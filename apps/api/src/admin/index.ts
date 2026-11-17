@@ -12,15 +12,27 @@
  *   PUT  /admin/base/blobs/:sha              body: a base template's HTML, stored under sys/b/.
  *   PUT  /admin/screens/:screen/manifest     body: the manifest. Stored, then published by the tool.
  *
+ * `sf template push` (packages/cli/src/template-push.ts) uploads a built template the same way:
+ *
+ *   PUT  /admin/base/blobs/:sha              a base template's bundle or sources, under sys/b/
+ *   PUT  /admin/orgs/:org/blobs/:sha         an org template's bundle or sources, under the org
+ *   PUT  /admin/base/templates               body: { manifest, bundleId, sourcesId, approve }.
+ *   PUT  /admin/orgs/:org/templates          Registers the version with `register_template_version`
+ *                                            (which repeats the build's checks), then with `approve`
+ *                                            approves a new draft with `set_template_version_status`.
+ *
+ * Base templates belong to no org, so their tools run from `platformRegistry` with `platform(db)`
+ * and are audited in `platform_audit_log`; an org's run from the org registry with its scope.
+ *
  * Keys follow docs/backend-plan.md#publishing and the device blob route: a base template's HTML
  * is read from `sys/b/`, every other file from the org's prefix. Every file is checked against
  * its hash before it is stored, and a manifest is checked by `validateManifest` and against its
  * own id before it is. Blobs and manifests are content-addressed and inert: nothing plays them
  * until a publish names them. Pushing the same build again uploads nothing and changes nothing.
  */
-import { manifestIdInput, type ScreenManifest } from '@signforge/contract';
-import { findDeviceScreen, scoped } from '@signforge/db';
-import { dispatch, registry, type Caller } from '@signforge/tools';
+import { isId, manifestIdInput, type ScreenManifest } from '@signforge/contract';
+import { findDeviceScreen, organizationExists, platform, scoped } from '@signforge/db';
+import { dispatch, platformRegistry, registry, type AnyTool, type Caller, type DataScope, type DispatchResult, type TemplateVersionView } from '@signforge/tools';
 import { validateManifest } from '@signforge/player-core';
 import { Hono, type Context } from 'hono';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
@@ -34,7 +46,7 @@ const encoder = new TextEncoder();
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 const sha256 = async (data: ArrayBuffer | string) => hex(await crypto.subtle.digest('SHA-256', typeof data === 'string' ? encoder.encode(data) : data));
 
-const fail = (c: Context, status: 400 | 404 | 409, error: string, extra: Record<string, unknown> = {}) => c.json({ error, ...extra }, status);
+const fail = (c: Context, status: 400 | 404 | 409 | 500, error: string, extra: Record<string, unknown> = {}) => c.json({ error, ...extra }, status);
 
 /** Where each of a manifest's files lives: base templates' HTML in `sys/b/`, the rest under the org. */
 function fileKeys(m: ScreenManifest, orgId: string): { sha256: string; scope: 'org' | 'base'; key: string }[] {
@@ -132,4 +144,56 @@ admin.put('/screens/:screen/manifest', async (c) => {
   if (!result.ok) return fail(c, result.error === 'not_found' ? 404 : 409, result.message);
   const { changed } = result.output as { changed: boolean };
   return c.json({ manifestId: manifest.id, changed });
+});
+
+admin.put('/orgs/:org/blobs/:sha256', async (c) => {
+  const sha = c.req.param('sha256');
+  if (!SHA256.test(sha)) return fail(c, 400, 'not a sha256');
+  const org = c.req.param('org');
+  if (!isId(org) || !(await organizationExists(c.env.DB, org))) return fail(c, 404, 'organization not found');
+  return putBlob(c, orgBlobKey(org, sha), sha);
+});
+
+/** The system actor `sf-push`, with the owner's role and a grant for drafting and approving templates. */
+const templateCaller = <D extends DataScope>(c: Context<AdminEnv>, org: D): Caller<D> => ({
+  org,
+  role: 'owner',
+  scopes: ['content:draft', 'content:publish'],
+  actor: { kind: 'system', id: SF_PUSH, clientId: SF_PUSH },
+  blobs: c.env.BLOBS,
+});
+
+const STATUS = { invalid_input: 400, not_found: 404, conflict: 409, forbidden: 500, unknown_tool: 500 } as const;
+const refused = (c: Context, r: Extract<DispatchResult, { ok: false }>) => {
+  const problems = Array.isArray(r.details) ? r.details.map((d: { path?: string; message?: string }) => (d.path ? `${d.path}: ${d.message}` : String(d.message))) : undefined;
+  return fail(c, STATUS[r.error], r.message, problems ? { problems } : {});
+};
+
+/** Register a template version through the dispatcher, then approve it if asked and it is a new draft. */
+async function registerTemplate<D extends DataScope>(c: Context<AdminEnv>, tools: ReadonlyMap<string, AnyTool<D>>, caller: Caller<D>) {
+  let body: { approve?: unknown } & Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as typeof body;
+  } catch {
+    return fail(c, 400, 'body is not JSON');
+  }
+  const { approve, ...input } = body ?? {};
+  const reg = await dispatch(tools, 'register_template_version', input, caller);
+  if (!reg.ok) return refused(c, reg);
+  let { version, changed } = reg.output as { version: TemplateVersionView; changed: boolean };
+  if (approve === true && version.status === 'draft') {
+    const set = await dispatch(tools, 'set_template_version_status', { templateVersionId: version.id, status: 'approved' }, caller);
+    if (!set.ok) return refused(c, set);
+    version = (set.output as { version: TemplateVersionView }).version;
+    changed = true;
+  }
+  return c.json({ key: version.key, templateVersionId: version.id, status: version.status, changed, checkReport: version.checkReport });
+}
+
+admin.put('/base/templates', (c) => registerTemplate(c, platformRegistry, templateCaller(c, platform(c.env.DB))));
+
+admin.put('/orgs/:org/templates', async (c) => {
+  const org = c.req.param('org');
+  if (!isId(org) || !(await organizationExists(c.env.DB, org))) return fail(c, 404, 'organization not found');
+  return registerTemplate(c, registry, templateCaller(c, scoped(c.env.DB, org)));
 });

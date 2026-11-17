@@ -5,7 +5,7 @@
  */
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { member } from './schema';
+import { member, organization } from './schema';
 
 /** The user's membership of the org, or undefined if they are not a member. */
 export async function findMembership(d1: D1Database, orgId: string, userId: string): Promise<{ role: string } | undefined> {
@@ -14,4 +14,9 @@ export async function findMembership(d1: D1Database, orgId: string, userId: stri
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, userId)))
     .get();
+}
+
+/** Whether an organization exists. The deploy-secret tree checks the org it is told to write to. */
+export async function organizationExists(d1: D1Database, orgId: string): Promise<boolean> {
+  return (await drizzle(d1).select({ id: organization.id }).from(organization).where(eq(organization.id, orgId)).get()) !== undefined;
 }

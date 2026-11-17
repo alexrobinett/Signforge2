@@ -2,6 +2,7 @@
 // changes it only through the dispatcher, which writes the audit log. The test enumerates the
 // Worker's routes, so a new route fails here until it is either read-only or listed below.
 import { scoped } from '@signforge/db';
+import { seedBaseTemplate } from '@signforge/db/testing';
 import { registry } from '@signforge/tools';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -20,6 +21,9 @@ const WRITERS: Record<string, string> = {
   'PUT /admin/screens/:screen/blobs/:sha256': 'sf push: content-addressed bytes in R2, inert until a publish names them',
   'PUT /admin/base/blobs/:sha256': 'sf push: content-addressed bytes in R2, inert until a publish names them',
   'PUT /admin/screens/:screen/manifest': 'sf push: stores the manifest file, then publishes through the dispatcher (admin.test.ts checks the audit row)',
+  'PUT /admin/orgs/:org/blobs/:sha256': 'sf template push: content-addressed bytes in R2, inert until a template version names them',
+  'PUT /admin/base/templates': 'sf template push: registers a base template version through the dispatcher, audited in platform_audit_log (templates.test.ts)',
+  'PUT /admin/orgs/:org/templates': "sf template push: registers an org's template version through the dispatcher, audited in its audit_log (templates.test.ts)",
 };
 /** Middleware each tree mounts on its whole prefix. A wildcard on any other path is a route and fails. */
 const MIDDLEWARE = new Set(['ALL /api/*', 'ALL /v1/device/*', 'ALL /admin/*']);
@@ -68,8 +72,10 @@ describe('requests', () => {
   const writes: string[] = [];
   let owner: Client;
   let screenId: string;
+  let baseTemplate: string;
 
   beforeAll(async () => {
+    baseTemplate = (await seedBaseTemplate(env.DB)).template;
     const setup = new Client(t);
     await setup.signIn(email('guard'));
     const org = await setup.createOrg('Guard');
@@ -98,7 +104,7 @@ describe('requests', () => {
       if (tool.mutates) continue;
       writes.length = 0;
       const example = tool.example as Record<string, unknown>;
-      const input = 'screenId' in example ? { ...example, screenId } : example;
+      const input = 'screenId' in example ? { ...example, screenId } : 'templateId' in example ? { ...example, templateId: baseTemplate } : example;
       expect((await owner.tool(tool.name, input)).status, tool.name).toBe(200);
       expect(ours(), tool.name).toEqual([]);
     }
@@ -162,6 +168,6 @@ describe('POST /api/tools/:name', () => {
   it('lists what the caller may use', async () => {
     const names = async (c: Client) => ((await (await c.get('/api/tools')).json()) as { tools: { name: string }[] }).tools.map((x) => x.name);
     expect(await names(owner)).toHaveLength(registry.size);
-    expect((await names(viewer)).sort()).toEqual(['get_screen', 'list_groups', 'list_screens']);
+    expect((await names(viewer)).sort()).toEqual(['get_screen', 'get_template', 'list_groups', 'list_screens', 'list_templates']);
   });
 });

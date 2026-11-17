@@ -5,9 +5,12 @@ import { scoped } from '@signforge/db';
 import { seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { dispatch, manifestKey, registry, TOOLS, type Caller } from '../src';
+import { dispatch, manifestKey, orgBlobKey, registry, TOOLS, type Caller } from '../src';
 
 const MANIFEST = 'a'.repeat(64);
+/** Org A's uploaded template bundle and sources. */
+const BUNDLE = 'b'.repeat(64);
+const SOURCES = 'c'.repeat(64);
 
 /** Org A's row for each kind of id a tool input can name (`screenId` → `screen`). */
 const ORG_A_IDS: Record<string, (a: SeededOrg) => string> = {
@@ -15,6 +18,10 @@ const ORG_A_IDS: Record<string, (a: SeededOrg) => string> = {
   group: (a) => a.group,
   credential: (a) => a.credential,
   manifest: () => MANIFEST,
+  template: (a) => a.template,
+  templateVersion: (a) => a.templateVersion,
+  bundle: () => BUNDLE,
+  sources: () => SOURCES,
 };
 
 /** `example` with every id field replaced by org A's id of that kind. Also says whether it named any. */
@@ -52,6 +59,8 @@ async function orgAState() {
     groups: await a.screenGroups.list(),
     members: await a.screenGroups.members(s.a.group),
     credentials: await a.screens.credentials.list(),
+    templates: await a.templates.list(),
+    templateVersions: await a.templates.versions.list(),
     audit: await a.auditLog.list(),
   };
 }
@@ -59,6 +68,8 @@ async function orgAState() {
 beforeAll(async () => {
   s = await seedTwoOrgs(env.DB);
   await env.BLOBS.put(manifestKey('org-a', s.a.screen, MANIFEST), '{}');
+  await env.BLOBS.put(orgBlobKey('org-a', BUNDLE), '<!doctype html>');
+  await env.BLOBS.put(orgBlobKey('org-a', SOURCES), '{}');
   callerB = { org: scoped(env.DB, 'org-b'), role: 'owner', actor: { kind: 'user', id: 'user-b', clientId: 'test' }, blobs: env.BLOBS };
   before = await orgAState();
 });

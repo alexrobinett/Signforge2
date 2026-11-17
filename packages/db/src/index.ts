@@ -7,9 +7,10 @@
 import type * as s from './schema';
 
 export { scoped, NotInOrgError, type OrgScope, type NewRow, type RowPatch } from './scoped';
+export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
 export { findDeviceScreen, type DeviceScreen } from './device';
-export { findMembership } from './members';
+export { findMembership, organizationExists } from './members';
 
 // Row shapes, as types only.
 export type Screen = typeof s.screens.$inferSelect;
@@ -26,4 +27,5 @@ export type Publish = typeof s.publishes.$inferSelect;
 export type DataSourceRow = typeof s.dataSources.$inferSelect;
 export type DataSnapshotRow = typeof s.dataSnapshots.$inferSelect;
 export type AuditEntry = typeof s.auditLog.$inferSelect;
+export type PlatformAuditEntry = typeof s.platformAuditLog.$inferSelect;
 export type PlayCountRow = typeof s.playCounts.$inferSelect;

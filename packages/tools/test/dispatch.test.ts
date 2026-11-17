@@ -4,7 +4,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { defineTool, describeTools, dispatch, effectiveScopes, redact, registry, ROLES, TOOLS, type Caller, type Role, type Scope } from '../src';
+import { defineTool, describeTools, dispatch, effectiveScopes, platformRegistry, redact, registry, ROLES, TOOLS, type Caller, type Role, type Scope } from '../src';
 
 let o: SeededOrg;
 const caller = (role: Role, scopes?: Scope[], actor: Caller['actor'] = { kind: 'user', id: 'user-1', clientId: 'cms' }): Caller => ({
@@ -33,9 +33,14 @@ describe('the registry', () => {
 
   it('lists the first tools', () => {
     expect([...registry.keys()].sort()).toEqual([
-      'create_group', 'delete_group', 'get_screen', 'list_groups', 'list_screens', 'publish_manifest_to_screen',
-      'rename_group', 'rename_screen', 'revoke_screen_credential', 'set_group_members', 'update_screen_settings',
+      'create_group', 'delete_group', 'get_screen', 'get_template', 'list_groups', 'list_screens', 'list_templates', 'publish_manifest_to_screen',
+      'register_template_version', 'rename_group', 'rename_screen', 'revoke_screen_credential', 'set_group_members', 'set_template_version_status',
+      'update_screen_settings',
     ]);
+  });
+
+  it('keeps the platform tools apart: base templates only, never on /api', () => {
+    expect([...platformRegistry.keys()].sort()).toEqual(['register_template_version', 'set_template_version_status']);
   });
 });
 
@@ -69,8 +74,9 @@ describe('roles and scopes', () => {
 
   it('decide what GET /api/tools lists', () => {
     const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes }).map((t) => t.name);
-    expect(names('viewer').sort()).toEqual(['get_screen', 'list_groups', 'list_screens']);
+    expect(names('viewer').sort()).toEqual(['get_screen', 'get_template', 'list_groups', 'list_screens', 'list_templates']);
     expect(names('editor')).not.toContain('revoke_screen_credential');
+    expect(names('editor')).not.toContain('set_template_version_status');
     expect(names('owner')).toHaveLength(TOOLS.length);
     const listed = describeTools(registry, { role: 'owner' }).find((t) => t.name === 'rename_screen')!;
     expect(listed).toMatchObject({ scope: 'screens:manage', minRole: 'editor', mutates: true });

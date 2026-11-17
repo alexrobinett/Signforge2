@@ -175,6 +175,52 @@ export function validateTemplateManifest(m: unknown): string[] {
   return errors;
 }
 
+/** The checks a built template is put through, by `sf build` and again by the server. */
+export const TEMPLATE_CHECKS = ['manifest', 'forbidden-css', 'size', 'network', 'source-code'] as const;
+export type TemplateCheckName = (typeof TEMPLATE_CHECKS)[number];
+
+/** The result of `checkTemplateBundle`. The server stores it on the template version. */
+export interface TemplateCheckReport {
+  ok: boolean;
+  /** Bytes of the built HTML file. */
+  bundleBytes: number;
+  checks: { check: TemplateCheckName; ok: boolean; problems: string[] }[];
+}
+
+/**
+ * Lint a built template: the manifest, the forbidden CSS list, the size budget and network
+ * references are checked on the bundle; the forbidden-code list on the author's own source files
+ * (`index.html`, `style.css`, `main.ts`), because the bundle holds the SDK, which itself calls
+ * `parent.postMessage`. A lint, not a boundary: string checks can be evaded, and the template
+ * sandbox with its no-network policy is what keeps a screen safe.
+ */
+export function checkTemplateBundle(input: { manifest: unknown; html: string; sources: Record<string, string> }): TemplateCheckReport {
+  const { manifest, html, sources } = input;
+  const bundleBytes = new TextEncoder().encode(html).byteLength;
+  const matches = (rules: { pattern: RegExp; reason: string }[], text: string) => rules.filter((r) => r.pattern.test(text)).map((r) => r.reason);
+
+  const manifestProblems = validateTemplateManifest(manifest);
+  const protocol = (manifest as Partial<TemplateManifest> | null)?.protocol;
+  if (protocol !== undefined && !SUPPORTED_PROTOCOLS.includes(protocol)) manifestProblems.push(`protocol ${String(protocol)} is not supported`);
+
+  const network: string[] = [];
+  if (/\b(?:src|href)\s*=\s*["']https?:/i.test(html) || /url\(\s*["']?https?:/i.test(html)) network.push('a template may not load anything from the network');
+
+  // Comments are stripped first, so a note about `fetch` is not a call to it. `//` after a colon is a URL, and is kept.
+  const own = Object.values(sources).map((text) => text.replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm, '')).join('\n');
+  const source = Object.keys(sources).length ? matches(FORBIDDEN_TEMPLATE_CODE, own) : ['no source files were given'];
+
+  const checks: TemplateCheckReport['checks'] = [
+    { check: 'manifest', ok: !manifestProblems.length, problems: manifestProblems },
+    { check: 'forbidden-css', ok: true, problems: matches(FORBIDDEN_CSS, html) },
+    { check: 'size', ok: true, problems: bundleBytes > TEMPLATE_BUDGET.maxBundleBytes ? [`bundle is ${bundleBytes} bytes; the budget is ${TEMPLATE_BUDGET.maxBundleBytes}`] : [] },
+    { check: 'network', ok: true, problems: network },
+    { check: 'source-code', ok: true, problems: source },
+  ];
+  for (const c of checks) c.ok = !c.problems.length;
+  return { ok: checks.every((c) => c.ok), bundleBytes, checks };
+}
+
 function checkScalar(name: string, def: ScalarFieldDef, v: unknown): string | undefined {
   if (def.type === 'text' && typeof v !== 'string') return `field "${name}" must be text`;
   if (def.type === 'text' && def.maxLength && (v as string).length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;

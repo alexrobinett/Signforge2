@@ -3,9 +3,9 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 
-/** Tables whose rows exist before or outside any org: pairing codes and Better Auth's own. */
+/** Tables whose rows exist before or outside any org: pairing codes, the platform audit log and Better Auth's own. */
 const AUTH_TABLES = ['account', 'invitation', 'member', 'organization', 'rateLimit', 'session', 'user', 'verification'];
-const NOT_TENANT = new Set(['pairing_codes', ...AUTH_TABLES]);
+const NOT_TENANT = new Set(['pairing_codes', 'platform_audit_log', ...AUTH_TABLES]);
 /** Tables where a null org means a base row shared by every org. */
 const NULLABLE_ORG = new Set(['templates', 'template_versions']);
 /** Indexes that deliberately do not lead with org_id. */

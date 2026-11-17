@@ -29,6 +29,13 @@
       "when": 1794924499154,
       "tag": "0003_audit_client_id",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794925910158,
+      "tag": "0004_platform_audit_log",
+      "breakpoints": true
     }
   ]
 }
