@@ -6,7 +6,7 @@
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { scoped, type OrgScope } from './scoped';
-import { templates, templateVersions } from './schema';
+import { organization, templates, templateVersions } from './schema';
 
 const MANIFEST = (key: string) =>
   JSON.stringify({
@@ -50,8 +50,16 @@ export interface Seeded {
 
 export const SEED_HOUR = Date.UTC(2026, 10, 17, 13);
 
+/** An `organization` row, as Better Auth would write it. Tenant rows reference it. */
+export async function seedOrganization(db: D1Database, orgId: string) {
+  await drizzle(db).insert(organization)
+    .values({ id: orgId, name: orgId, slug: orgId, createdAt: new Date().toISOString() })
+    .onConflictDoNothing().run();
+}
+
 /** Seed one org. Ids are `<orgId>-<thing>`, so a test failure names whose row leaked. */
 export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion?: string): Promise<SeededOrg> {
+  await seedOrganization(db, orgId);
   const o = scoped(db, orgId);
   const id = (thing: string) => `${orgId}-${thing}`;
 

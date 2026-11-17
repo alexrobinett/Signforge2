@@ -121,9 +121,10 @@ describe('device auth', () => {
     // A cookie is not a device credential.
     expect((await get('/manifest.json', undefined, { cookie: 'session=whatever' })).status).toBe(401);
     // And a device credential opens nothing outside /v1/device.
-    for (const path of ['/api/screens', '/api/v1/device/manifest.json', '/mcp', '/manifest.json']) {
+    // The user tree refuses any Authorization header outright (M3-09); elsewhere nothing exists.
+    for (const [path, status] of [['/api/screens', 401], ['/api/v1/device/manifest.json', 401], ['/mcp', 404], ['/manifest.json', 404]] as const) {
       const res = await exports.default.fetch(`https://api.test${path}`, { headers: { authorization: `Bearer ${a.credential}` } });
-      expect(res.status, path).toBe(404);
+      expect(res.status, path).toBe(status);
     }
   });
 

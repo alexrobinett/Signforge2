@@ -6,18 +6,23 @@
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  "vars": { "ENVIRONMENT": "dev", "BUILD_VERSION": "dev" },
+  "vars": { "ENVIRONMENT": "dev", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+  // Cloudflare Email Sending. Dev records mail instead of sending it (src/email); the binding is
+  // here so its type is generated. Secrets (AUTH_SECRET, GITHUB_*) are listed in src/env.d.ts.
+  "send_email": [{ "name": "EMAIL" }],
   // Local development and tests use these placeholders; real ids are set per environment.
   "d1_databases": [{ "binding": "DB", "database_name": "signforge-dev", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
   "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-dev" }],
   "env": {
     "demo": {
-      "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev" },
+      "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      "send_email": [{ "name": "EMAIL" }],
       "d1_databases": [{ "binding": "DB", "database_name": "signforge-demo", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
       "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-demo" }]
     },
     "prod": {
-      "vars": { "ENVIRONMENT": "prod", "BUILD_VERSION": "dev" },
+      "vars": { "ENVIRONMENT": "prod", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      "send_email": [{ "name": "EMAIL" }],
       "d1_databases": [{ "binding": "DB", "database_name": "signforge-prod", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
       "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-prod" }]
     }

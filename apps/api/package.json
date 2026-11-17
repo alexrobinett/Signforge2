@@ -13,13 +13,15 @@
   "dependencies": {
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
-    "hono": "^4.13.19"
+    "hono": "^4.13.19",
+    "better-auth": "^1.7.25"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.4",
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
     "vitest": "^5.1.0",
-    "wrangler": "^4.164.0"
+    "wrangler": "^4.164.0",
+    "auth": "1.7.25"
   }
 }
