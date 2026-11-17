@@ -30,7 +30,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { basename, extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import {
-  VIDEO_SPEC, templateKey,
+  SCREEN_BOX, VIDEO_SPEC, coverSize, templateKey,
+  type ScreenBox,
   type Binding, type CalendarFeed, type DataSnapshot, type DataSource, type NewsFeed, type Playlist, type ScreenManifest, type Spot, type Transition,
 } from '@signforge/contract';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
@@ -44,24 +45,20 @@ const MIME: Record<string, string> = {
   '.webp': 'image/webp', '.avif': 'image/avif', '.mp4': 'video/mp4',
 };
 
-/** The largest frame a screen of each orientation draws. Images are never shipped bigger than this. */
-const SCREEN_BOX = { landscape: { w: 1920, h: 1080 }, portrait: { w: 1080, h: 1920 } } as const;
-
 /**
  * Scale a raster image down to the smallest size that still covers the screen, so the device
  * never decodes or uploads more pixels than it can show. A 4K photo is a quarter of the work
  * at 1080p. SVG and images already small enough pass through untouched.
  */
-async function fitImage(data: Buffer, type: string, box: { w: number; h: number }): Promise<{ data: Buffer; note?: string }> {
+async function fitImage(data: Buffer, type: string, box: ScreenBox): Promise<{ data: Buffer; note?: string }> {
   if (!['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(type)) return { data };
   const img = sharp(data, { failOn: 'error' }).rotate();
   const meta = await img.metadata();
   const w = meta.autoOrient?.width ?? meta.width ?? 0;
   const h = meta.autoOrient?.height ?? meta.height ?? 0;
-  const scale = Math.min(1, Math.max(box.w / w, box.h / h));
-  if (scale >= 1) return { data };
-  const size = { width: Math.round(w * scale), height: Math.round(h * scale) };
-  const resized = img.resize(size);
+  const size = coverSize(w, h, box);
+  if (!size.scaled) return { data };
+  const resized = img.resize({ width: size.width, height: size.height });
   const out = type === 'image/png' ? await resized.png({ compressionLevel: 9 }).toBuffer()
     : type === 'image/webp' ? await resized.webp({ quality: 85 }).toBuffer()
     : type === 'image/avif' ? await resized.avif({ quality: 60 }).toBuffer()

@@ -133,6 +133,25 @@ export const VIDEO_SPEC = {
   maxBitrate: 10_000_000,
 } as const;
 
+/** The largest frame a screen of each orientation draws. Images are never shipped bigger than this. */
+export const SCREEN_BOX = { landscape: { w: 1920, h: 1080 }, portrait: { w: 1080, h: 1920 } } as const;
+export type ScreenBox = { readonly w: number; readonly h: number };
+
+/**
+ * The cover rule for images: the smallest size that still covers the box, keeping the aspect
+ * ratio, so a screen never decodes more pixels than it can show. An image that already fits
+ * (one side within the box) keeps its size, and `scaled` is false. A 3840x2160 photo becomes
+ * 1920x1080 for a landscape box and 3413x1920 for a portrait one.
+ */
+export function coverSize(width: number, height: number, box: ScreenBox): { width: number; height: number; scaled: boolean } {
+  const scale = Math.min(1, Math.max(box.w / width, box.h / height));
+  if (!(scale < 1)) return { width, height, scaled: false };
+  return { width: Math.round(width * scale), height: Math.round(height * scale), scaled: true };
+}
+
+/** Whether an image is no larger than the cover rule allows for the box: at least one side within it. */
+export const fitsScreenBox = (width: number, height: number, box: ScreenBox) => width <= box.w || height <= box.h;
+
 /**
  * Code a template author may not write. Templates run with every request blocked, but the policy
  * cannot stop a frame navigating itself, and these never belong in a template anyway. Checked
