@@ -4,7 +4,7 @@
  * the server's compiler from drifting. After a deliberate change to the output, regenerate the
  * goldens and say why in the commit.
  *
- * Built template bundles are compared by key, not by bytes: their hash follows the minifier, which
+ * Built template bundles are compared by key, not by bytes or size: their hash follows the minifier, which
  * renames variables whenever the SDK or contract code it bundles changes. The template build is
  * checked by its own budget and lint, not here. Everything that depends on a bundle's hash (the
  * manifest id, and the bundle's entry in `files`) is normalised the same way.
@@ -24,7 +24,9 @@ type Manifest = { id?: string; templates: Record<string, { html: string }>; file
 /** Replace each template bundle's hash with a name derived from its key, and drop the id. */
 function normalise(m: Manifest): Manifest {
   const names = new Map(Object.entries(m.templates).map(([key, t]) => [t.html, `<bundle ${key}>`]));
-  const json = JSON.stringify({ ...m, id: undefined }).replace(/[0-9a-f]{64}/g, (sha) => names.get(sha) ?? sha);
+  // A bundle's size changes with any template edit, which is not compiler behaviour either.
+  const files = Object.fromEntries(Object.entries(m.files).filter(([sha]) => !names.has(sha)));
+  const json = JSON.stringify({ ...m, files, id: undefined }).replace(/[0-9a-f]{64}/g, (sha) => names.get(sha) ?? sha);
   return JSON.parse(json) as Manifest;
 }
 
