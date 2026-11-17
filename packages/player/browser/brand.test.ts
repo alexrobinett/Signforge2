@@ -147,6 +147,15 @@ describe('brand in the player', () => {
     expect(d.logo).toEqual({ blob: true, width: 4 });
   });
 
+  it('loads no brand font into a template whose styles never use one', async () => {
+    // The plain fixture template has no var(--sf-font-*): a face it would never draw is not made.
+    const content = buildContent(h.templateHtml, [{ id: 'a', durationMs: 60_000 }], { brand });
+    const p = await h.openPlayer((server) => server.publish(content));
+    const f = await playing(p);
+    expect(await f.evaluate(() => [...document.fonts].map((x) => x.family))).toEqual([]);
+    expect(await f.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--sf-primary'))).toBe(colors.primary);
+  });
+
   it('picks onLight on a light background', async () => {
     const content = buildContent(h.brandTemplateHtml, [{ id: 'a', durationMs: 60_000 }], { brand: { ...brand, colors: { ...colors, background: '#f5f5f4' } } });
     const p = await h.openPlayer((server) => server.publish(content));

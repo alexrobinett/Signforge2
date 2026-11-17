@@ -248,7 +248,18 @@ export class Slot {
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.srcdoc = html;
 
-    const live: LiveFrame = (this.live = { frame, wrapper, protocol, html: t.html, spot, manifest, assets, theme, orientation, viewport: { width: w, height: h } });
+    const live: LiveFrame = (this.live = {
+      frame,
+      wrapper,
+      protocol,
+      html: t.html,
+      spot,
+      manifest,
+      assets,
+      theme,
+      orientation,
+      viewport: { width: w, height: h },
+    });
     // A second load is a navigation, which the policy turned into an error page. Fail the spot; if
     // it is already playing, blank it until the next spot.
     let loads = 0;
