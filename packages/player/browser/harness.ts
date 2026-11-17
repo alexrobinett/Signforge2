@@ -122,7 +122,24 @@ export function useHarness(): Harness {
         page.evaluate(() => {
           const s = (window as unknown as { __sf?: PlayerState }).__sf;
           if (!s) throw new Error('the player has not started');
-          const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log, data, dataRejected, displayOn, auth, socket, clock } = s;
+          const {
+            manifestId,
+            playlist,
+            spot,
+            played,
+            skipped,
+            lastError,
+            online,
+            lastGood,
+            fallback,
+            log,
+            data,
+            dataRejected,
+            displayOn,
+            auth,
+            socket,
+            clock,
+          } = s;
           return {
             manifestId,
             playlist,
