@@ -13,10 +13,12 @@
   "dependencies": {
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
+    "@signforge/player-core": "workspace:*",
     "hono": "^4.13.19"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.4",
+    "@signforge/cli": "workspace:*",
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
     "vitest": "^5.1.0",

@@ -83,6 +83,7 @@ Pairing calls are rate limited. For zero-touch installs, the CMS mints a credent
 - An opaque token, `sfd_<screenId>.<32 random bytes>`, stored as a SHA-256. It is not a JWT.
 - Revoking is one row update, then the Durable Object closes the socket.
 - Until pairing exists, `pnpm --filter @signforge/api dev:screen [--content dist/content]` creates a screen in local D1, loads a build into local R2, and prints a credential.
+- Until the CMS publishes, `sf push <out-dir> --screen <id> --api <url>` uploads an `sf build` output and makes it the screen's desired manifest. It calls a temporary `/admin` tree guarded by the `ADMIN_TOKEN` deploy secret (off when unset), which M3-12's tool registry replaces.
 
 **The screen's Durable Object** holds the desired and reported manifest IDs and one hibernating WebSocket.
 - Keepalive pings get an automatic reply (`setWebSocketAutoResponse`) without waking it or billing duration. Whether those pings count as billed requests (incoming messages bill at 20:1) is not documented: at a 60-second ping and 1,000 screens the worst case is 2.2M requests a month, about $0.18 over the allowance. M3-06 reads the real count from analytics on the paid account and uses the longest keepalive that holds the connection.

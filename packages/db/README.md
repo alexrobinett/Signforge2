@@ -21,6 +21,7 @@ The table objects (`src/schema.ts`) are not exported. `test/node/boundary.test.t
 Code that has to find a row before it knows the org (device auth by screen id, pairing, the data-source poller) gets a narrow function here, added by the ticket that needs it. It does not get the tables. So far:
 
 - `findDeviceScreen(db, screenId)` (`src/device.ts`): a screen's org, desired and previous manifest ids, and the hashes of its unrevoked credentials (none if the screen is revoked). The device API checks the secret against them, then uses `scoped(db, orgId)`.
+  The temporary `/admin` push routes (M3-04) also use it to find a screen's org, behind the deploy secret, until M3-12 replaces them.
 
 `org.screens.setDesiredManifest(screenId, manifestId)` keeps the manifest it replaces as `previous_manifest_id`, whose files a screen mid-switch may still fetch.
 
