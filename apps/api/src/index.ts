@@ -29,3 +29,6 @@ app.route('/api', createApi());
 app.route('/admin', admin);
 
 export default app;
+
+// Durable Object classes are exported from the Worker's entry point.
+export { ScreenObject } from './device/screen-object';

@@ -9,19 +9,21 @@ beforeAll(async () => {
 });
 
 describe('findDeviceScreen', () => {
-  it("finds a screen by id alone, with its org and live credential hashes", async () => {
+  it("finds a screen by id alone, with its org and live credentials", async () => {
     expect(await findDeviceScreen(env.DB, o.screen)).toEqual({
-      orgId: 'org-device', screenId: o.screen, desiredManifestId: null, previousManifestId: null, secretHashes: ['0'.repeat(64)],
+      orgId: 'org-device', screenId: o.screen, desiredManifestId: null, previousManifestId: null,
+      credentials: [{ id: o.credential, secretHash: '0'.repeat(64) }],
     });
   });
 
   it('leaves out revoked credentials, and every credential of a revoked screen', async () => {
+    const hashes = async () => (await findDeviceScreen(env.DB, o.screen))?.credentials.map((c) => c.secretHash);
     const extra = await o.scope.screens.credentials.insert({ screenId: o.screen, secretHash: '1'.repeat(64) });
-    expect((await findDeviceScreen(env.DB, o.screen))?.secretHashes.sort()).toEqual(['0'.repeat(64), '1'.repeat(64)]);
+    expect((await hashes())?.sort()).toEqual(['0'.repeat(64), '1'.repeat(64)]);
     await o.scope.screens.credentials.update(extra.id, { revokedAt: Date.now() });
-    expect((await findDeviceScreen(env.DB, o.screen))?.secretHashes).toEqual(['0'.repeat(64)]);
+    expect(await hashes()).toEqual(['0'.repeat(64)]);
     await o.scope.screens.update(o.screen, { status: 'revoked' });
-    expect((await findDeviceScreen(env.DB, o.screen))?.secretHashes).toEqual([]);
+    expect(await hashes()).toEqual([]);
     await o.scope.screens.update(o.screen, { status: 'active' });
   });
 

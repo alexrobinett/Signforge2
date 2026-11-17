@@ -12,10 +12,16 @@ export { roles, ROLES, type Role } from './roles';
 /** Only for `wrangler dev` and tests. Every other environment must set the AUTH_SECRET secret. */
 const DEV_SECRET = 'signforge-dev-secret-not-for-deployed-environments';
 
-export function createAuth(env: Env, request: Request, email: EmailSender) {
-  const origin = new URL(request.url).origin;
+/** The server's signing secret: Better Auth's, and the device socket tickets' (src/device/ticket.ts). */
+export function authSecret(env: Pick<Env, 'AUTH_SECRET' | 'ENVIRONMENT'>): string {
   const secret = env.AUTH_SECRET ?? (env.ENVIRONMENT === 'dev' ? DEV_SECRET : undefined);
   if (!secret) throw new Error('AUTH_SECRET is not set');
+  return secret;
+}
+
+export function createAuth(env: Env, request: Request, email: EmailSender) {
+  const origin = new URL(request.url).origin;
+  const secret = authSecret(env);
   const appUrl = env.CMS_ORIGIN ?? origin;
   const github =
     env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET

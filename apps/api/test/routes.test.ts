@@ -24,6 +24,7 @@ const WRITERS: Record<string, string> = {
   'PUT /admin/orgs/:org/blobs/:sha256': 'sf template push: content-addressed bytes in R2, inert until a template version names them',
   'PUT /admin/base/templates': 'sf template push: registers a base template version through the dispatcher, audited in platform_audit_log (templates.test.ts)',
   'PUT /admin/orgs/:org/templates': "sf template push: registers an org's template version through the dispatcher, audited in its audit_log (templates.test.ts)",
+  'POST /v1/device/sync': 'a screen reporting about itself. Writes nothing yet: M3-06 issues the socket ticket, M3-07 stores play counts and status',
 };
 /** Middleware each tree mounts on its whole prefix. A wildcard on any other path is a route and fails. */
 const MIDDLEWARE = new Set(['ALL /api/*', 'ALL /v1/device/*', 'ALL /admin/*']);

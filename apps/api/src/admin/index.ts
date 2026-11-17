@@ -34,6 +34,7 @@ import { isId, manifestIdInput, validateManifest, type ScreenManifest } from '@s
 import { findDeviceScreen, organizationExists, platform, scoped } from '@signforge/db';
 import { dispatch, platformRegistry, registry, type AnyTool, type Caller, type DataScope, type DispatchResult, type TemplateVersionView } from '@signforge/tools';
 import { Hono, type Context } from 'hono';
+import { screenNotifier } from '../device/screens';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
 import { adminAuth, type AdminEnv } from './auth';
 
@@ -138,6 +139,7 @@ admin.put('/screens/:screen/manifest', async (c) => {
     scopes: ['content:publish'],
     actor: { kind: 'system', id: SF_PUSH, clientId: SF_PUSH },
     blobs: c.env.BLOBS,
+    screens: screenNotifier(c.env),
   };
   const result = await dispatch(registry, 'publish_manifest_to_screen', { screenId: screen.screenId, manifestId: manifest.id }, caller);
   if (!result.ok) return fail(c, result.error === 'not_found' ? 404 : 409, result.message);

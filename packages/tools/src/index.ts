@@ -15,6 +15,7 @@ export {
   type DataScope,
   type Role,
   type Scope,
+  type ScreenNotifier,
   type Tool,
   type ToolContext,
   type ToolErrorCode,

@@ -136,7 +136,7 @@ export const updateScreenSettings = defineTool({
 export const revokeScreenCredential = defineTool({
   name: 'revoke_screen_credential',
   description:
-    'Revoke one of a screen\'s credentials, so a device holding it can no longer fetch anything. Use get_screen to see the credentials. Revoking an already revoked credential changes nothing. Owners only. Returns { credential }.',
+    'Revoke one of a screen\'s credentials, so a device holding it can no longer fetch anything; its open socket is closed. Use get_screen to see the credentials. Revoking an already revoked credential changes nothing. Owners only. Returns { credential }.',
   scope: 'screens:manage',
   minRole: 'owner',
   mutates: true,
@@ -144,11 +144,14 @@ export const revokeScreenCredential = defineTool({
   output: z.object({ credential: credentialOutput }),
   example: { screenId: 'scr_example', credentialId: 'crd_example' },
   target: (input) => ({ kind: 'credential', id: input.credentialId }),
-  handler: async ({ org, input, write }) => {
+  handler: async ({ org, input, write, notify }) => {
     const cred = await org.screens.credentials.get(input.credentialId);
     if (!cred || cred.screenId !== input.screenId) throw notFound('credential', input.credentialId);
     if (cred.revokedAt != null) return { credential: credentialView(cred) };
-    return { credential: credentialView(write(org.screens.credentials.stage.update(cred, { revokedAt: Date.now() }))) };
+    const row = write(org.screens.credentials.stage.update(cred, { revokedAt: Date.now() }));
+    // A socket the device opened with it closes now, not when it next reconnects.
+    notify((screens) => screens.revoked(cred.screenId, cred.id));
+    return { credential: credentialView(row) };
   },
 });
 

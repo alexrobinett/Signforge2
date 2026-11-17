@@ -41,6 +41,17 @@ export interface Actor {
  */
 export type DataScope = OrgScope | PlatformScope;
 
+/**
+ * Tells a screen, through its socket, about a change that concerns it (M3-06). Implemented by the
+ * API with the screen's Durable Object; absent where no screen can be reached (tests, scripts).
+ */
+export interface ScreenNotifier {
+  /** The screen's desired manifest is now `manifestId`. */
+  manifest(screenId: string, manifestId: string): Promise<void>;
+  /** The credential was revoked: close its sockets. */
+  revoked(screenId: string, credentialId: string): Promise<void>;
+}
+
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
 export interface ToolContext<I, D extends DataScope = OrgScope> {
   org: D;
@@ -56,6 +67,11 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
    * atomic batch after the handler returns. Only a tool with `mutates` may call it.
    */
   write: <T>(change: Staged<T>) => T;
+  /**
+   * Tell screens about this call's change. Queued: the dispatcher sends the notices only once the
+   * writes are committed, so a screen never hears of a change that was rolled back.
+   */
+  notify: (send: (screens: ScreenNotifier) => Promise<void>) => void;
 }
 
 export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict';

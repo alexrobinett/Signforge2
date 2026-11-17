@@ -21,7 +21,7 @@ import { canonicalJson } from '@signforge/contract';
 import { z } from 'zod';
 import { checkOutput } from './output';
 import type { UploadSigner } from './upload';
-import { ROLE_SCOPES, ROLES, ToolError, type Actor, type AnyTool, type DataScope, type Role, type Scope, type ToolErrorCode } from './tool';
+import { ROLE_SCOPES, ROLES, ToolError, type Actor, type AnyTool, type DataScope, type Role, type Scope, type ScreenNotifier, type ToolErrorCode } from './tool';
 
 /** Who is calling, resolved by the adapter (the `/api` route, `/admin`, later MCP and WebMCP). */
 export interface Caller<D extends DataScope = OrgScope> {
@@ -35,6 +35,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   blobs: R2Bucket;
   /** Signs direct uploads to `blobs`. Asset uploads need it; nothing else does. */
   uploads?: UploadSigner;
+  /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
+  screens?: ScreenNotifier;
 }
 
 export type DispatchResult =
@@ -95,6 +97,22 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
   }
 
   const writes: Write[] = [];
+  const notices: ((screens: ScreenNotifier) => Promise<void>)[] = [];
+  const notify = (send: (screens: ScreenNotifier) => Promise<void>) => {
+    if (!tool.mutates) throw new Error(`${tool.name} is a read and cannot notify screens`);
+    notices.push(send);
+  };
+  /**
+   * After the commit: a screen that cannot be told now still learns at its next sync, so a failure
+   * here is logged, never returned as the call's failure (the change is made).
+   */
+  const tell = async () => {
+    const { screens } = caller;
+    if (!screens || !writes.length) return;
+    await Promise.all(
+      notices.map((send) => send(screens).catch((err: unknown) => console.warn(`[tools] ${tool.name}: could not tell the screen`, err))),
+    );
+  };
   const write = <T>(change: Staged<T>): T => {
     if (!tool.mutates) throw new Error(`${tool.name} is a read and cannot write`);
     writes.push(...change.writes);
@@ -117,11 +135,14 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
 
   let output: unknown;
   try {
-    output = await tool.handler({ org: caller.org, actor: caller.actor, input: parsed.data, blobs: caller.blobs, uploads: caller.uploads, write });
+    output = await tool.handler({ org: caller.org, actor: caller.actor, input: parsed.data, blobs: caller.blobs, uploads: caller.uploads, write, notify });
   } catch (err) {
     if (err instanceof ToolError) {
       // A refusal that changed something is recorded too, with what was refused.
-      if (err.changed) await commit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
+      if (err.changed) {
+        await commit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
+        await tell();
+      }
       return fail(err.code, err.message, err.details);
     }
     if (err instanceof NotInOrgError) return fail('not_found', err.message);
@@ -138,6 +159,7 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
     if (prior) return prior;
     throw err;
   }
+  await tell();
   return { ok: true, output };
 }
 
