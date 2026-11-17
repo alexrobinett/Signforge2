@@ -5,7 +5,8 @@
  *   publisher        <-> player   ScreenManifest
  *   screen           <-> server   the device API: pairing, sync, socket messages
  *
- * Nothing here depends on a browser or on Node.
+ * Nothing here depends on a browser or on Node. The runtime checks for every shape are in
+ * `validate.ts`, re-exported here.
  *
  * Versioning. Screens and template bundles outlive any one release, so both versions are ranges:
  *  - A template bundle records the frame protocol it was built against (`TemplateManifest.protocol`)
@@ -14,6 +15,10 @@
  *  - A player reports the manifest schemas it can play in every sync. The server compiles each
  *    screen at the newest schema that screen supports, and tells an outdated player to reload.
  */
+
+import { validateTemplateManifest } from './validate.ts';
+
+export * from './validate.ts';
 
 /** The frame protocol this build of the SDK speaks. Stamped into every template bundle. */
 export const PROTOCOL_VERSION = 1;
@@ -64,7 +69,7 @@ export type Sha256 = string;
 
 export type ScalarFieldDef =
   | { type: 'text'; label: string; default?: string; maxLength?: number }
-  | { type: 'number'; label: string; default?: number; min?: number; max?: number }
+  | { type: 'number'; label: string; default?: number; min?: number; max?: number; /** Counted from `min`, or from 0 without one. */ step?: number }
   | { type: 'boolean'; label: string; default?: boolean }
   | { type: 'color'; label: string; default?: string }
   | { type: 'select'; label: string; options: string[]; default?: string };
@@ -149,8 +154,26 @@ export function coverSize(width: number, height: number, box: ScreenBox): { widt
   return { width: Math.round(width * scale), height: Math.round(height * scale), scaled: true };
 }
 
-/** Whether an image is no larger than the cover rule allows for the box: at least one side within it. */
-export const fitsScreenBox = (width: number, height: number, box: ScreenBox) => width <= box.w || height <= box.h;
+/**
+ * The most pixels a screen will decode for one image: a 3840x2160 frame, about 33 MB as RGBA.
+ * The cover rule alone lets one side run free (a 65,535x1,080 PNG has a side within the box and
+ * would cost about 280 MB to decode), so this caps the area. Any photo from 16:9 to 2:1 scaled to
+ * cover either box fits under it.
+ */
+export const MAX_IMAGE_PIXELS = 3840 * 2160;
+
+/** Why an image of this size may not ship for the box; undefined when it may. Both the cover rule and the pixel cap. */
+export function imageSizeProblem(width: number, height: number, box: ScreenBox): string | undefined {
+  if (width * height > MAX_IMAGE_PIXELS) {
+    const mp = (n: number) => (n / 1e6).toFixed(1);
+    return `${width}x${height} is ${mp(width * height)} million pixels; a screen decodes at most ${mp(MAX_IMAGE_PIXELS)} million (3840x2160)`;
+  }
+  if (!(width <= box.w || height <= box.h)) return `${width}x${height} is larger than a ${box.w >= box.h ? 'landscape' : 'portrait'} screen needs: scale it to cover ${box.w}x${box.h}`;
+  return undefined;
+}
+
+/** Whether an image may ship for the box: at least one side within it (the cover rule), and no more than `MAX_IMAGE_PIXELS`. */
+export const fitsScreenBox = (width: number, height: number, box: ScreenBox) => imageSizeProblem(width, height, box) === undefined;
 
 /**
  * Code a template author may not write. Templates run with every request blocked, but the policy
@@ -173,26 +196,6 @@ export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
 export const FORBIDDEN_CSS: { pattern: RegExp; reason: string }[] = [
   { pattern: /backdrop-filter\s*:/i, reason: '`backdrop-filter` drops about a fifth of frames over moving content' },
 ];
-
-export function validateTemplateManifest(m: unknown): string[] {
-  const errors: string[] = [];
-  const t = m as Partial<TemplateManifest> | null;
-  if (!t || typeof t !== 'object') return ['manifest is not an object'];
-  if (!t.id || !/^[a-z0-9][a-z0-9-]*$/.test(t.id)) errors.push('id must be lowercase letters, digits and dashes');
-  if (!t.version || !/^\d+\.\d+\.\d+$/.test(t.version)) errors.push('version must be semver, e.g. 1.0.0');
-  if (!t.name) errors.push('name is required');
-  if (!t.fields || typeof t.fields !== 'object') errors.push('fields is required');
-  const d = t.duration;
-  if (!d || !(d.minMs > 0) || !(d.minMs <= d.defaultMs) || !(d.defaultMs <= d.maxMs)) {
-    errors.push('duration needs 0 < minMs <= defaultMs <= maxMs');
-  }
-  if (!t.orientations?.length || t.orientations.some((o) => o !== 'landscape' && o !== 'portrait')) {
-    errors.push('orientations must list landscape and/or portrait');
-  }
-  if (!Array.isArray(t.uses)) errors.push('uses must be an array (it may be empty)');
-  if (!t.background) errors.push('background is required');
-  return errors;
-}
 
 /** The checks a built template is put through, by `sf build` and again by the server. */
 export const TEMPLATE_CHECKS = ['manifest', 'forbidden-css', 'size', 'network', 'source-code'] as const;
@@ -238,60 +241,6 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
   ];
   for (const c of checks) c.ok = !c.problems.length;
   return { ok: checks.every((c) => c.ok), bundleBytes, checks };
-}
-
-function checkScalar(name: string, def: ScalarFieldDef, v: unknown): string | undefined {
-  if (def.type === 'text' && typeof v !== 'string') return `field "${name}" must be text`;
-  if (def.type === 'text' && def.maxLength && (v as string).length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
-  if (def.type === 'number' && typeof v !== 'number') return `field "${name}" must be a number`;
-  if (def.type === 'boolean' && typeof v !== 'boolean') return `field "${name}" must be true or false`;
-  if (def.type === 'color' && typeof v !== 'string') return `field "${name}" must be a colour`;
-  if (def.type === 'select' && !def.options.includes(v as string)) return `field "${name}" must be one of ${def.options.join(', ')}`;
-  return undefined;
-}
-
-/** Check a spot's data against the template's fields. Returns problems; empty means valid. */
-export function validateSpotData(
-  fields: Record<string, FieldDef>,
-  data: Record<string, unknown>,
-  assets: Record<string, unknown>,
-  bindings: Record<string, Binding> = {},
-): string[] {
-  const errors: string[] = [];
-  for (const name of Object.keys(bindings)) {
-    if (!fields[name]) errors.push(`binding for unknown field "${name}"`);
-    else if (fields[name]!.type === 'image') errors.push(`image field "${name}" cannot be bound to live data`);
-  }
-  for (const [name, def] of Object.entries(fields)) {
-    if (def.type === 'image') {
-      if (!assets[name]) errors.push(`image field "${name}" has no asset`);
-      continue;
-    }
-    const v = data[name] ?? ('default' in def ? def.default : undefined);
-    // A bound field still needs a static value: it is what shows before the first snapshot arrives.
-    if (v === undefined) errors.push(`field "${name}" is missing${bindings[name] ? ' (a bound field needs a fallback value)' : ''}`);
-    else if (def.type === 'list') {
-      if (!Array.isArray(v)) errors.push(`field "${name}" must be a list`);
-      else {
-        if (def.maxItems && v.length > def.maxItems) errors.push(`field "${name}" has more than ${def.maxItems} rows`);
-        v.forEach((row: Record<string, unknown>, i) => {
-          for (const [k, d] of Object.entries(def.item)) {
-            const cell = row?.[k] ?? d.default;
-            if (cell === undefined) errors.push(`field "${name}" row ${i + 1} is missing "${k}"`);
-            else {
-              const e = checkScalar(`${name}[${i + 1}].${k}`, d, cell);
-              if (e) errors.push(e);
-            }
-          }
-        });
-      }
-    } else {
-      const e = checkScalar(name, def, v);
-      if (e) errors.push(e);
-    }
-  }
-  for (const name of Object.keys(data)) if (!fields[name]) errors.push(`unknown field "${name}"`);
-  return errors;
 }
 
 // ------------------------------------------------------------ frame protocol

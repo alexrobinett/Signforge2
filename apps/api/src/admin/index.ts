@@ -30,10 +30,9 @@
  * own id before it is. Blobs and manifests are content-addressed and inert: nothing plays them
  * until a publish names them. Pushing the same build again uploads nothing and changes nothing.
  */
-import { isId, manifestIdInput, type ScreenManifest } from '@signforge/contract';
+import { isId, manifestIdInput, validateManifest, type ScreenManifest } from '@signforge/contract';
 import { findDeviceScreen, organizationExists, platform, scoped } from '@signforge/db';
 import { dispatch, platformRegistry, registry, type AnyTool, type Caller, type DataScope, type DispatchResult, type TemplateVersionView } from '@signforge/tools';
-import { validateManifest } from '@signforge/player-core';
 import { Hono, type Context } from 'hono';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
 import { adminAuth, type AdminEnv } from './auth';

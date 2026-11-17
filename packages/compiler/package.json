@@ -11,8 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@signforge/contract": "workspace:*",
-    "@signforge/player-core": "workspace:*"
+    "@signforge/contract": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.6"

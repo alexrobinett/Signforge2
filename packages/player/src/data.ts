@@ -4,7 +4,7 @@
  * in memory for spots to read, and stores it on disk so the last good value survives a restart
  * with no network.
  */
-import type { DataSnapshot, DataSource } from '@signforge/contract';
+import { validateDataSnapshot, type DataSnapshot, type DataSource } from '@signforge/contract';
 
 const STATE = 'sf-state-v1';
 const key = (id: string) => `/_sf/data/${id}`;
@@ -33,6 +33,12 @@ async function refresh(base: string, id: string, headers: Record<string, string>
   if (!res.ok) return;
   const text = await res.text();
   const next = JSON.parse(text) as DataSnapshot;
+  // A malformed snapshot never replaces the last good one, which is also what survives offline.
+  const problems = validateDataSnapshot(next);
+  if (problems.length || next.id !== id) {
+    console.warn(`[sf] snapshot for ${id} ignored: ${problems[0] ?? `it is for "${String(next.id)}"`}`);
+    return;
+  }
   if (next.fetchedAt === snapshots.get(id)?.fetchedAt) return;
   snapshots.set(id, next);
   await (await caches.open(STATE)).put(key(id), new Response(text, { headers: { 'content-type': 'application/json' } }));
