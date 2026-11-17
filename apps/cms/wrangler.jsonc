@@ -1,0 +1,26 @@
+{
+  // SignForge CMS: TanStack Start on Workers. It shares a hostname with the API Worker
+  // (apps/api), so the session cookie is same-origin: in a deployed environment the API Worker's
+  // routes take `<host>/api/*`, and this Worker takes the rest of `<host>/*`. Routes are added per
+  // environment when hostnames exist (M3-24). See apps/cms/README.md.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "signforge-cms",
+  "main": "@tanstack/react-start/server-entry",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": { "ENVIRONMENT": "dev" },
+  // The API, called from server code without leaving Cloudflare. In dev it is the API's
+  // `wrangler dev`, found through Wrangler's dev registry.
+  "services": [{ "binding": "API", "service": "signforge-api" }],
+  "env": {
+    "demo": {
+      "vars": { "ENVIRONMENT": "demo" },
+      "services": [{ "binding": "API", "service": "signforge-api-demo" }]
+    },
+    "prod": {
+      "vars": { "ENVIRONMENT": "prod" },
+      "services": [{ "binding": "API", "service": "signforge-api-prod" }]
+    }
+  }
+}
