@@ -18,7 +18,10 @@ import { useHarness } from './harness';
 
 const h = useHarness();
 const templatesDir = resolve(import.meta.dirname, '../../../templates');
-const names = readdirSync(templatesDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+const names = readdirSync(templatesDir, { withFileTypes: true })
+  .filter((d) => d.isDirectory())
+  .map((d) => d.name)
+  .sort();
 
 /** The time every frame is told it is: a Tuesday afternoon in UTC. */
 const NOW = Date.parse('2026-11-17T15:00:00Z');
@@ -47,7 +50,13 @@ const cases: Record<string, { a: Data; b: Data; assetsA?: Record<string, string>
   },
   'menu-board': {
     a: { theme: 'light', items: Array.from({ length: 7 }, (_, i) => ({ name: `Dish ${i}`, description: 'Good', price: `$${i}`, tag: i ? '' : 'New' })) },
-    b: { theme: 'dark', items: [{ name: 'Soup', description: 'Hot', price: '$4', tag: '' }, { name: 'Bread', description: '', price: '$2', tag: 'V' }] },
+    b: {
+      theme: 'dark',
+      items: [
+        { name: 'Soup', description: 'Hot', price: '$4', tag: '' },
+        { name: 'Bread', description: '', price: '$2', tag: 'V' },
+      ],
+    },
   },
   news: {
     a: { items: [] },
@@ -106,42 +115,59 @@ async function host(): Promise<Host> {
   return {
     page,
     async open(frame, html) {
-      await page.evaluate(({ frame, html }) => {
-        const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]> };
-        const f = document.createElement('iframe');
-        f.setAttribute('sandbox', 'allow-scripts');
-        // Every frame on screen: Chromium throttles animation frames in an off-screen frame.
-        f.style.cssText = 'position:absolute;left:0;top:0;width:960px;height:540px;border:0';
-        w.frames_[frame] = f;
-        w.msgs[frame] = [];
-        f.srcdoc = html;
-        document.body.appendChild(f);
-      }, { frame, html });
+      await page.evaluate(
+        ({ frame, html }) => {
+          const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]> };
+          const f = document.createElement('iframe');
+          f.setAttribute('sandbox', 'allow-scripts');
+          // Every frame on screen: Chromium throttles animation frames in an off-screen frame.
+          f.style.cssText = 'position:absolute;left:0;top:0;width:960px;height:540px;border:0';
+          w.frames_[frame] = f;
+          w.msgs[frame] = [];
+          f.srcdoc = html;
+          document.body.appendChild(f);
+        },
+        { frame, html },
+      );
       await waitFor(frame, 'loaded', 1);
     },
     async init(frame, data, assets = {}, now = NOW) {
-      await page.evaluate(async ({ frame, data, assets, sf, now }) => {
-        const w = window as unknown as { frames_: Record<string, HTMLIFrameElement> };
-        const blobs: Record<string, Blob> = {};
-        for (const [field, colour] of Object.entries(assets)) {
-          const c = document.createElement('canvas');
-          c.width = c.height = 8;
-          const g = c.getContext('2d')!;
-          g.fillStyle = colour;
-          g.fillRect(0, 0, 8, 8);
-          blobs[field] = await new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
-        }
-        const init = {
-          sf, type: 'init', data, assets: blobs, durationMs: 8000, orientation: 'landscape', viewport: { width: 960, height: 540 },
-          timezone: 'UTC', locale: 'en-US', clock: { now, offsetMs: now - Date.now() },
-        };
-        w.frames_[frame]!.contentWindow!.postMessage(init, '*');
-      }, { frame, data, assets, sf, now });
+      await page.evaluate(
+        async ({ frame, data, assets, sf, now }) => {
+          const w = window as unknown as { frames_: Record<string, HTMLIFrameElement> };
+          const blobs: Record<string, Blob> = {};
+          for (const [field, colour] of Object.entries(assets)) {
+            const c = document.createElement('canvas');
+            c.width = c.height = 8;
+            const g = c.getContext('2d')!;
+            g.fillStyle = colour;
+            g.fillRect(0, 0, 8, 8);
+            blobs[field] = await new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
+          }
+          const init = {
+            sf,
+            type: 'init',
+            data,
+            assets: blobs,
+            durationMs: 8000,
+            orientation: 'landscape',
+            viewport: { width: 960, height: 540 },
+            timezone: 'UTC',
+            locale: 'en-US',
+            clock: { now, offsetMs: now - Date.now() },
+          };
+          w.frames_[frame]!.contentWindow!.postMessage(init, '*');
+        },
+        { frame, data, assets, sf, now },
+      );
     },
     post: (frame, type) =>
-      page.evaluate(({ frame, type, sf }) => {
-        (window as unknown as { frames_: Record<string, HTMLIFrameElement> }).frames_[frame]!.contentWindow!.postMessage({ sf, type }, '*');
-      }, { frame, type, sf }),
+      page.evaluate(
+        ({ frame, type, sf }) => {
+          (window as unknown as { frames_: Record<string, HTMLIFrameElement> }).frames_[frame]!.contentWindow!.postMessage({ sf, type }, '*');
+        },
+        { frame, type, sf },
+      ),
     waitFor,
     dom: async (frame) => {
       const f = page.mainFrame().childFrames()[frameOrder.get(frame)!]!;
@@ -152,7 +178,11 @@ async function host(): Promise<Host> {
 }
 
 // Frames are created in a known order per page; map each name to its position among child frames.
-const frameOrder = new Map<string, number>([['fresh', 0], ['reset', 1], ['again', 2]]);
+const frameOrder = new Map<string, number>([
+  ['fresh', 0],
+  ['reset', 1],
+  ['again', 2],
+]);
 
 describe('template time', () => {
   // Wednesday 2031-01-01 09:30 UTC: years from the machine's own clock, so the device time cannot pass for it.
@@ -191,7 +221,8 @@ describe('template update lifecycle', () => {
     it(`${name}: new data after the first init leaves the same document as a fresh load`, async () => {
       const t = built.get(name)!;
       const c = cases[name]!;
-      const a = spotData(t.manifest, c.a), b = spotData(t.manifest, c.b);
+      const a = spotData(t.manifest, c.a),
+        b = spotData(t.manifest, c.b);
       const hst = await host();
 
       await hst.open('fresh', t.html);

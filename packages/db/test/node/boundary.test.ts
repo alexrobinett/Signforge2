@@ -12,7 +12,8 @@ const ROOT = resolve(PKG, '../..');
 const SKIP = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', '.wrangler', 'vendor']);
 const CODE = /\.(?:[cm]?[jt]sx?)$/;
 const ALLOWED = new Set(['@signforge/db', '@signforge/db/testing']);
-const SPECIFIER = /\b(?:import|export)\s[^'";]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/g;
+const SPECIFIER =
+  /\b(?:import|export)\s[^'";]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/g;
 
 function* codeFiles(dir: string): Generator<string> {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -25,7 +26,7 @@ function* codeFiles(dir: string): Generator<string> {
 }
 
 /** Imports in `source` (a file at `file`) that reach into packages/db past its public entry points. */
-export function forbiddenImports(file: string, source: string): string[] {
+function forbiddenImports(file: string, source: string): string[] {
   const bad: string[] = [];
   for (const m of source.matchAll(SPECIFIER)) {
     const spec = (m[1] ?? m[2] ?? m[3] ?? m[4])!;

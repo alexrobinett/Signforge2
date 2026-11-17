@@ -2,17 +2,24 @@
  * A slot holds one spot. The player owns two and alternates: one is on screen while the
  * other loads the next spot out of sight, so a swap only happens between two finished frames.
  */
-import { SUPPORTED_PROTOCOLS, type FrameClock, type HostMessage, type Orientation, type ScreenManifest, type Spot, type TemplateMessage } from '@signforge/contract';
+import {
+  SUPPORTED_PROTOCOLS,
+  type FrameClock,
+  type HostMessage,
+  type Orientation,
+  type ScreenManifest,
+  type Spot,
+  type TemplateMessage,
+} from '@signforge/contract';
 import { resolveSpotData } from '@signforge/player-core';
-import { liveData } from './data';
+import { liveData, reportRejected } from './data';
 import { getBlob } from './store';
 
 /** A spot that has not reported ready by this point is skipped. */
 export const READY_TIMEOUT_MS = 2000;
 
 // A template gets no network at all: scripts and styles are inline, media arrives as blobs.
-const TEMPLATE_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; font-src data:";
+const TEMPLATE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; font-src data:";
 
 /**
  * The time templates show. The device clock, uncorrected, until the sync loop keeps an offset from
@@ -46,10 +53,13 @@ export class Slot {
     this.spot = spot;
     this.abort = new AbortController();
     const work =
-      spot.kind === 'template' ? this.template(spot, manifest, this.abort.signal)
-      : spot.kind === 'image' ? this.image(spot, this.abort.signal)
-      : spot.kind === 'video' ? this.playVideo(spot, this.abort.signal)
-      : this.url(spot, this.abort.signal);
+      spot.kind === 'template'
+        ? this.template(spot, manifest, this.abort.signal)
+        : spot.kind === 'image'
+          ? this.image(spot, this.abort.signal)
+          : spot.kind === 'video'
+            ? this.playVideo(spot, this.abort.signal)
+            : this.url(spot, this.abort.signal);
     // If the timeout wins, the load is cancelled and rejects later; that is expected, not an error.
     work.catch(() => undefined);
     let timer = 0;
@@ -105,10 +115,12 @@ export class Slot {
 
     // Fit the template to the screen. On an orientation it does not support it is letterboxed
     // at the shape it does support, over the background it declares.
-    const sw = innerWidth, sh = innerHeight;
+    const sw = innerWidth,
+      sh = innerHeight;
     const screenIs = orientationOf(sw, sh);
     const orientation = t.manifest.orientations.includes(screenIs) ? screenIs : t.manifest.orientations[0]!;
-    let w = sw, h = sh;
+    let w = sw,
+      h = sh;
     if (orientation !== screenIs) {
       const ratio = orientation === 'landscape' ? 16 / 9 : 9 / 16;
       w = Math.min(sw, sh * ratio);
@@ -124,22 +136,43 @@ export class Slot {
     frame.srcdoc = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${TEMPLATE_CSP}">${html.replace(/^\s*<!doctype[^>]*>/i, '')}`;
     // The policy cannot stop a frame navigating itself. A template that does is blanked.
     let loads = 0;
-    frame.addEventListener('load', () => {
-      if (++loads > 1) {
-        console.warn(`[sf] template ${spot.template} navigated away; removed`);
-        frame.remove();
-      }
-    }, { signal });
+    frame.addEventListener(
+      'load',
+      () => {
+        if (++loads > 1) {
+          console.warn(`[sf] template ${spot.template} navigated away; removed`);
+          frame.remove();
+        }
+      },
+      { signal },
+    );
 
     const post = (m: HostMessage) => frame.contentWindow?.postMessage(m, '*');
     const ready = new Promise<void>((resolve, reject) => {
-      addEventListener('message', (e: MessageEvent<TemplateMessage>) => {
-        if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
-        if (e.data.type === 'loaded') {
-          post({ sf: protocol, type: 'init', data: resolveSpotData(spot, liveData), assets, durationMs: spot.durationMs, orientation, viewport: { width: w, height: h }, timezone: manifest.screen.timezone, locale: manifest.screen.locale ?? 'en-US', clock: frameClock() });
-        } else if (e.data.type === 'ready') resolve();
-        else if (e.data.type === 'error') reject(new Error(`template error: ${e.data.message}`));
-      }, { signal });
+      addEventListener(
+        'message',
+        (e: MessageEvent<TemplateMessage>) => {
+          if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
+          if (e.data.type === 'loaded') {
+            const { data, rejected } = resolveSpotData(spot, t.manifest.fields, liveData);
+            reportRejected(rejected);
+            post({
+              sf: protocol,
+              type: 'init',
+              data,
+              assets,
+              durationMs: spot.durationMs,
+              orientation,
+              viewport: { width: w, height: h },
+              timezone: manifest.screen.timezone,
+              locale: manifest.screen.locale ?? 'en-US',
+              clock: frameClock(),
+            });
+          } else if (e.data.type === 'ready') resolve();
+          else if (e.data.type === 'error') reject(new Error(`template error: ${e.data.message}`));
+        },
+        { signal },
+      );
       signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
     });
     this.startPlayback = () => post({ sf: protocol, type: 'play' });

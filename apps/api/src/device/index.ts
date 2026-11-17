@@ -28,7 +28,16 @@ export const device = new Hono<DeviceEnv>();
 
 // The player runs on the device's own origin and sends a bearer header, never cookies, so any
 // origin may read these responses: without the credential they are all 401.
-device.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST'], allowHeaders: ['authorization', 'if-none-match', 'content-type'], exposeHeaders: ['etag'], maxAge: 86400 }));
+device.use(
+  '*',
+  cors({
+    origin: '*',
+    allowMethods: ['GET', 'POST'],
+    allowHeaders: ['authorization', 'if-none-match', 'content-type'],
+    exposeHeaders: ['etag'],
+    maxAge: 86400,
+  }),
+);
 device.use('*', deviceAuth);
 
 device.get('/manifest.json', async (c) => {

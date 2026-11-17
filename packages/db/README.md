@@ -34,7 +34,19 @@ Base templates are written by `platform(db)` (`src/platform.ts`), the one scope 
 
 `org.assets.usage(assetIds?)` maps each asset to the ids of the spots that use it, through an image or video spot's `asset_id` or a template spot's asset map. Unused assets are absent. The asset tools use it for usage counts and to refuse deleting an asset in use.
 
-`org.auditLog.append(...)` is called by the tool dispatcher (`packages/tools`) and nothing else. Each row records the actor kind and id, the client id (`client_id`: `cms`, `sf-push`, an agent's OAuth client), the action, the target and a redacted detail.
+### Staged writes
+
+D1 has no interactive transactions, but a `batch()` is atomic. So each repository also has a `stage` (`src/writes.ts`): `org.screens.stage.update(row, patch)`, `org.assets.stage.insert(values)`, `org.screenGroups.stage.setMembers(groupId, screenIds)` and so on build the statements of a change without running them. They return `{ row, writes }`: the row as it will be once written (ids, timestamps and column defaults are fixed when staged, so it is exact), and opaque `Write`s, stamped with the scope's org like every other write. `org.commit(writes)` runs them in one batch: all take effect, or none. `platform(db)` has the same `stage` on `templates` and `templates.versions`, and its own `commit`.
+
+The tool dispatcher (`packages/tools`) is what commits: a tool stages its change, and the dispatcher commits it with its audit row (`org.auditLog.stage(...)`) and, for a keyed creation, its idempotency record. `org.auditLog.append(...)` writes a row on its own and is for seeding tests only. Each audit row records the actor kind and id, the client id (`client_id`: `cms`, `sf-push`, an agent's OAuth client), the action, the target and a redacted detail.
+
+### Drafts and published versions
+
+Spots, playlists and schedule entries have a draft and a published version (`src/drafts.ts`, docs/backend-plan.md#publishing). The row's columns are the draft: `insert`, `update` and `stage.update` change only them, and drop `publishedJson` and `publishedAt` if a caller passes them. `org.spots.stage.publish(row)`, `org.playlists.stage.publish(row, items)` and `org.scheduleEntries.stage.publish(row)` stage copying the row's content as read (a playlist's with its items) into `published_json`. `published(row)` returns the published version shaped as the row (a playlist's with `items`), or undefined if it was never published; `draftChanged(row, items?)` says whether the draft differs from it.
+
+`org.playlists.allItems()` and `org.screenGroups.allMembers()` read every playlist's items and every group membership in one query each, for a publish. `org.settings.get()` and `org.settings.stage.set({ defaultPlaylistId })` hold the org's default playlist, refused (`NotInOrgError`) for a playlist the org does not have. `org.assets.usage` counts a spot's draft and its published version, so an asset a screen still plays counts as used.
+
+`org.idempotency.get(key)` and `org.idempotency.stage({ key, action, inputSha256, outputJson })` read and stage the `idempotency_keys` record of a creating tool call, keyed `(org_id, key)`: a second record of the same key fails its whole batch.
 
 ## Better Auth's tables
 

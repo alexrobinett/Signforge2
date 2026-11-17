@@ -123,9 +123,10 @@ describe('push', () => {
     expect(s?.desiredManifestId).toBe(first.manifest.id);
     expect(s?.previousManifestId).toBeNull();
 
-    // The publish ran the tool through the dispatcher, audited as sf push; both pushes are recorded.
+    // The publish ran the tool through the dispatcher, audited as sf push. The second push changed
+    // nothing, so it wrote nothing, audit row included.
     const audit = (await org.scope.auditLog.list()).filter((e) => e.action === 'publish_manifest_to_screen');
-    expect(audit).toHaveLength(2);
+    expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ actorKind: 'system', actorId: 'sf-push', clientId: 'sf-push', targetKind: 'screen', targetId: org.screen });
     expect(JSON.parse(audit[0]!.detailJson!)).toEqual({ input: { screenId: org.screen, manifestId: first.manifest.id } });
   });

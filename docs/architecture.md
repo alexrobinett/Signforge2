@@ -1,6 +1,6 @@
 # SignForge 2 Architecture
 
-Status: Milestone 1 (the Pi spike) is done; its measurements are in `spike/pi-perf/RESULTS.md`. Milestone 2 (player core) is built and running on the test Pi. The template contract is in `docs/template-spec.md` and `packages/contract`.
+Status: Milestone 1 (the Pi spike) is done; its measurements are in `spike/pi-perf/RESULTS.md`. Milestone 2 (player core) is built and running on the test Pi. Milestone 3 (CMS and API) is in progress; what exists so far is under **Milestone 3 so far** below, and the plan is `docs/backend-plan.md`. The template contract is in `docs/template-spec.md` and `packages/contract`.
 
 ## Purpose and scale
 
@@ -71,10 +71,10 @@ Rive was evaluated as an alternative template format because it has a native App
 
 ### Lifecycle
 
-1. The player gives the template its data.
+1. The player gives the template its data and the length of this play.
 2. The template loads and decodes what it needs and reports ready.
 3. The player tells it to play.
-4. The template reports done.
+4. The player removes the template when the play's time is up. The template is not asked: it times its own outro from the duration it was given (`--sf-duration`).
 
 ### Rules
 
@@ -84,7 +84,7 @@ Rive was evaluated as an alternative template format because it has a native App
 - At most about 50 DOM elements may animate at once. Denser effects such as particles go in a single 2D or WebGL canvas.
 - Layout is fluid and sized relative to the screen, so one template is crisp at any resolution of an orientation it supports.
 - The template runs in a sandboxed frame with no network access, no storage and no reach outside its frame. The build produces one self-contained HTML file per template; the player loads it from its cache into the frame and passes image files in with the spot's data, under a content security policy that blocks every request.
-- Hard budgets, measured on a Pi 4 at 1080p 60 Hz: at most 1% dropped frames over a full play, no frame longer than 50 ms after play starts, and at most 500 ms to ready from cached files. A bundle size limit is still to be set.
+- Hard budgets, measured on a Pi 4 at 1080p 60 Hz: at most 1% dropped frames over a full play, no frame longer than 50 ms after play starts, and at most 500 ms to ready from cached files. A built bundle may be at most 600 kB, checked by `sf build` and again by the server.
 
 ### Submission and review
 
@@ -109,13 +109,13 @@ The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) ar
 - The player downloads and verifies every file, then switches to the new manifest in one step. A partial download is never played.
 - The player evaluates the schedule on its own clock, so a timed changeover happens with the network down.
 - A takeover ends at an absolute instant (`endsAt` on its schedule entry, manifest schema 3), not after a duration, so it ends on time offline and in any time zone.
-- Data source snapshots are pushed to screens separately from manifests. Offline, a screen shows the last good value.
+- Data source snapshots are pushed to screens separately from manifests. Offline, a screen shows the last good value. A snapshot that is malformed, or that fits none of the fields bound to it, never becomes the last good value; a bound value that does not fit its field leaves the spot's static fallback on screen. Refusals are counted per source (`__sf.dataRejected` on the player).
 
 ## Player
 
 The web player owns all content concerns and runs unchanged in any browser, including the public demo.
 
-- **Cache**: every file is stored on the device under its SHA-256 and verified on download. A service worker keeps the player itself available offline.
+- **Cache**: every file is stored on the device under its SHA-256. A download runs in a worker, off the main thread, streams to disk and is hashed as it arrives, so memory stays flat even for video; it is stored under its hash only if the hash matches, and a download that receives nothing for 30 seconds is abandoned. Cleanup removes files the active manifest no longer names, except pinned ones: the spot on screen and the spot loading, which can belong to the manifest just replaced. A service worker keeps the player itself available offline.
 - **Playback**: two stacked slots. The next spot loads and is fully drawn underneath the current one, and the swap happens only when it reports ready. Drawing it ahead of time matters: revealing an undrawn template cost about a second of stalled frames on the Pi. A spot that fails to become ready within 2 seconds is skipped; three failures in a row show a holding message.
 - **Transitions**, set per playlist. Spots can be any length.
   - `cut`: instant. Templates animate their own intro and outro, so this already looks smooth.
@@ -151,9 +151,9 @@ Uploaded video must match one strict profile (1080p H.264, capped bitrate). The 
 - **Durable Objects**: one per screen, holding a sleeping WebSocket and both the manifest version the screen should be on and the one it reports. This gives the CMS rollout status per publish. Alarms drive timed publishes.
 - **CMS**: TanStack Start, React 19, Tailwind, shadcn.
 - **Auth**: Better Auth with its organization plugin.
-- **Environments**: dev, demo and prod, each deployed with one command.
-- **Images**: scaled down at publish time to the smallest size that covers the screen. A 4K photo is a quarter of the decoding work at 1080p.
-- **Video**: one accepted profile, H.264 at up to 1080p and 30 fps and 10 Mbit/s, checked at publish. The Pi 4 decodes it in hardware with about 1% of video frames dropped; 60 fps drops about 18%.
+- **Environments**: dev, demo and prod, each deployed with one command. Dev is local only and must be named (`--env dev`); a bare `wrangler deploy` of the API fails rather than shipping dev settings.
+- **Images**: scaled down when they enter the system, to the smallest size that covers the screen: in the browser at upload (`packages/media`), into a landscape and a portrait rendition, and by `sf build` for local projects. The server checks the dimensions rather than resizing. A 4K photo is a quarter of the decoding work at 1080p.
+- **Video**: one accepted profile, H.264 at up to 1080p and 30 fps and 10 Mbit/s, checked at upload and by `sf build`. The Pi 4 decodes it in hardware with about 1% of video frames dropped; 60 fps drops about 18%.
 
 ## Agents
 
@@ -191,6 +191,22 @@ pnpm and Turborepo, with packages for:
 4. **Agents**: MCP server, WebMCP, the template submission and review pipeline.
 5. **Polish**: public demo org, Pi image, more base templates, archive the four SignForge 1 repos with a pointer here.
 
+### Milestone 3 so far
+
+Built (tickets in `docs/tickets/`):
+
+- **API Worker** (`apps/api`, Hono on Workers): D1 through `packages/db`, whose scoped repositories are the only code that touches tenant tables, and R2 for blobs and manifests.
+- **Device routes**: a screen authenticates with an opaque per-screen credential and fetches its manifest and files. The Pi plays from the API, and survives losing it. Until pairing (M3-08), credentials are made with `dev:screen` and installed by hand, and the player polls every 30 seconds.
+- **`sf push`**: publishes an `sf build` output to a screen through a temporary `/admin` tree (see the backend plan for what replaces it).
+- **Auth and orgs**: Better Auth with email codes, GitHub and organizations; a CMS shell (TanStack Start) with sign-in, org creation and switching.
+- **Tool registry**: every change is a tool with an input and output schema, a scope and a role, audited. List tools page.
+- **Server compiler** (`packages/compiler`), golden-tested against `sf build`.
+- **Assets**: presigned upload, browser-made renditions and a server-side check on finalize. The library page waits for the CMS design.
+- **Templates**: pushed, checked again on the server, versioned and approved; base templates are seeded on deploy.
+- **Feed normalisers** (`packages/feeds`): iCal, RSS and Atom into fixed shapes.
+
+After the full review of 2026-11-17 (`docs/reviews/2026-11-17-full-review.md`), foundations come next: player resilience with browser tests, contract fixes, write safety, then the screen socket, sync and pairing, before the spot and playlist editors.
+
 ## Out of v1
 
 - Billing
@@ -204,8 +220,6 @@ pnpm and Turborepo, with packages for:
 
 ## Open items
 
-- Template bundle size limit.
 - Which hardware, if any, v1 supports for 4K. A Pi 5 is the obvious candidate and is untested.
-- Photo-heavy and video spots were not covered by the spike.
 - Current browser support for WebMCP has not been checked.
 - Replacement artwork and fonts for the C-Store template: the SignForge 1 repo contains Petro-Points artwork and Gibson and Minion font files that should not be reused without a licence.

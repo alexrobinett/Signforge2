@@ -30,6 +30,7 @@ function RootDocument({ children }: { children: ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head>
         {/* Before first paint, so the page never flashes the wrong theme. */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: themeScript is a constant in this file, not user input. */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <HeadContent />
       </head>

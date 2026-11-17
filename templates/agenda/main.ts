@@ -21,9 +21,7 @@ defineTemplate({
 
     const all = (ctx.data.events as Event[]) ?? [];
     // An all-day event's end date is exclusive: it is over once that date arrives.
-    const upcoming = all.filter((e) =>
-      e.allDay ? (e.end ? e.end.slice(0, 10) > today : e.start.slice(0, 10) >= today) : new Date(e.end || e.start) > now,
-    );
+    const upcoming = all.filter((e) => (e.allDay ? (e.end ? e.end.slice(0, 10) > today : e.start.slice(0, 10) >= today) : new Date(e.end || e.start) > now));
     const rows = upcoming.slice(0, Math.max(1, Math.min(6, Number(ctx.data.rows) || 5)));
     document.getElementById('empty')!.hidden = rows.length > 0;
 

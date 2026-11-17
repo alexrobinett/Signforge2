@@ -78,7 +78,17 @@ export function defineTemplate(hooks: TemplateHooks = {}): void {
         run = ++generation;
         const assets: Record<string, string> = {};
         for (const [k, blob] of Object.entries(m.assets)) urls.push((assets[k] = URL.createObjectURL(blob)));
-        ctx = { data: m.data, assets, durationMs: m.durationMs, orientation: m.orientation, viewport: m.viewport, timezone: m.timezone, locale: m.locale, clock, root };
+        ctx = {
+          data: m.data,
+          assets,
+          durationMs: m.durationMs,
+          orientation: m.orientation,
+          viewport: m.viewport,
+          timezone: m.timezone,
+          locale: m.locale,
+          clock,
+          root,
+        };
         root.style.setProperty('--sf-duration', `${m.durationMs}ms`);
         root.dataset.orientation = m.orientation;
         bind(ctx);

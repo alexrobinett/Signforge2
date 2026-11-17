@@ -3,10 +3,24 @@
  * out. Pure, with no I/O, so the server's publish and the local `sf build` share it and cannot
  * drift. Files are already uploaded and hashed by the time content reaches it; image scaling
  * and video checks happen at upload.
+ *
+ * It checks only what it compiles: the spots this screen's schedule reaches. Content no screen
+ * reaches is a draft's business, checked when a publish promotes it (packages/tools
+ * `promoteDrafts`) and shown in the CMS, so one broken spot never blocks another screen.
  */
 import {
-  MANIFEST_SCHEMA, manifestIdInput, requiredFiles, validateManifest, validateSpotData,
-  type DataSource, type Playlist, type ScheduleEntry, type ScreenManifest, type Sha256, type Spot, type TemplateManifest,
+  MANIFEST_SCHEMA,
+  manifestIdInput,
+  requiredFiles,
+  validateManifest,
+  validateSpotData,
+  type DataSource,
+  type Playlist,
+  type ScheduleEntry,
+  type ScreenManifest,
+  type Sha256,
+  type Spot,
+  type TemplateManifest,
 } from '@signforge/contract';
 
 /** A schedule entry as the org stores it: its target level plus which group or screen it targets. */
@@ -57,8 +71,11 @@ function withDefaults(spot: Extract<Spot, { kind: 'template' }>, t: TemplateMani
   return { ...spot, data };
 }
 
-/** What stops a template spot from playing: a missing template, a bad duration, bad data. */
-function spotProblems(spot: Spot, templates: CompileInput['templates']): string[] {
+/**
+ * What stops a template spot from playing: a missing template, a bad duration, bad data. Exported
+ * for checks of content no screen reaches yet: `sf build` and the publish's draft checks.
+ */
+export function spotProblems(spot: Spot, templates: CompileInput['templates']): string[] {
   if (spot.kind !== 'template') return [];
   const t = templates[spot.template]?.manifest;
   if (!t) return [`template ${spot.template} is not available`];
@@ -76,13 +93,8 @@ function entryProblems(e: TargetedEntry): string[] {
 }
 
 export async function compileScreen(input: CompileInput, opts: CompileOptions): Promise<CompileResult> {
-  // Content errors are errors whether or not this screen reaches them, so every spot and entry is
-  // checked: a broken spot surfaces when it is made, not when a schedule first uses it.
-  const problems = [
-    ...input.spots.flatMap((s) => spotProblems(s, input.templates).map((p) => `spot ${s.id}: ${p}`)),
-    ...input.schedule.flatMap((e) => entryProblems(e).map((p) => `schedule entry ${e.id}: ${p}`)),
-  ];
-  const brokenSpots = new Set(problems.filter((p) => p.startsWith('spot ')).map((p) => p.slice(5, p.indexOf(':'))));
+  // Entries are checked first: one that cannot be placed cannot be said to miss this screen.
+  const problems = input.schedule.flatMap((e) => entryProblems(e).map((p) => `schedule entry ${e.id}: ${p}`));
 
   const targets = (e: TargetedEntry) =>
     e.target === 'org' || (e.target === 'group' && input.groups.includes(e.targetId ?? '')) || (e.target === 'screen' && e.targetId === input.screen.id);
@@ -95,6 +107,11 @@ export async function compileScreen(input: CompileInput, opts: CompileOptions): 
   const spotIds = new Set(playlistList.flatMap((p) => p.items.map((i) => i.spot)));
   const spotList = input.spots.filter((s) => spotIds.has(s.id));
 
+  // Only what this screen plays is checked: a broken spot elsewhere in the org is that content's
+  // problem (a draft the publish did not promote, see docs/backend-plan.md#publishing), not this screen's.
+  problems.push(...spotList.flatMap((s) => spotProblems(s, input.templates).map((p) => `spot ${s.id}: ${p}`)));
+  const brokenSpots = new Set(problems.filter((p) => p.startsWith('spot ')).map((p) => p.slice(5, p.indexOf(':'))));
+
   const spots = Object.fromEntries(spotList.map((s) => [s.id, s.kind === 'template' ? withDefaults(s, input.templates[s.template]?.manifest) : s]));
   const templateKeys = new Set(spotList.flatMap((s) => (s.kind === 'template' ? [s.template] : [])));
   const templates = Object.fromEntries(Object.entries(input.templates).filter(([key]) => templateKeys.has(key)));
@@ -102,7 +119,17 @@ export async function compileScreen(input: CompileInput, opts: CompileOptions): 
   const dataSources = Object.fromEntries(input.dataSources.filter((d) => bound.has(d.id)).map((d) => [d.id, d]));
   const playlists = Object.fromEntries(playlistList.map((p) => [p.id, p]));
 
-  const draft = { schema: MANIFEST_SCHEMA, screen: input.screen, files: {}, templates, spots, playlists, dataSources, schedule, defaultPlaylist: input.defaultPlaylist };
+  const draft = {
+    schema: MANIFEST_SCHEMA,
+    screen: input.screen,
+    files: {},
+    templates,
+    spots,
+    playlists,
+    dataSources,
+    schedule,
+    defaultPlaylist: input.defaultPlaylist,
+  };
   const files: ScreenManifest['files'] = {};
   for (const sha of [...requiredFiles(draft as ScreenManifest)].sort()) {
     const f = input.files[sha];
@@ -112,6 +139,10 @@ export async function compileScreen(input: CompileInput, opts: CompileOptions): 
   const manifest: ScreenManifest = { ...body, id: await opts.hash(manifestIdInput(body)), generatedAt: opts.now.toISOString() };
   // Report everything in one pass, but say each thing once: a spot already reported is not
   // reported again by the whole-manifest check.
-  problems.push(...validateManifest(manifest).filter((p) => ![...brokenSpots].some((id) => p.includes(`spot "${id}"`))).map((p) => `manifest: ${p}`));
+  problems.push(
+    ...validateManifest(manifest)
+      .filter((p) => ![...brokenSpots].some((id) => p.includes(`spot "${id}"`)))
+      .map((p) => `manifest: ${p}`),
+  );
   return problems.length ? { problems } : { manifest, problems };
 }

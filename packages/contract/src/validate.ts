@@ -11,8 +11,16 @@
  * every plain object, and must not count as a field.
  */
 import {
-  BRAND_COLORS, BRAND_SHAPES, ID_PATTERN, SUPPORTED_MANIFEST_SCHEMAS, templateKey,
-  type BrandKit, type DisplayHours, type FieldDef, type ScalarFieldDef, type ScreenManifest,
+  BRAND_COLORS,
+  BRAND_SHAPES,
+  ID_PATTERN,
+  SUPPORTED_MANIFEST_SCHEMAS,
+  templateKey,
+  type BrandKit,
+  type DisplayHours,
+  type FieldDef,
+  type ScalarFieldDef,
+  type ScreenManifest,
 } from './index.ts';
 
 // ------------------------------------------------------------------ helpers
@@ -107,7 +115,8 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       if (!isNum(v)) return `field "${name}" must be a number`;
       if (def.min !== undefined && v < def.min) return `field "${name}" must be at least ${def.min}`;
       if (def.max !== undefined && v > def.max) return `field "${name}" must be at most ${def.max}`;
-      if (def.step !== undefined && !onStep(v, def.step, def.min ?? 0)) return `field "${name}" must be a multiple of ${def.step}${def.min ? ` from ${def.min}` : ''}`;
+      if (def.step !== undefined && !onStep(v, def.step, def.min ?? 0))
+        return `field "${name}" must be a multiple of ${def.step}${def.min ? ` from ${def.min}` : ''}`;
       return undefined;
     case 'boolean':
       return typeof v === 'boolean' ? undefined : `field "${name}" must be true or false`;
@@ -224,7 +233,9 @@ export function validateSpotData(fields: unknown, data: unknown, assets: unknown
   if (!isObj(assets)) errors.push('assets is not an object');
   if (!isObj(bindings)) errors.push('bindings is not an object');
   if (errors.length) return errors;
-  const d = data as Obj, a = assets as Obj, b = bindings as Obj;
+  const d = data as Obj,
+    a = assets as Obj,
+    b = bindings as Obj;
 
   for (const [name, binding] of Object.entries(b)) {
     const def = own(fields, name);
@@ -256,6 +267,43 @@ export function validateSpotData(fields: unknown, data: unknown, assets: unknown
   return errors;
 }
 
+// ------------------------------------------------------------------ bound values
+
+/**
+ * Read a binding's dot path out of a snapshot's data. Numbers index arrays: `daily.max.0`. Only
+ * own keys count, so `constructor` or an array's `length` reads as missing. Undefined when any
+ * step is missing.
+ */
+export function readPath(data: unknown, path: string): unknown {
+  let v: unknown = data;
+  for (const key of path.split('.')) {
+    if (Array.isArray(v)) v = /^\d+$/.test(key) ? v[Number(key)] : undefined;
+    else v = own(v, key);
+    if (v === undefined) return undefined;
+  }
+  return v;
+}
+
+/**
+ * Check a live value against the field it is bound to, before it replaces the spot's static
+ * value. Returns problems; empty means the value may be shown. A missing value (`undefined` or
+ * `null`, as `readPath` gives for a path the snapshot does not have) is a problem: the fallback
+ * stays. The player runs this on every bound field it plays; the server runs it when it stores a
+ * snapshot (M3-23), so both refuse the same values.
+ */
+export function validateBoundValue(fields: unknown, name: unknown, value: unknown): string[] {
+  const field = typeof name === 'string' ? name : show(name);
+  const raw = own(fields, name);
+  if (raw === undefined) return [`unknown field "${field}"`];
+  if (fieldDefProblems(field, raw).length) return [`field "${field}" has no valid definition`];
+  const def = raw as FieldDef;
+  if (def.type === 'image') return [`image field "${field}" cannot be bound to live data`];
+  if (value === undefined || value === null) return [`field "${field}" has no value at the bound path`];
+  if (def.type === 'list') return listProblems(field, def, value);
+  const e = scalarProblem(field, def, value);
+  return e ? [e] : [];
+}
+
 // --------------------------------------------------------------- display hours
 
 function windowProblems(where: string, w: unknown, required: boolean): string[] {
@@ -265,7 +313,8 @@ function windowProblems(where: string, w: unknown, required: boolean): string[] 
     const v = w[k];
     if (v === undefined ? required : !isStr(v) || !TIME.test(v)) out.push(`${where}: ${k} must be HH:MM`);
   }
-  if (w.days !== undefined && (!Array.isArray(w.days) || w.days.some((d) => !Number.isInteger(d) || (d as number) < 0 || (d as number) > 6))) out.push(`${where}: days must be 0-6`);
+  if (w.days !== undefined && (!Array.isArray(w.days) || w.days.some((d) => !Number.isInteger(d) || (d as number) < 0 || (d as number) > 6)))
+    out.push(`${where}: days must be 0-6`);
   for (const k of ['startDate', 'endDate'] as const) if (w[k] !== undefined && !(isStr(w[k]) && DATE.test(w[k]))) out.push(`${where}: ${k} must be YYYY-MM-DD`);
   return out;
 }
@@ -278,7 +327,8 @@ export function displayHoursProblems(hours: unknown): string[] {
   else for (const w of hours.weekly) errors.push(...windowProblems('display hours', w, true));
   if (hours.exceptions !== undefined && !Array.isArray(hours.exceptions)) errors.push('display hours exceptions must be a list');
   for (const e of Array.isArray(hours.exceptions) ? (hours.exceptions as unknown[]) : []) {
-    const date = own(e, 'date'), on = own(e, 'on');
+    const date = own(e, 'date'),
+      on = own(e, 'on');
     if (!isStr(date) || !DATE.test(date) || !Array.isArray(on)) {
       errors.push(`display hours exception "${show(date)}" is malformed`);
       continue;
@@ -308,17 +358,20 @@ function fontProblems(where: string, f: unknown): string[] {
   if (!isObj(f)) return [`${where} font must be an object`];
   const errors: string[] = [];
   const [owner, id, more] = isStr(f.id) ? f.id.split('/') : [];
-  if (more !== undefined || !(owner === 'base' || isIdValue(owner)) || !isStr(id) || !/^[a-z0-9][a-z0-9-]*$/.test(id)) errors.push(`${where} font id must be <owner>/<id>`);
+  if (more !== undefined || !(owner === 'base' || isIdValue(owner)) || !isStr(id) || !/^[a-z0-9][a-z0-9-]*$/.test(id))
+    errors.push(`${where} font id must be <owner>/<id>`);
   if (!isText(f.family)) errors.push(`${where} font needs a family`);
   if (Array.isArray(f.files) && !f.files.length) errors.push(`${where} font has no files`);
-  errors.push(...list(`${where} font file`, f.files, (x) => {
-    if (!isObj(x)) return ['is not an object'];
-    const out: string[] = [];
-    if (!(Number.isSafeInteger(x.weight) && (x.weight as number) >= 1 && (x.weight as number) <= 1000)) out.push('weight must be 1 to 1000');
-    if (x.style !== 'normal' && x.style !== 'italic') out.push('style must be normal or italic');
-    if (!isText(x.file)) out.push('file must name a file');
-    return out;
-  }));
+  errors.push(
+    ...list(`${where} font file`, f.files, (x) => {
+      if (!isObj(x)) return ['is not an object'];
+      const out: string[] = [];
+      if (!(Number.isSafeInteger(x.weight) && (x.weight as number) >= 1 && (x.weight as number) <= 1000)) out.push('weight must be 1 to 1000');
+      if (x.style !== 'normal' && x.style !== 'italic') out.push('style must be normal or italic');
+      if (!isText(x.file)) out.push('file must name a file');
+      return out;
+    }),
+  );
   return errors;
 }
 
@@ -356,7 +409,8 @@ export function requiredFiles(manifest: ScreenManifest): Set<string> {
 export function validateManifest(m: unknown): string[] {
   if (!isObj(m)) return ['manifest is not an object'];
   const errors: string[] = [];
-  if (!SUPPORTED_MANIFEST_SCHEMAS.includes(m.schema as number)) errors.push(`manifest schema ${show(m.schema)} is not one this player can play (${SUPPORTED_MANIFEST_SCHEMAS.join(', ')})`);
+  if (!SUPPORTED_MANIFEST_SCHEMAS.includes(m.schema as number))
+    errors.push(`manifest schema ${show(m.schema)} is not one this player can play (${SUPPORTED_MANIFEST_SCHEMAS.join(', ')})`);
   if (!isText(m.id)) errors.push('id is missing');
   if (!isInstant(m.generatedAt)) errors.push('generatedAt must be an ISO 8601 time');
 
@@ -373,7 +427,8 @@ export function validateManifest(m: unknown): string[] {
   }
 
   const { files, templates, spots, playlists, dataSources, schedule } = m;
-  if (!isObj(files) || !isObj(spots) || !isObj(playlists) || !isObj(templates) || !Array.isArray(schedule) || !isObj(dataSources)) return [...errors, 'manifest is incomplete'];
+  if (!isObj(files) || !isObj(spots) || !isObj(playlists) || !isObj(templates) || !Array.isArray(schedule) || !isObj(dataSources))
+    return [...errors, 'manifest is incomplete'];
   if (!own(playlists, m.defaultPlaylist)) errors.push('defaultPlaylist does not exist');
 
   for (const [sha, f] of Object.entries(files)) {
@@ -431,7 +486,8 @@ export function validateManifest(m: unknown): string[] {
         const fields = own(t, 'fields');
         if (isObj(fields)) errors.push(...prefix(where, validateSpotData(fields, spot.data, spot.assets, bindings)));
         const d = own(t, 'duration');
-        const minMs = own(d, 'minMs'), maxMs = own(d, 'maxMs');
+        const minMs = own(d, 'minMs'),
+          maxMs = own(d, 'maxMs');
         if (isNum(spot.durationMs) && isNum(minMs) && isNum(maxMs) && (spot.durationMs < minMs || spot.durationMs > maxMs)) {
           errors.push(`${where}: duration ${spot.durationMs} ms is outside the template's range ${minMs} to ${maxMs}`);
         }
@@ -475,7 +531,8 @@ export function validateManifest(m: unknown): string[] {
     if (!own(playlists, e.playlist)) errors.push(`${where} plays unknown playlist "${show(e.playlist)}"`);
     errors.push(...windowProblems(where, e, false));
     for (const k of ['startsAt', 'endsAt'] as const) if (e[k] !== undefined && !isInstant(e[k])) errors.push(`${where}: ${k} must be an ISO 8601 time`);
-    if (isInstant(e.startsAt) && isInstant(e.endsAt) && !(Date.parse(e.endsAt) > Date.parse(e.startsAt))) errors.push(`${where}: endsAt must be after startsAt`);
+    if (isInstant(e.startsAt) && isInstant(e.endsAt) && !(Date.parse(e.endsAt) > Date.parse(e.startsAt)))
+      errors.push(`${where}: endsAt must be after startsAt`);
   }
 
   for (const [key, p] of Object.entries(playlists)) {
@@ -523,7 +580,6 @@ export function validateDataSnapshot(s: unknown): string[] {
 }
 
 // ------------------------------------------------------------------ device API
-
 
 /** `POST /v1/device/pair/start`, as the screen receives it. */
 export function validatePairStartResponse(r: unknown): string[] {
@@ -600,13 +656,16 @@ export function validateSyncRequest(r: unknown): string[] {
     errors.push('player needs a version and the manifest schemas and protocols it supports');
   }
   const m = r.manifest;
-  if (!isObj(m) || (m.active !== undefined && !isText(m.active)) || !isCount(m.filesMissing)) errors.push('manifest needs filesMissing, and active when there is one');
+  if (!isObj(m) || (m.active !== undefined && !isText(m.active)) || !isCount(m.filesMissing))
+    errors.push('manifest needs filesMissing, and active when there is one');
   errors.push(...displayStatusProblems(r.display));
   if (!isInstant(r.deviceTime)) errors.push('deviceTime must be an ISO 8601 time');
   if (!isObj(r.clock) || !isNum(r.clock.offsetMs) || typeof r.clock.trusted !== 'boolean') errors.push('clock needs offsetMs and whether the screen trusts it');
   errors.push(...list('play count', r.playCounts, playCountProblems));
   if (!isObj(r.snapshots)) errors.push('snapshots must map source ids to versions');
-  else for (const [k, v] of Object.entries(r.snapshots)) if (!isIdValue(k) || !isCount(v)) errors.push(`snapshots: "${k}" must be a source id with a version number`);
+  else
+    for (const [k, v] of Object.entries(r.snapshots))
+      if (!isIdValue(k) || !isCount(v)) errors.push(`snapshots: "${k}" must be a source id with a version number`);
   return errors;
 }
 

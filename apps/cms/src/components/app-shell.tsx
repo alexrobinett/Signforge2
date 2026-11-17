@@ -41,14 +41,12 @@ function Sidebar({ shell }: { shell: Shell }) {
 export function AppShell({ shell, children }: { shell: Shell; children: ReactNode }) {
   const [drawer, setDrawer] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the trigger: navigating closes the drawer.
   useEffect(() => setDrawer(false), [pathname]);
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
-      <a
-        href="#main"
-        className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
-      >
+      <a href="#main" className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3">
         Skip to content
       </a>
       <aside className="sticky top-0 hidden h-dvh border-r bg-sidebar text-sidebar-foreground lg:block" aria-label="Sidebar">
