@@ -14,7 +14,7 @@ import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
-import { commit, fullRow, staged, updateSet, type Staged, type Write } from './writes';
+import { commit, fullRow, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
@@ -35,11 +35,6 @@ type Guarded = 'orgId' | 'id' | 'createdAt' | 'publishedJson' | 'publishedAt';
 export type NewRow<T extends SQLiteTable> = Omit<T['$inferInsert'], Guarded> & { id?: string };
 export type RowPatch<T extends SQLiteTable> = Partial<Omit<T['$inferInsert'], Guarded>>;
 
-function strip<T extends object>(v: T): T {
-  const { orgId: _o, id: _i, createdAt: _c, publishedJson: _pj, publishedAt: _pa, ...rest } = v as Record<string, unknown>;
-  return rest as T;
-}
-
 /** D1 binds at most 100 parameters per statement; leave one for the org. */
 function chunk<T>(rows: T[], columns: number): T[][] {
   const size = Math.max(1, Math.floor(99 / columns));
@@ -48,8 +43,22 @@ function chunk<T>(rows: T[], columns: number): T[][] {
   return out;
 }
 
-/** get / list / insert / update / delete over a table keyed by `(org_id, id)`. */
-function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: string) {
+/**
+ * Who names a row. `content`: spots, playlists, schedule entries and data sources, whose ids
+ * content and manifests name; a caller may choose one, and the table is keyed `(org_id, id)` so
+ * two orgs can choose the same. `server`: everything else, made by a tool; the id is always
+ * `newId(prefix)` and a caller's is ignored, so ids are unique across orgs (a screen's must be:
+ * its credential and its Durable Object name it by id alone).
+ */
+type Ids = 'content' | 'server';
+
+/** get / list / insert / update / delete over a table with an org and an id. */
+function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: string, ids: Ids = 'server') {
+  const idFor = (values: { id?: string }) => {
+    const id = ids === 'content' ? (values.id ?? newId(prefix)) : newId(prefix);
+    assertId(id);
+    return id;
+  };
   type Row = T['$inferSelect'];
   // Drizzle's builders do not type-check over a generic table; the public signatures carry the types.
   const t = table as unknown as typeof s.screens;
@@ -70,8 +79,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
       ).flat() as Row[],
     list: async (): Promise<Row[]> => (await db.select().from(t).where(eq(t.orgId, orgId)).orderBy(asc(t.id)).all()) as Row[],
     insert: async (values: NewRow<T>): Promise<Row> => {
-      const id = values.id ?? newId(prefix);
-      assertId(id);
+      const id = idFor(values);
       return (await db
         .insert(t)
         .values({ ...strip(values as object), id, orgId } as never)
@@ -93,8 +101,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
     /** The same changes, staged for the scope's `commit` (./writes.ts). */
     stage: {
       insert: (values: NewRow<T>): Staged<Row> => {
-        const id = values.id ?? newId(prefix);
-        assertId(id);
+        const id = idFor(values);
         const row = fullRow(t, { ...strip(values as object), id, orgId });
         return staged(row as Row, db.insert(t).values(row as never));
       },
@@ -118,7 +125,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
 /** Templates and their versions: the org's own plus base ones (null org), which it may read but not change. */
 function shared<T extends SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn }>(db: Db, orgId: string, table: T, prefix: string) {
   type Row = T['$inferSelect'];
-  const own = entity(db, orgId, table, prefix);
+  const own = entity(db, orgId, table, prefix, 'server');
   const t = table as unknown as typeof s.templates;
   const visible = or(eq(t.orgId, orgId), isNull(t.orgId))!;
   return {
@@ -186,11 +193,11 @@ export function scoped(d1: D1Database, orgId: string) {
   const assetRenditions = entity(db, orgId, s.assetRenditions, 'rnd');
   const templates = shared(db, orgId, s.templates, 'tpl');
   const templateVersions = shared(db, orgId, s.templateVersions, 'tpv');
-  const spotRows = entity(db, orgId, s.spots, 'spt');
-  const playlists = entity(db, orgId, s.playlists, 'pls');
-  const scheduleEntries = entity(db, orgId, s.scheduleEntries, 'sch');
+  const spotRows = entity(db, orgId, s.spots, 'spt', 'content');
+  const playlists = entity(db, orgId, s.playlists, 'pls', 'content');
+  const scheduleEntries = entity(db, orgId, s.scheduleEntries, 'sch', 'content');
   const publishes = entity(db, orgId, s.publishes, 'pub');
-  const dataSources = entity(db, orgId, s.dataSources, 'src');
+  const dataSources = entity(db, orgId, s.dataSources, 'src', 'content');
   const audit = entity(db, orgId, s.auditLog, 'aud');
   const brandKitRows = entity(db, orgId, s.brandKits, 'bk');
 
@@ -247,6 +254,18 @@ export function scoped(d1: D1Database, orgId: string) {
             .where(and(eq(s.screenCredentials.orgId, orgId), eq(s.screenCredentials.screenId, screenId)))
             .orderBy(asc(s.screenCredentials.createdAt))
             .all(),
+        /**
+         * Record a credential's first use (device auth calls this once per credential, when
+         * `findDeviceScreen` says it is unused). A used credential is never replaced by a repeat
+         * pairing poll.
+         */
+        markUsed: async (credentialId: string, now: number) => {
+          await db
+            .update(s.screenCredentials)
+            .set({ lastUsedAt: now })
+            .where(and(eq(s.screenCredentials.orgId, orgId), eq(s.screenCredentials.id, credentialId), isNull(s.screenCredentials.lastUsedAt)))
+            .run();
+        },
       },
       /**
        * Make `manifestId` the screen's desired manifest. The one it replaces becomes the previous
@@ -359,6 +378,38 @@ export function scoped(d1: D1Database, orgId: string) {
               .from(s.organization)
               .where(eq(s.organization.id, orgId)),
           ),
+      },
+      /**
+       * A screen collecting the credential for a code this org claimed (`collectPairing`,
+       * ./pairing.ts, which finds the code by poll token and makes this scope from the org the
+       * claim stored). Stores `secretHash` as the screen's credential `credentialId`, replacing
+       * `previous` (the credential an earlier collect of this code stored) if that one is still
+       * unused. One batch, every step guarded on the code still naming `previous`, so of two
+       * racing collects one writes and the other changes nothing. Returns whether it wrote.
+       */
+      collect: async (v: { codeId: string; screenId: string; previous: string | null; credentialId: string; secretHash: string; now: number }) => {
+        assertId(v.credentialId);
+        const code = 'SELECT 1 FROM pairing_codes WHERE id = ? AND claimed_org_id = ? AND claimed_screen_id = ? AND collected_credential_id IS ?';
+        const codeArgs = [v.codeId, orgId, v.screenId, v.previous];
+        const [, inserted] = await d1.batch([
+          d1
+            .prepare(`DELETE FROM screen_credentials WHERE org_id = ? AND id = ? AND last_used_at IS NULL AND revoked_at IS NULL AND EXISTS (${code})`)
+            .bind(orgId, v.previous, ...codeArgs),
+          d1
+            .prepare(
+              `INSERT INTO screen_credentials (id, org_id, screen_id, secret_hash, created_at)
+               SELECT ?, ?, ?, ?, ? WHERE EXISTS (${code}) AND NOT EXISTS (SELECT 1 FROM screen_credentials WHERE org_id = ? AND id IS ?)`,
+            )
+            .bind(v.credentialId, orgId, v.screenId, v.secretHash, v.now, ...codeArgs, orgId, v.previous),
+          d1
+            .prepare(
+              `UPDATE pairing_codes SET collected_credential_id = ?, collected_at = coalesce(collected_at, ?)
+               WHERE id = ? AND claimed_org_id = ? AND claimed_screen_id = ? AND collected_credential_id IS ?
+                 AND EXISTS (SELECT 1 FROM screen_credentials WHERE org_id = ? AND id = ?)`,
+            )
+            .bind(v.credentialId, v.now, ...codeArgs, orgId, v.credentialId),
+        ]);
+        return inserted?.meta.changes === 1;
       },
     },
 
@@ -593,7 +644,7 @@ export function scoped(d1: D1Database, orgId: string) {
       ...brandKitRows,
       insert: async (values: NewRow<typeof s.brandKits>) => {
         await checkLogos(values);
-        return brandKitRows.insert({ ...values, id: undefined });
+        return brandKitRows.insert(values);
       },
       update: async (id: string, patch: RowPatch<typeof s.brandKits>) => {
         await checkLogos(patch);
@@ -603,7 +654,7 @@ export function scoped(d1: D1Database, orgId: string) {
         ...brandKitRows.stage,
         insert: async (values: NewRow<typeof s.brandKits>) => {
           await checkLogos(values);
-          return brandKitRows.stage.insert({ ...values, id: undefined });
+          return brandKitRows.stage.insert(values);
         },
         update: async (current: typeof s.brandKits.$inferSelect, patch: RowPatch<typeof s.brandKits>) => {
           await checkLogos(patch);

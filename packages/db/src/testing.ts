@@ -6,7 +6,7 @@
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { scoped, type OrgScope } from './scoped';
-import { organization, templates, templateVersions } from './schema';
+import { organization, screens, templates, templateVersions } from './schema';
 
 const MANIFEST = (key: string) =>
   JSON.stringify({
@@ -57,7 +57,37 @@ export async function seedOrganization(db: D1Database, orgId: string) {
   await drizzle(db).insert(organization).values({ id: orgId, name: orgId, slug: orgId, createdAt: new Date().toISOString() }).onConflictDoNothing().run();
 }
 
-/** Seed one org. Ids are `<orgId>-<thing>`, so a test failure names whose row leaked. */
+/**
+ * A screen with an id the test chooses, such as a golden manifest's. The repositories never let a
+ * caller choose a screen's id (it must be unique across orgs); a test fixture may, written around them.
+ */
+export async function seedScreen(
+  db: D1Database,
+  orgId: string,
+  screen: { id: string; name: string; timezone: string; orientation: 'landscape' | 'portrait'; locale?: string; displayHours?: unknown },
+) {
+  const now = Date.now();
+  await drizzle(db)
+    .insert(screens)
+    .values({
+      id: screen.id,
+      orgId,
+      name: screen.name,
+      timezone: screen.timezone,
+      orientation: screen.orientation,
+      locale: screen.locale ?? null,
+      displayHoursJson: screen.displayHours ? JSON.stringify(screen.displayHours) : null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+  return screen.id;
+}
+
+/**
+ * Seed one org. Content ids (spots, playlists, schedule entries, data sources) are
+ * `<orgId>-<thing>`, so a test failure names whose row leaked; the rest are the server's.
+ */
 export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion?: string): Promise<SeededOrg> {
   await seedOrganization(db, orgId);
   const o = scoped(db, orgId);

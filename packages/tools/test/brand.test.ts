@@ -31,8 +31,8 @@ const branded: TemplateManifest = {
 async function setup(orgId: string) {
   await seedOrganization(env.DB, orgId);
   const org = scoped(env.DB, orgId);
-  const lobby = await org.screens.insert({ id: `${orgId}-lobby`, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' });
-  const hall = await org.screens.insert({ id: `${orgId}-hall`, name: 'Hall', timezone: 'UTC', orientation: 'landscape' });
+  const lobby = await org.screens.insert({ name: 'Lobby', timezone: 'UTC', orientation: 'landscape' });
+  const hall = await org.screens.insert({ name: 'Hall', timezone: 'UTC', orientation: 'landscape' });
   const front = await org.screenGroups.insert({ id: `${orgId}-front`, name: 'Front' });
   const back = await org.screenGroups.insert({ id: `${orgId}-back`, name: 'Back' });
   await org.screenGroups.setMembers(front.id, [lobby.id, hall.id]);
@@ -99,7 +99,7 @@ describe('brand tools', () => {
       bodyFont: null,
       logo: null,
       isDefault: true,
-      reach: [hall.id, lobby.id],
+      reach: [hall.id, lobby.id].sort(),
       warnings: ['muted on background is 1.27:1, below 4.5:1'],
     });
     const second = await call('create_brand_kit', { name: 'Winter', colors: COLORS, shape: 'round' });
@@ -134,7 +134,7 @@ describe('brand tools', () => {
     expect(brandKit.conflicts).toEqual([
       {
         screenId: lobby.id,
-        problem: `groups ${back.id} and ${front.id} choose different brand kits (${[house.id, winter.id].sort().join(', ')}); choose one for the screen`,
+        problem: `groups ${[back.id, front.id].sort().join(' and ')} choose different brand kits (${[house.id, winter.id].sort().join(', ')}); choose one for the screen`,
       },
     ]);
 

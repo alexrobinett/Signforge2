@@ -71,3 +71,22 @@ describe('import boundary', () => {
     }
   });
 });
+
+describe('guarded fields', () => {
+  // `scoped` and `platform` must drop the same fields from a caller's values: one `strip`.
+  it('are stripped by one function, in src/writes.ts', () => {
+    const defining = readdirSync(join(PKG, 'src')).filter((f) => /\bfunction strip\b/.test(readFileSync(join(PKG, 'src', f), 'utf8')));
+    expect(defining).toEqual(['writes.ts']);
+  });
+});
+
+describe('tenant writes', () => {
+  // Pairing used to insert the screen's credential with raw SQL in src/pairing.ts (review fix 8).
+  it('are written in scoped.ts, never in raw SQL elsewhere in the package', () => {
+    const TENANT_WRITE = /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+[`"]?(?!pairing_codes\b|platform_audit_log\b)[a-z_]+/;
+    const outside = readdirSync(join(PKG, 'src')).filter(
+      (f) => !['scoped.ts', 'schema.ts'].includes(f) && TENANT_WRITE.test(readFileSync(join(PKG, 'src', f), 'utf8')),
+    );
+    expect(outside).toEqual([]);
+  });
+});

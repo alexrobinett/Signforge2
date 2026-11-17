@@ -19,6 +19,8 @@ const code = z
   .refine((v) => CODE.test(v), `a pairing code is ${PAIRING_CODE_LENGTH} letters and digits, as the screen shows it`)
   .describe('The code the screen shows, such as K7M-2QX; case, spaces and dashes do not matter');
 
+const notOpen = (code: string) => new ToolError('not_found', `pairing code ${code} is not open: check it, or restart the screen for a new one`);
+
 export const claimScreen = defineTool({
   name: 'claim_screen',
   description:
@@ -45,8 +47,7 @@ export const claimScreen = defineTool({
     if (!(await rateLimit('pairing_claim'))) throw new ToolError('rate_limited', 'too many pairing claims; wait a minute and try again');
     const now = Date.now();
     // One answer for unknown, expired and already claimed: a claim learns nothing about other orgs' codes.
-    if (!(await org.pairing.open(input.code, now)))
-      throw new ToolError('not_found', `pairing code ${input.code} is not open: check it, or restart the screen for a new one`);
+    if (!(await org.pairing.open(input.code, now))) throw notOpen(input.code);
     const screen = write(
       org.screens.stage.insert({
         name: input.name,
@@ -60,6 +61,8 @@ export const claimScreen = defineTool({
     write(org.pairing.stage.claim(input.code, screen.id, now));
     return { screen: screenView(screen) };
   },
+  // The claim's guard failed the batch: another claim took the code (or it expired) since `open`.
+  refuseFailedCommit: async ({ org, input }) => ((await org.pairing.open(input.code, Date.now())) ? undefined : notOpen(input.code)),
 });
 
 export const pairingTools = [claimScreen];

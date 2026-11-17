@@ -26,7 +26,7 @@ Two Workers on one hostname, so cookies stay same-origin. They are split because
 
 ## Data model (D1)
 
-Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT NULL`, its indexes lead with it, and foreign keys are composite `(org_id, id)` so a row cannot point into another org. D1 enforces foreign keys by default (`PRAGMA foreign_keys` is 1): a cross-org reference, a missing parent and deleting a restricted parent are all rejected, and a `batch()` with one bad row writes nothing. The schema is `packages/db/src/schema.ts`; its README lists the few deliberate exceptions.
+Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT NULL`, its indexes lead with it, and foreign keys are composite `(org_id, id)` so a row cannot point into another org. D1 enforces foreign keys by default (`PRAGMA foreign_keys` is 1): a cross-org reference, a missing parent and deleting a restricted parent are all rejected, and a `batch()` with one bad row writes nothing. **Ids.** Content rows (spots, playlists, schedule entries, data sources, brand kits) are keyed `(org_id, id)`: content and manifests name their ids, so two orgs may choose the same one and neither learns of the other. Every other tenant row has a global id that only the server makes (`newId`); a caller's id is ignored. A screen's id must be global: its credential and its Durable Object name it alone. The schema is `packages/db/src/schema.ts`; its README lists the few deliberate exceptions.
 
 | Table | Key columns |
 | --- | --- |
@@ -35,7 +35,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 | `screens` | name, timezone, locale, orientation, `display_hours_json`, `desired_manifest_id`, `previous_manifest_id` (whose files stay servable while a screen switches), `reported_manifest_id`, last seen, player version, status |
 | `screen_groups`, `screen_group_members` | |
 | `screen_credentials` | screen, secret hash, last used, revoked at |
-| `pairing_codes` | code, poll-token hash, expires at, claimed org and screen |
+| `pairing_codes` | code, poll-token hash, expires at, claimed org and screen, collected credential |
 | `assets`, `asset_renditions` | kind, sha256, type, size, width, height, duration, status (pending, verified, rejected); landscape and portrait renditions |
 | `templates`, `template_versions` | null org means a base template; version, manifest, bundle sha, status (draft, approved, retired), check report |
 | `spots` | kind, template version, data, asset map, bindings, duration, plus the image, video or URL fields; the published version (see Publishing) |
@@ -90,8 +90,8 @@ The per-org prefix keeps one org from probing whether another holds a file, and 
 **Pairing** (M3-08: `apps/api/src/device/pairing.ts`, `packages/db/src/pairing.ts`, the `claim_screen` tool)
 1. The screen calls `pair/start` and receives a 6-character code (32 letters and digits without 0/O or 1/I, about a billion codes) and a secret poll token, valid 15 minutes. Only the token's hash is stored.
 2. It shows the code and polls every 5 seconds.
-3. A member (editor or owner) claims the code with `claim_screen`, giving name, time zone, orientation and optionally locale and display hours; the CMS form is M3-11, and groups are set after with the group tools. The claim creates the screen and binds the code in one batch, which fails, writing nothing, if another claim got the code first or it expired. An unknown, expired and claimed code get the same answer.
-4. The next poll mints the credential, stores its hash for the claimed screen and deletes the code in one batch, and returns the credential once. A second poll gets `expired`.
+3. A member (editor or owner) claims the code with `claim_screen`, giving name, time zone, orientation and optionally locale and display hours; the CMS form is M3-11, and groups are set after with the group tools. The claim creates the screen and binds the code in one batch, which fails, writing nothing, if another claim got the code first or it expired; the loser gets the same `not_found` as for a code that was never open (`refuseFailedCommit`). An unknown, expired and claimed code get the same answer.
+4. The next poll mints the credential, stores its hash for the claimed screen and records it on the code in one batch, and returns it. A reply can be lost, so a repeat poll mints a fresh credential and replaces the earlier one while that one is unused (device auth records a credential's first use in `last_used_at`) and the first collect was under 15 minutes ago; after that a poll gets `expired`. At most one credential from a code is live.
 
 Rate limits (Workers rate limiting bindings, per Cloudflare location, a minute's window): `pair/start` 10 per address, `pair/poll` 600 per address (a shop of screens behind one address polls 12 times a minute each), and claims 10 per member and 10 per address, counted right or wrong, before the code is looked at (`apps/api/test/pairing.test.ts`). With 10 codes open at once, 10 guesses a minute find one about once in 20 years per member and address (10^9 / 100 minutes); many accounts on one address share its 10, so guessing faster takes many addresses as well as many accounts, and each guess needs a signed-in member. A claim over the limit is `429 rate_limited`. Codes past their time are swept by the next `pair/start`, claimed ones uncollected after a day.
 
@@ -120,7 +120,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 - **Socket ticket.** `GET /v1/device/ws?ticket=` takes a ticket, not the credential, since a browser cannot put a header on a WebSocket and URLs end up in logs. Sync issues it: `<screenId>.<credentialId>.<expiresMs>.<HMAC-SHA256 under AUTH_SECRET>`, good for 60 seconds. The route checks it and that its credential is still live, then hands the socket to the object tagged with that credential, so revoking a credential closes exactly its sockets.
 - **Who tells the object.** The tool dispatcher, after a change commits: `publish_manifest_to_screen` sends `manifest`, `revoke_screen_credential` sends `revoked` and closes. The object writes `applied` to `screens.reported_manifest_id` through the org's scope.
 
-**Sync.** `POST /v1/device/sync`, every 5 minutes with jitter, the interval set by the server.
+**Sync.** `POST /v1/device/sync`, every 5 minutes with jitter, the interval set by the server; every 2 minutes while the screen's socket is down, so that with every socket down at once 1,000 screens write about 43M rows a month (a minute would be 65M).
 - **The screen sends:** player version and the manifest schemas and frame protocols it plays, the active manifest (and the one it fell back from), files missing, display state and power methods, its clock and offset, snapshot versions held, data refused per source, and hourly play counts.
 - **The server returns:** the desired manifest ID, any changed data snapshots, a short-lived socket ticket, the server time and commands. The server time is there because a Pi has no battery-backed clock. `reload` is sent while the screen's player cannot play the desired manifest's schema or a template's protocol.
 - **What it stores** (`apps/api/src/device/sync.ts`, `scoped(...).screens.sync`): on the screen row, the last-seen time, the player version, the heartbeat (`heartbeat_json`, with the drift between server and device clocks) and the play count `(epoch, seq)`; and the counts, added to `play_counts` in the same D1 batch unless the seq is already stored in its epoch. The repeat check is in the SQL, so two copies of one request racing count once. Play counts carry no manifest: which manifest a screen had when is in its publish history.
@@ -129,7 +129,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | Route | Purpose |
 | --- | --- |
 | `POST /v1/device/pair/start` | Get a code and poll token (no credential; rate limited) |
-| `POST /v1/device/pair/poll` | `{ pollToken }`: waiting, expired, or the credential, once (no credential; rate limited) |
+| `POST /v1/device/pair/poll` | `{ pollToken }`: waiting, expired, or the credential (a fresh one on a repeat poll until the first is used; no credential; rate limited) |
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
 | `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
 | `GET /v1/device/data/:id.json` | Snapshot of one source. Only sources the screen's manifest lists. The player takes snapshots from the sync; this route is for debugging and tools. |
@@ -185,7 +185,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
   - Turn on the session cookie cache. The client must take the new cookies `setActiveOrganization` returns; with the old cache cookie the server still sees no active org.
   - In 1.7.25, creating an org and accepting an invitation change the active org without reissuing the cache cookie. An after hook in `apps/api/src/auth/options.ts` reissues it.
   - Check membership of the active org on every request. `apps/api`'s `requireOrg` reads it fresh (`findMembership` in `packages/db`) and hands handlers `scoped(db, orgId)`; the cache cookie only says which org is active.
-- **Files for users.** `GET /api/blobs/:sha256` serves a file the session's org can see, for the editor preview: from the org's own R2 prefix, or from `sys/b/` only when the hash is a base template version's bundle (`templates.versions.baseBundle` in the scoped repository). `private`, cached forever. `test/blobs.test.ts` checks one org cannot fetch another's file.
+- **Files for users.** `GET /api/blobs/:sha256` serves a file the session's org can see, for the editor preview: from the org's own R2 prefix, or from `sys/b/` only when the hash is a base template version's bundle (`templates.versions.baseBundle` in the scoped repository). `private`, cached forever. Template HTML and SVG are org markup on the CMS's origin, so every blob response here and on `/v1/device/blobs` carries `nosniff`, a `sandbox; default-src 'none'` CSP, and `content-disposition: attachment` for markup types (`blobHeaders` in `apps/api/src/r2.ts`): opening one never runs its script with the session. The preview and the player fetch the bytes, never navigate to them. `test/blobs.test.ts` checks one org cannot fetch another's file.
   - Email goes through an `EmailSender` interface: Cloudflare Email Sending by default (Q3 is open), a recorder in dev and tests.
 - **Agents (Milestone 4).**
   - OAuth through Better Auth's provider plugin (`@better-auth/oauth-provider`). Its source has dynamic client registration (off by default) and S256 PKCE, required for public clients; it is first run in Milestone 4. A grant is bound to one org.

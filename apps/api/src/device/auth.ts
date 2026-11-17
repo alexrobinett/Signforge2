@@ -2,7 +2,7 @@
  * Bearer authentication for `/v1/device`. Mounted on the device tree only: no other tree reads
  * this header, and this middleware reads nothing else (a session cookie means nothing here).
  */
-import { findDeviceScreen, type DeviceScreen } from '@signforge/db';
+import { findDeviceScreen, scoped, type DeviceScreen } from '@signforge/db';
 import { createMiddleware } from 'hono/factory';
 import { hashSecret, parseCredential } from './credential';
 
@@ -33,11 +33,13 @@ export const deviceAuth = createMiddleware<DeviceEnv>(async (c, next) => {
   const [hash, screen] = await Promise.all([hashSecret(parsed.secret), findDeviceScreen(c.env.DB, parsed.screenId)]);
   if (!screen) return unauthorized();
   // Check every live credential, so the time taken does not depend on which one matched.
-  let matched: string | undefined;
-  for (const stored of screen.credentials) if (sameHash(hash, stored.secretHash)) matched = stored.id;
+  let matched: DeviceScreen['credentials'][number] | undefined;
+  for (const stored of screen.credentials) if (sameHash(hash, stored.secretHash)) matched = stored;
   if (!matched) return unauthorized();
+  // Once per credential: from now on a repeat pairing poll cannot replace it (collectPairing).
+  if (!matched.used) await scoped(c.env.DB, screen.orgId).screens.credentials.markUsed(matched.id, Date.now());
 
   c.set('screen', screen);
-  c.set('credentialId', matched);
+  c.set('credentialId', matched.id);
   await next();
 });

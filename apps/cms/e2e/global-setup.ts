@@ -27,7 +27,7 @@ async function waitFor(url: string, timeoutMs = 90_000) {
 export default async function globalSetup() {
   rmSync(RUN_DIR, { recursive: true, force: true });
   mkdirSync(RUN_DIR, { recursive: true });
-  const env = { ...process.env, CLOUDFLARE_DEV_REGISTRY_PATH: `${RUN_DIR}registry`, NO_COLOR: '1' };
+  const env = { ...process.env, CLOUDFLARE_DEV_REGISTRY_PATH: `${RUN_DIR}registry`, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' };
   const state = `${RUN_DIR}state`;
 
   const migrate = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--env', 'dev', '--persist-to', state], {

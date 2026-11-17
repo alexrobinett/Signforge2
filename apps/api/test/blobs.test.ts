@@ -13,6 +13,7 @@ const bob = new Client(t);
 const sha = (c: string) => c.repeat(64);
 const A_FILE = sha('1');
 const B_FILE = sha('2');
+const A_SVG = sha('4');
 /** seedBaseTemplate's clock bundle. */
 const BASE_HTML = sha('e');
 /** Under the shared prefix but no base template's bundle. */
@@ -27,6 +28,9 @@ beforeAll(async () => {
   const orgB = (await bob.createOrg('Blobs B')).id;
   await seedBaseTemplate(env.DB);
   await env.BLOBS.put(orgBlobKey(orgA, A_FILE), 'org a file', { httpMetadata: { contentType: 'image/png' } });
+  await env.BLOBS.put(orgBlobKey(orgA, A_SVG), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', {
+    httpMetadata: { contentType: 'image/svg+xml' },
+  });
   await env.BLOBS.put(orgBlobKey(orgB, B_FILE), 'org b secret', { httpMetadata: { contentType: 'image/png' } });
   await env.BLOBS.put(baseBlobKey(BASE_HTML), '<!doctype html>', { httpMetadata: { contentType: 'text/html' } });
   await env.BLOBS.put(baseBlobKey(STRAY), 'not a template');
@@ -54,6 +58,22 @@ describe('GET /api/blobs/:sha256', () => {
     expect(await (await alice.get(`/api/blobs/${BASE_HTML}`)).text()).toBe('<!doctype html>');
     expect(await (await bob.get(`/api/blobs/${BASE_HTML}`)).text()).toBe('<!doctype html>');
     expect((await alice.get(`/api/blobs/${STRAY}`)).status).toBe(404);
+  });
+
+  it('never lets a file run as a page on the CMS origin', async () => {
+    const html = await alice.get(`/api/blobs/${BASE_HTML}`);
+    expect(html.headers.get('content-type')).toBe('text/html');
+    expect(html.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(html.headers.get('content-security-policy')).toMatch(/^sandbox; default-src 'none'/);
+    expect(html.headers.get('content-disposition')).toBe('attachment');
+    const svg = await alice.get(`/api/blobs/${A_SVG}`);
+    expect(svg.headers.get('content-type')).toBe('image/svg+xml');
+    expect(svg.headers.get('content-security-policy')).toMatch(/^sandbox; default-src 'none'/);
+    expect(svg.headers.get('content-disposition')).toBe('attachment');
+    const png = await alice.get(`/api/blobs/${A_FILE}`);
+    expect(png.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(png.headers.get('content-security-policy')).toMatch(/^sandbox; default-src 'none'/);
+    expect(png.headers.get('content-disposition')).toBeNull();
   });
 
   it('serves a catalogue brand font to every org', async () => {

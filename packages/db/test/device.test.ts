@@ -15,7 +15,7 @@ describe('findDeviceScreen', () => {
       screenId: o.screen,
       desiredManifestId: null,
       previousManifestId: null,
-      credentials: [{ id: o.credential, secretHash: '0'.repeat(64) }],
+      credentials: [{ id: o.credential, secretHash: '0'.repeat(64), used: false }],
     });
   });
 

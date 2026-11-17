@@ -8,6 +8,10 @@
  *  - Every tenant table has `org_id NOT NULL`, and its indexes lead with `org_id`.
  *  - Every row is unique on `(org_id, id)`, and references between tenant rows are composite
  *    `(org_id, x_id)` foreign keys, so a row cannot point into another org.
+ *  - Content rows (spots, playlists, schedule entries, data sources, and brand kits) are keyed
+ *    `(org_id, id)`: content names their ids, so two orgs may use the same one. Every other
+ *    tenant row has a global `id` primary key that only the server makes (`scoped.ts`), so no
+ *    caller can collide with or probe another org's ids.
  *
  * Exceptions, each deliberate:
  *  - `templates` and `template_versions`: a null `org_id` is a base template every org can use.
@@ -263,6 +267,12 @@ export const pairingCodes = sqliteTable(
     claimedOrgId: text('claimed_org_id'),
     claimedScreenId: text('claimed_screen_id'),
     claimedAt: integer('claimed_at'),
+    /**
+     * The credential the screen last collected, and when it first collected one. A repeat poll
+     * (the reply was lost) replaces that credential while it is unused (M3 review fix 2).
+     */
+    collectedCredentialId: text('collected_credential_id'),
+    collectedAt: integer('collected_at'),
     createdAt: created(),
   },
   (t) => [
@@ -369,7 +379,7 @@ export const templateVersions = sqliteTable(
 export const spots = sqliteTable(
   'spots',
   {
-    id: text('id').primaryKey(),
+    id: text('id').notNull(),
     orgId: orgId(),
     name: text('name').notNull(),
     kind: text('kind', { enum: ['template', 'image', 'video', 'url'] }).notNull(),
@@ -392,7 +402,7 @@ export const spots = sqliteTable(
     updatedAt: updated(),
   },
   (t) => [
-    uniqueIndex('spots_org_id_uq').on(t.orgId, t.id),
+    primaryKey({ columns: [t.orgId, t.id] }),
     index('spots_org_asset_idx').on(t.orgId, t.assetId),
     foreignKey({ columns: [t.orgId, t.assetId], foreignColumns: [assets.orgId, assets.id] }),
   ],
@@ -401,7 +411,7 @@ export const spots = sqliteTable(
 export const playlists = sqliteTable(
   'playlists',
   {
-    id: text('id').primaryKey(),
+    id: text('id').notNull(),
     orgId: orgId(),
     name: text('name').notNull(),
     /** The contract's `Transition`. */
@@ -411,7 +421,7 @@ export const playlists = sqliteTable(
     createdAt: created(),
     updatedAt: updated(),
   },
-  (t) => [uniqueIndex('playlists_org_id_uq').on(t.orgId, t.id)],
+  (t) => [primaryKey({ columns: [t.orgId, t.id] })],
 );
 
 export const playlistItems = sqliteTable(
@@ -435,7 +445,7 @@ export const playlistItems = sqliteTable(
 export const scheduleEntries = sqliteTable(
   'schedule_entries',
   {
-    id: text('id').primaryKey(),
+    id: text('id').notNull(),
     orgId: orgId(),
     playlistId: text('playlist_id').notNull(),
     priority: integer('priority').notNull().default(0),
@@ -456,7 +466,7 @@ export const scheduleEntries = sqliteTable(
     updatedAt: updated(),
   },
   (t) => [
-    uniqueIndex('schedule_entries_org_id_uq').on(t.orgId, t.id),
+    primaryKey({ columns: [t.orgId, t.id] }),
     index('schedule_entries_org_playlist_idx').on(t.orgId, t.playlistId),
     foreignKey({ columns: [t.orgId, t.playlistId], foreignColumns: [playlists.orgId, playlists.id] }),
     foreignKey({ columns: [t.orgId, t.groupId], foreignColumns: [screenGroups.orgId, screenGroups.id] }).onDelete('cascade'),
@@ -594,7 +604,7 @@ export const publishScreens = sqliteTable(
 export const dataSources = sqliteTable(
   'data_sources',
   {
-    id: text('id').primaryKey(),
+    id: text('id').notNull(),
     orgId: orgId(),
     name: text('name').notNull(),
     format: text('format', { enum: ['json', 'ical', 'rss'] }).notNull(),
@@ -610,7 +620,7 @@ export const dataSources = sqliteTable(
     createdAt: created(),
     updatedAt: updated(),
   },
-  (t) => [uniqueIndex('data_sources_org_id_uq').on(t.orgId, t.id)],
+  (t) => [primaryKey({ columns: [t.orgId, t.id] })],
 );
 
 /** The latest snapshot of each source, at most 64 kB. */

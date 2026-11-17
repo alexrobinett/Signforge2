@@ -1,9 +1,9 @@
 // The publish model: drafts promoted when they pass their checks, and the loader from the
 // database to `compileScreen`. See docs/backend-plan.md#publishing.
 import { compileScreen } from '@signforge/compiler';
-import { manifestIdInput, templateKey, type ScreenManifest, type Spot, type TemplateManifest } from '@signforge/contract';
+import { templateKey, type ScreenManifest, type Spot, type TemplateManifest } from '@signforge/contract';
 import { platform, published, scoped, type OrgScope } from '@signforge/db';
-import { seedOrganization } from '@signforge/db/testing';
+import { seedOrganization, seedScreen } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import stressGolden from '../../cli/test/golden/stress.json';
@@ -84,8 +84,8 @@ async function seedSmallOrg(orgId: string) {
   prefix = orgId;
   await seedOrganization(env.DB, orgId);
   const org = scoped(env.DB, orgId);
-  const lobby = await org.screens.insert({ id: `${orgId}-lobby`, name: 'Lobby', timezone: 'Europe/London', orientation: 'landscape' });
-  const hall = await org.screens.insert({ id: `${orgId}-hall`, name: 'Hall', timezone: 'Europe/London', orientation: 'portrait', locale: 'en-GB' });
+  const lobby = await org.screens.insert({ name: 'Lobby', timezone: 'Europe/London', orientation: 'landscape' });
+  const hall = await org.screens.insert({ name: 'Hall', timezone: 'Europe/London', orientation: 'portrait', locale: 'en-GB' });
   const front = await org.screenGroups.insert({ name: 'Front' });
   await org.screenGroups.setMembers(front.id, [lobby.id, hall.id]);
   const version = await addTemplate(org, promo, sha('a'));
@@ -134,10 +134,12 @@ describe('publishOrg', () => {
     await org.playlists.setItems(side.id, [x('broken')]);
 
     const result = await publishOrg(org, opts);
-    expect(result.screens.map((s) => [s.screenId, s.problems])).toEqual([
-      [hall.id, []],
-      [lobby.id, []],
-    ]);
+    expect(result.screens.map((s) => [s.screenId, s.problems])).toEqual(
+      [
+        [hall.id, []],
+        [lobby.id, []],
+      ].sort(),
+    );
     for (const s of result.screens) expect(s.manifest).toBeDefined();
     expect(result.drafts.held).toEqual([
       { kind: 'playlist', id: x('side'), problems: [`spot ${x('broken')} is not published`] },
@@ -244,7 +246,8 @@ describe('publishOrg', () => {
     // Published content broken from outside the draft model: its asset is rejected.
     await org.assets.update(other.id, { status: 'rejected' });
     const result = await publishOrg(org, opts);
-    expect(result.screens).toEqual([
+    // Screen ids are the server's, so their order is not fixed.
+    expect([...result.screens].sort((p, q) => (p.screenId === hall.id ? -1 : q.screenId === hall.id ? 1 : 0))).toEqual([
       {
         screenId: hall.id,
         problems: [`spot ${x('extra')}: asset ${other.id} is not verified`, `manifest: playlist "${x('lonely')}" lists unknown spot "${x('extra')}"`],
@@ -256,8 +259,8 @@ describe('publishOrg', () => {
   it('says so when the org has no default playlist', async () => {
     await seedOrganization(env.DB, 'pub-no-default');
     const org = scoped(env.DB, 'pub-no-default');
-    await org.screens.insert({ id: 'only', name: 'Only', timezone: 'UTC', orientation: 'landscape' });
-    expect((await publishOrg(org, opts)).screens).toEqual([{ screenId: 'only', problems: ['the organization has no default playlist'] }]);
+    const only = await org.screens.insert({ name: 'Only', timezone: 'UTC', orientation: 'landscape' });
+    expect((await publishOrg(org, opts)).screens).toEqual([{ screenId: only.id, problems: ['the organization has no default playlist'] }]);
   });
 });
 
@@ -306,7 +309,8 @@ describe('loadCompileInput', () => {
       }
       return assetIds.get(file)!;
     };
-    await org.screens.insert({ ...golden.screen });
+    // The golden names its screen; a screen's id is otherwise always the server's.
+    await seedScreen(env.DB, orgId, golden.screen);
     for (const s of Object.values(golden.spots)) {
       if (s.kind === 'template') {
         const assetMap: Record<string, string> = {};
@@ -350,24 +354,23 @@ describe('loadCompileInput', () => {
     const input = await loadCompileInput(org, golden.screen.id);
     const { manifest, problems } = await compileScreen(input!, opts);
     expect(problems).toEqual([]);
-    // The golden's stored id is not checked by golden.test.ts (bundle hashes follow the minifier),
-    // so compare bodies, and the id with the hash of the golden's body.
-    const { generatedAt: _a, id, ...body } = manifest!;
-    const { generatedAt: _b, id: _c, ...expected } = golden;
-    expect(body).toEqual(expected);
-    expect(id).toBe(await hash(manifestIdInput(golden)));
+    // golden.test.ts checks the golden's id is the hash of its body, so compare it whole.
+    const { generatedAt: _a, ...compiled } = manifest!;
+    expect(compiled).toEqual(golden);
   });
 
   it('reads only the published graph, and nothing for a screen the org does not have', async () => {
-    const { org } = await seedSmallOrg('load-published');
-    const before = await loadCompileInput(org, 'load-published-lobby');
+    const { org, lobby, hall } = await seedSmallOrg('load-published');
+    await seedOrganization(env.DB, 'load-other');
+    const elsewhere = await scoped(env.DB, 'load-other').screens.insert({ name: 'Elsewhere', timezone: 'UTC', orientation: 'landscape' });
+    const before = await loadCompileInput(org, lobby.id);
     expect(before).toMatchObject({ spots: [], playlists: [], schedule: [], defaultPlaylist: x('main') });
     await org.commit((await publishOrg(org, opts)).writes);
     await org.spots.update(x('deal'), { name: 'Renamed in draft' });
-    const after = (await loadCompileInput(org, 'load-published-lobby'))!;
+    const after = (await loadCompileInput(org, lobby.id))!;
     expect(after.spots.find((s) => s.id === x('deal'))!.name).toBe('Deal');
     expect(after.groups).toHaveLength(1);
-    expect(await loadCompileInput(org, 'pub-broken-lobby')).toBeUndefined();
-    expect((await loadOrg(org)).screens.map((s) => s.id).sort()).toEqual(['load-published-hall', 'load-published-lobby']);
+    expect(await loadCompileInput(org, elsewhere.id)).toBeUndefined();
+    expect((await loadOrg(org)).screens.map((s) => s.id).sort()).toEqual([hall.id, lobby.id].sort());
   });
 });

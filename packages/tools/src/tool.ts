@@ -131,6 +131,12 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
   /** What the change was made to, for the audit log. */
   target?: (input: z.output<S>, output: NoInfer<z.output<R>>) => { kind: string; id: string };
   handler: (ctx: ToolContext<z.output<S>, D>) => Promise<NoInfer<z.output<R>>>;
+  /**
+   * For a tool whose writes carry a guard (a statement that fails the batch when what the handler
+   * checked changed before the commit): called when the commit fails, it says whether the guard
+   * refused, as a `ToolError`. Undefined means a real failure, which is thrown. Nothing was written.
+   */
+  refuseFailedCommit?: (ctx: { org: D; input: z.output<S> }) => Promise<ToolError | undefined>;
 }
 
 /** Declare a tool, keeping its input and output types. */

@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
+    "dev": "CLOUDFLARE_ENV=dev vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "types": "wrangler types --include-runtime=false",
-    "typecheck": "wrangler types --include-runtime=false >/dev/null && tsc -p .",
+    "types": "wrangler types --env dev --include-runtime=false",
+    "typecheck": "wrangler types --env dev --include-runtime=false >/dev/null && tsc -p .",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },

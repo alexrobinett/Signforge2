@@ -3,11 +3,11 @@
  *
  * The org comes from the session (`requireOrg`), never from the request, so a hash only ever
  * resolves under that org's own R2 prefix, or under the shared prefix when it is a base
- * template's HTML or a catalogue brand font (public OFL bytes every org may use). Responses are `private`: they need a session, so no shared cache may keep them.
+ * template's HTML or a catalogue brand font (public OFL bytes every org may use). Responses are `private` and can never run as a page here (`blobHeaders`).
  */
 import { isCatalogueFontFile } from '@signforge/compiler';
 import type { Hono } from 'hono';
-import { baseBlobKey, orgBlobKey } from '../r2';
+import { baseBlobKey, blobHeaders, orgBlobKey } from '../r2';
 import type { ApiEnv } from '.';
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -20,13 +20,6 @@ export function mountBlobs(api: Hono<ApiEnv>): void {
     let obj = await c.env.BLOBS.get(orgBlobKey(c.var.orgId, sha));
     if (!obj && (isCatalogueFontFile(sha) || (await c.var.org.templates.versions.baseBundle(sha)))) obj = await c.env.BLOBS.get(baseBlobKey(sha));
     if (!obj) return notFound();
-    return new Response(obj.body, {
-      headers: {
-        'content-type': obj.httpMetadata?.contentType || 'application/octet-stream',
-        'content-length': String(obj.size),
-        etag: `"${sha}"`,
-        'cache-control': 'private, max-age=31536000, immutable',
-      },
-    });
+    return new Response(obj.body, { headers: blobHeaders(sha, obj.httpMetadata?.contentType || 'application/octet-stream', obj.size) });
   });
 }
