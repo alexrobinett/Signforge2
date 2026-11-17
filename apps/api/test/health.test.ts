@@ -1,11 +1,12 @@
 import { exports } from 'cloudflare:workers';
+import { MANIFEST_SCHEMA } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
 
 describe('health', () => {
   it('reports the environment and build', async () => {
     const res = await exports.default.fetch('https://api.test/health');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, environment: 'dev', version: 'dev', manifestSchema: 1 });
+    expect(await res.json()).toEqual({ ok: true, environment: 'dev', version: 'dev', manifestSchema: MANIFEST_SCHEMA });
   });
 
   it('returns 404 for unknown routes', async () => {

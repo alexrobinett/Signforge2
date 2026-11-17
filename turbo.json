@@ -1,8 +1,23 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
-    "typecheck": { "dependsOn": ["^typecheck"] },
-    "test": {},
-    "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] }
+    "typecheck": {
+      "dependsOn": [
+        "^typecheck"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "^typecheck"
+      ]
+    },
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    }
   }
 }
