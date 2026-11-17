@@ -14,6 +14,7 @@
     "@signforge/player-core": "workspace:*"
   },
   "devDependencies": {
+    "@signforge/cli": "workspace:*",
     "@signforge/template-sdk": "workspace:*",
     "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",

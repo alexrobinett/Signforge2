@@ -2,10 +2,18 @@
  * A slot holds one spot. The player owns two and alternates: one is on screen while the
  * other loads the next spot out of sight, so a swap only happens between two finished frames.
  */
-import { SUPPORTED_PROTOCOLS, type HostMessage, type Orientation, type ScreenManifest, type Spot, type TemplateMessage } from '@signforge/contract';
+import {
+  SUPPORTED_PROTOCOLS,
+  type FrameClock,
+  type HostMessage,
+  type Orientation,
+  type ScreenManifest,
+  type Spot,
+  type TemplateMessage,
+} from '@signforge/contract';
 import { resolveSpotData } from '@signforge/player-core';
 import { liveData, reportRejected } from './data';
-import { getBlob } from './store';
+import { getFile } from './source';
 
 /** A spot that has not reported ready by this point is skipped. */
 export const READY_TIMEOUT_MS = 2000;
@@ -20,7 +28,13 @@ const WRAPPER_HTML =
   `<!doctype html><meta http-equiv="Content-Security-Policy" content="${TEMPLATE_CSP}">` +
   '<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style>' +
   "<script>relay=(w,m)=>w.postMessage(m,'*')</script>";
-type Relay = (to: Window, m: HostMessage) => void;
+type WrapperWindow = Window & { relay: (to: Window, m: HostMessage) => void };
+
+/**
+ * The time templates show. The device clock, uncorrected, until the sync loop keeps an offset from
+ * server time (M3-07); that offset goes here.
+ */
+const frameClock = (): FrameClock => ({ now: Date.now(), offsetMs: 0 });
 
 /** Throw if the load was cancelled while it waited. */
 function alive(signal: AbortSignal): void {
@@ -28,6 +42,32 @@ function alive(signal: AbortSignal): void {
 }
 
 const orientationOf = (w: number, h: number): Orientation => (w >= h ? 'landscape' : 'portrait');
+
+type TemplateSpot = Extract<Spot, { kind: 'template' }>;
+
+/** A slot's template frame, and what its next `init` sends. */
+interface LiveFrame {
+  frame: HTMLIFrameElement;
+  /** The wrapper frame's window: the template's `parent`. */
+  wrapper: WrapperWindow;
+  protocol: number;
+  /** The bundle's hash: an update to another bundle is a fresh load. */
+  html: string;
+  spot: TemplateSpot;
+  manifest: ScreenManifest;
+  assets: Record<string, Blob>;
+  orientation: Orientation;
+  viewport: { width: number; height: number };
+  /** Settles on the frame's next `ready` or `error`. */
+  waiter?: { resolve: () => void; reject: (err: Error) => void };
+}
+
+/** A template spot's image fields, as Blobs: the frame has no network and an opaque origin. */
+async function spotAssets(spot: TemplateSpot): Promise<Record<string, Blob>> {
+  const assets: Record<string, Blob> = {};
+  await Promise.all(Object.entries(spot.assets).map(async ([field, sha]) => (assets[field] = await getFile(sha))));
+  return assets;
+}
 
 export class Slot {
   readonly el = document.createElement('div');
@@ -88,6 +128,7 @@ export class Slot {
     this.urls.forEach((u) => URL.revokeObjectURL(u));
     this.urls = [];
     this.spot = undefined;
+    this.live = undefined;
     this.startPlayback = () => {};
   }
 
@@ -97,15 +138,33 @@ export class Slot {
     return u;
   }
 
-  private async template(spot: Extract<Spot, { kind: 'template' }>, manifest: ScreenManifest, signal: AbortSignal): Promise<void> {
+  /** Set while a template spot is loaded. */
+  private live?: LiveFrame;
+
+  private post(m: HostMessage): void {
+    const live = this.live;
+    if (live?.frame.contentWindow) live.wrapper.relay(live.frame.contentWindow, m);
+  }
+
+  /** Wait for the frame's next `ready`; `send` starts what leads to it. */
+  private nextReady(send: () => void, signal: AbortSignal): Promise<void> {
+    const live = this.live!;
+    live.waiter?.reject(new Error('superseded'));
+    return new Promise<void>((resolve, reject) => {
+      live.waiter = { resolve, reject };
+      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+      send();
+    });
+  }
+
+  private async template(spot: TemplateSpot, manifest: ScreenManifest, signal: AbortSignal): Promise<void> {
     const t = manifest.templates[spot.template];
     if (!t) throw new Error(`template ${spot.template} is not in the manifest`);
     // Speak the protocol the bundle was built against: published bundles never change.
     const protocol = t.manifest.protocol ?? 1;
     if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
-    const html = await (await getBlob(t.html)).text();
-    const assets: Record<string, Blob> = {};
-    await Promise.all(Object.entries(spot.assets).map(async ([field, sha]) => (assets[field] = await getBlob(sha))));
+    const html = await (await getFile(t.html)).text();
+    const assets = await spotAssets(spot);
     alive(signal);
 
     // Fit the template to the screen. On an orientation it does not support it is letterboxed
@@ -129,72 +188,106 @@ export class Slot {
     // policy, not the template's, also decides where the template's frame may navigate: nowhere
     // (`frame-src` falls back to `default-src 'none'`). A template that tries is replaced by an
     // error page, without a request. See "Template containment" in docs/architecture.md.
-    const wrapper = document.createElement('iframe');
-    wrapper.style.width = `${w}px`;
-    wrapper.style.height = `${h}px`;
-    wrapper.srcdoc = WRAPPER_HTML;
-    const wrapped = new Promise<void>((resolve) => wrapper.addEventListener('load', () => resolve(), { once: true, signal }));
-    this.el.appendChild(wrapper);
+    const wrapperFrame = document.createElement('iframe');
+    wrapperFrame.style.width = `${w}px`;
+    wrapperFrame.style.height = `${h}px`;
+    wrapperFrame.srcdoc = WRAPPER_HTML;
+    const wrapped = new Promise<void>((resolve) => wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal }));
+    this.el.appendChild(wrapperFrame);
     await wrapped;
     alive(signal);
-    const win = wrapper.contentWindow as Window & { relay: Relay };
-    const frame = win.document.createElement('iframe');
+    const wrapper = wrapperFrame.contentWindow as WrapperWindow;
+    const frame = wrapper.document.createElement('iframe');
     // Scripts only: an opaque origin, so no access to the player, the wrapper or their storage;
     // no popups, forms, or navigating any frame but its own.
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.srcdoc = html;
 
-    const post = (m: HostMessage) => frame.contentWindow && win.relay(frame.contentWindow, m);
-    const ready = new Promise<void>((resolve, reject) => {
-      // A second load is a navigation, which the policy turned into an error page. Fail the spot;
-      // if it is already playing, blank it until the next spot.
-      let loads = 0;
-      frame.addEventListener(
-        'load',
-        () => {
-          if (++loads < 2) return;
-          console.warn(`[sf] template ${spot.template} navigated away; removed`);
-          wrapper.remove();
-          reject(new Error('template navigated away'));
-        },
-        { signal },
-      );
-      // The template's `parent` is the wrapper, so its messages arrive there.
-      win.addEventListener(
-        'message',
-        (e: MessageEvent<TemplateMessage>) => {
-          if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
-          if (e.data.type === 'loaded') {
-            const { data, rejected } = resolveSpotData(spot, t.manifest.fields, liveData);
-            reportRejected(rejected);
-            post({
-              sf: protocol,
-              type: 'init',
-              data,
-              assets,
-              durationMs: spot.durationMs,
-              orientation,
-              viewport: { width: w, height: h },
-              timezone: manifest.screen.timezone,
-              locale: manifest.screen.locale ?? 'en-US',
-            });
-          } else if (e.data.type === 'ready') resolve();
-          else if (e.data.type === 'error') reject(new Error(`template error: ${e.data.message}`));
-        },
-        { signal },
-      );
-      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
-    });
-    this.startPlayback = () => post({ sf: protocol, type: 'play' });
-    win.document.body.appendChild(frame);
+    const live: LiveFrame = (this.live = { frame, wrapper, protocol, html: t.html, spot, manifest, assets, orientation, viewport: { width: w, height: h } });
+    // A second load is a navigation, which the policy turned into an error page. Fail the spot; if
+    // it is already playing, blank it until the next spot.
+    let loads = 0;
+    frame.addEventListener(
+      'load',
+      () => {
+        if (++loads < 2) return;
+        console.warn(`[sf] template ${spot.template} navigated away; removed`);
+        wrapperFrame.remove();
+        live.waiter?.reject(new Error('template navigated away'));
+      },
+      { signal },
+    );
+    // One listener for the frame's life. It reads `live`, so after an update (`reset`) the frame's
+    // next `loaded` gets the new spot's init. The template's `parent` is the wrapper, so its
+    // messages arrive there.
+    wrapper.addEventListener(
+      'message',
+      (e: MessageEvent<TemplateMessage>) => {
+        if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
+        if (e.data.type === 'loaded') {
+          const { data, rejected } = resolveSpotData(live.spot, t.manifest.fields, liveData);
+          reportRejected(rejected);
+          this.post({
+            sf: protocol,
+            type: 'init',
+            data,
+            assets: live.assets,
+            durationMs: live.spot.durationMs,
+            orientation: live.orientation,
+            viewport: live.viewport,
+            timezone: live.manifest.screen.timezone,
+            locale: live.manifest.screen.locale ?? 'en-US',
+            clock: frameClock(),
+          });
+        } else if (e.data.type === 'ready') live.waiter?.resolve();
+        else if (e.data.type === 'error') live.waiter?.reject(new Error(`template error: ${e.data.message}`));
+      },
+      { signal },
+    );
+    this.startPlayback = () => this.post({ sf: protocol, type: 'play' });
+    const ready = this.nextReady(() => wrapper.document.body.appendChild(frame), signal);
     await ready;
     alive(signal);
+  }
+
+  /**
+   * Show a new version of the spot on screen in place, and play it: the preview's instant edit.
+   * A template of the same bundle that speaks protocol 2 takes it without a reload: `reset`, then
+   * `init` with the new data when it answers `loaded`, then `play`. Anything else (protocol 1,
+   * another bundle, another kind of spot) is loaded afresh in this slot. Rejects as `prepare` does.
+   */
+  async update(spot: Spot, manifest: ScreenManifest): Promise<void> {
+    const live = this.live;
+    const t = spot.kind === 'template' ? manifest.templates[spot.template] : undefined;
+    if (!live || spot.kind !== 'template' || !t || t.html !== live.html || live.protocol < 2 || !this.abort || this.abort.signal.aborted) {
+      await this.prepare(spot, manifest);
+      this.play();
+      return;
+    }
+    const signal = this.abort.signal;
+    const assets = await spotAssets(spot);
+    alive(signal);
+    Object.assign(live, { spot, manifest, assets });
+    this.spot = spot;
+    let timer = 0;
+    try {
+      await Promise.race([
+        this.nextReady(() => this.post({ sf: live.protocol, type: 'reset' }), signal),
+        new Promise<never>((_, reject) => {
+          timer = window.setTimeout(() => reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`)), READY_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+    alive(signal);
+    this.play();
   }
 
   private async image(spot: Extract<Spot, { kind: 'image' }>, signal: AbortSignal): Promise<void> {
     const img = new Image();
     img.style.cssText = `width:100%;height:100%;object-fit:${spot.fit}`;
-    const blob = await getBlob(spot.file);
+    const blob = await getFile(spot.file);
     alive(signal);
     img.src = this.objectUrl(blob);
     await img.decode();
@@ -203,7 +296,7 @@ export class Slot {
   }
 
   private async playVideo(spot: Extract<Spot, { kind: 'video' }>, signal: AbortSignal): Promise<void> {
-    const blob = await getBlob(spot.file);
+    const blob = await getFile(spot.file);
     alive(signal);
     const v = (this.video = document.createElement('video'));
     v.muted = true;

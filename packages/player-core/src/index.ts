@@ -2,7 +2,18 @@
  * Player logic with no browser dependency: which playlist is live, what plays next,
  * and which files a manifest still needs. Checking a manifest is the contract's job. The browser shell supplies time, storage and frames.
  */
-import { readPath, requiredFiles, validateBoundValue, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
+import {
+  readPath,
+  requiredFiles,
+  validateBoundValue,
+  type DataSnapshot,
+  type DisplayHours,
+  type Playlist,
+  type ScheduleEntry,
+  type ScreenManifest,
+  type Spot,
+  type TargetLevel,
+} from '@signforge/contract';
 
 /**
  * Validation lives in the contract, which the server imports too. Re-exported here while callers
@@ -26,8 +37,14 @@ const DAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu:
 /** The wall-clock time in a given IANA time zone. */
 export function localTime(now: Date, timezone: string): LocalTime {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, hourCycle: 'h23', weekday: 'short',
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    timeZone: timezone,
+    hourCycle: 'h23',
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).formatToParts(now);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return {
@@ -61,7 +78,8 @@ export function entryApplies(e: ScheduleEntry, t: LocalTime): boolean {
 }
 
 const inWindow = (w: { from: string; to: string }, minutes: number) => {
-  const from = toMinutes(w.from), to = toMinutes(w.to);
+  const from = toMinutes(w.from),
+    to = toMinutes(w.to);
   return to <= from ? minutes >= from || minutes < to : minutes >= from && minutes < to;
 };
 
@@ -84,11 +102,22 @@ export function displayOn(hours: DisplayHours | undefined, t: LocalTime): boolea
 
 const LEVEL: Record<TargetLevel, number> = { org: 0, group: 1, screen: 2 };
 
+/**
+ * Whether `now` is inside an entry's absolute bounds. On a clock the screen does not trust, an entry
+ * with either bound never applies: better a takeover missed than one that never ends.
+ */
+export function withinBounds(e: ScheduleEntry, now: Date, clockTrusted = true): boolean {
+  if (e.startsAt === undefined && e.endsAt === undefined) return true;
+  if (!clockTrusted) return false;
+  const ms = now.getTime();
+  return !(e.startsAt !== undefined && ms < Date.parse(e.startsAt)) && !(e.endsAt !== undefined && ms >= Date.parse(e.endsAt));
+}
+
 /** Highest priority wins; on a tie the more specific target wins; otherwise the default playlist. */
-export function resolvePlaylist(manifest: ScreenManifest, now: Date): Playlist {
+export function resolvePlaylist(manifest: ScreenManifest, now: Date, { clockTrusted = true } = {}): Playlist {
   const t = localTime(now, manifest.screen.timezone);
   const live = manifest.schedule
-    .filter((e) => entryApplies(e, t) && manifest.playlists[e.playlist])
+    .filter((e) => withinBounds(e, now, clockTrusted) && entryApplies(e, t) && manifest.playlists[e.playlist])
     .sort((a, b) => b.priority - a.priority || LEVEL[b.target] - LEVEL[a.target] || a.id.localeCompare(b.id));
   const id = live[0]?.playlist ?? manifest.defaultPlaylist;
   const playlist = manifest.playlists[id];
@@ -203,6 +232,17 @@ export function snapshotFit(manifest: ScreenManifest, snapshot: DataSnapshot): {
 }
 
 // --------------------------------------------------------------------- files
+
+/** The files one spot needs to play: a template spot its bundle and assets, an image or video its file. */
+export function spotFiles(spot: Spot, manifest: ScreenManifest): Set<string> {
+  const out = new Set<string>();
+  if (spot.kind === 'template') {
+    const html = manifest.templates[spot.template]?.html;
+    if (html) out.add(html);
+    Object.values(spot.assets).forEach((a) => out.add(a));
+  } else if (spot.kind === 'image' || spot.kind === 'video') out.add(spot.file);
+  return out;
+}
 
 /** Files to download before a manifest can go live, and files no longer needed once it has. */
 export function planSync(next: ScreenManifest, have: Iterable<string>): { missing: string[]; stale: string[] } {

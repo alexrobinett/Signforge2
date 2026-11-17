@@ -14,24 +14,31 @@
  *    change must never strand templates already published.
  *  - A player reports the manifest schemas it can play in every sync. The server compiles each
  *    screen at the newest schema that screen supports, and tells an outdated player to reload.
+ *  - A player release plays schema N and N-1, so a screen updated while offline still plays the
+ *    manifest it cached under the previous release.
  */
 
 import { validateTemplateManifest } from './validate.ts';
 
 export * from './validate.ts';
 
-/** The frame protocol this build of the SDK speaks. Stamped into every template bundle. */
-export const PROTOCOL_VERSION = 1;
+/**
+ * The frame protocol this build of the SDK speaks. Stamped into every template bundle.
+ *   1  init, play, stop
+ *   2  adds `clock` and `theme` to init, and `reset`: a template can take new data without a reload
+ */
+export const PROTOCOL_VERSION = 2;
 /** Frame protocols this player can drive. */
-export const SUPPORTED_PROTOCOLS: readonly number[] = [1];
+export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
 /**
  * The manifest schema this build produces.
  *   1  pre-release; never deployed beyond the test rig
  *   2  template keys carry their owner: `<owner>/<id>@<version>`
+ *   3  the screen's `brand`; schedule entries bounded by instants (`startsAt`, `endsAt`)
  */
-export const MANIFEST_SCHEMA = 2;
-/** Manifest schemas this player can play. */
-export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [2];
+export const MANIFEST_SCHEMA = 3;
+/** Manifest schemas this player can play: the current one and the one before it. */
+export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
 /**
  * Every id a screen sees (screen, spot, playlist, schedule entry, data source, group, org) goes
@@ -69,7 +76,7 @@ export type Sha256 = string;
 
 export type ScalarFieldDef =
   | { type: 'text'; label: string; default?: string; maxLength?: number }
-  | { type: 'number'; label: string; default?: number; min?: number; max?: number; /** Counted from `min`, or from 0 without one. */ step?: number }
+  | { type: 'number'; label: string; default?: number; min?: number; max?: number /** Counted from `min`, or from 0 without one. */; step?: number }
   | { type: 'boolean'; label: string; default?: boolean }
   | { type: 'color'; label: string; default?: string }
   | { type: 'select'; label: string; options: string[]; default?: string };
@@ -168,7 +175,8 @@ export function imageSizeProblem(width: number, height: number, box: ScreenBox):
     const mp = (n: number) => (n / 1e6).toFixed(1);
     return `${width}x${height} is ${mp(width * height)} million pixels; a screen decodes at most ${mp(MAX_IMAGE_PIXELS)} million (3840x2160)`;
   }
-  if (!(width <= box.w || height <= box.h)) return `${width}x${height} is larger than a ${box.w >= box.h ? 'landscape' : 'portrait'} screen needs: scale it to cover ${box.w}x${box.h}`;
+  if (!(width <= box.w || height <= box.h))
+    return `${width}x${height} is larger than a ${box.w >= box.h ? 'landscape' : 'portrait'} screen needs: scale it to cover ${box.w}x${box.h}`;
   return undefined;
 }
 
@@ -181,11 +189,15 @@ export const fitsScreenBox = (width: number, height: number, box: ScreenBox) => 
  * against the author's own files, not the bundled SDK.
  */
 export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
-  { pattern: /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b/, reason: 'templates may not make network requests; bind to a data source instead' },
+  {
+    pattern: /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b/,
+    reason: 'templates may not make network requests; bind to a data source instead',
+  },
   { pattern: /\bimport\s*\(/, reason: 'templates may not load code at run time' },
   {
     // Bare `location.x` / `location =` and `window.location`, but not a data field such as `event.location`.
-    pattern: /(?<![.\w$])location\s*(?:[.[]|=(?!=))|\b(?:window|document|self|globalThis)\s*\.\s*location\b|\bwindow\.open\b|(?<![.\w$])(?:top|parent|opener)\s*\./,
+    pattern:
+      /(?<![.\w$])location\s*(?:[.[]|=(?!=))|\b(?:window|document|self|globalThis)\s*\.\s*location\b|\bwindow\.open\b|(?<![.\w$])(?:top|parent|opener)\s*\./,
     reason: 'templates may not navigate or reach outside their frame',
   },
   { pattern: /@import\b/, reason: 'stylesheets must be bundled, not imported at run time' },
@@ -229,13 +241,19 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
   if (/\b(?:src|href)\s*=\s*["']https?:/i.test(html) || /url\(\s*["']?https?:/i.test(html)) network.push('a template may not load anything from the network');
 
   // Comments are stripped first, so a note about `fetch` is not a call to it. `//` after a colon is a URL, and is kept.
-  const own = Object.values(sources).map((text) => text.replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm, '')).join('\n');
+  const own = Object.values(sources)
+    .map((text) => text.replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm, ''))
+    .join('\n');
   const source = Object.keys(sources).length ? matches(FORBIDDEN_TEMPLATE_CODE, own) : ['no source files were given'];
 
   const checks: TemplateCheckReport['checks'] = [
     { check: 'manifest', ok: !manifestProblems.length, problems: manifestProblems },
     { check: 'forbidden-css', ok: true, problems: matches(FORBIDDEN_CSS, html) },
-    { check: 'size', ok: true, problems: bundleBytes > TEMPLATE_BUDGET.maxBundleBytes ? [`bundle is ${bundleBytes} bytes; the budget is ${TEMPLATE_BUDGET.maxBundleBytes}`] : [] },
+    {
+      check: 'size',
+      ok: true,
+      problems: bundleBytes > TEMPLATE_BUDGET.maxBundleBytes ? [`bundle is ${bundleBytes} bytes; the budget is ${TEMPLATE_BUDGET.maxBundleBytes}`] : [],
+    },
     { check: 'network', ok: true, problems: network },
     { check: 'source-code', ok: true, problems: source },
   ];
@@ -246,6 +264,38 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
 // ------------------------------------------------------------ frame protocol
 // The player and a template talk only through postMessage. The template runs in a
 // sandboxed frame with no network and no storage; everything it needs arrives in `init`.
+//
+// Lifecycle:  loaded -> init -> ready -> play -> stop
+// Updating a template already on screen (the editor's preview) never re-sends `init` over the old
+// state. Protocol 2: the player sends `reset`; the SDK stops the template, restores the document as
+// it loaded, and sends `loaded` again, and the usual `init` follows. (An `init` that arrives without
+// a `reset` is handled the same way.) Protocol 1: the player reloads the frame.
+
+/**
+ * Time as the screen knows it. A screen corrects its clock from server time (a Pi has no
+ * battery-backed clock), and a template must show that time, not the device's: the SDK's `now()`.
+ */
+export interface FrameClock {
+  /** The corrected time when `init` was sent, in ms since the epoch. */
+  now: number;
+  /** Add to `Date.now()` for the corrected time. */
+  offsetMs: number;
+}
+
+export interface FrameFont {
+  family: string;
+  /** Each file as a Blob: an object URL made by the player would not resolve in the opaque-origin frame. */
+  files: { weight: number; style: 'normal' | 'italic'; data: Blob }[];
+}
+
+/** The screen's brand, resolved for one spot. Absent: the template draws with its own fallbacks. */
+export interface FrameTheme {
+  colors: BrandColors;
+  shape: BrandShape;
+  /** A missing font means the template's own. */
+  fonts: { display?: FrameFont; body?: FrameFont };
+  logo?: { onDark: Blob; onLight?: Blob };
+}
 
 export interface InitPayload {
   data: Record<string, unknown>;
@@ -258,17 +308,67 @@ export interface InitPayload {
   /** The screen's IANA time zone and locale. Use these, not the device's, for anything shown. */
   timezone: string;
   locale: string;
+  /** Protocol 2. */
+  clock: FrameClock;
+  /** Protocol 2. */
+  theme?: FrameTheme;
 }
 
 export type HostMessage =
   | ({ sf: number; type: 'init' } & InitPayload)
   | { sf: number; type: 'play' }
-  | { sf: number; type: 'stop' };
+  | { sf: number; type: 'stop' }
+  /** Protocol 2: stop, restore the document as loaded, and answer `loaded`. */
+  | { sf: number; type: 'reset' };
 
-export type TemplateMessage =
-  | { sf: number; type: 'loaded' }
-  | { sf: number; type: 'ready' }
-  | { sf: number; type: 'error'; message: string };
+export type TemplateMessage = { sf: number; type: 'loaded' } | { sf: number; type: 'ready' } | { sf: number; type: 'error'; message: string };
+
+// ---------------------------------------------------------------------- brand
+// A brand kit is the org's look, chosen per screen and frozen into the manifest at publish.
+// Template fields may default to a token (`"$brand.accent"`); the compiler resolves those into
+// plain values, so a spot's data never holds a token.
+
+export const BRAND_COLORS = ['primary', 'onPrimary', 'accent', 'onAccent', 'background', 'surface', 'text', 'muted'] as const;
+export type BrandColor = (typeof BRAND_COLORS)[number];
+export type BrandColors = Record<BrandColor, string>;
+export const BRAND_SHAPES = ['square', 'soft', 'round'] as const;
+export type BrandShape = (typeof BRAND_SHAPES)[number];
+
+/** The CSS custom properties the SDK sets on a template's root from a theme. */
+export const BRAND_CSS_VARS = {
+  primary: '--sf-primary',
+  onPrimary: '--sf-on-primary',
+  accent: '--sf-accent',
+  onAccent: '--sf-on-accent',
+  background: '--sf-bg',
+  surface: '--sf-surface',
+  text: '--sf-text',
+  muted: '--sf-muted',
+  radius: '--sf-radius',
+  fontDisplay: '--sf-font-display',
+  fontBody: '--sf-font-body',
+} as const;
+
+/** A field default of `$brand.<colour>` names a brand colour; the compiler replaces it. */
+export const BRAND_TOKEN = /^\$brand\.([A-Za-z]+)$/;
+
+export interface BrandFont {
+  /** Catalogue key, `<owner>/<id>`: `base/inter`. Only `base` fonts exist for now. */
+  id: string;
+  family: string;
+  /** WOFF2 files, listed in the manifest's `files`. */
+  files: { weight: number; style: 'normal' | 'italic'; file: Sha256 }[];
+}
+
+/** One screen's brand kit, as the manifest carries it. */
+export interface BrandKit {
+  id: string;
+  colors: BrandColors;
+  shape: BrandShape;
+  fonts: { display?: BrandFont; body?: BrandFont };
+  /** SVG or PNG. */
+  logo?: { onDark: Sha256; onLight?: Sha256 };
+}
 
 // ------------------------------------------------------------------ live data
 // A data source is a JSON feed the server polls. Screens never call the feed themselves:
@@ -283,6 +383,12 @@ export interface DataSource {
 
 export interface DataSnapshot {
   id: string;
+  /**
+   * Increases every time the source's data changes, so a screen keeps the newest snapshot whichever
+   * order they arrive in (a first-load fetch and a sync can cross). The server uses the time the
+   * changed data was fetched, in ms since the epoch.
+   */
+  version: number;
   fetchedAt: string;
   data: unknown;
 }
@@ -368,6 +474,14 @@ export interface ScheduleEntry {
   /** Local `HH:MM`. `from` is inclusive, `to` exclusive. A window may cross midnight. */
   from?: string;
   to?: string;
+  /**
+   * Absolute bounds, ISO 8601 instants, on top of the local dates and window: `startsAt` inclusive,
+   * `endsAt` exclusive. A takeover sets `endsAt`, so it ends on time whatever the screen's time
+   * zone and with the network down. A screen that does not trust its clock skips any entry with
+   * either bound rather than risk running a takeover forever.
+   */
+  startsAt?: string;
+  endsAt?: string;
 }
 
 /** Everything one screen needs. Immutable; a change produces a new manifest with a new id. */
@@ -404,6 +518,8 @@ export interface ScreenManifest {
   schedule: ScheduleEntry[];
   /** Plays when no schedule entry applies, so a screen is never blank. */
   defaultPlaylist: string;
+  /** The screen's brand kit, frozen at publish. Its fonts and logo are in `files`. Absent: templates use their own look. */
+  brand?: BrandKit;
 }
 
 // ------------------------------------------------------------------- device API
@@ -459,23 +575,34 @@ export interface PlayCount {
 export interface SyncRequest {
   /**
    * Increases by one per batch of play counts. A retried request repeats its number, and the
-   * server ignores counts for a number it has already acknowledged.
+   * server ignores counts for a number it has already acknowledged in the same `epoch`.
    */
   seq: number;
+  /**
+   * Names this run of `seq` numbers: a random id the screen makes when it has no counter (first
+   * start, re-imaged, storage cleared) and starts again at seq 1. The server keeps the highest
+   * acknowledged seq per epoch; a new epoch starts from nothing, so a screen that lost its counter
+   * is never ignored as a repeat. Never derived from the clock, which may be wrong.
+   */
+  epoch: string;
   player: { version: string; manifestSchemas: readonly number[]; protocols: readonly number[] };
   manifest: { active?: string; filesMissing: number };
   display: DisplayStatus;
-  /** The screen's clock when it sent this; the server measures drift from it. */
+  /** The screen's own clock when it sent this, uncorrected; the server measures drift from it. */
   deviceTime: string;
+  /** The correction the screen applies to its own clock, and whether it trusts the result (docs/architecture.md, Player, Clock). */
+  clock: { offsetMs: number; trusted: boolean };
   playCounts: PlayCount[];
-  /** Data snapshot versions the screen holds, by source id. */
-  snapshots: Record<string, string>;
+  /** `DataSnapshot.version` of each snapshot the screen holds, by source id. */
+  snapshots: Record<string, number>;
 }
 
 export interface SyncResponse {
   serverTime: string;
   /** When to sync next. */
   nextSyncS: number;
+  /** The request's epoch: `ackSeq` counts in it. A screen ignores an ack for an epoch it is not in. */
+  epoch: string;
   /** The highest `seq` whose play counts are stored. The screen drops those counts. */
   ackSeq: number;
   /** The manifest the screen should be on. Fetch it if it differs from the active one. */
@@ -489,15 +616,43 @@ export interface SyncResponse {
 
 export type DeviceCommand =
   /** Reload the player, e.g. after the server stops producing a schema this build can play. */
-  | { type: 'reload' }
-  | { type: 'display'; override: DisplayOverride | null }
-  | { type: 'reboot' };
+  { type: 'reload' } | { type: 'display'; override: DisplayOverride | null } | { type: 'reboot' };
 
 /** Server to screen, over the socket. Kept rare: the socket exists to nudge, not to carry data. */
-export type ServerSocketMessage =
-  | { type: 'manifest'; id: string }
-  | { type: 'command'; command: DeviceCommand }
-  | { type: 'revoked' };
+export type ServerSocketMessage = { type: 'manifest'; id: string } | { type: 'command'; command: DeviceCommand } | { type: 'revoked' };
 
 /** Screen to server, over the socket. */
 export type DeviceSocketMessage = { type: 'applied'; manifest: string };
+
+// -------------------------------------------------------------- preview channel
+// The CMS editor runs the real player build in an iframe, in preview mode (`?source=preview`).
+// The CMS page posts the draft to it; the player accepts messages only from the CMS origin and
+// only while that origin frames it. See docs/architecture.md (Player, Content sources).
+
+/** The preview channel's version, in every message both ways. */
+export const PREVIEW_PROTOCOL = 1;
+
+/** CMS page to preview player. */
+export interface PreviewDraftMessage {
+  sfPreview: number;
+  type: 'draft';
+  /** A compiled draft manifest. Its first spot plays now, and later drafts update it in place. */
+  manifest: ScreenManifest;
+  /**
+   * Files of the manifest, by hash. A file not here is fetched from `<cms>/api/blobs/<sha256>`
+   * with the user's session, so the CMS posts only what is not saved yet.
+   */
+  files?: Record<string, Blob>;
+  /** The latest snapshot of each data source the draft binds. */
+  data?: DataSnapshot[];
+}
+export type PreviewHostMessage = PreviewDraftMessage;
+
+/** Preview player to CMS page. */
+export type PreviewPlayerMessage =
+  /** The player is listening: post the draft. */
+  | { sfPreview: number; type: 'listening' }
+  /** A spot of the draft is on screen. */
+  | { sfPreview: number; type: 'playing'; manifest: string; spot: string }
+  /** The draft was refused or a spot could not be shown. */
+  | { sfPreview: number; type: 'error'; message: string };

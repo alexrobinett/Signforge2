@@ -7,7 +7,8 @@
  * then wait forever, so only the player can end the spot; the others throw once the attempt is
  * refused, as a template that does not handle a failed load would.
  * It shows `label` and lists the titles of `items` in `#box` the way a news template would, trusting
- * the shape (so `items: {}` throws), runs a CSS animation the SDK must hold until play, and marks `play`.
+ * the shape (so `items: {}` throws), marks whether it received asset `file`, runs a CSS animation
+ * the SDK must hold until play, and marks `play`.
  */
 import { defineTemplate } from '@signforge/template-sdk';
 
@@ -56,6 +57,7 @@ const navigates = new Set(['navigate', 'navigate-data', 'navigate-top', 'refresh
 defineTemplate({
   async prepare(ctx) {
     document.body.dataset.prepared = '1';
+    document.body.dataset.asset = ctx.assets.file ? '1' : '';
     const mode = String(ctx.data.mode ?? 'ok');
     const target = String(ctx.data.target ?? '');
     if (mode === 'throw') throw new Error('fixture prepare failed');

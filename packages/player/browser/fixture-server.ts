@@ -14,7 +14,9 @@ export type Action =
   /** Answer with this status and an empty body. */
   | { status: number }
   /** Send the headers and half the body, then nothing more, until the client gives up. */
-  | 'stall';
+  | 'stall'
+  /** Send the body at this many bytes a second, so a download takes a while. */
+  | { bytesPerSecond: number };
 
 export interface RequestRecord {
   path: string;
@@ -85,7 +87,24 @@ export class FixtureServer {
     const rule = this.rules.find((r) => r.match.test(path));
     const send = (status: number, body?: Buffer | string, type = 'application/octet-stream') => {
       rec.status = status;
-      res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...(body !== undefined ? { 'content-length': Buffer.byteLength(body) } : {}) });
+      res.writeHead(status, {
+        'content-type': type,
+        'cache-control': 'no-store',
+        ...(body !== undefined ? { 'content-length': Buffer.byteLength(body) } : {}),
+      });
+      if (rule && typeof rule.action === 'object' && 'bytesPerSecond' in rule.action && body) {
+        const buf = Buffer.from(body);
+        const chunk = 64 * 1024;
+        const every = (1000 * chunk) / rule.action.bytesPerSecond;
+        let at = 0;
+        const next = () => {
+          if (res.destroyed) return;
+          res.write(buf.subarray(at, (at += chunk)));
+          if (at >= buf.byteLength) res.end();
+          else setTimeout(next, every);
+        };
+        return next();
+      }
       if (rule?.action === 'stall' && body) {
         const buf = Buffer.from(body);
         res.write(buf.subarray(0, Math.floor(buf.byteLength / 2)));
@@ -93,7 +112,7 @@ export class FixtureServer {
       }
       res.end(body);
     };
-    if (rule && rule.action !== 'stall') return send(rule.action.status, '');
+    if (rule && typeof rule.action === 'object' && 'status' in rule.action) return send(rule.action.status, '');
 
     if (path.startsWith('/supervisor/')) return send(404, '');
     if (path.startsWith('/content/')) {

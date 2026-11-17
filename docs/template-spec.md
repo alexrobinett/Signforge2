@@ -22,7 +22,7 @@ The build (`sf build`) bundles these into one self-contained HTML file with the 
 ```json
 {
   "id": "cstore-promo",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "C-Store Promo",
   "fields": {
     "price": { "type": "text", "label": "Price", "default": "4", "maxLength": 5 },
@@ -42,18 +42,25 @@ The build (`sf build`) bundles these into one self-contained HTML file with the 
 - `orientations`: `landscape`, `portrait` or both.
 - `uses`: list `canvas`, `webgl` or `audio` if the template needs them.
 - `background`: the colour shown around the template when it is letterboxed on an orientation it does not support.
+- `protocol` is added by the build: the frame protocol of the SDK it bundled. A rebuilt template speaks the current protocol (2), so it needs a new version; published bundles keep the protocol they were built with, and the player speaks every protocol in `SUPPORTED_PROTOCOLS` (1 and 2).
 
 ## Lifecycle
 
 The player and the template talk only through messages. The SDK handles all of it.
 
 1. The template loads and reports `loaded`.
-2. The player sends `init` with the spot's data, its image files, the duration of this play, the orientation, the viewport size, and the screen's time zone and locale.
+2. The player sends `init` with the spot's data, its image files, the duration of this play, the orientation, the viewport size, the screen's time zone and locale, and (protocol 2) the screen's clock and, when the screen has a brand kit, its theme.
 3. The SDK fills in the data, waits for fonts and images to decode and for the result to be painted, pauses every animation, and reports `ready`.
 4. When the spot goes on screen the player sends `play`. Every animation restarts from zero.
 5. The player removes the template when the spot's duration is up. The template is not asked.
 
 A template that has not reported `ready` within 2 seconds is skipped.
+
+**New data for a template on screen** (the editor's preview, protocol 2). The player sends `reset`: the SDK calls `stop`, cancels animations, releases the image URLs, restores the document exactly as it loaded, and reports `loaded` again. The usual `init`, `ready` and `play` follow. An `init` that arrives without a `reset` is handled the same way. So `prepare` always starts from the markup in `index.html`, and a list is never built twice. What this asks of a template:
+- Look elements up inside the hooks, not once at the top of `main.ts`: a reset replaces them.
+- Clear any state kept outside the DOM (a timer, a module variable) in `stop`.
+
+`packages/player/browser/templates.test.ts` checks every template in `templates/`: new data after the first `init` must leave the same document as a fresh load. A protocol-1 bundle has no `reset`; the player reloads its frame instead.
 
 ## What the SDK gives you
 
@@ -63,6 +70,9 @@ A template that has not reported `ready` within 2 seconds is skipped.
 - `data-orientation="landscape|portrait"` on the root element. Use it for layout, not a media query, because a letterboxed template is not the shape of the screen.
 - `defineTemplate({ prepare, play })` hooks for anything markup cannot do, such as building rows from a list or drawing to a canvas. `prepare` may be async; ready is reported after it resolves. A `stop` hook exists in the SDK but the player does not call it today: a template is simply removed.
 - `formatter(ctx, options)` and `dayKey(ctx, date)` format dates and times in the screen's time zone and locale. Use them for anything shown: the device's own clock settings may not match the screen's location.
+- `now()` is the screen's time: the device clock corrected from the server. Use it, never `new Date()` or `Date.now()`, for anything that depends on the time: a Pi has no battery-backed clock, and after a power cut its own clock can be days out.
+- A theme (brand colours, fonts and logo) arrives in `init` as `theme`. Applying it is M3-39; the CSS custom property names are `BRAND_CSS_VARS` in the contract.
+- A colour field may default to a brand token, `"$brand.<colour>"` with one of the contract's `BRAND_COLORS` (`"$brand.accent"`). The server's compiler replaces it with the screen's brand colour at publish, so `data` only ever holds colours; a token naming no brand colour is a problem of the spot.
 
 ## Live data
 
@@ -98,7 +108,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 - No network. The template runs in a sandboxed frame under a policy that blocks every request, including navigating its own frame: a template that tries is stopped and its spot is skipped. Scripts and styles must be inline after the build, and images arrive from the player.
 - No storage, cookies or access to anything outside its own frame.
 - Fonts ship inside the bundle. Reference a font file from `style.css` and the build inlines it. Use a font you are licensed to redistribute.
-- Data is fixed for one play. New values arrive with the next `init`.
+- Data is fixed for one play. New values arrive with the next `init`, from a clean document (see Lifecycle).
 - Decoration must not fail the spot. If an optional effect cannot be drawn, catch the error and show the content without it; a template that rejects in `prepare` is skipped.
 
 **Budgets**

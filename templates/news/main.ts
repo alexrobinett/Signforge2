@@ -1,4 +1,4 @@
-import { defineTemplate, formatter } from '@signforge/template-sdk';
+import { defineTemplate, formatter, now as clockNow } from '@signforge/template-sdk';
 
 interface Item {
   title: string;
@@ -21,7 +21,7 @@ defineTemplate({
   prepare(ctx) {
     const root = document.documentElement;
     root.style.setProperty('--accent', String(ctx.data.accent));
-    const now = new Date();
+    const now = clockNow();
     const items = ((ctx.data.items as Item[]) ?? []).filter((i) => i.title);
     const [lead, ...rest] = items;
     document.getElementById('clock')!.textContent = formatter(ctx, { hour: 'numeric', minute: '2-digit' }).format(now);

@@ -1,9 +1,9 @@
-import { defineTemplate, formatter, type TemplateContext } from '@signforge/template-sdk';
+import { defineTemplate, formatter, now as clockNow, type TemplateContext } from '@signforge/template-sdk';
 
 let timer = 0;
 
 function render(ctx: TemplateContext): void {
-  const now = new Date();
+  const now = clockNow();
   const h24 = Boolean(ctx.data.hour24);
   const parts = formatter(ctx, { hour: 'numeric', minute: '2-digit', second: '2-digit', hourCycle: h24 ? 'h23' : 'h12' }).formatToParts(now);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
@@ -30,7 +30,7 @@ defineTemplate({
     // Wake on each second boundary; text only changes when the value does.
     const tick = () => {
       render(ctx);
-      timer = window.setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
+      timer = window.setTimeout(tick, 1000 - (clockNow().getTime() % 1000) + 5);
     };
     tick();
   },

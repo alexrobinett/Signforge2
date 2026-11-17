@@ -1,4 +1,4 @@
-import { dayKey, defineTemplate, formatter } from '@signforge/template-sdk';
+import { dayKey, defineTemplate, formatter, now as clockNow } from '@signforge/template-sdk';
 
 interface Event {
   title: string;
@@ -14,16 +14,14 @@ const asDate = (s: string, allDay: boolean) => (allDay ? new Date(`${s.slice(0, 
 defineTemplate({
   prepare(ctx) {
     document.documentElement.style.setProperty('--accent', String(ctx.data.accent));
-    const now = new Date();
+    const now = clockNow();
     const today = dayKey(ctx, now);
     const tomorrow = dayKey(ctx, new Date(now.getTime() + 864e5));
     document.getElementById('today')!.textContent = formatter(ctx, { weekday: 'long', month: 'long', day: 'numeric' }).format(now);
 
     const all = (ctx.data.events as Event[]) ?? [];
     // An all-day event's end date is exclusive: it is over once that date arrives.
-    const upcoming = all.filter((e) =>
-      e.allDay ? (e.end ? e.end.slice(0, 10) > today : e.start.slice(0, 10) >= today) : new Date(e.end || e.start) > now,
-    );
+    const upcoming = all.filter((e) => (e.allDay ? (e.end ? e.end.slice(0, 10) > today : e.start.slice(0, 10) >= today) : new Date(e.end || e.start) > now));
     const rows = upcoming.slice(0, Math.max(1, Math.min(6, Number(ctx.data.rows) || 5)));
     document.getElementById('empty')!.hidden = rows.length > 0;
 

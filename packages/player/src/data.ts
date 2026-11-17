@@ -67,7 +67,9 @@ async function refresh(base: string, id: string, manifest: ScreenManifest, heade
     reportRejected([{ source: id, problem: `snapshot ignored: ${problems[0] ?? `it is for "${String(next.id)}"`}` }]);
     return;
   }
-  if (next.fetchedAt === snapshots.get(id)?.fetchedAt) return;
+  // Keep the newest: an older snapshot can arrive after a newer one. (A copy stored before
+  // snapshots had versions has none, and any versioned one replaces it.)
+  if (next.version <= (snapshots.get(id)?.version ?? -1)) return;
   // Nor does one that fits none of the fields bound to it: the last good one stays the latest.
   const fit = snapshotFit(manifest, next);
   if (fit.problems.length && !fit.fits) {
@@ -139,4 +141,14 @@ export function dataSettled(ids: string[], timeoutMs: number): Promise<void> {
 /** When each source was last updated, for the status overlay. */
 export function dataStatus(): Record<string, string> {
   return Object.fromEntries([...snapshots].map(([id, s]) => [id, s.fetchedAt]));
+}
+
+/**
+ * Preview: the CMS posts each source's latest snapshot with the draft, in place of the data loop.
+ * Every source of the draft counts as loaded, with or without one, so no spot waits for a feed.
+ * Bound values are still checked against their fields when a spot plays.
+ */
+export function usePostedData(manifest: ScreenManifest, posted: readonly DataSnapshot[]): void {
+  for (const s of posted) snapshots.set(s.id, s);
+  for (const id of Object.keys(manifest.dataSources)) if (!settled.has(id)) markSettled(id);
 }

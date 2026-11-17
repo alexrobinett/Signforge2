@@ -40,6 +40,12 @@ D1 has no interactive transactions, but a `batch()` is atomic. So each repositor
 
 The tool dispatcher (`packages/tools`) is what commits: a tool stages its change, and the dispatcher commits it with its audit row (`org.auditLog.stage(...)`) and, for a keyed creation, its idempotency record. `org.auditLog.append(...)` writes a row on its own and is for seeding tests only. Each audit row records the actor kind and id, the client id (`client_id`: `cms`, `sf-push`, an agent's OAuth client), the action, the target and a redacted detail.
 
+### Drafts and published versions
+
+Spots, playlists and schedule entries have a draft and a published version (`src/drafts.ts`, docs/backend-plan.md#publishing). The row's columns are the draft: `insert`, `update` and `stage.update` change only them, and drop `publishedJson` and `publishedAt` if a caller passes them. `org.spots.stage.publish(row)`, `org.playlists.stage.publish(row, items)` and `org.scheduleEntries.stage.publish(row)` stage copying the row's content as read (a playlist's with its items) into `published_json`. `published(row)` returns the published version shaped as the row (a playlist's with `items`), or undefined if it was never published; `draftChanged(row, items?)` says whether the draft differs from it.
+
+`org.playlists.allItems()` and `org.screenGroups.allMembers()` read every playlist's items and every group membership in one query each, for a publish. `org.settings.get()` and `org.settings.stage.set({ defaultPlaylistId })` hold the org's default playlist, refused (`NotInOrgError`) for a playlist the org does not have. `org.assets.usage` counts a spot's draft and its published version, so an asset a screen still plays counts as used.
+
 `org.idempotency.get(key)` and `org.idempotency.stage({ key, action, inputSha256, outputJson })` read and stage the `idempotency_keys` record of a creating tool call, keyed `(org_id, key)`: a second record of the same key fails its whole batch.
 
 ## Better Auth's tables
@@ -60,7 +66,7 @@ From `docs/backend-plan.md#data-model-d1`, checked against the migrated database
 - Every tenant table has `org_id NOT NULL`; its indexes lead with `org_id`; every row is unique on `(org_id, id)`.
 - References between tenant rows are composite `(org_id, x_id)` foreign keys.
 
-Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); nor is `platform_audit_log` (changes made outside any org); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. Every tenant `org_id` references Better Auth's `organization(id)`, without cascade.
+Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); nor is `platform_audit_log` (changes made outside any org); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. Every tenant `org_id` references Better Auth's `organization(id)`, without cascade. `brand_kits` is keyed `(org_id, id)` rather than by a global `id`, and its ids are always the server's: `brandKits.insert` ignores an `id` the caller passes. `brand_assignments` has no id; it is unique per target (the org, a group, a screen) by partial indexes.
 
 Local D1 enforces foreign keys (`PRAGMA foreign_keys` is 1, and a test shows a cross-org row is refused). Production is verified in M3-00. Isolation does not depend on it: the repositories filter every query.
 

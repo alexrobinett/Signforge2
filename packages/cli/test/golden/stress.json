@@ -150,7 +150,7 @@
     }
   },
   "schedule": [],
-  "schema": 2,
+  "schema": 3,
   "screen": {
     "id": "stress-screen",
     "name": "Stress test screen",
@@ -171,7 +171,7 @@
       "id": "clock",
       "kind": "template",
       "name": "Clock",
-      "template": "base/clock@1.0.0"
+      "template": "base/clock@1.1.0"
     },
     "energy": {
       "assets": {
@@ -192,7 +192,7 @@
       "id": "energy",
       "kind": "template",
       "name": "Energy drinks 3 for $7",
-      "template": "base/cstore-promo@1.0.0"
+      "template": "base/cstore-promo@1.1.0"
     },
     "holidays": {
       "assets": {},
@@ -214,7 +214,7 @@
       "id": "holidays",
       "kind": "template",
       "name": "US holidays (Google Calendar)",
-      "template": "base/agenda@1.0.0"
+      "template": "base/agenda@1.1.0"
     },
     "meeting-room": {
       "assets": {},
@@ -266,7 +266,7 @@
       "id": "meeting-room",
       "kind": "template",
       "name": "Meeting room (fixed data)",
-      "template": "base/agenda@1.0.0"
+      "template": "base/agenda@1.1.0"
     },
     "menu": {
       "assets": {},
@@ -331,7 +331,7 @@
       "id": "menu",
       "kind": "template",
       "name": "Coffee menu",
-      "template": "base/menu-board@1.0.0"
+      "template": "base/menu-board@1.1.0"
     },
     "news": {
       "assets": {},
@@ -352,7 +352,7 @@
       "id": "news",
       "kind": "template",
       "name": "NPR headlines",
-      "template": "base/news@1.0.0"
+      "template": "base/news@1.1.0"
     },
     "photo-berries": {
       "assets": {
@@ -368,7 +368,7 @@
       "id": "photo-berries",
       "kind": "template",
       "name": "Photo promo, 1080p photo",
-      "template": "base/photo-promo@1.0.0"
+      "template": "base/photo-promo@1.1.0"
     },
     "photo-kitchen": {
       "assets": {
@@ -384,7 +384,7 @@
       "id": "photo-kitchen",
       "kind": "template",
       "name": "Photo promo, 4K photo 2",
-      "template": "base/photo-promo@1.0.0"
+      "template": "base/photo-promo@1.1.0"
     },
     "photo-river": {
       "assets": {
@@ -400,7 +400,7 @@
       "id": "photo-river",
       "kind": "template",
       "name": "Photo promo, 4K photo",
-      "template": "base/photo-promo@1.0.0"
+      "template": "base/photo-promo@1.1.0"
     },
     "sport-drinks": {
       "assets": {
@@ -421,7 +421,7 @@
       "id": "sport-drinks",
       "kind": "template",
       "name": "Sport drinks 2 for $4",
-      "template": "base/cstore-promo@1.0.0"
+      "template": "base/cstore-promo@1.1.0"
     },
     "still-snow": {
       "durationMs": 5000,
@@ -495,7 +495,7 @@
       "id": "weather-live",
       "kind": "template",
       "name": "Weather, live",
-      "template": "base/weather@1.0.0"
+      "template": "base/weather@1.1.0"
     },
     "weather-rain": {
       "assets": {},
@@ -515,7 +515,7 @@
       "id": "weather-rain",
       "kind": "template",
       "name": "Weather, rain (fixed data)",
-      "template": "base/weather@1.0.0"
+      "template": "base/weather@1.1.0"
     },
     "weather-snow": {
       "assets": {},
@@ -535,11 +535,11 @@
       "id": "weather-snow",
       "kind": "template",
       "name": "Weather, snow (fixed data)",
-      "template": "base/weather@1.0.0"
+      "template": "base/weather@1.1.0"
     }
   },
   "templates": {
-    "base/agenda@1.0.0": {
+    "base/agenda@1.1.0": {
       "html": "857b55f754e4785a097b8e2965ed720e4ea7d110c4ab12f332082ead483ed640",
       "manifest": {
         "background": "#0d1117",
@@ -619,12 +619,12 @@
           "landscape",
           "portrait"
         ],
-        "protocol": 1,
+        "protocol": 2,
         "uses": [],
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     },
-    "base/clock@1.0.0": {
+    "base/clock@1.1.0": {
       "html": "02003e52669a00433f3b2779954dad5febc7cefde21edbd2fb4800df1f678232",
       "manifest": {
         "background": "#05070d",
@@ -669,12 +669,12 @@
           "landscape",
           "portrait"
         ],
-        "protocol": 1,
+        "protocol": 2,
         "uses": [],
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     },
-    "base/cstore-promo@1.0.0": {
+    "base/cstore-promo@1.1.0": {
       "html": "2d4a1954105fb462525246efe2d408721fa416a04d629a09d7f7ec9f2b05bc17",
       "manifest": {
         "background": "#06122b",
@@ -746,12 +746,12 @@
           "landscape",
           "portrait"
         ],
-        "protocol": 1,
+        "protocol": 2,
         "uses": [],
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     },
-    "base/menu-board@1.0.0": {
+    "base/menu-board@1.1.0": {
       "html": "047882e8d18dd26c8e9b5c175d8db151e3276917ea1c273dd02b14e006b63e07",
       "manifest": {
         "background": "#14110f",
@@ -837,12 +837,12 @@
           "landscape",
           "portrait"
         ],
-        "protocol": 1,
+        "protocol": 2,
         "uses": [],
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     },
-    "base/news@1.0.0": {
+    "base/news@1.1.0": {
       "html": "8343f84e67436f8ea11501e9c693aa21904a018f09e1b293de81a48d380dba2a",
       "manifest": {
         "background": "#0b0d12",
@@ -907,12 +907,12 @@
           "landscape",
           "portrait"
         ],
-        "protocol": 1,
+        "protocol": 2,
         "uses": [],
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     },
-    "base/photo-promo@1.0.0": {
+    "base/photo-promo@1.1.0": {
       "html": "36baf4242886bf3c6b0e2bcbf839978a02725b234d982f487f065939dcc3e82b",
       "manifest": {
         "background": "#000000",
@@ -958,12 +958,12 @@
           "landscape",
           "portrait"
         ],
-        "protocol": 1,
+        "protocol": 2,
         "uses": [],
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     },
-    "base/weather@1.0.0": {
+    "base/weather@1.1.0": {
       "html": "6156267b1157f930485c90af15d0d68e9840feb7a187c983c7e616f8c93fc43b",
       "manifest": {
         "background": "#0b1a33",
@@ -1040,11 +1040,11 @@
           "landscape",
           "portrait"
         ],
-        "protocol": 1,
+        "protocol": 2,
         "uses": [
           "canvas"
         ],
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     }
   }

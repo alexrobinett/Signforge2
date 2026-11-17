@@ -58,14 +58,22 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `get_asset` | content:read | viewer | `{ assetId }` | `{ asset, spotIds }` |
 | `create_asset_upload` | content:draft | editor | `{ name, renditions: { landscape, portrait }, idempotencyKey? }` | `{ asset, uploads }` |
 | `finalize_asset` | content:draft | editor | `{ assetId }` | `{ asset, changed }` |
-| `delete_asset` | content:draft | editor | `{ assetId }` | `{ deleted }`, or 409 while a spot uses the asset |
+| `delete_asset` | content:draft | editor | `{ assetId }` | `{ deleted }`, or 409 while a spot uses the asset or a brand kit uses it as its logo |
+| `list_fonts` | content:read | viewer | `{ limit?, cursor? }` | `{ fonts: Font[], next }`, by id |
+| `list_brand_kits` | content:read | viewer | `{ limit?, cursor? }` | `{ brandKits: BrandKit[], next }`, by id |
+| `get_brand_kit` | content:read | viewer | `{ brandKitId }` | `{ brandKit }` |
+| `create_brand_kit` | content:draft | editor | `{ name, colors, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId?, makeDefault?, idempotencyKey? }` | `{ brandKit }` |
+| `update_brand_kit` | content:draft | editor | `{ brandKitId, name?, colors?, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId? }` | `{ brandKit }` |
+| `set_default_brand_kit` | content:draft | editor | `{ brandKitId }` | `{ brandKit }` |
+| `assign_brand_kit` | content:draft | editor | `{ brandKitId \| null, screenId? \| groupId? }` | `{ brandKit \| null }` |
 
 Details:
 
-- **Idempotency keys.** The creating tools (`create_group`, `create_asset_upload`) take an optional `idempotencyKey`: 8 to 128 printable ASCII characters the caller picks for one creation, such as a UUID. The CMS should send one with every create. A retry with the same key and input returns the first call's output and writes nothing, even when two calls race. The same key with a different input is refused with `conflict`. Keys are per org and kept for now (expiry is M3-24). A retried `create_asset_upload` returns the first call's upload URLs, which expire at their `expiresAt`. `register_template_version` needs no key: a version is registered once, and registering it again returns `changed: false`.
+- **Idempotency keys.** The creating tools (`create_group`, `create_asset_upload`, `create_brand_kit`) take an optional `idempotencyKey`: 8 to 128 printable ASCII characters the caller picks for one creation, such as a UUID. The CMS should send one with every create. A retry with the same key and input returns the first call's output and writes nothing, even when two calls race. The same key with a different input is refused with `conflict`. Keys are per org and kept for now (expiry is M3-24). A retried `create_asset_upload` returns the first call's upload URLs, which expire at their `expiresAt`. `register_template_version` needs no key: a version is registered once, and registering it again returns `changed: false`.
 - **Lists page.** Every `list_*` tool takes `limit` (default 50, at most 200) and `cursor`, and returns `next`. Pass `next` back as `cursor`, with the same filters, for the following page; `next` is `null` on the last page. A cursor is opaque. It holds the sort key of the last row returned, so rows added or removed between calls are neither repeated nor skipped. A cursor the server did not make is `invalid_input`. The repositories still read the org's whole list and the tool cuts the page; paging in SQL can wait until lists are large.
 - **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by the contract's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
 - **`get_screen`.** Credentials come back without their hashes.
+- **Brand kits.** Colours are hex. Leave out `onPrimary` or `onAccent` (or set it to `null` on update) to have it derived for 4.5:1 contrast; `derived` says which were. `warnings` lists pairs below 4.5:1; they do not stop a publish. Fonts are catalogue ids from `list_fonts` (`available: false` until the font's files are added; screens then draw with the template's font). A logo is a verified SVG or PNG image asset. The first kit becomes the default. A screen uses its own kit, else its groups', else the default: `reach` lists the screens a kit's edits will reach at the next publish, and `conflicts` the screens whose groups chose this kit and another (they cannot publish until the screen or a group is changed). Nothing reaches a screen until the next publish.
 - **`publish_manifest_to_screen`.** The manifest must already be stored for that screen. `sf push` stores manifests now; the server compiler will in M3-13.
 - **Templates.** An org sees its own templates and the base ones (`owner: 'base'`). Each version carries its manifest, its status (`draft`, `approved`, `retired`) and the server's check report. Only approved versions should be offered for new spots.
 - **`register_template_version`.** The bundle and sources (a JSON object of file name to text) must already be in R2 under the caller's prefix; `sf template push` uploads them through `/admin`. It runs `checkTemplateBundle` from the contract and refuses a failure with `invalid_input`, one `details` entry per problem, `path` naming the check (`manifest`, `forbidden-css`, `size`, `network`, `source-code`). The checks are a lint; the template sandbox is the guarantee. Versions are immutable: the same version with the same bundle and manifest returns `changed: false`, with different ones `conflict`. A new version is a draft.
@@ -130,6 +138,17 @@ Callers so far:
 - `/api/tools`: actor `user` with the session's user id, client `cms`.
 - `/admin`'s manifest upload: actor `system` with id `sf-push`, role owner, scope `content:publish` only.
 - `/admin`'s template registration (`sf template push`): actor `system` with id `sf-push`, role owner, scopes `content:draft` and `content:publish`; the platform registry for base templates, the org registry for an org's.
+
+## Publishing: drafts and the loader
+
+`src/publishing.ts` is what M3-18's publish tool builds on. Spots, playlists and schedule entries each have a draft (the row) and a published version (see `packages/db`'s README); edits change the draft only.
+
+- `loadOrg(org)` reads everything a publish needs in one round of parallel queries.
+- `promoteDrafts(org, graph, opts)` checks each draft that differs from its published version, in order: spots, then playlists (every item must be a published spot), then schedule entries (their playlist must be published). A draft is checked by compiling a probe screen that plays it, for each orientation the org's screens have, so its problems are exactly the ones a screen would get. A spot may use only an approved template version, or keep a retired one it was already published with. A draft that passes is staged for publishing; one that fails keeps its published version, if any, and is reported in `held`. It never blocks the rest.
+- `compileInputFor(graph, screenId)` and `loadCompileInput(org, screenId)` give a screen's published graph as `compileScreen` takes it: image files are the asset's rendition for the screen's orientation, a video is the asset's own file, a template bundle's size comes from its stored check report.
+- `publishOrg(org, { hash, now })` promotes drafts and compiles every screen. A screen that cannot compile is reported with its problems and keeps its manifest; the others publish. With no default playlist set, no screen can. It stages writes and returns them; the caller commits.
+
+`test/publishing.test.ts` checks that the loader and compiler produce `sf build`'s manifest for `examples/stress` (its golden).
 
 ## Adding a tool
 

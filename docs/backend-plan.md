@@ -30,27 +30,38 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 
 | Table | Key columns |
 | --- | --- |
-| Better Auth's own: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation` | `organization` adds the default playlist and quotas. Roles: owner, editor, viewer. |
+| Better Auth's own: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation` | `organization` adds quotas. Roles: owner, editor, viewer. |
+| `org_settings` | one row per org: the default playlist (see Publishing) |
 | `screens` | name, timezone, locale, orientation, `display_hours_json`, `desired_manifest_id`, `previous_manifest_id` (whose files stay servable while a screen switches), `reported_manifest_id`, last seen, player version, status |
 | `screen_groups`, `screen_group_members` | |
 | `screen_credentials` | screen, secret hash, last used, revoked at |
 | `pairing_codes` | code, poll-token hash, expires at, claimed org and screen |
 | `assets`, `asset_renditions` | kind, sha256, type, size, width, height, duration, status (pending, verified, rejected); landscape and portrait renditions |
 | `templates`, `template_versions` | null org means a base template; version, manifest, bundle sha, status (draft, approved, retired), check report |
-| `spots` | kind, template version, data, asset map, bindings, duration, plus the image, video or URL fields |
-| `playlists`, `playlist_items` | transition; ordered spots |
-| `schedule_entries` | playlist, priority, target, dates, days, window |
+| `spots` | kind, template version, data, asset map, bindings, duration, plus the image, video or URL fields; the published version (see Publishing) |
+| `playlists`, `playlist_items` | transition; ordered spots; the published version, with its items |
+| `schedule_entries` | playlist, priority, target, dates, days, window; the published version |
 | `publishes`, `publish_screens` | status, publish at, actor; which manifest each screen got. Rollout status is a join against `screens.reported_manifest_id`. |
 | `data_sources`, `data_snapshots` | format, encrypted URL (a private calendar URL is a secret), refresh, next poll at, ETag, failures; latest snapshot, at most 64 kB |
 | `audit_log` | when, actor kind (user, agent, device, system), actor, action, target, detail |
 | `idempotency_keys` | key, action, input hash, the first result: a retried creation returns it and writes nothing |
 | `play_counts` | screen, hour, spot: plays and milliseconds |
+| `brand_kits` | name, colours, shape, display and body font (catalogue ids), logo assets. Keyed `(org_id, id)` with server-made ids (see Brand kits) |
+| `brand_assignments` | which kit the org (its default), a group or a screen uses; at most one per target |
 
 ## Publishing
 
-1. **Compile.** `packages/compiler` loads the org's data in about eight queries and builds each target screen's manifest. A manifest's ID is the hash of its body, so a screen whose content did not change is skipped.
+1. **Compile.** `loadOrg` (`packages/tools/src/publishing.ts`) reads the org's data in one round of about a dozen parallel queries, promotes drafts (below), and `packages/compiler` builds each target screen's manifest from the published graph. A manifest's ID is the hash of its body, so a screen whose content did not change is skipped. A screen that cannot compile keeps its manifest and is reported; the others publish.
 2. **Fan out** through a Queue, 50 screens per batch. Per screen: one R2 write, one D1 row, one call to its Durable Object, so 150 calls per batch. D1, R2 and Durable Object calls share the per-invocation limit on calls to Cloudflare services: 1,000 on Free (measured), 10,000 by default on Paid. External `fetch` is limited separately, to 50 on Free. Write a batch's D1 rows in one `batch()` and make the Durable Object calls concurrently: done one at a time, a batch of 50 took 13 to 25 seconds.
 3. **Timed publish.** A per-org Durable Object holds the alarm and serialises publishes for that org. It wakes only when a publish is due.
+
+**Drafts.** One broken or unfinished spot must not block every screen. Spots, playlists and schedule entries each have a draft and a published version: the row's columns are the draft, which every edit changes, and `published_json` is a copy of the draft's content (a playlist's with its items) taken when a publish promoted it. A publish checks each draft that differs from its published version, in order: spots, then playlists (every item must be a published spot), then schedule entries (their playlist must be published). It checks a draft by compiling a probe screen that plays it, so the problems are the ones a screen would get. A new or changed spot may use only an approved template version; one already published with a version that was since retired keeps it. A draft that passes is published; one that fails keeps its published version, if it has one, and is reported for the CMS to show. The compiler then checks only what each screen reaches. Deleting a row deletes its published version too, so the tools that delete spots and playlists (M3-16, M3-17) must refuse one a published playlist or entry still uses; assets already count a published spot's use (`assets.usage`).
+
+**Default playlist.** Owner decision, taken by the simplest sound option: it is an org setting, in `org_settings`, one row per org with a composite foreign key to the org's playlist, so it cannot point into another org or at a deleted playlist. Not a column on Better Auth's `organization` table, which is Better Auth's and outside the `scoped` repositories, and not per screen group, which would need a rule for a screen in two groups. A screen or group that needs other content uses a schedule entry. Changing it takes effect at the next publish, like any content change; until it has a published version, no screen can publish.
+
+**Brand kits** (M3-38). An org keeps several kits; one is its default. A screen uses its own kit, else its groups' kit, else the default (`chooseBrandKit` in `packages/compiler`); a screen in two groups that chose different kits, with no kit of its own, is a publish problem for that screen only. The compiler freezes the chosen kit into the manifest's `brand` and resolves token defaults (`"$brand.accent"`) into plain field values, so a screen never sees a token; with no kit, tokens take `DEFAULT_BRAND_COLORS` and the manifest has no `brand`. Kits have no drafts: a publish reads each kit as it is then, and an edit changes nothing on screens until the next publish (each kit view lists the screens it will reach). `onPrimary` and `onAccent` left unset are derived at publish as black or white, whichever reaches 4.5:1; pairs below 4.5:1 are warnings, not problems. A logo is its asset's rendition for the screen's orientation, SVG or PNG. Fonts come from a catalogue with an owner, like templates (`FONTS` in `packages/compiler/src/fonts.ts`): `base/<id>` holds the curated OFL fonts, and org uploads will use `<orgId>/<id>`. The catalogue's WOFF2 files are not added yet, so a kit's font is left out of the manifest until they are; they will be base blobs (`sys/b/`), at most 150 kB per family.
+
+Kit ids are always made by the server (`bk_...`) and the table is keyed `(org_id, id)`. The older tenant tables take caller-chosen ids under a global primary key, so two orgs can collide on one; brand kits do not repeat that.
 
 **Uploads**
 - **Images** are scaled in the browser at upload with `createImageBitmap` and `OffscreenCanvas`, using the same cover-the-screen rule as `sf build`, into a landscape and a portrait rendition. The Worker checks the dimensions. Uploads with no browser (API, MCP) fall back to the Cloudflare Images binding, which works on Workers Free. It includes 5,000 unique transformations a month on both plans, then $0.50 per 1,000 on Paid; on Free, transformations past the allowance fail with error 9422 rather than charging.
@@ -114,7 +125,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | `POST /v1/device/pair/start` | Get a code and poll token |
 | `POST /v1/device/pair/poll` | Collect the credential |
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
-| `GET /v1/device/blobs/:sha256` | File from R2, cached forever. Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
+| `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
 | `GET /v1/device/data/:id.json` | Snapshot, for first load. Only sources the screen's manifest lists. |
 | `POST /v1/device/sync` | Heartbeat, play counts, snapshot changes |
 | `GET /v1/device/ws?ticket=` | Nudge socket |
@@ -134,7 +145,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
 - Secrets stay off URLs. The screen's credential and the supervisor's token are handed to the page by the supervisor over loopback, only to the player's own origin. A template frame can read its parent's URL, so nothing secret goes there.
 - The same local origin is what makes a web-page spot on a public site unable to reach the device: Chromium blocks public pages from requesting loopback.
 
-**Clock.** A Pi has no battery-backed clock, and the schedule and display hours run on it. The player keeps the offset from the last sync's server time, persists it, and uses corrected time everywhere it reads the clock. Large drift is reported.
+**Clock.** A Pi has no battery-backed clock, and the schedule and display hours run on it. The player keeps the offset from the last sync's server time, persists it, and uses corrected time everywhere it reads the clock. Large drift is reported. The rules, including what a screen does when it cannot trust its clock, are in `architecture.md` (Player, Clock); a sync's `seq` carries an `epoch` so a screen that lost its counter is not ignored.
 
 **Display power**
 - **Hours.** Display hours are part of the screen's manifest, so a change is a publish and works offline. The player already enforces them (see `architecture.md`).
@@ -168,6 +179,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
   - Turn on the session cookie cache. The client must take the new cookies `setActiveOrganization` returns; with the old cache cookie the server still sees no active org.
   - In 1.7.25, creating an org and accepting an invitation change the active org without reissuing the cache cookie. An after hook in `apps/api/src/auth/options.ts` reissues it.
   - Check membership of the active org on every request. `apps/api`'s `requireOrg` reads it fresh (`findMembership` in `packages/db`) and hands handlers `scoped(db, orgId)`; the cache cookie only says which org is active.
+- **Files for users.** `GET /api/blobs/:sha256` serves a file the session's org can see, for the editor preview: from the org's own R2 prefix, or from `sys/b/` only when the hash is a base template version's bundle (`templates.versions.baseBundle` in the scoped repository). `private`, cached forever. `test/blobs.test.ts` checks one org cannot fetch another's file.
   - Email goes through an `EmailSender` interface: Cloudflare Email Sending by default (Q3 is open), a recorder in dev and tests.
 - **Agents (Milestone 4).**
   - OAuth through Better Auth's provider plugin (`@better-auth/oauth-provider`). Its source has dynamic client registration (off by default) and S256 PKCE, required for public clients; it is first run in Milestone 4. A grant is bound to one org.
@@ -216,7 +228,7 @@ Each slice ends with something working on the real Pi.
 - Better Auth's OAuth provider is the least-proven piece; Better Auth on D1 is proven for sign-in and organizations, but runs multi-step flows without a transaction.
 - An API deploy resets any screen Durable Object that is awake at the time, and a Cloudflare incident can drop every socket at once; reconnects need jitter.
 - R2 is not enabled on the account yet. It is enabled in the dashboard, and nothing that stores files can deploy until it is.
-- The contract has no expiry instant on a schedule entry, so a takeover is compiled into a dated window and capped under 24 hours, rather than changing the contract.
+- A takeover ends at an absolute instant (`ScheduleEntry.endsAt`, manifest schema 3). A schema-2 player ignores it, so a takeover published to a screen still on schema 2 must also be compiled into a dated window.
 
 ## Open questions
 

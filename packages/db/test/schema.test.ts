@@ -30,9 +30,28 @@ describe('schema', () => {
 
   it('has the tables in the plan', async () => {
     expect(await tables()).toEqual([
-      'asset_renditions', 'assets', 'audit_log', 'data_snapshots', 'data_sources', 'idempotency_keys', 'play_counts', 'playlist_items', 'playlists',
-      'publish_screens', 'publishes', 'schedule_entries', 'screen_credentials', 'screen_group_members', 'screen_groups', 'screens',
-      'spots', 'template_versions', 'templates',
+      'asset_renditions',
+      'assets',
+      'audit_log',
+      'brand_assignments',
+      'brand_kits',
+      'data_snapshots',
+      'data_sources',
+      'idempotency_keys',
+      'org_settings',
+      'play_counts',
+      'playlist_items',
+      'playlists',
+      'publish_screens',
+      'publishes',
+      'schedule_entries',
+      'screen_credentials',
+      'screen_group_members',
+      'screen_groups',
+      'screens',
+      'spots',
+      'template_versions',
+      'templates',
     ]);
   });
 

@@ -2,7 +2,7 @@
 """Stand-in for the backend's data-source poller (until Milestone 3).
 
 Reads content/data-sources.json, fetches each feed on its interval, converts it to the shape
-the contract defines, and writes content/data/<id>.json as {id, fetchedAt, data}.
+the contract defines, and writes content/data/<id>.json as {id, version, fetchedAt, data}.
 
 Formats:
   json   passed through unchanged
@@ -169,7 +169,9 @@ def tick():
         try:
             raw = fetch(src["url"])
             data = CONVERT[src.get("format", "json")](raw)
-            snap = {"id": sid, "fetchedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"), "data": data}
+            now = datetime.now(timezone.utc)
+            # version: increases with every change, so a screen keeps the newest (see the contract).
+            snap = {"id": sid, "version": int(now.timestamp() * 1000), "fetchedAt": now.isoformat(timespec="seconds"), "data": data}
             tmp = os.path.join(WWW, "data", f".{sid}.tmp")
             with open(tmp, "w") as f:
                 json.dump(snap, f)

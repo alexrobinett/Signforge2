@@ -43,6 +43,20 @@
       "when": 1794934088585,
       "tag": "0005_idempotency_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794934709833,
+      "tag": "0006_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794935966415,
+      "tag": "0007_brand_kits",
+      "breakpoints": true
     }
   ]
 }

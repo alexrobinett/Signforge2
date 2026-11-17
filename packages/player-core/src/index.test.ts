@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
-import { Sequencer, displayOn, entryApplies, localTime, planSync, resolvePlaylist, resolveSpotData, snapshotFit, validateManifest } from './index';
+import { Sequencer, displayOn, entryApplies, localTime, planSync, resolvePlaylist, resolveSpotData, snapshotFit, spotFiles, validateManifest } from './index';
 
 const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${id}`, fit: 'cover', durationMs: 5000 });
 
 function manifest(over: Partial<ScreenManifest> = {}): ScreenManifest {
   return {
-    schema: 2, id: 'm1', generatedAt: '2026-11-16T00:00:00Z',
+    schema: 2,
+    id: 'm1',
+    generatedAt: '2026-11-16T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'America/New_York', orientation: 'landscape' },
     files: { 'sha-a': { size: 1, type: 'image/png' }, 'sha-b': { size: 1, type: 'image/png' }, 'sha-c': { size: 1, type: 'image/png' } },
     templates: {},
@@ -52,6 +54,28 @@ describe('schedule', () => {
     expect(resolvePlaylist(m, at('12:00')).id).toBe('all');
   });
 
+  it('ends a takeover at its absolute end, whatever the local window says', () => {
+    const takeover = {
+      id: 't',
+      playlist: 'takeover',
+      priority: 99,
+      target: 'screen' as const,
+      startsAt: '2026-11-16T17:00:00Z',
+      endsAt: '2026-11-16T17:30:00Z',
+    };
+    const m = manifest({ schedule: [takeover] });
+    expect(resolvePlaylist(m, at('11:59')).id).toBe('all');
+    expect(resolvePlaylist(m, at('12:00')).id).toBe('takeover');
+    expect(resolvePlaylist(m, at('12:29')).id).toBe('takeover');
+    expect(resolvePlaylist(m, at('12:30')).id).toBe('all');
+  });
+
+  it('skips bounded entries on a clock it does not trust, so a takeover cannot run forever', () => {
+    const m = manifest({ schedule: [{ id: 't', playlist: 'takeover', priority: 99, target: 'screen', endsAt: '2026-11-16T17:30:00Z' }] });
+    expect(resolvePlaylist(m, at('12:00'), { clockTrusted: false }).id).toBe('all');
+    expect(resolvePlaylist(manifest(), at('07:30'), { clockTrusted: false }).id).toBe('breakfast');
+  });
+
   it('handles a window that crosses midnight and belongs to the day it started', () => {
     const late = { id: 'e', playlist: 'all', priority: 1, target: 'screen' as const, from: '22:00', to: '02:00', days: [1] };
     expect(entryApplies(late, localTime(at('23:00'), 'America/New_York'))).toBe(true);
@@ -80,7 +104,10 @@ describe('display hours', () => {
       { days: [1, 2, 3, 4, 5], from: '07:00', to: '19:00' },
       { days: [5], from: '22:00', to: '02:00' },
     ],
-    exceptions: [{ date: '2026-11-26', on: [] }, { date: '2026-11-27', on: [{ from: '10:00', to: '14:00' }] }],
+    exceptions: [
+      { date: '2026-11-26', on: [] },
+      { date: '2026-11-27', on: [{ from: '10:00', to: '14:00' }] },
+    ],
   };
 
   it('is always on with no hours set', () => {
@@ -142,14 +169,19 @@ describe('Sequencer', () => {
 });
 
 describe('live data', () => {
-  const weather = { id: 'weather', fetchedAt: 'now', data: { current: { temp: 41.2 }, daily: { max: [60.6] }, city: 7 } };
+  const weather = { id: 'weather', version: 1, fetchedAt: 'now', data: { current: { temp: 41.2 }, daily: { max: [60.6] }, city: 7 } };
   const fields: Record<string, FieldDef> = {
     city: { type: 'text', label: 'City' },
     temp: { type: 'number', label: 'Temp', min: -100, max: 100 },
     high: { type: 'number', label: 'High' },
   };
   const bound: Extract<Spot, { kind: 'template' }> = {
-    id: 'w', name: 'w', kind: 'template', template: 't@1.0.0', durationMs: 5000, assets: {},
+    id: 'w',
+    name: 'w',
+    kind: 'template',
+    template: 't@1.0.0',
+    durationMs: 5000,
+    assets: {},
     data: { city: 'Atlanta', temp: 0, high: 0 },
     bindings: { temp: { source: 'weather', path: 'current.temp' }, high: { source: 'weather', path: 'daily.max.0' } },
   };
@@ -176,7 +208,13 @@ describe('live data', () => {
   it('counts how many bound values in a manifest a snapshot fits', () => {
     const m = manifest();
     const t: TemplateManifest = {
-      id: 't', version: '1.0.0', name: 'T', fields, background: '#000', orientations: ['landscape'], uses: [],
+      id: 't',
+      version: '1.0.0',
+      name: 'T',
+      fields,
+      background: '#000',
+      orientations: ['landscape'],
+      uses: [],
       duration: { minMs: 1000, defaultMs: 5000, maxMs: 10_000 },
     };
     m.templates['t@1.0.0'] = { manifest: t, html: 'h' };
@@ -191,6 +229,23 @@ describe('live data', () => {
 describe('files', () => {
   it('lists what to download and what to drop', () => {
     expect(planSync(manifest(), ['sha-a', 'sha-old'])).toEqual({ missing: ['sha-b', 'sha-c'], stale: ['sha-old'] });
+  });
+
+  it('names the files one spot needs: a template spot its bundle and assets, a media spot its file', () => {
+    const m = manifest();
+    m.templates['base/t@1.0.0'] = { manifest: {} as never, html: 'sha-html' };
+    const t: Spot = {
+      id: 't',
+      name: 't',
+      kind: 'template',
+      template: 'base/t@1.0.0',
+      durationMs: 1000,
+      data: {},
+      assets: { pic: 'sha-pic', logo: 'sha-logo' },
+    };
+    expect([...spotFiles(t, m)].sort()).toEqual(['sha-html', 'sha-logo', 'sha-pic']);
+    expect([...spotFiles(m.spots.a!, m)]).toEqual(['sha-a']);
+    expect([...spotFiles({ id: 'u', name: 'u', kind: 'url', url: 'https://example.com', durationMs: 1000 } as Spot, m)]).toEqual([]);
   });
 
   it('rejects a manifest that refers to things it does not carry', () => {
@@ -225,14 +280,26 @@ describe('files', () => {
   });
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
-    expect(validateManifest(manifest({ schema: 1 }))).toEqual(['manifest schema 1 is not one this player can play (2)']);
+    // A release plays schema N and N-1, so a screen updated while offline keeps its cached manifest.
+    expect(validateManifest(manifest({ schema: 2 }))).toEqual([]);
+    expect(validateManifest(manifest({ schema: 1 }))).toEqual(['manifest schema 1 is not one this player can play (2, 3)']);
+    expect(validateManifest(manifest({ schema: 4 }))).toEqual(['manifest schema 4 is not one this player can play (2, 3)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);
   });
 
   it('keys each template by its owner, id and version, so a base and an org template cannot collide', () => {
-    const t = { id: 'promo', version: '1.0.0', name: 'P', fields: {}, duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 }, orientations: ['landscape' as const], uses: [], background: '#000' };
+    const t = {
+      id: 'promo',
+      version: '1.0.0',
+      name: 'P',
+      fields: {},
+      duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 },
+      orientations: ['landscape' as const],
+      uses: [],
+      background: '#000',
+    };
     const ok = manifest({ templates: { 'base/promo@1.0.0': { manifest: t, html: 'sha-a' }, 'org_42/promo@1.0.0': { manifest: t, html: 'sha-b' } } });
     expect(validateManifest(ok)).toEqual([]);
     const bare = manifest({ templates: { 'promo@1.0.0': { manifest: t, html: 'sha-a' } } });

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScreenManifest } from '@signforge/contract';
 import { DeviceCredential } from './credential';
-import { UnauthorisedError, loadActiveManifest, sync } from './store';
+import { PinSet, UnauthorisedError, loadActiveManifest, sync } from './store';
 
 // ---------------------------------------------------------------- fakes
 /** Cache Storage in memory: enough of it for the store. */
@@ -38,7 +38,9 @@ const blobPath = { [`/blobs/${A}`]: FILES.a, [`/blobs/${B}`]: FILES.b };
 
 function manifest(id: string, text = 'hello'): ScreenManifest {
   return {
-    schema: 2, id, generatedAt: '2026-11-17T00:00:00Z',
+    schema: 2,
+    id,
+    generatedAt: '2026-11-17T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'UTC', orientation: 'landscape' },
     files: { [A]: { size: 6, type: 'image/png' }, [B]: { size: 6, type: 'image/png' } },
     templates: {},
@@ -117,7 +119,7 @@ describe('sync against the device API', () => {
     expect(r).toEqual({ changed: false, downloaded: 1 });
     expect(manifestRequests()).toHaveLength(1);
     expect(blobRequests().map((q) => q.url)).toEqual([`${BASE}/blobs/${B}`]);
-    expect((await (await open('sf-blobs-v1').match(`/_sf/blob/${B}`))!.text())).toBe(FILES.b);
+    expect(await (await open('sf-blobs-v1').match(`/_sf/blob/${B}`))!.text()).toBe(FILES.b);
   });
 
   it('asks again without the condition if a 304 arrives but the cached manifest is gone', async () => {
@@ -127,6 +129,16 @@ describe('sync against the device API', () => {
     const r = await sync(BASE, { currentId: 'm1', headers: auth });
     expect(r).toEqual({ changed: false, downloaded: 0 });
     expect(manifestRequests().map((q) => q.headers.get('if-none-match'))).toEqual(['"m1"', null]);
+  });
+
+  it('asks again without the condition, and stores a sound copy, if the cached manifest is damaged', async () => {
+    await sync(BASE, { headers: auth });
+    await open('sf-state-v1').put('/_sf/manifest/active', new Response('{"id": "m1", "tor'));
+    api.requests = [];
+    const r = await sync(BASE, { currentId: 'm1', headers: auth });
+    expect(r).toEqual({ changed: false, downloaded: 0 });
+    expect(manifestRequests().map((q) => q.headers.get('if-none-match'))).toEqual(['"m1"', null]);
+    expect((await loadActiveManifest())?.id).toBe('m1');
   });
 
   it('picks up a new manifest after a 304 and switches to it in one step', async () => {
@@ -155,10 +167,59 @@ describe('sync against the device API', () => {
   });
 
   it('a network failure stays an ordinary error (offline)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))),
+    );
     const err = await sync(BASE, { headers: auth }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TypeError);
     expect(err).not.toBeInstanceOf(UnauthorisedError);
+  });
+});
+
+describe('file cleanup and pins', () => {
+  const held = async () => (await open('sf-blobs-v1').keys()).map((k) => k.url.split('/').pop());
+  /** m1 without spot b, so file B is no longer needed. */
+  const withoutB = (id: string): ScreenManifest => {
+    const m = manifest(id);
+    delete m.spots.b;
+    delete m.files[B];
+    m.playlists.all!.items = [{ spot: 'a' }];
+    return m;
+  };
+
+  it('keeps a pinned file the new manifest no longer needs, and drops it once unpinned', async () => {
+    await sync(BASE, { headers: auth });
+    api.manifest = withoutB('m2');
+    const pins = new PinSet();
+    pins.hold('preparing', [B]);
+    await sync(BASE, { currentId: 'm1', headers: auth, pinned: pins });
+    expect(await held()).toEqual(expect.arrayContaining([A, B]));
+
+    pins.release('preparing');
+    await sync(BASE, { currentId: 'm2', headers: auth, pinned: pins });
+    expect(await held()).toEqual([A]);
+  });
+
+  it('pins from several holders add up, and a holder replaces its own pins', () => {
+    const pins = new PinSet();
+    pins.hold('playing', [A]);
+    pins.hold('last-known-good', [A, B]);
+    pins.hold('playing', []);
+    expect([...pins].sort()).toEqual([A, B].sort());
+    pins.release('last-known-good');
+    expect([...pins]).toEqual([]);
+  });
+
+  it('never stores a file whose hash does not match, and activates nothing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith(`/blobs/${B}`) ? new Response('not file b') : handle(input, init))),
+    );
+    await expect(sync(BASE, { headers: auth })).rejects.toThrow(`file ${B.slice(0, 12)}: failed verification`);
+    expect(await held()).not.toContain(B);
+    expect((await open('sf-blobs-v1').keys()).every((k) => k.url.includes('/_sf/blob/'))).toBe(true);
+    expect(await loadActiveManifest()).toBeUndefined();
   });
 });
 
@@ -185,7 +246,10 @@ describe('DeviceCredential', () => {
   });
 
   it('treats an unreachable supervisor as no credential', async () => {
-    const c = new DeviceCredential('http://127.0.0.1:8091', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))));
+    const c = new DeviceCredential(
+      'http://127.0.0.1:8091',
+      vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))),
+    );
     expect(await c.headers()).toEqual({});
   });
 });
