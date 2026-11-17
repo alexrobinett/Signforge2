@@ -1,0 +1,32 @@
+@font-face {
+  font-family: "Inter";
+  src: url("./node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body { font-family: "Inter", sans-serif; color: #fff; font-feature-settings: "tnum" 1; }
+/* Clock. Dark by default (kind to OLED panels), and the whole block drifts slowly so no pixel
+   holds the same value for long when the clock is left up for an hour. */
+:root { --accent: #7cc4ff; }
+html, body { background: #05070d; }
+.stage { --u: 1vmin; --out: calc(var(--sf-duration, 10s) - 0.6s); position: fixed; inset: 0; overflow: hidden;
+  background: radial-gradient(120% 120% at 50% 110%, #101a33 0%, #05070d 60%); display: grid; place-items: center; }
+.blob { position: absolute; border-radius: 50%; opacity: .5; will-change: transform; animation: wander 40s ease-in-out infinite alternate; }
+.b1 { width: 80vmin; height: 80vmin; left: -20vmin; top: -25vmin; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 45%, transparent), transparent); }
+.b2 { width: 70vmin; height: 70vmin; right: -15vmin; bottom: -30vmin; animation-duration: 52s; animation-direction: alternate-reverse;
+  background: radial-gradient(closest-side, rgba(170, 120, 255, .35), transparent); }
+.content { position: relative; text-align: center; will-change: transform; animation: drift 90s ease-in-out infinite alternate; }
+.content > * { will-change: transform, opacity; animation: rise-in .9s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards; }
+.greeting { font-size: calc(var(--u) * 5); font-weight: 600; color: var(--accent); letter-spacing: .02em; animation-delay: .1s, var(--out); }
+.time { font-size: calc(var(--u) * 30); font-weight: 800; line-height: 1; letter-spacing: -.04em; animation-delay: .25s, var(--out); }
+.time .sec { font-size: .35em; font-weight: 600; color: rgba(255,255,255,.55); margin-left: .12em; letter-spacing: 0; }
+.time .ampm { font-size: .22em; font-weight: 700; margin-left: .2em; letter-spacing: .04em; vertical-align: .9em; }
+.date { font-size: calc(var(--u) * 5.6); font-weight: 500; color: rgba(255,255,255,.82); animation-delay: .4s, var(--out); }
+.message { font-size: calc(var(--u) * 3.6); font-weight: 500; color: rgba(255,255,255,.7); margin-top: calc(var(--u) * 4); animation-delay: .55s, var(--out); }
+.message:empty { display: none; }
+[data-orientation="portrait"] .time { font-size: calc(var(--u) * 24); }
+@keyframes rise-in { from { transform: translateY(5vh); opacity: 0 } }
+@keyframes fade-out { to { opacity: 0 } }
+@keyframes wander { to { transform: translate(18vmin, 12vmin) scale(1.15) } }
+@keyframes drift { from { transform: translate(-1.2vmin, -1vmin) } to { transform: translate(1.2vmin, 1vmin) } }

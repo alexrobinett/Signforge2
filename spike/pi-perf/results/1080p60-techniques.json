@@ -1,0 +1,505 @@
+{
+  "label": "1080p60-techniques",
+  "browser": "Chrome/156.0.8078.79",
+  "runs": {
+    "compositor": {
+      "result": {
+        "variant": "compositor",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 98,
+        "readyMs": 132,
+        "harness": {
+          "frames": 1197,
+          "fps": 59.85,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 50,
+          "droppedPct": 0.25
+        },
+        "template": {
+          "frames": 1193,
+          "fps": 59.7,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 50.1,
+          "droppedPct": 0.5
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 25.6,
+      "tempMaxC": 53.5,
+      "throttled": "throttled=0x0"
+    },
+    "shadowanim": {
+      "result": {
+        "variant": "shadowanim",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 95,
+        "readyMs": 120,
+        "harness": {
+          "frames": 1196,
+          "fps": 59.85,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 50,
+          "droppedPct": 0.25
+        },
+        "template": {
+          "frames": 1194,
+          "fps": 59.75,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 50.1,
+          "droppedPct": 0.42
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 25.3,
+      "tempMaxC": 54.0,
+      "throttled": "throttled=0x0"
+    },
+    "shadowbaked": {
+      "result": {
+        "variant": "shadowbaked",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 83,
+        "readyMs": 101,
+        "harness": {
+          "frames": 1195,
+          "fps": 59.8,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 83.4,
+          "droppedPct": 0.33
+        },
+        "template": {
+          "frames": 1194,
+          "fps": 59.75,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 83.3,
+          "droppedPct": 0.42
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 21.9,
+      "tempMaxC": 54.0,
+      "throttled": "throttled=0x0"
+    },
+    "bluranim": {
+      "result": {
+        "variant": "bluranim",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 86,
+        "readyMs": 105,
+        "harness": {
+          "frames": 1195,
+          "fps": 59.75,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 100,
+          "droppedPct": 0.42
+        },
+        "template": {
+          "frames": 1195,
+          "fps": 59.75,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 100,
+          "droppedPct": 0.42
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 25.4,
+      "tempMaxC": 54.0,
+      "throttled": "throttled=0x0"
+    },
+    "blurbaked": {
+      "result": {
+        "variant": "blurbaked",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 93,
+        "readyMs": 120,
+        "harness": {
+          "frames": 1194,
+          "fps": 59.7,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 100,
+          "droppedPct": 0.5
+        },
+        "template": {
+          "frames": 1192,
+          "fps": 59.65,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 100,
+          "droppedPct": 0.58
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 24.1,
+      "tempMaxC": 54.0,
+      "throttled": "throttled=0x0"
+    },
+    "backdrop": {
+      "result": {
+        "variant": "backdrop",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 105,
+        "readyMs": 155,
+        "harness": {
+          "frames": 1189,
+          "fps": 59.45,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 100,
+          "droppedPct": 0.92
+        },
+        "template": {
+          "frames": 971,
+          "fps": 48.59,
+          "medianMs": 16.7,
+          "p95Ms": 33.4,
+          "p99Ms": 33.4,
+          "maxMs": 100,
+          "droppedPct": 19.02
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 26.6,
+      "tempMaxC": 54.5,
+      "throttled": "throttled=0x0"
+    },
+    "panel": {
+      "result": {
+        "variant": "panel",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 101,
+        "readyMs": 141,
+        "harness": {
+          "frames": 1193,
+          "fps": 59.7,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 116.7,
+          "droppedPct": 0.5
+        },
+        "template": {
+          "frames": 1192,
+          "fps": 59.65,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 116.6,
+          "droppedPct": 0.58
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 23.7,
+      "tempMaxC": 55.5,
+      "throttled": "throttled=0x0"
+    },
+    "filter": {
+      "result": {
+        "variant": "filter",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 100,
+        "readyMs": 119,
+        "harness": {
+          "frames": 1190,
+          "fps": 59.55,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 133.3,
+          "droppedPct": 0.75
+        },
+        "template": {
+          "frames": 873,
+          "fps": 43.69,
+          "medianMs": 16.7,
+          "p95Ms": 33.4,
+          "p99Ms": 33.4,
+          "maxMs": 133.3,
+          "droppedPct": 27.19
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 26.2,
+      "tempMaxC": 56.0,
+      "throttled": "throttled=0x0"
+    },
+    "baked": {
+      "result": {
+        "variant": "baked",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 107,
+        "readyMs": 124,
+        "harness": {
+          "frames": 1195,
+          "fps": 59.75,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 83.3,
+          "droppedPct": 0.42
+        },
+        "template": {
+          "frames": 1191,
+          "fps": 59.6,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 100,
+          "droppedPct": 0.67
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 24.2,
+      "tempMaxC": 55.5,
+      "throttled": "throttled=0x0"
+    },
+    "rich": {
+      "result": {
+        "variant": "rich",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 91,
+        "readyMs": 118,
+        "harness": {
+          "frames": 1180,
+          "fps": 59.05,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 283.4,
+          "droppedPct": 1.58
+        },
+        "template": {
+          "frames": 1178,
+          "fps": 58.95,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 283.4,
+          "droppedPct": 1.75
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 27.1,
+      "tempMaxC": 55.0,
+      "throttled": "throttled=0x0"
+    },
+    "rich,willchange": {
+      "result": {
+        "variant": "rich,willchange",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          1920,
+          1080
+        ],
+        "dpr": 1,
+        "viewport": [
+          1920,
+          1080
+        ],
+        "loadMs": 108,
+        "readyMs": 127,
+        "harness": {
+          "frames": 1190,
+          "fps": 59.55,
+          "medianMs": 16.7,
+          "p95Ms": 16.7,
+          "p99Ms": 16.8,
+          "maxMs": 166.8,
+          "droppedPct": 0.75
+        },
+        "template": {
+          "frames": 1189,
+          "fps": 59.5,
+          "medianMs": 16.7,
+          "p95Ms": 16.8,
+          "p99Ms": 16.8,
+          "maxMs": 166.7,
+          "droppedPct": 0.83
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 26.6,
+      "tempMaxC": 55.0,
+      "throttled": "throttled=0x0"
+    }
+  },
+  "gpu": {
+    "devices": [
+      {
+        "vendorId": 0,
+        "deviceId": 0,
+        "vendorString": "Google Inc. (Broadcom)",
+        "deviceString": "ANGLE (Broadcom, V3D 4.2.14.0, OpenGL ES 3.1 Mesa 26.2.6-1~bpo13+0~rpt2)",
+        "driverVendor": "Mesa",
+        "driverVersion": "26.2.6"
+      }
+    ],
+    "features": {
+      "2d_canvas": "enabled",
+      "direct_rendering_display_compositor": "disabled_off_ok",
+      "gpu_compositing": "enabled",
+      "multiple_raster_threads": "enabled_on",
+      "opengl": "enabled_on",
+      "rasterization": "enabled_force",
+      "raw_draw": "disabled_off_ok",
+      "skia_graphite": "disabled_off",
+      "trees_in_viz": "disabled_off",
+      "video_decode": "enabled",
+      "video_encode": "disabled_software",
+      "vulkan": "disabled_off",
+      "webgl": "enabled",
+      "webgpu": "disabled_off",
+      "webgpu_on_vk_via_gl_interop": "disabled_off",
+      "webnn": "disabled_off"
+    },
+    "workarounds": [
+      "enable_webgl_timer_query_extensions",
+      "exit_on_context_lost",
+      "rely_on_implicit_sync_for_swap_buffers",
+      "disabled_extension_GL_KHR_blend_equation_advanced",
+      "disabled_extension_GL_KHR_blend_equation_advanced_coherent"
+    ]
+  }
+}

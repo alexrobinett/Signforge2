@@ -1,0 +1,16 @@
+{
+  "name": "NPR headlines",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 15000,
+  "data": {
+    "title": "Latest news",
+    "source": "NPR"
+  },
+  "bindings": {
+    "items": {
+      "source": "news",
+      "path": "items"
+    }
+  }
+}

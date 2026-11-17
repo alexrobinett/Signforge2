@@ -1,0 +1,16 @@
+{
+  "name": "Weather, live",
+  "kind": "template",
+  "template": "weather",
+  "durationMs": 10000,
+  "data": { "city": "Atlanta" },
+  "bindings": {
+    "temp": { "source": "weather", "path": "current.temperature_2m" },
+    "code": { "source": "weather", "path": "current.weather_code" },
+    "isDay": { "source": "weather", "path": "current.is_day" },
+    "wind": { "source": "weather", "path": "current.wind_speed_10m" },
+    "humidity": { "source": "weather", "path": "current.relative_humidity_2m" },
+    "high": { "source": "weather", "path": "daily.temperature_2m_max.0" },
+    "low": { "source": "weather", "path": "daily.temperature_2m_min.0" }
+  }
+}

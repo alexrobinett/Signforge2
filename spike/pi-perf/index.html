@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SignForge spike harness</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<script>
+  // Harness side of the contract. Loads the template in a sandboxed frame,
+  // drives prepare -> ready -> play, then measures frame pacing in both frames.
+  // ?variant=compositor|filter|layout  ?seconds=20  ?sandbox=0 to disable the sandbox
+  const q = new URLSearchParams(location.search);
+  const variant = q.get('variant') || 'compositor';
+  const seconds = Number(q.get('seconds') || 20);
+  const sandboxed = q.get('sandbox') !== '0';
+
+  function stats(deltas) {
+    if (!deltas.length) return null;
+    const s = [...deltas].sort((a, b) => a - b);
+    const at = p => s[Math.min(s.length - 1, Math.floor(s.length * p))];
+    const interval = at(0.5);
+    const total = deltas.reduce((a, b) => a + b, 0);
+    const missed = deltas.reduce((a, d) => a + Math.max(0, Math.round(d / interval) - 1), 0);
+    const r = n => Math.round(n * 100) / 100;
+    return {
+      frames: deltas.length, fps: r(1000 * deltas.length / total),
+      medianMs: r(interval), p95Ms: r(at(0.95)), p99Ms: r(at(0.99)), maxMs: r(s[s.length - 1]),
+      droppedPct: r(100 * missed / (deltas.length + missed)),
+    };
+  }
+
+  const t0 = performance.now();
+  const frame = document.createElement('iframe');
+  if (sandboxed) frame.setAttribute('sandbox', 'allow-scripts');
+  frame.src = 'template/index.html' + location.search;
+  document.body.appendChild(frame);
+
+  const result = { variant, particles: Number(q.get('particles') || 0), sandboxed, seconds, screen: [screen.width, screen.height], dpr: devicePixelRatio,
+                   viewport: [innerWidth, innerHeight] };
+  let deltas = [], last = 0, measuring = false, longTasks = 0, longTaskMs = 0;
+  try {
+    new PerformanceObserver(l => l.getEntries().forEach(e => { if (measuring) { longTasks++; longTaskMs += e.duration; } }))
+      .observe({ entryTypes: ['longtask'] });
+  } catch {}
+  function tick(t) { if (measuring) { if (last) deltas.push(t - last); last = t; requestAnimationFrame(tick); } }
+
+  addEventListener('message', (e) => {
+    const m = e.data || {};
+    if (m.type === 'loaded') {
+      result.loadMs = Math.round(performance.now() - t0);
+      frame.contentWindow.postMessage({ type: 'prepare', data: {
+        quantity: '2', price: '4', points: '400', promo: 'Buy any 2',
+        promoLineOne: 'Sport Drinks', promoLineTwo: 'All flavours, 710 mL',
+        disclaimer: 'Limited time offer. See store for details.' } }, '*');
+    } else if (m.type === 'ready') {
+      result.readyMs = Math.round(performance.now() - t0);
+      frame.contentWindow.postMessage({ type: 'play' }, '*');
+      measuring = true; requestAnimationFrame(tick);
+      setTimeout(() => { measuring = false; frame.contentWindow.postMessage({ type: 'report' }, '*'); }, seconds * 1000);
+    } else if (m.type === 'report') {
+      result.harness = stats(deltas);
+      result.template = stats(m.deltas);
+      result.longTasks = longTasks; result.longTaskMs = Math.round(longTaskMs);
+      window.__result = result;
+      document.title = 'done';
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+{
+  "label": "flags-vulkan-4k30",
+  "browser": "Chrome/156.0.8078.79",
+  "runs": {
+    "compositor": {
+      "result": {
+        "variant": "compositor",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          3840,
+          2160
+        ],
+        "dpr": 1,
+        "viewport": [
+          3840,
+          2160
+        ],
+        "loadMs": 118,
+        "readyMs": 138,
+        "harness": {
+          "frames": 599,
+          "fps": 30,
+          "medianMs": 33.3,
+          "p95Ms": 33.4,
+          "p99Ms": 33.4,
+          "maxMs": 33.5,
+          "droppedPct": 0
+        },
+        "template": {
+          "frames": 476,
+          "fps": 23.84,
+          "medianMs": 33.4,
+          "p95Ms": 66.7,
+          "p99Ms": 66.8,
+          "maxMs": 66.8,
+          "droppedPct": 20.53
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 18.8,
+      "tempMaxC": 62.3,
+      "throttled": "throttled=0x0"
+    },
+    "variant=rich,willchange": {
+      "result": {
+        "variant": "rich,willchange",
+        "particles": 0,
+        "sandboxed": true,
+        "seconds": 20,
+        "screen": [
+          3840,
+          2160
+        ],
+        "dpr": 1,
+        "viewport": [
+          3840,
+          2160
+        ],
+        "loadMs": 129,
+        "readyMs": 144,
+        "harness": {
+          "frames": 579,
+          "fps": 28.95,
+          "medianMs": 33.3,
+          "p95Ms": 33.4,
+          "p99Ms": 66.7,
+          "maxMs": 333.4,
+          "droppedPct": 3.5
+        },
+        "template": {
+          "frames": 395,
+          "fps": 19.78,
+          "medianMs": 33.4,
+          "p95Ms": 66.7,
+          "p99Ms": 100,
+          "maxMs": 333.3,
+          "droppedPct": 34.06
+        },
+        "longTasks": 0,
+        "longTaskMs": 0
+      },
+      "cpuBusyPct": 17.2,
+      "tempMaxC": 59.9,
+      "throttled": "throttled=0x0"
+    }
+  },
+  "gpu": {
+    "devices": [
+      {
+        "vendorId": 0,
+        "deviceId": 0,
+        "vendorString": "Google Inc. (Broadcom)",
+        "deviceString": "ANGLE (Broadcom, V3D 4.2.14.0, OpenGL ES 3.1 Mesa 26.2.6-1~bpo13+0~rpt2)",
+        "driverVendor": "Mesa",
+        "driverVersion": "26.2.6"
+      }
+    ],
+    "features": {
+      "2d_canvas": "enabled",
+      "direct_rendering_display_compositor": "disabled_off_ok",
+      "gpu_compositing": "enabled",
+      "multiple_raster_threads": "enabled_on",
+      "opengl": "enabled_on",
+      "rasterization": "enabled_force",
+      "raw_draw": "disabled_off_ok",
+      "skia_graphite": "disabled_off",
+      "trees_in_viz": "disabled_off",
+      "video_decode": "enabled",
+      "video_encode": "disabled_software",
+      "vulkan": "disabled_off",
+      "webgl": "enabled",
+      "webgpu": "disabled_off",
+      "webgpu_on_vk_via_gl_interop": "disabled_off",
+      "webnn": "disabled_off"
+    },
+    "workarounds": [
+      "enable_webgl_timer_query_extensions",
+      "exit_on_context_lost",
+      "rely_on_implicit_sync_for_swap_buffers",
+      "disabled_extension_GL_KHR_blend_equation_advanced",
+      "disabled_extension_GL_KHR_blend_equation_advanced_coherent"
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "defaultPlaylist": "all-day",
+  "entries": [
+    { "id": "breakfast", "playlist": "breakfast", "priority": 10, "target": "group", "from": "06:00", "to": "10:00" }
+  ]
+}

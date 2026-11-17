@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rive on Pi spike</title>
+<style>html, body { margin: 0; height: 100%; background: #06122b; overflow: hidden; } canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+  // ?runtime=canvas|webgl2  ?file=vehicles.riv  ?seconds=20  ?scale=1 (drawing surface scale)
+  const q = new URLSearchParams(location.search);
+  const runtime = q.get('runtime') || 'webgl2', seconds = Number(q.get('seconds') || 20), scale = Number(q.get('scale') || 1);
+  const t0 = performance.now();
+  const s = document.createElement('script'); s.src = 'vendor/' + runtime + '.js';
+  s.onload = () => {
+    rive.RuntimeLoader.setWasmUrl('vendor/' + runtime + '.wasm');
+    const canvas = document.getElementById('c');
+    canvas.width = innerWidth * scale; canvas.height = innerHeight * scale;
+    const result = { runtime, file: q.get('file') || 'vehicles.riv', viewport: [innerWidth, innerHeight], surface: [canvas.width, canvas.height] };
+    const r = new rive.Rive({
+      src: 'vendor/' + result.file, canvas, autoplay: true,
+      stateMachines: q.get('sm') || undefined,
+      layout: new rive.Layout({ fit: rive.Fit.Cover }),
+      onLoad: () => {
+        result.readyMs = Math.round(performance.now() - t0);
+        result.animations = r.animationNames; result.stateMachines = r.stateMachineNames;
+        let deltas = [], last = 0, on = true;
+        (function tick(t) { if (!on) return; if (last) deltas.push(t - last); last = t; requestAnimationFrame(tick); })(0);
+        setTimeout(() => {
+          on = false;
+          const a = [...deltas].sort((x, y) => x - y), at = p => a[Math.min(a.length - 1, Math.floor(a.length * p))];
+          const interval = at(.5), total = deltas.reduce((x, y) => x + y, 0);
+          const missed = deltas.reduce((x, d) => x + Math.max(0, Math.round(d / interval) - 1), 0);
+          const rd = n => Math.round(n * 100) / 100;
+          result.template = { frames: deltas.length, fps: rd(1000 * deltas.length / total), medianMs: rd(interval),
+            p99Ms: rd(at(.99)), maxMs: rd(a[a.length - 1]), droppedPct: rd(100 * missed / (deltas.length + missed)) };
+          window.__result = result;
+        }, seconds * 1000);
+      },
+      onLoadError: (e) => { window.__result = { runtime, error: String(e && (e.data || e)) }; },
+    });
+  };
+  s.onerror = () => { window.__result = { runtime, error: 'runtime script failed to load' }; };
+  document.head.appendChild(s);
+  addEventListener('error', e => { window.__result = window.__result || { runtime, error: e.message }; });
+</script>
+</body>
+</html>

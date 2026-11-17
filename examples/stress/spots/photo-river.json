@@ -1,0 +1,1 @@
+{ "name": "Photo promo, 4K photo", "kind": "template", "template": "photo-promo", "durationMs": 10000, "data": { "eyebrow": "Weekend escape", "headline": "Go further", "body": "Trail snacks and cold drinks, ready to go", "price": "2/$5" }, "assets": { "photo": "river-4k.jpg" } }

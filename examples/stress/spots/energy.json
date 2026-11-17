@@ -1,0 +1,8 @@
+{
+  "name": "Energy drinks 3 for $7",
+  "kind": "template",
+  "template": "cstore-promo",
+  "durationMs": 12000,
+  "data": { "quantity": "3", "price": "7", "points": "650", "promo": "Mix and match 3", "product": "Energy Drinks", "detail": "Selected 473 mL cans", "disclaimer": "While supplies last." },
+  "assets": { "imageLeft": "bottle-orange.svg", "imageCenter": "bottle-purple.svg", "imageRight": "bottle-blue.svg" }
+}

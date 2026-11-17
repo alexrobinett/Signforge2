@@ -1,0 +1,13 @@
+[Unit]
+Description=SignForge device supervisor (display power)
+After=network-online.target
+Before=signforge-kiosk.service
+
+[Service]
+User=alex
+ExecStart=/usr/bin/python3 /home/alex/signforge/supervisor.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

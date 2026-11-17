@@ -1,0 +1,9 @@
+{
+  "name": "@signforge/template-weather",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "typecheck": "tsc -p ." },
+  "dependencies": { "@signforge/template-sdk": "workspace:*" },
+  "devDependencies": { "@fontsource-variable/inter": "^5.2.8" }
+}

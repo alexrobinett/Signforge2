@@ -1,0 +1,25 @@
+{
+  "name": "Stress loop",
+  "transition": {
+    "type": "fade",
+    "ms": 600
+  },
+  "items": [
+    "sport-drinks",
+    "clock",
+    "photo-river",
+    "holidays",
+    "video-pan",
+    "news",
+    "weather-live",
+    "still-snow",
+    "menu",
+    "photo-berries",
+    "weather-rain",
+    "meeting-room",
+    "energy",
+    "photo-kitchen",
+    "weather-snow",
+    "still-strawberries"
+  ]
+}

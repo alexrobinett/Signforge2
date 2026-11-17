@@ -1,0 +1,12 @@
+node_modules
+dist
+.turbo
+.DS_Store
+*.log
+spike/rive-promo/build
+spike/pi-perf/rive/vendor
+examples/stress/media/*.jpg
+examples/stress/media/*.mp4
+examples/stress/media/bottle-*.svg
+spike/pi-perf/rejected-media/*.mp4
+spike/pi-perf/results/shots

@@ -1,0 +1,11 @@
+[Unit]
+Description=SignForge player files (local static server; stands in for the CDN until Milestone 3)
+
+[Service]
+User=alex
+WorkingDirectory=/home/alex/signforge/www
+ExecStart=/usr/bin/python3 -m http.server 8090 --bind 127.0.0.1
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Menu Board</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="stage" id="stage">
+  <header>
+    <h1 data-sf="title">Menu</h1>
+    <p class="subtitle" data-sf="subtitle"></p>
+  </header>
+  <ul class="items" id="items"></ul>
+  <p class="footnote" data-sf="footnote"></p>
+</div>
+<template id="row">
+  <li class="item">
+    <div class="line"><span class="name"></span><span class="tag"></span><span class="leader"></span><span class="price"></span></div>
+    <p class="desc"></p>
+  </li>
+</template>
+<script type="module" src="main.ts"></script>
+</body>
+</html>

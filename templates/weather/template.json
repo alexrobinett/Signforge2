@@ -1,0 +1,22 @@
+{
+  "id": "weather",
+  "version": "1.0.0",
+  "name": "Weather Now",
+  "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source.",
+  "fields": {
+    "city": { "type": "text", "label": "City", "default": "Atlanta", "maxLength": 24 },
+    "temp": { "type": "number", "label": "Temperature", "default": 72 },
+    "high": { "type": "number", "label": "Today's high", "default": 78 },
+    "low": { "type": "number", "label": "Today's low", "default": 61 },
+    "code": { "type": "number", "label": "WMO weather code", "default": 1 },
+    "isDay": { "type": "number", "label": "Daytime (1) or night (0)", "default": 1 },
+    "wind": { "type": "number", "label": "Wind speed", "default": 5 },
+    "humidity": { "type": "number", "label": "Humidity %", "default": 50 },
+    "unit": { "type": "select", "label": "Temperature unit", "options": ["°F", "°C"], "default": "°F" },
+    "windUnit": { "type": "select", "label": "Wind unit", "options": ["mph", "km/h"], "default": "mph" }
+  },
+  "duration": { "defaultMs": 8000, "minMs": 4000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": ["canvas"],
+  "background": "#0b1a33"
+}

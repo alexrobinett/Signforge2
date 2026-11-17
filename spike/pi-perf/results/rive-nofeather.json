@@ -1,0 +1,111 @@
+{
+  "label": "rive-nofeather",
+  "browser": "Chrome/156.0.8078.79",
+  "runs": {
+    "/rive/index.html?runtime=webgl2&file=promo-nofeather.riv&sm=Play": {
+      "result": {
+        "runtime": "webgl2",
+        "file": "promo-nofeather.riv",
+        "viewport": [
+          1920,
+          1080
+        ],
+        "surface": [
+          1920,
+          1080
+        ],
+        "readyMs": 356,
+        "animations": [
+          "Cycle",
+          "Bob",
+          "Spin"
+        ],
+        "stateMachines": [
+          "Play"
+        ],
+        "template": {
+          "frames": 451,
+          "fps": 22.59,
+          "medianMs": 50,
+          "p99Ms": 66.7,
+          "maxMs": 66.7,
+          "droppedPct": 0
+        }
+      },
+      "cpuBusyPct": 21.3,
+      "tempMaxC": 56.4,
+      "throttled": "throttled=0x0"
+    },
+    "/rive/index.html?runtime=canvas&file=promo-nofeather.riv&sm=Play": {
+      "result": {
+        "runtime": "canvas",
+        "file": "promo-nofeather.riv",
+        "viewport": [
+          1920,
+          1080
+        ],
+        "surface": [
+          1920,
+          1080
+        ],
+        "readyMs": 216,
+        "animations": [
+          "Cycle",
+          "Bob",
+          "Spin"
+        ],
+        "stateMachines": [
+          "Play"
+        ],
+        "template": {
+          "frames": 486,
+          "fps": 24.32,
+          "medianMs": 50,
+          "p99Ms": 83.4,
+          "maxMs": 100.1,
+          "droppedPct": 2.02
+        }
+      },
+      "cpuBusyPct": 15.4,
+      "tempMaxC": 56.4,
+      "throttled": "throttled=0x0"
+    }
+  },
+  "gpu": {
+    "devices": [
+      {
+        "vendorId": 0,
+        "deviceId": 0,
+        "vendorString": "Google Inc. (Broadcom)",
+        "deviceString": "ANGLE (Broadcom, V3D 4.2.14.0, OpenGL ES 3.1 Mesa 26.2.6-1~bpo13+0~rpt2)",
+        "driverVendor": "Mesa",
+        "driverVersion": "26.2.6"
+      }
+    ],
+    "features": {
+      "2d_canvas": "enabled",
+      "direct_rendering_display_compositor": "disabled_off_ok",
+      "gpu_compositing": "enabled",
+      "multiple_raster_threads": "enabled_on",
+      "opengl": "enabled_on",
+      "rasterization": "enabled_force",
+      "raw_draw": "disabled_off_ok",
+      "skia_graphite": "disabled_off",
+      "trees_in_viz": "disabled_off",
+      "video_decode": "enabled",
+      "video_encode": "disabled_software",
+      "vulkan": "disabled_off",
+      "webgl": "enabled",
+      "webgpu": "disabled_off",
+      "webgpu_on_vk_via_gl_interop": "disabled_off",
+      "webnn": "disabled_off"
+    },
+    "workarounds": [
+      "enable_webgl_timer_query_extensions",
+      "exit_on_context_lost",
+      "rely_on_implicit_sync_for_swap_buffers",
+      "disabled_extension_GL_KHR_blend_equation_advanced",
+      "disabled_extension_GL_KHR_blend_equation_advanced_coherent"
+    ]
+  }
+}

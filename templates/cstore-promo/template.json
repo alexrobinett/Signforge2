@@ -1,0 +1,22 @@
+{
+  "id": "cstore-promo",
+  "version": "1.0.0",
+  "name": "C-Store Promo",
+  "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
+  "fields": {
+    "quantity": { "type": "text", "label": "Quantity", "default": "2", "maxLength": 2 },
+    "price": { "type": "text", "label": "Price", "default": "4", "maxLength": 5 },
+    "points": { "type": "text", "label": "Points", "default": "400", "maxLength": 5 },
+    "promo": { "type": "text", "label": "Promo line", "default": "Buy any 2", "maxLength": 24 },
+    "product": { "type": "text", "label": "Product name", "default": "Sport Drinks", "maxLength": 18 },
+    "detail": { "type": "text", "label": "Detail line", "default": "All flavours, 710 mL", "maxLength": 40 },
+    "disclaimer": { "type": "text", "label": "Disclaimer", "default": "", "maxLength": 120 },
+    "imageLeft": { "type": "image", "label": "Left product" },
+    "imageCenter": { "type": "image", "label": "Centre product" },
+    "imageRight": { "type": "image", "label": "Right product" }
+  },
+  "duration": { "defaultMs": 8000, "minMs": 4000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#06122b"
+}

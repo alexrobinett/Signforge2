@@ -1,0 +1,11 @@
+[Unit]
+Description=SignForge spike static file server
+
+[Service]
+User=alex
+WorkingDirectory=/home/alex/spike
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agenda</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="stage">
+  <header>
+    <div>
+      <h1 data-sf="title">Coming up</h1>
+      <p class="subtitle" data-sf="subtitle"></p>
+    </div>
+    <p class="today" id="today"></p>
+  </header>
+  <ol class="events" id="events"></ol>
+  <p class="empty" id="empty" data-sf="empty" hidden>Nothing scheduled</p>
+</div>
+<template id="row">
+  <li class="event">
+    <div class="day"><span class="dow"></span><span class="num"></span><span class="mon"></span></div>
+    <div class="what">
+      <p class="when"></p>
+      <p class="name"></p>
+      <p class="where"></p>
+    </div>
+  </li>
+</template>
+<script type="module" src="main.ts"></script>
+</body>
+</html>

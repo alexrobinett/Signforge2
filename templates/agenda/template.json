@@ -1,0 +1,30 @@
+{
+  "id": "agenda",
+  "version": "1.0.0",
+  "name": "Agenda",
+  "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
+  "fields": {
+    "title": { "type": "text", "label": "Title", "default": "Coming up", "maxLength": 32 },
+    "subtitle": { "type": "text", "label": "Subtitle", "default": "", "maxLength": 48 },
+    "events": {
+      "type": "list",
+      "label": "Events",
+      "maxItems": 25,
+      "default": [],
+      "item": {
+        "title": { "type": "text", "label": "Title", "maxLength": 80 },
+        "start": { "type": "text", "label": "Start (YYYY-MM-DD or ISO time)" },
+        "end": { "type": "text", "label": "End", "default": "" },
+        "allDay": { "type": "boolean", "label": "All day", "default": false },
+        "location": { "type": "text", "label": "Location", "default": "" }
+      }
+    },
+    "rows": { "type": "number", "label": "Events to show", "default": 5, "min": 1, "max": 6 },
+    "empty": { "type": "text", "label": "Shown when there is nothing coming up", "default": "Nothing scheduled", "maxLength": 48 },
+    "accent": { "type": "color", "label": "Accent colour", "default": "#ffb547" }
+  },
+  "duration": { "defaultMs": 10000, "minMs": 5000, "maxMs": 120000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#0d1117"
+}

@@ -1,0 +1,91 @@
+/*
+ * C-Store Promo. Fluid: every length derives from --u, 1% of the shorter side.
+ * Each element has an intro (after a stagger delay) and an outro timed from the end of
+ * the spot through --sf-duration, so the spot can run for any length.
+ * Only transform and opacity animate.
+ */
+@font-face {
+  font-family: "Inter";
+  src: url("./node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; overflow: hidden; background: #06122b; }
+body { font-family: "Inter", sans-serif; color: #fff; }
+
+.stage {
+  --u: 1vmin;
+  --out: calc(var(--sf-duration, 8s) - 0.7s);
+  position: fixed; inset: 0; overflow: hidden;
+  background: radial-gradient(120% 90% at 70% 40%, #1c4fd6 0%, #0b2a7a 45%, #06122b 100%);
+  display: grid; grid-template-columns: 46fr 54fr; align-items: center;
+}
+.glow { position: absolute; width: 90vmin; height: 90vmin; right: 2vw; top: 50%; margin-top: -45vmin;
+  animation: pulse 8s ease-in-out infinite; will-change: transform, opacity; }
+/* Soft by construction: a radial gradient needs no blur filter. */
+.glow-in { position: absolute; inset: 0; border-radius: 50%;
+  background: radial-gradient(circle, rgba(120,190,255,.5), rgba(120,190,255,.18) 40%, rgba(120,190,255,0) 70%); }
+
+.copy { padding-left: calc(var(--u) * 8); position: relative; z-index: 2; }
+.copy::before { content: ""; position: absolute; inset: -4vmin -2vmin -4vmin 2vmin; border-radius: 4vmin; z-index: -1;
+  background: linear-gradient(135deg, rgba(255,255,255,.16), rgba(255,255,255,.04));
+  border: .15vmin solid rgba(255,255,255,.18);
+  animation: fade-in .6s ease both, fade-out .5s ease-in forwards; animation-delay: 0s, var(--out); }
+.price { display: flex; align-items: flex-start; font-weight: 900; line-height: .82; letter-spacing: -.04em;
+  font-size: calc(var(--u) * 34); transform-origin: 0 60%; text-shadow: 0 1vmin 3vmin rgba(0,0,0,.45);
+  animation: pop-in .9s cubic-bezier(.2,1.4,.3,1) both, shrink-out .5s ease-in forwards; animation-delay: .1s, var(--out);
+  will-change: transform, opacity; }
+.price .slash { font-weight: 300; opacity: .7; margin: 0 calc(var(--u) * 1); }
+.price .cur { font-size: .42em; margin-top: .12em; }
+.line { font-weight: 800; text-transform: uppercase; white-space: nowrap; will-change: transform, opacity;
+  animation: slide-in .8s cubic-bezier(.2,.8,.2,1) both, slide-out .5s ease-in forwards; }
+.l1 { font-size: calc(var(--u) * 5.2); margin-top: calc(var(--u) * 3); color: #ffd84a; animation-delay: .35s, var(--out); }
+.l2 { font-size: calc(var(--u) * 8.4); letter-spacing: -.02em; animation-delay: .5s, var(--out);
+  background: linear-gradient(90deg, #fff, #9fd0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.l3 { font-size: calc(var(--u) * 3); font-weight: 500; text-transform: none; animation-delay: .65s, var(--out); }
+
+.products { position: relative; height: 100%; z-index: 1; }
+.product { position: absolute; bottom: 9%; height: 70%; aspect-ratio: 1 / 2.8; will-change: transform, opacity;
+  animation: rise-in 1.1s cubic-bezier(.2,1.2,.3,1) both, sink-out .6s ease-in forwards; }
+.bob { width: 100%; height: 100%; animation: bob 3.2s ease-in-out infinite alternate; will-change: transform; }
+.product img { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* A painted contact shadow under each product instead of a drop-shadow filter. */
+.product::before { content: ""; position: absolute; left: -10%; right: -10%; bottom: -4%; height: 9%; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0,0,0,.5), rgba(0,0,0,0)); }
+.p1 { left: 14%; animation-delay: .6s, var(--out); } .p1 .bob { animation-delay: -.4s; }
+.p2 { left: 36%; height: 80%; z-index: 2; animation-delay: .45s, var(--out); }
+.p3 { left: 60%; animation-delay: .75s, var(--out); } .p3 .bob { animation-delay: -1.1s; }
+
+.badge { position: absolute; right: 5%; top: 7%; width: calc(var(--u) * 27); aspect-ratio: 1; z-index: 3;
+  display: grid; place-items: center; text-align: center; will-change: transform, opacity;
+  animation: badge-in .9s cubic-bezier(.2,1.5,.3,1) both, shrink-out .5s ease-in forwards; animation-delay: 1s, var(--out); }
+.badge .disc { position: absolute; inset: 6%; border-radius: 50%; background: #fff;
+  box-shadow: 0 1.5vmin 5vmin rgba(0,0,0,.5), 0 0 8vmin rgba(255,255,255,.35); }
+.badge .ring { position: absolute; inset: 0; animation: spin 14s linear infinite; will-change: transform; }
+.badge .txt { position: relative; color: #c8102e; font-weight: 900; line-height: 1; }
+.badge small { display: block; font-size: calc(var(--u) * 2.4); font-weight: 700; color: #06122b; }
+.badge b { display: block; font-size: calc(var(--u) * 9); letter-spacing: -.03em; }
+
+.legal { position: absolute; left: calc(var(--u) * 8); right: calc(var(--u) * 8); bottom: calc(var(--u) * 3.5);
+  font-size: calc(var(--u) * 1.6); z-index: 3; --rest: .7;
+  animation: fade-in .8s ease both, fade-out .5s ease-in forwards; animation-delay: 1.2s, var(--out); }
+
+[data-orientation="portrait"] .stage { grid-template-columns: 1fr; grid-template-rows: 44fr 56fr; }
+[data-orientation="portrait"] .copy { padding: calc(var(--u) * 10) calc(var(--u) * 8) 0; align-self: start; }
+[data-orientation="portrait"] .glow { right: -10vmin; top: 68%; }
+[data-orientation="portrait"] .badge { top: 40%; right: 6%; }
+[data-orientation="portrait"] .product { height: 78%; }
+[data-orientation="portrait"] .p2 { height: 88%; }
+
+@keyframes pop-in    { from { transform: scale(.3); opacity: 0 } }
+@keyframes slide-in  { from { transform: translateX(-30vw); opacity: 0 } }
+@keyframes rise-in   { from { transform: translateY(110%) rotate(8deg); opacity: 0 } }
+@keyframes badge-in  { from { transform: scale(0) rotate(-40deg); opacity: 0 } }
+@keyframes fade-in   { from { opacity: 0 } to { opacity: var(--rest, 1) } }
+@keyframes shrink-out { to { transform: scale(.85); opacity: 0 } }
+@keyframes slide-out { to { transform: translateX(-8vw); opacity: 0 } }
+@keyframes sink-out  { to { transform: translateY(30%); opacity: 0 } }
+@keyframes fade-out  { to { opacity: 0 } }
+@keyframes bob   { from { transform: translateY(-1.2%) rotate(-1.2deg) } to { transform: translateY(1.2%) rotate(1.2deg) } }
+@keyframes spin  { to { transform: rotate(360deg) } }
+@keyframes pulse { 0%, 100% { transform: scale(.85); opacity: .6 } 50% { transform: scale(1.1); opacity: 1 } }

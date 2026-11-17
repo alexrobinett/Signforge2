@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weather Now</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="sky"></div>
+  <div class="orb"><div class="rays"></div><div class="disc"></div></div>
+  <div id="fx"></div>
+  <div class="cloud c1"></div><div class="cloud c2"></div><div class="cloud c3"></div>
+  <div class="info">
+    <p class="city" data-sf="city">Atlanta</p>
+    <div class="temp"><span id="temp">72</span><span class="unit" data-sf="unit">°F</span></div>
+    <p class="cond" id="cond">Partly cloudy</p>
+    <p class="range"><span>High <b id="high">78°</b></span><span>Low <b id="low">61°</b></span></p>
+    <p class="extra"><span>Wind <b id="wind">5 mph</b></span><span>Humidity <b id="humidity">50%</b></span></p>
+  </div>
+</div>
+<script type="module" src="main.ts"></script>
+</body>
+</html>

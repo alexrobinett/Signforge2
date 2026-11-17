@@ -1,0 +1,9 @@
+{
+  "name": "Clock",
+  "kind": "template",
+  "template": "clock",
+  "durationMs": 8000,
+  "data": {
+    "message": "Welcome to SignForge"
+  }
+}

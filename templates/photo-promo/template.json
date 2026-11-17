@@ -1,0 +1,17 @@
+{
+  "id": "photo-promo",
+  "version": "1.0.0",
+  "name": "Photo Promo",
+  "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
+  "fields": {
+    "photo": { "type": "image", "label": "Background photo" },
+    "eyebrow": { "type": "text", "label": "Eyebrow", "default": "This week", "maxLength": 24 },
+    "headline": { "type": "text", "label": "Headline", "default": "Fresh picked", "maxLength": 28 },
+    "body": { "type": "text", "label": "Body line", "default": "", "maxLength": 60 },
+    "price": { "type": "text", "label": "Price tag", "default": "$3.99", "maxLength": 8 }
+  },
+  "duration": { "defaultMs": 8000, "minMs": 4000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#000000"
+}

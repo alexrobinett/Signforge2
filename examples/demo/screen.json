@@ -1,0 +1,44 @@
+{
+  "id": "demo-counter",
+  "name": "Demo counter screen",
+  "timezone": "America/New_York",
+  "orientation": "landscape",
+  "displayHours": {
+    "weekly": [
+      {
+        "days": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "from": "06:00",
+        "to": "22:00"
+      },
+      {
+        "days": [
+          0,
+          6
+        ],
+        "from": "08:00",
+        "to": "20:00"
+      }
+    ],
+    "exceptions": [
+      {
+        "date": "2026-11-26",
+        "on": []
+      },
+      {
+        "date": "2026-12-24",
+        "on": [
+          {
+            "from": "08:00",
+            "to": "14:00"
+          }
+        ]
+      }
+    ]
+  }
+}

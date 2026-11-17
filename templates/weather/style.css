@@ -1,0 +1,72 @@
+/* Weather Now. The scene (sky, sun or moon, clouds, rain or snow) follows the condition class
+   set on .stage by main.ts. Rain and snow are drawn on one canvas, not as DOM elements. */
+@font-face {
+  font-family: "Inter";
+  src: url("./node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; overflow: hidden; background: #0b1a33; }
+body { font-family: "Inter", sans-serif; color: #fff; }
+.stage { --u: 1vmin; --out: calc(var(--sf-duration, 8s) - 0.6s); position: fixed; inset: 0; overflow: hidden; }
+
+.sky { position: absolute; inset: 0; background: linear-gradient(170deg, #2f80ed 0%, #56ccf2 100%); }
+.night .sky { background: linear-gradient(170deg, #0b1a33 0%, #1d2b64 100%); }
+.cloudy .sky, .fog .sky { background: linear-gradient(170deg, #5b6b82 0%, #9fb1c7 100%); }
+.rain .sky, .storm .sky { background: linear-gradient(170deg, #26364d 0%, #51657f 100%); }
+.snow .sky { background: linear-gradient(170deg, #6f8fb0 0%, #dfe9f3 100%); }
+.night.cloudy .sky, .night.rain .sky, .night.storm .sky, .night.snow .sky, .night.fog .sky { background: linear-gradient(170deg, #0a1220 0%, #2b3a52 100%); }
+
+.orb { position: absolute; right: 12vw; top: 16vh; width: 34vmin; height: 34vmin; will-change: transform, opacity;
+  animation: orb-in 1.2s cubic-bezier(.2,1.2,.3,1) both, fade-out .5s ease-in forwards; animation-delay: .1s, var(--out); }
+.orb .disc { position: absolute; inset: 18%; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff6c9, #ffc93c 60%, #ff9f1c);
+  box-shadow: 0 0 9vmin rgba(255, 205, 80, .75); }
+.orb .rays { position: absolute; inset: 0; border-radius: 50%; will-change: transform; animation: spin 40s linear infinite;
+  background: repeating-conic-gradient(rgba(255, 220, 120, .55) 0 6deg, transparent 6deg 30deg);
+  -webkit-mask: radial-gradient(circle, transparent 36%, #000 37%, #000 62%, transparent 70%); mask: radial-gradient(circle, transparent 36%, #000 37%, #000 62%, transparent 70%); }
+.night .orb .disc { background: radial-gradient(circle at 35% 35%, #ffffff, #dfe7f5 60%, #aab7d1); box-shadow: 0 0 8vmin rgba(200, 220, 255, .5); }
+.night .orb .rays { display: none; }
+.rain .orb, .storm .orb, .snow .orb, .fog .orb { opacity: 0; animation: none; }
+
+.cloud { position: absolute; width: 46vmin; height: 15vmin; border-radius: 10vmin; background: #fff; opacity: 0;
+  will-change: transform; animation: drift 26s linear infinite; }
+.cloud::before, .cloud::after { content: ""; position: absolute; border-radius: 50%; background: inherit; }
+.cloud::before { width: 20vmin; height: 20vmin; left: 6vmin; top: -9vmin; }
+.cloud::after { width: 26vmin; height: 26vmin; right: 5vmin; top: -13vmin; }
+.c1 { top: 14vh; left: -50vmin; }
+.c2 { top: 34vh; left: -50vmin; animation-duration: 38s; animation-delay: -14s; scale: .7; }
+.c3 { top: 6vh; left: -50vmin; animation-duration: 32s; animation-delay: -24s; scale: .55; }
+/* Solid colours on every part: overlapping translucent circles show their seams. */
+.partly .c1, .partly .c2 { opacity: .92; }
+.cloudy .cloud, .rain .cloud, .storm .cloud, .snow .cloud, .fog .cloud { opacity: .92; }
+.rain .cloud, .storm .cloud, .night .cloud { background: #b9c3d1; }
+
+#fx { position: absolute; inset: 0; overflow: hidden; }
+/* Rain falls at an angle: rotate the whole field and oversize it so the corners stay covered. */
+#fx.slant { inset: -25%; transform: rotate(14deg); }
+#fx .fall { position: absolute; left: 0; right: 0; top: calc(var(--tile) * -1); bottom: 0; background-size: var(--tile) var(--tile);
+  will-change: transform; animation: fall 1s linear infinite; }
+#fx .snow { animation-name: fall, sway; animation-timing-function: linear, ease-in-out; animation-direction: normal, alternate; }
+
+.info { position: absolute; left: calc(var(--u) * 8); bottom: calc(var(--u) * 9); text-shadow: 0 .6vmin 2.4vmin rgba(0,0,0,.35); }
+.info > * { will-change: transform, opacity; animation: rise-in .8s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards; }
+.city { font-size: calc(var(--u) * 5); font-weight: 700; letter-spacing: .02em; text-transform: uppercase; animation-delay: .2s, var(--out); }
+.temp { display: flex; align-items: flex-start; font-size: calc(var(--u) * 36); font-weight: 900; line-height: .9; letter-spacing: -.05em; animation-delay: .35s, var(--out); }
+.temp .unit { font-size: .3em; margin-top: .22em; margin-left: .08em; font-weight: 700; letter-spacing: 0; }
+.cond { font-size: calc(var(--u) * 6.4); font-weight: 800; animation-delay: .5s, var(--out); }
+.range, .extra { display: flex; gap: calc(var(--u) * 5); font-size: calc(var(--u) * 3.4); font-weight: 500; margin-top: calc(var(--u) * 1.6); }
+.range { animation-delay: .65s, var(--out); }
+.extra { animation-delay: .8s, var(--out); opacity: .9; }
+.range b, .extra b { font-weight: 800; }
+
+[data-orientation="portrait"] .orb { right: 50%; margin-right: -17vmin; top: 12vh; }
+[data-orientation="portrait"] .info { left: 8vw; right: 8vw; bottom: 12vh; }
+[data-orientation="portrait"] .temp { font-size: calc(var(--u) * 44); }
+
+@keyframes orb-in  { from { transform: translateY(20vh) scale(.5); opacity: 0 } }
+@keyframes rise-in { from { transform: translateY(6vh); opacity: 0 } }
+@keyframes fade-out { to { opacity: 0 } }
+@keyframes spin  { to { transform: rotate(360deg) } }
+@keyframes drift { to { transform: translateX(calc(100vw + 60vmin)) } }
+@keyframes fall  { to { transform: translateY(var(--tile)) } }
+@keyframes sway  { from { translate: -1.5vmin 0 } to { translate: 1.5vmin 0 } }
