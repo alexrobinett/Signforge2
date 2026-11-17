@@ -33,7 +33,8 @@ describe('the registry', () => {
 
   it('lists the first tools', () => {
     expect([...registry.keys()].sort()).toEqual([
-      'create_group', 'delete_group', 'get_screen', 'get_template', 'list_groups', 'list_screens', 'list_templates', 'publish_manifest_to_screen',
+      'create_asset_upload', 'create_group', 'delete_asset', 'delete_group', 'finalize_asset', 'get_asset', 'get_screen', 'get_template',
+      'list_assets', 'list_groups', 'list_screens', 'list_templates', 'publish_manifest_to_screen',
       'register_template_version', 'rename_group', 'rename_screen', 'revoke_screen_credential', 'set_group_members', 'set_template_version_status',
       'update_screen_settings',
     ]);
@@ -74,7 +75,7 @@ describe('roles and scopes', () => {
 
   it('decide what GET /api/tools lists', () => {
     const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes }).map((t) => t.name);
-    expect(names('viewer').sort()).toEqual(['get_screen', 'get_template', 'list_groups', 'list_screens', 'list_templates']);
+    expect(names('viewer').sort()).toEqual(['get_asset', 'get_screen', 'get_template', 'list_assets', 'list_groups', 'list_screens', 'list_templates']);
     expect(names('editor')).not.toContain('revoke_screen_credential');
     expect(names('editor')).not.toContain('set_template_version_status');
     expect(names('owner')).toHaveLength(TOOLS.length);

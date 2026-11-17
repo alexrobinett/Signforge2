@@ -14,5 +14,6 @@ export default defineConfig({
       },
     })),
   ],
-  test: { setupFiles: ['test/setup.ts'] },
+  // test/e2e runs in Node, with a browser: vitest.e2e.config.ts.
+  test: { setupFiles: ['test/setup.ts'], exclude: ['test/e2e/**', '**/node_modules/**'] },
 });

@@ -72,6 +72,7 @@ describe('requests', () => {
   const writes: string[] = [];
   let owner: Client;
   let screenId: string;
+  let assetId: string;
   let baseTemplate: string;
 
   beforeAll(async () => {
@@ -80,6 +81,7 @@ describe('requests', () => {
     await setup.signIn(email('guard'));
     const org = await setup.createOrg('Guard');
     screenId = (await scoped(env.DB, org.id).screens.insert({ name: 'Guarded', timezone: 'UTC', orientation: 'landscape' })).id;
+    assetId = (await scoped(env.DB, org.id).assets.insert({ kind: 'image', name: 'a.png', sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 })).id;
     // The same session, on a D1 binding that records writes.
     owner = new Client(t, setup.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of setup.jar) owner.jar.set(k, v);
@@ -104,7 +106,7 @@ describe('requests', () => {
       if (tool.mutates) continue;
       writes.length = 0;
       const example = tool.example as Record<string, unknown>;
-      const input = 'screenId' in example ? { ...example, screenId } : 'templateId' in example ? { ...example, templateId: baseTemplate } : example;
+      const input = 'screenId' in example ? { ...example, screenId } : 'templateId' in example ? { ...example, templateId: baseTemplate } : 'assetId' in example ? { ...example, assetId } : example;
       expect((await owner.tool(tool.name, input)).status, tool.name).toBe(200);
       expect(ours(), tool.name).toEqual([]);
     }
@@ -165,9 +167,21 @@ describe('POST /api/tools/:name', () => {
     expect(broken.status).toBe(200); // an empty body is an empty input
   });
 
+  it('hands out presigned uploads to the local bucket in dev', async () => {
+    const r = { sha256: '1'.repeat(64), type: 'image/jpeg', size: 1000, width: 1920, height: 1080 };
+    const res = await owner.tool('create_asset_upload', { name: 'Photo', renditions: { landscape: r, portrait: { ...r, sha256: '2'.repeat(64), width: 1920 } } });
+    expect(res.status).toBe(200);
+    const { asset, uploads } = (await res.json()) as { asset: { id: string; status: string }; uploads: { url: string }[] };
+    expect(asset.status).toBe('pending');
+    expect(uploads).toHaveLength(2);
+    const url = new URL(uploads[0]!.url);
+    expect(url.pathname).toMatch(new RegExp(`^/cdn-cgi/local/r2/s3/signforge-dev/up/[^/]+/${asset.id}/[0-9a-f]{64}$`));
+    expect(url.searchParams.get('X-Amz-Credential')).toMatch(/^signforge-local\//);
+  });
+
   it('lists what the caller may use', async () => {
     const names = async (c: Client) => ((await (await c.get('/api/tools')).json()) as { tools: { name: string }[] }).tools.map((x) => x.name);
     expect(await names(owner)).toHaveLength(registry.size);
-    expect((await names(viewer)).sort()).toEqual(['get_screen', 'get_template', 'list_groups', 'list_screens', 'list_templates']);
+    expect((await names(viewer)).sort()).toEqual(['get_asset', 'get_screen', 'get_template', 'list_assets', 'list_groups', 'list_screens', 'list_templates']);
   });
 });

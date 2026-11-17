@@ -6,6 +6,7 @@
  */
 import type { OrgScope, PlatformScope } from '@signforge/db';
 import type { z } from 'zod';
+import type { UploadSigner } from './upload';
 
 /** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
 export const SCOPES = ['content:read', 'content:draft', 'content:publish', 'screens:manage'] as const;
@@ -47,16 +48,23 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   input: I;
   /** The R2 bucket holding blobs and manifests (keys in ./r2.ts). */
   blobs: R2Bucket;
+  /** Signs direct uploads to that bucket (./upload.ts). Undefined where uploads are not configured. */
+  uploads?: UploadSigner;
 }
 
 export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict';
 
-/** A refusal a handler means to return. Anything else a handler throws is a bug and propagates. */
+/**
+ * A refusal a handler means to return. Anything else a handler throws is a bug and propagates.
+ * A refusal that changed something on the way (`finalize_asset` marks a bad upload rejected) sets
+ * `changed`, and the dispatcher audits it like a success.
+ */
 export class ToolError extends Error {
   constructor(
     readonly code: ToolErrorCode,
     message: string,
     readonly details?: unknown,
+    readonly changed = false,
   ) {
     super(message);
     this.name = 'ToolError';
