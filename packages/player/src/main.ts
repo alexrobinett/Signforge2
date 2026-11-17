@@ -15,11 +15,11 @@
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
  */
 import type { ScreenManifest, Spot, Transition } from '@signforge/contract';
-import { Sequencer, displayOn, localTime, type Step } from '@signforge/player-core';
+import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { DeviceCredential } from './credential';
 import { dataRejections, dataSettled, dataStatus, startDataLoop } from './data';
 import { Slot } from './slot';
-import { UnauthorisedError, loadActiveManifest, requestPersistence, sync } from './store';
+import { PinSet, UnauthorisedError, loadActiveManifest, requestPersistence, sync } from './store';
 
 const query = new URLSearchParams(location.search);
 const CONTENT = query.get('content') ?? './content';
@@ -113,7 +113,7 @@ function monitor(t: number): void {
     // The display's frame interval is the median of the first two seconds of frames.
     if (!interval) {
       warmup.push(d);
-      if (warmup.length < 120) return void requestAnimationFrame(monitor), void (lastFrame = t);
+      if (warmup.length < 120) return (void requestAnimationFrame(monitor), void (lastFrame = t));
       interval = warmup.sort((x, y) => x - y)[60]!;
     }
     const missed = Math.max(0, Math.round(d / interval) - 1);
@@ -140,8 +140,12 @@ function renderHud(): void {
     `playlist ${state.playlist}\nspot     ${state.spot}\n` +
     `played ${state.played}  skipped ${state.skipped}${state.displayOn ? '' : '  ASLEEP'}\n` +
     `frames ${f.count}  dropped ${pct}%  worst ${f.maxMs} ms` +
-    Object.entries(dataStatus()).map(([id, at]) => `\ndata ${id}  ${at.slice(11, 19)}Z`).join('') +
-    Object.entries(dataRejections()).map(([id, n]) => `\ndata ${id}  ${n} REFUSED`).join('') +
+    Object.entries(dataStatus())
+      .map(([id, at]) => `\ndata ${id}  ${at.slice(11, 19)}Z`)
+      .join('') +
+    Object.entries(dataRejections())
+      .map(([id, n]) => `\ndata ${id}  ${n} REFUSED`)
+      .join('') +
     (state.lastError ? `\nlast error: ${state.lastError}` : '');
 }
 
@@ -216,7 +220,13 @@ function record(step: Step, manifestId: string): void {
   state.spot = step.spot.id;
   state.playlist = step.playlist.id;
   state.played++;
-  state.log.push({ spot: step.spot.id, playlist: step.playlist.id, manifest: manifestId, startedAt: new Date().toISOString(), durationMs: step.spot.durationMs });
+  state.log.push({
+    spot: step.spot.id,
+    playlist: step.playlist.id,
+    manifest: manifestId,
+    startedAt: new Date().toISOString(),
+    durationMs: step.spot.durationMs,
+  });
   if (state.log.length > 500) state.log.shift();
   lastProgress = performance.now();
 }
@@ -230,6 +240,11 @@ const hold = (ms: number) => Promise.race([sleep(ms), fellAsleep]);
 
 let manifest: ScreenManifest | undefined;
 let sequencer: Sequencer | undefined;
+/**
+ * Files cache cleanup must keep beyond the active manifest's: the spot on screen (`playing`) and
+ * the spot loading (`preparing`), either of which may come from a manifest just replaced.
+ */
+const pins = new PinSet();
 
 /**
  * Run a loop body forever. A bug or a bad value must never end playback: log it, wait, try again.
@@ -249,6 +264,8 @@ async function forever(name: string, body: () => Promise<void>): Promise<never> 
 async function playbackLoop(): Promise<never> {
   let current: Slot | undefined;
   let currentSpot: Spot | undefined;
+  /** The manifest `currentSpot` came from: its files are named there. */
+  let currentManifest: ScreenManifest | undefined;
   let startedAt = 0;
   let failures = 0;
 
@@ -265,6 +282,8 @@ async function playbackLoop(): Promise<never> {
       }
       current = undefined;
       currentSpot = undefined;
+      pins.release('playing');
+      pins.release('preparing');
       status('');
       state.spot = '';
       phase = 'sleep';
@@ -286,6 +305,7 @@ async function playbackLoop(): Promise<never> {
       }
       current = undefined;
       currentSpot = undefined;
+      pins.release('playing');
       status('SignForge\nNothing is scheduled for this screen.');
       lastProgress = performance.now(); // waiting on purpose, not stuck
       await sleep(5000);
@@ -295,6 +315,8 @@ async function playbackLoop(): Promise<never> {
     // A crossfade overlaps the end of the current spot; a fade's dark half does too.
     const tr = step.playlist.transition;
     const fadeMs = tr.type === 'crossfade' ? tr.ms : tr.type === 'fade' ? tr.ms / 2 : 0;
+    // Pinned before the first await: a sync that replaces `m` meanwhile must not delete these files.
+    pins.hold('preparing', spotFiles(step.spot, m));
     phase = 'prepare';
     preparing = step.spot.id;
     // A spot's data is fixed for its play: let its feeds finish their first load before it starts.
@@ -303,6 +325,7 @@ async function playbackLoop(): Promise<never> {
     }
     const ok = await prepareStep(slot, step, m);
     preparing = '';
+    if (!ok) pins.release('preparing');
     phase = 'play';
     if (!state.displayOn) return;
     if (!ok) {
@@ -311,6 +334,7 @@ async function playbackLoop(): Promise<never> {
         if (current) current.el.style.opacity = '0';
         current = undefined;
         currentSpot = undefined;
+        pins.release('playing');
         status('SignForge\nContent is unavailable. Retrying…');
         lastProgress = performance.now();
         await sleep(5000);
@@ -329,10 +353,17 @@ async function playbackLoop(): Promise<never> {
     record(step, m.id);
     phase = 'transition';
     const done = show(slot, current, step.playlist.transition);
+    // A video keeps reading its file from the cache while it plays, and the outgoing spot is
+    // still on screen until the transition ends.
+    const playing = spotFiles(step.spot, m);
+    pins.hold('playing', currentSpot ? [...playing, ...spotFiles(currentSpot, currentManifest ?? m)] : playing);
+    pins.release('preparing');
     front = front === 0 ? 1 : 0;
     current = slot;
     currentSpot = step.spot;
+    currentManifest = m;
     await done;
+    pins.hold('playing', playing);
     phase = 'play';
   });
 }
@@ -394,7 +425,12 @@ async function displayLoop(): Promise<never> {
 async function syncLoop(): Promise<never> {
   return forever('sync', async () => {
     try {
-      const result = await sync(CONTENT, { currentId: manifest?.id, headers: await deviceHeaders(), ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}) });
+      const result = await sync(CONTENT, {
+        currentId: manifest?.id,
+        headers: await deviceHeaders(),
+        ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
+        pinned: pins,
+      });
       state.online = true;
       state.auth = '';
       state.lastSync = new Date().toISOString();
@@ -421,10 +457,19 @@ async function syncLoop(): Promise<never> {
 
 /** Testing override: an ad hoc playlist of the given spots, replacing the schedule. */
 function applyOverrides(m: ScreenManifest): ScreenManifest {
-  const ids = query.get('spots')?.split(',').filter((id) => m.spots[id]);
+  const ids = query
+    .get('spots')
+    ?.split(',')
+    .filter((id) => m.spots[id]);
   const t = query.get('transition');
   const transition: Transition | undefined =
-    t === 'cut' ? { type: 'cut' } : t?.startsWith('fade') ? { type: 'fade', ms: Number(t.slice(4)) || 500 } : t ? { type: 'crossfade', ms: Number(t) } : undefined;
+    t === 'cut'
+      ? { type: 'cut' }
+      : t?.startsWith('fade')
+        ? { type: 'fade', ms: Number(t.slice(4)) || 500 }
+        : t
+          ? { type: 'crossfade', ms: Number(t) }
+          : undefined;
   if (!ids?.length && !transition) return m;
   const playlists = { ...m.playlists };
   if (ids?.length) playlists.__test = { id: '__test', name: 'Test', transition: transition ?? { type: 'cut' }, items: ids.map((spot) => ({ spot })) };

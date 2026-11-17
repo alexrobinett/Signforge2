@@ -27,6 +27,8 @@ export interface FixtureSpot {
   items?: { title: string }[];
   /** Fields that take their value from live data. Each source is added to the manifest. */
   bindings?: Record<string, Binding>;
+  /** A file of the spot's own, passed to the template as asset `file`. */
+  asset?: Buffer;
 }
 
 export interface Content {
@@ -62,6 +64,8 @@ export function buildContent(templateHtml: string, spots: FixtureSpot[], { trans
   const html = Buffer.from(templateHtml);
   const htmlSha = sha256(html);
   const spotMap: Record<string, Spot> = {};
+  const blobs = new Map<string, Buffer>([[htmlSha, html]]);
+  const files: ScreenManifest['files'] = { [htmlSha]: { size: html.byteLength, type: 'text/html' } };
   for (const s of spots) {
     spotMap[s.id] = {
       id: s.id,
@@ -73,6 +77,12 @@ export function buildContent(templateHtml: string, spots: FixtureSpot[], { trans
       assets: {},
       ...(s.bindings ? { bindings: s.bindings } : {}),
     };
+    if (s.asset) {
+      const sha = sha256(s.asset);
+      blobs.set(sha, s.asset);
+      files[sha] = { size: s.asset.byteLength, type: 'application/octet-stream' };
+      (spotMap[s.id] as Extract<Spot, { kind: 'template' }>).assets.file = sha;
+    }
   }
   const dataSources: Record<string, DataSource> = {};
   for (const b of spots.flatMap((s) => Object.values(s.bindings ?? {}))) dataSources[b.source] = { id: b.source, refreshS: MIN_REFRESH_S };
@@ -80,7 +90,7 @@ export function buildContent(templateHtml: string, spots: FixtureSpot[], { trans
     schema: MANIFEST_SCHEMA,
     generatedAt: new Date().toISOString(),
     screen: { id: 'test-screen', name: 'Test screen', timezone: 'UTC', orientation: 'landscape' },
-    files: { [htmlSha]: { size: html.byteLength, type: 'text/html' } },
+    files,
     templates: { [TEMPLATE_KEY]: { manifest: templateManifest, html: htmlSha } },
     spots: spotMap,
     playlists: { main: { id: 'main', name: 'Main', transition, items: spots.map((s) => ({ spot: s.id })) } },
@@ -89,5 +99,5 @@ export function buildContent(templateHtml: string, spots: FixtureSpot[], { trans
     defaultPlaylist: 'main',
   };
   const manifest: ScreenManifest = { ...body, id: sha256(manifestIdInput(body)) };
-  return { manifest, blobs: new Map([[htmlSha, html]]) };
+  return { manifest, blobs };
 }

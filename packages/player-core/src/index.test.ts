@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
-import { Sequencer, displayOn, entryApplies, localTime, planSync, resolvePlaylist, resolveSpotData, snapshotFit, validateManifest } from './index';
+import { Sequencer, displayOn, entryApplies, localTime, planSync, resolvePlaylist, resolveSpotData, snapshotFit, spotFiles, validateManifest } from './index';
 
 const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${id}`, fit: 'cover', durationMs: 5000 });
 
 function manifest(over: Partial<ScreenManifest> = {}): ScreenManifest {
   return {
-    schema: 2, id: 'm1', generatedAt: '2026-11-16T00:00:00Z',
+    schema: 2,
+    id: 'm1',
+    generatedAt: '2026-11-16T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'America/New_York', orientation: 'landscape' },
     files: { 'sha-a': { size: 1, type: 'image/png' }, 'sha-b': { size: 1, type: 'image/png' }, 'sha-c': { size: 1, type: 'image/png' } },
     templates: {},
@@ -80,7 +82,10 @@ describe('display hours', () => {
       { days: [1, 2, 3, 4, 5], from: '07:00', to: '19:00' },
       { days: [5], from: '22:00', to: '02:00' },
     ],
-    exceptions: [{ date: '2026-11-26', on: [] }, { date: '2026-11-27', on: [{ from: '10:00', to: '14:00' }] }],
+    exceptions: [
+      { date: '2026-11-26', on: [] },
+      { date: '2026-11-27', on: [{ from: '10:00', to: '14:00' }] },
+    ],
   };
 
   it('is always on with no hours set', () => {
@@ -149,7 +154,12 @@ describe('live data', () => {
     high: { type: 'number', label: 'High' },
   };
   const bound: Extract<Spot, { kind: 'template' }> = {
-    id: 'w', name: 'w', kind: 'template', template: 't@1.0.0', durationMs: 5000, assets: {},
+    id: 'w',
+    name: 'w',
+    kind: 'template',
+    template: 't@1.0.0',
+    durationMs: 5000,
+    assets: {},
     data: { city: 'Atlanta', temp: 0, high: 0 },
     bindings: { temp: { source: 'weather', path: 'current.temp' }, high: { source: 'weather', path: 'daily.max.0' } },
   };
@@ -176,7 +186,13 @@ describe('live data', () => {
   it('counts how many bound values in a manifest a snapshot fits', () => {
     const m = manifest();
     const t: TemplateManifest = {
-      id: 't', version: '1.0.0', name: 'T', fields, background: '#000', orientations: ['landscape'], uses: [],
+      id: 't',
+      version: '1.0.0',
+      name: 'T',
+      fields,
+      background: '#000',
+      orientations: ['landscape'],
+      uses: [],
       duration: { minMs: 1000, defaultMs: 5000, maxMs: 10_000 },
     };
     m.templates['t@1.0.0'] = { manifest: t, html: 'h' };
@@ -191,6 +207,23 @@ describe('live data', () => {
 describe('files', () => {
   it('lists what to download and what to drop', () => {
     expect(planSync(manifest(), ['sha-a', 'sha-old'])).toEqual({ missing: ['sha-b', 'sha-c'], stale: ['sha-old'] });
+  });
+
+  it('names the files one spot needs: a template spot its bundle and assets, a media spot its file', () => {
+    const m = manifest();
+    m.templates['base/t@1.0.0'] = { manifest: {} as never, html: 'sha-html' };
+    const t: Spot = {
+      id: 't',
+      name: 't',
+      kind: 'template',
+      template: 'base/t@1.0.0',
+      durationMs: 1000,
+      data: {},
+      assets: { pic: 'sha-pic', logo: 'sha-logo' },
+    };
+    expect([...spotFiles(t, m)].sort()).toEqual(['sha-html', 'sha-logo', 'sha-pic']);
+    expect([...spotFiles(m.spots.a!, m)]).toEqual(['sha-a']);
+    expect([...spotFiles({ id: 'u', name: 'u', kind: 'url', url: 'https://example.com', durationMs: 1000 } as Spot, m)]).toEqual([]);
   });
 
   it('rejects a manifest that refers to things it does not carry', () => {
@@ -232,7 +265,16 @@ describe('files', () => {
   });
 
   it('keys each template by its owner, id and version, so a base and an org template cannot collide', () => {
-    const t = { id: 'promo', version: '1.0.0', name: 'P', fields: {}, duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 }, orientations: ['landscape' as const], uses: [], background: '#000' };
+    const t = {
+      id: 'promo',
+      version: '1.0.0',
+      name: 'P',
+      fields: {},
+      duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 },
+      orientations: ['landscape' as const],
+      uses: [],
+      background: '#000',
+    };
     const ok = manifest({ templates: { 'base/promo@1.0.0': { manifest: t, html: 'sha-a' }, 'org_42/promo@1.0.0': { manifest: t, html: 'sha-b' } } });
     expect(validateManifest(ok)).toEqual([]);
     const bare = manifest({ templates: { 'promo@1.0.0': { manifest: t, html: 'sha-a' } } });
