@@ -23,6 +23,7 @@ Move every template onto brand tokens, as the proposal describes, and in the sam
   - news: in portrait a long source label ("THE NEW YORK TIMES") takes about 40% of the ticker; ellipsis at a word boundary shows as " ...".
   - agenda: portrait leaves room for more rows than `rows` allows; fit as many as the space holds.
   - clock: a faint purple patch remains in the bottom-right corner.
+- Transition drops have drifted since the spike: 2–4.4% during fades on 2026-11-17, against 1.5% in `spike/pi-perf/RESULTS.md`, with the previous player as well (M3-05 notes). Find out why before the token migration's Pi measurement, so a regression is not hidden by the drift.
 - Portrait crops of landscape media are soft: a per-asset focal point (`object-position`) and portrait renditions, with M3-14's media library.
 
 ## Out of scope
