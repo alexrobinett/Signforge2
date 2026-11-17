@@ -13,6 +13,7 @@ import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { assertId, newId } from './ids';
 import type { NewRow, RowPatch } from './scoped';
 import * as s from './schema';
+import { commit, fullRow, staged, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type Template = typeof s.templates.$inferSelect;
@@ -30,9 +31,27 @@ export function platform(d1: D1Database) {
   const tv = s.templateVersions;
   const pa = s.platformAuditLog;
 
+  /** Staged writes of base rows (null org), as `scoped`'s `stage`. */
+  const stager = <T extends typeof t | typeof tv>(table: T, prefix: string) => ({
+    insert: (values: NewRow<T>): Staged<T['$inferSelect']> => {
+      const id = values.id ?? newId(prefix);
+      assertId(id);
+      const row = fullRow(table, { ...strip(values), id, orgId: null });
+      return staged(row as T['$inferSelect'], db.insert(table).values(row as never));
+    },
+    update: (current: T['$inferSelect'], patch: RowPatch<T>): Staged<T['$inferSelect']> => {
+      const set = updateSet(table, strip(patch));
+      if (!Object.keys(set).length) return { row: current, writes: [] };
+      const x = table as typeof t;
+      return staged({ ...current, ...set } as T['$inferSelect'], db.update(x).set(set as never).where(and(isNull(x.orgId), eq(x.id, current.id))));
+    },
+  });
+
   return {
     /** Null: there is no org. Tools use it to tell base templates from an org's. */
     orgId: null,
+    /** Run staged writes in one atomic batch, as `scoped(...).commit`. */
+    commit: (writes: readonly Write[]) => commit(db, writes),
     templates: {
       get: async (id: string): Promise<Template | undefined> => db.select().from(t).where(and(isNull(t.orgId), eq(t.id, id))).get(),
       list: async (): Promise<Template[]> => db.select().from(t).where(isNull(t.orgId)).orderBy(asc(t.id)).all(),
@@ -44,6 +63,7 @@ export function platform(d1: D1Database) {
       },
       update: async (id: string, patch: RowPatch<typeof s.templates>): Promise<Template | undefined> =>
         db.update(t).set(strip(patch)).where(and(isNull(t.orgId), eq(t.id, id))).returning().get(),
+      stage: stager(t, 'tpl'),
       versions: {
         get: async (id: string): Promise<TemplateVersion | undefined> => db.select().from(tv).where(and(isNull(tv.orgId), eq(tv.id, id))).get(),
         forTemplate: async (templateId: string): Promise<TemplateVersion[]> =>
@@ -57,12 +77,18 @@ export function platform(d1: D1Database) {
         },
         update: async (id: string, patch: RowPatch<typeof s.templateVersions>): Promise<TemplateVersion | undefined> =>
           db.update(tv).set(strip(patch)).where(and(isNull(tv.orgId), eq(tv.id, id))).returning().get(),
+        stage: stager(tv, 'tpv'),
       },
     },
     auditLog: {
       append: (entry: NewRow<typeof s.platformAuditLog>) => {
         const id = entry.id ?? newId('pau');
         return db.insert(pa).values({ ...(strip(entry) as typeof entry), id }).returning().get();
+      },
+      /** The audit row for a change, staged to commit with it. */
+      stage: (entry: NewRow<typeof s.platformAuditLog>): Staged<typeof pa.$inferSelect> => {
+        const row = fullRow(pa, { ...strip(entry), id: entry.id ?? newId('pau') });
+        return staged(row as typeof pa.$inferSelect, db.insert(pa).values(row as never));
       },
       /** Newest first. */
       list: ({ limit = 50 }: { limit?: number } = {}) => db.select().from(pa).orderBy(desc(pa.at), desc(pa.id)).limit(limit).all(),

@@ -38,7 +38,9 @@ const blobPath = { [`/blobs/${A}`]: FILES.a, [`/blobs/${B}`]: FILES.b };
 
 function manifest(id: string, text = 'hello'): ScreenManifest {
   return {
-    schema: 2, id, generatedAt: '2026-11-17T00:00:00Z',
+    schema: 2,
+    id,
+    generatedAt: '2026-11-17T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'UTC', orientation: 'landscape' },
     files: { [A]: { size: 6, type: 'image/png' }, [B]: { size: 6, type: 'image/png' } },
     templates: {},
@@ -117,7 +119,7 @@ describe('sync against the device API', () => {
     expect(r).toEqual({ changed: false, downloaded: 1 });
     expect(manifestRequests()).toHaveLength(1);
     expect(blobRequests().map((q) => q.url)).toEqual([`${BASE}/blobs/${B}`]);
-    expect((await (await open('sf-blobs-v1').match(`/_sf/blob/${B}`))!.text())).toBe(FILES.b);
+    expect(await (await open('sf-blobs-v1').match(`/_sf/blob/${B}`))!.text()).toBe(FILES.b);
   });
 
   it('asks again without the condition if a 304 arrives but the cached manifest is gone', async () => {
@@ -155,7 +157,10 @@ describe('sync against the device API', () => {
   });
 
   it('a network failure stays an ordinary error (offline)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))),
+    );
     const err = await sync(BASE, { headers: auth }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TypeError);
     expect(err).not.toBeInstanceOf(UnauthorisedError);
@@ -197,8 +202,10 @@ describe('file cleanup and pins', () => {
   });
 
   it('never stores a file whose hash does not match, and activates nothing', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-      String(input).endsWith(`/blobs/${B}`) ? new Response('not file b') : handle(input, init)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith(`/blobs/${B}`) ? new Response('not file b') : handle(input, init))),
+    );
     await expect(sync(BASE, { headers: auth })).rejects.toThrow(`file ${B.slice(0, 12)}: failed verification`);
     expect(await held()).not.toContain(B);
     expect((await open('sf-blobs-v1').keys()).every((k) => k.url.includes('/_sf/blob/'))).toBe(true);
@@ -229,7 +236,10 @@ describe('DeviceCredential', () => {
   });
 
   it('treats an unreachable supervisor as no credential', async () => {
-    const c = new DeviceCredential('http://127.0.0.1:8091', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))));
+    const c = new DeviceCredential(
+      'http://127.0.0.1:8091',
+      vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))),
+    );
     expect(await c.headers()).toEqual({});
   });
 });

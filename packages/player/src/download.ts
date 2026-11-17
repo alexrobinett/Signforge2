@@ -76,4 +76,3 @@ export async function download(blobs: Cache, { url, sha, type, headers, stallMs,
     await blobs.delete(partial).catch(() => false);
   }
 }
-

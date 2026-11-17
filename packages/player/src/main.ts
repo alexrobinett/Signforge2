@@ -17,7 +17,7 @@
 import type { ScreenManifest, Spot, Transition } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { DeviceCredential } from './credential';
-import { dataSettled, dataStatus, startDataLoop } from './data';
+import { dataRejections, dataSettled, dataStatus, startDataLoop } from './data';
 import { Slot } from './slot';
 import { PinSet, UnauthorisedError, loadActiveManifest, requestPersistence, sync } from './store';
 
@@ -81,6 +81,10 @@ const state = {
   get data(): Record<string, string> {
     return dataStatus();
   },
+  /** Live values and snapshots refused per data source: a broken feed shows here. */
+  get dataRejected(): Record<string, number> {
+    return dataRejections();
+  },
   /** Frame pacing since the last reset. */
   frames: { count: 0, dropped: 0, maxMs: 0 },
   /** The same, split by what the player was doing: playing, loading the next spot, or transitioning. */
@@ -109,7 +113,7 @@ function monitor(t: number): void {
     // The display's frame interval is the median of the first two seconds of frames.
     if (!interval) {
       warmup.push(d);
-      if (warmup.length < 120) return void requestAnimationFrame(monitor), void (lastFrame = t);
+      if (warmup.length < 120) return (void requestAnimationFrame(monitor), void (lastFrame = t));
       interval = warmup.sort((x, y) => x - y)[60]!;
     }
     const missed = Math.max(0, Math.round(d / interval) - 1);
@@ -136,7 +140,12 @@ function renderHud(): void {
     `playlist ${state.playlist}\nspot     ${state.spot}\n` +
     `played ${state.played}  skipped ${state.skipped}${state.displayOn ? '' : '  ASLEEP'}\n` +
     `frames ${f.count}  dropped ${pct}%  worst ${f.maxMs} ms` +
-    Object.entries(dataStatus()).map(([id, at]) => `\ndata ${id}  ${at.slice(11, 19)}Z`).join('') +
+    Object.entries(dataStatus())
+      .map(([id, at]) => `\ndata ${id}  ${at.slice(11, 19)}Z`)
+      .join('') +
+    Object.entries(dataRejections())
+      .map(([id, n]) => `\ndata ${id}  ${n} REFUSED`)
+      .join('') +
     (state.lastError ? `\nlast error: ${state.lastError}` : '');
 }
 
@@ -211,7 +220,13 @@ function record(step: Step, manifestId: string): void {
   state.spot = step.spot.id;
   state.playlist = step.playlist.id;
   state.played++;
-  state.log.push({ spot: step.spot.id, playlist: step.playlist.id, manifest: manifestId, startedAt: new Date().toISOString(), durationMs: step.spot.durationMs });
+  state.log.push({
+    spot: step.spot.id,
+    playlist: step.playlist.id,
+    manifest: manifestId,
+    startedAt: new Date().toISOString(),
+    durationMs: step.spot.durationMs,
+  });
   if (state.log.length > 500) state.log.shift();
   lastProgress = performance.now();
 }
@@ -410,7 +425,12 @@ async function displayLoop(): Promise<never> {
 async function syncLoop(): Promise<never> {
   return forever('sync', async () => {
     try {
-      const result = await sync(CONTENT, { currentId: manifest?.id, headers: await deviceHeaders(), ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}), pinned: pins });
+      const result = await sync(CONTENT, {
+        currentId: manifest?.id,
+        headers: await deviceHeaders(),
+        ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
+        pinned: pins,
+      });
       state.online = true;
       state.auth = '';
       state.lastSync = new Date().toISOString();
@@ -437,10 +457,19 @@ async function syncLoop(): Promise<never> {
 
 /** Testing override: an ad hoc playlist of the given spots, replacing the schedule. */
 function applyOverrides(m: ScreenManifest): ScreenManifest {
-  const ids = query.get('spots')?.split(',').filter((id) => m.spots[id]);
+  const ids = query
+    .get('spots')
+    ?.split(',')
+    .filter((id) => m.spots[id]);
   const t = query.get('transition');
   const transition: Transition | undefined =
-    t === 'cut' ? { type: 'cut' } : t?.startsWith('fade') ? { type: 'fade', ms: Number(t.slice(4)) || 500 } : t ? { type: 'crossfade', ms: Number(t) } : undefined;
+    t === 'cut'
+      ? { type: 'cut' }
+      : t?.startsWith('fade')
+        ? { type: 'fade', ms: Number(t.slice(4)) || 500 }
+        : t
+          ? { type: 'crossfade', ms: Number(t) }
+          : undefined;
   if (!ids?.length && !transition) return m;
   const playlists = { ...m.playlists };
   if (ids?.length) playlists.__test = { id: '__test', name: 'Test', transition: transition ?? { type: 'cut' }, items: ids.map((spot) => ({ spot })) };
@@ -499,7 +528,7 @@ async function boot(): Promise<void> {
   }, 10_000);
 
   void syncLoop();
-  wakeData = startDataLoop(CONTENT, () => manifest?.dataSources ?? {}, deviceHeaders);
+  wakeData = startDataLoop(CONTENT, () => manifest, deviceHeaders);
   void playbackLoop();
   void displayLoop();
 }

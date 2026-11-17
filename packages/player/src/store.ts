@@ -3,8 +3,8 @@
  * downloaded once however many manifests use it, and a manifest only goes live when every file
  * it names is present and verified.
  */
-import type { ScreenManifest } from '@signforge/contract';
-import { planSync, validateManifest } from '@signforge/player-core';
+import { validateManifest, type ScreenManifest } from '@signforge/contract';
+import { planSync } from '@signforge/player-core';
 import { STALL_MS, UnauthorisedError, download, type DownloadRequest, type DownloadResult } from './download';
 
 export { STALL_MS, UnauthorisedError };
@@ -150,10 +150,12 @@ export async function sync(base: string, { currentId, headers = {}, stallMs = ST
   const { missing } = planSync(next, (await heldKeys(blobs)).hashes);
   for (const sha of missing) {
     const type = next.files[sha]?.type ?? 'application/octet-stream';
-    await fetchFile({ url: `${base}/blobs/${sha}`, sha, type, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` }).catch((err: unknown) => {
-      if (err instanceof UnauthorisedError) throw err;
-      throw new Error(`file ${sha.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    await fetchFile({ url: `${base}/blobs/${sha}`, sha, type, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` }).catch(
+      (err: unknown) => {
+        if (err instanceof UnauthorisedError) throw err;
+        throw new Error(`file ${sha.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`);
+      },
+    );
   }
 
   if (!same) await (await caches.open(STATE)).put(ACTIVE, new Response(text, { headers: { 'content-type': 'application/json' } }));

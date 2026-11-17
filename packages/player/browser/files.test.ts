@@ -10,14 +10,13 @@ const BLOBS = /^\/content\/blobs\//;
 /** The hash of spot `id`'s own file. */
 const assetOf = (c: Content, id: string) => (c.manifest.spots[id] as Extract<Spot, { kind: 'template' }>).assets.file!;
 /** Every key in the player's file cache. */
-const cached = (p: Player) =>
-  p.page.evaluate(async () => (await (await caches.open('sf-blobs-v1')).keys()).map((r) => new URL(r.url).pathname));
+const cached = (p: Player) => p.page.evaluate(async () => (await (await caches.open('sf-blobs-v1')).keys()).map((r) => new URL(r.url).pathname));
 
 describe('content files', () => {
   it('keeps the files of a spot preparing under a replaced manifest, plays it, then drops them', async () => {
     // `a` is bound to a feed that never answers, so it sits in the player's 3 s data wait,
     // its step already chosen under `first`, while `second` arrives and replaces `first`.
-    const first = h.content([{ id: 'a', asset: randomBytes(4096), bound: true, durationMs: 800 }]);
+    const first = h.content([{ id: 'a', asset: randomBytes(4096), bindings: { label: { source: 'feed', path: 'label' } }, durationMs: 800 }]);
     const p = await h.openPlayer((s) => {
       s.publish(first);
       s.setData('feed', { id: 'feed', fetchedAt: '2026-11-17T00:00:00Z', data: { label: 'a' } });
@@ -75,7 +74,10 @@ describe('content files', () => {
         workerSession = (await browser.send('Target.attachToTarget', { targetId: w.targetId, flatten: false })).sessionId;
       }
       const id = ++msgId;
-      if (gc) await browser.send('Target.sendMessageToTarget', { sessionId: workerSession, message: JSON.stringify({ id: ++msgId, method: 'HeapProfiler.collectGarbage' }) }).catch(() => undefined);
+      if (gc)
+        await browser
+          .send('Target.sendMessageToTarget', { sessionId: workerSession, message: JSON.stringify({ id: ++msgId, method: 'HeapProfiler.collectGarbage' }) })
+          .catch(() => undefined);
       const reply = new Promise<number>((resolve) => {
         const on = (e: { sessionId: string; message: string }) => {
           const m = JSON.parse(e.message) as { id: number; result?: { usedSize: number; backingStorageSize?: number } };
@@ -86,7 +88,9 @@ describe('content files', () => {
         browser.on('Target.receivedMessageFromTarget', on);
         setTimeout(() => resolve(0), 500);
       });
-      await browser.send('Target.sendMessageToTarget', { sessionId: workerSession, message: JSON.stringify({ id, method: 'Runtime.getHeapUsage' }) }).catch(() => (workerSession = undefined));
+      await browser
+        .send('Target.sendMessageToTarget', { sessionId: workerSession, message: JSON.stringify({ id, method: 'Runtime.getHeapUsage' }) })
+        .catch(() => (workerSession = undefined));
       return reply;
     };
     const pageHeap = async () => usage(await page.send('Runtime.getHeapUsage'));
@@ -105,7 +109,9 @@ describe('content files', () => {
     }
     await page.send('HeapProfiler.collectGarbage');
     const after = await pageHeap();
-    console.info(`page heap before ${(before / MB).toFixed(1)} MB, peak ${(pagePeak / MB).toFixed(1)} MB, after ${(after / MB).toFixed(1)} MB; download worker retained at most ${(workerPeak / MB).toFixed(1)} MB`);
+    console.info(
+      `page heap before ${(before / MB).toFixed(1)} MB, peak ${(pagePeak / MB).toFixed(1)} MB, after ${(after / MB).toFixed(1)} MB; download worker retained at most ${(workerPeak / MB).toFixed(1)} MB`,
+    );
     expect(workerPeak).toBeGreaterThan(0); // it was measured
     // Streamed, a few MB; buffered, the whole file.
     expect(workerPeak).toBeLessThan(16 * MB);

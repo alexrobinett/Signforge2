@@ -158,6 +158,41 @@ describe('rows a scope writes', () => {
     expect(await s.a.scope.screenGroups.get(row.id)).toBeUndefined();
   });
 
+  it('are staged the same way: stamped with its org, and changing nothing of another org', async () => {
+    const { a } = s;
+    const b = s.b.scope;
+    const aScreen = (await s.a.scope.screens.get(a.screen))!;
+    const aGroup = (await s.a.scope.screenGroups.get(a.group))!;
+    const smuggled = b.screenGroups.stage.insert({ name: 'staged smuggled', orgId: 'org-a' } as never);
+    expect(smuggled.row.orgId).toBe('org-b');
+    await b.commit([
+      ...smuggled.writes,
+      ...b.screens.stage.update(aScreen, { name: 'hijacked' }).writes,
+      ...b.screens.stage.setDesiredManifest(a.screen, 'f'.repeat(64)).writes,
+      ...b.screenGroups.stage.delete(a.group).writes,
+      ...b.assets.stage.delete(a.asset).writes,
+      ...b.idempotency.stage({ key: 'k-iso', action: 'x', inputSha256: '0', outputJson: '{}' }).writes,
+    ]);
+    expect(await s.a.scope.screens.get(a.screen)).toEqual(aScreen);
+    expect(await s.a.scope.screenGroups.get(a.group)).toEqual(aGroup);
+    expect(await s.a.scope.assets.get(a.asset)).toBeDefined();
+    expect(await b.screenGroups.get(smuggled.row.id)).toEqual(smuggled.row);
+    expect(await s.a.scope.idempotency.get('k-iso')).toBeUndefined();
+    expect(await b.idempotency.get('k-iso')).toMatchObject({ orgId: 'org-b', action: 'x' });
+    await expect(b.screenGroups.stage.setMembers(a.group, [s.b.screen]), 'stage.setMembers: A group').rejects.toBeInstanceOf(NotInOrgError);
+    await expect(b.screenGroups.stage.setMembers(s.b.group, [a.screen]), 'stage.setMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
+    await expect(b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })).rejects.toBeInstanceOf(NotInOrgError);
+  });
+
+  it('commit atomically: one failing statement and none take effect', async () => {
+    const b = s.b.scope;
+    const before = await b.screenGroups.list();
+    const ok = b.screenGroups.stage.insert({ name: 'never' });
+    const dup = b.idempotency.stage({ key: 'k-iso', action: 'x', inputSha256: '0', outputJson: '{}' });
+    await expect(b.commit([...ok.writes, ...dup.writes])).rejects.toThrow();
+    expect(await b.screenGroups.list()).toEqual(before);
+  });
+
   it('need ids matching ID_PATTERN', async () => {
     expect(() => scoped(env.DB, 'org/a')).toThrow(TypeError);
     await expect(s.b.scope.screenGroups.insert({ id: 'a.b', name: 'x' })).rejects.toThrow(TypeError);

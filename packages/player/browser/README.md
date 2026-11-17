@@ -20,8 +20,8 @@ pnpm --filter @signforge/player exec playwright install chromium
   - `intercept(/path regex/, { status })`, `intercept(/path regex/, 'stall')` or `intercept(/path regex/, { bytesPerSecond })`: fail a path, send the headers and half the body and then nothing, or send the body slowly. Returns a function that removes the rule.
   - `setData(id, snapshot)`: serve a data source snapshot.
   - read `requests` / `requestsTo(regex)`: every request, its status, its `If-None-Match`, and `abortedAt` if the client gave up on it.
-- `content.ts` builds a manifest in memory. Every spot uses the fixture template; its `mode` field picks the behaviour: `ok`, `throw` (throws in `prepare`) or `hang` (never ready). A spot can carry its own file (`asset`, passed to the template as asset `file`), and `bound: true` binds it to data source `feed`, so a feed that never answers holds it in the player's 3 s data wait before prepare.
-- `harness.ts` gives each test file one browser and each test a fresh context (empty Cache Storage, no service worker) and fixture server. `openPlayer` opens the player with `?poll=1`; `until(predicate)` waits on `window.__sf`; `onScreen()` reads the template drawn on top.
+- `content.ts` builds a manifest in memory. Every spot uses the fixture template; its `mode` field picks the behaviour: `ok`, `throw` (throws in `prepare`) or `hang` (never ready). The template shows `label` and lists the titles of `items` (a list of up to 3 rows of `title`), trusting the shape as a news template would, so `items: {}` throws. A spot may set `items` and `bindings`; each bound source is added to the manifest's data sources. A bound spot waits up to 3 s for its feeds before prepare, so a feed that never answers holds it in that wait. A spot can also carry its own file (`asset`, passed to the template as asset `file`).
+- `harness.ts` gives each test file one browser and each test a fresh context (empty Cache Storage, no service worker) and fixture server. `openPlayer` opens the player with `?poll=1`; `until(predicate)` waits on `window.__sf`; `onScreen()` reads the label, the listed item titles and the play flag of the template drawn on top.
 
 Testing-only query options the tests use: `?poll=<s>`, `?stall=<s>` (the download stall timeout, 30 s by default), `?spots=` and `?transition=` (see `src/main.ts`).
 
@@ -32,6 +32,7 @@ Testing-only query options the tests use: `?poll=<s>`, `?stall=<s>` (the downloa
 | `playback.test.ts` | Two spots play in order and loop; a spot whose template throws in `prepare` is skipped; a template that never reports ready is skipped after the ready timeout |
 | `sync.test.ts` | A stalled download is abandoned after the stall timeout and the player recovers; a 304 poll changes nothing; a new manifest is adopted at the next poll |
 | `files.test.ts` | A spot preparing under a replaced manifest keeps its files and plays, and they are dropped afterwards; a file whose hash does not match is never stored or used; a 64 MB file downloads with flat memory (JS heap plus ArrayBuffer backing stores of the page and of the download worker, read over CDP) |
+| `data.test.ts` | Live data: values that fit replace the fallback; a value of the wrong type, the wrong shape, with too many list rows, or missing at its path leaves the fallback on screen and is counted against its source; a snapshot that fits no bound field is not kept as the latest, in memory or on disk |
 | `sdk.test.ts` | The SDK on its own: `loaded` → `init` → `ready` with data bound and animations held, `play` starts them; an error in `prepare` is reported; a `prepare` that never finishes never reports ready |
 
 Protocol 1 has no `done` message: a spot ends when the player moves on.

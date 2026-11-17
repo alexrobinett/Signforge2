@@ -87,7 +87,11 @@ export class FixtureServer {
     const rule = this.rules.find((r) => r.match.test(path));
     const send = (status: number, body?: Buffer | string, type = 'application/octet-stream') => {
       rec.status = status;
-      res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...(body !== undefined ? { 'content-length': Buffer.byteLength(body) } : {}) });
+      res.writeHead(status, {
+        'content-type': type,
+        'cache-control': 'no-store',
+        ...(body !== undefined ? { 'content-length': Buffer.byteLength(body) } : {}),
+      });
       if (rule && typeof rule.action === 'object' && 'bytesPerSecond' in rule.action && body) {
         const buf = Buffer.from(body);
         const chunk = 64 * 1024;

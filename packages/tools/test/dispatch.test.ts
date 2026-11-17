@@ -40,6 +40,18 @@ describe('the registry', () => {
     ]);
   });
 
+  it('gives every creating tool an idempotency key', () => {
+    const keyed = TOOLS.filter((t) => t.idempotent).map((t) => t.name).sort();
+    expect(keyed).toEqual(['create_asset_upload', 'create_group']);
+    for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
+    for (const name of keyed) {
+      const schema = describeTools(registry, { role: 'owner' }).find((t) => t.name === name)!.inputSchema as { properties: Record<string, unknown>; required?: string[] };
+      expect(schema.properties, name).toHaveProperty('idempotencyKey');
+      expect(schema.required ?? [], name).not.toContain('idempotencyKey');
+    }
+    // register_template_version is idempotent by its natural key: a version is registered once (templates.test.ts).
+  });
+
   it('keeps the platform tools apart: base templates only, never on /api', () => {
     expect([...platformRegistry.keys()].sort()).toEqual(['register_template_version', 'set_template_version_status']);
   });
@@ -132,7 +144,10 @@ describe('the audit log', () => {
       input: z.object({ screenId: z.string(), apiKey: z.string(), nested: z.object({ token: z.string(), credentialId: z.string() }) }),
       output: z.object({ done: z.boolean() }),
       example: { screenId: 's', apiKey: 'k', nested: { token: 't', credentialId: 'c' } },
-      handler: async () => ({ done: true }),
+      handler: async ({ org, input, write }) => {
+        write(org.screens.stage.update((await org.screens.get(input.screenId))!, { name: 'Has a feed' }));
+        return { done: true };
+      },
     });
     const reg = new Map([[secretive.name, secretive]]);
     const input = { screenId: o.screen, apiKey: 'sk_live_123', nested: { token: 'tok_456', credentialId: 'crd_1' } };
@@ -146,5 +161,50 @@ describe('the audit log', () => {
     expect(redact({ password: 'p', secret: 's', code: '123456', pairingCode: 'ABC', authorization: 'Bearer x', urlEncrypted: 'e', name: 'n', screenIds: ['a'] })).toEqual({
       password: '[redacted]', secret: '[redacted]', code: '[redacted]', pairingCode: '[redacted]', authorization: '[redacted]', urlEncrypted: '[redacted]', name: 'n', screenIds: ['a'],
     });
+  });
+});
+
+describe('write safety', () => {
+  it('rolls the change back when its audit row cannot be written', async () => {
+    const org = scoped(env.DB, o.orgId);
+    const before = await org.screenGroups.get(o.group);
+    await env.DB.exec("CREATE TRIGGER audit_down BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+    try {
+      await expect(dispatch(registry, 'rename_group', { groupId: o.group, name: 'Never recorded' }, caller('owner'))).rejects.toThrow();
+    } finally {
+      await env.DB.exec('DROP TRIGGER audit_down');
+    }
+    expect(await org.screenGroups.get(o.group)).toEqual(before);
+  });
+  it('creates once for a retried key, returning the first result and writing nothing', async () => {
+    const org = scoped(env.DB, o.orgId);
+    const audits = async () => (await org.auditLog.list({ limit: 1000 })).length;
+    const groups = async () => (await org.screenGroups.list()).filter((g) => g.name === 'Retried').length;
+    const input = { name: 'Retried', screenIds: [o.screen], idempotencyKey: 'retry-key-1' };
+    const first = await dispatch(registry, 'create_group', input, caller('editor'));
+    expect(first).toMatchObject({ ok: true });
+    const n = await audits();
+    const again = await dispatch(registry, 'create_group', input, caller('editor'));
+    expect(again).toEqual(first);
+    expect(await groups()).toBe(1);
+    expect(await audits()).toBe(n);
+  });
+
+  it('creates once when two calls with the same key race', async () => {
+    const input = { name: 'Raced', idempotencyKey: 'retry-key-race' };
+    const [x, y] = await Promise.all([1, 2].map(() => dispatch(registry, 'create_group', input, caller('editor'))));
+    expect(x).toMatchObject({ ok: true });
+    expect(y).toEqual(x);
+    expect((await scoped(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Raced')).toHaveLength(1);
+  });
+
+  it('refuses a key reused for a different input, and keeps keys apart between orgs', async () => {
+    const input = { name: 'Keyed', idempotencyKey: 'retry-key-2' };
+    expect(await dispatch(registry, 'create_group', input, caller('editor'))).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'create_group', { ...input, name: 'Other' }, caller('editor'))).toMatchObject({ ok: false, error: 'conflict' });
+    const other = await seedOrg(env.DB, 'disp-org-2');
+    const r = await dispatch(registry, 'create_group', input, { ...caller('editor'), org: scoped(env.DB, other.orgId) });
+    expect(r).toMatchObject({ ok: true });
+    expect(await scoped(env.DB, other.orgId).screenGroups.list()).toContainEqual(expect.objectContaining({ name: 'Keyed' }));
   });
 });
