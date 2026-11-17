@@ -17,7 +17,7 @@ Two terminals, from the repo root:
 
 ```sh
 # 1. The API, on http://localhost:8787. Sign-in codes are printed here.
-pnpm --filter @signforge/api exec wrangler d1 migrations apply DB --local   # first time, and after new migrations
+pnpm --filter @signforge/api exec wrangler d1 migrations apply DB --local --env dev   # first time, and after new migrations
 pnpm --filter @signforge/api dev
 
 # 2. The CMS, on http://localhost:3000.

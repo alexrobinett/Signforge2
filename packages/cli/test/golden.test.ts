@@ -44,7 +44,22 @@ describe('sf build', () => {
   }, 60_000);
 
   // The stress project's photos and videos are generated (scripts/stress-media.sh), not committed.
-  it.skipIf(!existsSync(join(root, 'examples/stress/media/pan-1080p30.mp4')))('builds the stress project exactly as before', () => {
-    expect(build('stress')).toEqual(golden('stress'));
-  }, 120_000);
+  // Without them the test skips, and says so in the test name and on stderr, so a green run
+  // never hides that the stress golden went unchecked.
+  const stressMedia = existsSync(join(root, 'examples/stress/media/pan-1080p30.mp4'));
+  if (!stressMedia) {
+    process.stderr.write(
+      '\n*** golden.test.ts: SKIPPING the stress golden: examples/stress/media is missing. Run `sh scripts/stress-media.sh` to check it. ***\n\n',
+    );
+  }
+  const stressName = stressMedia
+    ? 'builds the stress project exactly as before'
+    : 'builds the stress project exactly as before (SKIPPED: no stress media, run scripts/stress-media.sh)';
+  it.skipIf(!stressMedia)(
+    stressName,
+    () => {
+      expect(build('stress')).toEqual(golden('stress'));
+    },
+    120_000,
+  );
 });

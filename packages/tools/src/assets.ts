@@ -6,16 +6,17 @@
  *   - the bytes hash to the SHA-256 the uploader claimed, and have the claimed size;
  *   - the bytes are a JPEG, PNG, WebP or SVG of the claimed type (read from the bytes);
  *   - a raster rendition has the claimed size in pixels, as displayed, and is no larger than its
- *     screen box allows under the cover rule (`fitsScreenBox`, the rule `sf build` follows).
+ *     screen box allows under the cover rule, and within the decoded-pixel cap
+ *     (`imageSizeProblem` in the contract; the cover rule is the one `sf build` follows).
  *
  * A file that passes moves to `o/<org>/b/<sha256>`, where manifests reference it. One that fails
  * is deleted, and the asset is marked rejected. Video is M3-21.
  */
-import { fitsScreenBox, SCREEN_BOX } from '@signforge/contract';
+import { imageSizeProblem, SCREEN_BOX } from '@signforge/contract';
 import type { Asset, AssetRendition, OrgScope } from '@signforge/db';
 import { readImageInfo, RENDITION_TYPES } from '@signforge/media/image-info';
 import { z } from 'zod';
-import { id, name } from './fields';
+import { id, idempotencyKey, name } from './fields';
 import { nextOutput, page, pageInput } from './paging';
 import { orgBlobKey, uploadKey } from './r2';
 import { defineTool, notFound, ToolError } from './tool';
@@ -127,14 +128,16 @@ export const getAsset = defineTool({
 export const createAssetUpload = defineTool({
   name: 'create_asset_upload',
   description:
-    "Start uploading an image. Scale it first (the CMS uses @signforge/media): a landscape and a portrait rendition, each the smallest size that covers its screen box (1920x1080, 1080x1920), JPEG, PNG or WebP; an SVG is sent as it is for both. Pass each rendition's SHA-256, type, byte size and pixel size. Returns { asset, uploads }: the new asset, pending, and for each file the server does not already hold, a URL to PUT it to with the given headers before expiresAt. Then call finalize_asset.",
+    "Start uploading an image. Scale it first (the CMS uses @signforge/media): a landscape and a portrait rendition, each the smallest size that covers its screen box (1920x1080, 1080x1920), JPEG, PNG or WebP; an SVG is sent as it is for both. Pass each rendition's SHA-256, type, byte size and pixel size. Returns { asset, uploads }: the new asset, pending, and for each file the server does not already hold, a URL to PUT it to with the given headers before expiresAt. Then call finalize_asset. Pass an idempotencyKey so a retry cannot create the asset twice; a retry returns the first call's upload URLs, which still expire at their expiresAt.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  idempotent: true,
   input: z
     .object({
       name: name('asset'),
       renditions: z.object({ landscape: renditionInput, portrait: renditionInput }),
+      idempotencyKey,
     })
     .superRefine(({ renditions }, ctx) => {
       for (const o of ORIENTATIONS) {
@@ -144,9 +147,9 @@ export const createAssetUpload = defineTool({
           if (r.width !== null || r.height !== null) ctx.addIssue({ code: 'custom', path, message: 'an SVG has no pixel size: send width and height as null' });
         } else if (r.width === null || r.height === null) {
           ctx.addIssue({ code: 'custom', path, message: 'a raster rendition needs its width and height' });
-        } else if (!fitsScreenBox(r.width, r.height, SCREEN_BOX[o])) {
-          const box = SCREEN_BOX[o];
-          ctx.addIssue({ code: 'custom', path, message: `${r.width}x${r.height} is larger than a ${o} screen needs: scale it to cover ${box.w}x${box.h}` });
+        } else {
+          const message = imageSizeProblem(r.width, r.height, SCREEN_BOX[o]);
+          if (message) ctx.addIssue({ code: 'custom', path, message });
         }
       }
       const { landscape: l, portrait: p } = renditions;
@@ -165,19 +168,18 @@ export const createAssetUpload = defineTool({
     },
   },
   target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
-  handler: async ({ org, blobs, uploads, input }) => {
+  handler: async ({ org, blobs, uploads, input, write }) => {
     if (!uploads) throw new Error('direct uploads are not configured on this server (R2 S3 credentials)');
     const { landscape, portrait } = input.renditions;
-    const asset = await org.assets.insert({
+    // The asset and both renditions are written in one batch: never an asset without its renditions.
+    const asset = write(org.assets.stage.insert({
       kind: 'image', name: input.name, sha256: landscape.sha256, type: landscape.type, size: landscape.size,
       width: landscape.width, height: landscape.height, status: 'pending',
+    }));
+    const renditions = ORIENTATIONS.map((o) => {
+      const r = input.renditions[o];
+      return write(org.assets.renditions.stage.insert({ assetId: asset.id, orientation: o, sha256: r.sha256, type: r.type, size: r.size, width: r.width ?? 0, height: r.height ?? 0 }));
     });
-    const renditions = await Promise.all(
-      ORIENTATIONS.map((o) => {
-        const r = input.renditions[o];
-        return org.assets.renditions.insert({ assetId: asset.id, orientation: o, sha256: r.sha256, type: r.type, size: r.size, width: r.width ?? 0, height: r.height ?? 0 });
-      }),
-    );
     const files = new Map([landscape, portrait].map((r) => [r.sha256, r]));
     const targets = [];
     for (const r of files.values()) {
@@ -198,7 +200,7 @@ interface Problem {
 export const finalizeAsset = defineTool({
   name: 'finalize_asset',
   description:
-    "Finish an upload started with create_asset_upload, once every file is PUT. The server re-hashes each file in storage and checks its type, size and pixel size against what was claimed and against the screen box. If all pass, the asset becomes verified and usable. If any fails, its files are deleted, the asset is marked rejected, and the call is refused with each problem; upload it again as a new asset. A file not uploaded yet is refused without changing anything. Finalizing a verified asset changes nothing. Returns { asset, changed }.",
+    "Finish an upload started with create_asset_upload, once every file is PUT. The server re-hashes each file in storage and checks its type, size and pixel size against what was claimed and against the screen box. If all pass, the asset becomes verified and usable. If any fails, its files are deleted, the asset is marked rejected, and the call is refused with each problem; upload it again as a new asset. An asset without both renditions, or a file not uploaded yet, is refused without changing anything. Finalizing a verified asset changes nothing. Returns { asset, changed }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -206,11 +208,16 @@ export const finalizeAsset = defineTool({
   output: z.object({ asset: assetOutput, changed: z.boolean() }),
   example: { assetId: 'ast_example' },
   target: (input) => ({ kind: 'asset', id: input.assetId }),
-  handler: async ({ org, blobs, input }) => {
+  handler: async ({ org, blobs, input, write }) => {
     const asset = await requireAsset(org, input.assetId);
     const renditions = await org.assets.renditions.forAsset(asset.id);
     if (asset.status === 'verified') return { asset: assetView(asset, renditions), changed: false };
     if (asset.status === 'rejected') throw new ToolError('conflict', `asset ${asset.id} was rejected; upload the image again`);
+    // Both renditions, or the asset cannot be verified: a screen of either orientation needs its own.
+    const absent = ORIENTATIONS.filter((o) => !renditions.some((r) => r.orientation === o));
+    if (absent.length) {
+      throw new ToolError('conflict', `asset ${asset.id} has no ${absent.join(' or ')} rendition; upload the image again`, absent.map((path) => ({ path, message: 'no rendition' })));
+    }
 
     const bySha = Map.groupBy(renditions, (r) => r.sha256);
     const staged = [...bySha.keys()].map((sha) => uploadKey(org.orgId, asset.id, sha));
@@ -244,8 +251,9 @@ export const finalizeAsset = defineTool({
       else if (info.width !== null && info.height !== null) {
         for (const r of rows) {
           if (info.width !== r.width || info.height !== r.height) problems.push({ path: r.orientation, message: `the image is ${info.width}x${info.height}, not the claimed ${r.width}x${r.height}` });
-          else if (!fitsScreenBox(info.width, info.height, SCREEN_BOX[r.orientation])) {
-            problems.push({ path: r.orientation, message: `${info.width}x${info.height} is larger than a ${r.orientation} screen needs` });
+          else {
+            const message = imageSizeProblem(info.width, info.height, SCREEN_BOX[r.orientation]);
+            if (message) problems.push({ path: r.orientation, message });
           }
         }
       }
@@ -254,8 +262,8 @@ export const finalizeAsset = defineTool({
 
     if (problems.length) {
       await blobs.delete(staged);
-      const rejected = (await org.assets.update(asset.id, { status: 'rejected' })) ?? asset;
-      throw new ToolError('invalid_input', `the upload was rejected and deleted: ${problems.map((p) => `${p.path}: ${p.message}`).join('; ')}`, problems, rejected.status === 'rejected');
+      write(org.assets.stage.update(asset, { status: 'rejected' }));
+      throw new ToolError('invalid_input', `the upload was rejected and deleted: ${problems.map((p) => `${p.path}: ${p.message}`).join('; ')}`, problems, true);
     }
     if (missing.length) {
       throw new ToolError('invalid_input', `not uploaded yet: ${missing.join(', ')}`, missing.map((path) => ({ path, message: 'not uploaded yet' })));
@@ -268,8 +276,7 @@ export const finalizeAsset = defineTool({
       }
     }
     await blobs.delete(staged);
-    const verified = await org.assets.update(asset.id, { status: 'verified' });
-    if (!verified) throw notFound('asset', asset.id);
+    const verified = write(org.assets.stage.update(asset, { status: 'verified' }));
     return { asset: assetView(verified, renditions), changed: true };
   },
 });
@@ -285,7 +292,7 @@ export const deleteAsset = defineTool({
   output: z.object({ deleted: z.string().describe("The deleted asset's id") }),
   example: { assetId: 'ast_example' },
   target: (input) => ({ kind: 'asset', id: input.assetId }),
-  handler: async ({ org, blobs, input }) => {
+  handler: async ({ org, blobs, input, write }) => {
     const asset = await requireAsset(org, input.assetId);
     const spotIds = (await org.assets.usage([asset.id])).get(asset.id) ?? [];
     if (spotIds.length) throw new ToolError('conflict', `asset ${asset.id} is used by ${spotIds.length} spot${spotIds.length === 1 ? '' : 's'}`, { spotIds });
@@ -293,7 +300,8 @@ export const deleteAsset = defineTool({
     const renditions = await org.assets.renditions.forAsset(asset.id);
     const staged = [...new Set(renditions.map((r) => uploadKey(org.orgId, asset.id, r.sha256)))];
     if (staged.length) await blobs.delete(staged);
-    if (!(await org.assets.delete(asset.id))) throw notFound('asset', asset.id);
+    // Its renditions go with it (the foreign key cascades).
+    write(org.assets.stage.delete(asset.id));
     return { deleted: asset.id };
   },
 });

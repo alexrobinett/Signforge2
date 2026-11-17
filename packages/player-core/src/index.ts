@@ -1,8 +1,14 @@
 /**
  * Player logic with no browser dependency: which playlist is live, what plays next,
- * and which files a manifest still needs. The browser shell supplies time, storage and frames.
+ * and which files a manifest still needs. Checking a manifest is the contract's job. The browser shell supplies time, storage and frames.
  */
-import { SUPPORTED_MANIFEST_SCHEMAS, isId, templateKey, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
+import { requiredFiles, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
+
+/**
+ * Validation lives in the contract, which the server imports too. Re-exported here while callers
+ * move to `@signforge/contract`; new code imports from there.
+ */
+export { displayHoursProblems, requiredFiles, safeUrl, validateManifest, validTimezone } from '@signforge/contract';
 
 // ------------------------------------------------------------------ schedule
 
@@ -170,138 +176,6 @@ export function resolveSpotData(spot: Extract<Spot, { kind: 'template' }>, snaps
 }
 
 // --------------------------------------------------------------------- files
-
-/** A screen checks a data source no more often than this. */
-const MIN_REFRESH_S = 60;
-const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Whether `tz` is an IANA time zone this runtime knows. */
-export function validTimezone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** A URL spot shows a page from the internet: never a relative, local or script URL. */
-export function safeUrl(url: unknown): boolean {
-  try {
-    return typeof url === 'string' && new URL(url).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-function windowProblems(where: string, w: { from?: string; to?: string; days?: number[]; startDate?: string; endDate?: string }, required: boolean): string[] {
-  const out: string[] = [];
-  for (const k of ['from', 'to'] as const) {
-    const v = w[k];
-    if (v === undefined ? required : typeof v !== 'string' || !TIME.test(v)) out.push(`${where}: ${k} must be HH:MM`);
-  }
-  if (w.days !== undefined && (!Array.isArray(w.days) || w.days.some((d) => !Number.isInteger(d) || d < 0 || d > 6))) out.push(`${where}: days must be 0-6`);
-  else if (required && !Array.isArray(w.days) && 'days' in w) out.push(`${where}: days must be a list`);
-  for (const k of ['startDate', 'endDate'] as const) if (w[k] !== undefined && !DATE.test(String(w[k]))) out.push(`${where}: ${k} must be YYYY-MM-DD`);
-  return out;
-}
-
-/** What is wrong with a screen's display hours, as `validateManifest` checks them. Empty if they are valid. */
-export function displayHoursProblems(hours: DisplayHours): string[] {
-  const errors: string[] = [];
-  if (!Array.isArray(hours.weekly)) errors.push('display hours have no weekly list');
-  else for (const w of hours.weekly) errors.push(...windowProblems('display hours', w, true));
-  for (const e of hours.exceptions ?? []) {
-    if (!DATE.test(e.date) || !Array.isArray(e.on)) errors.push(`display hours exception "${e.date}" is malformed`);
-    else for (const w of e.on) {
-      errors.push(...windowProblems(`display hours on ${e.date}`, w, true));
-      if (toMinutes(w.to) <= toMinutes(w.from)) errors.push(`display hours on ${e.date}: ${w.from}-${w.to} must end after it starts`);
-    }
-  }
-  return errors;
-}
-
-export function validateManifest(m: unknown): string[] {
-  const errors: string[] = [];
-  const s = m as Partial<ScreenManifest> | null;
-  if (!s || typeof s !== 'object') return ['manifest is not an object'];
-  if (!SUPPORTED_MANIFEST_SCHEMAS.includes(s.schema as number)) errors.push(`manifest schema ${String(s.schema)} is not one this player can play (${SUPPORTED_MANIFEST_SCHEMAS.join(', ')})`);
-  if (!s.id) errors.push('id is missing');
-  if (!s.screen?.timezone) errors.push('screen.timezone is missing');
-  if (!s.files || !s.spots || !s.playlists || !s.templates || !s.schedule || !s.dataSources) return [...errors, 'manifest is incomplete'];
-  if (!s.playlists[s.defaultPlaylist ?? '']) errors.push('defaultPlaylist does not exist');
-  for (const [key, t] of Object.entries(s.templates)) {
-    if (!t?.manifest || typeof t.manifest !== 'object') {
-      errors.push(`template "${key}" has no manifest`);
-      continue;
-    }
-    if (s.schema === 1) {
-      // Schema 1 keyed templates without their owner.
-      const bare = `${t.manifest.id}@${t.manifest.version}`;
-      if (key !== bare) errors.push(`template key "${key}" must be ${bare}`);
-      continue;
-    }
-    const owner = key.split('/')[0] ?? '';
-    if (!(owner === 'base' || isId(owner)) || key !== templateKey(t.manifest, owner)) {
-      errors.push(`template key "${key}" must be <owner>/${t.manifest.id}@${t.manifest.version}`);
-    }
-  }
-  for (const sha of requiredFiles(s as ScreenManifest)) if (!s.files[sha]) errors.push(`file ${sha.slice(0, 12)} is referenced but not listed`);
-  for (const [key, spot] of Object.entries(s.spots)) {
-    if (spot.id !== key) errors.push(`spot "${key}" is listed under a different id ("${spot.id}")`);
-    if (!isId(key)) errors.push(`spot id "${key}" is not a valid id`);
-    if (spot.kind === 'template' && !s.templates[spot.template]) errors.push(`spot "${spot.id}" uses unknown template ${spot.template}`);
-    if (!(spot.durationMs > 0)) errors.push(`spot "${spot.id}" has no duration`);
-    if (spot.kind === 'url' && !safeUrl(spot.url)) errors.push(`spot "${spot.id}" needs an absolute https URL`);
-    if (spot.kind === 'template') {
-      for (const b of Object.values(spot.bindings ?? {})) {
-        if (!s.dataSources[b.source]) errors.push(`spot "${spot.id}" binds to unknown data source "${b.source}"`);
-      }
-    }
-  }
-  if (s.screen?.timezone && !validTimezone(s.screen.timezone)) errors.push(`screen.timezone "${s.screen.timezone}" is not a time zone`);
-  if (s.screen?.id !== undefined && !isId(s.screen.id)) errors.push(`screen id "${s.screen.id}" is not a valid id`);
-  for (const e of s.schedule) {
-    if (!isId(e.id)) errors.push(`schedule entry id "${e.id}" is not a valid id`);
-    if (typeof e.priority !== 'number' || !Number.isFinite(e.priority)) errors.push(`schedule entry "${e.id}": priority must be a number`);
-    if (!['org', 'group', 'screen'].includes(e.target)) errors.push(`schedule entry "${e.id}": target must be org, group or screen`);
-    if (!s.playlists[e.playlist]) errors.push(`schedule entry "${e.id}" plays unknown playlist "${e.playlist}"`);
-    errors.push(...windowProblems(`schedule entry "${e.id}"`, e, false));
-  }
-  if (s.screen?.displayHours) errors.push(...displayHoursProblems(s.screen.displayHours));
-  for (const [key, p] of Object.entries(s.playlists)) {
-    if (p.id !== key) errors.push(`playlist "${key}" is listed under a different id ("${p.id}")`);
-    if (!isId(key)) errors.push(`playlist id "${key}" is not a valid id`);
-    const tr = p.transition as { type?: string; ms?: unknown } | undefined;
-    const okMs = (ms: unknown) => typeof ms === 'number' && ms >= 1 && ms <= 10_000;
-    if (!tr || !(tr.type === 'cut' || ((tr.type === 'fade' || tr.type === 'crossfade') && okMs(tr.ms)))) {
-      errors.push(`playlist "${key}": transition must be cut, fade or crossfade with ms between 1 and 10000`);
-    }
-    if (!Array.isArray(p.items)) {
-      errors.push(`playlist "${key}" has no items list`);
-      continue;
-    }
-    for (const item of p.items) if (!s.spots[item.spot]) errors.push(`playlist "${p.id}" lists unknown spot "${item.spot}"`);
-  }
-  for (const [key, d] of Object.entries(s.dataSources)) {
-    if (d.id !== key) errors.push(`data source "${key}" is listed under a different id ("${d.id}")`);
-    if (!isId(key)) errors.push(`data source id "${key}" is not a valid id`);
-    if (!(typeof d.refreshS === 'number' && d.refreshS >= MIN_REFRESH_S)) errors.push(`data source "${key}": refreshS must be at least ${MIN_REFRESH_S}`);
-  }
-  return errors;
-}
-
-/** Every file hash a manifest refers to. */
-export function requiredFiles(manifest: ScreenManifest): Set<string> {
-  const out = new Set<string>();
-  for (const t of Object.values(manifest.templates)) out.add(t.html);
-  for (const s of Object.values(manifest.spots)) {
-    if (s.kind === 'template') Object.values(s.assets).forEach((a) => out.add(a));
-    else if (s.kind === 'image' || s.kind === 'video') out.add(s.file);
-  }
-  return out;
-}
 
 /** Files to download before a manifest can go live, and files no longer needed once it has. */
 export function planSync(next: ScreenManifest, have: Iterable<string>): { missing: string[]; stale: string[] } {

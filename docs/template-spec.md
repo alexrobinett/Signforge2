@@ -37,7 +37,7 @@ The build (`sf build`) bundles these into one self-contained HTML file with the 
 
 - `id`: lowercase letters, digits and dashes.
 - `version`: semver. A published version never changes; any edit is a new version.
-- `fields`: what the CMS form shows. Types are `text`, `number`, `boolean`, `color`, `select`, `image` and `list`. A `list` is repeating rows (menu items, events, headlines): it declares an `item` with its own scalar fields and an optional `maxItems`. Every non-image field needs a `default` or the spot must supply a value.
+- `fields`: what the CMS form shows. Types are `text`, `number`, `boolean`, `color`, `select`, `image` and `list`. A `list` is repeating rows (menu items, events, headlines): it declares an `item` with its own scalar fields and an optional `maxItems`. A `number` may set `min`, `max` and `step` (counted from `min`, or from 0); a `text` may set `maxLength`. Every non-image field needs a `default` or the spot must supply a value. These limits are enforced, on the template's own defaults and on every spot's data, by the contract's `validateTemplateManifest` and `validateSpotData`.
 - `duration`: a spot may run for any length inside `minMs` to `maxMs`.
 - `orientations`: `landscape`, `portrait` or both.
 - `uses`: list `canvas`, `webgl` or `audio` if the template needs them.
