@@ -43,8 +43,22 @@ function chunk<T>(rows: T[], columns: number): T[][] {
   return out;
 }
 
-/** get / list / insert / update / delete over a table keyed by `(org_id, id)`. */
-function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: string) {
+/**
+ * Who names a row. `content`: spots, playlists, schedule entries and data sources, whose ids
+ * content and manifests name; a caller may choose one, and the table is keyed `(org_id, id)` so
+ * two orgs can choose the same. `server`: everything else, made by a tool; the id is always
+ * `newId(prefix)` and a caller's is ignored, so ids are unique across orgs (a screen's must be:
+ * its credential and its Durable Object name it by id alone).
+ */
+type Ids = 'content' | 'server';
+
+/** get / list / insert / update / delete over a table with an org and an id. */
+function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: string, ids: Ids = 'server') {
+  const idFor = (values: { id?: string }) => {
+    const id = ids === 'content' ? (values.id ?? newId(prefix)) : newId(prefix);
+    assertId(id);
+    return id;
+  };
   type Row = T['$inferSelect'];
   // Drizzle's builders do not type-check over a generic table; the public signatures carry the types.
   const t = table as unknown as typeof s.screens;
@@ -65,8 +79,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
       ).flat() as Row[],
     list: async (): Promise<Row[]> => (await db.select().from(t).where(eq(t.orgId, orgId)).orderBy(asc(t.id)).all()) as Row[],
     insert: async (values: NewRow<T>): Promise<Row> => {
-      const id = values.id ?? newId(prefix);
-      assertId(id);
+      const id = idFor(values);
       return (await db
         .insert(t)
         .values({ ...strip(values as object), id, orgId } as never)
@@ -88,8 +101,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
     /** The same changes, staged for the scope's `commit` (./writes.ts). */
     stage: {
       insert: (values: NewRow<T>): Staged<Row> => {
-        const id = values.id ?? newId(prefix);
-        assertId(id);
+        const id = idFor(values);
         const row = fullRow(t, { ...strip(values as object), id, orgId });
         return staged(row as Row, db.insert(t).values(row as never));
       },
@@ -113,7 +125,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
 /** Templates and their versions: the org's own plus base ones (null org), which it may read but not change. */
 function shared<T extends SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn }>(db: Db, orgId: string, table: T, prefix: string) {
   type Row = T['$inferSelect'];
-  const own = entity(db, orgId, table, prefix);
+  const own = entity(db, orgId, table, prefix, 'server');
   const t = table as unknown as typeof s.templates;
   const visible = or(eq(t.orgId, orgId), isNull(t.orgId))!;
   return {
@@ -181,11 +193,11 @@ export function scoped(d1: D1Database, orgId: string) {
   const assetRenditions = entity(db, orgId, s.assetRenditions, 'rnd');
   const templates = shared(db, orgId, s.templates, 'tpl');
   const templateVersions = shared(db, orgId, s.templateVersions, 'tpv');
-  const spotRows = entity(db, orgId, s.spots, 'spt');
-  const playlists = entity(db, orgId, s.playlists, 'pls');
-  const scheduleEntries = entity(db, orgId, s.scheduleEntries, 'sch');
+  const spotRows = entity(db, orgId, s.spots, 'spt', 'content');
+  const playlists = entity(db, orgId, s.playlists, 'pls', 'content');
+  const scheduleEntries = entity(db, orgId, s.scheduleEntries, 'sch', 'content');
   const publishes = entity(db, orgId, s.publishes, 'pub');
-  const dataSources = entity(db, orgId, s.dataSources, 'src');
+  const dataSources = entity(db, orgId, s.dataSources, 'src', 'content');
   const audit = entity(db, orgId, s.auditLog, 'aud');
   const brandKitRows = entity(db, orgId, s.brandKits, 'bk');
 
@@ -632,7 +644,7 @@ export function scoped(d1: D1Database, orgId: string) {
       ...brandKitRows,
       insert: async (values: NewRow<typeof s.brandKits>) => {
         await checkLogos(values);
-        return brandKitRows.insert({ ...values, id: undefined });
+        return brandKitRows.insert(values);
       },
       update: async (id: string, patch: RowPatch<typeof s.brandKits>) => {
         await checkLogos(patch);
@@ -642,7 +654,7 @@ export function scoped(d1: D1Database, orgId: string) {
         ...brandKitRows.stage,
         insert: async (values: NewRow<typeof s.brandKits>) => {
           await checkLogos(values);
-          return brandKitRows.stage.insert({ ...values, id: undefined });
+          return brandKitRows.stage.insert(values);
         },
         update: async (current: typeof s.brandKits.$inferSelect, patch: RowPatch<typeof s.brandKits>) => {
           await checkLogos(patch);

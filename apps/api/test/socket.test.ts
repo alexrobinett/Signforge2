@@ -113,7 +113,7 @@ describe('POST /v1/device/sync', () => {
     const res = await sync(a.credential);
     expect(res.status).toBe(200);
     const body = (await res.json()) as SyncResponse;
-    expect(body.socketTicket).toMatch(/^ws-a-screen\./);
+    expect(body.socketTicket.startsWith(`${a.seed.screen}.`)).toBe(true);
     expect(body.desiredManifest).toBeUndefined();
     expect(body.epoch).toBe('e1');
     expect(Math.abs(Date.parse(body.serverTime) - Date.now())).toBeLessThan(5000);

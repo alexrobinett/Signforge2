@@ -19,7 +19,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { ScreenManifest } from '@signforge/contract';
-import { newId, scoped } from '@signforge/db';
+import { scoped } from '@signforge/db';
 import { seedOrganization } from '@signforge/db/testing';
 import { getPlatformProxy } from 'wrangler';
 import { mintCredential } from '../src/device/credential';
@@ -52,7 +52,6 @@ try {
   const org = scoped(DB, args.org!);
 
   const screen = await org.screens.insert({
-    id: newId('scr'),
     name: args.name ?? manifest?.screen.name ?? 'Test screen',
     timezone: manifest?.screen.timezone ?? 'UTC',
     locale: manifest?.screen.locale,
@@ -77,9 +76,8 @@ try {
     // The manifest names its data sources; give each a row so its snapshot has somewhere to live.
     for (const [id, s] of Object.entries(manifest.dataSources)) {
       if (!(await org.dataSources.get(id))) {
-        await org.dataSources.insert({ id, name: id, format: 'json', urlEncrypted: '', refreshS: s.refreshS }).catch((err: unknown) => {
-          log(`  data source ${id}: ${err instanceof Error ? err.message : String(err)} (another org may hold this id)`);
-        });
+        // Data-source ids are per org (review fix 4), so the content's own ids always fit.
+        await org.dataSources.insert({ id, name: id, format: 'json', urlEncrypted: '', refreshS: s.refreshS });
       }
       const file = args.data ? join(resolve(args.data), `${id}.json`) : undefined;
       if (file && existsSync(file)) {

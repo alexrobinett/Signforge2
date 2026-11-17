@@ -213,7 +213,59 @@ describe('rows a scope writes', () => {
 
   it('need ids matching ID_PATTERN', async () => {
     expect(() => scoped(env.DB, 'org/a')).toThrow(TypeError);
-    await expect(s.b.scope.screenGroups.insert({ id: 'a.b', name: 'x' })).rejects.toThrow(TypeError);
+    await expect(s.b.scope.playlists.insert({ id: 'a.b', name: 'x', transitionJson: '{}' })).rejects.toThrow(TypeError);
+  });
+});
+
+describe('ids', () => {
+  // Content ids (spots, playlists, schedule entries, data sources) are named by content and
+  // manifests, so a caller may choose them: they are keyed (org_id, id), and one org's choice
+  // neither blocks nor reveals another's.
+  it('let two orgs choose the same content id', async () => {
+    const a = s.a.scope;
+    const b = s.b.scope;
+    const same = 'same-id';
+    for (const o of [a, b]) {
+      await o.spots.insert({ id: same, name: `${o.orgId} spot`, kind: 'url', durationMs: 1000, url: 'https://example.com/' });
+      await o.playlists.insert({ id: same, name: `${o.orgId} list`, transitionJson: '{}' });
+      await o.playlists.setItems(same, [same]);
+      await o.scheduleEntries.insert({ id: same, playlistId: same, target: 'org', priority: 0 });
+      await o.dataSources.insert({ id: same, name: `${o.orgId} feed`, format: 'json', urlEncrypted: 'enc:x', refreshS: 60 });
+      await o.dataSources.putSnapshot(same, { version: o.orgId, fetchedAt: 1, dataJson: '{}' });
+    }
+    for (const o of [a, b]) {
+      expect(await o.spots.get(same)).toMatchObject({ name: `${o.orgId} spot` });
+      expect(await o.playlists.items(same)).toEqual([same]);
+      expect(await o.scheduleEntries.get(same)).toMatchObject({ orgId: o.orgId });
+      expect(await o.dataSources.snapshot(same)).toMatchObject({ version: o.orgId });
+    }
+    // Deleting org A's leaves org B's.
+    await a.playlists.setItems(same, []);
+    expect(await a.spots.delete(same)).toBe(true);
+    expect(await b.spots.get(same)).toBeDefined();
+    expect(await b.playlists.items(same)).toEqual([same]);
+  });
+
+  // Everything else is made by a tool and named by the server: a caller's id is ignored, so no
+  // id can collide across orgs. Screens must be unique globally: a credential and the screen's
+  // Durable Object name the screen by id alone.
+  it("are the server's for screens, groups, credentials, assets, renditions, publishes, audit rows and templates", async () => {
+    const b = s.b.scope;
+    const taken = s.a.screen;
+    const rows = [
+      await b.screens.insert({ id: taken, name: 'x', timezone: 'UTC', orientation: 'landscape' } as never),
+      await b.screenGroups.insert({ id: s.a.group, name: 'x' } as never),
+      await b.screens.credentials.insert({ id: s.a.credential, screenId: s.b.screen, secretHash: '1'.repeat(64) } as never),
+      await b.assets.insert({ id: s.a.asset, kind: 'image', name: 'x', sha256: '2'.repeat(64), type: 'image/png', size: 1 } as never),
+      await b.publishes.insert({ id: s.a.publish, status: 'published', actorKind: 'user', actorId: 'u' } as never),
+      await b.templates.insert({ id: s.a.template, key: 'chosen', name: 'x' } as never),
+      b.screens.stage.insert({ id: taken, name: 'y', timezone: 'UTC', orientation: 'landscape' } as never).row,
+    ];
+    for (const r of rows) expect(r.id).toMatch(/^[a-z]+_/);
+    const asset = rows[3]!;
+    const rendition = await b.assets.renditions.insert({ id: 'chosen', assetId: asset.id, orientation: 'portrait', sha256: '2'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 } as never);
+    expect(rendition.id).not.toBe('chosen');
+    expect(await s.a.scope.screens.get(taken)).toMatchObject({ orgId: s.a.orgId });
   });
 });
 

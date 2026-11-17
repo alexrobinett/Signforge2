@@ -26,7 +26,7 @@ Two Workers on one hostname, so cookies stay same-origin. They are split because
 
 ## Data model (D1)
 
-Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT NULL`, its indexes lead with it, and foreign keys are composite `(org_id, id)` so a row cannot point into another org. D1 enforces foreign keys by default (`PRAGMA foreign_keys` is 1): a cross-org reference, a missing parent and deleting a restricted parent are all rejected, and a `batch()` with one bad row writes nothing. The schema is `packages/db/src/schema.ts`; its README lists the few deliberate exceptions.
+Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT NULL`, its indexes lead with it, and foreign keys are composite `(org_id, id)` so a row cannot point into another org. D1 enforces foreign keys by default (`PRAGMA foreign_keys` is 1): a cross-org reference, a missing parent and deleting a restricted parent are all rejected, and a `batch()` with one bad row writes nothing. **Ids.** Content rows (spots, playlists, schedule entries, data sources, brand kits) are keyed `(org_id, id)`: content and manifests name their ids, so two orgs may choose the same one and neither learns of the other. Every other tenant row has a global id that only the server makes (`newId`); a caller's id is ignored. A screen's id must be global: its credential and its Durable Object name it alone. The schema is `packages/db/src/schema.ts`; its README lists the few deliberate exceptions.
 
 | Table | Key columns |
 | --- | --- |
