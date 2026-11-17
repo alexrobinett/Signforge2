@@ -1,6 +1,6 @@
 # Typecheck, lint and test on every push to master and every pull request.
-# `pnpm test` includes the API's workerd tests and the player's headless browser tests (M3-26),
-# so Chromium is installed first. The CMS end-to-end run starts a real local API and CMS.
+# `pnpm test` includes the API's workerd tests, the player's headless browser tests (M3-26) and
+# the CMS end-to-end run against a real local API and CMS, so Chromium is installed first.
 # Performance is not checked here: that is measured on the Pi (docs/template-spec.md).
 name: CI
 
@@ -33,7 +33,6 @@ jobs:
       # Only files the change touches: the repo is not formatted wholesale yet (see README).
       - run: pnpm format:check --since=origin/${{ github.base_ref || 'master' }}
       - run: pnpm test
-      - run: pnpm --filter @signforge/cms test:e2e
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

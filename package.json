@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "test": "turbo run test test:e2e",
     "lint": "biome lint .",
     "format": "biome format --write --changed --no-errors-on-unmatched",
     "format:check": "biome format --changed --no-errors-on-unmatched",
