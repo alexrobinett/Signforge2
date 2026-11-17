@@ -4,8 +4,10 @@
  * give. Tests change content with `publish`, and make any path fail or stall with `intercept`.
  * Every request is logged, with whether the client gave up on it.
  *
- * `/content/` also plays the device API's socket (M3-06): `POST /content/sync` hands out a ticket,
- * and `/content/ws` accepts a WebSocket that answers `ping` with `pong` as the Durable Object does.
+ * `/content/` also plays the device API (M3-06, M3-07): `POST /content/sync` answers as the API's
+ * sync does (server time, acknowledged play counts per epoch, snapshots newer than the screen holds,
+ * queued commands, a ticket), and `/content/ws` accepts a WebSocket that answers `ping` with `pong`
+ * as the Durable Object does.
  * Tests `push` socket messages and read what the player sent in `socketMessages`. Content is
  * answered with CORS headers, so a test can serve it from another origin (`localUrl`), the way the
  * player meets the API.
@@ -15,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { extname, join, normalize } from 'node:path';
+import type { DeviceCommand, PlayCount, SyncRequest } from '@signforge/contract';
 import type { Content } from './content';
 
 export type Action =
@@ -49,7 +52,18 @@ export class FixtureServer {
   /** How many sockets the player has opened, in all. */
   socketsOpened = 0;
   /** Every sync request's body, oldest first. */
-  readonly syncs: unknown[] = [];
+  readonly syncs: SyncRequest[] = [];
+  /** Play counts stored by syncs, as the API stores them: a seq already stored in its epoch adds nothing. */
+  readonly playCounts: PlayCount[] = [];
+  private acked = new Map<string, number>();
+  /** Added to the real time in the sync's `serverTime`: the device clock is that far wrong. */
+  serverOffsetMs = 0;
+  /** The sync's `nextSyncS`. */
+  nextSyncS = 300;
+  /** Commands the next sync carries, once. */
+  readonly commands: DeviceCommand[] = [];
+  /** Syncs carrying play counts to process and then drop without an answer, as a lost response would be. */
+  loseCountReplies = 0;
 
   private constructor(private readonly playerDir: string) {
     this.server.on('upgrade', (req, socket: Socket) => this.upgrade(req, socket));
@@ -91,7 +105,7 @@ export class FixtureServer {
     this.content = content;
   }
 
-  /** Serve this snapshot at `/content/data/<id>.json`. */
+  /** Serve this snapshot at `/content/data/<id>.json`, and send it on sync to a screen that holds an older one. */
   setData(id: string, snapshot: unknown): void {
     this.data.set(id, snapshot);
   }
@@ -101,6 +115,17 @@ export class FixtureServer {
     const rule = { match, action };
     this.rules.push(rule);
     return () => void (this.rules = this.rules.filter((r) => r !== rule));
+  }
+
+  /** Total plays and ms the syncs stored, by `hour spot`. */
+  storedCounts(): Record<string, { plays: number; ms: number }> {
+    const out: Record<string, { plays: number; ms: number }> = {};
+    for (const c of this.playCounts) {
+      const t = (out[`${c.hour} ${c.spot}`] ??= { plays: 0, ms: 0 });
+      t.plays += c.plays;
+      t.ms += c.ms;
+    }
+    return out;
   }
 
   /** Requests whose path matches, oldest first. */
@@ -169,18 +194,33 @@ export class FixtureServer {
         let body = '';
         req.on('data', (d: Buffer) => (body += d));
         req.on('end', () => {
-          const sync = JSON.parse(body) as { epoch: string };
+          const sync = JSON.parse(body) as SyncRequest;
           this.syncs.push(sync);
+          const acked = this.acked.get(sync.epoch) ?? 0;
+          if (sync.seq > acked) {
+            this.playCounts.push(...sync.playCounts);
+            this.acked.set(sync.epoch, sync.seq);
+          }
+          const held = sync.snapshots ?? {};
+          const snapshots = [...this.data.values()].filter((d) => {
+            const snap = d as { id: string; version: number };
+            return snap.version > (held[snap.id] ?? -1);
+          });
           const reply = {
-            serverTime: new Date().toISOString(),
-            nextSyncS: 300,
+            serverTime: new Date(Date.now() + this.serverOffsetMs).toISOString(),
+            nextSyncS: this.nextSyncS,
             epoch: sync.epoch,
-            ackSeq: 0,
+            ackSeq: this.acked.get(sync.epoch) ?? 0,
             ...(c ? { desiredManifest: c.manifest.id } : {}),
-            snapshots: [],
+            snapshots,
             socketTicket: `ticket-${this.syncs.length}`,
-            commands: [],
+            commands: this.commands.splice(0),
           };
+          if (sync.playCounts.length && this.loseCountReplies > 0) {
+            this.loseCountReplies--;
+            rec.status = 0;
+            return void req.socket.destroy();
+          }
           send(200, JSON.stringify(reply), 'application/json');
         });
         return;

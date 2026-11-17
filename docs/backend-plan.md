@@ -119,8 +119,10 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 - **Who tells the object.** The tool dispatcher, after a change commits: `publish_manifest_to_screen` sends `manifest`, `revoke_screen_credential` sends `revoked` and closes. The object writes `applied` to `screens.reported_manifest_id` through the org's scope.
 
 **Sync.** `POST /v1/device/sync`, every 5 minutes with jitter, the interval set by the server.
-- **The screen sends:** player and manifest versions, cache state, display state, hourly play counts.
-- **The server returns:** the desired manifest ID, any changed data snapshots, a short-lived socket ticket and the server time. The server time is there because a Pi has no battery-backed clock.
+- **The screen sends:** player version and the manifest schemas and frame protocols it plays, the active manifest (and the one it fell back from), files missing, display state and power methods, its clock and offset, snapshot versions held, data refused per source, and hourly play counts.
+- **The server returns:** the desired manifest ID, any changed data snapshots, a short-lived socket ticket, the server time and commands. The server time is there because a Pi has no battery-backed clock. `reload` is sent while the screen's player cannot play the desired manifest's schema or a template's protocol.
+- **What it stores** (`apps/api/src/device/sync.ts`, `scoped(...).screens.sync`): on the screen row, the last-seen time, the player version, the heartbeat (`heartbeat_json`, with the drift between server and device clocks) and the play count `(epoch, seq)`; and the counts, added to `play_counts` in the same D1 batch unless the seq is already stored in its epoch. The repeat check is in the SQL, so two copies of one request racing count once. Play counts carry no manifest: which manifest a screen had when is in its publish history.
+- **D1 writes per sync**, measured in `packages/db/test/device.test.ts` from D1's `rows_written`: 1 for a sync with no counts (the screen row; none of its indexed columns change), plus 3 for each count of a new (hour, spot) row (the row, its key and the org-hour index) or 1 for one added to an existing row. The screen sends an hour's counts once the hour has ended, so each (hour, spot) row is written once: at 1,000 screens on a 5-minute sync, 8.6M writes a month for heartbeats plus about 3 per spot played per screen per hour (10 spots: 21.6M), about 30M in all against the 50M included. Sending the running hour on every sync would cost twelve times as much for counts.
 
 | Route | Purpose |
 | --- | --- |
@@ -128,17 +130,17 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | `POST /v1/device/pair/poll` | Collect the credential |
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
 | `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
-| `GET /v1/device/data/:id.json` | Snapshot, for first load. Only sources the screen's manifest lists. |
+| `GET /v1/device/data/:id.json` | Snapshot of one source. Only sources the screen's manifest lists. The player takes snapshots from the sync; this route is for debugging and tools. |
 | `POST /v1/device/sync` | Heartbeat, play counts, snapshot changes |
 | `GET /v1/device/ws?ticket=` | Nudge socket |
 
 The device API's request and response shapes are in `packages/contract` (device API section). Changes the player needs, beyond pointing its content base at `/v1/device`:
 - Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files. Done in M3-05: `?content=<api>/v1/device` in the kiosk URL, the credential from the supervisor's `GET /credential`.
-- Replace the per-source data poll with snapshots delivered on sync. Left as it is, every screen sends a request per source per refresh, which the cost table does not include.
-- Count plays per UTC hour, persist the counts, and send them with a batch number until acknowledged.
+- Replace the per-source data poll with snapshots delivered on sync. Done in M3-07: from the API the player fetches no source itself.
+- Count plays per UTC hour, persist the counts, and send them with a batch number until acknowledged. Done in M3-07.
 - Treat a 401 as revoked, not offline: show a pairing code (open question 2).
 - Act on socket commands at once, including a display override.
-- Correct its clock from server time.
+- Correct its clock from server time. Done in M3-07.
 
 Its service worker already leaves `/v1/` alone, so device API responses are never stored in the shell cache.
 
@@ -197,7 +199,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
 | Worker CPU | 30M ms | $0.02/M ms | about 20M ms |
 | Durable Object duration | 400k GB-s | $12.50/M GB-s | about 270k: tight |
 | Durable Object requests | 1M | $0.15/M | under 0.3M, or up to 2.5M if auto-responded pings bill at 20:1 |
-| D1 writes | 50M | $1.00/M | 16 to 20M; each index a write touches counts as another row |
+| D1 writes | 50M | $1.00/M | about 30M (measured per sync, see Screens: Sync); each index a write touches counts as another row |
 | D1 reads | 25B | $0.001/M | about 30M |
 | D1 storage | 5 GB | $0.75/GB-month | about 1 GB with 90 days of play counts |
 | R2 | 10 GB, 1M Class A, 10M Class B | $0.015/GB-month, $4.50/M A, $0.36/M B | about 50 GB, about $0.60 |

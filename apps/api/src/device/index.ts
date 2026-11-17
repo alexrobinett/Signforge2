@@ -9,7 +9,8 @@ import { cors } from 'hono/cors';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
 import { deviceAuth, type DeviceEnv } from './auth';
 import { screenManifests } from './manifests';
-import { socketRoute, syncRoute } from './socket';
+import { socketRoute } from './socket';
+import { syncRoute } from './sync';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 

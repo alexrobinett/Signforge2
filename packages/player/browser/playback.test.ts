@@ -16,11 +16,13 @@ describe('playback loop', () => {
     expect(s.manifestId).toBe(content.manifest.id);
     expect(s.skipped).toBe(0);
     // The spot the player says is on screen is the one drawn on top, and it was told to play.
-    await expect.poll(async () => {
-      const now = (await p.state()).spot;
-      const shown = await p.onScreen();
-      return shown?.playing && shown.label === now;
-    }).toBe(true);
+    await expect
+      .poll(async () => {
+        const now = (await p.state()).spot;
+        const shown = await p.onScreen();
+        return shown?.playing && shown.label === now;
+      })
+      .toBe(true);
   });
 
   it('skips a spot whose template throws in prepare and plays the next', async () => {

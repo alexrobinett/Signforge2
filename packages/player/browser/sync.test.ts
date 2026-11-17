@@ -10,10 +10,13 @@ describe('content sync', () => {
     const content = h.content([{ id: 'a' }]);
     let release = () => {};
     // The player's stall timeout is 30 s; `?stall=1` makes it 1 s so the test is quick.
-    const p = await h.openPlayer((s) => {
-      s.publish(content);
-      release = s.intercept(BLOBS, 'stall');
-    }, { stall: '1' });
+    const p = await h.openPlayer(
+      (s) => {
+        s.publish(content);
+        release = s.intercept(BLOBS, 'stall');
+      },
+      { stall: '1' },
+    );
 
     await expect.poll(() => p.server.requestsTo(BLOBS).find((r) => r.abortedAt), { timeout: 10_000 }).toBeTruthy();
     const stalled = p.server.requestsTo(BLOBS).find((r) => r.abortedAt)!;

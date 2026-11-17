@@ -25,11 +25,12 @@ it('syncs at once when the socket says a new manifest is published, and reports 
   await expect.poll(() => p.server.socketMessages).toContainEqual({ type: 'applied', manifest: second.manifest.id });
 });
 
-it('does not poll for the manifest while the socket is up, and polls again when it drops', async () => {
+it('does not sync between nudges while the socket is up, and syncs every poll when it drops', async () => {
   const content = h.content([{ id: 'a', durationMs: 800 }]);
   const p = await h.openPlayer((server) => server.publish(content), remote('1'));
   await p.until((s) => s.manifestId === content.manifest.id && s.socket);
-  const polls = () => p.server.requestsTo(/^\/content\/manifest\.json$/).length;
+  // With the API every look is a sync (M3-07); the manifest is fetched only when the sync names a new one.
+  const polls = () => p.server.syncs.length;
   const before = polls();
   await new Promise((r) => setTimeout(r, 2500));
   expect(polls() - before).toBeLessThanOrEqual(1);
