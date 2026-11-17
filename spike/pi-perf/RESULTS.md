@@ -104,6 +104,19 @@ Other findings:
 - **An element the player draws on top of templates is costly.** The always-moving debug speck cost 7% of frames. A player-level overlay such as a ticker bar over spots would cost the same; overlays belong inside templates.
 - **The page's frame counter is a valid measure.** With every frame forced to draw, frames presented by the compositor and the page's counter agreed within a few percent.
 
+## The template wrapper frame (M3-27, 2026-11-17)
+
+Each template now runs inside a same-origin wrapper frame (see Template containment in `docs/architecture.md`). Same Pi, content and measurement as the third round: the full 16-spot playlist, 150 s per run, `device/pi/isolate.py`. The baseline is the `m3-foundations` build without the wrapper, measured in the same session, alternating builds.
+
+| Build | Transition | Overall | Playing | Loading next | During transition | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- |
+| Without wrapper | Cut | 0.12% | 0.01% | 3.6% | - | 67 ms |
+| With wrapper | Cut | 0.12% | 0.00% | 3.3% | - | 67 ms |
+| Without wrapper (3 runs) | Fade, 600 ms | 0.28, 0.74, 0.33% | 0.01, 0.18, 0.02% | 3.8, 10.9, 1.9% | 2.6, 2.8, 4.5% | 17, 467, 17 ms |
+| With wrapper (3 runs) | Fade, 600 ms | 0.46, 0.33, 0.34% | 0.02, 0.02, 0.02% | 3.3, 1.7, 2.6% | 5.6, 4.4, 4.0% | 67, 17, 50 ms |
+
+No spot was skipped in any run. Overall and while playing, the wrapper makes no difference beyond run-to-run noise, and every run is inside the 1% budget. During the 600 ms fade the wrapper runs drop slightly more frames (4.0 to 5.6% against 2.6 to 4.5%); the ranges overlap, so three runs cannot tell whether that is real.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
