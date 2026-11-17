@@ -5,12 +5,19 @@
  */
 import { Hono } from 'hono';
 import { MANIFEST_SCHEMA } from '@signforge/contract';
+import { createApi } from './api';
+import { refuseSession } from './auth/guards';
 
 // `Env` is generated from wrangler.jsonc by `wrangler types` (worker-configuration.d.ts).
 const app = new Hono<{ Bindings: Env }>();
 
+// A user's session is never a screen's credential (M3-09).
+app.use('/v1/device/*', refuseSession);
+
 app.get('/health', (c) =>
   c.json({ ok: true, environment: c.env.ENVIRONMENT, version: c.env.BUILD_VERSION, manifestSchema: MANIFEST_SCHEMA }),
 );
+
+app.route('/api', createApi());
 
 export default app;
