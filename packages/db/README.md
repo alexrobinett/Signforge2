@@ -25,6 +25,9 @@ Code that has to find a row before it knows the org (device auth by screen id, p
   The temporary `/admin` upload routes (M3-04) also use it to find a screen's org, behind the deploy secret. The publish they end with goes through the tool registry with `scoped(db, orgId)`.
 
 - `organizationExists(db, orgId)`: the `/admin` template routes check the org they are told to write to.
+- `startPairing(db, { code, pollTokenHash, now })` and `collectPairing(db, pollTokenHash, now, mint)` (`src/pairing.ts`): the screen's half of pairing. `startPairing` stores a code for 15 minutes (`PAIRING_TTL_MS`), sweeping codes past their time in the same batch, and returns false if the code is in use. `collectPairing` answers `waiting` or `expired` until the code is claimed; then it mints the credential, inserts its hash for the claimed screen and deletes the code in one batch, so only the first of two racing polls gets it. That insert is the one tenant row written outside `scoped`, into the org the claim stored, never one the screen names.
+
+`org.pairing.open(code, now)` says whether a code can be claimed now (unknown, expired and claimed are all false), and `org.pairing.stage.claim(code, screenId, now)` binds it to a screen staged before it in the same batch. Its second statement makes the whole batch fail, writing nothing, if the code was not open when it ran.
 
 Base templates are written by `platform(db)` (`src/platform.ts`), the one scope that is not an org's. It reads and writes only rows with a null org: `templates`, `template_versions`, and the `platform_audit_log` that records each change. Its `templates` has the same shape as an org scope's, so one tool serves both. Only `/admin` uses it, through the tool dispatcher's platform registry. `org.templates.ownByKey(key)` and `org.templates.versions.ownVersion(templateId, version)` return the scope's own rows only, never base ones.
 
