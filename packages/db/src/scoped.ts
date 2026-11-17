@@ -186,8 +186,16 @@ export function scoped(d1: D1Database, orgId: string) {
 
     templates: {
       ...templates,
+      /** The org's own template whose `template.json` id is `key`. Never a base one. */
+      ownByKey: (key: string) =>
+        db.select().from(s.templates).where(and(eq(s.templates.orgId, orgId), eq(s.templates.key, key))).get(),
       versions: {
         ...templateVersions,
+        /** The org's own version of one of its templates. Never a base one. */
+        ownVersion: (templateId: string, version: string) => {
+          const tv = s.templateVersions;
+          return db.select().from(tv).where(and(eq(tv.orgId, orgId), eq(tv.templateId, templateId), eq(tv.version, version))).get();
+        },
         /** Versions of one template, if the org can see it. */
         forTemplate: async (templateId: string) => {
           const tv = s.templateVersions;

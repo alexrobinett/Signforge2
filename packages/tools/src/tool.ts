@@ -4,7 +4,7 @@
  * the MCP server and WebMCP all call tools through `dispatch` (./dispatch.ts); none of them
  * reaches the database another way.
  */
-import type { OrgScope } from '@signforge/db';
+import type { OrgScope, PlatformScope } from '@signforge/db';
 import type { z } from 'zod';
 
 /** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
@@ -34,9 +34,15 @@ export interface Actor {
   clientId?: string;
 }
 
-/** What a handler gets. `org` is the only way it reaches tenant data. */
-export interface ToolContext<I> {
-  org: OrgScope;
+/**
+ * The data a tool reaches: an org's (`scoped(db, orgId)`), or for the platform registry the
+ * platform's own (`platform(db)`: base templates). Each registry is dispatched with its own kind.
+ */
+export type DataScope = OrgScope | PlatformScope;
+
+/** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
+export interface ToolContext<I, D extends DataScope = OrgScope> {
+  org: D;
   actor: Actor;
   input: I;
   /** The R2 bucket holding blobs and manifests (keys in ./r2.ts). */
@@ -59,7 +65,7 @@ export class ToolError extends Error {
 
 export const notFound = (what: string, id: string) => new ToolError('not_found', `${what} ${id} not found`);
 
-export interface Tool<S extends z.ZodType = z.ZodType, O = unknown> {
+export interface Tool<S extends z.ZodType = z.ZodType, O = unknown, D extends DataScope = OrgScope> {
   /** Stable: the CMS, agents and the audit log refer to it. snake_case, as MCP clients expect. */
   name: string;
   /** For an agent choosing a tool: what it does, when to use it, what it returns. */
@@ -73,11 +79,14 @@ export interface Tool<S extends z.ZodType = z.ZodType, O = unknown> {
   example: z.input<S>;
   /** What the change was made to, for the audit log. */
   target?: (input: z.output<S>, output: NoInfer<O>) => { kind: string; id: string };
-  handler: (ctx: ToolContext<z.output<S>>) => Promise<O>;
+  handler: (ctx: ToolContext<z.output<S>, D>) => Promise<O>;
 }
 
 /** Declare a tool, keeping its input and output types. */
 export const defineTool = <S extends z.ZodType, O>(tool: Tool<S, O>): Tool<S, O> => tool;
 
+/** Declare a tool that works on an org's scope and on the platform's alike (templates). */
+export const defineSharedTool = <S extends z.ZodType, O>(tool: Tool<S, O, DataScope>): Tool<S, O, DataScope> => tool;
+
 /** Any registered tool. */
-export type AnyTool = Tool<z.ZodType, any>;
+export type AnyTool<D extends DataScope = OrgScope> = Tool<z.ZodType, any, D>;

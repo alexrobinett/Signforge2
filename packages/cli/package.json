@@ -7,7 +7,9 @@
     "sf": "./src/sf.ts"
   },
   "exports": {
-    "./push": "./src/push.ts"
+    "./push": "./src/push.ts",
+    "./template": "./src/template.ts",
+    "./template-push": "./src/template-push.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",

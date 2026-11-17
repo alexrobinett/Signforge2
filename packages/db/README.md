@@ -24,6 +24,10 @@ Code that has to find a row before it knows the org (device auth by screen id, p
 - `findDeviceScreen(db, screenId)` (`src/device.ts`): a screen's org, desired and previous manifest ids, and the hashes of its unrevoked credentials (none if the screen is revoked). The device API checks the secret against them, then uses `scoped(db, orgId)`.
   The temporary `/admin` upload routes (M3-04) also use it to find a screen's org, behind the deploy secret. The publish they end with goes through the tool registry with `scoped(db, orgId)`.
 
+- `organizationExists(db, orgId)`: the `/admin` template routes check the org they are told to write to.
+
+Base templates are written by `platform(db)` (`src/platform.ts`), the one scope that is not an org's. It reads and writes only rows with a null org: `templates`, `template_versions`, and the `platform_audit_log` that records each change. Its `templates` has the same shape as an org scope's, so one tool serves both. Only `/admin` uses it, through the tool dispatcher's platform registry. `org.templates.ownByKey(key)` and `org.templates.versions.ownVersion(templateId, version)` return the scope's own rows only, never base ones.
+
 `org.screens.setDesiredManifest(screenId, manifestId)` keeps the manifest it replaces as `previous_manifest_id`, whose files a screen mid-switch may still fetch.
 
 `org.screenGroups.setMembers(groupId, screenIds)` replaces a group's members in one batch, after checking the group and every screen are the org's (`NotInOrgError` otherwise, changing nothing).
@@ -48,7 +52,7 @@ From `docs/backend-plan.md#data-model-d1`, checked against the migrated database
 - Every tenant table has `org_id NOT NULL`; its indexes lead with `org_id`; every row is unique on `(org_id, id)`.
 - References between tenant rows are composite `(org_id, x_id)` foreign keys.
 
-Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. Every tenant `org_id` references Better Auth's `organization(id)`, without cascade.
+Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); nor is `platform_audit_log` (changes made outside any org); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. Every tenant `org_id` references Better Auth's `organization(id)`, without cascade.
 
 Local D1 enforces foreign keys (`PRAGMA foreign_keys` is 1, and a test shows a cross-org row is refused). Production is verified in M3-00. Isolation does not depend on it: the repositories filter every query.
 

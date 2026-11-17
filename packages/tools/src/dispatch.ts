@@ -8,18 +8,21 @@
  *   5. If the tool changes data, append to `audit_log`: actor kind and id, client id, action,
  *      target, and the input with secrets redacted. Reads are not audited.
  *
+ * A platform tool (`platformRegistry`, run by `/admin` with `platform(db)`) is audited the same way
+ * in `platform_audit_log`, since what it changes belongs to no org.
+ *
  * D1 has no interactive transactions, so the audit row is written after the change succeeds.
  * Should that write fail, the error propagates (a 500) and the change stands unrecorded; it is
  * not retried silently.
  */
 import { NotInOrgError, type OrgScope } from '@signforge/db';
 import { z } from 'zod';
-import { ROLE_SCOPES, ROLES, ToolError, type Actor, type AnyTool, type Role, type Scope, type ToolErrorCode } from './tool';
+import { ROLE_SCOPES, ROLES, ToolError, type Actor, type AnyTool, type DataScope, type Role, type Scope, type ToolErrorCode } from './tool';
 
-/** Who is calling, resolved by the adapter (the `/api` route, later MCP and WebMCP). */
-export interface Caller {
-  /** `scoped(db, orgId)` for the caller's active org: the only org it can reach. */
-  org: OrgScope;
+/** Who is calling, resolved by the adapter (the `/api` route, `/admin`, later MCP and WebMCP). */
+export interface Caller<D extends DataScope = OrgScope> {
+  /** `scoped(db, orgId)` for the caller's active org: the only org it can reach. For the platform registry, `platform(db)`. */
+  org: D;
   /** The caller's role in that org, read fresh by the adapter. */
   role: Role;
   /** The scopes its grant names. Omitted for a session: everything the role allows. Never more than the role allows either way. */
@@ -41,7 +44,7 @@ export function effectiveScopes(caller: Pick<Caller, 'role' | 'scopes'>): Scope[
 }
 
 /** Whether the caller may use the tool at all. */
-export function permits(caller: Pick<Caller, 'role' | 'scopes'>, tool: AnyTool): boolean {
+export function permits(caller: Pick<Caller, 'role' | 'scopes'>, tool: AnyTool<any>): boolean {
   return rank(caller.role) >= rank(tool.minRole) && effectiveScopes(caller).includes(tool.scope);
 }
 
@@ -66,7 +69,7 @@ export function redact(value: unknown, depth = 0): unknown {
 const fail = (error: ToolErrorCode, message: string, details?: unknown): DispatchResult => ({ ok: false, error, message, ...(details === undefined ? {} : { details }) });
 
 /** Run a tool for a caller. Refusals come back as `{ ok: false }`; anything unexpected throws. */
-export async function dispatch(registry: ReadonlyMap<string, AnyTool>, name: string, rawInput: unknown, caller: Caller): Promise<DispatchResult> {
+export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string, AnyTool<D>>, name: string, rawInput: unknown, caller: Caller<D>): Promise<DispatchResult> {
   const tool = registry.get(name);
   if (!tool) return fail('unknown_tool', `no tool named ${JSON.stringify(name)}`);
   if (!permits(caller, tool)) {
@@ -103,7 +106,7 @@ export async function dispatch(registry: ReadonlyMap<string, AnyTool>, name: str
 }
 
 /** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role and JSON Schema input. */
-export function describeTools(registry: ReadonlyMap<string, AnyTool>, caller: Pick<Caller, 'role' | 'scopes'>) {
+export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, caller: Pick<Caller, 'role' | 'scopes'>) {
   return [...registry.values()]
     .filter((t) => permits(caller, t))
     .map((t) => ({

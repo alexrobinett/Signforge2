@@ -2,5 +2,7 @@
 declare namespace Cloudflare {
   interface Env {
     TEST_MIGRATIONS: import('cloudflare:test').D1Migration[];
+    /** JSON: every template in templates/, built by `buildTemplate` (vitest.config.ts). */
+    TEMPLATE_BUILDS: string;
   }
 }

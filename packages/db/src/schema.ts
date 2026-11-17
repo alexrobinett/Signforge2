@@ -14,6 +14,7 @@
  *    A spot references a template version by id alone, and the repository checks the version is
  *    the org's own or a base one.
  *  - `pairing_codes` exist before any org claims them, so `claimed_org_id` is nullable.
+ *  - `platform_audit_log` records changes made outside any org (base templates); it has no org.
  *
  * Every tenant `org_id` references Better Auth's `organization` table, with no cascade: an org
  * cannot be deleted while it holds content.
@@ -518,6 +519,26 @@ export const auditLog = sqliteTable(
     detailJson: text('detail_json'),
   },
   (t) => [uniqueIndex('audit_log_org_id_uq').on(t.orgId, t.id), index('audit_log_org_at_idx').on(t.orgId, t.at)],
+);
+
+/**
+ * Changes the platform makes outside any org, such as registering a base template. Not a tenant
+ * table: no org reads it. Written only by the tool dispatcher, through `platform(db)`.
+ */
+export const platformAuditLog = sqliteTable(
+  'platform_audit_log',
+  {
+    id: text('id').primaryKey(),
+    at: integer('at').notNull().$defaultFn(() => Date.now()),
+    actorKind: text('actor_kind', { enum: ['user', 'agent', 'device', 'system'] }).notNull(),
+    actorId: text('actor_id').notNull(),
+    clientId: text('client_id'),
+    action: text('action').notNull(),
+    targetKind: text('target_kind'),
+    targetId: text('target_id'),
+    detailJson: text('detail_json'),
+  },
+  (t) => [index('platform_audit_log_at_idx').on(t.at)],
 );
 
 /**

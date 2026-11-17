@@ -78,7 +78,8 @@ beforeAll(async () => {
 });
 
 describe('admin auth', () => {
-  const paths: [string, string][] = [['POST', '/screens/x/missing'], ['PUT', `/screens/x/blobs/${'a'.repeat(64)}`], ['PUT', `/base/blobs/${'a'.repeat(64)}`], ['PUT', '/screens/x/manifest']];
+  const paths: [string, string][] = [['POST', '/screens/x/missing'], ['PUT', `/screens/x/blobs/${'a'.repeat(64)}`], ['PUT', `/base/blobs/${'a'.repeat(64)}`], ['PUT', '/screens/x/manifest'],
+    ['PUT', `/orgs/x/blobs/${'a'.repeat(64)}`], ['PUT', '/base/templates'], ['PUT', '/orgs/x/templates']];
 
   it('is a 401 with no token, a wrong token, or a device credential', async () => {
     for (const [method, path] of paths) {

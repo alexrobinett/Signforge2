@@ -1,14 +1,34 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
+import { buildTemplate } from '@signforge/cli/template';
+import { readdirSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 
 // Tests run inside workerd with the bindings from wrangler.jsonc, backed by local storage.
 // ADMIN_TOKEN is a fixed test value here, so a local .dev.vars never changes what the tests see.
 // `test/setup.ts` applies packages/db's migrations, the same ones `wrangler d1 migrations apply` runs.
+// TEMPLATE_BUILDS holds every template in templates/, built here in Node as `sf template push`
+// builds them (esbuild cannot run in workerd), for test/templates.test.ts to push.
+async function templateBuilds() {
+  const root = new URL('../../templates/', import.meta.url).pathname;
+  const builds = [];
+  for (const dir of readdirSync(root).sort()) {
+    const { manifest, html, sources, problems } = await buildTemplate(`${root}${dir}`);
+    builds.push({ dir, manifest, html, sources, problems });
+  }
+  return JSON.stringify(builds);
+}
+
 export default defineConfig({
   plugins: [
     cloudflareTest(async () => ({
       wrangler: { configPath: './wrangler.jsonc' },
-      miniflare: { bindings: { ADMIN_TOKEN: 'test-admin-token', TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname) } },
+      miniflare: {
+        bindings: {
+          ADMIN_TOKEN: 'test-admin-token',
+          TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname),
+          TEMPLATE_BUILDS: await templateBuilds(),
+        },
+      },
     })),
   ],
   test: { setupFiles: ['test/setup.ts'] },

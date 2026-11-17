@@ -107,7 +107,7 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   };
 }
 
-/** A base template (null org) every org can use. Base templates have no scoped writer yet (M3-15). */
+/** A base template (null org) every org can use, with fixed ids. Production code writes base templates through `platform(db)`. */
 export async function seedBaseTemplate(db: D1Database) {
   const d = drizzle(db);
   await d.insert(templates).values({ id: 'base-clock', orgId: null, key: 'clock', name: 'Clock' }).onConflictDoNothing().run();

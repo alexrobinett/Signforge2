@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { findMembership, NotInOrgError, scoped } from '../src/index';
+import { findMembership, NotInOrgError, organizationExists, platform, scoped } from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 let s: Seeded;
@@ -173,6 +173,36 @@ describe('base templates', () => {
       expect(await o.templates.versions.delete(s.base.templateVersion)).toBe(false);
     }
     expect(await s.b.scope.spots.get(s.b.templateSpot)).toMatchObject({ templateVersionId: s.base.templateVersion });
+  });
+
+  it("are written by platform(db), which never reaches an org's templates", async () => {
+    const p = platform(env.DB);
+    expect(await p.templates.get(s.a.template)).toBeUndefined();
+    expect(await p.templates.ownByKey('menu')).toBeUndefined(); // org A's key
+    expect(await p.templates.update(s.a.template, { name: 'hijacked' })).toBeUndefined();
+    expect(await p.templates.versions.update(s.a.templateVersion, { status: 'retired' })).toBeUndefined();
+    expect(await s.a.scope.templates.get(s.a.template)).toMatchObject({ name: 'Menu' });
+
+    const t = await p.templates.insert({ key: 'banner', name: 'Banner', orgId: 'org-a' } as never);
+    expect(t.orgId).toBeNull();
+    const v = await p.templates.versions.insert({ templateId: t.id, version: '1.0.0', manifestJson: '{}', bundleSha256: 'f'.repeat(64) });
+    expect(v).toMatchObject({ orgId: null, status: 'draft' });
+    expect(await p.templates.versions.ownVersion(t.id, '1.0.0')).toMatchObject({ id: v.id });
+    for (const o of [s.a.scope, s.b.scope]) {
+      expect(await o.templates.get(t.id)).toMatchObject({ key: 'banner' });
+      expect(await o.templates.ownByKey('banner')).toBeUndefined();
+      expect(await o.templates.versions.ownVersion(t.id, '1.0.0')).toBeUndefined();
+    }
+    await p.auditLog.append({ actorKind: 'system', actorId: 'test', action: 'register_template_version' });
+    expect(await p.auditLog.list()).toEqual([expect.objectContaining({ action: 'register_template_version' })]);
+    expect(await s.a.scope.auditLog.list()).not.toContainEqual(expect.objectContaining({ actorId: 'test' }));
+  });
+});
+
+describe('organizationExists', () => {
+  it('is true for an org and false otherwise', async () => {
+    expect(await organizationExists(env.DB, 'org-a')).toBe(true);
+    expect(await organizationExists(env.DB, 'org-nobody')).toBe(false);
   });
 });
 

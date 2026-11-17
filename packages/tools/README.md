@@ -49,12 +49,19 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `delete_group` | screens:manage | editor | `{ groupId }` | `{ deleted }`, or 409 while a schedule entry targets the group |
 | `set_group_members` | screens:manage | editor | `{ groupId, screenIds }` | `{ group }` |
 | `publish_manifest_to_screen` | content:publish | editor | `{ screenId, manifestId }` | `{ screenId, manifestId, changed }` |
+| `list_templates` | content:read | viewer | `{ status? }` | `{ templates: Template[] }`, base first |
+| `get_template` | content:read | viewer | `{ templateId }` | `{ template }` |
+| `register_template_version` | content:draft | editor | `{ manifest, bundleId, sourcesId }` | `{ template, version, changed }` |
+| `set_template_version_status` | content:publish | owner | `{ templateVersionId, status }` | `{ version, changed }` |
 
 Details:
 
 - **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by player-core's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
 - **`get_screen`.** Credentials come back without their hashes.
 - **`publish_manifest_to_screen`.** The manifest must already be stored for that screen. `sf push` stores manifests now; the server compiler will in M3-13.
+- **Templates.** An org sees its own templates and the base ones (`owner: 'base'`). Each version carries its manifest, its status (`draft`, `approved`, `retired`) and the server's check report. Only approved versions should be offered for new spots.
+- **`register_template_version`.** The bundle and sources (a JSON object of file name to text) must already be in R2 under the caller's prefix; `sf template push` uploads them through `/admin`. It runs `checkTemplateBundle` from the contract and refuses a failure with `invalid_input`, one `details` entry per problem, `path` naming the check (`manifest`, `forbidden-css`, `size`, `network`, `source-code`). The checks are a lint; the template sandbox is the guarantee. Versions are immutable: the same version with the same bundle and manifest returns `changed: false`, with different ones `conflict`. A new version is a draft.
+- **`set_template_version_status`.** Owners only, and only the org's own versions; a base version is `not_found`. Retiring stops new spots using a version; spots already using it keep playing.
 
 Each tool's `description` is written for an agent choosing a tool, and its `example` is a valid input.
 
@@ -89,10 +96,15 @@ Owner decision Q7 (can editors publish?) is still open. The table shows the defa
 
 Reads are not audited, and neither are refusals. D1 has no interactive transactions, so the audit row is written after the change. If that write fails, the request fails, and the change stands without an audit row.
 
+### The platform registry
+
+`platformRegistry` holds `register_template_version` and `set_template_version_status` again, dispatched with `platform(db)` (from `@signforge/db`) instead of an org's scope, so they write base templates. Its changes are audited in `platform_audit_log`, because they belong to no org. Only `/admin` uses it. It is never served on `/api`, so no org member can change a base template. A tool works on both scopes when it is declared with `defineSharedTool` and reaches data only through what both scopes share (`templates`, `auditLog`, `orgId`, which is null on the platform's).
+
 Callers so far:
 
 - `/api/tools`: actor `user` with the session's user id, client `cms`.
 - `/admin`'s manifest upload: actor `system` with id `sf-push`, role owner, scope `content:publish` only.
+- `/admin`'s template registration (`sf template push`): actor `system` with id `sf-push`, role owner, scopes `content:draft` and `content:publish`; the platform registry for base templates, the org registry for an org's.
 
 ## Adding a tool
 

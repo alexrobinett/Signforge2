@@ -4,6 +4,8 @@
  *
  *   sf build <project-dir> --out <dir>
  *   sf push <out-dir> --screen <id> --api <url>
+ *   sf template push <template-dir> --api <url> [--org <id>] [--approve]
+ *   sf template seed [templates-dir] --api <url>
  *
  * Reads a content project (screen, spots, playlists, schedule, media), builds every template
  * it uses into one self-contained HTML file, checks it against the contract, and writes an
@@ -16,20 +18,26 @@
  * temporary, until the CMS publishes: it calls the `/admin` routes with the `ADMIN_TOKEN` deploy
  * secret, read from the `SF_ADMIN_TOKEN` environment variable; the API publishes through its tool
  * registry and audits it as `sf-push`. See ./push.ts.
+ *
+ * `sf template push` builds one template, uploads its bundle and the author's sources, and
+ * registers the version; the API repeats the build's checks (./template-push.ts). Without `--org`
+ * it is a base template every org can use. `sf template seed` pushes every template in
+ * `templates/` as an approved base template, and is run on each deploy.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
-import { build } from 'esbuild';
 import sharp from 'sharp';
 import {
-  FORBIDDEN_CSS, FORBIDDEN_TEMPLATE_CODE, PROTOCOL_VERSION, TEMPLATE_BUDGET, VIDEO_SPEC, templateKey, validateTemplateManifest,
-  type Binding, type CalendarFeed, type DataSnapshot, type DataSource, type NewsFeed, type Playlist, type ScreenManifest, type Spot, type TemplateManifest, type Transition,
+  VIDEO_SPEC, templateKey,
+  type Binding, type CalendarFeed, type DataSnapshot, type DataSource, type NewsFeed, type Playlist, type ScreenManifest, type Spot, type Transition,
 } from '@signforge/contract';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
 import { compileScreen, type CompileInput, type TargetedEntry } from '@signforge/compiler';
 import { push, PushError } from './push';
+import { buildTemplate, type BuiltTemplate } from './template';
+import { pushTemplate, TemplatePushError } from './template-push';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html', '.webm': 'video/webm', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -110,45 +118,6 @@ class Problems {
   }
 }
 
-interface BuiltTemplate {
-  manifest: TemplateManifest;
-  html: string;
-}
-
-/** Bundle a template directory into a single HTML file with its script, styles and fonts inlined. */
-export async function buildTemplate(dir: string, problems: Problems): Promise<BuiltTemplate> {
-  const manifest = readJson<TemplateManifest>(join(dir, 'template.json'));
-  const where = `template ${basename(dir)}`;
-  problems.add(where, validateTemplateManifest(manifest));
-
-  const common = { bundle: true, minify: true, write: false, target: 'chrome120', logLevel: 'silent' } as const;
-  const js = await build({ ...common, entryPoints: [join(dir, 'main.ts')], format: 'iife' });
-  const css = await build({ ...common, entryPoints: [join(dir, 'style.css')], loader: { '.woff2': 'dataurl', '.svg': 'dataurl', '.png': 'dataurl' } });
-  const script = js.outputFiles[0]!.text.replaceAll('</script', '<\\/script');
-  const style = css.outputFiles[0]!.text;
-
-  for (const rule of FORBIDDEN_CSS) if (rule.pattern.test(style)) problems.add(where, [rule.reason]);
-  // The author's own files; the bundled SDK is trusted.
-  const own = ['index.html', 'style.css', 'main.ts'].map((f) => readFileSync(join(dir, f), 'utf8').replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm, '')).join('\n');
-  for (const rule of FORBIDDEN_TEMPLATE_CODE) if (rule.pattern.test(own)) problems.add(where, [rule.reason]);
-
-  let html = readFileSync(join(dir, 'index.html'), 'utf8');
-  const before = html;
-  html = html.replace(/<link rel="stylesheet" href="style\.css">/, () => `<style>${style}</style>`);
-  html = html.replace(/<script type="module" src="main\.ts"><\/script>/, () => `<script>${script}</script>`);
-  if (html === before || !html.includes('<style>') || !html.includes('<script>')) {
-    problems.add(where, ['index.html must reference style.css and main.ts exactly as the template starter does']);
-  }
-  if (/\b(?:src|href)\s*=\s*["']https?:/i.test(html) || /url\(\s*["']?https?:/i.test(style)) {
-    problems.add(where, ['a template may not load anything from the network']);
-  }
-  const bytes = Buffer.byteLength(html);
-  if (bytes > TEMPLATE_BUDGET.maxBundleBytes) problems.add(where, [`bundle is ${bytes} bytes; the budget is ${TEMPLATE_BUDGET.maxBundleBytes}`]);
-  console.log(`  template ${templateKey(manifest)}  ${(bytes / 1024).toFixed(0)} kB (budget ${TEMPLATE_BUDGET.maxBundleBytes / 1000} kB)`);
-  // The bundle embeds this build's SDK, so it speaks this protocol for as long as it exists.
-  return { manifest: { ...manifest, protocol: PROTOCOL_VERSION }, html };
-}
-
 interface SpotFile {
   name: string;
   kind: Spot['kind'];
@@ -209,7 +178,11 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
         problems.add(where, [`template "${s.template}" not found in ${templatesDir}`]);
         continue;
       }
-      if (!built.has(s.template)) built.set(s.template, await buildTemplate(tdir, problems));
+      if (!built.has(s.template)) {
+        const b = await buildTemplate(tdir);
+        problems.add(`template ${s.template}`, b.problems);
+        built.set(s.template, b);
+      }
       const t = built.get(s.template)!;
       const key = templateKey(t.manifest);
       templates[key] = { manifest: t.manifest, html: addBlob(Buffer.from(t.html), 'text/html') };
@@ -300,7 +273,17 @@ async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
 }
 
 const [cmd, dirArg, ...rest] = process.argv.slice(2);
-const USAGE = 'usage:\n  sf build <project-dir> [--out <dir>] [--templates <dir>]\n  sf feeds <project-dir> [--out <dir>]   (live data snapshots, default dist/content/data)\n  sf push <out-dir> --screen <id> --api <url>   (token in SF_ADMIN_TOKEN)';
+
+/** The API's `ADMIN_TOKEN`, from `SF_ADMIN_TOKEN`. */
+function adminToken(command: string): string {
+  const token = process.env.SF_ADMIN_TOKEN;
+  if (!token) {
+    console.error(`${command}: set SF_ADMIN_TOKEN to the API's ADMIN_TOKEN (locally, the value in apps/api/.dev.vars)`);
+    process.exit(2);
+  }
+  return token;
+}
+const USAGE = 'usage:\n  sf build <project-dir> [--out <dir>] [--templates <dir>]\n  sf feeds <project-dir> [--out <dir>]   (live data snapshots, default dist/content/data)\n  sf push <out-dir> --screen <id> --api <url>   (token in SF_ADMIN_TOKEN)\n  sf template push <template-dir> --api <url> [--org <id>] [--approve]   (base template unless --org)\n  sf template seed [templates-dir] --api <url>   (every template, as approved base templates)';
 const flag = (name: string, fallback?: string) => {
   const i = rest.indexOf(`--${name}`);
   return i >= 0 && rest[i + 1] ? rest[i + 1]! : fallback;
@@ -311,11 +294,7 @@ if (cmd === 'build' && dirArg) {
   console.log(`Fetching feeds for ${dirArg}`);
   await fetchFeeds(resolve(dirArg), resolve(flag('out', 'dist/content/data')!));
 } else if (cmd === 'push' && dirArg && flag('screen') && flag('api')) {
-  const token = process.env.SF_ADMIN_TOKEN;
-  if (!token) {
-    console.error('sf push: set SF_ADMIN_TOKEN to the API\'s ADMIN_TOKEN (locally, the value in apps/api/.dev.vars)');
-    process.exit(2);
-  }
+  const token = adminToken('sf push');
   const dir = resolve(dirArg);
   const manifestText = readFileSync(join(dir, 'manifest.json'), 'utf8');
   const screen = flag('screen')!;
@@ -328,6 +307,40 @@ if (cmd === 'build' && dirArg) {
   } catch (err) {
     if (!(err instanceof PushError)) throw err;
     console.error(`sf push failed: ${err.message}`);
+    process.exit(1);
+  }
+} else if (cmd === 'template' && (dirArg === 'push' || dirArg === 'seed') && flag('api')) {
+  const token = adminToken(`sf template ${dirArg}`);
+  const org = flag('org');
+  // seed: every template in the directory, as approved base templates. push: one, as a draft unless --approve.
+  const target = rest[0] && !rest[0].startsWith('--') ? resolve(rest[0]) : dirArg === 'seed' ? resolve('templates') : undefined;
+  if (!target || (dirArg === 'seed' && org)) {
+    console.error(USAGE);
+    process.exit(2);
+  }
+  const dirs = dirArg === 'seed'
+    ? readdirSync(target).map((d) => join(target, d)).filter((d) => existsSync(join(d, 'template.json'))).sort()
+    : [target];
+  const owner = org ? { org } : ('base' as const);
+  let failed = 0;
+  for (const dir of dirs) {
+    console.log(`Pushing ${basename(dir)} to ${org ? `org ${org}` : 'base templates'}`);
+    const built = await buildTemplate(dir);
+    if (built.problems.length) {
+      failed++;
+      for (const p of built.problems) console.error(`  - ${p}`);
+      continue;
+    }
+    try {
+      await pushTemplate({ api: flag('api')!, token, owner, ...built, approve: dirArg === 'seed' || rest.includes('--approve'), log: (l) => console.log(`  ${l}`) });
+    } catch (err) {
+      if (!(err instanceof TemplatePushError)) throw err;
+      failed++;
+      console.error(`  failed: ${err.message}`);
+    }
+  }
+  if (failed) {
+    console.error(`${failed} of ${dirs.length} template(s) not pushed`);
     process.exit(1);
   }
 } else {
