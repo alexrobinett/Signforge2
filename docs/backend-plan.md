@@ -119,7 +119,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | `POST /v1/device/pair/start` | Get a code and poll token |
 | `POST /v1/device/pair/poll` | Collect the credential |
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
-| `GET /v1/device/blobs/:sha256` | File from R2, cached forever. Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
+| `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
 | `GET /v1/device/data/:id.json` | Snapshot, for first load. Only sources the screen's manifest lists. |
 | `POST /v1/device/sync` | Heartbeat, play counts, snapshot changes |
 | `GET /v1/device/ws?ticket=` | Nudge socket |
@@ -173,6 +173,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
   - Turn on the session cookie cache. The client must take the new cookies `setActiveOrganization` returns; with the old cache cookie the server still sees no active org.
   - In 1.7.25, creating an org and accepting an invitation change the active org without reissuing the cache cookie. An after hook in `apps/api/src/auth/options.ts` reissues it.
   - Check membership of the active org on every request. `apps/api`'s `requireOrg` reads it fresh (`findMembership` in `packages/db`) and hands handlers `scoped(db, orgId)`; the cache cookie only says which org is active.
+- **Files for users.** `GET /api/blobs/:sha256` serves a file the session's org can see, for the editor preview: from the org's own R2 prefix, or from `sys/b/` only when the hash is a base template version's bundle (`templates.versions.baseBundle` in the scoped repository). `private`, cached forever. `test/blobs.test.ts` checks one org cannot fetch another's file.
   - Email goes through an `EmailSender` interface: Cloudflare Email Sending by default (Q3 is open), a recorder in dev and tests.
 - **Agents (Milestone 4).**
   - OAuth through Better Auth's provider plugin (`@better-auth/oauth-provider`). Its source has dynamic client registration (off by default) and S256 PKCE, required for public clients; it is first run in Milestone 4. A grant is bound to one org.

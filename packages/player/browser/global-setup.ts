@@ -16,13 +16,19 @@ declare module 'vitest' {
     playerDir: string;
     /** `browser/fixtures/template.ts` bundled with the SDK into one HTML file. */
     templateHtml: string;
+    /** The CMS origin the player is built to accept preview drafts from (`CMS_ORIGIN`). */
+    cmsOrigin: string;
   }
 }
 
 const playerRoot = resolve(import.meta.dirname, '..');
+/** Not the player's origin (127.0.0.1), so preview.test.ts frames the player from another origin. */
+const CMS_ORIGIN = 'http://cms.test';
 
 export default async function setup(project: TestProject): Promise<() => void> {
   const outDir = mkdtempSync(join(tmpdir(), 'sf-player-test-'));
+  // The build reads CMS_ORIGIN as a deploy's build does (vite.config.ts).
+  process.env.CMS_ORIGIN = CMS_ORIGIN;
   await viteBuild({ root: playerRoot, logLevel: 'warn', build: { outDir, emptyOutDir: true } });
 
   const js = await esbuild({
@@ -42,5 +48,6 @@ export default async function setup(project: TestProject): Promise<() => void> {
 
   project.provide('playerDir', outDir);
   project.provide('templateHtml', templateHtml);
+  project.provide('cmsOrigin', CMS_ORIGIN);
   return () => rmSync(outDir, { recursive: true, force: true });
 }
