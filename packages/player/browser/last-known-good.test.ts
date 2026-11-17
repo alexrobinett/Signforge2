@@ -40,8 +40,13 @@ describe('last known good', () => {
     expect(s.log.slice(before).map((l) => l.manifest)).toEqual([good.manifest.id, good.manifest.id]);
     expect((await p.onScreen())?.label).toMatch(/^[ab]$/);
 
-    // Restarted with no network, the player tries the broken manifest again, then falls back to
-    // the good one: its files were kept although the broken manifest does not use them.
+    // Restarted, the player tries the broken manifest again, then falls back to the good one. Its
+    // files were kept through the sync that ran first, although the broken manifest does not use them.
+    await restart(p);
+    s = await p.until((s) => s.fallback === broken.manifest.id && s.log.length >= 2, 15_000);
+    expect(s.log.map((l) => l.manifest)).toEqual([good.manifest.id, good.manifest.id]);
+
+    // And again with no network.
     cutNetwork(p);
     await restart(p);
     s = await p.until((s) => s.fallback === broken.manifest.id && s.log.length >= 2, 15_000);

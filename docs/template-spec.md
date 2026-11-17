@@ -66,7 +66,7 @@ A template that has not reported `ready` within 2 seconds is skipped.
 
 ## Live data
 
-Any non-image field can be bound to a data source instead of a fixed value. The spot names the source and a dot path into it (`current.temperature_2m`, `daily.temperature_2m_max.0`, `events`). The static value stays as the fallback until the first data arrives.
+Any non-image field can be bound to a data source instead of a fixed value. The spot names the source and a dot path into it (`current.temperature_2m`, `daily.temperature_2m_max.0`, `events`). The static value is the fallback: it shows until the first data arrives, and whenever the live value does not fit the field. Before a bound value replaces it, the player checks it against the field's definition (type, `maxLength`, `min`/`max`/`step`, `options`, a list's `maxItems` and row fields); a value that is missing at its path or fails is ignored for that spot and counted against its source. So a template can trust its data to have the shape its fields declare, live or not. The check is `validateBoundValue` in `packages/contract`, which the server will also run when it stores a snapshot (M3-23).
 
 The server fetches feeds, never the screen. JSON feeds pass through; calendar (iCal) and news (RSS or Atom) feeds are converted to fixed shapes, `CalendarFeed` and `NewsFeed` in `packages/contract`, so a template binds to the same paths whichever service the data came from. A spot reads the latest data when it starts; data does not change during a play.
 

@@ -22,13 +22,27 @@
 import { sql } from 'drizzle-orm';
 import { check, customType, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
-const orgId = () => text('org_id').notNull().references(() => organization.id);
-const created = () => integer('created_at').notNull().$defaultFn(() => Date.now());
+const orgId = () =>
+  text('org_id')
+    .notNull()
+    .references(() => organization.id);
+const created = () =>
+  integer('created_at')
+    .notNull()
+    .$defaultFn(() => Date.now());
 const updated = () =>
   integer('updated_at')
     .notNull()
     .$defaultFn(() => Date.now())
     .$onUpdateFn(() => Date.now());
+/**
+ * Drafts (spots, playlists, schedule entries): the row's own columns are the draft, which edits
+ * change. `published_json` is the version screens get, a copy of the draft's content columns
+ * (and a playlist's items) taken when a publish promoted it; null until then. Only
+ * `stage.publish` in ./scoped.ts writes it.
+ */
+const publishedJson = () => text('published_json');
+const publishedAt = () => integer('published_at');
 
 // --------------------------------------------------------------- Better Auth
 
@@ -60,7 +74,9 @@ export const session = sqliteTable(
     updatedAt: date('updatedAt').notNull(),
     ipAddress: text('ipAddress'),
     userAgent: text('userAgent'),
-    userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     activeOrganizationId: text('activeOrganizationId'),
   },
   (t) => [index('session_userId_idx').on(t.userId)],
@@ -72,7 +88,9 @@ export const account = sqliteTable(
     id: text('id').primaryKey(),
     accountId: text('accountId').notNull(),
     providerId: text('providerId').notNull(),
-    userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     accessToken: text('accessToken'),
     refreshToken: text('refreshToken'),
     idToken: text('idToken'),
@@ -112,8 +130,12 @@ export const member = sqliteTable(
   'member',
   {
     id: text('id').primaryKey(),
-    organizationId: text('organizationId').notNull().references(() => organization.id, { onDelete: 'cascade' }),
-    userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    organizationId: text('organizationId')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     role: text('role').notNull(),
     createdAt: date('createdAt').notNull(),
   },
@@ -124,13 +146,17 @@ export const invitation = sqliteTable(
   'invitation',
   {
     id: text('id').primaryKey(),
-    organizationId: text('organizationId').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+    organizationId: text('organizationId')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
     role: text('role'),
     status: text('status').notNull(),
     expiresAt: date('expiresAt').notNull(),
     createdAt: date('createdAt').notNull(),
-    inviterId: text('inviterId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    inviterId: text('inviterId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
   },
   (t) => [index('invitation_organizationId_idx').on(t.organizationId), index('invitation_email_idx').on(t.email)],
 );
@@ -162,7 +188,9 @@ export const screens = sqliteTable(
     reportedManifestId: text('reported_manifest_id'),
     lastSeenAt: integer('last_seen_at'),
     playerVersion: text('player_version'),
-    status: text('status', { enum: ['active', 'revoked'] }).notNull().default('active'),
+    status: text('status', { enum: ['active', 'revoked'] })
+      .notNull()
+      .default('active'),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -251,7 +279,9 @@ export const assets = sqliteTable(
     width: integer('width'),
     height: integer('height'),
     durationMs: integer('duration_ms'),
-    status: text('status', { enum: ['pending', 'verified', 'rejected'] }).notNull().default('pending'),
+    status: text('status', { enum: ['pending', 'verified', 'rejected'] })
+      .notNull()
+      .default('pending'),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -310,7 +340,9 @@ export const templateVersions = sqliteTable(
     /** The contract's `TemplateManifest`. */
     manifestJson: text('manifest_json').notNull(),
     bundleSha256: text('bundle_sha256').notNull(),
-    status: text('status', { enum: ['draft', 'approved', 'retired'] }).notNull().default('draft'),
+    status: text('status', { enum: ['draft', 'approved', 'retired'] })
+      .notNull()
+      .default('draft'),
     checkReportJson: text('check_report_json'),
     createdAt: created(),
     updatedAt: updated(),
@@ -346,6 +378,8 @@ export const spots = sqliteTable(
     fit: text('fit', { enum: ['cover', 'contain'] }),
     /** URL spots: an https page on another origin. */
     url: text('url'),
+    publishedJson: publishedJson(),
+    publishedAt: publishedAt(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -364,6 +398,8 @@ export const playlists = sqliteTable(
     name: text('name').notNull(),
     /** The contract's `Transition`. */
     transitionJson: text('transition_json').notNull(),
+    publishedJson: publishedJson(),
+    publishedAt: publishedAt(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -406,6 +442,8 @@ export const scheduleEntries = sqliteTable(
     /** Local `HH:MM`. */
     fromTime: text('from_time'),
     toTime: text('to_time'),
+    publishedJson: publishedJson(),
+    publishedAt: publishedAt(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -422,6 +460,22 @@ export const scheduleEntries = sqliteTable(
         OR (${t.target} = 'screen' AND ${t.screenId} IS NOT NULL AND ${t.groupId} IS NULL)`,
     ),
   ],
+);
+
+/**
+ * Org-wide settings, one row per org, made on first write. The default playlist plays on every
+ * screen when no schedule entry applies; it cannot be deleted while it is the default.
+ */
+export const orgSettings = sqliteTable(
+  'org_settings',
+  {
+    orgId: text('org_id')
+      .primaryKey()
+      .references(() => organization.id),
+    defaultPlaylistId: text('default_playlist_id'),
+    updatedAt: updated(),
+  },
+  (t) => [foreignKey({ columns: [t.orgId, t.defaultPlaylistId], foreignColumns: [playlists.orgId, playlists.id] })],
 );
 
 // ---------------------------------------------------------------- publishing
@@ -508,7 +562,9 @@ export const auditLog = sqliteTable(
   {
     id: text('id').primaryKey(),
     orgId: orgId(),
-    at: integer('at').notNull().$defaultFn(() => Date.now()),
+    at: integer('at')
+      .notNull()
+      .$defaultFn(() => Date.now()),
     actorKind: text('actor_kind', { enum: ['user', 'agent', 'device', 'system'] }).notNull(),
     actorId: text('actor_id').notNull(),
     /** The app the actor acted through: `cms`, `sf-push`, or an agent's OAuth client id. */
@@ -550,7 +606,9 @@ export const platformAuditLog = sqliteTable(
   'platform_audit_log',
   {
     id: text('id').primaryKey(),
-    at: integer('at').notNull().$defaultFn(() => Date.now()),
+    at: integer('at')
+      .notNull()
+      .$defaultFn(() => Date.now()),
     actorKind: text('actor_kind', { enum: ['user', 'agent', 'device', 'system'] }).notNull(),
     actorId: text('actor_id').notNull(),
     clientId: text('client_id'),

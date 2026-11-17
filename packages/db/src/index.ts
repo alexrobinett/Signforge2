@@ -10,6 +10,7 @@ export { scoped, NotInOrgError, type OrgScope, type NewRow, type RowPatch } from
 export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
 export type { Staged, Write } from './writes';
+export { published, draftChanged, type DraftRow, type PublishedPlaylist } from './drafts';
 export { findDeviceScreen, type DeviceScreen } from './device';
 export { findMembership, organizationExists } from './members';
 
@@ -30,3 +31,4 @@ export type DataSnapshotRow = typeof s.dataSnapshots.$inferSelect;
 export type AuditEntry = typeof s.auditLog.$inferSelect;
 export type PlatformAuditEntry = typeof s.platformAuditLog.$inferSelect;
 export type PlayCountRow = typeof s.playCounts.$inferSelect;
+export type OrgSettings = typeof s.orgSettings.$inferSelect;

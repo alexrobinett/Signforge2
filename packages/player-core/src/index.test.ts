@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ScreenManifest, Spot } from '@signforge/contract';
-import { Sequencer, displayOn, entryApplies, localTime, planSync, readPath, resolvePlaylist, resolveSpotData, validateManifest } from './index';
+import type { FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
+import { Sequencer, displayOn, entryApplies, localTime, planSync, resolvePlaylist, resolveSpotData, snapshotFit, spotFiles, validateManifest } from './index';
 
 const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${id}`, fit: 'cover', durationMs: 5000 });
 
@@ -147,7 +147,12 @@ describe('Sequencer', () => {
 });
 
 describe('live data', () => {
-  const weather = { id: 'weather', fetchedAt: 'now', data: { current: { temp: 41.2 }, daily: { max: [60.6] } } };
+  const weather = { id: 'weather', fetchedAt: 'now', data: { current: { temp: 41.2 }, daily: { max: [60.6] }, city: 7 } };
+  const fields: Record<string, FieldDef> = {
+    city: { type: 'text', label: 'City' },
+    temp: { type: 'number', label: 'Temp', min: -100, max: 100 },
+    high: { type: 'number', label: 'High' },
+  };
   const bound: Extract<Spot, { kind: 'template' }> = {
     id: 'w',
     name: 'w',
@@ -159,23 +164,66 @@ describe('live data', () => {
     bindings: { temp: { source: 'weather', path: 'current.temp' }, high: { source: 'weather', path: 'daily.max.0' } },
   };
 
-  it('reads dot paths, including array indexes', () => {
-    expect(readPath(weather.data, 'daily.max.0')).toBe(60.6);
-    expect(readPath(weather.data, 'current.missing.deeper')).toBeUndefined();
-  });
-
   it('overlays snapshot values on the static data', () => {
-    expect(resolveSpotData(bound, new Map([['weather', weather]]))).toEqual({ city: 'Atlanta', temp: 41.2, high: 60.6 });
+    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]))).toEqual({ data: { city: 'Atlanta', temp: 41.2, high: 60.6 }, rejected: [] });
   });
 
   it('falls back to the static value when there is no snapshot yet', () => {
-    expect(resolveSpotData(bound, new Map())).toEqual(bound.data);
+    expect(resolveSpotData(bound, fields, new Map())).toEqual({ data: bound.data, rejected: [] });
+  });
+
+  it('keeps the static value for a live value that does not fit its field, and says why', () => {
+    const hot = { ...weather, data: { current: { temp: 400 }, daily: {} } };
+    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]))).toEqual({
+      data: bound.data,
+      rejected: [
+        { source: 'weather', problem: 'field "temp" must be at most 100' },
+        { source: 'weather', problem: 'field "high" has no value at the bound path' },
+      ],
+    });
+  });
+
+  it('counts how many bound values in a manifest a snapshot fits', () => {
+    const m = manifest();
+    const t: TemplateManifest = {
+      id: 't',
+      version: '1.0.0',
+      name: 'T',
+      fields,
+      background: '#000',
+      orientations: ['landscape'],
+      uses: [],
+      duration: { minMs: 1000, defaultMs: 5000, maxMs: 10_000 },
+    };
+    m.templates['t@1.0.0'] = { manifest: t, html: 'h' };
+    m.spots.w = bound;
+    m.spots.other = { ...bound, id: 'other', bindings: { city: { source: 'weather', path: 'city' }, temp: { source: 'elsewhere', path: 'x' } } };
+    expect(snapshotFit(m, weather)).toEqual({ fits: 2, problems: ['spot "other": field "city" must be text'] });
+    expect(snapshotFit(m, { ...weather, data: {} }).fits).toBe(0);
+    expect(snapshotFit(m, { ...weather, id: 'unbound' })).toEqual({ fits: 0, problems: [] });
   });
 });
 
 describe('files', () => {
   it('lists what to download and what to drop', () => {
     expect(planSync(manifest(), ['sha-a', 'sha-old'])).toEqual({ missing: ['sha-b', 'sha-c'], stale: ['sha-old'] });
+  });
+
+  it('names the files one spot needs: a template spot its bundle and assets, a media spot its file', () => {
+    const m = manifest();
+    m.templates['base/t@1.0.0'] = { manifest: {} as never, html: 'sha-html' };
+    const t: Spot = {
+      id: 't',
+      name: 't',
+      kind: 'template',
+      template: 'base/t@1.0.0',
+      durationMs: 1000,
+      data: {},
+      assets: { pic: 'sha-pic', logo: 'sha-logo' },
+    };
+    expect([...spotFiles(t, m)].sort()).toEqual(['sha-html', 'sha-logo', 'sha-pic']);
+    expect([...spotFiles(m.spots.a!, m)]).toEqual(['sha-a']);
+    expect([...spotFiles({ id: 'u', name: 'u', kind: 'url', url: 'https://example.com', durationMs: 1000 } as Spot, m)]).toEqual([]);
   });
 
   it('rejects a manifest that refers to things it does not carry', () => {

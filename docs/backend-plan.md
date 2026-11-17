@@ -30,16 +30,17 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 
 | Table | Key columns |
 | --- | --- |
-| Better Auth's own: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation` | `organization` adds the default playlist and quotas. Roles: owner, editor, viewer. |
+| Better Auth's own: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation` | `organization` adds quotas. Roles: owner, editor, viewer. |
+| `org_settings` | one row per org: the default playlist (see Publishing) |
 | `screens` | name, timezone, locale, orientation, `display_hours_json`, `desired_manifest_id`, `previous_manifest_id` (whose files stay servable while a screen switches), `reported_manifest_id`, last seen, player version, status |
 | `screen_groups`, `screen_group_members` | |
 | `screen_credentials` | screen, secret hash, last used, revoked at |
 | `pairing_codes` | code, poll-token hash, expires at, claimed org and screen |
 | `assets`, `asset_renditions` | kind, sha256, type, size, width, height, duration, status (pending, verified, rejected); landscape and portrait renditions |
 | `templates`, `template_versions` | null org means a base template; version, manifest, bundle sha, status (draft, approved, retired), check report |
-| `spots` | kind, template version, data, asset map, bindings, duration, plus the image, video or URL fields |
-| `playlists`, `playlist_items` | transition; ordered spots |
-| `schedule_entries` | playlist, priority, target, dates, days, window |
+| `spots` | kind, template version, data, asset map, bindings, duration, plus the image, video or URL fields; the published version (see Publishing) |
+| `playlists`, `playlist_items` | transition; ordered spots; the published version, with its items |
+| `schedule_entries` | playlist, priority, target, dates, days, window; the published version |
 | `publishes`, `publish_screens` | status, publish at, actor; which manifest each screen got. Rollout status is a join against `screens.reported_manifest_id`. |
 | `data_sources`, `data_snapshots` | format, encrypted URL (a private calendar URL is a secret), refresh, next poll at, ETag, failures; latest snapshot, at most 64 kB |
 | `audit_log` | when, actor kind (user, agent, device, system), actor, action, target, detail |
@@ -48,9 +49,13 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 
 ## Publishing
 
-1. **Compile.** `packages/compiler` loads the org's data in about eight queries and builds each target screen's manifest. A manifest's ID is the hash of its body, so a screen whose content did not change is skipped.
+1. **Compile.** `loadOrg` (`packages/tools/src/publishing.ts`) reads the org's data in one round of about a dozen parallel queries, promotes drafts (below), and `packages/compiler` builds each target screen's manifest from the published graph. A manifest's ID is the hash of its body, so a screen whose content did not change is skipped. A screen that cannot compile keeps its manifest and is reported; the others publish.
 2. **Fan out** through a Queue, 50 screens per batch. Per screen: one R2 write, one D1 row, one call to its Durable Object, so 150 calls per batch. D1, R2 and Durable Object calls share the per-invocation limit on calls to Cloudflare services: 1,000 on Free (measured), 10,000 by default on Paid. External `fetch` is limited separately, to 50 on Free. Write a batch's D1 rows in one `batch()` and make the Durable Object calls concurrently: done one at a time, a batch of 50 took 13 to 25 seconds.
 3. **Timed publish.** A per-org Durable Object holds the alarm and serialises publishes for that org. It wakes only when a publish is due.
+
+**Drafts.** One broken or unfinished spot must not block every screen. Spots, playlists and schedule entries each have a draft and a published version: the row's columns are the draft, which every edit changes, and `published_json` is a copy of the draft's content (a playlist's with its items) taken when a publish promoted it. A publish checks each draft that differs from its published version, in order: spots, then playlists (every item must be a published spot), then schedule entries (their playlist must be published). It checks a draft by compiling a probe screen that plays it, so the problems are the ones a screen would get. A new or changed spot may use only an approved template version; one already published with a version that was since retired keeps it. A draft that passes is published; one that fails keeps its published version, if it has one, and is reported for the CMS to show. The compiler then checks only what each screen reaches. Deleting a row deletes its published version too, so the tools that delete spots and playlists (M3-16, M3-17) must refuse one a published playlist or entry still uses; assets already count a published spot's use (`assets.usage`).
+
+**Default playlist.** Owner decision, taken by the simplest sound option: it is an org setting, in `org_settings`, one row per org with a composite foreign key to the org's playlist, so it cannot point into another org or at a deleted playlist. Not a column on Better Auth's `organization` table, which is Better Auth's and outside the `scoped` repositories, and not per screen group, which would need a rule for a screen in two groups. A screen or group that needs other content uses a schedule entry. Changing it takes effect at the next publish, like any content change; until it has a published version, no screen can publish.
 
 **Uploads**
 - **Images** are scaled in the browser at upload with `createImageBitmap` and `OffscreenCanvas`, using the same cover-the-screen rule as `sf build`, into a landscape and a portrait rendition. The Worker checks the dimensions. Uploads with no browser (API, MCP) fall back to the Cloudflare Images binding, which works on Workers Free. It includes 5,000 unique transformations a month on both plans, then $0.50 per 1,000 on Paid; on Free, transformations past the allowance fail with error 9422 rather than charging.

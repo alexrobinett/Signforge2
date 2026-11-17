@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   SCREEN_BOX,
   displayHoursProblems,
+  readPath,
+  validateBoundValue,
   fitsScreenBox,
   imageSizeProblem,
   validateDataSnapshot,
@@ -185,6 +187,7 @@ const validators: [string, (v: unknown) => string[], (() => unknown)?][] = [
   ['validateManifest', validateManifest, validManifest],
   ['validateTemplateManifest', validateTemplateManifest, () => structuredClone(template)],
   ['validateDataSnapshot', validateDataSnapshot],
+  ['validateBoundValue', (v) => validateBoundValue(template.fields, 'items', v), () => [{ name: 'Soup', hot: true }]],
   ['displayHoursProblems', displayHoursProblems, () => validManifest().screen.displayHours],
   ['validatePairStartResponse', validatePairStartResponse, () => ({ code: 'ABC123', pollToken: 'p', expiresAt: '2026-11-17T13:15:00Z' })],
   ['validatePairPollResponse', validatePairPollResponse, () => ({ status: 'paired', screenId: 's1', credential: 'sfd_s1.secret' })],
@@ -249,6 +252,41 @@ describe('validateSpotData limits', () => {
       'binding for unknown field "toString"',
       'unknown field "constructor"',
     ]);
+  });
+});
+
+describe('live values for bound fields', () => {
+  total('validateBoundValue', (f, n, v) => validateBoundValue(f, n, v), 3);
+
+  it('accepts a value that fits the field it is bound to', () => {
+    expect(validateBoundValue(template.fields, 'title', 'Dinner')).toEqual([]);
+    expect(validateBoundValue(template.fields, 'items', [{ name: 'Tea' }])).toEqual([]);
+  });
+
+  it('refuses the wrong type, the wrong shape, too many rows and a missing value', () => {
+    expect(validateBoundValue(template.fields, 'title', 42)).toEqual(['field "title" must be text']);
+    expect(validateBoundValue(template.fields, 'title', 'x'.repeat(41))).toEqual(['field "title" is longer than 40']);
+    expect(validateBoundValue(template.fields, 'price', 101)).toEqual(['field "price" must be at most 100']);
+    expect(validateBoundValue(template.fields, 'items', {})).toEqual(['field "items" must be a list']);
+    expect(validateBoundValue(template.fields, 'items', [{ hot: true }])).toEqual(['field "items" row 1 is missing "name"']);
+    expect(validateBoundValue(template.fields, 'items', [{ name: 'a' }, { name: 'b' }, { name: 'c' }])).toEqual(['field "items" has more than 2 rows']);
+    expect(validateBoundValue(template.fields, 'title', undefined)).toEqual(['field "title" has no value at the bound path']);
+    expect(validateBoundValue(template.fields, 'title', null)).toEqual(['field "title" has no value at the bound path']);
+  });
+
+  it('refuses a field that cannot be bound', () => {
+    expect(validateBoundValue(template.fields, 'photo', 'sha')).toEqual(['image field "photo" cannot be bound to live data']);
+    expect(validateBoundValue(template.fields, 'constructor', 'x')).toEqual(['unknown field "constructor"']);
+    expect(validateBoundValue({ bad: { type: 'nope' } }, 'bad', 'x')).toEqual(['field "bad" has no valid definition']);
+  });
+
+  it('reads dot paths through own keys only, including array indexes', () => {
+    const data = { current: { temp: 41.2 }, daily: { max: [60.6] } };
+    expect(readPath(data, 'daily.max.0')).toBe(60.6);
+    expect(readPath(data, 'current.missing.deeper')).toBeUndefined();
+    expect(readPath(data, 'current.constructor')).toBeUndefined();
+    expect(readPath(data, 'daily.max.length')).toBeUndefined();
+    expect(readPath('text', 'length')).toBeUndefined();
   });
 });
 

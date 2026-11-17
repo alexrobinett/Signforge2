@@ -22,6 +22,10 @@ export interface PlayerState {
   /** The id of a new manifest that played nothing, while the player falls back to `lastGood`; '' otherwise. */
   fallback: string;
   log: { spot: string; manifest: string; startedAt: string }[];
+  /** When each data source's current snapshot was fetched. */
+  data: Record<string, string>;
+  /** Live values refused per data source, and snapshots refused as a whole. */
+  dataRejected: Record<string, number>;
 }
 
 export interface Player {
@@ -32,8 +36,8 @@ export interface Player {
   state(): Promise<PlayerState>;
   /** Wait until `predicate(state)` holds. The predicate runs in Node, polled every 100 ms. */
   until(predicate: (s: PlayerState) => boolean, timeoutMs?: number): Promise<PlayerState>;
-  /** The label and play flag of the template on screen, or undefined if none is. */
-  onScreen(): Promise<{ label: string; playing: boolean } | undefined>;
+  /** The label, the listed item titles and the play flag of the template on screen, or undefined if none is. */
+  onScreen(): Promise<{ label: string; items: string; playing: boolean } | undefined>;
 }
 
 export interface Harness {
@@ -91,7 +95,7 @@ export function useHarness(): Harness {
         page.evaluate(() => {
           const s = (window as unknown as { __sf?: PlayerState }).__sf;
           if (!s) throw new Error('the player has not started');
-          const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log } = s;
+          const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log, data, dataRejected } = s;
           return {
             manifestId,
             playlist,
@@ -103,6 +107,8 @@ export function useHarness(): Harness {
             lastGood,
             fallback,
             log: log.map(({ spot, manifest, startedAt }) => ({ spot, manifest, startedAt })),
+            data: { ...data },
+            dataRejected: { ...dataRejected },
           };
         });
       const until = async (predicate: (s: PlayerState) => boolean, timeoutMs = 10_000) => {
@@ -124,7 +130,11 @@ export function useHarness(): Harness {
             return slot.style.zIndex === '2' && getComputedStyle(slot).opacity === '1';
           });
           if (!shown) continue;
-          return frame.evaluate(() => ({ label: document.getElementById('label')?.textContent ?? '', playing: document.body.dataset.playing === '1' }));
+          return frame.evaluate(() => ({
+            label: document.getElementById('label')?.textContent ?? '',
+            items: document.getElementById('box')?.textContent ?? '',
+            playing: document.body.dataset.playing === '1',
+          }));
         }
         return undefined;
       };

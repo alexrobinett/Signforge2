@@ -131,6 +131,17 @@ Callers so far:
 - `/admin`'s manifest upload: actor `system` with id `sf-push`, role owner, scope `content:publish` only.
 - `/admin`'s template registration (`sf template push`): actor `system` with id `sf-push`, role owner, scopes `content:draft` and `content:publish`; the platform registry for base templates, the org registry for an org's.
 
+## Publishing: drafts and the loader
+
+`src/publishing.ts` is what M3-18's publish tool builds on. Spots, playlists and schedule entries each have a draft (the row) and a published version (see `packages/db`'s README); edits change the draft only.
+
+- `loadOrg(org)` reads everything a publish needs in one round of parallel queries.
+- `promoteDrafts(org, graph, opts)` checks each draft that differs from its published version, in order: spots, then playlists (every item must be a published spot), then schedule entries (their playlist must be published). A draft is checked by compiling a probe screen that plays it, for each orientation the org's screens have, so its problems are exactly the ones a screen would get. A spot may use only an approved template version, or keep a retired one it was already published with. A draft that passes is staged for publishing; one that fails keeps its published version, if any, and is reported in `held`. It never blocks the rest.
+- `compileInputFor(graph, screenId)` and `loadCompileInput(org, screenId)` give a screen's published graph as `compileScreen` takes it: image files are the asset's rendition for the screen's orientation, a video is the asset's own file, a template bundle's size comes from its stored check report.
+- `publishOrg(org, { hash, now })` promotes drafts and compiles every screen. A screen that cannot compile is reported with its problems and keeps its manifest; the others publish. With no default playlist set, no screen can. It stages writes and returns them; the caller commits.
+
+`test/publishing.test.ts` checks that the loader and compiler produce `sf build`'s manifest for `examples/stress` (its golden).
+
 ## Adding a tool
 
 1. Write it with `defineTool` next to its kind (`src/screens.ts`, `src/groups.ts`, …).

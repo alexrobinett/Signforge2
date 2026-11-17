@@ -2,7 +2,18 @@
  * Player logic with no browser dependency: which playlist is live, what plays next,
  * and which files a manifest still needs. Checking a manifest is the contract's job. The browser shell supplies time, storage and frames.
  */
-import { requiredFiles, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
+import {
+  readPath,
+  requiredFiles,
+  validateBoundValue,
+  type DataSnapshot,
+  type DisplayHours,
+  type Playlist,
+  type ScheduleEntry,
+  type ScreenManifest,
+  type Spot,
+  type TargetLevel,
+} from '@signforge/contract';
 
 /**
  * Validation lives in the contract, which the server imports too. Re-exported here while callers
@@ -26,8 +37,14 @@ const DAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu:
 /** The wall-clock time in a given IANA time zone. */
 export function localTime(now: Date, timezone: string): LocalTime {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, hourCycle: 'h23', weekday: 'short',
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    timeZone: timezone,
+    hourCycle: 'h23',
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).formatToParts(now);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return {
@@ -61,7 +78,8 @@ export function entryApplies(e: ScheduleEntry, t: LocalTime): boolean {
 }
 
 const inWindow = (w: { from: string; to: string }, minutes: number) => {
-  const from = toMinutes(w.from), to = toMinutes(w.to);
+  const from = toMinutes(w.from),
+    to = toMinutes(w.to);
   return to <= from ? minutes >= from || minutes < to : minutes >= from && minutes < to;
 };
 
@@ -151,31 +169,69 @@ export class Sequencer {
 
 // ----------------------------------------------------------------- live data
 
-/** Read a dot path out of a JSON value. Returns undefined when any step is missing. */
-export function readPath(data: unknown, path: string): unknown {
-  let v: unknown = data;
-  for (const key of path.split('.')) {
-    if (v === null || typeof v !== 'object') return undefined;
-    v = (v as Record<string, unknown>)[key];
-  }
-  return v;
+/** A live value that was refused: the source it came from and what is wrong with it. */
+export interface Rejected {
+  source: string;
+  problem: string;
 }
 
 /**
- * The data a template spot plays with: its static values, with each bound field replaced by
- * the latest snapshot value. A missing source or path leaves the static fallback in place.
+ * The data a template spot plays with: its static values, with each bound field replaced by the
+ * latest snapshot value when that value fits the field (`validateBoundValue`). A missing source
+ * leaves the static fallback in place quietly; a value that is missing at its path or does not
+ * fit also leaves the fallback, and is listed in `rejected` so a broken feed can be seen.
  */
-export function resolveSpotData(spot: Extract<Spot, { kind: 'template' }>, snapshots: ReadonlyMap<string, DataSnapshot>): Record<string, unknown> {
+export function resolveSpotData(
+  spot: Extract<Spot, { kind: 'template' }>,
+  fields: unknown,
+  snapshots: ReadonlyMap<string, DataSnapshot>,
+): { data: Record<string, unknown>; rejected: Rejected[] } {
   const data = { ...spot.data };
+  const rejected: Rejected[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    const v = snapshot ? readPath(snapshot.data, b.path) : undefined;
-    if (v !== undefined && v !== null) data[field] = v;
+    if (!snapshot) continue;
+    const v = readPath(snapshot.data, b.path);
+    const problems = validateBoundValue(fields, field, v);
+    if (problems.length) rejected.push(...problems.map((problem) => ({ source: b.source, problem })));
+    else data[field] = v;
   }
-  return data;
+  return { data, rejected };
+}
+
+/**
+ * How a snapshot serves the spots of a manifest: how many bound values it would fill, and what is
+ * wrong with the rest. A snapshot that fills none while some spot binds to it is broken for this
+ * screen, and must not replace the last good one.
+ */
+export function snapshotFit(manifest: ScreenManifest, snapshot: DataSnapshot): { fits: number; problems: string[] } {
+  let fits = 0;
+  const problems: string[] = [];
+  for (const spot of Object.values(manifest.spots)) {
+    if (spot.kind !== 'template') continue;
+    const fields = manifest.templates[spot.template]?.manifest.fields;
+    for (const [field, b] of Object.entries(spot.bindings ?? {})) {
+      if (b.source !== snapshot.id) continue;
+      const p = validateBoundValue(fields, field, readPath(snapshot.data, b.path));
+      if (p.length) problems.push(...p.map((e) => `spot "${spot.id}": ${e}`));
+      else fits++;
+    }
+  }
+  return { fits, problems };
 }
 
 // --------------------------------------------------------------------- files
+
+/** The files one spot needs to play: a template spot its bundle and assets, an image or video its file. */
+export function spotFiles(spot: Spot, manifest: ScreenManifest): Set<string> {
+  const out = new Set<string>();
+  if (spot.kind === 'template') {
+    const html = manifest.templates[spot.template]?.html;
+    if (html) out.add(html);
+    Object.values(spot.assets).forEach((a) => out.add(a));
+  } else if (spot.kind === 'image' || spot.kind === 'video') out.add(spot.file);
+  return out;
+}
 
 /** Files to download before a manifest can go live, and files no longer needed once it has. */
 export function planSync(next: ScreenManifest, have: Iterable<string>): { missing: string[]; stale: string[] } {

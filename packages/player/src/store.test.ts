@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScreenManifest } from '@signforge/contract';
 import { DeviceCredential } from './credential';
-import { UnauthorisedError, filesToKeep, loadActiveManifest, rememberGood, sync } from './store';
+import { PinSet, UnauthorisedError, loadActiveManifest, sync } from './store';
 
 // ---------------------------------------------------------------- fakes
 /** Cache Storage in memory: enough of it for the store. */
@@ -141,27 +141,6 @@ describe('sync against the device API', () => {
     expect((await loadActiveManifest())?.id).toBe('m1');
   });
 
-  it('keeps the files of the last manifest that played until a newer one has played', async () => {
-    const onlyA = (id: string) => {
-      const m = manifest(id);
-      delete (m.spots as Record<string, unknown>).b;
-      m.playlists.all!.items = [{ spot: 'a' }];
-      return m;
-    };
-    await sync(BASE, { headers: auth });
-    await rememberGood(api.manifest); // m1, using A and B, played
-    api.manifest = onlyA('m2');
-    await sync(BASE, { currentId: 'm1', headers: auth });
-    expect(await filesToKeep()).toEqual(new Set([A, B]));
-    expect(await open('sf-blobs-v1').match(`/_sf/blob/${B}`)).toBeDefined();
-
-    await rememberGood(api.manifest); // m2 played
-    api.manifest = onlyA('m3');
-    await sync(BASE, { currentId: 'm2', headers: auth });
-    expect(await filesToKeep()).toEqual(new Set([A]));
-    expect(await open('sf-blobs-v1').match(`/_sf/blob/${B}`)).toBeUndefined();
-  });
-
   it('picks up a new manifest after a 304 and switches to it in one step', async () => {
     await sync(BASE, { headers: auth });
     api.manifest = manifest('m2', 'changed text');
@@ -195,6 +174,52 @@ describe('sync against the device API', () => {
     const err = await sync(BASE, { headers: auth }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TypeError);
     expect(err).not.toBeInstanceOf(UnauthorisedError);
+  });
+});
+
+describe('file cleanup and pins', () => {
+  const held = async () => (await open('sf-blobs-v1').keys()).map((k) => k.url.split('/').pop());
+  /** m1 without spot b, so file B is no longer needed. */
+  const withoutB = (id: string): ScreenManifest => {
+    const m = manifest(id);
+    delete m.spots.b;
+    delete m.files[B];
+    m.playlists.all!.items = [{ spot: 'a' }];
+    return m;
+  };
+
+  it('keeps a pinned file the new manifest no longer needs, and drops it once unpinned', async () => {
+    await sync(BASE, { headers: auth });
+    api.manifest = withoutB('m2');
+    const pins = new PinSet();
+    pins.hold('preparing', [B]);
+    await sync(BASE, { currentId: 'm1', headers: auth, pinned: pins });
+    expect(await held()).toEqual(expect.arrayContaining([A, B]));
+
+    pins.release('preparing');
+    await sync(BASE, { currentId: 'm2', headers: auth, pinned: pins });
+    expect(await held()).toEqual([A]);
+  });
+
+  it('pins from several holders add up, and a holder replaces its own pins', () => {
+    const pins = new PinSet();
+    pins.hold('playing', [A]);
+    pins.hold('last-known-good', [A, B]);
+    pins.hold('playing', []);
+    expect([...pins].sort()).toEqual([A, B].sort());
+    pins.release('last-known-good');
+    expect([...pins]).toEqual([]);
+  });
+
+  it('never stores a file whose hash does not match, and activates nothing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith(`/blobs/${B}`) ? new Response('not file b') : handle(input, init))),
+    );
+    await expect(sync(BASE, { headers: auth })).rejects.toThrow(`file ${B.slice(0, 12)}: failed verification`);
+    expect(await held()).not.toContain(B);
+    expect((await open('sf-blobs-v1').keys()).every((k) => k.url.includes('/_sf/blob/'))).toBe(true);
+    expect(await loadActiveManifest()).toBeUndefined();
   });
 });
 

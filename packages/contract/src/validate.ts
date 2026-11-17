@@ -253,6 +253,43 @@ export function validateSpotData(fields: unknown, data: unknown, assets: unknown
   return errors;
 }
 
+// ------------------------------------------------------------------ bound values
+
+/**
+ * Read a binding's dot path out of a snapshot's data. Numbers index arrays: `daily.max.0`. Only
+ * own keys count, so `constructor` or an array's `length` reads as missing. Undefined when any
+ * step is missing.
+ */
+export function readPath(data: unknown, path: string): unknown {
+  let v: unknown = data;
+  for (const key of path.split('.')) {
+    if (Array.isArray(v)) v = /^\d+$/.test(key) ? v[Number(key)] : undefined;
+    else v = own(v, key);
+    if (v === undefined) return undefined;
+  }
+  return v;
+}
+
+/**
+ * Check a live value against the field it is bound to, before it replaces the spot's static
+ * value. Returns problems; empty means the value may be shown. A missing value (`undefined` or
+ * `null`, as `readPath` gives for a path the snapshot does not have) is a problem: the fallback
+ * stays. The player runs this on every bound field it plays; the server runs it when it stores a
+ * snapshot (M3-23), so both refuse the same values.
+ */
+export function validateBoundValue(fields: unknown, name: unknown, value: unknown): string[] {
+  const field = typeof name === 'string' ? name : show(name);
+  const raw = own(fields, name);
+  if (raw === undefined) return [`unknown field "${field}"`];
+  if (fieldDefProblems(field, raw).length) return [`field "${field}" has no valid definition`];
+  const def = raw as FieldDef;
+  if (def.type === 'image') return [`image field "${field}" cannot be bound to live data`];
+  if (value === undefined || value === null) return [`field "${field}" has no value at the bound path`];
+  if (def.type === 'list') return listProblems(field, def, value);
+  const e = scalarProblem(field, def, value);
+  return e ? [e] : [];
+}
+
 // --------------------------------------------------------------- display hours
 
 function windowProblems(where: string, w: unknown, required: boolean): string[] {
