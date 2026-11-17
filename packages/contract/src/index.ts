@@ -560,16 +560,20 @@ export interface DisplayStatus {
 
 /**
  * Plays of one spot in one UTC hour. Counted on the screen, persisted across reloads, and sent
- * until a sync acknowledges them.
+ * once the hour has ended, until a sync acknowledges them. Which manifest a spot played from is
+ * not counted: the screen's publish history says which manifest it had when.
  */
 export interface PlayCount {
   /** Start of the hour in UTC: `2026-11-17T13:00Z`. */
   hour: string;
   spot: string;
-  manifest: string;
   plays: number;
+  /** Time on screen: the spots' scheduled durations, summed. */
   ms: number;
 }
+
+/** The most play counts one sync carries; a screen with more sends the rest at the next. */
+export const MAX_SYNC_PLAY_COUNTS = 500;
 
 /** `POST /v1/device/sync`, every few minutes and whenever the socket is down. */
 export interface SyncRequest {
@@ -586,7 +590,12 @@ export interface SyncRequest {
    */
   epoch: string;
   player: { version: string; manifestSchemas: readonly number[]; protocols: readonly number[] };
-  manifest: { active?: string; filesMissing: number };
+  /**
+   * `active`: the manifest playing. `filesMissing`: files of the manifest being synced not yet held.
+   * `fallbackFrom`: a newer manifest that played nothing in a full pass, so the screen went back to
+   * its last good one (`active`).
+   */
+  manifest: { active?: string; filesMissing: number; fallbackFrom?: string };
   display: DisplayStatus;
   /** The screen's own clock when it sent this, uncorrected; the server measures drift from it. */
   deviceTime: string;
@@ -595,6 +604,8 @@ export interface SyncRequest {
   playCounts: PlayCount[];
   /** `DataSnapshot.version` of each snapshot the screen holds, by source id. */
   snapshots: Record<string, number>;
+  /** Live values and snapshots refused since the player started, by source id: a broken feed shows here. */
+  dataRejected?: Record<string, number>;
 }
 
 export interface SyncResponse {

@@ -14,6 +14,7 @@ import {
   BRAND_COLORS,
   BRAND_SHAPES,
   ID_PATTERN,
+  MAX_SYNC_PLAY_COUNTS,
   PREVIEW_PROTOCOL,
   SUPPORTED_MANIFEST_SCHEMAS,
   templateKey,
@@ -638,7 +639,6 @@ function playCountProblems(p: unknown): string[] {
   const errors: string[] = [];
   if (!isStr(p.hour) || !HOUR.test(p.hour) || Number.isNaN(Date.parse(p.hour))) errors.push('hour must be the start of a UTC hour, e.g. 2026-11-17T13:00Z');
   if (!isIdValue(p.spot)) errors.push('spot is not a valid id');
-  if (!isText(p.manifest)) errors.push('manifest is missing');
   if (!isCount(p.plays)) errors.push('plays must be a whole number, 0 or more');
   if (!isNum(p.ms) || p.ms < 0) errors.push('ms must be 0 or more');
   return errors;
@@ -657,16 +657,23 @@ export function validateSyncRequest(r: unknown): string[] {
     errors.push('player needs a version and the manifest schemas and protocols it supports');
   }
   const m = r.manifest;
-  if (!isObj(m) || (m.active !== undefined && !isText(m.active)) || !isCount(m.filesMissing))
-    errors.push('manifest needs filesMissing, and active when there is one');
+  if (!isObj(m) || (m.active !== undefined && !isText(m.active)) || (m.fallbackFrom !== undefined && !isText(m.fallbackFrom)) || !isCount(m.filesMissing))
+    errors.push('manifest needs filesMissing, and active and fallbackFrom when there are any');
   errors.push(...displayStatusProblems(r.display));
   if (!isInstant(r.deviceTime)) errors.push('deviceTime must be an ISO 8601 time');
   if (!isObj(r.clock) || !isNum(r.clock.offsetMs) || typeof r.clock.trusted !== 'boolean') errors.push('clock needs offsetMs and whether the screen trusts it');
   errors.push(...list('play count', r.playCounts, playCountProblems));
+  if (Array.isArray(r.playCounts) && r.playCounts.length > MAX_SYNC_PLAY_COUNTS) errors.push(`playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`);
   if (!isObj(r.snapshots)) errors.push('snapshots must map source ids to versions');
   else
     for (const [k, v] of Object.entries(r.snapshots))
       if (!isIdValue(k) || !isCount(v)) errors.push(`snapshots: "${k}" must be a source id with a version number`);
+  if (r.dataRejected !== undefined) {
+    if (!isObj(r.dataRejected)) errors.push('dataRejected must map source ids to counts');
+    else
+      for (const [k, v] of Object.entries(r.dataRejected))
+        if (!isIdValue(k) || !isCount(v)) errors.push(`dataRejected: "${k}" must be a source id with a count`);
+  }
   return errors;
 }
 
