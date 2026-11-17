@@ -3,10 +3,17 @@
  * blobs, data snapshots) held in memory, and a supervisor at `/supervisor/` that has nothing to
  * give. Tests change content with `publish`, and make any path fail or stall with `intercept`.
  * Every request is logged, with whether the client gave up on it.
+ *
+ * `/content/` also plays the device API's socket (M3-06): `POST /content/sync` hands out a ticket,
+ * and `/content/ws` accepts a WebSocket that answers `ping` with `pong` as the Durable Object does.
+ * Tests `push` socket messages and read what the player sent in `socketMessages`. Content is
+ * answered with CORS headers, so a test can serve it from another origin (`localUrl`), the way the
+ * player meets the API.
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 import { extname, join, normalize } from 'node:path';
 import type { Content } from './content';
 
@@ -36,8 +43,17 @@ export class FixtureServer {
   private data = new Map<string, unknown>();
   private rules: { match: RegExp; action: Action }[] = [];
   private server = createServer((req, res) => this.handle(req, res));
+  private sockets = new Set<Socket>();
+  /** Text messages the player sent over its sockets, other than keepalive pings. */
+  readonly socketMessages: unknown[] = [];
+  /** How many sockets the player has opened, in all. */
+  socketsOpened = 0;
+  /** Every sync request's body, oldest first. */
+  readonly syncs: unknown[] = [];
 
-  private constructor(private readonly playerDir: string) {}
+  private constructor(private readonly playerDir: string) {
+    this.server.on('upgrade', (req, socket: Socket) => this.upgrade(req, socket));
+  }
 
   static async start(playerDir: string): Promise<FixtureServer> {
     const s = new FixtureServer(playerDir);
@@ -47,6 +63,27 @@ export class FixtureServer {
 
   get url(): string {
     return `http://127.0.0.1:${(this.server.address() as AddressInfo).port}`;
+  }
+
+  /** The same server under another origin (`localhost`): content there is cross-origin to the player. */
+  get localUrl(): string {
+    return `http://localhost:${(this.server.address() as AddressInfo).port}`;
+  }
+
+  /** Sockets open now. */
+  get openSockets(): number {
+    return this.sockets.size;
+  }
+
+  /** Send a message to every open socket. */
+  push(msg: unknown): void {
+    for (const s of this.sockets) s.write(frame(JSON.stringify(msg)));
+  }
+
+  /** Drop every open socket without a close frame, as a lost network would. */
+  dropSockets(): void {
+    for (const s of this.sockets) s.destroy();
+    this.sockets.clear();
   }
 
   /** Serve this content from now on. The player sees it at its next poll. */
@@ -72,6 +109,7 @@ export class FixtureServer {
   }
 
   async close(): Promise<void> {
+    this.dropSockets();
     this.server.closeAllConnections();
     await new Promise<void>((r) => this.server.close(() => r()));
   }
@@ -112,12 +150,41 @@ export class FixtureServer {
       }
       res.end(body);
     };
+    if (path.startsWith('/content/')) {
+      res.setHeader('access-control-allow-origin', '*');
+      res.setHeader('access-control-expose-headers', 'etag');
+      if (req.method === 'OPTIONS') {
+        res.setHeader('access-control-allow-headers', 'authorization, if-none-match, content-type');
+        res.setHeader('access-control-allow-methods', 'GET, POST');
+        return send(204);
+      }
+    }
     if (rule && typeof rule.action === 'object' && 'status' in rule.action) return send(rule.action.status, '');
 
     if (path.startsWith('/supervisor/')) return send(404, '');
     if (path.startsWith('/content/')) {
       const rest = path.slice('/content/'.length);
       const c = this.content;
+      if (rest === 'sync' && req.method === 'POST') {
+        let body = '';
+        req.on('data', (d: Buffer) => (body += d));
+        req.on('end', () => {
+          const sync = JSON.parse(body) as { epoch: string };
+          this.syncs.push(sync);
+          const reply = {
+            serverTime: new Date().toISOString(),
+            nextSyncS: 300,
+            epoch: sync.epoch,
+            ackSeq: 0,
+            ...(c ? { desiredManifest: c.manifest.id } : {}),
+            snapshots: [],
+            socketTicket: `ticket-${this.syncs.length}`,
+            commands: [],
+          };
+          send(200, JSON.stringify(reply), 'application/json');
+        });
+        return;
+      }
       if (rest === 'manifest.json') {
         if (!c) return send(404, '');
         if (inm === `"${c.manifest.id}"`) return send(304);
@@ -139,4 +206,72 @@ export class FixtureServer {
       send(404, '');
     }
   }
+
+  /** A minimal WebSocket server: text frames, close, and `ping` answered with `pong`. */
+  private upgrade(req: IncomingMessage, socket: Socket): void {
+    const path = new URL(req.url ?? '/', 'http://x').pathname;
+    const rec: RequestRecord = { path, status: 101, at: Date.now() };
+    this.requests.push(rec);
+    const rule = this.rules.find((r) => r.match.test(path));
+    const key = req.headers['sec-websocket-key'];
+    const refuse = rule && typeof rule.action === 'object' && 'status' in rule.action ? rule.action.status : path === '/content/ws' && key ? 0 : 404;
+    if (refuse) {
+      rec.status = refuse;
+      socket.end(`HTTP/1.1 ${refuse} Refused\r\nconnection: close\r\ncontent-length: 0\r\n\r\n`);
+      return;
+    }
+    const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-accept: ${accept}\r\n\r\n`);
+    this.sockets.add(socket);
+    this.socketsOpened++;
+    socket.on('close', () => this.sockets.delete(socket));
+    socket.on('error', () => this.sockets.delete(socket));
+    let buf = Buffer.alloc(0);
+    socket.on('data', (d: Buffer) => {
+      buf = Buffer.concat([buf, d]);
+      for (;;) {
+        const f = readFrame(buf);
+        if (!f) return;
+        buf = buf.subarray(f.length);
+        if (f.opcode === 8) {
+          socket.end(Buffer.from([0x88, 0]));
+          this.sockets.delete(socket);
+          return;
+        }
+        if (f.opcode !== 1) continue;
+        const text = f.payload.toString('utf8');
+        if (text === 'ping') socket.write(frame('pong'));
+        else this.socketMessages.push(JSON.parse(text));
+      }
+    });
+  }
+}
+
+/** An unmasked text frame, as a server sends. */
+function frame(text: string): Buffer {
+  const body = Buffer.from(text);
+  const head = body.length < 126 ? Buffer.from([0x81, body.length]) : Buffer.from([0x81, 126, body.length >> 8, body.length & 255]);
+  return Buffer.concat([head, body]);
+}
+
+/** One frame from a client (always masked), or undefined until it has all arrived. */
+function readFrame(buf: Buffer): { opcode: number; payload: Buffer; length: number } | undefined {
+  if (buf.length < 2) return undefined;
+  const opcode = buf[0]! & 15;
+  let len = buf[1]! & 127;
+  let at = 2;
+  if (len === 126) {
+    if (buf.length < 4) return undefined;
+    len = buf.readUInt16BE(2);
+    at = 4;
+  } else if (len === 127) {
+    if (buf.length < 10) return undefined;
+    len = Number(buf.readBigUInt64BE(2));
+    at = 10;
+  }
+  if (buf.length < at + 4 + len) return undefined;
+  const mask = buf.subarray(at, at + 4);
+  const payload = Buffer.from(buf.subarray(at + 4, at + 4 + len));
+  for (let i = 0; i < payload.length; i++) payload[i]! ^= mask[i % 4]!;
+  return { opcode, payload, length: at + 4 + len };
 }

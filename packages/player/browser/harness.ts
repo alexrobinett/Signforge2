@@ -26,6 +26,12 @@ export interface PlayerState {
   data: Record<string, string>;
   /** Live values refused per data source, and snapshots refused as a whole. */
   dataRejected: Record<string, number>;
+  /** False while the panel is off (display hours or an override). */
+  displayOn: boolean;
+  /** Why the API refused this screen, or ''. */
+  auth: string;
+  /** Whether the nudge socket is open. */
+  socket: boolean;
 }
 
 export interface Player {
@@ -44,8 +50,11 @@ export interface Harness {
   /** The fixture template bundle, for building content or hosting it directly. */
   templateHtml: string;
   content(spots: FixtureSpot[], opts?: Parameters<typeof buildContent>[2]): ReturnType<typeof buildContent>;
-  /** Start a fixture server and open the player on it. `query` adds to or overrides the defaults (`poll=1`). */
-  openPlayer(setup?: (server: FixtureServer) => void, query?: Record<string, string>): Promise<Player>;
+  /**
+   * Start a fixture server and open the player on it. `query` adds to or overrides the defaults
+   * (`poll=1`); give a function to build it from the server (e.g. `content` on `server.localUrl`).
+   */
+  openPlayer(setup?: (server: FixtureServer) => void, query?: Record<string, string> | ((server: FixtureServer) => Record<string, string>)): Promise<Player>;
   /** A blank page in a fresh context, for hosting a template without the player. */
   blankPage(): Promise<Page>;
 }
@@ -88,14 +97,14 @@ export function useHarness(): Harness {
       page.on('console', (m) => lines.push(`${m.type()}: ${m.text()}`));
       page.on('pageerror', (e) => lines.push(`pageerror: ${e.message}`));
       // The supervisor points at the fixture server, so a real one on this machine is never touched.
-      const q = new URLSearchParams({ poll: '1', supervisor: `${server.url}/supervisor`, ...query });
+      const q = new URLSearchParams({ poll: '1', supervisor: `${server.url}/supervisor`, ...(typeof query === 'function' ? query(server) : query) });
       await page.goto(`${server.url}/?${q}`);
 
       const state = () =>
         page.evaluate(() => {
           const s = (window as unknown as { __sf?: PlayerState }).__sf;
           if (!s) throw new Error('the player has not started');
-          const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log, data, dataRejected } = s;
+          const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log, data, dataRejected, displayOn, auth, socket } = s;
           return {
             manifestId,
             playlist,
@@ -109,6 +118,9 @@ export function useHarness(): Harness {
             log: log.map(({ spot, manifest, startedAt }) => ({ spot, manifest, startedAt })),
             data: { ...data },
             dataRejected: { ...dataRejected },
+            displayOn,
+            auth,
+            socket,
           };
         });
       const until = async (predicate: (s: PlayerState) => boolean, timeoutMs = 10_000) => {
