@@ -15,6 +15,8 @@ export {
   type DataScope,
   type Role,
   type Scope,
+  type RateLimitBucket,
+  type RateLimiter,
   type ScreenNotifier,
   type Tool,
   type ToolContext,
@@ -28,6 +30,7 @@ export { baseBlobKey, manifestKey, orgBlobKey, uploadKey } from './r2';
 export { r2Presigner, type R2PresignConfig, type UploadSigner } from './upload';
 export { MAX_RENDITION_BYTES, UPLOAD_URL_SECONDS, type AssetView, type RenditionView } from './assets';
 export type { ScreenView, CredentialView } from './screens';
+export { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from './pairing';
 export type { GroupView } from './groups';
 export { kitColors, type BrandKitView, type StoredColors } from './brand';
 export type { StoredCheckReport, TemplateVersionView, TemplateView } from './templates';

@@ -31,6 +31,7 @@ Lists the tools the caller's role may use:
 | 404 | `unknown_tool` | No tool has that name. |
 | 404 | `not_found` | An id names nothing in this org, including another org's ids. |
 | 409 | `conflict` | The change would break something else. `details` says what. |
+| 429 | `rate_limited` | Too many attempts (`claim_screen`); try again in a minute. |
 | 401, 403 | `unauthenticated`, `no_active_organization`, `not_a_member` | Returned by `requireOrg`, before any tool runs. |
 
 The CMS should keep every cookie a response sets (see M3-09). Times in outputs are milliseconds since the epoch.
@@ -44,6 +45,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `rename_screen` | screens:manage | editor | `{ screenId, name }` | `{ screen }` |
 | `update_screen_settings` | screens:manage | editor | `{ screenId, timezone?, locale?, orientation?, displayHours? }` | `{ screen }` |
 | `revoke_screen_credential` | screens:manage | owner | `{ screenId, credentialId }` | `{ credential }` |
+| `claim_screen` | screens:manage | editor | `{ code, name, timezone, orientation, locale?, displayHours?, idempotencyKey? }` | `{ screen }`; 404 for a code that is not open, 429 over the rate limit |
 | `list_groups` | content:read | viewer | `{ limit?, cursor? }` | `{ groups: Group[], next }`, by id |
 | `create_group` | screens:manage | editor | `{ name, screenIds?, idempotencyKey? }` | `{ group }` |
 | `rename_group` | screens:manage | editor | `{ groupId, name }` | `{ group }` |
@@ -69,10 +71,11 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 
 Details:
 
-- **Idempotency keys.** The creating tools (`create_group`, `create_asset_upload`, `create_brand_kit`) take an optional `idempotencyKey`: 8 to 128 printable ASCII characters the caller picks for one creation, such as a UUID. The CMS should send one with every create. A retry with the same key and input returns the first call's output and writes nothing, even when two calls race. The same key with a different input is refused with `conflict`. Keys are per org and kept for now (expiry is M3-24). A retried `create_asset_upload` returns the first call's upload URLs, which expire at their `expiresAt`. `register_template_version` needs no key: a version is registered once, and registering it again returns `changed: false`.
+- **Idempotency keys.** The creating tools (`create_group`, `create_asset_upload`, `create_brand_kit`, `claim_screen`) take an optional `idempotencyKey`: 8 to 128 printable ASCII characters the caller picks for one creation, such as a UUID. The CMS should send one with every create. A retry with the same key and input returns the first call's output and writes nothing, even when two calls race. The same key with a different input is refused with `conflict`. Keys are per org and kept for now (expiry is M3-24). A retried `create_asset_upload` returns the first call's upload URLs, which expire at their `expiresAt`. `register_template_version` needs no key: a version is registered once, and registering it again returns `changed: false`.
 - **Lists page.** Every `list_*` tool takes `limit` (default 50, at most 200) and `cursor`, and returns `next`. Pass `next` back as `cursor`, with the same filters, for the following page; `next` is `null` on the last page. A cursor is opaque. It holds the sort key of the last row returned, so rows added or removed between calls are neither repeated nor skipped. A cursor the server did not make is `invalid_input`. The repositories still read the org's whole list and the tool cuts the page; paging in SQL can wait until lists are large.
 - **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by the contract's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
 - **`get_screen`.** Credentials come back without their hashes.
+- **`claim_screen`.** Pairs a screen (M3-08): `{ code, name, timezone, orientation, locale?, displayHours?, idempotencyKey? }` returns `{ screen }`. The code is as the screen shows it; case, spaces and dashes are ignored. An unknown, expired or already claimed code is `not_found`, one answer for all three. Every claim counts against the caller's rate limit (`Caller.rateLimit`, bucket `pairing_claim`: the API allows 10 a minute per member and per address) before the code is read, and over it is `rate_limited`; a caller with no `rateLimit` is refused, so no adapter can skip it. The screen collects its credential on its next poll. Two claims racing for one code: the second's batch fails and writes nothing (an error, not a refusal).
 - **Brand kits.** Colours are hex. Leave out `onPrimary` or `onAccent` (or set it to `null` on update) to have it derived for 4.5:1 contrast; `derived` says which were. `warnings` lists pairs below 4.5:1; they do not stop a publish. Fonts are catalogue ids from `list_fonts` (`available: false` until the font's files are added; screens then draw with the template's font). A logo is a verified SVG or PNG image asset. The first kit becomes the default. A screen uses its own kit, else its groups', else the default: `reach` lists the screens a kit's edits will reach at the next publish, and `conflicts` the screens whose groups chose this kit and another (they cannot publish until the screen or a group is changed). Nothing reaches a screen until the next publish.
 - **`publish_manifest_to_screen`.** The manifest must already be stored for that screen. `sf push` stores manifests now; the server compiler will in M3-13.
 - **Templates.** An org sees its own templates and the base ones (`owner: 'base'`). Each version carries its manifest, its status (`draft`, `approved`, `retired`) and the server's check report. Only approved versions should be offered for new spots.
@@ -136,7 +139,7 @@ A call that staged nothing changed nothing, and writes nothing: no audit row eit
 
 Callers so far:
 
-- `/api/tools`: actor `user` with the session's user id, client `cms`.
+- `/api/tools`: actor `user` with the session's user id, client `cms`, and a `rateLimit` on the `PAIR_CLAIM_LIMIT` binding keyed by user and by address.
 - `/admin`'s manifest upload: actor `system` with id `sf-push`, role owner, scope `content:publish` only.
 - `/admin`'s template registration (`sf template push`): actor `system` with id `sf-push`, role owner, scopes `content:draft` and `content:publish`; the platform registry for base templates, the org registry for an org's.
 

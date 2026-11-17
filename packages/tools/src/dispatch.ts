@@ -30,6 +30,7 @@ import {
   type DataScope,
   type Role,
   type Scope,
+  type RateLimiter,
   type ScreenNotifier,
   type ToolErrorCode,
 } from './tool';
@@ -48,6 +49,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
   screens?: ScreenNotifier;
+  /** Counts attempts against the caller's rate limits. `claim_screen` refuses without one. */
+  rateLimit?: RateLimiter;
 }
 
 export type DispatchResult = { ok: true; output: unknown } | { ok: false; error: ToolErrorCode; message: string; details?: unknown };
@@ -156,7 +159,7 @@ export async function dispatch<D extends DataScope>(
 
   let output: unknown;
   try {
-    output = await tool.handler({ org: caller.org, actor: caller.actor, input: parsed.data, blobs: caller.blobs, uploads: caller.uploads, write, notify });
+    output = await tool.handler({ org: caller.org, actor: caller.actor, input: parsed.data, blobs: caller.blobs, uploads: caller.uploads, write, notify, rateLimit: caller.rateLimit });
   } catch (err) {
     if (err instanceof ToolError) {
       // A refusal that changed something is recorded too, with what was refused.

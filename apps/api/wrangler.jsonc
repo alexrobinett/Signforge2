@@ -16,6 +16,13 @@
       "vars": { "ENVIRONMENT": "dev", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
       // Cloudflare Email Sending. Dev records mail instead of sending it (src/email); the binding is
       // here so its type is generated. Secrets (AUTH_SECRET, GITHUB_*) are listed in src/env.d.ts.
+      // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
+      // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
+      "ratelimits": [
+        { "name": "PAIR_START_LIMIT", "namespace_id": "801", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PAIR_POLL_LIMIT", "namespace_id": "802", "simple": { "limit": 600, "period": 60 } },
+        { "name": "PAIR_CLAIM_LIMIT", "namespace_id": "803", "simple": { "limit": 10, "period": 60 } }
+      ],
       "send_email": [{ "name": "EMAIL" }],
       // One Durable Object per screen, holding its nudge socket (src/device/screen-object.ts).
       "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
@@ -43,6 +50,13 @@
       "name": "signforge-api-demo",
       "main": "src/index.ts",
       "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
+      // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
+      "ratelimits": [
+        { "name": "PAIR_START_LIMIT", "namespace_id": "811", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PAIR_POLL_LIMIT", "namespace_id": "812", "simple": { "limit": 600, "period": 60 } },
+        { "name": "PAIR_CLAIM_LIMIT", "namespace_id": "813", "simple": { "limit": 10, "period": 60 } }
+      ],
       "send_email": [{ "name": "EMAIL" }],
       "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
       "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
@@ -60,6 +74,13 @@
       "name": "signforge-api-prod",
       "main": "src/index.ts",
       "vars": { "ENVIRONMENT": "prod", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
+      // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
+      "ratelimits": [
+        { "name": "PAIR_START_LIMIT", "namespace_id": "821", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PAIR_POLL_LIMIT", "namespace_id": "822", "simple": { "limit": 600, "period": 60 } },
+        { "name": "PAIR_CLAIM_LIMIT", "namespace_id": "823", "simple": { "limit": 10, "period": 60 } }
+      ],
       "send_email": [{ "name": "EMAIL" }],
       "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
       "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],

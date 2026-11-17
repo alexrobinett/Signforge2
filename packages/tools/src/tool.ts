@@ -72,9 +72,19 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
    * writes are committed, so a screen never hears of a change that was rolled back.
    */
   notify: (send: (screens: ScreenNotifier) => Promise<void>) => void;
+  /** The caller's rate limits. A tool that guards a guessable secret refuses without it. */
+  rateLimit?: RateLimiter;
 }
 
-export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict';
+export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited';
+
+/**
+ * What the adapter counts against a rate limit, keyed by what it knows of the caller (the API: the
+ * member and the address). `pairing_claim`: every claim of a pairing code, right or wrong.
+ */
+export type RateLimitBucket = 'pairing_claim';
+/** Counts one attempt in `bucket`; false once the caller is over its limit. */
+export type RateLimiter = (bucket: RateLimitBucket) => Promise<boolean>;
 
 /**
  * A refusal a handler means to return. Anything else a handler throws is a bug and propagates.
