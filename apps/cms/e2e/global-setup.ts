@@ -1,0 +1,67 @@
+/**
+ * Start the API and the CMS as a developer would (two processes, joined by the dev registry),
+ * but on their own ports, with their own local database and their own registry, so a dev server
+ * already running on this machine is neither used nor disturbed.
+ */
+import { chromium } from '@playwright/test';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { mkdirSync, openSync, rmSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { API_LOG, API_PORT, CMS_PORT, CMS_URL, RUN_DIR } from './servers';
+
+const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
+const cmsDir = fileURLToPath(new URL('../', import.meta.url));
+
+async function waitFor(url: string, timeoutMs = 90_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+      if (res.status < 500) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error(`${url} did not come up`);
+}
+
+export default async function globalSetup() {
+  rmSync(RUN_DIR, { recursive: true, force: true });
+  mkdirSync(RUN_DIR, { recursive: true });
+  const env = { ...process.env, CLOUDFLARE_DEV_REGISTRY_PATH: `${RUN_DIR}registry`, NO_COLOR: '1' };
+  const state = `${RUN_DIR}state`;
+
+  const migrate = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--persist-to', state], { cwd: apiDir, env, encoding: 'utf8' });
+  if (migrate.status !== 0) throw new Error(`migrations failed:\n${migrate.stdout}\n${migrate.stderr}`);
+
+  const log = openSync(API_LOG, 'a');
+  const children: ChildProcess[] = [
+    spawn('pnpm', ['exec', 'wrangler', 'dev', '--port', String(API_PORT), '--persist-to', state, '--ip', '127.0.0.1'], { cwd: apiDir, env, stdio: ['ignore', log, log], detached: true }),
+    spawn('pnpm', ['exec', 'vite', 'dev', '--port', String(CMS_PORT)], { cwd: cmsDir, env, stdio: ['ignore', openSync(`${RUN_DIR}cms.log`, 'a'), openSync(`${RUN_DIR}cms.log`, 'a')], detached: true }),
+  ];
+
+  await waitFor(`http://127.0.0.1:${API_PORT}/health`);
+  await waitFor(`${CMS_URL}/sign-in`);
+  // The CMS reaches the API through the registry; wait until the binding answers.
+  await waitFor(`${CMS_URL}/api/sign-in-options`);
+  // Vite optimises dependencies on the first browser load and may reload the page; do that now,
+  // not in the middle of a test.
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${CMS_URL}/sign-in`);
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1_000);
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+  } finally {
+    await browser.close();
+  }
+
+  return async () => {
+    for (const child of children) {
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGTERM');
+      } catch {}
+    }
+  };
+}
