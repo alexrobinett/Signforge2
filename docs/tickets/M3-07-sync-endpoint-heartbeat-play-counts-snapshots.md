@@ -1,6 +1,6 @@
 # M3-07 Sync endpoint: heartbeat, play counts, snapshots
 
-Status: open  ·  Size: M  ·  Depends on: M3-06
+Status: open  ·  Size: M  ·  Depends on: M3-06, M3-32
 
 ## Goal
 

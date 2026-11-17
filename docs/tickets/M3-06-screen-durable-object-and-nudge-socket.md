@@ -1,6 +1,6 @@
 # M3-06 Screen Durable Object and nudge socket
 
-Status: open  ·  Size: M  ·  Depends on: M3-05
+Status: open  ·  Size: M  ·  Depends on: M3-05, M3-32
 
 ## Goal
 

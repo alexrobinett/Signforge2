@@ -1,6 +1,6 @@
 # Proposal: brand-aware templates and the live editor
 
-Status: proposal, 2026-11-17. Nothing here is built. It changes the contract and the template SDK, so it is decided before the CMS editor (M3-16) and before more templates are written.
+Status: decided 2026-11-17 (see **Decisions** at the end); built through M3-38, M3-39, M3-25, M3-40 and M3-16. Nothing here is built yet. It changes the contract and the template SDK, so it is decided before the CMS editor (M3-16) and before more templates are written.
 
 ## Where we are
 
@@ -85,3 +85,20 @@ Protocol: `seek`, `field-clicked` and `notice` are additions, so the frame proto
 1. Is the three-layer model right (brand kit, style fields, forked templates), or should spots be able to override any colour?
 2. One brand kit per org, or several (sub-brands, seasonal themes) chosen per screen group?
 3. Should brand fonts be uploadable, or picked from a curated list of licensed open fonts? Uploads raise licensing questions for screens in public places.
+
+## Decisions (owner, 2026-11-17)
+
+Answers to the three questions, with the reviewers' changes from `docs/reviews/2026-11-17-full-review.md`. Where this section and the text above disagree, this section wins.
+
+1. **Three layers: yes.** One theme path: the compiler resolves token defaults into field values, and a spot's override is an ordinary field value. Branding is frozen at publish.
+2. **Several brand kits per org.** One is the default. A screen uses its own kit, else its group's, else the default; a screen in two groups with different kits and no choice of its own is a publish problem for that screen.
+3. **Fonts: curated now, custom later.** Fonts come from a catalogue with an owner, like templates: `base` holds the curated open fonts. The id format leaves room for org uploads later (with a licence statement) without a migration.
+
+Also changed from the text above:
+
+- The player does change: fonts and logo reach the frame as Blobs, like `assets`, and the template CSP allows `blob:` fonts (M3-39).
+- Updating a live template is a defined lifecycle (frame reload or SDK `reset`), not a re-sent `init` (M3-32).
+- `seek`, `field-clicked` and `notice` are cut from v1 of the editor.
+- The colour lint warns; it does not fail.
+- The preview channel accepts messages only from the CMS origin, framed by it (M3-36).
+- The CMS is not re-themed by tenant brand in v1.

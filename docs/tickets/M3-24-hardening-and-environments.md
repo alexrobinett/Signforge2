@@ -1,6 +1,6 @@
 # M3-24 Hardening and environments
 
-Status: open  ·  Size: M  ·  Depends on: M3-23, M3-19, M3-21
+Status: open  ·  Size: M  ·  Depends on: M3-23, M3-19, M3-21, M3-37
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # M3-18 Instant publish and rollout
 
-Status: open  ·  Size: M  ·  Depends on: M3-17, M3-06
+Status: open  ·  Size: M  ·  Depends on: M3-17, M3-06, M3-34
 
 ## Goal
 

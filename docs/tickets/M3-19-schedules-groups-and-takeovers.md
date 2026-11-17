@@ -1,6 +1,6 @@
 # M3-19 Schedules, groups and takeovers
 
-Status: open  ·  Size: M  ·  Depends on: M3-18
+Status: open  ·  Size: M  ·  Depends on: M3-18, M3-32
 
 ## Goal
 

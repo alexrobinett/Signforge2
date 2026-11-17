@@ -1,10 +1,10 @@
 # M3-25 Brand tokens and template polish
 
-Status: open  ·  Size: L  ·  Depends on: the owner's decisions in `docs/proposals/brand-and-editor.md`
+Status: open  ·  Size: L  ·  Depends on: M3-38, M3-39
 
 ## Goal
 
-Move every template onto brand tokens, as the proposal describes, and in the same pass clear the remaining findings from the visual reviews, since both touch every template's CSS.
+Move every template onto brand tokens (M3-38 and M3-39 build the kits and the player side), and in the same pass clear the remaining findings from the visual reviews, since both touch every template's CSS.
 
 ## Read first
 
@@ -14,8 +14,8 @@ Move every template onto brand tokens, as the proposal describes, and in the sam
 
 ## Scope
 
-- Contract and SDK changes from the proposal (brand kit, token defaults, `theme` in `init`), contract first in its own commit.
-- Every template's colours from `var(--sf-*)`; the lint from the proposal in `sf build` and the server check.
+- Every template's colours from `var(--sf-*)`, passing M3-39's lint; `accent` fields default to `$brand.accent`.
+- Templates use the SDK's `now()` (M3-32) instead of `new Date()`.
 - A new version number for every template that changes (the spec: any edit is a new version).
 - Remaining findings from the second visual review (2026-11-17):
   - weather: snow and rain still cross the reading (dimmed); stop or mask the particle layer above the text. In landscape rain and snow leave the right half empty; the top-left cloud is clipped and near the city name.
