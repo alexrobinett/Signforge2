@@ -160,6 +160,18 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       removeMember: async (groupId: string, screenId: string) =>
         (await db.delete(m).where(and(eq(m.orgId, orgId), eq(m.groupId, groupId), eq(m.screenId, screenId))).returning().all()).length > 0,
+      /** Replace a group's members. Throws `NotInOrgError`, changing nothing, if the group or any screen is not the org's. */
+      setMembers: async (groupId: string, screenIds: readonly string[]) => {
+        if (!(await screenGroups.get(groupId))) throw new NotInOrgError('group', groupId);
+        const unique = [...new Set(screenIds)];
+        const found = new Set((await screens.getMany(unique)).map((r) => r.id));
+        for (const id of unique) if (!found.has(id)) throw new NotInOrgError('screen', id);
+        const rows = unique.map((screenId) => ({ orgId, groupId, screenId }));
+        await db.batch([
+          db.delete(m).where(and(eq(m.orgId, orgId), eq(m.groupId, groupId))),
+          ...chunk(rows, 3).map((part) => db.insert(m).values(part)),
+        ]);
+      },
     },
 
     assets: {

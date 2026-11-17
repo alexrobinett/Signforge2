@@ -1,8 +1,8 @@
 /**
  * SignForge API Worker. Three route trees, one per kind of caller, and no credential is accepted
  * on another's tree: `/api` for CMS users (session cookie), `/v1/device` for screens (bearer
- * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. Until M3-12, `/admin` serves
- * `sf push`, behind a deploy secret (src/admin).
+ * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. `/admin` takes
+ * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.

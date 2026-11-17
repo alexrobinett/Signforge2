@@ -129,6 +129,8 @@ describe("a call made for org B with org A's ids", () => {
     const refused: [string, () => Promise<unknown>][] = [
       ['addMember: A group', () => b.screenGroups.addMember(a.group, s.b.screen)],
       ['addMember: A screen', () => b.screenGroups.addMember(s.b.group, a.screen)],
+      ['setMembers: A group', () => b.screenGroups.setMembers(a.group, [s.b.screen])],
+      ['setMembers: A screen', () => b.screenGroups.setMembers(s.b.group, [s.b.screen, a.screen])],
       ['setItems: A playlist', () => b.playlists.setItems(a.playlist, [s.b.imageSpot])],
       ['setItems: A spot', () => b.playlists.setItems(s.b.playlist, [a.imageSpot])],
       ['addScreens: A publish', () => b.publishes.addScreens(a.publish, [{ screenId: s.b.screen, manifestId: 'x' }])],
@@ -140,6 +142,8 @@ describe("a call made for org B with org A's ids", () => {
     ];
     for (const [name, call] of refused) await expect(call(), name).rejects.toBeInstanceOf(NotInOrgError);
     expect(await b.playlists.items(s.b.playlist)).toEqual([s.b.templateSpot, s.b.imageSpot]);
+    expect(await b.screenGroups.members(s.b.group)).toEqual([s.b.screen]);
+    expect(await s.a.scope.screenGroups.members(a.group)).toEqual([a.screen]);
   });
 });
 

@@ -1,6 +1,7 @@
 /**
  * The plan's roles: owner, editor, viewer. Better Auth's organization statements cover the org
- * itself (members, invitations); `content` is ours, checked by the tool registry (M3-12).
+ * itself (members, invitations); `content` is ours. What each role may do with tools is
+ * `ROLE_SCOPES` in packages/tools, which the dispatcher checks.
  */
 import { createAccessControl } from 'better-auth/plugins/access';
 import { defaultStatements, ownerAc } from 'better-auth/plugins/organization/access';

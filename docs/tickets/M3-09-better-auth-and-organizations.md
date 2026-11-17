@@ -75,3 +75,4 @@ Nothing has been created on Cloudflare. Before the first deploy of each environm
 - **Cache cookie on removal.** A removed member's cache cookie can still name the org for up to 5 minutes. `requireOrg` refuses them anyway, because membership is read fresh on every request. A revoked session still works for up to 5 minutes. Pass `disableCookieCache` on sensitive routes if that matters.
 - **Editors can publish,** as in M3-00's roles. That is open question Q7 in the plan.
 - **No real CMS data routes yet.** Isolation is proven with test-only routes mounted behind `requireOrg`. Real routes arrive with the tool registry (M3-12).
+  - **Since M3-12:** the test-only routes are gone. `tenancy.test.ts` uses the real `/api/tools` route.

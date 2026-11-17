@@ -6,11 +6,14 @@
  * - `/api/session` says who is signed in and their active org, if any.
  * - Every other route runs behind `requireOrg`, which re-checks membership of the active org
  *   on every request and hands handlers `c.var.org`, a `scoped(db, orgId)`.
+ * - `/api/tools` serves the tool registry (./tools.ts). It is the only route here that changes
+ *   data; test/routes.test.ts fails if another one does.
  */
 import { Hono, type MiddlewareHandler } from 'hono';
 import { findMembership, scoped, type OrgScope } from '@signforge/db';
 import { createAuth, ROLES, type Auth, type AuthSession, type Role } from '../auth';
 import { emailSenderFor, type EmailSender } from '../email';
+import { mountTools } from './tools';
 
 export interface ApiVars {
   auth: Auth;
@@ -60,7 +63,7 @@ export const requireOrg: MiddlewareHandler<ApiEnv> = async (c, next) => {
   await next();
 };
 
-/** The `/api` sub-app. Routes added to it after this call run behind `requireOrg`. */
+/** The `/api` sub-app, with the tool routes. Routes added to it after this call run behind `requireOrg`. */
 export function createApi(deps: ApiDeps = {}) {
   const api = new Hono<ApiEnv>();
 
@@ -83,5 +86,6 @@ export function createApi(deps: ApiDeps = {}) {
   });
 
   api.use('*', requireSession, requireOrg);
+  mountTools(api);
   return api;
 }

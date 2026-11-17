@@ -83,7 +83,7 @@ Pairing calls are rate limited. For zero-touch installs, the CMS mints a credent
 - An opaque token, `sfd_<screenId>.<32 random bytes>`, stored as a SHA-256. It is not a JWT.
 - Revoking is one row update, then the Durable Object closes the socket.
 - Until pairing exists, `pnpm --filter @signforge/api dev:screen [--content dist/content]` creates a screen in local D1, loads a build into local R2, and prints a credential.
-- Until the CMS publishes, `sf push <out-dir> --screen <id> --api <url>` uploads an `sf build` output and makes it the screen's desired manifest. It calls a temporary `/admin` tree guarded by the `ADMIN_TOKEN` deploy secret (off when unset), which M3-12's tool registry replaces.
+- Until the CMS publishes, `sf push <out-dir> --screen <id> --api <url>` uploads an `sf build` output and makes it the screen's desired manifest. It uploads through a temporary `/admin` tree guarded by the `ADMIN_TOKEN` deploy secret (off when unset). The last step, making the manifest desired, runs the `publish_manifest_to_screen` tool through the dispatcher and is audited as the system actor `sf-push`. `/admin` goes once assets upload through the CMS (M3-14) and agents hold OAuth grants (Milestone 4).
 
 **The screen's Durable Object** holds the desired and reported manifest IDs and one hibernating WebSocket.
 - Keepalive pings get an automatic reply (`setWebSocketAutoResponse`) without waking it or billing duration. Whether those pings count as billed requests (incoming messages bill at 20:1) is not documented: at a 60-second ping and 1,000 screens the worst case is 2.2M requests a month, about $0.18 over the allowance. M3-06 reads the real count from analytics on the paid account and uses the longest keepalive that holds the connection.
@@ -158,7 +158,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
   - OAuth through Better Auth's provider plugin (`@better-auth/oauth-provider`). Its source has dynamic client registration (off by default) and S256 PKCE, required for public clients; it is first run in Milestone 4. A grant is bound to one org.
   - Scopes: `content:read`, `content:draft` (the default), `content:publish` (separate, off by default, never more than the user's role allows), `screens:manage`.
   - Without publish scope, the publish tool creates a pending publish for a person to approve.
-  - The tool registry is built in Milestone 3 as the CMS's own API, and the audit log is written in its dispatcher, so the MCP server and WebMCP become thin adapters.
+  - The tool registry is built in Milestone 3 as the CMS's own API, and the audit log is written in its dispatcher, so the MCP server and WebMCP become thin adapters. It is `packages/tools`, served at `POST /api/tools/:name` (its README has the contract); on `/api` nothing else but Better Auth changes data, and a test enumerating the routes enforces it.
 
 ## Cost at 1,000 screens
 

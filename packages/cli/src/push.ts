@@ -1,13 +1,14 @@
 /**
  * The client side of `sf push`: send one `sf build` output to the API and make it a screen's
  * desired manifest. TEMPORARY, like the `/admin` routes it calls (apps/api/src/admin), until the
- * CMS publishes (M3-12 replaces both).
+ * CMS uploads assets (M3-14) and agents hold OAuth grants (Milestone 4). The API makes the
+ * manifest desired with the `publish_manifest_to_screen` tool, audited as `sf-push`.
  *
  * No Node imports, so the API's own tests run it inside workerd against the real routes.
  *
  *   1. Ask which of the manifest's files the API lacks.
  *   2. Upload only those; the API checks each against its hash.
- *   3. Upload the manifest; the API validates it and makes it the screen's desired manifest.
+ *   3. Upload the manifest; the API validates it, stores it, and publishes it with the tool.
  */
 
 export interface PushOptions {

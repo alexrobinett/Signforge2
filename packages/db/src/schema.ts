@@ -510,6 +510,8 @@ export const auditLog = sqliteTable(
     at: integer('at').notNull().$defaultFn(() => Date.now()),
     actorKind: text('actor_kind', { enum: ['user', 'agent', 'device', 'system'] }).notNull(),
     actorId: text('actor_id').notNull(),
+    /** The app the actor acted through: `cms`, `sf-push`, or an agent's OAuth client id. */
+    clientId: text('client_id'),
     action: text('action').notNull(),
     targetKind: text('target_kind'),
     targetId: text('target_id'),

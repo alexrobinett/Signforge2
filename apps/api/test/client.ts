@@ -13,10 +13,9 @@ export const ORIGIN = 'https://api.test';
 
 export type Api = ReturnType<typeof createApi>;
 
-/** A fresh `/api` app, as a new isolate would build it. `extend` adds routes behind `requireOrg`. */
-export function testApp({ outbox = new RecordingEmailSender(), extend }: { outbox?: RecordingEmailSender; extend?: (api: Api) => void } = {}) {
+/** A fresh `/api` app, as a new isolate would build it. */
+export function testApp({ outbox = new RecordingEmailSender() }: { outbox?: RecordingEmailSender } = {}) {
   const api = createApi({ email: outbox });
-  extend?.(api);
   const app = new Hono<{ Bindings: Env }>().route('/api', api);
   return { app, outbox };
 }
@@ -62,6 +61,9 @@ export class Client {
   get = (path: string, extra?: Record<string, string>) => this.request('GET', path, undefined, extra);
   post = (path: string, body: unknown = {}, extra?: Record<string, string>) => this.request('POST', path, body, extra);
   patch = (path: string, body: unknown, extra?: Record<string, string>) => this.request('PATCH', path, body, extra);
+
+  /** Call a tool through `POST /api/tools/:name`. */
+  tool = (name: string, input: unknown = {}, extra?: Record<string, string>) => this.post(`/api/tools/${name}`, input, extra);
 
   /** POST and expect 2xx; returns the JSON body. */
   async ok<T = any>(path: string, body: unknown = {}): Promise<T> {
