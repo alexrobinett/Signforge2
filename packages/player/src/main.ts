@@ -13,7 +13,7 @@
  */
 import type { ScreenManifest, Spot, Transition } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, type Step } from '@signforge/player-core';
-import { dataStatus, startDataLoop } from './data';
+import { dataSettled, dataStatus, startDataLoop } from './data';
 import { Slot } from './slot';
 import { loadActiveManifest, requestPersistence, sync } from './store';
 
@@ -23,6 +23,8 @@ const POLL_MS = Number(query.get('poll') ?? 30) * 1000;
 /** How long before the end of a spot the next one starts loading. */
 const PREPARE_LEAD_MS = 3000;
 const MAX_CONSECUTIVE_FAILURES = 3;
+/** The longest a spot waits for its data feeds' first load. */
+const DATA_WAIT_MS = 3000;
 const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
 /** The supervisor's secret, collected from it at first use. Never in the URL: templates can read that. */
 let supervisorToken = '';
@@ -277,6 +279,10 @@ async function playbackLoop(): Promise<never> {
     const fadeMs = tr.type === 'crossfade' ? tr.ms : tr.type === 'fade' ? tr.ms / 2 : 0;
     phase = 'prepare';
     preparing = step.spot.id;
+    // A spot's data is fixed for its play: let its feeds finish their first load before it starts.
+    if (step.spot.kind === 'template' && step.spot.bindings) {
+      await dataSettled([...new Set(Object.values(step.spot.bindings).map((b) => b.source))], DATA_WAIT_MS);
+    }
     const ok = await prepareStep(slot, step, m);
     preparing = '';
     phase = 'play';
@@ -398,9 +404,13 @@ function applyOverrides(m: ScreenManifest): ScreenManifest {
   return { ...m, playlists, ...(ids?.length ? { schedule: [], defaultPlaylist: '__test' } : {}) };
 }
 
+/** Runs a data pass now; set once the data loop starts. */
+let wakeData = () => {};
+
 function adopt(next: ScreenManifest): void {
   next = applyOverrides(next);
   manifest = next;
+  wakeData();
   state.manifestId = next.id;
   // The sequencer keeps its place; the change shows at the next spot boundary.
   if (sequencer) sequencer.setManifest(next);
@@ -445,7 +455,7 @@ async function boot(): Promise<void> {
   }, 10_000);
 
   void syncLoop();
-  startDataLoop(CONTENT, () => manifest?.dataSources ?? {});
+  wakeData = startDataLoop(CONTENT, () => manifest?.dataSources ?? {});
   void playbackLoop();
   void displayLoop();
 }

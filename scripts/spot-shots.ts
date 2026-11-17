@@ -2,7 +2,7 @@
 /**
  * Screenshot every spot of a built project through the real player, for visual review.
  *
- *   tsx scripts/spot-shots.ts --content <sf build output> --out <dir> [--chrome <path>] [--sizes 1920x1080,1080x1920]
+ *   tsx scripts/spot-shots.ts --content <sf build output> --out <dir> [--chrome <path>] [--sizes 1920x1080,1080x1920] [--spots a,b]
  *
  * Serves `dist/player` (run `pnpm build:player` first) with the content under it, launches
  * Chromium headless, plays each spot on its own at each size, and saves two frames per spot:
@@ -25,6 +25,7 @@ const { values: args } = parseArgs({
     out: { type: 'string' },
     chrome: { type: 'string', default: process.env.CHROME },
     sizes: { type: 'string', default: '1920x1080,1080x1920' },
+    spots: { type: 'string' },
   },
 });
 if (!args.content || !args.out || !args.chrome) {
@@ -94,7 +95,8 @@ const index: Record<string, unknown>[] = [];
 for (const size of args.sizes!.split(',')) {
   const [width, height] = size.split('x').map(Number) as [number, number];
   await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-  for (const [id, spot] of Object.entries(manifest.spots)) {
+  const only = args.spots?.split(',');
+  for (const [id, spot] of Object.entries(manifest.spots).filter(([id]) => !only || only.includes(id))) {
     await call('Page.navigate', { url: `http://127.0.0.1:${port}/index.html?content=./content&poll=600&transition=cut&spots=${id}` });
     // Wait until the spot is on screen, then catch it after its intro and near its end.
     let started = false;
@@ -112,8 +114,10 @@ for (const size of args.sizes!.split(',')) {
     const a = await shot('a');
     await sleep(Math.max(0, spot.durationMs * 0.85 - Math.min(2500, spot.durationMs * 0.3)));
     const b = await shot('b');
-    const info = await evaluate<{ error: string; skipped: number }>('({ error: __sf.lastError, skipped: __sf.skipped })');
-    index.push({ spot: id, name: spot.name, size, started, frames: [a, b], playerError: info.error || undefined, skipped: info.skipped });
+    const info = await evaluate<{ error: string; skipped: number; data: Record<string, string> }>('({ error: __sf.lastError, skipped: __sf.skipped, data: __sf.data })');
+    // `data`: when each live source's snapshot was fetched, as the player held it at the end of the
+    // play. A bound source missing here means the spot showed its static fallback.
+    index.push({ spot: id, name: spot.name, size, started, frames: [a, b], data: info.data, playerError: info.error || undefined, skipped: info.skipped });
     console.log(`  ${id} ${size}${started ? '' : '  NOT STARTED'}${info.error ? `  error: ${info.error}` : ''}`);
   }
 }
