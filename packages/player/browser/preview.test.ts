@@ -9,7 +9,7 @@
 import type { DataSnapshot } from '@signforge/contract';
 import type { Frame, Page } from 'playwright';
 import { describe, expect, inject, it } from 'vitest';
-import type { Content, FixtureSpot } from './content';
+import { buildContent, TEMPLATE_KEY, type Content, type FixtureSpot } from './content';
 import type { FixtureServer } from './fixture-server';
 import { useHarness, type PlayerState } from './harness';
 
@@ -136,6 +136,29 @@ async function openPreview(origin: string, content?: Content, extra: Record<stri
   };
 }
 
+/**
+ * A bundle that speaks frame protocol 1, as one built before M3-32 does: `loaded`, then `ready`
+ * after `init`, and no `reset`. Shows the spot's label, as the fixture template does.
+ */
+const PROTOCOL_1_HTML = `<!doctype html><body style="margin:0;background:#000;color:#fff"><div id="label"></div><script>
+addEventListener('message', (e) => {
+  if (e.data?.sf !== 1) return;
+  if (e.data.type === 'init') {
+    document.getElementById('label').textContent = e.data.data.label;
+    parent.postMessage({ sf: 1, type: 'ready' }, '*');
+  }
+});
+parent.postMessage({ sf: 1, type: 'loaded' }, '*');
+</script>`;
+
+const protocol1Draft = (label: string) =>
+  buildContent(PROTOCOL_1_HTML, [{ id: 'draft', durationMs: 60_000, label }], {
+    edit: (m) => {
+      const t = m.templates[TEMPLATE_KEY]!;
+      m.templates[TEMPLATE_KEY] = { ...t, manifest: { ...t.manifest, protocol: 1 } };
+    },
+  });
+
 /** One long spot, so nothing but an update changes what is on screen. */
 const draft = (spot: Partial<FixtureSpot> = {}) => h.content([{ id: 'draft', durationMs: 60_000, ...spot }]);
 
@@ -189,6 +212,21 @@ describe('preview content source', () => {
     await expect.poll(p.onScreen, { timeout: 3000 }).toEqual({ label: 'After', items: '', marked: true });
     await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'playing', manifest: next.manifest.id, spot: 'draft' });
     expect((await p.state()).played).toBe(1);
+  });
+
+  it('reloads a protocol 1 bundle in place for a new draft, since it cannot reset', async () => {
+    const p = await openPreview(CMS);
+    await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'listening' });
+    await p.post(protocol1Draft('Before'));
+    await p.until((s) => s.played >= 1);
+    await expect.poll(p.onScreen).toMatchObject({ label: 'Before' });
+    await p.mark();
+
+    const next = protocol1Draft('After');
+    await p.post(next);
+    // A fresh frame (not the marked one) with the new data, long before the 60 s spot ends.
+    await expect.poll(p.onScreen, { timeout: 3000 }).toEqual({ label: 'After', items: '', marked: false });
+    await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'playing', manifest: next.manifest.id, spot: 'draft' });
   });
 
   it('ignores a page on any other origin that frames it', async () => {
