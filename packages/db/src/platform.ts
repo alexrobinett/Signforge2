@@ -36,7 +36,13 @@ export function platform(d1: D1Database) {
       const set = updateSet(table, strip(patch));
       if (!Object.keys(set).length) return { row: current, writes: [] };
       const x = table as typeof t;
-      return staged({ ...current, ...set } as T['$inferSelect'], db.update(x).set(set as never).where(and(isNull(x.orgId), eq(x.id, current.id))));
+      return staged(
+        { ...current, ...set } as T['$inferSelect'],
+        db
+          .update(x)
+          .set(set as never)
+          .where(and(isNull(x.orgId), eq(x.id, current.id))),
+      );
     },
   });
 
@@ -46,33 +52,79 @@ export function platform(d1: D1Database) {
     /** Run staged writes in one atomic batch, as `scoped(...).commit`. */
     commit: (writes: readonly Write[]) => commit(db, writes),
     templates: {
-      get: async (id: string): Promise<Template | undefined> => db.select().from(t).where(and(isNull(t.orgId), eq(t.id, id))).get(),
+      get: async (id: string): Promise<Template | undefined> =>
+        db
+          .select()
+          .from(t)
+          .where(and(isNull(t.orgId), eq(t.id, id)))
+          .get(),
       list: async (): Promise<Template[]> => db.select().from(t).where(isNull(t.orgId)).orderBy(asc(t.id)).all(),
-      ownByKey: async (key: string): Promise<Template | undefined> => db.select().from(t).where(and(isNull(t.orgId), eq(t.key, key))).get(),
+      ownByKey: async (key: string): Promise<Template | undefined> =>
+        db
+          .select()
+          .from(t)
+          .where(and(isNull(t.orgId), eq(t.key, key)))
+          .get(),
       insert: async (values: NewRow<typeof s.templates>): Promise<Template> => {
-        return db.insert(t).values({ ...(strip(values) as typeof values), id: newId('tpl'), orgId: null }).returning().get();
+        return db
+          .insert(t)
+          .values({ ...(strip(values) as typeof values), id: newId('tpl'), orgId: null })
+          .returning()
+          .get();
       },
       update: async (id: string, patch: RowPatch<typeof s.templates>): Promise<Template | undefined> =>
-        db.update(t).set(strip(patch)).where(and(isNull(t.orgId), eq(t.id, id))).returning().get(),
+        db
+          .update(t)
+          .set(strip(patch))
+          .where(and(isNull(t.orgId), eq(t.id, id)))
+          .returning()
+          .get(),
       stage: stager(t, 'tpl'),
       versions: {
-        get: async (id: string): Promise<TemplateVersion | undefined> => db.select().from(tv).where(and(isNull(tv.orgId), eq(tv.id, id))).get(),
+        get: async (id: string): Promise<TemplateVersion | undefined> =>
+          db
+            .select()
+            .from(tv)
+            .where(and(isNull(tv.orgId), eq(tv.id, id)))
+            .get(),
         forTemplate: async (templateId: string): Promise<TemplateVersion[]> =>
-          db.select().from(tv).where(and(isNull(tv.orgId), eq(tv.templateId, templateId))).orderBy(asc(tv.createdAt)).all(),
+          db
+            .select()
+            .from(tv)
+            .where(and(isNull(tv.orgId), eq(tv.templateId, templateId)))
+            .orderBy(asc(tv.createdAt))
+            .all(),
         ownVersion: async (templateId: string, version: string): Promise<TemplateVersion | undefined> =>
-          db.select().from(tv).where(and(isNull(tv.orgId), eq(tv.templateId, templateId), eq(tv.version, version))).get(),
+          db
+            .select()
+            .from(tv)
+            .where(and(isNull(tv.orgId), eq(tv.templateId, templateId), eq(tv.version, version)))
+            .get(),
         insert: async (values: NewRow<typeof s.templateVersions>): Promise<TemplateVersion> => {
-          return db.insert(tv).values({ ...(strip(values) as typeof values), id: newId('tpv'), orgId: null }).returning().get();
+          return db
+            .insert(tv)
+            .values({ ...(strip(values) as typeof values), id: newId('tpv'), orgId: null })
+            .returning()
+            .get();
         },
         update: async (id: string, patch: RowPatch<typeof s.templateVersions>): Promise<TemplateVersion | undefined> =>
-          db.update(tv).set(strip(patch)).where(and(isNull(tv.orgId), eq(tv.id, id))).returning().get(),
+          db
+            .update(tv)
+            .set(strip(patch))
+            .where(and(isNull(tv.orgId), eq(tv.id, id)))
+            .returning()
+            .get(),
         stage: stager(tv, 'tpv'),
       },
     },
     auditLog: {
       append: (entry: NewRow<typeof s.platformAuditLog>) => {
         const id = entry.id ?? newId('pau');
-        return db.insert(pa).values({ ...(strip(entry) as typeof entry), id }).returning().get();
+        return db
+          .insert(pa)
+          .values({ ...(strip(entry) as typeof entry), id })
+          .returning()
+          .get();
       },
       /** The audit row for a change, staged to commit with it. */
       stage: (entry: NewRow<typeof s.platformAuditLog>): Staged<typeof pa.$inferSelect> => {

@@ -27,7 +27,10 @@ afterAll(() => rmSync(out, { recursive: true, force: true }));
 
 type Manifest = { id?: string; templates: Record<string, { html: string }>; files: Record<string, { size: number; type: string }> };
 
-const idOf = (m: Manifest) => createHash('sha256').update(manifestIdInput(m as unknown as ScreenManifest)).digest('hex');
+const idOf = (m: Manifest) =>
+  createHash('sha256')
+    .update(manifestIdInput(m as unknown as ScreenManifest))
+    .digest('hex');
 
 /** `built` with `golden`'s bundle hash and size for each template it shares, and its id recomputed. */
 function withBundlesOf(built: Manifest, golden: Manifest): Manifest {

@@ -263,7 +263,16 @@ describe('ids', () => {
     ];
     for (const r of rows) expect(r.id).toMatch(/^[a-z]+_/);
     const asset = rows[3]!;
-    const rendition = await b.assets.renditions.insert({ id: 'chosen', assetId: asset.id, orientation: 'portrait', sha256: '2'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 } as never);
+    const rendition = await b.assets.renditions.insert({
+      id: 'chosen',
+      assetId: asset.id,
+      orientation: 'portrait',
+      sha256: '2'.repeat(64),
+      type: 'image/png',
+      size: 1,
+      width: 1,
+      height: 1,
+    } as never);
     expect(rendition.id).not.toBe('chosen');
     expect(await s.a.scope.screens.get(taken)).toMatchObject({ orgId: s.a.orgId });
   });
