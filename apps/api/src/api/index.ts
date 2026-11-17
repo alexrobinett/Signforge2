@@ -14,6 +14,7 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { findMembership, scoped, type OrgScope } from '@signforge/db';
 import { createAuth, ROLES, type Auth, type AuthSession, type Role } from '../auth';
 import { emailSenderFor, type EmailSender } from '../email';
+import { mountBlobs } from './blobs';
 import { mountTools } from './tools';
 
 export interface ApiVars {
@@ -98,5 +99,6 @@ export function createApi(deps: ApiDeps = {}) {
 
   api.use('*', requireSession, requireOrg);
   mountTools(api);
+  mountBlobs(api);
   return api;
 }
