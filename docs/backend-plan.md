@@ -87,18 +87,20 @@ The per-org prefix keeps one org from probing whether another holds a file, and 
 
 ## Screens
 
-**Pairing**
-1. The screen calls `pair/start` and receives a 6-character code and a secret poll token, valid 15 minutes.
+**Pairing** (M3-08: `apps/api/src/device/pairing.ts`, `packages/db/src/pairing.ts`, the `claim_screen` tool)
+1. The screen calls `pair/start` and receives a 6-character code (32 letters and digits without 0/O or 1/I, about a billion codes) and a secret poll token, valid 15 minutes. Only the token's hash is stored.
 2. It shows the code and polls every 5 seconds.
-3. A user claims the code in the CMS, choosing name, time zone, orientation, groups and display hours.
-4. The next poll returns the screen's credential once. Only its hash is stored.
+3. A member (editor or owner) claims the code with `claim_screen`, giving name, time zone, orientation and optionally locale and display hours; the CMS form is M3-11, and groups are set after with the group tools. The claim creates the screen and binds the code in one batch, which fails, writing nothing, if another claim got the code first or it expired. An unknown, expired and claimed code get the same answer.
+4. The next poll mints the credential, stores its hash for the claimed screen and deletes the code in one batch, and returns the credential once. A second poll gets `expired`.
 
-Pairing calls are rate limited. For zero-touch installs, the CMS mints a credential that the image script pre-seeds.
+Rate limits (Workers rate limiting bindings, per Cloudflare location, a minute's window): `pair/start` 10 per address, `pair/poll` 600 per address (a shop of screens behind one address polls 12 times a minute each), and claims 10 per member and 10 per address, counted right or wrong, before the code is looked at (`apps/api/test/pairing.test.ts`). With 10 codes open at once, 10 guesses a minute find one about once in 20 years per member and address (10^9 / 100 minutes); many accounts on one address share its 10, so guessing faster takes many addresses as well as many accounts, and each guess needs a signed-in member. A claim over the limit is `429 rate_limited`. Codes past their time are swept by the next `pair/start`, claimed ones uncollected after a day.
+
+For zero-touch installs, the CMS mints a credential that the image script pre-seeds.
 
 **Credential**
 - An opaque token, `sfd_<screenId>.<32 random bytes>`, stored as a SHA-256. It is not a JWT.
 - Revoking is one row update, then the Durable Object closes the socket.
-- Until pairing exists, `pnpm --filter @signforge/api dev:screen [--content dist/content]` creates a screen in local D1, loads a build into local R2, and prints a credential.
+- Pairing gives a screen its credential. For local work without a screen, `pnpm --filter @signforge/api dev:screen [--content dist/content]` still creates a screen in local D1, loads a build into local R2, and prints a credential.
 - Until the CMS publishes, `sf push <out-dir> --screen <id> --api <url>` uploads an `sf build` output and makes it the screen's desired manifest. It uploads through a temporary `/admin` tree guarded by the `ADMIN_TOKEN` deploy secret (off when unset). The last step, making the manifest desired, runs the `publish_manifest_to_screen` tool through the dispatcher and is audited as the system actor `sf-push`. `/admin` goes once assets upload through the CMS (M3-14) and agents hold OAuth grants (Milestone 4).
 
 **What replaces `/admin`, and when.** No new routes go under `/admin`; each group has a replacement and goes with it:
@@ -126,8 +128,8 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 
 | Route | Purpose |
 | --- | --- |
-| `POST /v1/device/pair/start` | Get a code and poll token |
-| `POST /v1/device/pair/poll` | Collect the credential |
+| `POST /v1/device/pair/start` | Get a code and poll token (no credential; rate limited) |
+| `POST /v1/device/pair/poll` | `{ pollToken }`: waiting, expired, or the credential, once (no credential; rate limited) |
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
 | `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
 | `GET /v1/device/data/:id.json` | Snapshot of one source. Only sources the screen's manifest lists. The player takes snapshots from the sync; this route is for debugging and tools. |
@@ -138,7 +140,7 @@ The device API's request and response shapes are in `packages/contract` (device 
 - Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files. Done in M3-05: `?content=<api>/v1/device` in the kiosk URL, the credential from the supervisor's `GET /credential`.
 - Replace the per-source data poll with snapshots delivered on sync. Done in M3-07: from the API the player fetches no source itself.
 - Count plays per UTC hour, persist the counts, and send them with a batch number until acknowledged. Done in M3-07.
-- Treat a 401 as revoked, not offline: show a pairing code (open question 2).
+- Treat a 401 as revoked, not offline: wipe what it holds and show a pairing code (open question 2, the default). Done in M3-08.
 - Act on socket commands at once, including a display override.
 - Correct its clock from server time. Done in M3-07.
 
@@ -237,7 +239,7 @@ Each slice ends with something working on the real Pi.
 ## Open questions
 
 1. Does a timed publish ship content as it was when scheduled, or as it is when the time comes? The plan assumes the latter.
-2. Should a revoked screen wipe its cache and show a pairing code, or keep playing what it has?
+2. Should a revoked screen wipe its cache and show a pairing code, or keep playing what it has? Built with the default, wipe and show a code (M3-08).
 3. Is passwordless sign-in (email code, GitHub, Google) acceptable? Which email service?
 4. Are 5-minute data freshness and roughly 10-minute offline detection acceptable?
 5. Are hourly play counts enough, or is per-play proof of play needed?
