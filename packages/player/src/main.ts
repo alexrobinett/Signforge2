@@ -15,11 +15,11 @@
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
  */
 import type { ScreenManifest, Spot, Transition } from '@signforge/contract';
-import { Sequencer, displayOn, localTime, type Step } from '@signforge/player-core';
+import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { DeviceCredential } from './credential';
 import { dataSettled, dataStatus, startDataLoop } from './data';
 import { Slot } from './slot';
-import { UnauthorisedError, loadActiveManifest, requestPersistence, sync } from './store';
+import { PinSet, UnauthorisedError, loadActiveManifest, requestPersistence, sync } from './store';
 
 const query = new URLSearchParams(location.search);
 const CONTENT = query.get('content') ?? './content';
@@ -225,6 +225,11 @@ const hold = (ms: number) => Promise.race([sleep(ms), fellAsleep]);
 
 let manifest: ScreenManifest | undefined;
 let sequencer: Sequencer | undefined;
+/**
+ * Files cache cleanup must keep beyond the active manifest's: the spot on screen (`playing`) and
+ * the spot loading (`preparing`), either of which may come from a manifest just replaced.
+ */
+const pins = new PinSet();
 
 /**
  * Run a loop body forever. A bug or a bad value must never end playback: log it, wait, try again.
@@ -244,6 +249,8 @@ async function forever(name: string, body: () => Promise<void>): Promise<never> 
 async function playbackLoop(): Promise<never> {
   let current: Slot | undefined;
   let currentSpot: Spot | undefined;
+  /** The manifest `currentSpot` came from: its files are named there. */
+  let currentManifest: ScreenManifest | undefined;
   let startedAt = 0;
   let failures = 0;
 
@@ -260,6 +267,8 @@ async function playbackLoop(): Promise<never> {
       }
       current = undefined;
       currentSpot = undefined;
+      pins.release('playing');
+      pins.release('preparing');
       status('');
       state.spot = '';
       phase = 'sleep';
@@ -281,6 +290,7 @@ async function playbackLoop(): Promise<never> {
       }
       current = undefined;
       currentSpot = undefined;
+      pins.release('playing');
       status('SignForge\nNothing is scheduled for this screen.');
       lastProgress = performance.now(); // waiting on purpose, not stuck
       await sleep(5000);
@@ -290,6 +300,8 @@ async function playbackLoop(): Promise<never> {
     // A crossfade overlaps the end of the current spot; a fade's dark half does too.
     const tr = step.playlist.transition;
     const fadeMs = tr.type === 'crossfade' ? tr.ms : tr.type === 'fade' ? tr.ms / 2 : 0;
+    // Pinned before the first await: a sync that replaces `m` meanwhile must not delete these files.
+    pins.hold('preparing', spotFiles(step.spot, m));
     phase = 'prepare';
     preparing = step.spot.id;
     // A spot's data is fixed for its play: let its feeds finish their first load before it starts.
@@ -298,6 +310,7 @@ async function playbackLoop(): Promise<never> {
     }
     const ok = await prepareStep(slot, step, m);
     preparing = '';
+    if (!ok) pins.release('preparing');
     phase = 'play';
     if (!state.displayOn) return;
     if (!ok) {
@@ -306,6 +319,7 @@ async function playbackLoop(): Promise<never> {
         if (current) current.el.style.opacity = '0';
         current = undefined;
         currentSpot = undefined;
+        pins.release('playing');
         status('SignForge\nContent is unavailable. Retrying…');
         lastProgress = performance.now();
         await sleep(5000);
@@ -324,10 +338,17 @@ async function playbackLoop(): Promise<never> {
     record(step, m.id);
     phase = 'transition';
     const done = show(slot, current, step.playlist.transition);
+    // A video keeps reading its file from the cache while it plays, and the outgoing spot is
+    // still on screen until the transition ends.
+    const playing = spotFiles(step.spot, m);
+    pins.hold('playing', currentSpot ? [...playing, ...spotFiles(currentSpot, currentManifest ?? m)] : playing);
+    pins.release('preparing');
     front = front === 0 ? 1 : 0;
     current = slot;
     currentSpot = step.spot;
+    currentManifest = m;
     await done;
+    pins.hold('playing', playing);
     phase = 'play';
   });
 }
@@ -389,7 +410,7 @@ async function displayLoop(): Promise<never> {
 async function syncLoop(): Promise<never> {
   return forever('sync', async () => {
     try {
-      const result = await sync(CONTENT, { currentId: manifest?.id, headers: await deviceHeaders(), ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}) });
+      const result = await sync(CONTENT, { currentId: manifest?.id, headers: await deviceHeaders(), ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}), pinned: pins });
       state.online = true;
       state.auth = '';
       state.lastSync = new Date().toISOString();

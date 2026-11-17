@@ -286,14 +286,22 @@ export function validateManifest(m: unknown): string[] {
   return errors;
 }
 
+/** The files one spot needs to play: a template spot its bundle and assets, an image or video its file. */
+export function spotFiles(spot: Spot, manifest: ScreenManifest): Set<string> {
+  const out = new Set<string>();
+  if (spot.kind === 'template') {
+    const html = manifest.templates[spot.template]?.html;
+    if (html) out.add(html);
+    Object.values(spot.assets).forEach((a) => out.add(a));
+  } else if (spot.kind === 'image' || spot.kind === 'video') out.add(spot.file);
+  return out;
+}
+
 /** Every file hash a manifest refers to. */
 export function requiredFiles(manifest: ScreenManifest): Set<string> {
   const out = new Set<string>();
   for (const t of Object.values(manifest.templates)) out.add(t.html);
-  for (const s of Object.values(manifest.spots)) {
-    if (s.kind === 'template') Object.values(s.assets).forEach((a) => out.add(a));
-    else if (s.kind === 'image' || s.kind === 'video') out.add(s.file);
-  }
+  for (const s of Object.values(manifest.spots)) spotFiles(s, manifest).forEach((h) => out.add(h));
   return out;
 }
 

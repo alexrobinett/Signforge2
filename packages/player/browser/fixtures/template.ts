@@ -3,13 +3,14 @@
  *   ok     report ready (the default)
  *   throw  throw in `prepare`, so the SDK reports an error
  *   hang   never resolve `prepare`, so it never reports ready
- * It shows `label`, runs a CSS animation the SDK must hold until play, and marks `play`.
+ * It shows `label`, marks whether it received asset `file`, runs a CSS animation the SDK must hold until play, and marks `play`.
  */
 import { defineTemplate } from '@signforge/template-sdk';
 
 defineTemplate({
   async prepare(ctx) {
     document.body.dataset.prepared = '1';
+    document.body.dataset.asset = ctx.assets.file ? '1' : '';
     const mode = String(ctx.data.mode ?? 'ok');
     if (mode === 'throw') throw new Error('fixture prepare failed');
     if (mode === 'hang') await new Promise(() => {});

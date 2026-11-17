@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ScreenManifest, Spot } from '@signforge/contract';
-import { Sequencer, displayOn, entryApplies, localTime, planSync, readPath, resolvePlaylist, resolveSpotData, validateManifest } from './index';
+import { Sequencer, displayOn, entryApplies, localTime, planSync, readPath, resolvePlaylist, resolveSpotData, spotFiles, validateManifest } from './index';
 
 const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${id}`, fit: 'cover', durationMs: 5000 });
 
@@ -166,6 +166,15 @@ describe('live data', () => {
 describe('files', () => {
   it('lists what to download and what to drop', () => {
     expect(planSync(manifest(), ['sha-a', 'sha-old'])).toEqual({ missing: ['sha-b', 'sha-c'], stale: ['sha-old'] });
+  });
+
+  it('names the files one spot needs: a template spot its bundle and assets, a media spot its file', () => {
+    const m = manifest();
+    m.templates['base/t@1.0.0'] = { manifest: {} as never, html: 'sha-html' };
+    const t: Spot = { id: 't', name: 't', kind: 'template', template: 'base/t@1.0.0', durationMs: 1000, data: {}, assets: { pic: 'sha-pic', logo: 'sha-logo' } };
+    expect([...spotFiles(t, m)].sort()).toEqual(['sha-html', 'sha-logo', 'sha-pic']);
+    expect([...spotFiles(m.spots.a!, m)]).toEqual(['sha-a']);
+    expect([...spotFiles({ id: 'u', name: 'u', kind: 'url', url: 'https://example.com', durationMs: 1000 } as Spot, m)]).toEqual([]);
   });
 
   it('rejects a manifest that refers to things it does not carry', () => {

@@ -114,7 +114,7 @@ The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) ar
 
 The web player owns all content concerns and runs unchanged in any browser, including the public demo.
 
-- **Cache**: every file is stored on the device under its SHA-256 and verified on download. A service worker keeps the player itself available offline.
+- **Cache**: every file is stored on the device under its SHA-256. A download runs in a worker, off the main thread, streams to disk and is hashed as it arrives, so memory stays flat even for video; it is stored under its hash only if the hash matches, and a download that receives nothing for 30 seconds is abandoned. Cleanup removes files the active manifest no longer names, except pinned ones: the spot on screen and the spot loading, which can belong to the manifest just replaced. A service worker keeps the player itself available offline.
 - **Playback**: two stacked slots. The next spot loads and is fully drawn underneath the current one, and the swap happens only when it reports ready. Drawing it ahead of time matters: revealing an undrawn template cost about a second of stalled frames on the Pi. A spot that fails to become ready within 2 seconds is skipped; three failures in a row show a holding message.
 - **Transitions**, set per playlist. Spots can be any length.
   - `cut`: instant. Templates animate their own intro and outro, so this already looks smooth.
