@@ -38,6 +38,6 @@ An org keeps several brand kits (colours, fonts, logo) and the compiler applies 
 
 - No contract change was needed: `BrandKit`, `BrandFont`, `BRAND_TOKEN` came with M3-32.
 - **Ids.** `brand_kits` is keyed `(org_id, id)` and its ids are always the server's (`bk_…`); a caller's `id` is ignored. Choices live in `brand_assignments` (target `org` for the default, `group`, `screen`), not in new columns: adding a composite foreign key to `screens`, `screen_groups` or `org_settings` would rebuild those tables.
-- **Fonts.** Eight OFL-1.1 fonts in `packages/compiler/src/fonts.ts`, each with its copyright line and source: Inter, Atkinson Hyperlegible, Source Sans 3, Archivo, Montserrat, Oswald, Bebas Neue, Playfair Display. Their WOFF2 files are a follow-up: until each entry's `files` is filled, a kit's font is left out of the manifest and `list_fonts` says `available: false`.
+- **Fonts.** Eight OFL-1.1 fonts (six since 2026-11-17: Source Sans 3 and Playfair Display dropped for their Reserved Font Names, see `fonts/README.md`) in `packages/compiler/src/fonts.ts`, each with its copyright line and source: Inter, Atkinson Hyperlegible, Source Sans 3, Archivo, Montserrat, Oswald, Bebas Neue, Playfair Display. Their WOFF2 files are a follow-up: until each entry's `files` is filled, a kit's font is left out of the manifest and `list_fonts` says `available: false`.
 - **No kit:** token defaults take `DEFAULT_BRAND_COLORS` and the manifest has no `brand`.
 - Not built (not asked): deleting a kit. `delete_asset` now refuses an asset a kit uses as its logo.
