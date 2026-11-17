@@ -30,6 +30,8 @@ Base templates are written by `platform(db)` (`src/platform.ts`), the one scope 
 
 `org.screens.setDesiredManifest(screenId, manifestId)` keeps the manifest it replaces as `previous_manifest_id`, whose files a screen mid-switch may still fetch.
 
+`org.screens.sync(screenId, write)` is a screen's sync in one atomic batch: its heartbeat and last-seen time, and its hourly play counts added unless the batch's `seq` is already stored in its `epoch`. The repeat check is inside the SQL, so a retried or doubled request counts once. It returns the highest stored `seq` and the rows D1 wrote.
+
 `org.screenGroups.setMembers(groupId, screenIds)` replaces a group's members in one batch, after checking the group and every screen are the org's (`NotInOrgError` otherwise, changing nothing).
 
 `org.assets.usage(assetIds?)` maps each asset to the ids of the spots that use it, through an image or video spot's `asset_id` or a template spot's asset map. Unused assets are absent. The asset tools use it for usage counts and to refuse deleting an asset in use.
