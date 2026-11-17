@@ -34,7 +34,15 @@ it('a freshly flashed screen shows a code, and plays once it is claimed, without
   expect(first.text.replace(/\s/g, '')).toContain(s.pairing);
 
   // OLED: the code does not sit still.
-  await expect.poll(async () => { const now = await shown(p); return now && (now.x !== first.x || now.y !== first.y); }, { timeout: 5000 }).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        const now = await shown(p);
+        return now && (now.x !== first.x || now.y !== first.y);
+      },
+      { timeout: 5000 },
+    )
+    .toBe(true);
 
   const credential = p.server.claim(s.pairing);
   await p.until((s) => s.manifestId === content.manifest.id && s.played > 0, 15_000);

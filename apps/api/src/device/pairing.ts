@@ -19,7 +19,8 @@ type PairEnv = { Bindings: Env };
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
 
-const tooMany = () => json({ error: 'rate_limited', message: 'too many pairing requests from this address; try again in a minute' }, 429, { 'retry-after': '60' });
+const tooMany = () =>
+  json({ error: 'rate_limited', message: 'too many pairing requests from this address; try again in a minute' }, 429, { 'retry-after': '60' });
 
 /** The caller's address as Cloudflare saw it. */
 export const clientIp = (c: Context) => c.req.header('cf-connecting-ip') ?? 'unknown';
@@ -34,7 +35,10 @@ function randomCode(): string {
 
 function randomToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
 export async function pairStart(c: Context<PairEnv>): Promise<Response> {

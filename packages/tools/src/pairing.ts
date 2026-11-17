@@ -22,7 +22,7 @@ const code = z
 export const claimScreen = defineTool({
   name: 'claim_screen',
   description:
-    "Pair a screen: claim the code it shows, creating the screen in this organization with the given name and settings. The screen collects its credential on its next poll (within seconds) and starts playing what is published to it. A code works once, for 15 minutes. Claims are rate limited, right or wrong, so a code cannot be guessed. Pass an idempotencyKey so a retry cannot pair twice. Returns { screen }.",
+    'Pair a screen: claim the code it shows, creating the screen in this organization with the given name and settings. The screen collects its credential on its next poll (within seconds) and starts playing what is published to it. A code works once, for 15 minutes. Claims are rate limited, right or wrong, so a code cannot be guessed. Pass an idempotencyKey so a retry cannot pair twice. Returns { screen }.',
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
@@ -45,7 +45,8 @@ export const claimScreen = defineTool({
     if (!(await rateLimit('pairing_claim'))) throw new ToolError('rate_limited', 'too many pairing claims; wait a minute and try again');
     const now = Date.now();
     // One answer for unknown, expired and already claimed: a claim learns nothing about other orgs' codes.
-    if (!(await org.pairing.open(input.code, now))) throw new ToolError('not_found', `pairing code ${input.code} is not open: check it, or restart the screen for a new one`);
+    if (!(await org.pairing.open(input.code, now)))
+      throw new ToolError('not_found', `pairing code ${input.code} is not open: check it, or restart the screen for a new one`);
     const screen = write(
       org.screens.stage.insert({
         name: input.name,

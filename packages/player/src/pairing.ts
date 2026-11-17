@@ -90,9 +90,7 @@ class CodeView {
 
   show(code: string): void {
     const spaced = code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
-    this.el.replaceChildren(
-      Object.assign(document.createElement('div'), { className: 'card' }),
-    );
+    this.el.replaceChildren(Object.assign(document.createElement('div'), { className: 'card' }));
     const card = this.el.firstElementChild!;
     card.append(
       Object.assign(document.createElement('div'), { className: 'title', textContent: 'Pair this screen' }),

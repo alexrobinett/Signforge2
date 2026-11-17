@@ -353,7 +353,9 @@ export function scoped(d1: D1Database, orgId: string) {
               .where(and(eq(pcodes.code, code), isNull(pcodes.claimedOrgId), sql`${pcodes.expiresAt} > ${now}`)),
             // json() of text that is not JSON raises an error, which aborts the batch.
             db
-              .select({ open: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${pcodes} WHERE ${pcodes.code} = ${code} AND ${pcodes.claimedOrgId} = ${orgId} AND ${pcodes.claimedScreenId} = ${screenId}) THEN '1' ELSE 'pairing code is not open' END)` })
+              .select({
+                open: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${pcodes} WHERE ${pcodes.code} = ${code} AND ${pcodes.claimedOrgId} = ${orgId} AND ${pcodes.claimedScreenId} = ${screenId}) THEN '1' ELSE 'pairing code is not open' END)`,
+              })
               .from(s.organization)
               .where(eq(s.organization.id, orgId)),
           ),

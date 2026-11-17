@@ -23,9 +23,7 @@ export type PairingCollected = { status: 'waiting' } | { status: 'expired' } | {
 export async function startPairing(d1: D1Database, v: { code: string; pollTokenHash: string; now: number }): Promise<boolean> {
   try {
     await d1.batch([
-      d1
-        .prepare('DELETE FROM pairing_codes WHERE (claimed_at IS NULL AND expires_at <= ?1) OR claimed_at <= ?2')
-        .bind(v.now, v.now - CLAIMED_KEEP_MS),
+      d1.prepare('DELETE FROM pairing_codes WHERE (claimed_at IS NULL AND expires_at <= ?1) OR claimed_at <= ?2').bind(v.now, v.now - CLAIMED_KEEP_MS),
       d1
         .prepare('INSERT INTO pairing_codes (id, code, poll_token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
         .bind(newId('pair'), v.code, v.pollTokenHash, v.now + PAIRING_TTL_MS, v.now),

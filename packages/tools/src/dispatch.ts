@@ -159,7 +159,16 @@ export async function dispatch<D extends DataScope>(
 
   let output: unknown;
   try {
-    output = await tool.handler({ org: caller.org, actor: caller.actor, input: parsed.data, blobs: caller.blobs, uploads: caller.uploads, write, notify, rateLimit: caller.rateLimit });
+    output = await tool.handler({
+      org: caller.org,
+      actor: caller.actor,
+      input: parsed.data,
+      blobs: caller.blobs,
+      uploads: caller.uploads,
+      write,
+      notify,
+      rateLimit: caller.rateLimit,
+    });
   } catch (err) {
     if (err instanceof ToolError) {
       // A refusal that changed something is recorded too, with what was refused.

@@ -551,7 +551,7 @@ let revoking: Promise<void> | undefined;
  */
 function revoked(): Promise<void> {
   revoking ??= (async () => {
-    console.warn('[sf] the server refused this screen\'s credential: wiping what it holds and pairing again');
+    console.warn("[sf] the server refused this screen's credential: wiping what it holds and pairing again");
     state.online = true;
     state.auth = 'revoked';
     const held = !!manifest || !!lastGood || pendingPlays() > 0;
