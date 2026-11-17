@@ -49,6 +49,7 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
     screenId,
     desiredManifestId: first.desiredManifestId,
     previousManifestId: first.previousManifestId,
-    credentials: first.status === 'active' ? rows.flatMap((r) => (r.credentialId && r.secretHash ? [{ id: r.credentialId, secretHash: r.secretHash }] : [])) : [],
+    credentials:
+      first.status === 'active' ? rows.flatMap((r) => (r.credentialId && r.secretHash ? [{ id: r.credentialId, secretHash: r.secretHash }] : [])) : [],
   };
 }

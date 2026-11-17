@@ -6,7 +6,7 @@ import { findDeviceScreen, type DeviceScreen } from '@signforge/db';
 import { createMiddleware } from 'hono/factory';
 import { hashSecret, parseCredential } from './credential';
 
-export type DeviceEnv = { Bindings: Env; Variables: { screen: DeviceScreen; /** The id of the credential the request presented. */ credentialId: string } };
+export type DeviceEnv = { Bindings: Env; Variables: { screen: DeviceScreen /** The id of the credential the request presented. */; credentialId: string } };
 
 /** One response for every failure, so a caller cannot tell an unknown screen from a wrong secret. */
 const unauthorized = () =>

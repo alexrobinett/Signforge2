@@ -9,9 +9,12 @@ beforeAll(async () => {
 });
 
 describe('findDeviceScreen', () => {
-  it("finds a screen by id alone, with its org and live credentials", async () => {
+  it('finds a screen by id alone, with its org and live credentials', async () => {
     expect(await findDeviceScreen(env.DB, o.screen)).toEqual({
-      orgId: 'org-device', screenId: o.screen, desiredManifestId: null, previousManifestId: null,
+      orgId: 'org-device',
+      screenId: o.screen,
+      desiredManifestId: null,
+      previousManifestId: null,
       credentials: [{ id: o.credential, secretHash: '0'.repeat(64) }],
     });
   });

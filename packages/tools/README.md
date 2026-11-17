@@ -109,9 +109,10 @@ Owner decision Q7 (can editors publish?) is still open. The table shows the defa
 2. Checks the role and scopes.
 3. Validates the input.
 4. For a keyed creation, returns the first result if the key was used before (see Idempotency keys above).
-5. Runs the handler with `{ org: scoped(db, orgId), actor, input, blobs, uploads, write }`.
+5. Runs the handler with `{ org: scoped(db, orgId), actor, input, blobs, uploads, write, notify }`.
    A handler reads through `ctx.org` but never writes: it stages each change with `ctx.write(org.<repo>.stage.<op>(...))`, which returns the row as it will be (see `packages/db`'s README).
    In tests it then parses the output with the tool's output schema and throws on a mismatch, before anything is written (`setOutputChecks(true)`, called by `test/setup.ts` here and in `apps/api`). Production skips the parse.
+   A handler that changes something a screen should hear of at once queues it with `ctx.notify((screens) => screens.manifest(...) | screens.revoked(...))`. The notices go out after step 6, only if the commit succeeded, through the caller's `screens` (`ScreenNotifier`; the API's reaches each screen's Durable Object). A notice that fails is logged, not returned: the screen catches up at its next sync.
 6. Commits the staged writes in one D1 `batch()`, together with an `audit_log` row and, for a keyed creation, its idempotency record. The batch is atomic: if the audit row cannot be written, the change is not made either, and the request fails. The audit row holds:
    - actor kind and id;
    - client id (`cms`, `sf-push`, or an agent's OAuth client);

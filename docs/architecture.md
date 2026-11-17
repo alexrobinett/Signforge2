@@ -105,7 +105,7 @@ The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) ar
 - A screen's manifest carries only what its schedule can reach: the playlists of the entries that target it, their spots, templates, files and data sources. Downloads stay small and no screen holds another's content.
 - Template versions are referred to as `<owner>/<id>@<version>`, where the owner is `base` for the platform's templates or the org's id.
 - Publish happens immediately or at a set time.
-- The server nudges connected screens that a new manifest exists. Screens that were offline catch up when they reconnect.
+- The server nudges connected screens that a new manifest exists, over each screen's socket. Screens that were offline catch up when they reconnect.
 - The player downloads and verifies every file, then switches to the new manifest in one step. A partial download is never played.
 - The player evaluates the schedule on its own clock, so a timed changeover happens with the network down.
 - A takeover ends at an absolute instant (`endsAt` on its schedule entry, manifest schema 3), not after a duration, so it ends on time offline and in any time zone.
@@ -125,6 +125,8 @@ The web player owns all content concerns and runs unchanged in any browser, incl
   - `crossfade`: both spots on screen while one fades over the other. It doubles GPU work for its length, about 10% dropped frames on a Pi 4 during the fade, so it is offered as a choice and not a default.
 - **Display hours**, set per screen: weekly hours plus dated exceptions such as holidays. The player evaluates them on its own clock like the schedule, so they work offline. Outside them the player stops drawing, keeps syncing, and asks the device supervisor to power the panel down. After powering the panel back on it waits 3 seconds before the first spot, so the panel has locked onto the signal and the intro is seen.
 - **Pairing**: an unpaired screen shows a short code. A user enters it in the CMS and assigns the screen to an org. The screen receives its own credential, which the CMS can revoke.
+- **Socket**: content from the API comes with one WebSocket to the screen's Durable Object (`src/socket.ts`). The player syncs for a 60-second ticket, so the credential never goes in a URL, and connects to `/v1/device/ws?ticket=`. It pings every 50 seconds (answered by the runtime without waking the object) and reconnects with exponential backoff and full jitter. A `manifest` message makes it fetch the manifest at once; a `command` acts at once (a display override wakes the display-hours check, `reload` reloads, `reboot` is logged until the supervisor can reboot); `revoked` is treated like a 401. It reports each manifest it switches to as `applied`, which the server writes to D1 as the reported manifest. While the socket is open the manifest is polled only every 5 minutes; while it is down, at the poll interval (`?poll=`, 30 seconds).
+- **Display override**: a command from the CMS turns the panel on or off until an absolute time (normally the next scheduled change). It is persisted, so a reload keeps it, and ends by itself.
 - **Reporting**: heartbeat with player version, manifest version and cache state. Play logs are recorded locally and uploaded in batches.
 - **Clock**: a Pi has no battery-backed clock, so the player keeps its own correction. The rules, built in M3-07:
   - Each sync measures `offsetMs` (server time minus device time) and persists it with the corrected time it was measured at (`syncedAt`). Corrected time is device time plus `offsetMs`, and it is what the schedule, display hours, play counts and templates (`clock` in `init`, `now()` in the SDK) read.
@@ -198,7 +200,8 @@ pnpm and Turborepo, with packages for:
 Built (tickets in `docs/tickets/`):
 
 - **API Worker** (`apps/api`, Hono on Workers): D1 through `packages/db`, whose scoped repositories are the only code that touches tenant tables, and R2 for blobs and manifests.
-- **Device routes**: a screen authenticates with an opaque per-screen credential and fetches its manifest and files. The Pi plays from the API, and survives losing it. Until pairing (M3-08), credentials are made with `dev:screen` and installed by hand, and the player polls every 30 seconds.
+- **Device routes**: a screen authenticates with an opaque per-screen credential and fetches its manifest and files. The Pi plays from the API, and survives losing it. Until pairing (M3-08), credentials are made with `dev:screen` and installed by hand.
+- **Screen socket** (M3-06): a Durable Object per screen (`ScreenObject`) holds one hibernating WebSocket. A publish or a revoked credential reaches the screen through it at once; the player polls only while it is down.
 - **`sf push`**: publishes an `sf build` output to a screen through a temporary `/admin` tree (see the backend plan for what replaces it).
 - **Auth and orgs**: Better Auth with email codes, GitHub and organizations; a CMS shell (TanStack Start) with sign-in, org creation and switching.
 - **Tool registry**: every change is a tool with an input and output schema, a scope and a role, audited. List tools page.

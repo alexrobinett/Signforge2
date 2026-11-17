@@ -72,7 +72,8 @@ export const listScreens = defineTool({
 
 export const getScreen = defineTool({
   name: 'get_screen',
-  description: 'Get one screen by id: its settings, status, manifests, the ids of the groups it is in, and its credentials (never their secrets). Returns { screen, groupIds, credentials }.',
+  description:
+    'Get one screen by id: its settings, status, manifests, the ids of the groups it is in, and its credentials (never their secrets). Returns { screen, groupIds, credentials }.',
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -117,18 +118,23 @@ export const updateScreenSettings = defineTool({
       orientation: orientation.optional(),
       displayHours: displayHours.nullable().optional(),
     })
-    .refine((v) => v.timezone !== undefined || v.locale !== undefined || v.orientation !== undefined || v.displayHours !== undefined, 'give at least one setting to change'),
+    .refine(
+      (v) => v.timezone !== undefined || v.locale !== undefined || v.orientation !== undefined || v.displayHours !== undefined,
+      'give at least one setting to change',
+    ),
   output: z.object({ screen: screenOutput }),
   example: { screenId: 'scr_example', timezone: 'Europe/London', displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }] } },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, write }) => {
     const screen = await requireScreen(org, input.screenId);
-    const row = write(org.screens.stage.update(screen, {
-      timezone: input.timezone,
-      locale: input.locale,
-      orientation: input.orientation,
-      displayHoursJson: input.displayHours === undefined ? undefined : input.displayHours === null ? null : JSON.stringify(input.displayHours),
-    }));
+    const row = write(
+      org.screens.stage.update(screen, {
+        timezone: input.timezone,
+        locale: input.locale,
+        orientation: input.orientation,
+        displayHoursJson: input.displayHours === undefined ? undefined : input.displayHours === null ? null : JSON.stringify(input.displayHours),
+      }),
+    );
     return { screen: screenView(row) };
   },
 });
@@ -136,7 +142,7 @@ export const updateScreenSettings = defineTool({
 export const revokeScreenCredential = defineTool({
   name: 'revoke_screen_credential',
   description:
-    'Revoke one of a screen\'s credentials, so a device holding it can no longer fetch anything; its open socket is closed. Use get_screen to see the credentials. Revoking an already revoked credential changes nothing. Owners only. Returns { credential }.',
+    "Revoke one of a screen's credentials, so a device holding it can no longer fetch anything; its open socket is closed. Use get_screen to see the credentials. Revoking an already revoked credential changes nothing. Owners only. Returns { credential }.",
   scope: 'screens:manage',
   minRole: 'owner',
   mutates: true,

@@ -21,7 +21,18 @@ import { canonicalJson } from '@signforge/contract';
 import { z } from 'zod';
 import { checkOutput } from './output';
 import type { UploadSigner } from './upload';
-import { ROLE_SCOPES, ROLES, ToolError, type Actor, type AnyTool, type DataScope, type Role, type Scope, type ScreenNotifier, type ToolErrorCode } from './tool';
+import {
+  ROLE_SCOPES,
+  ROLES,
+  ToolError,
+  type Actor,
+  type AnyTool,
+  type DataScope,
+  type Role,
+  type Scope,
+  type ScreenNotifier,
+  type ToolErrorCode,
+} from './tool';
 
 /** Who is calling, resolved by the adapter (the `/api` route, `/admin`, later MCP and WebMCP). */
 export interface Caller<D extends DataScope = OrgScope> {
@@ -39,9 +50,7 @@ export interface Caller<D extends DataScope = OrgScope> {
   screens?: ScreenNotifier;
 }
 
-export type DispatchResult =
-  | { ok: true; output: unknown }
-  | { ok: false; error: ToolErrorCode; message: string; details?: unknown };
+export type DispatchResult = { ok: true; output: unknown } | { ok: false; error: ToolErrorCode; message: string; details?: unknown };
 
 const rank = (r: Role) => ROLES.indexOf(r);
 
@@ -74,10 +83,20 @@ export function redact(value: unknown, depth = 0): unknown {
   return value;
 }
 
-const fail = (error: ToolErrorCode, message: string, details?: unknown): DispatchResult => ({ ok: false, error, message, ...(details === undefined ? {} : { details }) });
+const fail = (error: ToolErrorCode, message: string, details?: unknown): DispatchResult => ({
+  ok: false,
+  error,
+  message,
+  ...(details === undefined ? {} : { details }),
+});
 
 /** Run a tool for a caller. Refusals come back as `{ ok: false }`; anything unexpected throws. */
-export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string, AnyTool<D>>, name: string, rawInput: unknown, caller: Caller<D>): Promise<DispatchResult> {
+export async function dispatch<D extends DataScope>(
+  registry: ReadonlyMap<string, AnyTool<D>>,
+  name: string,
+  rawInput: unknown,
+  caller: Caller<D>,
+): Promise<DispatchResult> {
   const tool = registry.get(name);
   if (!tool) return fail('unknown_tool', `no tool named ${JSON.stringify(name)}`);
   if (!permits(caller, tool)) {
@@ -86,7 +105,11 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
 
   const parsed = tool.input.safeParse(rawInput ?? {});
   if (!parsed.success) {
-    return fail('invalid_input', z.prettifyError(parsed.error), parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })));
+    return fail(
+      'invalid_input',
+      z.prettifyError(parsed.error),
+      parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+    );
   }
 
   // A retry of a creation made with this key gets the first result, and writes nothing.
@@ -109,9 +132,7 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
   const tell = async () => {
     const { screens } = caller;
     if (!screens || !writes.length) return;
-    await Promise.all(
-      notices.map((send) => send(screens).catch((err: unknown) => console.warn(`[tools] ${tool.name}: could not tell the screen`, err))),
-    );
+    await Promise.all(notices.map((send) => send(screens).catch((err: unknown) => console.warn(`[tools] ${tool.name}: could not tell the screen`, err))));
   };
   const write = <T>(change: Staged<T>): T => {
     if (!tool.mutates) throw new Error(`${tool.name} is a read and cannot write`);

@@ -23,7 +23,8 @@ const WRITERS: Record<string, string> = {
   'PUT /admin/screens/:screen/manifest': 'sf push: stores the manifest file, then publishes through the dispatcher (admin.test.ts checks the audit row)',
   'PUT /admin/orgs/:org/blobs/:sha256': 'sf template push: content-addressed bytes in R2, inert until a template version names them',
   'PUT /admin/base/templates': 'sf template push: registers a base template version through the dispatcher, audited in platform_audit_log (templates.test.ts)',
-  'PUT /admin/orgs/:org/templates': "sf template push: registers an org's template version through the dispatcher, audited in its audit_log (templates.test.ts)",
+  'PUT /admin/orgs/:org/templates':
+    "sf template push: registers an org's template version through the dispatcher, audited in its audit_log (templates.test.ts)",
   'POST /v1/device/sync': 'a screen reporting about itself. Writes nothing yet: M3-06 issues the socket ticket, M3-07 stores play counts and status',
 };
 /** Middleware each tree mounts on its whole prefix. A wildcard on any other path is a route and fails. */
@@ -82,7 +83,9 @@ describe('requests', () => {
     await setup.signIn(email('guard'));
     const org = await setup.createOrg('Guard');
     screenId = (await scoped(env.DB, org.id).screens.insert({ name: 'Guarded', timezone: 'UTC', orientation: 'landscape' })).id;
-    assetId = (await scoped(env.DB, org.id).assets.insert({ kind: 'image', name: 'a.png', sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 })).id;
+    assetId = (
+      await scoped(env.DB, org.id).assets.insert({ kind: 'image', name: 'a.png', sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 })
+    ).id;
     // The same session, on a D1 binding that records writes.
     owner = new Client(t, setup.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of setup.jar) owner.jar.set(k, v);
@@ -107,7 +110,14 @@ describe('requests', () => {
       if (tool.mutates) continue;
       writes.length = 0;
       const example = tool.example as Record<string, unknown>;
-      const input = 'screenId' in example ? { ...example, screenId } : 'templateId' in example ? { ...example, templateId: baseTemplate } : 'assetId' in example ? { ...example, assetId } : example;
+      const input =
+        'screenId' in example
+          ? { ...example, screenId }
+          : 'templateId' in example
+            ? { ...example, templateId: baseTemplate }
+            : 'assetId' in example
+              ? { ...example, assetId }
+              : example;
       expect((await owner.tool(tool.name, input)).status, tool.name).toBe(200);
       expect(ours(), tool.name).toEqual([]);
     }
@@ -134,7 +144,11 @@ describe('POST /api/tools/:name', () => {
     await viewer.signIn(email('viewer'));
     const org = await owner.createOrg('Tools');
     screenId = (await scoped(env.DB, org.id).screens.insert({ name: 'Lobby', timezone: 'UTC', orientation: 'landscape' })).id;
-    const invite = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: (await viewer.session()).body.user.email, role: 'viewer', organizationId: org.id });
+    const invite = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', {
+      email: (await viewer.session()).body.user.email,
+      role: 'viewer',
+      organizationId: org.id,
+    });
     await viewer.ok('/api/auth/organization/accept-invitation', { invitationId: invite.id });
     expect((await viewer.setActive(org.id)).status).toBe(200);
   });
@@ -170,7 +184,10 @@ describe('POST /api/tools/:name', () => {
 
   it('hands out presigned uploads to the local bucket in dev', async () => {
     const r = { sha256: '1'.repeat(64), type: 'image/jpeg', size: 1000, width: 1920, height: 1080 };
-    const res = await owner.tool('create_asset_upload', { name: 'Photo', renditions: { landscape: r, portrait: { ...r, sha256: '2'.repeat(64), width: 1920 } } });
+    const res = await owner.tool('create_asset_upload', {
+      name: 'Photo',
+      renditions: { landscape: r, portrait: { ...r, sha256: '2'.repeat(64), width: 1920 } },
+    });
     expect(res.status).toBe(200);
     const { asset, uploads } = (await res.json()) as { asset: { id: string; status: string }; uploads: { url: string }[] };
     expect(asset.status).toBe('pending');

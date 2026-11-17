@@ -23,10 +23,7 @@ export function createAuth(env: Env, request: Request, email: EmailSender) {
   const origin = new URL(request.url).origin;
   const secret = authSecret(env);
   const appUrl = env.CMS_ORIGIN ?? origin;
-  const github =
-    env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
-      ? { github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } }
-      : {};
+  const github = env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET ? { github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } } : {};
   return betterAuth({
     ...authOptions({ email, appUrl }),
     database: env.DB,
