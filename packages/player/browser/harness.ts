@@ -53,6 +53,8 @@ export interface Player {
 export interface Harness {
   /** The fixture template bundle, for building content or hosting it directly. */
   templateHtml: string;
+  /** The same template in markup that uses every brand token, the brand fonts and the logo. */
+  brandTemplateHtml: string;
   content(spots: FixtureSpot[], opts?: Parameters<typeof buildContent>[2]): ReturnType<typeof buildContent>;
   /**
    * Start a fixture server and open the player on it. `query` adds to or overrides the defaults
@@ -69,6 +71,7 @@ export interface Harness {
 export function useHarness(): Harness {
   const playerDir = inject('playerDir');
   const templateHtml = inject('templateHtml');
+  const brandTemplateHtml = inject('brandTemplateHtml');
   let browser: Browser;
   const contexts: BrowserContext[] = [];
   const servers: FixtureServer[] = [];
@@ -97,6 +100,7 @@ export function useHarness(): Harness {
 
   return {
     templateHtml,
+    brandTemplateHtml,
     content: (spots, opts) => buildContent(templateHtml, spots, opts),
     blankPage: newPage,
     async playerServer() {
@@ -120,7 +124,25 @@ export function useHarness(): Harness {
         page.evaluate(() => {
           const s = (window as unknown as { __sf?: PlayerState }).__sf;
           if (!s) throw new Error('the player has not started');
-          const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log, data, dataRejected, displayOn, auth, socket, clock, pairing } = s;
+          const {
+            manifestId,
+            playlist,
+            spot,
+            played,
+            skipped,
+            lastError,
+            online,
+            lastGood,
+            fallback,
+            log,
+            data,
+            dataRejected,
+            displayOn,
+            auth,
+            socket,
+            clock,
+            pairing,
+          } = s;
           return {
             manifestId,
             playlist,

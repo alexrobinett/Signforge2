@@ -3,7 +3,8 @@
 // template, read back through the CMS's tool route; the server's checks reject what the build
 // would; versions are immutable; org templates stay in their org.
 import { PROTOCOL_VERSION, type TemplateManifest } from '@signforge/contract';
-import { pushTemplate, TemplatePushError, type TemplatePushOptions } from '@signforge/cli/template-push';
+import { pushFonts, pushTemplate, TemplatePushError, type TemplatePushOptions } from '@signforge/cli/template-push';
+import { FONTS } from '@signforge/compiler';
 import { platform, scoped } from '@signforge/db';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -141,5 +142,25 @@ describe('org templates', () => {
 
   it('need an org that exists', async () => {
     expect(await rejection(push(card({ id: 'nobody' }), { owner: { org: 'org-nobody' } }))).toMatch(/404/);
+  });
+});
+
+describe('sf fonts push', () => {
+  const files = JSON.parse(env.FONT_FILES) as Record<string, string>;
+  const read = (path: string) => Uint8Array.from(atob(files[path]!), (c) => c.charCodeAt(0));
+
+  it('uploads every catalogue font file under sys/b/, where any org can read it', async () => {
+    const r = await pushFonts({ api: API, token: TOKEN, read, fetch: viaWorker });
+    const all = FONTS.flatMap((f) => f.files);
+    expect(r.uploaded).toBe(all.length);
+    for (const f of all) expect((await env.BLOBS.head(baseBlobKey(f.file)))?.size).toBe(f.size);
+    expect((await env.BLOBS.head(baseBlobKey(all[0]!.file)))?.httpMetadata?.contentType).toBe('font/woff2');
+    const res = await member.get(`/api/blobs/${all[0]!.file}`);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(read('fonts/inter/400-normal.woff2'));
+  });
+
+  it('refuses a file whose bytes are not the catalogue entry, before uploading anything', async () => {
+    const message = await rejection(pushFonts({ api: API, token: TOKEN, read: () => new Uint8Array([1, 2, 3]), fetch: viaWorker }));
+    expect(message).toMatch(/^fonts\/inter\/400-normal\.woff2 does not match the catalogue/);
   });
 });

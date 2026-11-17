@@ -1,6 +1,6 @@
 # M3-39 Brand in the player and SDK
 
-Status: open  ·  Size: M  ·  Depends on: M3-32, M3-28, M3-38
+Status: done (branch m3-39-brand-in-player), with the Pi budget box open  ·  Size: M  ·  Depends on: M3-32, M3-28, M3-38
 
 ## Goal
 
@@ -18,6 +18,14 @@ Templates draw with the brand: tokens as CSS custom properties, brand fonts and 
 
 ## Done when
 
-- [ ] Browser test: a template using every token and a brand font renders with the brand values, and with its fallbacks when no theme is sent.
-- [ ] A brand font adds no more than the prepare budget on the Pi (measured).
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [x] Browser test: a template using every token and a brand font renders with the brand values, and with its fallbacks when no theme is sent. `packages/player/browser/brand.test.ts`: every `--sf-*` colour, the radius per shape, both catalogue fonts (Oswald, Inter) loaded before ready, the logo by background; the same template with no kit draws every fallback; a template that never uses a brand font loads none; an SDK reset removes the theme. Breaking the player (no `theme` in init) fails three tests, breaking the reset cleanup or the use check fails one each.
+- [ ] A brand font adds no more than the prepare budget on the Pi (measured). **Measured, not met for every template** (`spike/pi-perf/RESULTS.md`, Brand fonts). The full stress playlist does not regress in frames (0.32% dropped with brand fonts against 0.34 to 0.54% plain, no stall of 150 ms or more, nothing skipped). A kit costs today's templates nothing (prepare median 256-259 ms against 247-260 ms). Decoding is 14 ms for six files. With the templates drawing in the brand fonts, most prepares grow 30 to 100 ms and stay inside 500 ms, but cstore-promo (235 to 1138 ms), news (467 to 1076 ms) and photo-promo over a 4K photo (about 300 to 515-690 ms) go over. That must be found and fixed before M3-25 moves those templates onto the brand fonts.
+- [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated. Run on the branch after merging `m3-foundations`. Docs: template-spec (Brand, lint, budget), architecture (Player, Brand), backend-plan (seed pushes fonts), the brand proposal's status, fonts/README.md, the player harness README.
+
+## Notes from the build
+
+- The curated fonts' WOFF2 files are in `fonts/` (latin, the catalogue's weights, with OFL texts and sizes). `sf fonts push` uploads them, and so does `sf template seed`. The device and preview blob routes serve them from `sys/b/`.
+- Fonts reach the frame as Blobs and become `@font-face` rules with `data:` URLs, so the template CSP did not need `blob:` fonts. Faces built from bytes were measured worse on the Pi; see RESULTS.md.
+- The colour lint is in the contract (`brandColourWarnings`). Its warnings are kept on the check report (`warnings`) and do not fail a build.
+- Owner decision flagged in `fonts/README.md`: Source Sans 3 and Playfair Display have Reserved Font Names, and the files are subsets.
+

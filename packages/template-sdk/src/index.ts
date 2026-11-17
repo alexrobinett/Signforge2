@@ -11,15 +11,33 @@
  * through `formatter(ctx, { hour: 'numeric' })`, and the time from `now()`, never `new Date()`:
  * the screen corrects its clock from the server, and the device's own clock may be wrong.
  *
+ * Brand (protocol 2). When the screen has a brand kit, `init` carries it as `theme`, and before
+ * `prepare` the SDK sets on the root `--sf-primary`, `--sf-on-primary`, `--sf-accent`,
+ * `--sf-on-accent`, `--sf-bg`, `--sf-surface`, `--sf-text`, `--sf-muted`, `--sf-radius` (square
+ * 0, soft 12px, round 9999px) and, for each brand font, `--sf-font-display` / `--sf-font-body`;
+ * it loads the fonts the template's styles use (as `sf-brand-display` and `sf-brand-body`, from
+ * `data:` URLs, as a template's own fonts arrive), and an `<img data-sf-src="$brand.logo">` gets the logo for the brand's
+ * background (onLight on a light one, when the kit has it). Write every brand value with a
+ * fallback, `var(--sf-accent, #22d3ee)`: without a kit nothing is set and the template draws as
+ * it is. `ready` waits for the fonts.
+ *
  * New data (protocol 2). On `reset`, or an `init` after the first, the SDK stops the template,
  * restores the document exactly as it loaded, and initialises again, so `prepare` always starts
  * from clean markup. Look elements up inside the hooks, not once at the top of `main.ts`: a reset
  * replaces them. State a template keeps outside the DOM must be cleared in `stop`.
  */
-import { PROTOCOL_VERSION, type HostMessage, type InitPayload, type TemplateMessage } from '@signforge/contract';
+import {
+  BRAND_CSS_VARS,
+  PROTOCOL_VERSION,
+  type BrandShape,
+  type FrameTheme,
+  type HostMessage,
+  type InitPayload,
+  type TemplateMessage,
+} from '@signforge/contract';
 
 export interface TemplateContext extends Omit<InitPayload, 'assets' | 'theme'> {
-  /** Image fields as object URLs. */
+  /** Image fields as object URLs; `$brand.logo` too when the brand kit has a logo. */
   assets: Record<string, string>;
   root: HTMLElement;
 }
@@ -41,6 +59,8 @@ export const now = (): Date => new Date(Date.now() + offsetMs);
 export function defineTemplate(hooks: TemplateHooks = {}): void {
   let ctx: TemplateContext | undefined;
   let urls: string[] = [];
+  /** The brand font rules this init added to `<head>`. */
+  let fontStyle: HTMLStyleElement | undefined;
   /** The document as it loaded, taken before the first init touches it. */
   let pristine: { body: HTMLElement; attrs: [string, string][] } | undefined;
   /** Counts inits and resets, so a prepare still running for older data never reports ready. */
@@ -54,6 +74,8 @@ export function defineTemplate(hooks: TemplateHooks = {}): void {
     document.getAnimations().forEach((a) => a.cancel());
     urls.forEach((u) => URL.revokeObjectURL(u));
     urls = [];
+    fontStyle?.remove();
+    fontStyle = undefined;
     if (!pristine) return;
     const root = document.documentElement;
     for (const a of [...root.attributes]) root.removeAttribute(a.name);
@@ -78,6 +100,13 @@ export function defineTemplate(hooks: TemplateHooks = {}): void {
         run = ++generation;
         const assets: Record<string, string> = {};
         for (const [k, blob] of Object.entries(m.assets)) urls.push((assets[k] = URL.createObjectURL(blob)));
+        if (m.theme) {
+          const added = await applyTheme(m.theme, root);
+          // Superseded while the fonts decoded: the reset's restore ran before these were added.
+          if (run !== generation) return added.fontStyle?.remove();
+          fontStyle = added.fontStyle;
+          if (added.logo) urls.push((assets[BRAND_LOGO] = URL.createObjectURL(added.logo)));
+        }
         ctx = {
           data: m.data,
           assets,
@@ -118,6 +147,72 @@ export function defineTemplate(hooks: TemplateHooks = {}): void {
 
   addEventListener('error', (e) => send({ sf: PROTOCOL_VERSION, type: 'error', message: e.message }));
   send({ sf: PROTOCOL_VERSION, type: 'loaded' });
+}
+
+/** The `data-sf-src` value that takes the brand kit's logo. */
+export const BRAND_LOGO = '$brand.logo';
+
+const RADIUS: Record<BrandShape, string> = { square: '0px', soft: '12px', round: '9999px' };
+
+/**
+ * Set the theme's custom properties on the root and load its fonts. Returns the `@font-face`
+ * rules it added to `<head>` (the caller removes them on reset) and the logo for the brand's
+ * background.
+ */
+async function applyTheme(theme: FrameTheme, root: HTMLElement): Promise<{ fontStyle?: HTMLStyleElement; logo?: Blob }> {
+  for (const [name, value] of Object.entries(theme.colors)) {
+    const v = BRAND_CSS_VARS[name as keyof typeof theme.colors];
+    if (v) root.style.setProperty(v, value);
+  }
+  root.style.setProperty(BRAND_CSS_VARS.radius, RADIUS[theme.shape] ?? RADIUS.soft);
+  const logo = theme.logo && (theme.logo.onLight && isLight(theme.colors.background) ? theme.logo.onLight : theme.logo.onDark);
+  // Only the families the template's styles use: an unused face still cost the Pi time.
+  const css = [...document.querySelectorAll('style')].map((s) => s.textContent ?? '').join('\n');
+  const varOf = { display: BRAND_CSS_VARS.fontDisplay, body: BRAND_CSS_VARS.fontBody } as const;
+  const roles = (['display', 'body'] as const).filter((r) => theme.fonts[r]?.files.length && css.includes(varOf[r]));
+  if (!roles.length) return { logo };
+  // As data: URLs in @font-face, the way a template's own fonts arrive (the CSP allows font-src
+  // data:). Faces made from bytes (`new FontFace(name, buffer)`) are a new typeface in every
+  // document, and on the Pi one in three prepares of a large photo then took about a second to paint.
+  const rules = await Promise.all(
+    roles.flatMap((role) =>
+      theme.fonts[role]!.files.map(async (f) => {
+        const url = await dataUrl(f.data);
+        return `@font-face{font-family:"sf-brand-${role}";src:url("${url}") format("woff2");font-weight:${f.weight};font-style:${f.style}}`;
+      }),
+    ),
+  );
+  const fontStyle = document.createElement('style');
+  fontStyle.textContent = rules.join('');
+  document.head.appendChild(fontStyle);
+  for (const role of roles) root.style.setProperty(varOf[role], `sf-brand-${role}, sans-serif`);
+  // Load now, inside prepare: a face is otherwise fetched only once text that uses it is laid out.
+  await Promise.all(roles.flatMap((role) => theme.fonts[role]!.files.map((f) => document.fonts.load(`${f.style} ${f.weight} 16px sf-brand-${role}`))));
+  return { fontStyle, logo };
+}
+
+/** A Blob as a `data:` URL, typed as WOFF2 whatever type the Blob carries. */
+function dataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(`data:font/woff2;base64,${String(r.result).slice(String(r.result).indexOf(',') + 1)}`);
+    r.onerror = () => reject(r.error ?? new Error('could not read a brand font'));
+    r.readAsDataURL(blob);
+  });
+}
+
+/** Whether a `#rgb`/`#rrggbb` colour is light enough that dark text (and a logo for light) reads better on it. */
+function isLight(color: string): boolean {
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color)?.[1];
+  if (!hex) return false;
+  const full = hex.length === 3 ? [...hex].map((c) => c + c).join('') : hex;
+  const [r, g, b] = [0, 2, 4].map((i) => {
+    const c = Number.parseInt(full.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const l = 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  // Black on it has more contrast than white: the WCAG crossover, at about 0.179.
+  return (l + 0.05) / 0.05 > 1.05 / (l + 0.05);
 }
 
 function bind(ctx: TemplateContext): void {
