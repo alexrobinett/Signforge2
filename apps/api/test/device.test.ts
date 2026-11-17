@@ -14,10 +14,17 @@ const sha = (c: string) => c.repeat(64);
 /** Enough of a manifest for the routes: they read its files, templates and data sources. */
 function manifest(id: string, files: string[], extra: Partial<ScreenManifest> = {}): ScreenManifest {
   return {
-    schema: 2, id, generatedAt: '2026-11-17T00:00:00.000Z',
+    schema: 2,
+    id,
+    generatedAt: '2026-11-17T00:00:00.000Z',
     screen: { id: 'x', name: 'x', timezone: 'UTC', orientation: 'landscape' },
     files: Object.fromEntries(files.map((f) => [f, { size: 4, type: 'image/png' }])),
-    templates: {}, spots: {}, playlists: {}, dataSources: {}, schedule: [], defaultPlaylist: 'p',
+    templates: {},
+    spots: {},
+    playlists: {},
+    dataSources: {},
+    schedule: [],
+    defaultPlaylist: 'p',
     ...extra,
   };
 }
@@ -54,13 +61,23 @@ beforeAll(async () => {
   b = await setUp('dev-b');
   const A = a.seed.orgId;
 
-  await env.BLOBS.put(manifestKey(A, a.seed.screen, M1), JSON.stringify(manifest(M1, [BLOB1, BASE_HTML], {
-    templates: { 'base/clock@1.0.0': { manifest: {} as never, html: BASE_HTML } },
-  })));
+  await env.BLOBS.put(
+    manifestKey(A, a.seed.screen, M1),
+    JSON.stringify(
+      manifest(M1, [BLOB1, BASE_HTML], {
+        templates: { 'base/clock@1.0.0': { manifest: {} as never, html: BASE_HTML } },
+      }),
+    ),
+  );
   // Manifest 2 also lists org B's blob: even listed, another org's file is out of reach.
-  await env.BLOBS.put(manifestKey(A, a.seed.screen, M2), JSON.stringify(manifest(M2, [BLOB2, B_BLOB], {
-    dataSources: { 'dev-a-source': { id: 'dev-a-source', refreshS: 300 }, 'dev-b-source': { id: 'dev-b-source', refreshS: 300 } },
-  })));
+  await env.BLOBS.put(
+    manifestKey(A, a.seed.screen, M2),
+    JSON.stringify(
+      manifest(M2, [BLOB2, B_BLOB], {
+        dataSources: { 'dev-a-source': { id: 'dev-a-source', refreshS: 300 }, 'dev-b-source': { id: 'dev-b-source', refreshS: 300 } },
+      }),
+    ),
+  );
   for (const s of [BLOB1, BLOB2, UNLISTED]) await env.BLOBS.put(orgBlobKey(A, s), `blob ${s.slice(0, 4)}`);
   await env.BLOBS.put(baseBlobKey(BASE_HTML), '<!doctype html>');
   await env.BLOBS.put(orgBlobKey(b.seed.orgId, B_BLOB), 'org b secret');
@@ -89,8 +106,15 @@ describe('device auth', () => {
   it('rejects malformed tokens', async () => {
     const secret = a.credential.slice(a.credential.indexOf('.') + 1);
     for (const auth of [
-      `Bearer`, `Bearer nope`, `Basic ${btoa('a:b')}`, `Bearer ${a.credential.slice(4)}`, `Bearer sfd_${a.seed.screen}${secret}`,
-      `Bearer sfd_.${secret}`, `Bearer sfd_${a.seed.screen}.${secret}x`, `Bearer sfd_bad/id.${secret}`, `Bearer ${a.credential} extra`,
+      `Bearer`,
+      `Bearer nope`,
+      `Basic ${btoa('a:b')}`,
+      `Bearer ${a.credential.slice(4)}`,
+      `Bearer sfd_${a.seed.screen}${secret}`,
+      `Bearer sfd_.${secret}`,
+      `Bearer sfd_${a.seed.screen}.${secret}x`,
+      `Bearer sfd_bad/id.${secret}`,
+      `Bearer ${a.credential} extra`,
     ]) {
       const res = await exports.default.fetch(`${BASE}/manifest.json`, { headers: { authorization: auth } });
       expect(res.status, auth).toBe(401);
@@ -122,7 +146,12 @@ describe('device auth', () => {
     expect((await get('/manifest.json', undefined, { cookie: 'session=whatever' })).status).toBe(401);
     // And a device credential opens nothing outside /v1/device.
     // The user tree refuses any Authorization header outright (M3-09); elsewhere nothing exists.
-    for (const [path, status] of [['/api/screens', 401], ['/api/v1/device/manifest.json', 401], ['/mcp', 404], ['/manifest.json', 404]] as const) {
+    for (const [path, status] of [
+      ['/api/screens', 401],
+      ['/api/v1/device/manifest.json', 401],
+      ['/mcp', 404],
+      ['/manifest.json', 404],
+    ] as const) {
       const res = await exports.default.fetch(`https://api.test${path}`, { headers: { authorization: `Bearer ${a.credential}` } });
       expect(res.status, path).toBe(status);
     }
@@ -216,7 +245,7 @@ describe('GET /v1/device/data/:id.json', () => {
     const res = await get('/data/dev-a-source.json', a.credential);
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(await res.json()).toEqual({ id: 'dev-a-source', fetchedAt: '2026-11-17T14:00:00.000Z', data: { t: 14 } });
+    expect(await res.json()).toEqual({ id: 'dev-a-source', version: Date.UTC(2026, 10, 17, 14), fetchedAt: '2026-11-17T14:00:00.000Z', data: { t: 14 } });
   });
 
   it("is a 404 for a source the manifest does not list, or another org's", async () => {

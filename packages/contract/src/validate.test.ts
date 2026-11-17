@@ -1,7 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
+  MANIFEST_SCHEMA,
   SCREEN_BOX,
+  SUPPORTED_MANIFEST_SCHEMAS,
+  SUPPORTED_PROTOCOLS,
+  checkTemplateBundle,
+  requiredFiles,
+  validateBrandKit,
   displayHoursProblems,
   readPath,
   validateBoundValue,
@@ -18,6 +24,7 @@ import {
   validateSyncRequest,
   validateSyncResponse,
   validateTemplateManifest,
+  type BrandKit,
   type FieldDef,
   type ScreenManifest,
   type SyncRequest,
@@ -99,8 +106,16 @@ const template: TemplateManifest = {
   },
 };
 
+const validBrand = (): BrandKit => ({
+  id: 'house',
+  colors: { primary: '#123', onPrimary: '#fff', accent: '#f80', onAccent: '#000', background: '#000', surface: '#111', text: '#eee', muted: '#999' },
+  shape: 'soft',
+  fonts: { display: { id: 'base/inter', family: 'Inter', files: [{ weight: 700, style: 'normal', file: 'sha-font' }] } },
+  logo: { onDark: 'sha-logo' },
+});
+
 const validManifest = (): ScreenManifest => ({
-  schema: 2,
+  schema: 3,
   id: 'm1',
   generatedAt: '2026-11-17T00:00:00.000Z',
   screen: {
@@ -110,7 +125,13 @@ const validManifest = (): ScreenManifest => ({
     orientation: 'landscape',
     displayHours: { weekly: [{ from: '07:00', to: '22:00', days: [1, 2] }] },
   },
-  files: { 'sha-html': { size: 10, type: 'text/html' }, 'sha-photo': { size: 10, type: 'image/jpeg' } },
+  files: {
+    'sha-html': { size: 10, type: 'text/html' },
+    'sha-photo': { size: 10, type: 'image/jpeg' },
+    'sha-font': { size: 10, type: 'font/woff2' },
+    'sha-logo': { size: 10, type: 'image/svg+xml' },
+  },
+  brand: validBrand(),
   templates: { 'base/menu@1.0.0': { manifest: structuredClone(template), html: 'sha-html' } },
   spots: {
     menu: {
@@ -127,27 +148,33 @@ const validManifest = (): ScreenManifest => ({
   },
   playlists: { all: { id: 'all', name: 'All', transition: { type: 'fade', ms: 500 }, items: [{ spot: 'menu' }, { spot: 'web' }] } },
   dataSources: { feed: { id: 'feed', refreshS: 300 } },
-  schedule: [{ id: 'e1', playlist: 'all', priority: 1, target: 'screen', from: '06:00', to: '10:00' }],
+  schedule: [
+    { id: 'e1', playlist: 'all', priority: 1, target: 'screen', from: '06:00', to: '10:00' },
+    { id: 'takeover', playlist: 'all', priority: 100, target: 'screen', startsAt: '2026-11-17T14:00:00Z', endsAt: '2026-11-17T16:00:00Z' },
+  ],
   defaultPlaylist: 'all',
 });
 
 const validSyncRequest = (): SyncRequest => ({
   seq: 3,
-  player: { version: '1.2.3', manifestSchemas: [2], protocols: [1] },
+  epoch: 'e7Hq2',
+  player: { version: '1.2.3', manifestSchemas: [2, 3], protocols: [1, 2] },
   manifest: { active: 'm1', filesMissing: 0 },
   display: { on: true, methods: { signal: 'ok' }, override: { state: 'off', until: '2026-11-17T18:00:00Z' } },
   deviceTime: '2026-11-17T13:05:00Z',
+  clock: { offsetMs: -1200, trusted: true },
   playCounts: [{ hour: '2026-11-17T13:00Z', spot: 'menu', manifest: 'm1', plays: 4, ms: 32_000 }],
-  snapshots: { feed: '2026-11-17T13:00:00Z' },
+  snapshots: { feed: 1_763_384_400_000 },
 });
 
 const validSyncResponse = (): SyncResponse => ({
   serverTime: '2026-11-17T13:05:01Z',
   nextSyncS: 300,
+  epoch: 'e7Hq2',
   ackSeq: 3,
   desiredManifest: 'm1',
   socketTicket: 't',
-  snapshots: [{ id: 'feed', fetchedAt: '2026-11-17T13:00:00Z', data: { headline: 'Hi' } }],
+  snapshots: [{ id: 'feed', version: 1_763_384_400_000, fetchedAt: '2026-11-17T13:00:00Z', data: { headline: 'Hi' } }],
   commands: [{ type: 'reload' }, { type: 'display', override: null }],
 });
 
@@ -186,7 +213,8 @@ const totalOn = (name: string, arb: fc.Arbitrary<unknown>, run: (v: unknown) => 
 const validators: [string, (v: unknown) => string[], (() => unknown)?][] = [
   ['validateManifest', validateManifest, validManifest],
   ['validateTemplateManifest', validateTemplateManifest, () => structuredClone(template)],
-  ['validateDataSnapshot', validateDataSnapshot],
+  ['validateDataSnapshot', validateDataSnapshot, () => validSyncResponse().snapshots[0]],
+  ['validateBrandKit', validateBrandKit, validBrand],
   ['validateBoundValue', (v) => validateBoundValue(template.fields, 'items', v), () => [{ name: 'Soup', hot: true }]],
   ['displayHoursProblems', displayHoursProblems, () => validManifest().screen.displayHours],
   ['validatePairStartResponse', validatePairStartResponse, () => ({ code: 'ABC123', pollToken: 'p', expiresAt: '2026-11-17T13:15:00Z' })],
@@ -301,17 +329,6 @@ describe('validateManifest', () => {
     ]);
   });
 
-  it('plays schema N and N-1; schema 1 keys templates without their owner', () => {
-    const v1 = validManifest();
-    v1.schema = 1;
-    v1.templates = { 'menu@1.0.0': v1.templates['base/menu@1.0.0']! };
-    (v1.spots.menu as { template: string }).template = 'menu@1.0.0';
-    expect(validateManifest(v1)).toEqual([]);
-    v1.templates = { 'base/menu@1.0.0': v1.templates['menu@1.0.0']! };
-    expect(validateManifest(v1)).toContain('template key "base/menu@1.0.0" must be menu@1.0.0');
-    expect(validateManifest({ ...validManifest(), schema: 0 })).toContain('manifest schema 0 is not one this player can play (1, 2)');
-  });
-
   it('checks the screen and each spot kind', () => {
     const m = validManifest() as unknown as { screen: Record<string, unknown>; spots: Record<string, Record<string, unknown>> };
     m.screen.orientation = 'sideways';
@@ -325,13 +342,83 @@ describe('validateManifest', () => {
   });
 });
 
+describe('versions', () => {
+  it('plays the current manifest schema and the one before it', () => {
+    expect(MANIFEST_SCHEMA).toBe(3);
+    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([2, 3]);
+    const old = validManifest() as unknown as Record<string, unknown>;
+    old.schema = 2;
+    delete old.brand;
+    (old.schedule as unknown[]).pop();
+    expect(validateManifest(old)).toEqual([]);
+    expect(validateManifest({ ...validManifest(), schema: 1 })).toEqual(['manifest schema 1 is not one this player can play (2, 3)']);
+  });
+
+  it('drives protocol 1 and 2 bundles, and refuses a newer one', () => {
+    expect(SUPPORTED_PROTOCOLS).toEqual([1, 2]);
+    const lint = (protocol: number) =>
+      checkTemplateBundle({ manifest: { ...structuredClone(template), protocol }, html: '<p>', sources: { 'main.ts': '' } }).checks.find(
+        (c) => c.check === 'manifest',
+      )!.problems;
+    expect(lint(1)).toEqual([]);
+    expect(lint(2)).toEqual([]);
+    expect(lint(3)).toEqual(['protocol 3 is not supported']);
+  });
+});
+
+describe('brand', () => {
+  it('lists the brand fonts and logo among the files a screen must hold', () => {
+    expect([...requiredFiles(validManifest())].sort()).toEqual(['sha-font', 'sha-html', 'sha-logo', 'sha-photo']);
+  });
+
+  it('checks every colour, the shape, the fonts and that brand files are listed', () => {
+    const m = validManifest() as unknown as { brand: Record<string, unknown>; files: Record<string, unknown> };
+    delete m.files['sha-logo'];
+    (m.brand.colors as Record<string, unknown>).muted = 7;
+    m.brand.shape = 'blob';
+    m.brand.fonts = { body: { id: 'inter', family: 'Inter', files: [{ weight: 1200, style: 'oblique', file: 'sha-font' }] } };
+    expect(validateManifest(m)).toEqual([
+      'brand: colour "muted" must be a CSS colour',
+      'brand: shape must be square, soft or round',
+      'brand: body font id must be <owner>/<id>',
+      'brand: body font file 1: weight must be 1 to 1000',
+      'brand: body font file 1: style must be normal or italic',
+      'file sha-logo is referenced but not listed',
+    ]);
+  });
+});
+
+describe('takeovers', () => {
+  it('bounds an entry by absolute instants, end after start', () => {
+    const m = validManifest();
+    m.schedule[1] = { ...m.schedule[1]!, startsAt: '2026-11-17T16:00:00Z', endsAt: '2026-11-17T14:00:00Z' };
+    expect(validateManifest(m)).toEqual(['schedule entry "takeover": endsAt must be after startsAt']);
+    m.schedule[1] = { ...m.schedule[1]!, startsAt: 'soon', endsAt: undefined };
+    expect(validateManifest(m)).toEqual(['schedule entry "takeover": startsAt must be an ISO 8601 time']);
+  });
+});
+
 describe('snapshots and device bodies', () => {
-  it('rejects a snapshot without an id, time or data', () => {
-    expect(validateDataSnapshot({ id: '../x', fetchedAt: 'yesterday' })).toEqual([
+  it('rejects a snapshot without an id, version, time or data', () => {
+    expect(validateDataSnapshot({ id: '../x', version: -1, fetchedAt: 'yesterday' })).toEqual([
       'snapshot id "../x" is not a valid id',
+      'snapshot version must be a whole number, 0 or more',
       'snapshot fetchedAt must be an ISO 8601 time',
       'snapshot has no data',
     ]);
+  });
+
+  it('carries the seq epoch and the clock both ways', () => {
+    const r = validSyncRequest() as unknown as Record<string, unknown>;
+    r.epoch = '../e';
+    r.clock = { offsetMs: 'far', trusted: 1 };
+    r.snapshots = { feed: '2026-11-17T13:00:00Z' };
+    expect(validateSyncRequest(r)).toEqual([
+      'epoch must be a valid id',
+      'clock needs offsetMs and whether the screen trusts it',
+      'snapshots: "feed" must be a source id with a version number',
+    ]);
+    expect(validateSyncResponse({ ...validSyncResponse(), epoch: undefined })).toEqual(['epoch must be a valid id']);
   });
 
   it('rejects a sync request with bad counts', () => {

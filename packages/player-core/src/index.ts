@@ -102,11 +102,22 @@ export function displayOn(hours: DisplayHours | undefined, t: LocalTime): boolea
 
 const LEVEL: Record<TargetLevel, number> = { org: 0, group: 1, screen: 2 };
 
+/**
+ * Whether `now` is inside an entry's absolute bounds. On a clock the screen does not trust, an entry
+ * with either bound never applies: better a takeover missed than one that never ends.
+ */
+export function withinBounds(e: ScheduleEntry, now: Date, clockTrusted = true): boolean {
+  if (e.startsAt === undefined && e.endsAt === undefined) return true;
+  if (!clockTrusted) return false;
+  const ms = now.getTime();
+  return !(e.startsAt !== undefined && ms < Date.parse(e.startsAt)) && !(e.endsAt !== undefined && ms >= Date.parse(e.endsAt));
+}
+
 /** Highest priority wins; on a tie the more specific target wins; otherwise the default playlist. */
-export function resolvePlaylist(manifest: ScreenManifest, now: Date): Playlist {
+export function resolvePlaylist(manifest: ScreenManifest, now: Date, { clockTrusted = true } = {}): Playlist {
   const t = localTime(now, manifest.screen.timezone);
   const live = manifest.schedule
-    .filter((e) => entryApplies(e, t) && manifest.playlists[e.playlist])
+    .filter((e) => withinBounds(e, now, clockTrusted) && entryApplies(e, t) && manifest.playlists[e.playlist])
     .sort((a, b) => b.priority - a.priority || LEVEL[b.target] - LEVEL[a.target] || a.id.localeCompare(b.id));
   const id = live[0]?.playlist ?? manifest.defaultPlaylist;
   const playlist = manifest.playlists[id];

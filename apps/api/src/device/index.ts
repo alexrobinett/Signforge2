@@ -28,7 +28,16 @@ export const device = new Hono<DeviceEnv>();
 
 // The player runs on the device's own origin and sends a bearer header, never cookies, so any
 // origin may read these responses: without the credential they are all 401.
-device.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST'], allowHeaders: ['authorization', 'if-none-match', 'content-type'], exposeHeaders: ['etag'], maxAge: 86400 }));
+device.use(
+  '*',
+  cors({
+    origin: '*',
+    allowMethods: ['GET', 'POST'],
+    allowHeaders: ['authorization', 'if-none-match', 'content-type'],
+    exposeHeaders: ['etag'],
+    maxAge: 86400,
+  }),
+);
 device.use('*', deviceAuth);
 
 device.get('/manifest.json', async (c) => {
@@ -75,6 +84,7 @@ device.get('/data/:file', async (c) => {
   if (!manifests.some((m) => m.dataSources.has(id))) return notFound('data source not found');
   const snap = await scoped(c.env.DB, screen.orgId).dataSources.snapshot(id);
   if (!snap) return notFound('no snapshot yet');
-  const body: DataSnapshot = { id, fetchedAt: new Date(snap.fetchedAt).toISOString(), data: JSON.parse(snap.dataJson) };
+  // The stored version is a hash, for telling whether data changed; a screen orders snapshots by the fetch time.
+  const body: DataSnapshot = { id, version: snap.fetchedAt, fetchedAt: new Date(snap.fetchedAt).toISOString(), data: JSON.parse(snap.dataJson) };
   return c.json(body, 200, { 'cache-control': 'no-store' });
 });

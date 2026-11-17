@@ -2,7 +2,7 @@
 // (packages/cli/src/template-push.ts): every template in templates/ becomes an approved base
 // template, read back through the CMS's tool route; the server's checks reject what the build
 // would; versions are immutable; org templates stay in their org.
-import type { TemplateManifest } from '@signforge/contract';
+import { PROTOCOL_VERSION, type TemplateManifest } from '@signforge/contract';
 import { pushTemplate, TemplatePushError, type TemplatePushOptions } from '@signforge/cli/template-push';
 import { platform, scoped } from '@signforge/db';
 import { env, exports } from 'cloudflare:workers';
@@ -13,14 +13,23 @@ import { Client, email, testApp } from './client';
 const TOKEN = 'test-admin-token'; // vitest.config.ts
 const API = 'https://api.test';
 
-interface Built { dir: string; manifest: TemplateManifest; html: string; sources: Record<string, string>; problems: string[] }
+interface Built {
+  dir: string;
+  manifest: TemplateManifest;
+  html: string;
+  sources: Record<string, string>;
+  problems: string[];
+}
 const BUILDS = JSON.parse(env.TEMPLATE_BUILDS) as Built[];
 
 const viaWorker = (url: string, init?: RequestInit) => exports.default.fetch(url, init);
 const push = (b: Pick<Built, 'manifest' | 'html' | 'sources'>, extra: Partial<TemplatePushOptions> = {}) =>
   pushTemplate({ api: API, token: TOKEN, owner: 'base', manifest: b.manifest, html: b.html, sources: b.sources, fetch: viaWorker, ...extra });
 const rejection = async (p: Promise<unknown>) => {
-  const err = await p.then(() => undefined, (e: unknown) => e);
+  const err = await p.then(
+    () => undefined,
+    (e: unknown) => e,
+  );
   expect(err).toBeInstanceOf(TemplatePushError);
   return (err as Error).message;
 };
@@ -69,7 +78,14 @@ describe('sf template seed', () => {
   it("appear in every org's catalogue as approved base templates, with their check reports", async () => {
     const res = await member.tool('list_templates', { status: 'approved' });
     expect(res.status).toBe(200);
-    const { templates } = (await res.json()) as { templates: { id: string; owner: string; key: string; versions: { id: string; key: string; status: string; manifest: TemplateManifest; checkReport: { ok: boolean; checks: unknown[] } }[] }[] };
+    const { templates } = (await res.json()) as {
+      templates: {
+        id: string;
+        owner: string;
+        key: string;
+        versions: { id: string; key: string; status: string; manifest: TemplateManifest; checkReport: { ok: boolean; checks: unknown[] } }[];
+      }[];
+    };
     expect(templates.map((x) => x.key).sort()).toEqual(BUILDS.map((b) => b.manifest.id).sort());
     for (const x of templates) {
       expect(x.owner).toBe('base');
@@ -79,7 +95,7 @@ describe('sf template seed', () => {
     }
     const weather = templates.find((x) => x.key === 'weather')!;
     const got = (await (await member.tool('get_template', { templateId: weather.id })).json()) as { template: { versions: { manifest: TemplateManifest }[] } };
-    expect(got.template.versions[0]!.manifest).toMatchObject({ id: 'weather', orientations: expect.any(Array), protocol: 1 });
+    expect(got.template.versions[0]!.manifest).toMatchObject({ id: 'weather', orientations: expect.any(Array), protocol: PROTOCOL_VERSION });
 
     // Readable, not changeable, by an org.
     const retire = await member.tool('set_template_version_status', { templateVersionId: weather.versions[0]!.id, status: 'retired' });
@@ -103,7 +119,7 @@ describe("the server's checks", () => {
   });
 
   it('refuse an existing version with different bytes', async () => {
-    const message = await rejection(push(card({ id: 'clock', version: '1.0.0', css: 'h1{color:red}' })));
+    const message = await rejection(push(card({ id: 'clock', version: BUILDS.find((b) => b.dir === 'clock')!.manifest.version, css: 'h1{color:red}' })));
     expect(message).toMatch(/409/);
     expect(message).toMatch(/bump the version/);
   });

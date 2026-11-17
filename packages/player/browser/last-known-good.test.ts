@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MANIFEST_SCHEMA } from '@signforge/contract';
 import type { Player } from './harness';
 import { useHarness } from './harness';
 
@@ -77,9 +78,9 @@ describe('last known good', () => {
         { id: 'a', durationMs: 600 },
         { id: 'b', durationMs: 600 },
       ],
-      { schema: 1 },
+      { schema: MANIFEST_SCHEMA - 1 },
     );
-    expect(old.manifest.schema).toBe(1);
+    expect(old.manifest.schema).toBe(MANIFEST_SCHEMA - 1);
     const p = await h.openPlayer((s) => s.publish(old));
     await p.until((s) => s.log.length >= 1);
 

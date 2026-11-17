@@ -429,6 +429,9 @@ importers:
         specifier: workspace:*
         version: link:../player-core
     devDependencies:
+      '@signforge/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../template-sdk

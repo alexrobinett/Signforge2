@@ -139,7 +139,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
 - Secrets stay off URLs. The screen's credential and the supervisor's token are handed to the page by the supervisor over loopback, only to the player's own origin. A template frame can read its parent's URL, so nothing secret goes there.
 - The same local origin is what makes a web-page spot on a public site unable to reach the device: Chromium blocks public pages from requesting loopback.
 
-**Clock.** A Pi has no battery-backed clock, and the schedule and display hours run on it. The player keeps the offset from the last sync's server time, persists it, and uses corrected time everywhere it reads the clock. Large drift is reported.
+**Clock.** A Pi has no battery-backed clock, and the schedule and display hours run on it. The player keeps the offset from the last sync's server time, persists it, and uses corrected time everywhere it reads the clock. Large drift is reported. The rules, including what a screen does when it cannot trust its clock, are in `architecture.md` (Player, Clock); a sync's `seq` carries an `epoch` so a screen that lost its counter is not ignored.
 
 **Display power**
 - **Hours.** Display hours are part of the screen's manifest, so a change is a publish and works offline. The player already enforces them (see `architecture.md`).
@@ -221,7 +221,7 @@ Each slice ends with something working on the real Pi.
 - Better Auth's OAuth provider is the least-proven piece; Better Auth on D1 is proven for sign-in and organizations, but runs multi-step flows without a transaction.
 - An API deploy resets any screen Durable Object that is awake at the time, and a Cloudflare incident can drop every socket at once; reconnects need jitter.
 - R2 is not enabled on the account yet. It is enabled in the dashboard, and nothing that stores files can deploy until it is.
-- The contract has no expiry instant on a schedule entry, so a takeover is compiled into a dated window and capped under 24 hours, rather than changing the contract.
+- A takeover ends at an absolute instant (`ScheduleEntry.endsAt`, manifest schema 3). A schema-2 player ignores it, so a takeover published to a screen still on schema 2 must also be compiled into a dated window.
 
 ## Open questions
 

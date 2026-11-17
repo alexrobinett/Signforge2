@@ -347,7 +347,7 @@ async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
           : src.format === 'rss'
             ? normaliseFeed('rss', body)
             : JSON.parse(body);
-      const snapshot: DataSnapshot = { id, fetchedAt: now.toISOString(), data };
+      const snapshot: DataSnapshot = { id, version: now.getTime(), fetchedAt: now.toISOString(), data };
       writeFileSync(join(outDir, `${id}.json`), JSON.stringify(snapshot));
       const count =
         src.format === 'ical' ? `${(data as CalendarFeed).events.length} events` : src.format === 'rss' ? `${(data as NewsFeed).items.length} items` : 'json';

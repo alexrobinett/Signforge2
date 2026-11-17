@@ -108,6 +108,7 @@ The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) ar
 - The server nudges connected screens that a new manifest exists. Screens that were offline catch up when they reconnect.
 - The player downloads and verifies every file, then switches to the new manifest in one step. A partial download is never played.
 - The player evaluates the schedule on its own clock, so a timed changeover happens with the network down.
+- A takeover ends at an absolute instant (`endsAt` on its schedule entry, manifest schema 3), not after a duration, so it ends on time offline and in any time zone.
 - Manifests carry a schema number. A player release plays schema N and N−1, and the server compiles each screen at the newest schema its player reports, so a screen updated while offline still plays the manifest it cached under the previous release.
 - Data source snapshots are pushed to screens separately from manifests. Offline, a screen shows the last good value. A snapshot that is malformed, or that fits none of the fields bound to it, never becomes the last good value; a bound value that does not fit its field leaves the spot's static fallback on screen. Refusals are counted per source (`__sf.dataRejected` on the player).
 
@@ -125,6 +126,12 @@ The web player owns all content concerns and runs unchanged in any browser, incl
 - **Display hours**, set per screen: weekly hours plus dated exceptions such as holidays. The player evaluates them on its own clock like the schedule, so they work offline. Outside them the player stops drawing, keeps syncing, and asks the device supervisor to power the panel down. After powering the panel back on it waits 3 seconds before the first spot, so the panel has locked onto the signal and the intro is seen.
 - **Pairing**: an unpaired screen shows a short code. A user enters it in the CMS and assigns the screen to an org. The screen receives its own credential, which the CMS can revoke.
 - **Reporting**: heartbeat with player version, manifest version and cache state. Play logs are recorded locally and uploaded in batches.
+- **Clock**: a Pi has no battery-backed clock, so the player keeps its own correction. The rules, built in M3-07:
+  - Each sync measures `offsetMs` (server time minus device time) and persists it with the corrected time it was measured at (`syncedAt`). Corrected time is device time plus `offsetMs`, and it is what the schedule, display hours, play counts and templates (`clock` in `init`, `now()` in the SDK) read.
+  - While running, a jump in the device clock (it moves against `performance.now()` by more than 2 seconds, as when NTP steps it) is folded into `offsetMs`, so corrected time stays continuous until the next sync.
+  - At start, before a sync: the persisted offset is used, but the clock is **not trusted** if the corrected time is earlier than `syncedAt` (time went backwards: a reboot without a clock) or earlier than the player's build time. With no persisted offset, the same build-time floor applies.
+  - On an untrusted clock the screen keeps playing: the schedule's local windows still apply, but entries with absolute bounds (takeovers) do not (`resolvePlaylist` with `clockTrusted: false`), the display stays on whatever its hours say, and plays are not counted, since their hour is unknown. The first good sync makes it trusted again. Each sync reports `clock: { offsetMs, trusted }`.
+- **Play counts** are sent with a `seq` until acknowledged. A screen that loses its counter (re-imaged, storage cleared) makes a new random `epoch` and starts again at 1; the server keeps the highest acknowledged `seq` per epoch, so a repeat is ignored and a fresh counter is not.
 
 ### Video
 

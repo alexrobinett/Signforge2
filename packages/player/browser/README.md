@@ -34,6 +34,7 @@ Testing-only query options the tests use: `?poll=<s>`, `?stall=<s>` (the downloa
 | `files.test.ts` | A spot preparing under a replaced manifest keeps its files and plays, and they are dropped afterwards; a file whose hash does not match is never stored or used; a 64 MB file downloads with flat memory (JS heap plus ArrayBuffer backing stores of the page and of the download worker, read over CDP) |
 | `data.test.ts` | Live data: values that fit replace the fallback; a value of the wrong type, the wrong shape, with too many list rows, or missing at its path leaves the fallback on screen and is counted against its source; a snapshot that fits no bound field is not kept as the latest, in memory or on disk |
 | `sdk.test.ts` | The SDK on its own: `loaded` → `init` → `ready` with data bound and animations held, `play` starts them; an error in `prepare` is reported; a `prepare` that never finishes never reports ready |
+| `templates.test.ts` | Every template in `templates/`, built by `sf build`'s builder: new data after the first `init` (with `reset`, and without) leaves the same document as a fresh load; clock, agenda and news show the time from `init`'s clock |
 
 Protocol 1 has no `done` message: a spot ends when the player moves on.
 
