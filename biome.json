@@ -1,0 +1,42 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "master" },
+  "files": {
+    "includes": ["**", "!**/worker-configuration.d.ts", "!**/routeTree.gen.ts", "!packages/cli/test/golden", "!spike/pi-perf", "!spike/rive-promo"]
+  },
+  "formatter": { "includes": ["**", "!**/*.md"], "indentStyle": "space", "indentWidth": 2, "lineWidth": 160 },
+  "javascript": { "formatter": { "quoteStyle": "single" } },
+  "css": { "parser": { "tailwindDirectives": true } },
+  "assist": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "noNonNullAssertion": "off",
+        "useTemplate": "off"
+      },
+      "complexity": { "noCommaOperator": "off" },
+      "correctness": { "noVoidTypeReturn": "off" },
+      "suspicious": {
+        "noAssignInExpressions": "off",
+        "useIterableCallbackReturn": "off",
+        "noUndeclaredEnvVars": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/test/**", "**/*.test.ts", "**/*.test.tsx", "**/e2e/**"],
+      "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } }
+    },
+    {
+      "includes": ["packages/tools/src/**"],
+      "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } }
+    },
+    {
+      "includes": ["examples/**", "templates/**", "apps/cms/public/**"],
+      "linter": { "rules": { "a11y": { "noSvgWithoutTitle": "off" } } }
+    }
+  ]
+}

@@ -5,6 +5,9 @@
   "scripts": {
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "lint": "biome lint .",
+    "format": "biome format --write --changed --no-errors-on-unmatched",
+    "format:check": "biome format --changed --no-errors-on-unmatched",
     "build:player": "pnpm --filter @signforge/player build",
     "build:content": "tsx packages/cli/src/sf.ts build examples/demo --out dist/content",
     "seed:templates": "tsx packages/cli/src/sf.ts template seed templates",
@@ -12,6 +15,7 @@
     "deploy:pi": "sh scripts/deploy-pi.sh"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.5",
     "tsx": "^4.23.15",
     "turbo": "^2.11.11",
     "typescript": "^7.0.2",
