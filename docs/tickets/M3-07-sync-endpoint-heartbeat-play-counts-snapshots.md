@@ -21,6 +21,7 @@ One periodic HTTP call that carries everything chatty, so the socket stays silen
 - Play counts per UTC hour (`PlayCount`), persisted in Cache Storage, sent with `seq` until `ackSeq` covers them; the server ignores a repeated `seq`.
 - Clock: keep the offset from `serverTime`, persist it, and read corrected time everywhere the player uses `new Date()` (schedule, display hours, play counts).
 - Report supported manifest schemas and protocols (`SUPPORTED_MANIFEST_SCHEMAS`, `SUPPORTED_PROTOCOLS`); the server sends `reload` when a screen's player cannot play what it compiles.
+- `play_counts` (M3-02) is keyed on screen, hour and spot, with no manifest column, while the contract's `PlayCount` carries `manifest`. Decide: add the column in a migration, or drop the field from the contract in its own commit.
 
 ## Out of scope
 

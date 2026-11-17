@@ -19,6 +19,7 @@ Serve a screen its manifest, files and data snapshots from the Worker, authentic
 - `GET /v1/device/data/:id.json`: latest snapshot for a source the screen's manifest lists.
 - A script that creates a screen and prints a credential, for the Pi until pairing exists.
 - Use the device API types in `packages/contract`; ids follow `ID_PATTERN`.
+- Finding a screen from its credential happens before the org is known: add one narrow lookup inside `packages/db` for it (see `packages/db/README.md`); never export the tables.
 
 ## Out of scope
 
