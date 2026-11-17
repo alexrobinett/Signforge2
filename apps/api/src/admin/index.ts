@@ -55,7 +55,7 @@ const encoder = new TextEncoder();
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 const sha256 = async (data: ArrayBuffer | string) => hex(await crypto.subtle.digest('SHA-256', typeof data === 'string' ? encoder.encode(data) : data));
 
-const fail = (c: Context, status: 400 | 404 | 409 | 500, error: string, extra: Record<string, unknown> = {}) => c.json({ error, ...extra }, status);
+const fail = (c: Context, status: 400 | 404 | 409 | 429 | 500, error: string, extra: Record<string, unknown> = {}) => c.json({ error, ...extra }, status);
 
 /** Where each of a manifest's files lives: base templates' HTML in `sys/b/`, the rest under the org. */
 function fileKeys(m: ScreenManifest, orgId: string): { sha256: string; scope: 'org' | 'base'; key: string }[] {
@@ -177,7 +177,7 @@ const templateCaller = <D extends DataScope>(c: Context<AdminEnv>, org: D): Call
   blobs: c.env.BLOBS,
 });
 
-const STATUS = { invalid_input: 400, not_found: 404, conflict: 409, forbidden: 500, unknown_tool: 500 } as const;
+const STATUS = { invalid_input: 400, not_found: 404, conflict: 409, rate_limited: 429, forbidden: 500, unknown_tool: 500 } as const;
 const refused = (c: Context, r: Extract<DispatchResult, { ok: false }>) => {
   const problems = Array.isArray(r.details)
     ? r.details.map((d: { path?: string; message?: string }) => (d.path ? `${d.path}: ${d.message}` : String(d.message)))
