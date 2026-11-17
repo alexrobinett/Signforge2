@@ -95,7 +95,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 - A crawl or ticker is one strip of text holding its content twice, sliding left by exactly one copy. It loops seamlessly and costs nothing measurable.
 
 **Isolation**
-- No network. The template runs in a sandboxed frame under a policy that blocks every request. Scripts and styles must be inline after the build, and images arrive from the player.
+- No network. The template runs in a sandboxed frame under a policy that blocks every request, including navigating its own frame: a template that tries is stopped and its spot is skipped. Scripts and styles must be inline after the build, and images arrive from the player.
 - No storage, cookies or access to anything outside its own frame.
 - Fonts ship inside the bundle. Reference a font file from `style.css` and the build inlines it. Use a font you are licensed to redistribute.
 - Data is fixed for one play. New values arrive with the next `init`.

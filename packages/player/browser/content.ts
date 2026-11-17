@@ -5,10 +5,18 @@
 import { createHash } from 'node:crypto';
 import { MANIFEST_SCHEMA, PROTOCOL_VERSION, manifestIdInput, type ScreenManifest, type Spot, type TemplateManifest, type Transition } from '@signforge/contract';
 
+/** How the fixture template behaves; see `fixtures/template.ts`. */
+export type FixtureMode =
+  | 'ok' | 'throw' | 'hang'
+  // Hostile: each tries to reach `target`.
+  | 'navigate' | 'navigate-on-play' | 'navigate-data' | 'navigate-top' | 'refresh' | 'link' | 'form' | 'open' | 'iframe' | 'fetch' | 'image' | 'font';
+
 export interface FixtureSpot {
   id: string;
   /** How the fixture template behaves for this spot. */
-  mode?: 'ok' | 'throw' | 'hang';
+  mode?: FixtureMode;
+  /** For the hostile modes: the URL the template tries to reach. */
+  target?: string;
   /** Shown by the template. Defaults to the id. */
   label?: string;
   durationMs?: number;
@@ -27,7 +35,7 @@ const templateManifest: TemplateManifest = {
   id: 'fixture',
   version: '1.0.0',
   name: 'Fixture',
-  fields: { label: { type: 'text', label: 'Label' }, mode: { type: 'text', label: 'Mode' } },
+  fields: { label: { type: 'text', label: 'Label' }, mode: { type: 'text', label: 'Mode' }, target: { type: 'text', label: 'Target' } },
   duration: { defaultMs: 1000, minMs: 100, maxMs: 60_000 },
   orientations: ['landscape', 'portrait'],
   uses: [],
@@ -50,7 +58,7 @@ export function buildContent(templateHtml: string, spots: FixtureSpot[], { trans
       kind: 'template',
       template: TEMPLATE_KEY,
       durationMs: s.durationMs ?? 1000,
-      data: { label: s.label ?? s.id, mode: s.mode ?? 'ok' },
+      data: { label: s.label ?? s.id, mode: s.mode ?? 'ok', ...(s.target ? { target: s.target } : {}) },
       assets: {},
     };
   }

@@ -10,9 +10,18 @@ import { getBlob } from './store';
 /** A spot that has not reported ready by this point is skipped. */
 export const READY_TIMEOUT_MS = 2000;
 
-// A template gets no network at all: scripts and styles are inline, media arrives as blobs.
+// A template gets no network at all: scripts and styles are inline, media arrives as blobs. No
+// `frame-src`, so it falls back to `'none'`: the template cannot load a frame or navigate its own.
 const TEMPLATE_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; font-src data:";
+// The document around each template; see `template()`. Its one script is `relay`: templates
+// accept messages only from their `parent`, which is now the wrapper, and a message's source is
+// the window whose code called postMessage. So the player posts through a function of the wrapper.
+const WRAPPER_HTML =
+  `<!doctype html><meta http-equiv="Content-Security-Policy" content="${TEMPLATE_CSP}">` +
+  '<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style>' +
+  "<script>relay=(w,m)=>w.postMessage(m,'*')</script>";
+type Relay = (to: Window, m: HostMessage) => void;
 
 /** Throw if the load was cancelled while it waited. */
 function alive(signal: AbortSignal): void {
@@ -110,24 +119,40 @@ export class Slot {
       this.el.style.background = t.manifest.background;
     }
 
-    const frame = document.createElement('iframe');
+    // The template runs in a wrapper frame the player writes and the template cannot touch. The
+    // wrapper's policy is the template's too: a srcdoc document inherits its parent's, before any
+    // markup of its own runs, and no document can drop a policy it was given. The wrapper's
+    // policy, not the template's, also decides where the template's frame may navigate: nowhere
+    // (`frame-src` falls back to `default-src 'none'`). A template that tries is replaced by an
+    // error page, without a request. See "Template containment" in docs/architecture.md.
+    const wrapper = document.createElement('iframe');
+    wrapper.style.width = `${w}px`;
+    wrapper.style.height = `${h}px`;
+    wrapper.srcdoc = WRAPPER_HTML;
+    const wrapped = new Promise<void>((resolve) => wrapper.addEventListener('load', () => resolve(), { once: true, signal }));
+    this.el.appendChild(wrapper);
+    await wrapped;
+    alive(signal);
+    const win = wrapper.contentWindow as Window & { relay: Relay };
+    const frame = win.document.createElement('iframe');
+    // Scripts only: an opaque origin, so no access to the player, the wrapper or their storage;
+    // no popups, forms, or navigating any frame but its own.
     frame.setAttribute('sandbox', 'allow-scripts');
-    frame.style.width = `${w}px`;
-    frame.style.height = `${h}px`;
-    // The policy goes first, before anything the template wrote, so no markup can run ahead of it.
-    frame.srcdoc = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${TEMPLATE_CSP}">${html.replace(/^\s*<!doctype[^>]*>/i, '')}`;
-    // The policy cannot stop a frame navigating itself. A template that does is blanked.
-    let loads = 0;
-    frame.addEventListener('load', () => {
-      if (++loads > 1) {
-        console.warn(`[sf] template ${spot.template} navigated away; removed`);
-        frame.remove();
-      }
-    }, { signal });
+    frame.srcdoc = html;
 
-    const post = (m: HostMessage) => frame.contentWindow?.postMessage(m, '*');
+    const post = (m: HostMessage) => frame.contentWindow && win.relay(frame.contentWindow, m);
     const ready = new Promise<void>((resolve, reject) => {
-      addEventListener('message', (e: MessageEvent<TemplateMessage>) => {
+      // A second load is a navigation, which the policy turned into an error page. Fail the spot;
+      // if it is already playing, blank it until the next spot.
+      let loads = 0;
+      frame.addEventListener('load', () => {
+        if (++loads < 2) return;
+        console.warn(`[sf] template ${spot.template} navigated away; removed`);
+        wrapper.remove();
+        reject(new Error('template navigated away'));
+      }, { signal });
+      // The template's `parent` is the wrapper, so its messages arrive there.
+      win.addEventListener('message', (e: MessageEvent<TemplateMessage>) => {
         if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
         if (e.data.type === 'loaded') {
           post({ sf: protocol, type: 'init', data: resolveSpotData(spot, liveData), assets, durationMs: spot.durationMs, orientation, viewport: { width: w, height: h }, timezone: manifest.screen.timezone, locale: manifest.screen.locale ?? 'en-US' });
@@ -137,7 +162,7 @@ export class Slot {
       signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
     });
     this.startPlayback = () => post({ sf: protocol, type: 'play' });
-    this.el.appendChild(frame);
+    win.document.body.appendChild(frame);
     await ready;
     alive(signal);
   }
