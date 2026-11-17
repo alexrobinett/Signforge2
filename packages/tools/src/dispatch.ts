@@ -190,6 +190,8 @@ export async function dispatch<D extends DataScope>(
     // A concurrent call with the same key committed first, and this batch failed on its record.
     const prior = await keyed?.find();
     if (prior) return prior;
+    const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data });
+    if (refusal) return fail(refusal.code, refusal.message, refusal.details);
     throw err;
   }
   await tell();

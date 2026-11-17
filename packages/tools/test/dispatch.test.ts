@@ -331,3 +331,23 @@ describe('screen notices', () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe('claim_screen racing', () => {
+  it('refuses the loser of two claims on one code cleanly, writing nothing', async () => {
+    const { startPairing } = await import('@signforge/db');
+    const code = 'RACE23';
+    await startPairing(env.DB, { code, pollTokenHash: '9'.repeat(64), now: Date.now() });
+    const other = await seedOrg(env.DB, 'disp-race');
+    const input = { code, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' };
+    const winner = await dispatch(registry, 'claim_screen', input, { ...caller('editor'), org: scoped(env.DB, other.orgId), rateLimit: async () => true });
+    expect(winner).toMatchObject({ ok: true });
+    // The loser saw the code open just before the winner committed.
+    const org = scoped(env.DB, o.orgId);
+    const before = await org.screens.list();
+    let checks = 0;
+    const stale = { ...org, pairing: { ...org.pairing, open: async (c: string, now: number) => checks++ === 0 || org.pairing.open(c, now) } };
+    const loser = await dispatch(registry, 'claim_screen', input, { ...caller('editor'), org: stale, rateLimit: async () => true });
+    expect(loser).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await org.screens.list()).toEqual(before);
+  });
+});

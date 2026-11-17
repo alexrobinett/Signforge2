@@ -4,10 +4,11 @@
  * functions that need: start a code, and collect the credential once the code is claimed. The
  * claim itself is the org's (`scoped(db, orgId).pairing`, `./scoped.ts`).
  *
- * Collecting writes the screen's first credential, a tenant row, outside `scoped`: the org is the
- * one the claim stored on the code, never one the screen names, and nothing else is written.
+ * Collecting writes the screen's credential through `scoped(db, org)`, where the org is the one
+ * the claim stored on the code, never one the screen names.
  */
 import { newId } from './ids';
+import { scoped } from './scoped';
 
 /** How long a code can be claimed. */
 export const PAIRING_TTL_MS = 15 * 60_000;
@@ -36,10 +37,14 @@ export async function startPairing(d1: D1Database, v: { code: string; pollTokenH
 }
 
 /**
- * The screen's poll. Before a claim: waiting, or expired once its time is up. After one: mints the
- * credential with `mint(screenId)`, stores its hash for the claimed screen and deletes the code in
- * one batch, and returns the credential. Only the first of two racing polls gets it. An unknown
- * token is expired.
+ * The screen's poll. Before a claim: waiting, or expired once its time is up. After one: mints a
+ * credential with `mint(screenId)`, stores its hash for the claimed screen (through the claimed
+ * org's scope) and returns it.
+ *
+ * A reply can be lost, and a screen that never got its credential would be orphaned: so a repeat
+ * poll mints a fresh credential and replaces the earlier one, as long as that one was never used
+ * (device auth marks first use) and the first collect was under `PAIRING_TTL_MS` ago. After that,
+ * or for an unknown token, the answer is expired. At most one credential from a code is live.
  */
 export async function collectPairing(
   d1: D1Database,
@@ -47,22 +52,41 @@ export async function collectPairing(
   now: number,
   mint: (screenId: string) => Promise<{ credential: string; secretHash: string }>,
 ): Promise<PairingCollected> {
-  const row = await d1
-    .prepare('SELECT id, expires_at AS expiresAt, claimed_screen_id AS screenId FROM pairing_codes WHERE poll_token_hash = ?')
-    .bind(pollTokenHash)
-    .first<{ id: string; expiresAt: number; screenId: string | null }>();
-  if (!row) return { status: 'expired' };
-  if (!row.screenId) return row.expiresAt > now ? { status: 'waiting' } : { status: 'expired' };
-
-  const { credential, secretHash } = await mint(row.screenId);
-  const [inserted] = await d1.batch([
-    d1
+  // Twice at most: a collect that lost a race to another poll of the same token tries as a repeat.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const row = await d1
       .prepare(
-        `INSERT INTO screen_credentials (id, org_id, screen_id, secret_hash, created_at)
-         SELECT ?, claimed_org_id, claimed_screen_id, ?, ? FROM pairing_codes WHERE id = ? AND claimed_screen_id = ?`,
+        `SELECT p.id, p.expires_at AS expiresAt, p.claimed_org_id AS orgId, p.claimed_screen_id AS screenId,
+                p.collected_credential_id AS previous, p.collected_at AS collectedAt,
+                c.id AS previousLive, c.last_used_at AS previousUsedAt
+         FROM pairing_codes p LEFT JOIN screen_credentials c ON c.org_id = p.claimed_org_id AND c.id = p.collected_credential_id
+         WHERE p.poll_token_hash = ?`,
       )
-      .bind(newId('crd'), secretHash, now, row.id, row.screenId),
-    d1.prepare('DELETE FROM pairing_codes WHERE id = ?').bind(row.id),
-  ]);
-  return inserted?.meta.changes === 1 ? { status: 'paired', screenId: row.screenId, credential } : { status: 'expired' };
+      .bind(pollTokenHash)
+      .first<{
+        id: string;
+        expiresAt: number;
+        orgId: string | null;
+        screenId: string | null;
+        previous: string | null;
+        collectedAt: number | null;
+        previousLive: string | null;
+        previousUsedAt: number | null;
+      }>();
+    if (!row) return { status: 'expired' };
+    if (!row.screenId || !row.orgId) return row.expiresAt > now ? { status: 'waiting' } : { status: 'expired' };
+    if (row.previous && (!row.previousLive || row.previousUsedAt !== null || now - (row.collectedAt ?? 0) >= PAIRING_TTL_MS)) return { status: 'expired' };
+
+    const { credential, secretHash } = await mint(row.screenId);
+    const wrote = await scoped(d1, row.orgId).pairing.collect({
+      codeId: row.id,
+      screenId: row.screenId,
+      previous: row.previous,
+      credentialId: newId('crd'),
+      secretHash,
+      now,
+    });
+    if (wrote) return { status: 'paired', screenId: row.screenId, credential };
+  }
+  return { status: 'expired' };
 }

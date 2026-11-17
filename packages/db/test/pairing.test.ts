@@ -28,7 +28,7 @@ async function claim(orgId: string, code: string, at = T0) {
 }
 
 describe('pairing', () => {
-  it('waits until claimed, then hands over the credential once', async () => {
+  it('waits until claimed, then hands over the credential', async () => {
     const p = fresh();
     expect(await startPairing(env.DB, { ...p, now: T0 })).toBe(true);
     expect(await collectPairing(env.DB, p.pollTokenHash, T0 + 5000, mint)).toEqual({ status: 'waiting' });
@@ -40,11 +40,49 @@ describe('pairing', () => {
     const screen = await findDeviceScreen(env.DB, screenId);
     expect(screen?.orgId).toBe('org-pa');
     expect(screen?.credentials.map((c) => c.secretHash)).toEqual(['c'.repeat(64)]);
-
-    // Once only: the code is gone, and a second poll mints nothing.
-    expect(await collectPairing(env.DB, p.pollTokenHash, T0 + 15_000, mint)).toEqual({ status: 'expired' });
-    expect((await findDeviceScreen(env.DB, screenId))?.credentials).toHaveLength(1);
     expect(await scoped(env.DB, 'org-pb').pairing.open(p.code, T0 + 15_000)).toBe(false);
+  });
+
+  it('survives a lost reply: a repeat poll replaces the unused credential with a fresh one', async () => {
+    const p = fresh();
+    await startPairing(env.DB, { ...p, now: T0 });
+    const screenId = await claim('org-pa', p.code);
+    let k = 0;
+    const counting = (id: string) => {
+      k++;
+      return Promise.resolve({ credential: `sfd_${id}.secret${k}`, secretHash: String(k).repeat(64) });
+    };
+    expect(await collectPairing(env.DB, p.pollTokenHash, T0 + 1000, counting)).toMatchObject({ status: 'paired', credential: `sfd_${screenId}.secret1` });
+    // The reply never arrived; the screen polls again.
+    expect(await collectPairing(env.DB, p.pollTokenHash, T0 + 2000, counting)).toEqual({ status: 'paired', screenId, credential: `sfd_${screenId}.secret2` });
+    // Only the latest credential works.
+    expect((await findDeviceScreen(env.DB, screenId))?.credentials.map((c) => c.secretHash)).toEqual(['2'.repeat(64)]);
+
+    // Once the screen has used it, a repeat poll is refused and replaces nothing.
+    const [held] = (await findDeviceScreen(env.DB, screenId))!.credentials;
+    expect(held?.used).toBe(false);
+    await scoped(env.DB, 'org-pa').screens.credentials.markUsed(held!.id, T0 + 3000);
+    expect((await findDeviceScreen(env.DB, screenId))?.credentials[0]?.used).toBe(true);
+    expect(await collectPairing(env.DB, p.pollTokenHash, T0 + 4000, counting)).toEqual({ status: 'expired' });
+    expect((await findDeviceScreen(env.DB, screenId))?.credentials.map((c) => c.secretHash)).toEqual(['2'.repeat(64)]);
+  });
+
+  it('stops re-minting 15 minutes after the first collect, even unused', async () => {
+    const p = fresh();
+    await startPairing(env.DB, { ...p, now: T0 });
+    const screenId = await claim('org-pa', p.code);
+    expect(await collectPairing(env.DB, p.pollTokenHash, T0 + 1000, mint)).toMatchObject({ status: 'paired' });
+    expect(await collectPairing(env.DB, p.pollTokenHash, T0 + 1000 + PAIRING_TTL_MS, mint)).toEqual({ status: 'expired' });
+    expect((await findDeviceScreen(env.DB, screenId))?.credentials).toHaveLength(1);
+  });
+
+  it('mints one credential when two first polls race', async () => {
+    const p = fresh();
+    await startPairing(env.DB, { ...p, now: T0 });
+    const screenId = await claim('org-pa', p.code);
+    const results = await Promise.all([1, 2].map(() => collectPairing(env.DB, p.pollTokenHash, T0 + 1000, mint)));
+    expect(results.some((r) => r.status === 'paired')).toBe(true);
+    expect((await findDeviceScreen(env.DB, screenId))?.credentials).toHaveLength(1);
   });
 
   it('expires an unclaimed code after 15 minutes, for the screen and for a claim', async () => {

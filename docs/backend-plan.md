@@ -35,7 +35,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 | `screens` | name, timezone, locale, orientation, `display_hours_json`, `desired_manifest_id`, `previous_manifest_id` (whose files stay servable while a screen switches), `reported_manifest_id`, last seen, player version, status |
 | `screen_groups`, `screen_group_members` | |
 | `screen_credentials` | screen, secret hash, last used, revoked at |
-| `pairing_codes` | code, poll-token hash, expires at, claimed org and screen |
+| `pairing_codes` | code, poll-token hash, expires at, claimed org and screen, collected credential |
 | `assets`, `asset_renditions` | kind, sha256, type, size, width, height, duration, status (pending, verified, rejected); landscape and portrait renditions |
 | `templates`, `template_versions` | null org means a base template; version, manifest, bundle sha, status (draft, approved, retired), check report |
 | `spots` | kind, template version, data, asset map, bindings, duration, plus the image, video or URL fields; the published version (see Publishing) |
@@ -90,8 +90,8 @@ The per-org prefix keeps one org from probing whether another holds a file, and 
 **Pairing** (M3-08: `apps/api/src/device/pairing.ts`, `packages/db/src/pairing.ts`, the `claim_screen` tool)
 1. The screen calls `pair/start` and receives a 6-character code (32 letters and digits without 0/O or 1/I, about a billion codes) and a secret poll token, valid 15 minutes. Only the token's hash is stored.
 2. It shows the code and polls every 5 seconds.
-3. A member (editor or owner) claims the code with `claim_screen`, giving name, time zone, orientation and optionally locale and display hours; the CMS form is M3-11, and groups are set after with the group tools. The claim creates the screen and binds the code in one batch, which fails, writing nothing, if another claim got the code first or it expired. An unknown, expired and claimed code get the same answer.
-4. The next poll mints the credential, stores its hash for the claimed screen and deletes the code in one batch, and returns the credential once. A second poll gets `expired`.
+3. A member (editor or owner) claims the code with `claim_screen`, giving name, time zone, orientation and optionally locale and display hours; the CMS form is M3-11, and groups are set after with the group tools. The claim creates the screen and binds the code in one batch, which fails, writing nothing, if another claim got the code first or it expired; the loser gets the same `not_found` as for a code that was never open (`refuseFailedCommit`). An unknown, expired and claimed code get the same answer.
+4. The next poll mints the credential, stores its hash for the claimed screen and records it on the code in one batch, and returns it. A reply can be lost, so a repeat poll mints a fresh credential and replaces the earlier one while that one is unused (device auth records a credential's first use in `last_used_at`) and the first collect was under 15 minutes ago; after that a poll gets `expired`. At most one credential from a code is live.
 
 Rate limits (Workers rate limiting bindings, per Cloudflare location, a minute's window): `pair/start` 10 per address, `pair/poll` 600 per address (a shop of screens behind one address polls 12 times a minute each), and claims 10 per member and 10 per address, counted right or wrong, before the code is looked at (`apps/api/test/pairing.test.ts`). With 10 codes open at once, 10 guesses a minute find one about once in 20 years per member and address (10^9 / 100 minutes); many accounts on one address share its 10, so guessing faster takes many addresses as well as many accounts, and each guess needs a signed-in member. A claim over the limit is `429 rate_limited`. Codes past their time are swept by the next `pair/start`, claimed ones uncollected after a day.
 
@@ -129,7 +129,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | Route | Purpose |
 | --- | --- |
 | `POST /v1/device/pair/start` | Get a code and poll token (no credential; rate limited) |
-| `POST /v1/device/pair/poll` | `{ pollToken }`: waiting, expired, or the credential, once (no credential; rate limited) |
+| `POST /v1/device/pair/poll` | `{ pollToken }`: waiting, expired, or the credential (a fresh one on a repeat poll until the first is used; no credential; rate limited) |
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
 | `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
 | `GET /v1/device/data/:id.json` | Snapshot of one source. Only sources the screen's manifest lists. The player takes snapshots from the sync; this route is for debugging and tools. |

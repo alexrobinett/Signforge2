@@ -247,6 +247,18 @@ export function scoped(d1: D1Database, orgId: string) {
             .where(and(eq(s.screenCredentials.orgId, orgId), eq(s.screenCredentials.screenId, screenId)))
             .orderBy(asc(s.screenCredentials.createdAt))
             .all(),
+        /**
+         * Record a credential's first use (device auth calls this once per credential, when
+         * `findDeviceScreen` says it is unused). A used credential is never replaced by a repeat
+         * pairing poll.
+         */
+        markUsed: async (credentialId: string, now: number) => {
+          await db
+            .update(s.screenCredentials)
+            .set({ lastUsedAt: now })
+            .where(and(eq(s.screenCredentials.orgId, orgId), eq(s.screenCredentials.id, credentialId), isNull(s.screenCredentials.lastUsedAt)))
+            .run();
+        },
       },
       /**
        * Make `manifestId` the screen's desired manifest. The one it replaces becomes the previous
@@ -359,6 +371,38 @@ export function scoped(d1: D1Database, orgId: string) {
               .from(s.organization)
               .where(eq(s.organization.id, orgId)),
           ),
+      },
+      /**
+       * A screen collecting the credential for a code this org claimed (`collectPairing`,
+       * ./pairing.ts, which finds the code by poll token and makes this scope from the org the
+       * claim stored). Stores `secretHash` as the screen's credential `credentialId`, replacing
+       * `previous` (the credential an earlier collect of this code stored) if that one is still
+       * unused. One batch, every step guarded on the code still naming `previous`, so of two
+       * racing collects one writes and the other changes nothing. Returns whether it wrote.
+       */
+      collect: async (v: { codeId: string; screenId: string; previous: string | null; credentialId: string; secretHash: string; now: number }) => {
+        assertId(v.credentialId);
+        const code = 'SELECT 1 FROM pairing_codes WHERE id = ? AND claimed_org_id = ? AND claimed_screen_id = ? AND collected_credential_id IS ?';
+        const codeArgs = [v.codeId, orgId, v.screenId, v.previous];
+        const [, inserted] = await d1.batch([
+          d1
+            .prepare(`DELETE FROM screen_credentials WHERE org_id = ? AND id = ? AND last_used_at IS NULL AND revoked_at IS NULL AND EXISTS (${code})`)
+            .bind(orgId, v.previous, ...codeArgs),
+          d1
+            .prepare(
+              `INSERT INTO screen_credentials (id, org_id, screen_id, secret_hash, created_at)
+               SELECT ?, ?, ?, ?, ? WHERE EXISTS (${code}) AND NOT EXISTS (SELECT 1 FROM screen_credentials WHERE org_id = ? AND id IS ?)`,
+            )
+            .bind(v.credentialId, orgId, v.screenId, v.secretHash, v.now, ...codeArgs, orgId, v.previous),
+          d1
+            .prepare(
+              `UPDATE pairing_codes SET collected_credential_id = ?, collected_at = coalesce(collected_at, ?)
+               WHERE id = ? AND claimed_org_id = ? AND claimed_screen_id = ? AND collected_credential_id IS ?
+                 AND EXISTS (SELECT 1 FROM screen_credentials WHERE org_id = ? AND id = ?)`,
+            )
+            .bind(v.credentialId, v.now, ...codeArgs, orgId, v.credentialId),
+        ]);
+        return inserted?.meta.changes === 1;
       },
     },
 

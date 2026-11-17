@@ -17,7 +17,7 @@ export interface DeviceScreen {
   desiredManifestId: string | null;
   previousManifestId: string | null;
   /** Each credential that is not revoked, with the hex SHA-256 of its secret. Empty if the screen is revoked. */
-  credentials: { id: string; secretHash: string }[];
+  credentials: { id: string; secretHash: string; /** Whether a request has authenticated with it yet. */ used: boolean }[];
 }
 
 /**
@@ -37,6 +37,7 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       previousManifestId: sc.previousManifestId,
       credentialId: cr.id,
       secretHash: cr.secretHash,
+      lastUsedAt: cr.lastUsedAt,
     })
     .from(sc)
     .leftJoin(cr, and(eq(cr.orgId, sc.orgId), eq(cr.screenId, sc.id), isNull(cr.revokedAt)))
@@ -50,6 +51,6 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
     desiredManifestId: first.desiredManifestId,
     previousManifestId: first.previousManifestId,
     credentials:
-      first.status === 'active' ? rows.flatMap((r) => (r.credentialId && r.secretHash ? [{ id: r.credentialId, secretHash: r.secretHash }] : [])) : [],
+      first.status === 'active' ? rows.flatMap((r) => (r.credentialId && r.secretHash ? [{ id: r.credentialId, secretHash: r.secretHash, used: r.lastUsedAt !== null }] : [])) : [],
   };
 }

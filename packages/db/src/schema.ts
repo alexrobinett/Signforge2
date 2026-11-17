@@ -263,6 +263,12 @@ export const pairingCodes = sqliteTable(
     claimedOrgId: text('claimed_org_id'),
     claimedScreenId: text('claimed_screen_id'),
     claimedAt: integer('claimed_at'),
+    /**
+     * The credential the screen last collected, and when it first collected one. A repeat poll
+     * (the reply was lost) replaces that credential while it is unused (M3 review fix 2).
+     */
+    collectedCredentialId: text('collected_credential_id'),
+    collectedAt: integer('collected_at'),
     createdAt: created(),
   },
   (t) => [

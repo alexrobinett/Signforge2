@@ -45,7 +45,7 @@ beforeAll(async () => {
 });
 
 describe('pairing', () => {
-  it('a claimed code gives the screen its credential once, and the credential works', async () => {
+  it('a claimed code gives the screen its credential, and the credential works', async () => {
     const p = await start();
     expect(p.code).toMatch(CODE);
     const ttl = Date.parse(p.expiresAt) - Date.now();
@@ -60,14 +60,20 @@ describe('pairing', () => {
     expect(res.status, JSON.stringify(claimed)).toBe(200);
     expect(claimed.screen).toMatchObject({ name: 'Lobby', timezone: 'Europe/London', status: 'active' });
 
+    // The first reply is lost: the repeat poll gets a fresh credential, and the lost one is dead.
+    const lost = (await poll(p)) as { status: string; credential: string };
+    expect(lost).toMatchObject({ status: 'paired', screenId: claimed.screen.id });
     const paired = await poll(p);
     expect(paired).toMatchObject({ status: 'paired', screenId: claimed.screen.id });
-    expect(await poll(p)).toEqual({ status: 'expired' });
-
     const credential = (paired as { credential: string }).credential;
-    const manifest = await exports.default.fetch(`${BASE}/manifest.json`, { headers: { authorization: `Bearer ${credential}` } });
+    expect(credential).not.toBe(lost.credential);
+    const manifestWith = (cred: string) => exports.default.fetch(`${BASE}/manifest.json`, { headers: { authorization: `Bearer ${cred}` } });
+    expect((await manifestWith(lost.credential)).status).toBe(401);
     // Authenticated: nothing is published yet, which is a 404, not a 401.
-    expect(manifest.status).toBe(404);
+    expect((await manifestWith(credential)).status).toBe(404);
+    // Used now, so a further poll is refused and the credential stays.
+    expect(await poll(p)).toEqual({ status: 'expired' });
+    expect((await manifestWith(credential)).status).toBe(404);
 
     const screen = (await (await owner.tool('get_screen', { screenId: claimed.screen.id })).json()) as { credentials: unknown[] };
     expect(screen.credentials).toHaveLength(1);
