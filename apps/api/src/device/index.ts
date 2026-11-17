@@ -70,7 +70,8 @@ device.get('/blobs/:sha256', async (c) => {
       'content-type': listed.files.get(sha) || obj.httpMetadata?.contentType || 'application/octet-stream',
       'content-length': String(obj.size),
       etag: `"${sha}"`,
-      'cache-control': 'public, max-age=31536000, immutable',
+      // private: the response needs the credential, so no shared cache may keep it.
+      'cache-control': 'private, max-age=31536000, immutable',
     },
   });
 });
