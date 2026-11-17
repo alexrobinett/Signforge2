@@ -1,6 +1,6 @@
 # M3-02 Database package and tenancy guard
 
-Status: open  ·  Size: M  ·  Depends on: M3-01
+Status: done  ·  Size: M  ·  Depends on: M3-01
 
 ## Goal
 
@@ -24,7 +24,7 @@ Create `packages/db`: the Drizzle schema, migrations, and the scoped repository 
 
 ## Done when
 
-- [ ] Migrations apply to a fresh local D1.
-- [ ] A test proves a repository call made for org B with org A's id returns nothing.
-- [ ] A lint or test fails if any package outside `packages/db` imports the table objects.
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [x] Migrations apply to a fresh local D1.
+- [x] A test proves a repository call made for org B with org A's id returns nothing.
+- [x] A lint or test fails if any package outside `packages/db` imports the table objects.
+- [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
