@@ -19,6 +19,7 @@ import {
   validateManifest,
   validatePairPollResponse,
   validatePairStartResponse,
+  validatePreviewHostMessage,
   validateServerSocketMessage,
   validateSpotData,
   validateSyncRequest,
@@ -224,6 +225,11 @@ const validators: [string, (v: unknown) => string[], (() => unknown)?][] = [
   ['validateDeviceCommand', validateDeviceCommand, () => ({ type: 'display', override: { state: 'on', until: '2026-11-17T18:00:00Z' } })],
   ['validateServerSocketMessage', validateServerSocketMessage, () => ({ type: 'command', command: { type: 'reboot' } })],
   ['validateDeviceSocketMessage', validateDeviceSocketMessage, () => ({ type: 'applied', manifest: 'm1' })],
+  [
+    'validatePreviewHostMessage',
+    validatePreviewHostMessage,
+    () => ({ sfPreview: 1, type: 'draft', manifest: validManifest(), data: validSyncResponse().snapshots }),
+  ],
 ];
 
 describe('every validator is total', () => {
@@ -441,5 +447,23 @@ describe('snapshots and device bodies', () => {
       'command 1: command type must be reload, display or reboot',
     ]);
     expect(validateServerSocketMessage({ type: 'manifest' })).toEqual(['manifest message needs an id']);
+  });
+});
+
+describe('preview channel', () => {
+  const draft = (extra: Record<string, unknown> = {}) => ({ sfPreview: 1, type: 'draft', manifest: validManifest(), ...extra });
+  const sha = Object.keys(validManifest().files)[0]!;
+
+  it('takes posted files of the manifest as Blobs', () => {
+    expect(validatePreviewHostMessage(draft({ files: { [sha]: new Blob(['x']) } }))).toEqual([]);
+  });
+
+  it('refuses another version, a broken manifest, and files the manifest does not name or that are not Blobs', () => {
+    expect(validatePreviewHostMessage(draft({ sfPreview: 2 }))).toEqual(['preview protocol 2 is not 1']);
+    expect(validatePreviewHostMessage({ ...draft(), manifest: { ...validManifest(), id: '' } })[0]).toMatch(/^draft manifest: /);
+    expect(validatePreviewHostMessage(draft({ files: { ['f'.repeat(64)]: new Blob(['x']) } }))).toEqual([
+      `file "${'f'.repeat(12)}" is not a file of the manifest`,
+    ]);
+    expect(validatePreviewHostMessage(draft({ files: { [sha]: 'x' } }))).toEqual([`file "${sha.slice(0, 12)}" is not a Blob`]);
   });
 });

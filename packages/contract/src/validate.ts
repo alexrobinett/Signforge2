@@ -14,6 +14,7 @@ import {
   BRAND_COLORS,
   BRAND_SHAPES,
   ID_PATTERN,
+  PREVIEW_PROTOCOL,
   SUPPORTED_MANIFEST_SCHEMAS,
   templateKey,
   type BrandKit,
@@ -704,4 +705,26 @@ export function validateDeviceSocketMessage(msg: unknown): string[] {
   if (!isObj(msg)) return ['message is not an object'];
   if (msg.type !== 'applied') return ['message type must be applied'];
   return isText(msg.manifest) ? [] : ['applied message needs a manifest id'];
+}
+
+// ------------------------------------------------------------- preview channel
+
+const isBlob = (v: unknown) => typeof Blob !== 'undefined' && v instanceof Blob;
+
+/** A message from the CMS page, as the preview player receives it (after its origin check). */
+export function validatePreviewHostMessage(msg: unknown): string[] {
+  if (!isObj(msg)) return ['message is not an object'];
+  if (msg.sfPreview !== PREVIEW_PROTOCOL) return [`preview protocol ${show(msg.sfPreview)} is not ${PREVIEW_PROTOCOL}`];
+  if (msg.type !== 'draft') return ['message type must be draft'];
+  const errors = prefix('draft manifest', validateManifest(msg.manifest));
+  if (msg.files !== undefined) {
+    if (!isObj(msg.files)) errors.push('files must be an object of hash to Blob');
+    else
+      for (const [sha, blob] of Object.entries(msg.files)) {
+        if (own(own(msg.manifest, 'files'), sha) === undefined) errors.push(`file "${sha.slice(0, 12)}" is not a file of the manifest`);
+        else if (!isBlob(blob)) errors.push(`file "${sha.slice(0, 12)}" is not a Blob`);
+      }
+  }
+  if (msg.data !== undefined) errors.push(...list('snapshot', msg.data, validateDataSnapshot));
+  return errors;
 }
