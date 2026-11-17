@@ -3,6 +3,7 @@
  * (`Authorization` header) is refused here, as a session is refused on `/v1/device`.
  *
  * - `/api/auth/*` is Better Auth: email code and GitHub sign-in, organizations, invitations.
+ * - `/api/sign-in-options` says which sign-in methods the sign-in page should offer. Public.
  * - `/api/session` says who is signed in and their active org, if any.
  * - Every other route runs behind `requireOrg`, which re-checks membership of the active org
  *   on every request and hands handlers `c.var.org`, a `scoped(db, orgId)`.
@@ -71,6 +72,16 @@ export function createApi(deps: ApiDeps = {}) {
   });
 
   api.on(['GET', 'POST'], '/auth/*', (c) => c.var.auth.handler(c.req.raw));
+
+  // GitHub is offered only when its OAuth app is configured. In dev, codes are not emailed but
+  // printed in the `wrangler dev` terminal (src/email), and the CMS says so.
+  api.get('/sign-in-options', (c) =>
+    c.json({
+      emailCode: true,
+      github: Boolean(c.env.GITHUB_CLIENT_ID && c.env.GITHUB_CLIENT_SECRET),
+      codesInTerminal: c.env.ENVIRONMENT === 'dev',
+    }),
+  );
 
   api.get('/session', requireSession, async (c) => {
     const { user, session } = c.var.session;
