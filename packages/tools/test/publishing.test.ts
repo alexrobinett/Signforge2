@@ -1,7 +1,7 @@
 // The publish model: drafts promoted when they pass their checks, and the loader from the
 // database to `compileScreen`. See docs/backend-plan.md#publishing.
 import { compileScreen } from '@signforge/compiler';
-import { manifestIdInput, templateKey, type ScreenManifest, type Spot, type TemplateManifest } from '@signforge/contract';
+import { templateKey, type ScreenManifest, type Spot, type TemplateManifest } from '@signforge/contract';
 import { platform, published, scoped, type OrgScope } from '@signforge/db';
 import { seedOrganization, seedScreen } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
@@ -354,12 +354,9 @@ describe('loadCompileInput', () => {
     const input = await loadCompileInput(org, golden.screen.id);
     const { manifest, problems } = await compileScreen(input!, opts);
     expect(problems).toEqual([]);
-    // The golden's stored id is not checked by golden.test.ts (bundle hashes follow the minifier),
-    // so compare bodies, and the id with the hash of the golden's body.
-    const { generatedAt: _a, id, ...body } = manifest!;
-    const { generatedAt: _b, id: _c, ...expected } = golden;
-    expect(body).toEqual(expected);
-    expect(id).toBe(await hash(manifestIdInput(golden)));
+    // golden.test.ts checks the golden's id is the hash of its body, so compare it whole.
+    const { generatedAt: _a, ...compiled } = manifest!;
+    expect(compiled).toEqual(golden);
   });
 
   it('reads only the published graph, and nothing for a screen the org does not have', async () => {
