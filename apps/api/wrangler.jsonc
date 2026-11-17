@@ -12,7 +12,9 @@
   "send_email": [{ "name": "EMAIL" }],
   // Local development and tests use these placeholders; real ids are set per environment.
   "d1_databases": [{ "binding": "DB", "database_name": "signforge-dev", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
-  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-dev" }],
+  // local_dev: the S3 API wrangler dev serves for this bucket, so presigned asset uploads work
+  // locally (src/uploads.ts). Local-only credentials; they open nothing on Cloudflare.
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-dev", "local_dev": { "experimental_s3_credentials": { "accessKeyId": "signforge-local", "secretAccessKey": "signforge-local-only" } } }],
   "env": {
     "demo": {
       "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },

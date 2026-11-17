@@ -5,7 +5,7 @@ import { scoped } from '@signforge/db';
 import { seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { dispatch, manifestKey, orgBlobKey, registry, TOOLS, type Caller } from '../src';
+import { dispatch, manifestKey, orgBlobKey, r2Presigner, registry, TOOLS, type Caller } from '../src';
 
 const MANIFEST = 'a'.repeat(64);
 /** Org A's uploaded template bundle and sources. */
@@ -22,6 +22,7 @@ const ORG_A_IDS: Record<string, (a: SeededOrg) => string> = {
   templateVersion: (a) => a.templateVersion,
   bundle: () => BUNDLE,
   sources: () => SOURCES,
+  asset: (a) => a.asset,
 };
 
 /** `example` with every id field replaced by org A's id of that kind. Also says whether it named any. */
@@ -61,6 +62,8 @@ async function orgAState() {
     credentials: await a.screens.credentials.list(),
     templates: await a.templates.list(),
     templateVersions: await a.templates.versions.list(),
+    assets: await a.assets.list(),
+    renditions: await a.assets.renditions.list(),
     audit: await a.auditLog.list(),
   };
 }
@@ -70,7 +73,9 @@ beforeAll(async () => {
   await env.BLOBS.put(manifestKey('org-a', s.a.screen, MANIFEST), '{}');
   await env.BLOBS.put(orgBlobKey('org-a', BUNDLE), '<!doctype html>');
   await env.BLOBS.put(orgBlobKey('org-a', SOURCES), '{}');
-  callerB = { org: scoped(env.DB, 'org-b'), role: 'owner', actor: { kind: 'user', id: 'user-b', clientId: 'test' }, blobs: env.BLOBS };
+  callerB = { org: scoped(env.DB, 'org-b'), role: 'owner', actor: { kind: 'user', id: 'user-b', clientId: 'test' }, blobs: env.BLOBS,
+    uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
+  };
   before = await orgAState();
 });
 

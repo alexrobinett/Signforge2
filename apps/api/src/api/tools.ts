@@ -10,6 +10,7 @@
  */
 import { describeTools, dispatch, registry, type Caller, type ToolErrorCode } from '@signforge/tools';
 import type { Hono } from 'hono';
+import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
 
 const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409> = {
@@ -45,6 +46,7 @@ export function mountTools(api: Hono<ApiEnv>) {
       role: c.var.role,
       actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_CLIENT_ID },
       blobs: c.env.BLOBS,
+      uploads: uploadSigner(c.env, c.req.url),
     };
     const result = await dispatch(registry, c.req.param('name'), input, caller);
     if (result.ok) return c.json(result.output as object);

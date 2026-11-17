@@ -9,7 +9,17 @@ interface AuthSettings {
   /** The CMS's origin, if it differs from the API's: trusted for auth, and where invitation links point. */
   CMS_ORIGIN?: string;
 }
-interface Env extends AuthSettings {}
+/** Direct uploads to R2 by presigned PUT (src/uploads.ts). Unset in dev, which uses the local bucket's S3 API. */
+interface UploadSettings {
+  /** `https://<account>.r2.cloudflarestorage.com` */
+  R2_S3_ENDPOINT?: string;
+  /** The name of the bucket bound as BLOBS. */
+  R2_BUCKET_NAME?: string;
+  /** An R2 API token's S3 credentials, with write access to that bucket only. Secrets. */
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
+}
+interface Env extends AuthSettings, UploadSettings {}
 declare namespace Cloudflare {
-  interface Env extends AuthSettings {}
+  interface Env extends AuthSettings, UploadSettings {}
 }

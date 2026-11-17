@@ -32,6 +32,8 @@ Base templates are written by `platform(db)` (`src/platform.ts`), the one scope 
 
 `org.screenGroups.setMembers(groupId, screenIds)` replaces a group's members in one batch, after checking the group and every screen are the org's (`NotInOrgError` otherwise, changing nothing).
 
+`org.assets.usage(assetIds?)` maps each asset to the ids of the spots that use it, through an image or video spot's `asset_id` or a template spot's asset map. Unused assets are absent. The asset tools use it for usage counts and to refuse deleting an asset in use.
+
 `org.auditLog.append(...)` is called by the tool dispatcher (`packages/tools`) and nothing else. Each row records the actor kind and id, the client id (`client_id`: `cms`, `sf-push`, an agent's OAuth client), the action, the target and a redacted detail.
 
 ## Better Auth's tables

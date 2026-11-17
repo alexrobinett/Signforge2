@@ -16,6 +16,7 @@ apps/api       Hono Worker: /api (CMS), /v1/device (screens), /mcp (M4), both Du
 apps/cms       TanStack Start Worker; talks to apps/api over a service binding
 packages/db          Drizzle schema and the only code allowed to query tenant tables
 packages/compiler    org data + screen -> ScreenManifest. Lifted from sf.ts, golden-tested against examples/
+packages/media       image renditions in the browser (createImageBitmap, OffscreenCanvas), hashing, and the image-header reader the server checks with
 packages/media-check MP4 header check against VIDEO_SPEC, shared by browser and Worker
 packages/feeds       iCal and RSS normalising, ported from datad.py with fixtures
 packages/tools       one registry of operations (zod input, scope, role, handler); the CMS, MCP and WebMCP all call it
@@ -53,7 +54,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 **Uploads**
 - **Images** are scaled in the browser at upload with `createImageBitmap` and `OffscreenCanvas`, using the same cover-the-screen rule as `sf build`, into a landscape and a portrait rendition. The Worker checks the dimensions. Uploads with no browser (API, MCP) fall back to the Cloudflare Images binding, which works on Workers Free. It includes 5,000 unique transformations a month on both plans, then $0.50 per 1,000 on Paid; on Free, transformations past the allowance fail with error 9422 rather than charging.
 - **Video** is checked by `packages/media-check` reading the MP4 header against `VIDEO_SPEC`: in the browser before upload, and again in the Worker over R2 range reads, because the client cannot be trusted. mp4box.js runs in workerd. Fed from R2 range reads, it fetches only the boxes it needs: one read when the moov comes first, and one more jump past the mdat when it comes last. The pixel format follows from the H.264 profile: allowing only Baseline, Main and High (profile_idc 66, 77, 100) rules out 10-bit and 4:2:2.
-- **Transport.** Files go straight to R2 by presigned PUT, multipart for video. A finalize call re-hashes the file and marks it verified.
+- **Transport.** Files go straight to R2 by presigned PUT, multipart for video. The URL signs the content type and length and writes to `up/<org>/<asset>/<sha256>`, never to a content-addressed key. A finalize call re-hashes the file, checks its type and size against the screen box, and moves it to `o/<org>/b/<sha256>`; a file that fails is deleted. Presigned PUT is verified against `wrangler dev`'s local S3 API, not yet against R2 on the account (R2 is not enabled there). Deploying needs an R2 API token's S3 keys as secrets, a CORS rule on the bucket allowing PUT with `content-type` from the CMS origin, and a lifecycle rule expiring `up/` after a day (see `apps/api/src/uploads.ts`).
 
 **Templates** are not built in a Worker. The server's checks on an uploaded bundle are a lint, not a boundary: the bundle contains the SDK, whose own `parent.postMessage` would trip the code denylist, so that list runs on the author's sources, uploaded alongside the bundle; and string checks can be evaded. The sandbox and its policy are the guarantee.
 
@@ -67,6 +68,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 o/<org>/b/<sha256>                    assets and template bundles
 sys/b/<sha256>                        base templates
 o/<org>/m/<screen>/<manifestId>.json  manifests
+up/<org>/<asset>/<sha256>             asset uploads until finalize checks them
 ```
 
 The per-org prefix keeps one org from probing whether another holds a file, and makes cleanup simple.

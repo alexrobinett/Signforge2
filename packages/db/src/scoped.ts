@@ -176,6 +176,37 @@ export function scoped(d1: D1Database, orgId: string) {
 
     assets: {
       ...assets,
+      /**
+       * The spots that use each asset: an image or video spot's `asset_id`, or a template spot's
+       * asset map. Assets no spot uses are absent. Pass ids to look at those assets only.
+       */
+      usage: async (assetIds?: readonly string[]): Promise<Map<string, string[]>> => {
+        const sp = s.spots;
+        const rows = await db.select({ id: sp.id, assetId: sp.assetId, assetMapJson: sp.assetMapJson }).from(sp)
+          .where(and(eq(sp.orgId, orgId), or(sql`${sp.assetId} IS NOT NULL`, sql`${sp.assetMapJson} IS NOT NULL AND ${sp.assetMapJson} <> '{}'`)))
+          .orderBy(asc(sp.id)).all();
+        const wanted = assetIds ? new Set(assetIds) : undefined;
+        const out = new Map<string, string[]>();
+        const add = (assetId: unknown, spotId: string) => {
+          if (typeof assetId !== 'string' || (wanted && !wanted.has(assetId))) return;
+          const list = out.get(assetId) ?? [];
+          if (list.at(-1) !== spotId) list.push(spotId);
+          out.set(assetId, list);
+        };
+        for (const r of rows) {
+          add(r.assetId, r.id);
+          if (!r.assetMapJson) continue;
+          let map: unknown;
+          try {
+            map = JSON.parse(r.assetMapJson);
+          } catch {
+            continue;
+          }
+          // Field name to asset id; a list field may hold several.
+          for (const v of Object.values((map ?? {}) as Record<string, unknown>)) for (const a of Array.isArray(v) ? v : [v]) add(a, r.id);
+        }
+        return out;
+      },
       renditions: {
         ...assetRenditions,
         forAsset: (assetId: string) =>

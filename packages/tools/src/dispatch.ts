@@ -6,7 +6,8 @@
  *   3. Validate the input with the tool's zod schema.
  *   4. Run the handler with `scoped(db, orgId)`, the actor and the parsed input.
  *   5. If the tool changes data, append to `audit_log`: actor kind and id, client id, action,
- *      target, and the input with secrets redacted. Reads are not audited.
+ *      target, and the input with secrets redacted. Reads are not audited, nor are refusals,
+ *      except one whose `ToolError` says it changed something on the way.
  *
  * A platform tool (`platformRegistry`, run by `/admin` with `platform(db)`) is audited the same way
  * in `platform_audit_log`, since what it changes belongs to no org.
@@ -17,6 +18,7 @@
  */
 import { NotInOrgError, type OrgScope } from '@signforge/db';
 import { z } from 'zod';
+import type { UploadSigner } from './upload';
 import { ROLE_SCOPES, ROLES, ToolError, type Actor, type AnyTool, type DataScope, type Role, type Scope, type ToolErrorCode } from './tool';
 
 /** Who is calling, resolved by the adapter (the `/api` route, `/admin`, later MCP and WebMCP). */
@@ -29,6 +31,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   scopes?: readonly Scope[];
   actor: Actor;
   blobs: R2Bucket;
+  /** Signs direct uploads to `blobs`. Asset uploads need it; nothing else does. */
+  uploads?: UploadSigner;
 }
 
 export type DispatchResult =
@@ -81,27 +85,31 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
     return fail('invalid_input', z.prettifyError(parsed.error), parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })));
   }
 
-  let output: unknown;
-  try {
-    output = await tool.handler({ org: caller.org, actor: caller.actor, input: parsed.data, blobs: caller.blobs });
-  } catch (err) {
-    if (err instanceof ToolError) return fail(err.code, err.message, err.details);
-    if (err instanceof NotInOrgError) return fail('not_found', err.message);
-    throw err;
-  }
-
-  if (tool.mutates) {
-    const target = tool.target?.(parsed.data, output);
-    await caller.org.auditLog.append({
+  const audit = (target: { kind: string; id: string } | undefined, detail: Record<string, unknown>) =>
+    caller.org.auditLog.append({
       actorKind: caller.actor.kind,
       actorId: caller.actor.id,
       clientId: caller.actor.clientId ?? null,
       action: tool.name,
       targetKind: target?.kind ?? null,
       targetId: target?.id ?? null,
-      detailJson: JSON.stringify({ input: redact(parsed.data) }),
+      detailJson: JSON.stringify({ input: redact(parsed.data), ...detail }),
     });
+
+  let output: unknown;
+  try {
+    output = await tool.handler({ org: caller.org, actor: caller.actor, input: parsed.data, blobs: caller.blobs, uploads: caller.uploads });
+  } catch (err) {
+    if (err instanceof ToolError) {
+      // A refusal that changed something is recorded too, with what was refused.
+      if (tool.mutates && err.changed) await audit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
+      return fail(err.code, err.message, err.details);
+    }
+    if (err instanceof NotInOrgError) return fail('not_found', err.message);
+    throw err;
   }
+
+  if (tool.mutates) await audit(tool.target?.(parsed.data, output), {});
   return { ok: true, output };
 }
 
