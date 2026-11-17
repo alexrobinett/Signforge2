@@ -301,6 +301,17 @@ describe('validateManifest', () => {
     ]);
   });
 
+  it('plays schema N and N-1; schema 1 keys templates without their owner', () => {
+    const v1 = validManifest();
+    v1.schema = 1;
+    v1.templates = { 'menu@1.0.0': v1.templates['base/menu@1.0.0']! };
+    (v1.spots.menu as { template: string }).template = 'menu@1.0.0';
+    expect(validateManifest(v1)).toEqual([]);
+    v1.templates = { 'base/menu@1.0.0': v1.templates['menu@1.0.0']! };
+    expect(validateManifest(v1)).toContain('template key "base/menu@1.0.0" must be menu@1.0.0');
+    expect(validateManifest({ ...validManifest(), schema: 0 })).toContain('manifest schema 0 is not one this player can play (1, 2)');
+  });
+
   it('checks the screen and each spot kind', () => {
     const m = validManifest() as unknown as { screen: Record<string, unknown>; spots: Record<string, Record<string, unknown>> };
     m.screen.orientation = 'sideways';

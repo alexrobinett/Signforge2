@@ -131,6 +131,16 @@ describe('sync against the device API', () => {
     expect(manifestRequests().map((q) => q.headers.get('if-none-match'))).toEqual(['"m1"', null]);
   });
 
+  it('asks again without the condition, and stores a sound copy, if the cached manifest is damaged', async () => {
+    await sync(BASE, { headers: auth });
+    await open('sf-state-v1').put('/_sf/manifest/active', new Response('{"id": "m1", "tor'));
+    api.requests = [];
+    const r = await sync(BASE, { currentId: 'm1', headers: auth });
+    expect(r).toEqual({ changed: false, downloaded: 0 });
+    expect(manifestRequests().map((q) => q.headers.get('if-none-match'))).toEqual(['"m1"', null]);
+    expect((await loadActiveManifest())?.id).toBe('m1');
+  });
+
   it('picks up a new manifest after a 304 and switches to it in one step', async () => {
     await sync(BASE, { headers: auth });
     api.manifest = manifest('m2', 'changed text');

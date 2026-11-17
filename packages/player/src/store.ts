@@ -3,7 +3,7 @@
  * downloaded once however many manifests use it, and a manifest only goes live when every file
  * it names is present and verified.
  */
-import { validateManifest, type ScreenManifest } from '@signforge/contract';
+import { safeUrl, validTimezone, validateManifest, type ScreenManifest } from '@signforge/contract';
 import { planSync } from '@signforge/player-core';
 import { STALL_MS, UnauthorisedError, download, type DownloadRequest, type DownloadResult } from './download';
 
@@ -39,24 +39,84 @@ async function fetchFile(req: DownloadRequest): Promise<void> {
   }
 }
 
-/** The manifest last made active, if it is one this player can still play. */
-export async function loadActiveManifest(): Promise<ScreenManifest | undefined> {
-  const res = await (await caches.open(STATE)).match(ACTIVE);
-  if (!res) return undefined;
-  const m = (await res.json()) as ScreenManifest;
-  // A player update can tighten the rules; a stored manifest that now fails waits for a fresh one.
-  const problems = validateManifest(m);
-  if (problems.length) {
-    console.warn(`[sf] cached manifest ${m.id} ignored: ${problems[0]}`);
+/**
+ * The manifest that last played a spot. Kept, with its files, until a newer manifest has played
+ * one, so a screen whose new content plays nothing can go back to what it showed before.
+ */
+const LAST_GOOD = '/_sf/manifest/last-good';
+
+const jsonResponse = (text: string) => new Response(text, { headers: { 'content-type': 'application/json' } });
+
+/**
+ * What the player needs to run a manifest at all: without these the sequencer cannot pick a spot.
+ * Also holds the line on what makes a screen unsafe, whatever release stored the manifest.
+ */
+function unplayable(m: Partial<ScreenManifest> | null): string | undefined {
+  if (!m || typeof m !== 'object') return 'not an object';
+  if (typeof m.id !== 'string' || !m.id) return 'no id';
+  for (const k of ['files', 'templates', 'spots', 'playlists', 'dataSources'] as const) if (!m[k] || typeof m[k] !== 'object') return `no ${k}`;
+  if (!Array.isArray(m.schedule)) return 'no schedule';
+  if (!m.screen || !validTimezone(m.screen.timezone)) return 'no valid time zone';
+  if (!Object.values(m.playlists!).every((p) => p && Array.isArray(p.items))) return 'a playlist has no items';
+  if (!m.playlists![m.defaultPlaylist ?? '']) return 'no default playlist';
+  if (Object.values(m.spots!).some((sp) => sp?.kind === 'url' && !safeUrl(sp.url))) return 'a URL spot is not https';
+  return undefined;
+}
+
+/**
+ * Read a stored manifest. Everything stored passed the validator of the release that stored it,
+ * so one this release's validator rejects (a schema it no longer plays, a tightened rule) is
+ * still played when it can be run at all: an offline screen keeps its content across an update.
+ */
+async function loadStored(key: string): Promise<ScreenManifest | undefined> {
+  const text = await (await (await caches.open(STATE)).match(key))?.text();
+  if (text === undefined) return undefined;
+  let m: ScreenManifest;
+  try {
+    m = JSON.parse(text) as ScreenManifest;
+  } catch {
+    console.warn(`[sf] stored manifest ${key} is not JSON; ignored`);
     return undefined;
   }
+  const broken = unplayable(m);
+  if (broken) {
+    console.warn(`[sf] stored manifest ${key} cannot be played (${broken}); ignored`);
+    return undefined;
+  }
+  const problems = validateManifest(m);
+  if (problems.length) console.warn(`[sf] stored manifest ${m.id} is kept although this player rejects it: ${problems[0]}`);
   return m;
+}
+
+/** The manifest last made active and the last one that played, as far as the cache holds usable copies. */
+export async function loadManifests(): Promise<{ active?: ScreenManifest; lastGood?: ScreenManifest }> {
+  const [active, lastGood] = await Promise.all([loadStored(ACTIVE), loadStored(LAST_GOOD)]);
+  return { ...(active && { active }), ...(lastGood && { lastGood }) };
+}
+
+/** The manifest last made active, if the cache holds a usable copy. */
+export async function loadActiveManifest(): Promise<ScreenManifest | undefined> {
+  return loadStored(ACTIVE);
+}
+
+/** Record that `manifest` played a spot: it becomes the one to fall back to. */
+export async function rememberGood(manifest: ScreenManifest): Promise<void> {
+  await (await caches.open(STATE)).put(LAST_GOOD, jsonResponse(JSON.stringify(manifest)));
 }
 
 export async function getBlob(sha: string): Promise<Blob> {
   const res = await (await caches.open(BLOBS)).match(blobKey(sha));
   if (!res) throw new Error(`file ${sha.slice(0, 12)} is not in the cache`);
   return res.blob();
+}
+
+/** Whether stored manifest text parses and is the manifest `id`. */
+function storedIs(text: string | undefined, id: string | undefined): text is string {
+  try {
+    return !!text && (JSON.parse(text) as { id?: unknown } | null)?.id === id;
+  } catch {
+    return false;
+  }
 }
 
 /** Every key in the file cache: verified files by hash, and any partial left by an interrupted download. */
@@ -125,11 +185,17 @@ export async function sync(base: string, { currentId, headers = {}, stallMs = ST
     });
   let res = await get(true);
   let text: string | undefined;
+  /** The stored copy of the current manifest is missing or damaged: store the fresh one even if unchanged. */
+  let rewrite = false;
   if (res.status === 304) {
     // Unchanged: the active manifest is still the one to check for missing files. If it has
     // gone from the cache, ask again in full.
     text = await (await (await caches.open(STATE)).match(ACTIVE))?.text();
-    if (!text) res = await get(false);
+    if (!storedIs(text, currentId)) {
+      text = undefined;
+      rewrite = true;
+      res = await get(false);
+    }
   }
   if (res.status === 401) throw new UnauthorisedError();
   if (!text) {
@@ -158,7 +224,7 @@ export async function sync(base: string, { currentId, headers = {}, stallMs = ST
     );
   }
 
-  if (!same) await (await caches.open(STATE)).put(ACTIVE, new Response(text, { headers: { 'content-type': 'application/json' } }));
+  if (!same || rewrite) await (await caches.open(STATE)).put(ACTIVE, jsonResponse(text));
   // Every pass, not only on a change: a file pinned at the last change is dropped once released.
   await cleanup(blobs, next, pinned);
   return same ? { changed: false, downloaded: missing.length } : { manifest: next, changed: true, downloaded: missing.length };

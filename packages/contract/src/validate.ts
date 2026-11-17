@@ -390,7 +390,11 @@ export function validateManifest(m: unknown): string[] {
     ref(`template "${key}" html`, own(t, 'html'));
     const problems = validateTemplateManifest(manifest);
     errors.push(...prefix(`template "${key}"`, problems));
-    if (isStr(manifest.id) && isStr(manifest.version)) {
+    if (isStr(manifest.id) && isStr(manifest.version) && m.schema === 1) {
+      // Schema 1 keyed templates without their owner. A player still plays it (N-1).
+      const bare = `${manifest.id}@${manifest.version}`;
+      if (key !== bare) errors.push(`template key "${key}" must be ${bare}`);
+    } else if (isStr(manifest.id) && isStr(manifest.version)) {
       const owner = key.split('/')[0] ?? '';
       if (!(owner === 'base' || isIdValue(owner)) || key !== templateKey({ id: manifest.id, version: manifest.version }, owner)) {
         errors.push(`template key "${key}" must be <owner>/${manifest.id}@${manifest.version}`);
