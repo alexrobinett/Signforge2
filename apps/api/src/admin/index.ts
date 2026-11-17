@@ -30,7 +30,7 @@
  * own id before it is. Blobs and manifests are content-addressed and inert: nothing plays them
  * until a publish names them. Pushing the same build again uploads nothing and changes nothing.
  */
-import { isId, manifestIdInput, validateManifest, type ScreenManifest } from '@signforge/contract';
+import { baseTemplateHtml, isId, manifestIdInput, validateManifest, type ScreenManifest } from '@signforge/contract';
 import { findDeviceScreen, organizationExists, platform, scoped } from '@signforge/db';
 import {
   dispatch,
@@ -59,11 +59,7 @@ const fail = (c: Context, status: 400 | 404 | 409 | 429 | 500, error: string, ex
 
 /** Where each of a manifest's files lives: base templates' HTML in `sys/b/`, the rest under the org. */
 function fileKeys(m: ScreenManifest, orgId: string): { sha256: string; scope: 'org' | 'base'; key: string }[] {
-  const base = new Set(
-    Object.entries(m.templates)
-      .filter(([key]) => key.startsWith('base/'))
-      .map(([, t]) => t.html),
-  );
+  const base = baseTemplateHtml(m);
   return Object.keys(m.files).map((sha) =>
     base.has(sha) ? { sha256: sha, scope: 'base', key: baseBlobKey(sha) } : { sha256: sha, scope: 'org', key: orgBlobKey(orgId, sha) },
   );

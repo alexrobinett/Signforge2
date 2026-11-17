@@ -4,7 +4,7 @@
  * A manifest's id is the hash of its body, so the object at a manifest key never changes and
  * its parsed summary can be kept for the life of the isolate.
  */
-import type { ScreenManifest } from '@signforge/contract';
+import { baseTemplateHtml, type ScreenManifest } from '@signforge/contract';
 import type { DeviceScreen } from '@signforge/db';
 import { manifestKey } from '../r2';
 
@@ -29,11 +29,7 @@ function summarise(id: string, m: ScreenManifest): ManifestSummary {
     schema: m.schema,
     protocols: [...new Set(Object.values(m.templates ?? {}).map((t) => t.manifest?.protocol ?? 1))],
     files: new Map(Object.entries(m.files ?? {}).map(([sha, f]) => [sha, f.type])),
-    baseHtml: new Set(
-      Object.entries(m.templates ?? {})
-        .filter(([key]) => key.startsWith('base/'))
-        .map(([, t]) => t.html),
-    ),
+    baseHtml: baseTemplateHtml(m),
     dataSources: new Set(Object.keys(m.dataSources ?? {})),
   };
 }
