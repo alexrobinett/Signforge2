@@ -19,10 +19,14 @@
 export const PROTOCOL_VERSION = 1;
 /** Frame protocols this player can drive. */
 export const SUPPORTED_PROTOCOLS: readonly number[] = [1];
-/** The manifest schema this build produces. */
-export const MANIFEST_SCHEMA = 1;
+/**
+ * The manifest schema this build produces.
+ *   1  pre-release; never deployed beyond the test rig
+ *   2  template keys carry their owner: `<owner>/<id>@<version>`
+ */
+export const MANIFEST_SCHEMA = 2;
 /** Manifest schemas this player can play. */
-export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [1];
+export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [2];
 
 /**
  * Every id a screen sees (screen, spot, playlist, schedule entry, data source, group, org) goes
@@ -90,7 +94,14 @@ export interface TemplateManifest {
   protocol?: number;
 }
 
-export const templateKey = (m: Pick<TemplateManifest, 'id' | 'version'>) => `${m.id}@${m.version}`;
+/** Who owns a template: `base` for the platform's own, otherwise the org's id. */
+export type TemplateOwner = 'base' | (string & {});
+
+/**
+ * How a manifest and its spots refer to one template version: `<owner>/<id>@<version>`. The owner
+ * keeps a base template and an org's template with the same id and version apart.
+ */
+export const templateKey = (m: Pick<TemplateManifest, 'id' | 'version'>, owner: TemplateOwner = 'base') => `${owner}/${m.id}@${m.version}`;
 
 /** Budgets a built template bundle must meet. Measured on a Raspberry Pi 4 at 1080p 60 Hz. */
 export const TEMPLATE_BUDGET = {

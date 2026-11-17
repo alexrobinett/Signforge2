@@ -2,7 +2,7 @@
  * Player logic with no browser dependency: which playlist is live, what plays next,
  * and which files a manifest still needs. The browser shell supplies time, storage and frames.
  */
-import { SUPPORTED_MANIFEST_SCHEMAS, isId, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
+import { SUPPORTED_MANIFEST_SCHEMAS, isId, templateKey, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
 
 // ------------------------------------------------------------------ schedule
 
@@ -215,6 +215,16 @@ export function validateManifest(m: unknown): string[] {
   if (!s.screen?.timezone) errors.push('screen.timezone is missing');
   if (!s.files || !s.spots || !s.playlists || !s.templates || !s.schedule || !s.dataSources) return [...errors, 'manifest is incomplete'];
   if (!s.playlists[s.defaultPlaylist ?? '']) errors.push('defaultPlaylist does not exist');
+  for (const [key, t] of Object.entries(s.templates)) {
+    if (!t?.manifest || typeof t.manifest !== 'object') {
+      errors.push(`template "${key}" has no manifest`);
+      continue;
+    }
+    const owner = key.split('/')[0] ?? '';
+    if (!(owner === 'base' || isId(owner)) || key !== templateKey(t.manifest, owner)) {
+      errors.push(`template key "${key}" must be <owner>/${t.manifest.id}@${t.manifest.version}`);
+    }
+  }
   for (const sha of requiredFiles(s as ScreenManifest)) if (!s.files[sha]) errors.push(`file ${sha.slice(0, 12)} is referenced but not listed`);
   for (const [key, spot] of Object.entries(s.spots)) {
     if (spot.id !== key) errors.push(`spot "${key}" is listed under a different id ("${spot.id}")`);

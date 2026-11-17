@@ -6,7 +6,7 @@ const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${
 
 function manifest(over: Partial<ScreenManifest> = {}): ScreenManifest {
   return {
-    schema: 1, id: 'm1', generatedAt: '2026-11-16T00:00:00Z',
+    schema: 2, id: 'm1', generatedAt: '2026-11-16T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'America/New_York', orientation: 'landscape' },
     files: { 'sha-a': { size: 1, type: 'image/png' }, 'sha-b': { size: 1, type: 'image/png' }, 'sha-c': { size: 1, type: 'image/png' } },
     templates: {},
@@ -200,10 +200,20 @@ describe('files', () => {
   });
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
-    expect(validateManifest(manifest({ schema: 2 }))).toEqual(['manifest schema 2 is not one this player can play (1)']);
+    expect(validateManifest(manifest({ schema: 1 }))).toEqual(['manifest schema 1 is not one this player can play (2)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);
+  });
+
+  it('keys each template by its owner, id and version, so a base and an org template cannot collide', () => {
+    const t = { id: 'promo', version: '1.0.0', name: 'P', fields: {}, duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 }, orientations: ['landscape' as const], uses: [], background: '#000' };
+    const ok = manifest({ templates: { 'base/promo@1.0.0': { manifest: t, html: 'sha-a' }, 'org_42/promo@1.0.0': { manifest: t, html: 'sha-b' } } });
+    expect(validateManifest(ok)).toEqual([]);
+    const bare = manifest({ templates: { 'promo@1.0.0': { manifest: t, html: 'sha-a' } } });
+    expect(validateManifest(bare)).toEqual(['template key "promo@1.0.0" must be <owner>/promo@1.0.0']);
+    const empty = manifest({ templates: { 'base/x@1.0.0': { html: 'sha-a' } as never } });
+    expect(validateManifest(empty)).toEqual(['template "base/x@1.0.0" has no manifest']);
   });
 
   it('only accepts https pages for URL spots', () => {
