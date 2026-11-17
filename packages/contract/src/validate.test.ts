@@ -438,6 +438,12 @@ describe('snapshots and device bodies', () => {
     ]);
   });
 
+  it('lets a screen with nothing published sync, for its socket ticket', () => {
+    const { desiredManifest: _, ...unpublished } = validSyncResponse();
+    expect(validateSyncResponse(unpublished)).toEqual([]);
+    expect(validateSyncResponse({ ...validSyncResponse(), desiredManifest: '' })).toEqual(['desiredManifest must be a manifest id when present']);
+  });
+
   it('rejects a paired response whose credential is for another screen', () => {
     expect(validatePairPollResponse({ status: 'paired', screenId: 's1', credential: 'sfd_s2.secret' })).toEqual(['credential must be sfd_<screenId>.<secret>']);
   });

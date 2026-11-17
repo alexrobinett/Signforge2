@@ -15,12 +15,14 @@
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
  *                 ?source=preview  the CMS editor's preview: play drafts the framing CMS page posts (src/preview.ts)
  */
-import { requiredFiles, type ScreenManifest, type Spot, type Transition } from '@signforge/contract';
+import { requiredFiles, type DeviceCommand, type ScreenManifest, type Spot, type Transition } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { DeviceCredential } from './credential';
 import { dataRejections, dataSettled, dataStatus, startDataLoop } from './data';
+import { activeOverride, setOverride, wakeable } from './override';
 import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
+import { NudgeSocket } from './socket';
 import { SOURCE } from './source';
 import { PinSet, UnauthorisedError, loadManifests, rememberGood, requestPersistence, sync } from './store';
 
@@ -42,6 +44,8 @@ let supervisorToken = '';
  */
 const credential = new URL(CONTENT, location.href).origin === location.origin ? undefined : new DeviceCredential(SUPERVISOR);
 const deviceHeaders = async () => (credential ? credential.headers() : {});
+/** While the socket is open the server nudges, so the manifest is polled only this often. */
+const SOCKET_POLL_MS = 300_000;
 
 const statusEl = document.getElementById('status')!;
 const hudEl = document.getElementById('hud')!;
@@ -71,8 +75,10 @@ const state = {
   online: navigator.onLine,
   /** Why the API refused this screen ('not authorised'), or '' while it accepts it. */
   auth: '',
-  /** False outside the screen's display hours. */
+  /** False outside the screen's display hours, or while an override turns the panel off. */
   displayOn: true,
+  /** Whether the nudge socket to the API is open. While it is, the manifest is not polled. */
+  socket: false,
   /** How the supervisor last switched the panel, or why it could not. */
   display: '',
   persistent: false,
@@ -442,11 +448,14 @@ async function setPanel(on: boolean, retry = true): Promise<void> {
 }
 
 /** Follow the screen's display hours. Checked often rather than timed, so clock and DST changes are harmless. */
+const display = wakeable();
 async function displayLoop(): Promise<never> {
   let applied: boolean | undefined;
   return forever('display', async () => {
     if (manifest) {
-      const on = displayOn(manifest.screen.displayHours, localTime(new Date(), manifest.screen.timezone));
+      const now = new Date();
+      const override = activeOverride(now);
+      const on = override ? override.state === 'on' : displayOn(manifest.screen.displayHours, localTime(now, manifest.screen.timezone));
       if (on !== applied) {
         applied = on;
         console.info(`[sf] display ${on ? 'on' : 'off'}`);
@@ -466,11 +475,49 @@ async function displayLoop(): Promise<never> {
         }
       }
     }
-    await sleep(15_000);
+    // A display override from the socket wakes this at once.
+    await display.wait(15_000);
   });
 }
 
 // ---------------------------------------------------------------------- sync
+const poll = wakeable();
+
+/** The server answered, but refused the credential: not offline. Keep playing; pairing (M3-08) takes it from here. */
+function unauthorised(): void {
+  state.online = true;
+  state.auth = credential?.held ? 'not authorised' : 'no credential';
+  credential?.forget();
+  if (!manifest) status('SignForge\nThis screen is not authorised.');
+}
+
+function command(c: DeviceCommand): void {
+  console.info(`[sf] command ${c.type}`);
+  if (c.type === 'reload') location.reload();
+  else if (c.type === 'display') {
+    setOverride(c.override);
+    display.wake();
+  } else console.warn('[sf] reboot: the supervisor cannot reboot the device yet');
+}
+
+/** The nudge socket, when a screen's content comes from the API (never in the preview). */
+const socket =
+  credential && SOURCE === 'device'
+    ? new NudgeSocket({
+        base: new URL(CONTENT, location.href).href.replace(/\/$/, ''),
+        headers: deviceHeaders,
+        status: () => ({ active: manifest?.id, displayOn: state.displayOn }),
+        onNudge: () => poll.wake(),
+        onCommand: command,
+        onUnauthorised: unauthorised,
+        onChange: (open) => {
+          state.socket = open;
+          // Down: back to polling, starting now.
+          if (!open) poll.wake();
+        },
+      })
+    : undefined;
+
 async function syncLoop(): Promise<never> {
   return forever('sync', async () => {
     try {
@@ -491,18 +538,15 @@ async function syncLoop(): Promise<never> {
       }
     } catch (err) {
       if (err instanceof UnauthorisedError) {
-        // The server answered, so this is not offline. Keep playing; pairing (M3-08) takes it from here.
-        state.online = true;
-        state.auth = credential?.held ? 'not authorised' : 'no credential';
-        credential?.forget();
-        if (!manifest) status('SignForge\nThis screen is not authorised.');
-        await sleep(POLL_MS);
+        unauthorised();
+        await poll.wait(POLL_MS);
         return;
       }
       state.online = false;
       if (!manifest) status(`SignForge\nWaiting for content…\n${err instanceof Error ? err.message : String(err)}`);
     }
-    await sleep(POLL_MS);
+    // Polling is the fallback: while the socket is open, the server says when to look.
+    await poll.wait(socket?.open ? SOCKET_POLL_MS : POLL_MS);
   });
 }
 
@@ -538,6 +582,7 @@ function adopt(next: ScreenManifest): void {
   manifest = next;
   wakeData();
   state.manifestId = next.id;
+  socket?.reportApplied(next.id);
   // The sequencer keeps its place; the change shows at the next spot boundary.
   if (sequencer) sequencer.setManifest(next);
   else sequencer = new Sequencer(next);
@@ -616,6 +661,7 @@ async function boot(): Promise<void> {
   }, 10_000);
 
   void syncLoop();
+  socket?.start();
   wakeData = startDataLoop(CONTENT, () => manifest, deviceHeaders);
   void playbackLoop();
   void displayLoop();

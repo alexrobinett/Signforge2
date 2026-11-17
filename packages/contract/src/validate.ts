@@ -678,7 +678,7 @@ export function validateSyncResponse(r: unknown): string[] {
   if (!isNum(r.nextSyncS) || r.nextSyncS <= 0) errors.push('nextSyncS must be above 0');
   if (!isIdValue(r.epoch)) errors.push('epoch must be a valid id');
   if (!isCount(r.ackSeq)) errors.push('ackSeq must be a whole number, 0 or more');
-  if (!isText(r.desiredManifest)) errors.push('desiredManifest is missing');
+  if (r.desiredManifest !== undefined && !isText(r.desiredManifest)) errors.push('desiredManifest must be a manifest id when present');
   errors.push(...list('snapshot', r.snapshots, validateDataSnapshot));
   if (!isText(r.socketTicket)) errors.push('socketTicket is missing');
   errors.push(...list('command', r.commands, validateDeviceCommand));

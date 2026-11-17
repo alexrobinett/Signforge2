@@ -605,8 +605,11 @@ export interface SyncResponse {
   epoch: string;
   /** The highest `seq` whose play counts are stored. The screen drops those counts. */
   ackSeq: number;
-  /** The manifest the screen should be on. Fetch it if it differs from the active one. */
-  desiredManifest: string;
+  /**
+   * The manifest the screen should be on. Fetch it if it differs from the active one. Absent until
+   * something is published to the screen, which still syncs for its socket ticket.
+   */
+  desiredManifest?: string;
   /** Snapshots that are newer than what the screen holds. */
   snapshots: DataSnapshot[];
   /** Short-lived ticket for `GET /v1/device/ws?ticket=`. */

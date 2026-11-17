@@ -32,8 +32,18 @@
  */
 import { isId, manifestIdInput, validateManifest, type ScreenManifest } from '@signforge/contract';
 import { findDeviceScreen, organizationExists, platform, scoped } from '@signforge/db';
-import { dispatch, platformRegistry, registry, type AnyTool, type Caller, type DataScope, type DispatchResult, type TemplateVersionView } from '@signforge/tools';
+import {
+  dispatch,
+  platformRegistry,
+  registry,
+  type AnyTool,
+  type Caller,
+  type DataScope,
+  type DispatchResult,
+  type TemplateVersionView,
+} from '@signforge/tools';
 import { Hono, type Context } from 'hono';
+import { screenNotifier } from '../device/screens';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
 import { adminAuth, type AdminEnv } from './auth';
 
@@ -49,7 +59,11 @@ const fail = (c: Context, status: 400 | 404 | 409 | 500, error: string, extra: R
 
 /** Where each of a manifest's files lives: base templates' HTML in `sys/b/`, the rest under the org. */
 function fileKeys(m: ScreenManifest, orgId: string): { sha256: string; scope: 'org' | 'base'; key: string }[] {
-  const base = new Set(Object.entries(m.templates).filter(([key]) => key.startsWith('base/')).map(([, t]) => t.html));
+  const base = new Set(
+    Object.entries(m.templates)
+      .filter(([key]) => key.startsWith('base/'))
+      .map(([, t]) => t.html),
+  );
   return Object.keys(m.files).map((sha) =>
     base.has(sha) ? { sha256: sha, scope: 'base', key: baseBlobKey(sha) } : { sha256: sha, scope: 'org', key: orgBlobKey(orgId, sha) },
   );
@@ -138,6 +152,7 @@ admin.put('/screens/:screen/manifest', async (c) => {
     scopes: ['content:publish'],
     actor: { kind: 'system', id: SF_PUSH, clientId: SF_PUSH },
     blobs: c.env.BLOBS,
+    screens: screenNotifier(c.env),
   };
   const result = await dispatch(registry, 'publish_manifest_to_screen', { screenId: screen.screenId, manifestId: manifest.id }, caller);
   if (!result.ok) return fail(c, result.error === 'not_found' ? 404 : 409, result.message);
@@ -164,7 +179,9 @@ const templateCaller = <D extends DataScope>(c: Context<AdminEnv>, org: D): Call
 
 const STATUS = { invalid_input: 400, not_found: 404, conflict: 409, forbidden: 500, unknown_tool: 500 } as const;
 const refused = (c: Context, r: Extract<DispatchResult, { ok: false }>) => {
-  const problems = Array.isArray(r.details) ? r.details.map((d: { path?: string; message?: string }) => (d.path ? `${d.path}: ${d.message}` : String(d.message))) : undefined;
+  const problems = Array.isArray(r.details)
+    ? r.details.map((d: { path?: string; message?: string }) => (d.path ? `${d.path}: ${d.message}` : String(d.message)))
+    : undefined;
   return fail(c, STATUS[r.error], r.message, problems ? { problems } : {});
 };
 

@@ -112,9 +112,11 @@ Pairing calls are rate limited. For zero-touch installs, the CMS mints a credent
 Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 
 **The screen's Durable Object** holds the desired and reported manifest IDs and one hibernating WebSocket.
-- Keepalive pings get an automatic reply (`setWebSocketAutoResponse`) without waking it or billing duration. Whether those pings count as billed requests (incoming messages bill at 20:1) is not documented: at a 60-second ping and 1,000 screens the worst case is 2.2M requests a month, about $0.18 over the allowance. M3-06 reads the real count from analytics on the paid account and uses the longest keepalive that holds the connection.
+- Keepalive pings get an automatic reply (`setWebSocketAutoResponse`) without waking it or billing duration. Whether those pings count as billed requests (incoming messages bill at 20:1) is not documented: at a 60-second ping and 1,000 screens the worst case is 2.2M requests a month, about $0.18 over the allowance. The player pings every 50 seconds, under the usual 100-second proxy and NAT idle timeouts, and treats a ping without a pong in 10 seconds as a dead connection. The billed count is still to be read from analytics on a paid account (M3-06 could not deploy); lengthen the ping if it shows pings are billed and connections hold.
 - Server to screen: new manifest, command, revoked.
 - Screen to server: applied only, written through to D1. The CMS reads rollout from D1 and never calls 1,000 Durable Objects.
+- **Socket ticket.** `GET /v1/device/ws?ticket=` takes a ticket, not the credential, since a browser cannot put a header on a WebSocket and URLs end up in logs. Sync issues it: `<screenId>.<credentialId>.<expiresMs>.<HMAC-SHA256 under AUTH_SECRET>`, good for 60 seconds. The route checks it and that its credential is still live, then hands the socket to the object tagged with that credential, so revoking a credential closes exactly its sockets.
+- **Who tells the object.** The tool dispatcher, after a change commits: `publish_manifest_to_screen` sends `manifest`, `revoke_screen_credential` sends `revoked` and closes. The object writes `applied` to `screens.reported_manifest_id` through the org's scope.
 
 **Sync.** `POST /v1/device/sync`, every 5 minutes with jitter, the interval set by the server.
 - **The screen sends:** player and manifest versions, cache state, display state, hourly play counts.
