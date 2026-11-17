@@ -1,3 +1,5 @@
+// worker-configuration.d.ts is generated from the `dev` environment (`pnpm types`); demo and prod
+// have the same bindings, and ENVIRONMENT is typed as a string because it differs between them.
 // Secrets and optional settings. `wrangler types` only sees wrangler.jsonc, so these are declared
 // here; set them with `wrangler secret put` (see docs/tickets/M3-09-better-auth-and-organizations.md).
 interface AuthSettings {

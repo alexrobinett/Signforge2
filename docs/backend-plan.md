@@ -89,6 +89,16 @@ Pairing calls are rate limited. For zero-touch installs, the CMS mints a credent
 - Until pairing exists, `pnpm --filter @signforge/api dev:screen [--content dist/content]` creates a screen in local D1, loads a build into local R2, and prints a credential.
 - Until the CMS publishes, `sf push <out-dir> --screen <id> --api <url>` uploads an `sf build` output and makes it the screen's desired manifest. It uploads through a temporary `/admin` tree guarded by the `ADMIN_TOKEN` deploy secret (off when unset). The last step, making the manifest desired, runs the `publish_manifest_to_screen` tool through the dispatcher and is audited as the system actor `sf-push`. `/admin` goes once assets upload through the CMS (M3-14) and agents hold OAuth grants (Milestone 4).
 
+**What replaces `/admin`, and when.** No new routes go under `/admin`; each group has a replacement and goes with it:
+
+| Routes | Used by | Replaced by | When |
+| --- | --- | --- | --- |
+| `/admin/screens/:screen/*` (missing, blobs, manifest) | `sf push` | Publishing from the CMS through the compiler and the tool registry, with the nudge socket and sync carrying it to the screen. Pairing (M3-08) replaces `dev:screen` credentials. | M3-18 (instant publish), with M3-06 to M3-08 before it |
+| `/admin/orgs/:org/*` (blobs, templates) | `sf template push --org` | The same tools over `/mcp` with an OAuth grant, for agents and the CLI; the CMS already pushes assets through `/api` (M3-14). | Milestone 4 |
+| `/admin/base/*` (blobs, templates) | `pnpm seed:templates` on deploy | A deploy step in each environment's pipeline that runs the platform registry with a deploy credential, not a long-lived `ADMIN_TOKEN` on a public route. | M3-24 (environments) |
+
+Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
+
 **The screen's Durable Object** holds the desired and reported manifest IDs and one hibernating WebSocket.
 - Keepalive pings get an automatic reply (`setWebSocketAutoResponse`) without waking it or billing duration. Whether those pings count as billed requests (incoming messages bill at 20:1) is not documented: at a 60-second ping and 1,000 screens the worst case is 2.2M requests a month, about $0.18 over the allowance. M3-06 reads the real count from analytics on the paid account and uses the longest keepalive that holds the connection.
 - Server to screen: new manifest, command, revoked.
