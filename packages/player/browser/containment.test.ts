@@ -3,6 +3,7 @@
  * the spot fails and the next one plays. Templates navigating their own frame are the case the
  * wrapper frame exists for (review A1); the rest were already stopped by the sandbox and the CSP.
  */
+import type { Frame } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import type { FixtureMode } from './content';
 import { spotsPlayed, useHarness, type Player } from './harness';
@@ -17,11 +18,13 @@ const h = useHarness();
 async function hostile(mode: FixtureMode) {
   const popups: string[] = [];
   const p = await h.openPlayer((server) => {
-    server.publish(h.content([
-      { id: 'a', durationMs: 800 },
-      { id: 'evil', mode, target: `${server.url}/leak/${mode}`, durationMs: 800 },
-      { id: 'b', durationMs: 800 },
-    ]));
+    server.publish(
+      h.content([
+        { id: 'a', durationMs: 800 },
+        { id: 'evil', mode, target: `${server.url}/leak/${mode}`, durationMs: 800 },
+        { id: 'b', durationMs: 800 },
+      ]),
+    );
   });
   p.page.context().on('page', (popup) => popups.push(popup.url()));
   return { p, leaks: () => [...popups, ...p.server.requestsTo(/^\/leak\//).map((r) => r.path)] };
@@ -76,7 +79,7 @@ describe('the template frame', () => {
   it('keeps an opaque origin, so it cannot reach the player or its storage', async () => {
     const p = await h.openPlayer((server) => server.publish(h.content([{ id: 'a', durationMs: 5000 }])));
     await p.until((s) => s.played >= 1);
-    let template;
+    let template: Frame | undefined;
     for (const f of p.page.frames()) if (await f.evaluate(() => !!document.getElementById('label')).catch(() => false)) template = f;
     expect(template).toBeDefined();
     const reach = await template!.evaluate(() => {
@@ -84,17 +87,19 @@ describe('the template frame', () => {
         origin: () => origin,
         top: () => top!.document.title,
         parent: () => parent.document.title,
-        caches: () => typeof caches === 'undefined' ? 'none' : caches.keys(),
+        caches: () => (typeof caches === 'undefined' ? 'none' : caches.keys()),
         storage: () => localStorage.length,
       };
-      return Object.fromEntries(Object.entries(tries).map(([k, f]) => {
-        try {
-          const v = f();
-          return [k, v instanceof Promise ? 'promise' : String(v)];
-        } catch {
-          return [k, 'blocked'];
-        }
-      }));
+      return Object.fromEntries(
+        Object.entries(tries).map(([k, f]) => {
+          try {
+            const v = f();
+            return [k, v instanceof Promise ? 'promise' : String(v)];
+          } catch {
+            return [k, 'blocked'];
+          }
+        }),
+      );
     });
     expect(reach).toEqual({ origin: 'null', top: 'blocked', parent: 'blocked', caches: expect.stringMatching(/blocked|none/), storage: 'blocked' });
   });

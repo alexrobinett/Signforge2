@@ -522,6 +522,27 @@ export const auditLog = sqliteTable(
 );
 
 /**
+ * Idempotency keys: one row per creating tool call made with a key, written in the same batch as
+ * the change and its audit row. A retry with the same key gets `output_json` back and writes
+ * nothing; the same key with another action or input is refused. Keyed per org, so two orgs'
+ * keys never meet. Kept indefinitely for now; expiring old keys is M3-24's.
+ */
+export const idempotencyKeys = sqliteTable(
+  'idempotency_keys',
+  {
+    orgId: orgId(),
+    key: text('key').notNull(),
+    /** The tool name. */
+    action: text('action').notNull(),
+    /** SHA-256 of the canonical JSON of the input, without the key. */
+    inputSha256: text('input_sha256').notNull(),
+    outputJson: text('output_json').notNull(),
+    createdAt: created(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.key] })],
+);
+
+/**
  * Changes the platform makes outside any org, such as registering a base template. Not a tenant
  * table: no org reads it. Written only by the tool dispatcher, through `platform(db)`.
  */

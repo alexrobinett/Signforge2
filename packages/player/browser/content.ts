@@ -3,13 +3,37 @@
  * uses the fixture template (`fixtures/template.ts`); its `mode` decides how the template behaves.
  */
 import { createHash } from 'node:crypto';
-import { MANIFEST_SCHEMA, PROTOCOL_VERSION, manifestIdInput, type ScreenManifest, type Spot, type TemplateManifest, type Transition } from '@signforge/contract';
+import {
+  MANIFEST_SCHEMA,
+  MIN_REFRESH_S,
+  PROTOCOL_VERSION,
+  manifestIdInput,
+  type Binding,
+  type DataSource,
+  type ScreenManifest,
+  type Spot,
+  type TemplateManifest,
+  type Transition,
+} from '@signforge/contract';
 
 /** How the fixture template behaves; see `fixtures/template.ts`. */
 export type FixtureMode =
-  | 'ok' | 'throw' | 'hang'
+  | 'ok'
+  | 'throw'
+  | 'hang'
   // Hostile: each tries to reach `target`.
-  | 'navigate' | 'navigate-on-play' | 'navigate-data' | 'navigate-top' | 'refresh' | 'link' | 'form' | 'open' | 'iframe' | 'fetch' | 'image' | 'font';
+  | 'navigate'
+  | 'navigate-on-play'
+  | 'navigate-data'
+  | 'navigate-top'
+  | 'refresh'
+  | 'link'
+  | 'form'
+  | 'open'
+  | 'iframe'
+  | 'fetch'
+  | 'image'
+  | 'font';
 
 export interface FixtureSpot {
   id: string;
@@ -20,6 +44,10 @@ export interface FixtureSpot {
   /** Shown by the template. Defaults to the id. */
   label?: string;
   durationMs?: number;
+  /** Rows the template lists, as a news template would. Static, so the fallback when bound. */
+  items?: { title: string }[];
+  /** Fields that take their value from live data. Each source is added to the manifest. */
+  bindings?: Record<string, Binding>;
 }
 
 export interface Content {
@@ -35,7 +63,12 @@ const templateManifest: TemplateManifest = {
   id: 'fixture',
   version: '1.0.0',
   name: 'Fixture',
-  fields: { label: { type: 'text', label: 'Label' }, mode: { type: 'text', label: 'Mode' }, target: { type: 'text', label: 'Target' } },
+  fields: {
+    label: { type: 'text', label: 'Label', maxLength: 40 },
+    mode: { type: 'text', label: 'Mode' },
+    target: { type: 'text', label: 'Target' },
+    items: { type: 'list', label: 'Items', maxItems: 3, default: [], item: { title: { type: 'text', label: 'Title' } } },
+  },
   duration: { defaultMs: 1000, minMs: 100, maxMs: 60_000 },
   orientations: ['landscape', 'portrait'],
   uses: [],
@@ -58,10 +91,13 @@ export function buildContent(templateHtml: string, spots: FixtureSpot[], { trans
       kind: 'template',
       template: TEMPLATE_KEY,
       durationMs: s.durationMs ?? 1000,
-      data: { label: s.label ?? s.id, mode: s.mode ?? 'ok', ...(s.target ? { target: s.target } : {}) },
+      data: { label: s.label ?? s.id, mode: s.mode ?? 'ok', ...(s.items ? { items: s.items } : {}), target: s.target ?? '' },
       assets: {},
+      ...(s.bindings ? { bindings: s.bindings } : {}),
     };
   }
+  const dataSources: Record<string, DataSource> = {};
+  for (const b of spots.flatMap((s) => Object.values(s.bindings ?? {}))) dataSources[b.source] = { id: b.source, refreshS: MIN_REFRESH_S };
   const body: Omit<ScreenManifest, 'id'> = {
     schema: MANIFEST_SCHEMA,
     generatedAt: new Date().toISOString(),
@@ -70,7 +106,7 @@ export function buildContent(templateHtml: string, spots: FixtureSpot[], { trans
     templates: { [TEMPLATE_KEY]: { manifest: templateManifest, html: htmlSha } },
     spots: spotMap,
     playlists: { main: { id: 'main', name: 'Main', transition, items: spots.map((s) => ({ spot: s.id })) } },
-    dataSources: {},
+    dataSources,
     schedule: [],
     defaultPlaylist: 'main',
   };

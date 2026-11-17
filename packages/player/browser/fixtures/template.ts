@@ -6,14 +6,15 @@
  * Hostile modes try to reach the spot's `target` URL (see `attacks` below). Those that navigate
  * then wait forever, so only the player can end the spot; the others throw once the attempt is
  * refused, as a template that does not handle a failed load would.
- * It shows `label`, runs a CSS animation the SDK must hold until play, and marks `play`.
+ * It shows `label` and lists the titles of `items` in `#box` the way a news template would, trusting
+ * the shape (so `items: {}` throws), runs a CSS animation the SDK must hold until play, and marks `play`.
  */
 import { defineTemplate } from '@signforge/template-sdk';
 
 const forever = () => new Promise<never>(() => {});
 const after = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const attacks: Record<string, (target: string) => Promise<unknown> | void> = {
+const attacks: Record<string, (target: string) => unknown> = {
   navigate: (t) => void (location.href = t),
   'navigate-data': (t) => void (location.href = `data:text/html,<script>fetch(${JSON.stringify(t)})</script>`),
   'navigate-top': (t) => void (top!.location.href = t),
@@ -67,6 +68,8 @@ defineTemplate({
       await after(200);
       throw new Error(`${mode} was refused`);
     }
+    const items = (ctx.data.items ?? []) as { title: string }[];
+    document.getElementById('box')!.textContent = items.map((i) => i.title).join(', ');
   },
   play() {
     document.body.dataset.playing = '1';

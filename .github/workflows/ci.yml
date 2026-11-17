@@ -1,0 +1,43 @@
+# Typecheck, lint and test on every push to master and every pull request.
+# `pnpm test` includes the API's workerd tests, the player's headless browser tests (M3-26) and
+# the CMS end-to-end run against a real local API and CMS, so Chromium is installed first.
+# Performance is not checked here: that is measured on the Pi (docs/template-spec.md).
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the format check compares against the base branch
+      - uses: pnpm/action-setup@v4 # version from package.json's packageManager
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @signforge/cms exec playwright install --with-deps chromium
+      - run: pnpm typecheck
+      - run: pnpm lint
+      # Only files the change touches: the repo is not formatted wholesale yet (see README).
+      - run: pnpm format:check --since=origin/${{ github.base_ref || 'master' }}
+      - run: pnpm test
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cms-e2e
+          path: |
+            apps/cms/test-results
+            apps/cms/.e2e
+          if-no-files-found: ignore

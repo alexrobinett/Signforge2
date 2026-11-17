@@ -3,7 +3,7 @@ import { buildTemplate } from '@signforge/cli/template';
 import { existsSync, readdirSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 
-// Tests run inside workerd with the bindings from wrangler.jsonc, backed by local storage.
+// Tests run inside workerd with the bindings of wrangler.jsonc's `dev` environment, backed by local storage.
 // ADMIN_TOKEN is a fixed test value here, so a local .dev.vars never changes what the tests see.
 // `test/setup.ts` applies packages/db's migrations, the same ones `wrangler d1 migrations apply` runs.
 // TEMPLATE_BUILDS holds every template in templates/, built here in Node as `sf template push`
@@ -12,7 +12,9 @@ async function templateBuilds() {
   const root = new URL('../../templates/', import.meta.url).pathname;
   const builds = [];
   // Only folders that hold a template: a stray .DS_Store or README must not break the run.
-  for (const dir of readdirSync(root).filter((d) => existsSync(`${root}${d}/template.json`)).sort()) {
+  for (const dir of readdirSync(root)
+    .filter((d) => existsSync(`${root}${d}/template.json`))
+    .sort()) {
     const { manifest, html, sources, problems } = await buildTemplate(`${root}${dir}`);
     builds.push({ dir, manifest, html, sources, problems });
   }
@@ -22,7 +24,7 @@ async function templateBuilds() {
 export default defineConfig({
   plugins: [
     cloudflareTest(async () => ({
-      wrangler: { configPath: './wrangler.jsonc' },
+      wrangler: { configPath: './wrangler.jsonc', environment: 'dev' },
       miniflare: {
         bindings: {
           ADMIN_TOKEN: 'test-admin-token',

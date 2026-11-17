@@ -87,6 +87,16 @@ describe('create_asset_upload', () => {
     expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, type: 'image/gif' }, portrait: ok } })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, size: 30 * 1024 * 1024 }, portrait: ok } })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
+
+  it('refuses an image whose decoded size is over the pixel cap, though one side fits the box', async () => {
+    const strip = { sha256: '3'.repeat(64), type: 'image/png', size: 1000, width: 65_535, height: 1080 };
+    const ok = { sha256: '2'.repeat(64), type: 'image/jpeg', size: 1000, width: 1080, height: 1920 };
+    const r = await run('create_asset_upload', { name: 'x', renditions: { landscape: strip, portrait: ok } });
+    expect(r).toMatchObject({
+      ok: false, error: 'invalid_input',
+      details: [{ path: 'renditions.landscape', message: '65535x1080 is 70.8 million pixels; a screen decodes at most 8.3 million (3840x2160)' }],
+    });
+  });
 });
 
 describe('finalize_asset', () => {
@@ -164,6 +174,18 @@ describe('finalize_asset', () => {
     const created = await upload('Slow', { landscape: [l, await claim(l, 'image/png', 1920, 1080)], portrait: [p, await claim(p, 'image/png', 1080, 1920)] }, false);
     expect(await run('finalize_asset', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'invalid_input', message: expect.stringMatching(/not uploaded yet/) });
     expect((await call('get_asset', { assetId: created.asset.id })).asset.status).toBe('pending');
+  });
+
+  it('refuses an asset missing a rendition, and leaves it unverified', async () => {
+    // Written before M3-33, when an asset and its renditions were separate writes: the portrait row never landed.
+    const l = png(1920, 1080, 8);
+    const c = await claim(l, 'image/png', 1920, 1080);
+    const org = scoped(env.DB, o.orgId);
+    const asset = await org.assets.insert({ kind: 'image', name: 'Half', sha256: c.sha256, type: c.type, size: c.size, width: 1920, height: 1080, status: 'pending' });
+    await org.assets.renditions.insert({ assetId: asset.id, orientation: 'landscape', sha256: c.sha256, type: c.type, size: c.size, width: 1920, height: 1080 });
+    await env.BLOBS.put(uploadKey(o.orgId, asset.id, c.sha256), l);
+    expect(await run('finalize_asset', { assetId: asset.id })).toMatchObject({ ok: false, error: 'conflict', message: expect.stringMatching(/no portrait rendition/) });
+    expect((await call('get_asset', { assetId: asset.id })).asset.status).toBe('pending');
   });
 });
 

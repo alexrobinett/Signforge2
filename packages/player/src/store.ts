@@ -3,8 +3,8 @@
  * downloaded once however many manifests use it, and a manifest only goes live when every file
  * it names is present and verified.
  */
-import type { ScreenManifest } from '@signforge/contract';
-import { planSync, validateManifest } from '@signforge/player-core';
+import { validateManifest, type ScreenManifest } from '@signforge/contract';
+import { planSync } from '@signforge/player-core';
 
 const BLOBS = 'sf-blobs-v1';
 const STATE = 'sf-state-v1';
