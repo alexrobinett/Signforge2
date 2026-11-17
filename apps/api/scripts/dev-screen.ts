@@ -39,7 +39,12 @@ console.log = console.error;
 
 const manifest = args.content ? (JSON.parse(readFileSync(join(resolve(args.content), 'manifest.json'), 'utf8')) as ScreenManifest) : undefined;
 
-const proxy = await getPlatformProxy<Env>({ configPath: new URL('../wrangler.jsonc', import.meta.url).pathname, environment: 'dev', persist: true, remoteBindings: false });
+const proxy = await getPlatformProxy<Env>({
+  configPath: new URL('../wrangler.jsonc', import.meta.url).pathname,
+  environment: 'dev',
+  persist: true,
+  remoteBindings: false,
+});
 try {
   const { DB, BLOBS } = proxy.env;
   // Since M3-09 a screen's org must exist in Better Auth's `organization` table. Make it if it is new.
@@ -63,7 +68,9 @@ try {
     for (const [sha, f] of Object.entries(manifest.files)) {
       await BLOBS.put(orgBlobKey(org.orgId, sha), readFileSync(join(dir, 'blobs', sha)), { httpMetadata: { contentType: f.type } });
     }
-    await BLOBS.put(manifestKey(org.orgId, screen.id, manifest.id), readFileSync(join(dir, 'manifest.json')), { httpMetadata: { contentType: 'application/json' } });
+    await BLOBS.put(manifestKey(org.orgId, screen.id, manifest.id), readFileSync(join(dir, 'manifest.json')), {
+      httpMetadata: { contentType: 'application/json' },
+    });
     await org.screens.setDesiredManifest(screen.id, manifest.id);
     log(`manifest ${manifest.id.slice(0, 16)} and ${Object.keys(manifest.files).length} files loaded into local R2`);
 

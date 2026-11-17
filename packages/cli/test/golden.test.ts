@@ -48,10 +48,18 @@ describe('sf build', () => {
   // never hides that the stress golden went unchecked.
   const stressMedia = existsSync(join(root, 'examples/stress/media/pan-1080p30.mp4'));
   if (!stressMedia) {
-    process.stderr.write('\n*** golden.test.ts: SKIPPING the stress golden: examples/stress/media is missing. Run `sh scripts/stress-media.sh` to check it. ***\n\n');
+    process.stderr.write(
+      '\n*** golden.test.ts: SKIPPING the stress golden: examples/stress/media is missing. Run `sh scripts/stress-media.sh` to check it. ***\n\n',
+    );
   }
-  const stressName = stressMedia ? 'builds the stress project exactly as before' : 'builds the stress project exactly as before (SKIPPED: no stress media, run scripts/stress-media.sh)';
-  it.skipIf(!stressMedia)(stressName, () => {
-    expect(build('stress')).toEqual(golden('stress'));
-  }, 120_000);
+  const stressName = stressMedia
+    ? 'builds the stress project exactly as before'
+    : 'builds the stress project exactly as before (SKIPPED: no stress media, run scripts/stress-media.sh)';
+  it.skipIf(!stressMedia)(
+    stressName,
+    () => {
+      expect(build('stress')).toEqual(golden('stress'));
+    },
+    120_000,
+  );
 });

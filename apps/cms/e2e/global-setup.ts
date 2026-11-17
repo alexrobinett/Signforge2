@@ -30,13 +30,27 @@ export default async function globalSetup() {
   const env = { ...process.env, CLOUDFLARE_DEV_REGISTRY_PATH: `${RUN_DIR}registry`, NO_COLOR: '1' };
   const state = `${RUN_DIR}state`;
 
-  const migrate = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--env', 'dev', '--persist-to', state], { cwd: apiDir, env, encoding: 'utf8' });
+  const migrate = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--env', 'dev', '--persist-to', state], {
+    cwd: apiDir,
+    env,
+    encoding: 'utf8',
+  });
   if (migrate.status !== 0) throw new Error(`migrations failed:\n${migrate.stdout}\n${migrate.stderr}`);
 
   const log = openSync(API_LOG, 'a');
   const children: ChildProcess[] = [
-    spawn('pnpm', ['exec', 'wrangler', 'dev', '--env', 'dev', '--port', String(API_PORT), '--persist-to', state, '--ip', '127.0.0.1'], { cwd: apiDir, env, stdio: ['ignore', log, log], detached: true }),
-    spawn('pnpm', ['exec', 'vite', 'dev', '--port', String(CMS_PORT)], { cwd: cmsDir, env, stdio: ['ignore', openSync(`${RUN_DIR}cms.log`, 'a'), openSync(`${RUN_DIR}cms.log`, 'a')], detached: true }),
+    spawn('pnpm', ['exec', 'wrangler', 'dev', '--env', 'dev', '--port', String(API_PORT), '--persist-to', state, '--ip', '127.0.0.1'], {
+      cwd: apiDir,
+      env,
+      stdio: ['ignore', log, log],
+      detached: true,
+    }),
+    spawn('pnpm', ['exec', 'vite', 'dev', '--port', String(CMS_PORT)], {
+      cwd: cmsDir,
+      env,
+      stdio: ['ignore', openSync(`${RUN_DIR}cms.log`, 'a'), openSync(`${RUN_DIR}cms.log`, 'a')],
+      detached: true,
+    }),
   ];
 
   await waitFor(`http://127.0.0.1:${API_PORT}/health`);

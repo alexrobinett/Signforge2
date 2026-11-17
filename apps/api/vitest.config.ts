@@ -12,7 +12,9 @@ async function templateBuilds() {
   const root = new URL('../../templates/', import.meta.url).pathname;
   const builds = [];
   // Only folders that hold a template: a stray .DS_Store or README must not break the run.
-  for (const dir of readdirSync(root).filter((d) => existsSync(`${root}${d}/template.json`)).sort()) {
+  for (const dir of readdirSync(root)
+    .filter((d) => existsSync(`${root}${d}/template.json`))
+    .sort()) {
     const { manifest, html, sources, problems } = await buildTemplate(`${root}${dir}`);
     builds.push({ dir, manifest, html, sources, problems });
   }
