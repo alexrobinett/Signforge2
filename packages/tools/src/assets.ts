@@ -6,12 +6,13 @@
  *   - the bytes hash to the SHA-256 the uploader claimed, and have the claimed size;
  *   - the bytes are a JPEG, PNG, WebP or SVG of the claimed type (read from the bytes);
  *   - a raster rendition has the claimed size in pixels, as displayed, and is no larger than its
- *     screen box allows under the cover rule (`fitsScreenBox`, the rule `sf build` follows).
+ *     screen box allows under the cover rule, and within the decoded-pixel cap
+ *     (`imageSizeProblem` in the contract; the cover rule is the one `sf build` follows).
  *
  * A file that passes moves to `o/<org>/b/<sha256>`, where manifests reference it. One that fails
  * is deleted, and the asset is marked rejected. Video is M3-21.
  */
-import { fitsScreenBox, SCREEN_BOX } from '@signforge/contract';
+import { imageSizeProblem, SCREEN_BOX } from '@signforge/contract';
 import type { Asset, AssetRendition, OrgScope } from '@signforge/db';
 import { readImageInfo, RENDITION_TYPES } from '@signforge/media/image-info';
 import { z } from 'zod';
@@ -141,9 +142,9 @@ export const createAssetUpload = defineTool({
           if (r.width !== null || r.height !== null) ctx.addIssue({ code: 'custom', path, message: 'an SVG has no pixel size: send width and height as null' });
         } else if (r.width === null || r.height === null) {
           ctx.addIssue({ code: 'custom', path, message: 'a raster rendition needs its width and height' });
-        } else if (!fitsScreenBox(r.width, r.height, SCREEN_BOX[o])) {
-          const box = SCREEN_BOX[o];
-          ctx.addIssue({ code: 'custom', path, message: `${r.width}x${r.height} is larger than a ${o} screen needs: scale it to cover ${box.w}x${box.h}` });
+        } else {
+          const message = imageSizeProblem(r.width, r.height, SCREEN_BOX[o]);
+          if (message) ctx.addIssue({ code: 'custom', path, message });
         }
       }
       const { landscape: l, portrait: p } = renditions;
@@ -236,8 +237,9 @@ export const finalizeAsset = defineTool({
       else if (info.width !== null && info.height !== null) {
         for (const r of rows) {
           if (info.width !== r.width || info.height !== r.height) problems.push({ path: r.orientation, message: `the image is ${info.width}x${info.height}, not the claimed ${r.width}x${r.height}` });
-          else if (!fitsScreenBox(info.width, info.height, SCREEN_BOX[r.orientation])) {
-            problems.push({ path: r.orientation, message: `${info.width}x${info.height} is larger than a ${r.orientation} screen needs` });
+          else {
+            const message = imageSizeProblem(info.width, info.height, SCREEN_BOX[r.orientation]);
+            if (message) problems.push({ path: r.orientation, message });
           }
         }
       }

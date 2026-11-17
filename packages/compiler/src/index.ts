@@ -5,10 +5,9 @@
  * and video checks happen at upload.
  */
 import {
-  MANIFEST_SCHEMA, manifestIdInput, validateSpotData,
+  MANIFEST_SCHEMA, manifestIdInput, requiredFiles, validateManifest, validateSpotData,
   type DataSource, type Playlist, type ScheduleEntry, type ScreenManifest, type Sha256, type Spot, type TemplateManifest,
 } from '@signforge/contract';
-import { requiredFiles, validateManifest } from '@signforge/player-core';
 
 /** A schedule entry as the org stores it: its target level plus which group or screen it targets. */
 export type TargetedEntry = ScheduleEntry & {
