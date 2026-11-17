@@ -5,9 +5,10 @@
  * Query options:  ?content=<url>  where manifest.json and blobs/ live (default ./content). On another
  *                                 origin it is the API's device base (`https://<api>/v1/device`) and every
  *                                 request carries the screen's credential, collected from the supervisor
- *                 ?poll=<seconds> how often to look for a new manifest while the socket is down (default 30).
- *                                 With the API, each look is a sync; while the socket is up the server
- *                                 sets the interval (`nextSyncS`, 5 minutes)
+ *                 ?poll=<seconds> static content: how often to look for a new manifest (default 30). With the
+ *                                 API each look is a sync, every `nextSyncS` (5 minutes) with jitter, every
+ *                                 2 minutes while the socket is down (src/sync-interval.ts), and this often
+ *                                 after a failed one. Given explicitly, it is also the socket-down interval (testing)
  *                 ?stall=<seconds> give up on a download that receives nothing for this long (default 30; testing)
  *                 ?debug=1        show the on-screen status overlay
  *                 ?hb=1           with debug, also show a moving speck so every frame is drawn. It costs
@@ -45,6 +46,7 @@ import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from
 import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
+import { syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
 import { SOURCE } from './source';
 import { PinSet, UnauthorisedError, filesMissing, loadManifests, rememberGood, requestPersistence, sync, wipeContent } from './store';
 
@@ -53,6 +55,7 @@ declare const __SF_PLAYER_VERSION__: string;
 const query = new URLSearchParams(location.search);
 const CONTENT = query.get('content') ?? './content';
 const POLL_MS = Number(query.get('poll') ?? 30) * 1000;
+const POLL_OVERRIDE = query.has('poll');
 const STALL_OVERRIDE_MS = query.get('stall') ? Number(query.get('stall')) * 1000 : undefined;
 /** How long before the end of a spot the next one starts loading. */
 const PREPARE_LEAD_MS = 3000;
@@ -633,8 +636,8 @@ const socket = API
       },
       onChange: (open) => {
         state.socket = open;
-        // Down: back to polling, starting now.
-        if (!open) poll.wake();
+        // Down: sync now for any nudge missed (as often as the socket-down interval allows), then poll.
+        if (!open) syncSoon();
       },
     })
   : undefined;
@@ -670,7 +673,8 @@ function nextTicket(): Promise<string> {
   }
   return new Promise((resolve, reject) => {
     ticketWaiters.push({ resolve, reject });
-    poll.wake();
+    // A sync soon, but no sooner than the socket-down interval allows: else it waits for the next one.
+    syncSoon();
   });
 }
 
@@ -744,19 +748,41 @@ const withOverride = () => {
   return o ? { override: o } : {};
 };
 
-/** Sleep `s` seconds give or take 10%, so screens that synced together drift apart. */
-const jittered = (s: number) => s * 1000 * (0.9 + Math.random() * 0.2);
+/** The sync loop's timing inputs (src/sync-interval.ts). */
+const syncTiming = {
+  nextSyncS: SOCKET_POLL_MS / 1000,
+  ok: false,
+  /** When the last pass started (`performance.now()`). */
+  at: Number.NEGATIVE_INFINITY,
+};
+const timing = (): SyncTiming => ({
+  api: API,
+  ok: syncTiming.ok,
+  socketOpen: !!socket?.open,
+  nextSyncS: syncTiming.nextSyncS,
+  pollMs: POLL_MS,
+  pollOverride: POLL_OVERRIDE,
+});
+
+/** Wake the sync loop if the last pass was at least the socket-down interval ago. */
+function syncSoon(): void {
+  if (performance.now() - syncTiming.at >= syncGapMs(timing())) poll.wake();
+}
 
 async function syncLoop(): Promise<never> {
-  let nextSyncS = SOCKET_POLL_MS / 1000;
   return forever('sync', async () => {
+    syncTiming.at = performance.now();
+    syncTiming.ok = false;
     try {
       if (API && credential) {
         const has = await credential.check();
         // No supervisor to ask, with content playing: keep playing it rather than cover it with a code.
         if (has === 'none' || (has === 'unknown' && !manifest)) await pairScreen();
         else if (has === 'unknown') state.auth = 'no credential';
-        if (credential.held) nextSyncS = await apiSync();
+        if (credential.held) {
+          syncTiming.nextSyncS = await apiSync();
+          syncTiming.ok = true;
+        }
       } else {
         await fetchManifest();
         state.online = true;
@@ -775,8 +801,8 @@ async function syncLoop(): Promise<never> {
       state.online = false;
       if (!manifest) status(`SignForge\nWaiting for content…\n${err instanceof Error ? err.message : String(err)}`);
     }
-    // Polling is the fallback: while the socket is open, the server says when to look.
-    await poll.wait(socket?.open ? jittered(nextSyncS) : POLL_MS);
+    // The server says when to look; sooner while the socket is down, or after a failure.
+    await poll.wait(syncWaitMs(timing()));
   });
 }
 
