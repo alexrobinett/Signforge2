@@ -200,7 +200,10 @@ describe('files', () => {
   });
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
-    expect(validateManifest(manifest({ schema: 1 }))).toEqual(['manifest schema 1 is not one this player can play (2)']);
+    // A release plays schema N and N-1, so a screen updated while offline keeps its cached manifest.
+    expect(validateManifest(manifest({ schema: 1 }))).toEqual([]);
+    expect(validateManifest(manifest({ schema: 0 }))).toEqual(['manifest schema 0 is not one this player can play (1, 2)']);
+    expect(validateManifest(manifest({ schema: 3 }))).toEqual(['manifest schema 3 is not one this player can play (1, 2)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);
@@ -214,6 +217,14 @@ describe('files', () => {
     expect(validateManifest(bare)).toEqual(['template key "promo@1.0.0" must be <owner>/promo@1.0.0']);
     const empty = manifest({ templates: { 'base/x@1.0.0': { html: 'sha-a' } as never } });
     expect(validateManifest(empty)).toEqual(['template "base/x@1.0.0" has no manifest']);
+  });
+
+  it('accepts the bare template keys of schema 1, and only there', () => {
+    const t = { id: 'promo', version: '1.0.0', name: 'P', fields: {}, duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 }, orientations: ['landscape' as const], uses: [], background: '#000' };
+    const v1 = manifest({ schema: 1, templates: { 'promo@1.0.0': { manifest: t, html: 'sha-a' } } });
+    expect(validateManifest(v1)).toEqual([]);
+    const wrong = manifest({ schema: 1, templates: { 'promo@2.0.0': { manifest: t, html: 'sha-a' } } });
+    expect(validateManifest(wrong)).toEqual(['template key "promo@2.0.0" must be promo@1.0.0']);
   });
 
   it('only accepts https pages for URL spots', () => {

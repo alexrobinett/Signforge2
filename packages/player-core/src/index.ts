@@ -236,6 +236,12 @@ export function validateManifest(m: unknown): string[] {
       errors.push(`template "${key}" has no manifest`);
       continue;
     }
+    if (s.schema === 1) {
+      // Schema 1 keyed templates without their owner.
+      const bare = `${t.manifest.id}@${t.manifest.version}`;
+      if (key !== bare) errors.push(`template key "${key}" must be ${bare}`);
+      continue;
+    }
     const owner = key.split('/')[0] ?? '';
     if (!(owner === 'base' || isId(owner)) || key !== templateKey(t.manifest, owner)) {
       errors.push(`template key "${key}" must be <owner>/${t.manifest.id}@${t.manifest.version}`);
