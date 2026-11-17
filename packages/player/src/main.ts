@@ -356,9 +356,10 @@ function fallBack(): void {
 }
 
 /**
- * Run a loop body forever. A bug or a bad value must never end playback: log it, wait, try again.
+ * Run a loop body again and again, restarting it 5 s after it throws: a bug or a bad value must
+ * never end playback. The error is logged and shown as `lastError`.
  */
-async function forever(name: string, body: () => Promise<void>): Promise<never> {
+async function loopRestartingOnError(name: string, body: () => Promise<void>): Promise<never> {
   for (;;) {
     try {
       await body();
@@ -381,7 +382,7 @@ async function playbackLoop(): Promise<never> {
   let failedInManifest = 0;
   let failingManifest = '';
 
-  return forever('playback', async () => {
+  return loopRestartingOnError('playback', async () => {
     if (!manifest || !sequencer) {
       await sleep(500);
       return;
@@ -513,7 +514,7 @@ async function setPanel(on: boolean): Promise<void> {
 const display = wakeable();
 async function displayLoop(): Promise<never> {
   let applied: boolean | undefined;
-  return forever('display', async () => {
+  return loopRestartingOnError('display', async () => {
     if (manifest) {
       const at = new Date(now());
       const override = activeOverride(at);
@@ -770,7 +771,7 @@ function syncSoon(): void {
 }
 
 async function syncLoop(): Promise<never> {
-  return forever('sync', async () => {
+  return loopRestartingOnError('sync', async () => {
     syncTiming.at = performance.now();
     syncTiming.ok = false;
     try {
