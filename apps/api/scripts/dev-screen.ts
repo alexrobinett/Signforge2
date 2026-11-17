@@ -33,6 +33,8 @@ const { values: args } = parseArgs({
   },
 });
 const log = (msg: string) => process.stderr.write(`${msg}\n`);
+// Wrangler logs to stdout (e.g. "Using secrets defined in .dev.vars"); keep stdout for the credential alone.
+console.log = console.error;
 
 const manifest = args.content ? (JSON.parse(readFileSync(join(resolve(args.content), 'manifest.json'), 'utf8')) as ScreenManifest) : undefined;
 

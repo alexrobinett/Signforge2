@@ -13,11 +13,13 @@
   "dependencies": {
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
-    "hono": "^4.13.19",
-    "better-auth": "^1.7.25"
+    "@signforge/player-core": "workspace:*",
+    "better-auth": "^1.7.25",
+    "hono": "^4.13.19"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.4",
+    "@signforge/cli": "workspace:*",
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
     "vitest": "^5.1.0",

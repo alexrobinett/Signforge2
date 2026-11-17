@@ -3,6 +3,7 @@
  * sf: the local publisher. Stands in for the backend until Milestone 3.
  *
  *   sf build <project-dir> --out <dir>
+ *   sf push <out-dir> --screen <id> --api <url>
  *
  * Reads a content project (screen, spots, playlists, schedule, media), builds every template
  * it uses into one self-contained HTML file, checks it against the contract, and writes an
@@ -10,6 +11,10 @@
  *
  *   <out>/manifest.json
  *   <out>/blobs/<sha256>
+ *
+ * `sf push` uploads such a directory to the API and makes it a screen's desired manifest. It is
+ * temporary, until the CMS publishes: it calls the `/admin` routes with the `ADMIN_TOKEN` deploy
+ * secret, read from the `SF_ADMIN_TOKEN` environment variable. See ./push.ts.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -22,6 +27,7 @@ import {
   type Binding, type DataSource, type Playlist, type ScreenManifest, type Spot, type TemplateManifest, type Transition,
 } from '@signforge/contract';
 import { compileScreen, type CompileInput, type TargetedEntry } from '@signforge/compiler';
+import { push, PushError } from './push';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html', '.webm': 'video/webm', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -263,13 +269,35 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
   console.log(`  wrote ${outDir}`);
 }
 
-const [cmd, projectArg, ...rest] = process.argv.slice(2);
-if (cmd !== 'build' || !projectArg) {
-  console.error('usage: sf build <project-dir> [--out <dir>] [--templates <dir>]');
-  process.exit(2);
-}
-const flag = (name: string, fallback: string) => {
+const [cmd, dirArg, ...rest] = process.argv.slice(2);
+const USAGE = 'usage:\n  sf build <project-dir> [--out <dir>] [--templates <dir>]\n  sf push <out-dir> --screen <id> --api <url>   (token in SF_ADMIN_TOKEN)';
+const flag = (name: string, fallback?: string) => {
   const i = rest.indexOf(`--${name}`);
   return i >= 0 && rest[i + 1] ? rest[i + 1]! : fallback;
 };
-await buildProject(resolve(projectArg), resolve(flag('out', 'dist/content')), resolve(flag('templates', 'templates')));
+if (cmd === 'build' && dirArg) {
+  await buildProject(resolve(dirArg), resolve(flag('out', 'dist/content')!), resolve(flag('templates', 'templates')!));
+} else if (cmd === 'push' && dirArg && flag('screen') && flag('api')) {
+  const token = process.env.SF_ADMIN_TOKEN;
+  if (!token) {
+    console.error('sf push: set SF_ADMIN_TOKEN to the API\'s ADMIN_TOKEN (locally, the value in apps/api/.dev.vars)');
+    process.exit(2);
+  }
+  const dir = resolve(dirArg);
+  const manifestText = readFileSync(join(dir, 'manifest.json'), 'utf8');
+  const screen = flag('screen')!;
+  const built = JSON.parse(manifestText) as ScreenManifest;
+  if (built.screen.id !== screen) console.log(`  note: the build is for screen "${built.screen.id}"; pushing it to ${screen} as it is`);
+  console.log(`Pushing ${dir} to ${screen}`);
+  try {
+    const r = await push({ api: flag('api')!, screen, token, manifestText, readBlob: (sha) => readFileSync(join(dir, 'blobs', sha)), log: (l) => console.log(`  ${l}`) });
+    console.log(`  done: ${r.uploaded} of ${r.files} files uploaded (${(r.uploadedBytes / 1024).toFixed(0)} kB)`);
+  } catch (err) {
+    if (!(err instanceof PushError)) throw err;
+    console.error(`sf push failed: ${err.message}`);
+    process.exit(1);
+  }
+} else {
+  console.error(USAGE);
+  process.exit(2);
+}

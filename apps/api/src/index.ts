@@ -1,13 +1,15 @@
 /**
  * SignForge API Worker. Three route trees, one per kind of caller, and no credential is accepted
  * on another's tree: `/api` for CMS users (session cookie), `/v1/device` for screens (bearer
- * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md.
+ * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. Until M3-12, `/admin` serves
+ * `sf push`, behind a deploy secret (src/admin).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.
  */
 import { Hono } from 'hono';
 import { MANIFEST_SCHEMA } from '@signforge/contract';
+import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
 import { refuseSession } from './auth/guards';
@@ -24,5 +26,6 @@ app.get('/health', (c) =>
 
 app.route('/v1/device', device);
 app.route('/api', createApi());
+app.route('/admin', admin);
 
 export default app;

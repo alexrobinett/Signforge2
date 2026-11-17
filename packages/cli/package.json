@@ -6,6 +6,9 @@
   "bin": {
     "sf": "./src/sf.ts"
   },
+  "exports": {
+    "./push": "./src/push.ts"
+  },
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "vitest run"
