@@ -16,6 +16,12 @@
  *                 ?transition=cut|fade<ms>|<ms>  override the playlist transition (testing)
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
  *                 ?source=preview  the CMS editor's preview: play drafts the framing CMS page posts (src/preview.ts)
+ *                 ?pairmove=<seconds> how often the pairing code moves (default 60; testing)
+ *
+ * Pairing (M3-08): from the API, a screen whose supervisor has no credential shows a pairing code
+ * (src/pairing.ts) and plays once it is claimed. A credential the server refuses (a 401, or
+ * `revoked` on the socket) is a revoke: the screen deletes it and everything it was sent, and
+ * shows a code again (owner decision Q2, the default).
  */
 import {
   SUPPORTED_MANIFEST_SCHEMAS,
@@ -32,6 +38,7 @@ import {
 import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { clock, now, synced } from './clock';
 import { DeviceCredential } from './credential';
+import { pair } from './pairing';
 import { dataRejections, dataSettled, dataStatus, heldVersions, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
 import { activeOverride, setOverride, wakeable } from './override';
 import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
@@ -39,7 +46,7 @@ import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
 import { SOURCE } from './source';
-import { PinSet, UnauthorisedError, filesMissing, loadManifests, rememberGood, requestPersistence, sync } from './store';
+import { PinSet, UnauthorisedError, filesMissing, loadManifests, rememberGood, requestPersistence, sync, wipeContent } from './store';
 
 declare const __SF_PLAYER_VERSION__: string;
 
@@ -55,11 +62,29 @@ const DATA_WAIT_MS = 3000;
 const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
 /** The supervisor's secret, collected from it at first use. Never in the URL: templates can read that. */
 let supervisorToken = '';
+
+/** A request to the supervisor with its token. It makes a new token if its file is lost: then the token is collected again, once. */
+async function supervisorFetch(path: string, init: RequestInit, retry = true): Promise<Response> {
+  if (!supervisorToken) {
+    const t = await fetch(`${SUPERVISOR}/token`, { signal: AbortSignal.timeout(5000) });
+    if (t.ok) supervisorToken = ((await t.json()) as { token: string }).token;
+  }
+  const res = await fetch(`${SUPERVISOR}${path}`, {
+    ...init,
+    headers: { ...(init.headers as Record<string, string> | undefined), 'x-sf-token': supervisorToken },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (res.status === 403 && retry) {
+    supervisorToken = '';
+    return supervisorFetch(path, init, false);
+  }
+  return res;
+}
 /**
  * Content on another origin is the API, which needs the screen's credential. Static content served
  * beside the player (the default, the demo) gets no credential, so it never leaves the device.
  */
-const credential = new URL(CONTENT, location.href).origin === location.origin ? undefined : new DeviceCredential(SUPERVISOR);
+const credential = new URL(CONTENT, location.href).origin === location.origin ? undefined : new DeviceCredential(SUPERVISOR, supervisorFetch);
 const deviceHeaders = async () => (credential ? credential.headers() : {});
 /** Static content: while nothing nudges, the manifest is polled this often. */
 const SOCKET_POLL_MS = 300_000;
@@ -94,8 +119,10 @@ const state = {
   lastError: '',
   lastSync: '',
   online: navigator.onLine,
-  /** Why the API refused this screen ('not authorised'), or '' while it accepts it. */
+  /** 'pairing' while a code is shown, 'revoked' while the screen wipes itself, 'no credential' while the supervisor cannot be asked; '' once the API accepts it. */
   auth: '',
+  /** The pairing code on screen, or ''. */
+  pairing: '',
   /** False outside the screen's display hours, or while an override turns the panel off. */
   displayOn: true,
   /** Whether the nudge socket to the API is open. While it is, the manifest is not polled. */
@@ -461,22 +488,9 @@ async function playbackLoop(): Promise<never> {
 let displayMethods: Record<string, string> | undefined;
 
 /** Ask the device supervisor to power the panel. Without one (a browser, the demo) the player just goes dark. */
-async function setPanel(on: boolean, retry = true): Promise<void> {
+async function setPanel(on: boolean): Promise<void> {
   try {
-    if (!supervisorToken) {
-      const t = await fetch(`${SUPERVISOR}/token`, { signal: AbortSignal.timeout(5000) });
-      if (t.ok) supervisorToken = ((await t.json()) as { token: string }).token;
-    }
-    const res = await fetch(`${SUPERVISOR}/display/${on ? 'on' : 'off'}`, {
-      method: 'POST',
-      headers: { 'x-sf-token': supervisorToken },
-      signal: AbortSignal.timeout(15_000),
-    });
-    // The supervisor makes a new token if its file is lost: collect it again, once.
-    if (res.status === 403 && retry) {
-      supervisorToken = '';
-      return setPanel(on, false);
-    }
+    const res = await supervisorFetch(`/display/${on ? 'on' : 'off'}`, { method: 'POST' });
     if (res.ok) {
       const reply = (await res.json()) as Record<string, unknown>;
       state.display = JSON.stringify(reply);
@@ -523,12 +537,47 @@ async function displayLoop(): Promise<never> {
 // ---------------------------------------------------------------------- sync
 const poll = wakeable();
 
-/** The server answered, but refused the credential: not offline. Keep playing; pairing (M3-08) takes it from here. */
-function unauthorised(): void {
-  state.online = true;
-  state.auth = credential?.held ? 'not authorised' : 'no credential';
-  credential?.forget();
-  if (!manifest) status('SignForge\nThis screen is not authorised.');
+let revoking: Promise<void> | undefined;
+
+/**
+ * The server refused the credential this screen sent: it was revoked. Delete it from the
+ * supervisor and wipe everything the screen was sent, then pair again. A screen that held content
+ * reloads, so nothing of it stays in memory either; one that held none pairs where it is.
+ */
+function revoked(): Promise<void> {
+  revoking ??= (async () => {
+    console.warn('[sf] the server refused this screen\'s credential: wiping what it holds and pairing again');
+    state.online = true;
+    state.auth = 'revoked';
+    const held = !!manifest || !!lastGood || pendingPlays() > 0;
+    await credential?.revoke();
+    setOverride(null);
+    await wipeContent().catch((err: unknown) => console.warn('[sf] could not wipe the cache', err));
+    if (held) {
+      location.reload();
+      await new Promise(() => {}); // the page is going
+    }
+  })().finally(() => (revoking = undefined));
+  return revoking;
+}
+
+/** Show a code until it is claimed, or until a credential turns up another way (installed by hand, the supervisor back). */
+async function pairScreen(): Promise<void> {
+  if (!credential) return;
+  state.auth = 'pairing';
+  status('');
+  const got = await pair({
+    base: BASE,
+    moveMs: query.get('pairmove') ? Number(query.get('pairmove')) * 1000 : undefined,
+    stop: async () => (await credential.check()) === 'held',
+    onCode: (code) => (state.pairing = code),
+  });
+  if (got) {
+    console.info('[sf] paired');
+    await credential.adopt(got);
+  }
+  state.auth = '';
+  if (!manifest) status('SignForge\nWaiting for content…');
 }
 
 function command(c: DeviceCommand): void {
@@ -573,7 +622,10 @@ const socket = API
       ticket: () => nextTicket(),
       onNudge: () => poll.wake(),
       onCommand: command,
-      onUnauthorised: unauthorised,
+      // `revoked` on the socket. A refused sync is handled by the sync loop.
+      onUnauthorised: () => {
+        if (credential?.held) void revoked().then(() => poll.wake());
+      },
       onChange: (open) => {
         state.socket = open;
         // Down: back to polling, starting now.
@@ -694,8 +746,13 @@ async function syncLoop(): Promise<never> {
   let nextSyncS = SOCKET_POLL_MS / 1000;
   return forever('sync', async () => {
     try {
-      if (API) nextSyncS = await apiSync();
-      else {
+      if (API && credential) {
+        const has = await credential.check();
+        // No supervisor to ask, with content playing: keep playing it rather than cover it with a code.
+        if (has === 'none' || (has === 'unknown' && !manifest)) await pairScreen();
+        else if (has === 'unknown') state.auth = 'no credential';
+        if (credential.held) nextSyncS = await apiSync();
+      } else {
         await fetchManifest();
         state.online = true;
         state.auth = '';
@@ -706,8 +763,8 @@ async function syncLoop(): Promise<never> {
       // The sync's own data has gone as far as it will: spots waiting for feeds start with what is stored.
       if (API) settleSources(manifest);
       if (err instanceof UnauthorisedError) {
-        unauthorised();
-        await poll.wait(POLL_MS);
+        // Refused with a credential: revoked. Refused without one cannot happen (no request goes without).
+        if (credential?.held) await revoked();
         return;
       }
       state.online = false;

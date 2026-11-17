@@ -11,6 +11,11 @@
  * Tests `push` socket messages and read what the player sent in `socketMessages`. Content is
  * answered with CORS headers, so a test can serve it from another origin (`localUrl`), the way the
  * player meets the API.
+ *
+ * Pairing (M3-08): the supervisor holds `supervisorCredential` (GET, and POST or DELETE with its
+ * token, as device/pi/supervisor.py does). Requests to the API origin (`localUrl`) need a bearer
+ * credential in `authorised`; `/content/pair/start` and `/content/pair/poll` hand out codes, which a
+ * test `claim`s. `revoke` refuses a credential and tells the sockets.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -36,6 +41,18 @@ export interface RequestRecord {
   at: number;
   /** When the client closed the connection before the response finished (an abort), else undefined. */
   abortedAt?: number;
+}
+
+/** The credential the supervisor holds when a test starts: accepted by the API. */
+export const FIXTURE_CREDENTIAL = `sfd_scr_fixture.${'A'.repeat(43)}`;
+const SUPERVISOR_TOKEN = 'fixture-supervisor-token';
+
+interface Pairing {
+  code: string;
+  pollToken: string;
+  expiresAt: number;
+  credential?: string;
+  collected?: boolean;
 }
 
 const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.css': 'text/css' };
@@ -64,6 +81,14 @@ export class FixtureServer {
   readonly commands: DeviceCommand[] = [];
   /** Syncs carrying play counts to process and then drop without an answer, as a lost response would be. */
   loseCountReplies = 0;
+  /** What the supervisor holds; undefined is a freshly flashed screen. */
+  supervisorCredential: string | undefined = FIXTURE_CREDENTIAL;
+  /** Credentials the API accepts. */
+  readonly authorised = new Set<string>([FIXTURE_CREDENTIAL]);
+  /** Every code handed out, oldest first. */
+  readonly pairings: Pairing[] = [];
+  /** How long a new code lasts. */
+  pairingTtlMs = 15 * 60_000;
 
   private constructor(private readonly playerDir: string) {
     this.server.on('upgrade', (req, socket: Socket) => this.upgrade(req, socket));
@@ -128,6 +153,21 @@ export class FixtureServer {
     return out;
   }
 
+  /** Claim a code the screen shows, as claim_screen does. Returns the credential its next poll collects. */
+  claim(code: string): string {
+    const p = this.pairings.find((x) => x.code === code && !x.credential && x.expiresAt > Date.now());
+    if (!p) throw new Error(`no open pairing code ${code}`);
+    p.credential = `sfd_scr_paired${this.pairings.indexOf(p)}.${'B'.repeat(43)}`;
+    this.authorised.add(p.credential);
+    return p.credential;
+  }
+
+  /** Revoke a credential, as revoke_screen_credential does: refused from now on, and its sockets told. */
+  revoke(credential: string): void {
+    this.authorised.delete(credential);
+    this.push({ type: 'revoked' });
+  }
+
   /** Requests whose path matches, oldest first. */
   requestsTo(match: RegExp): RequestRecord[] {
     return this.requests.filter((r) => match.test(r.path));
@@ -186,10 +226,35 @@ export class FixtureServer {
     }
     if (rule && typeof rule.action === 'object' && 'status' in rule.action) return send(rule.action.status, '');
 
-    if (path.startsWith('/supervisor/')) return send(404, '');
+    if (path.startsWith('/supervisor/')) return this.supervisor(req, path.slice('/supervisor/'.length), send);
     if (path.startsWith('/content/')) {
       const rest = path.slice('/content/'.length);
       const c = this.content;
+      if (rest === 'pair/start' && req.method === 'POST') {
+        const p: Pairing = {
+          code: `P${String(this.pairings.length).padStart(5, '0')}`,
+          pollToken: `poll-${this.pairings.length}`,
+          expiresAt: Date.now() + this.pairingTtlMs,
+        };
+        this.pairings.push(p);
+        return send(200, JSON.stringify({ code: p.code, pollToken: p.pollToken, expiresAt: new Date(p.expiresAt).toISOString() }), 'application/json');
+      }
+      if (rest === 'pair/poll' && req.method === 'POST') {
+        return void readBody(req).then((body) => {
+          const token = (JSON.parse(body) as { pollToken?: string }).pollToken;
+          const p = this.pairings.find((x) => x.pollToken === token);
+          const reply =
+            p?.credential && !p.collected
+              ? ((p.collected = true), { status: 'paired', screenId: p.credential.slice(4, p.credential.indexOf('.')), credential: p.credential })
+              : p && !p.credential && p.expiresAt > Date.now()
+                ? { status: 'waiting' }
+                : { status: 'expired' };
+          send(200, JSON.stringify(reply), 'application/json');
+        });
+      }
+      // The API origin needs a live credential, as /v1/device does.
+      const bearer = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
+      if (req.headers.host?.startsWith('localhost') && !(bearer && this.authorised.has(bearer))) return send(401, '');
       if (rest === 'sync' && req.method === 'POST') {
         let body = '';
         req.on('data', (d: Buffer) => (body += d));
@@ -245,6 +310,26 @@ export class FixtureServer {
     } catch {
       send(404, '');
     }
+  }
+
+  /** The supervisor's credential and token routes; everything else it has nothing for. */
+  private supervisor(req: IncomingMessage, rest: string, send: (status: number, body?: string, type?: string) => void): void {
+    const json = (status: number, body: unknown) => send(status, JSON.stringify(body), 'application/json');
+    if (rest === 'token' && req.method === 'GET') return json(200, { token: SUPERVISOR_TOKEN });
+    if (rest !== 'credential') return send(404, '');
+    if (req.method === 'GET') return this.supervisorCredential ? json(200, { credential: this.supervisorCredential }) : json(404, { error: 'no credential' });
+    if (req.headers['x-sf-token'] !== SUPERVISOR_TOKEN) return json(403, { error: 'forbidden' });
+    if (req.method === 'DELETE') {
+      this.supervisorCredential = undefined;
+      return json(200, {});
+    }
+    if (req.method === 'POST') {
+      return void readBody(req).then((body) => {
+        this.supervisorCredential = (JSON.parse(body) as { credential: string }).credential;
+        json(200, {});
+      });
+    }
+    send(405, '');
   }
 
   /** A minimal WebSocket server: text frames, close, and `ping` answered with `pong`. */
@@ -314,4 +399,12 @@ function readFrame(buf: Buffer): { opcode: number; payload: Buffer; length: numb
   const payload = Buffer.from(buf.subarray(at + 4, at + 4 + len));
   for (let i = 0; i < payload.length; i++) payload[i]! ^= mask[i % 4]!;
   return { opcode, payload, length: at + 4 + len };
+}
+
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', (d: Buffer) => (body += d));
+    req.on('end', () => resolve(body));
+  });
 }

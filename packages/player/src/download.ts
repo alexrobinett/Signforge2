@@ -5,8 +5,8 @@
 import { Sha256 } from './sha256';
 
 /**
- * The server refused the screen's credential. Not offline: the server answered. The player keeps
- * playing what it has; pairing (M3-08) decides what a revoked screen shows.
+ * The server refused the screen's credential. Not offline: the server answered. The player treats
+ * it as revoked: it wipes what it holds and pairs again (main.ts `revoked`).
  */
 export class UnauthorisedError extends Error {
   constructor() {

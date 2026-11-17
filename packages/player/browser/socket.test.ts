@@ -62,15 +62,4 @@ it('acts on a display override at once, not at the next display-hours check', as
   await p.until((s) => s.displayOn, 12_000);
 });
 
-it('treats revoked as not authorised and closes the socket', async () => {
-  const content = h.content([{ id: 'a', durationMs: 800 }]);
-  const p = await h.openPlayer((server) => server.publish(content), remote('60'));
-  await p.until((s) => s.socket);
-  // As the API does once the credential is revoked.
-  p.server.intercept(/^\/content\/(manifest\.json|sync)$/, { status: 401 });
-  p.server.push({ type: 'revoked' });
-  const s = await p.until((s) => s.auth !== '' && !s.socket, 3000);
-  expect(s.auth).toBe('no credential');
-  // It keeps playing what it has.
-  expect(s.manifestId).toBe(content.manifest.id);
-});
+// `revoked` on the socket: browser/pairing.test.ts (the screen wipes itself and shows a code).
