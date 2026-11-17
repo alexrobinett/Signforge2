@@ -25,7 +25,7 @@ Two Workers on one hostname, so cookies stay same-origin. They are split because
 
 ## Data model (D1)
 
-Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT NULL`, its indexes lead with it, and foreign keys are composite `(org_id, id)` so a row cannot point into another org (**verify** D1 enforces foreign keys).
+Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT NULL`, its indexes lead with it, and foreign keys are composite `(org_id, id)` so a row cannot point into another org (**verify** D1 enforces foreign keys). The schema is `packages/db/src/schema.ts`; its README lists the few deliberate exceptions.
 
 | Table | Key columns |
 | --- | --- |

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@signforge/contract": "workspace:*",
+    "@signforge/db": "workspace:*",
     "hono": "^4.13.19"
   },
   "devDependencies": {

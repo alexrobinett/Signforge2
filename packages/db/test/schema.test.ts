@@ -1,0 +1,74 @@
+// The plan's schema rules, checked against the migrated database, so a later migration that
+// breaks one fails here. See docs/backend-plan.md#data-model-d1.
+import { env } from 'cloudflare:workers';
+import { describe, expect, it } from 'vitest';
+
+/** Tables whose rows exist before or outside any org. */
+const NOT_TENANT = new Set(['pairing_codes']);
+/** Tables where a null org means a base row shared by every org. */
+const NULLABLE_ORG = new Set(['templates', 'template_versions']);
+/** Indexes that deliberately do not lead with org_id. */
+const INDEX_EXCEPTIONS = new Set(['templates_base_key_uq', 'template_versions_base_version_uq']);
+/** Foreign keys that deliberately do not include org_id. */
+const FK_EXCEPTIONS = new Set(['spots.template_version_id']);
+
+const all = async <T>(sql: string) => (await env.DB.prepare(sql).all<T>()).results;
+
+async function tables() {
+  const rows = await all<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations' ORDER BY name",
+  );
+  return rows.map((r) => r.name).filter((n) => !NOT_TENANT.has(n));
+}
+
+describe('schema', () => {
+  it('has the tables in the plan', async () => {
+    expect(await tables()).toEqual([
+      'asset_renditions', 'assets', 'audit_log', 'data_snapshots', 'data_sources', 'play_counts', 'playlist_items', 'playlists',
+      'publish_screens', 'publishes', 'schedule_entries', 'screen_credentials', 'screen_group_members', 'screen_groups', 'screens',
+      'spots', 'template_versions', 'templates',
+    ]);
+  });
+
+  it('gives every tenant table org_id NOT NULL', async () => {
+    for (const t of await tables()) {
+      const col = (await all<{ name: string; notnull: number }>(`PRAGMA table_info(${t})`)).find((c) => c.name === 'org_id');
+      expect(col, t).toBeDefined();
+      if (!NULLABLE_ORG.has(t)) expect(col!.notnull, t).toBe(1);
+    }
+  });
+
+  it('leads every index with org_id, and makes (org_id, id) unique', async () => {
+    for (const t of await tables()) {
+      const indexes = await all<{ name: string; unique: number; origin: string }>(`PRAGMA index_list(${t})`);
+      const columns = async (i: string) => (await all<{ name: string }>(`PRAGMA index_info('${i}')`)).map((c) => c.name);
+      let orgIdUnique = false;
+      for (const i of indexes) {
+        const cols = await columns(i.name);
+        // The single-column primary key on `id` is the global lookup; everything else leads with org_id.
+        if (i.origin === 'pk' && cols.length === 1 && cols[0] === 'id') continue;
+        if (INDEX_EXCEPTIONS.has(i.name)) continue;
+        expect(cols[0], `${t}.${i.name} (${cols.join(', ')})`).toBe('org_id');
+        if (i.unique && cols.join() === 'org_id,id') orgIdUnique = true;
+      }
+      const hasId = (await all<{ name: string }>(`PRAGMA table_info(${t})`)).some((c) => c.name === 'id');
+      if (hasId) expect(orgIdUnique, `${t} needs a unique (org_id, id)`).toBe(true);
+    }
+  });
+
+  it('makes every foreign key between tenant rows composite on org_id', async () => {
+    for (const t of await tables()) {
+      const fks = await all<{ id: number; table: string; from: string; to: string }>(`PRAGMA foreign_key_list(${t})`);
+      const byId = Map.groupBy(fks, (f) => f.id);
+      for (const parts of byId.values()) {
+        const from = parts.map((p) => p.from);
+        if (FK_EXCEPTIONS.has(`${t}.${from.join()}`)) continue;
+        expect(parts.find((p) => p.from === 'org_id')?.to, `${t}(${from.join()}) -> ${parts[0]!.table}`).toBe('org_id');
+      }
+    }
+  });
+
+  it('runs with foreign keys enforced locally', async () => {
+    expect(await all('PRAGMA foreign_keys')).toEqual([{ foreign_keys: 1 }]);
+  });
+});

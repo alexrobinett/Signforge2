@@ -1,0 +1,27 @@
+{
+  "name": "@signforge/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "typecheck": "tsc -p . && tsc -p tsconfig.node.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.4",
+    "@cloudflare/workers-types": "^5.20261117.1",
+    "@types/node": "^26.6.6",
+    "drizzle-kit": "^0.31.11",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.164.0"
+  },
+  "dependencies": {
+    "@signforge/contract": "workspace:*",
+    "drizzle-orm": "^0.45.4"
+  }
+}
