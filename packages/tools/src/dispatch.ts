@@ -4,19 +4,20 @@
  *   1. Find the tool by name.
  *   2. Check the caller's role reaches the tool's minimum and its scopes include the tool's.
  *   3. Validate the input with the tool's zod schema.
- *   4. Run the handler with `scoped(db, orgId)`, the actor and the parsed input.
- *   5. If the tool changes data, append to `audit_log`: actor kind and id, client id, action,
- *      target, and the input with secrets redacted. Reads are not audited, nor are refusals,
- *      except one whose `ToolError` says it changed something on the way.
+ *   4. Run the handler with `scoped(db, orgId)`, the actor and the parsed input. A handler reads
+ *      freely but never writes: it stages each change with `ctx.write`.
+ *   5. Commit the staged writes and their `audit_log` row (actor kind and id, client id, action,
+ *      target, and the input with secrets redacted) in one D1 `batch()`, which is atomic: if the
+ *      audit row cannot be written, the change is not made either. A call that staged nothing
+ *      changed nothing and is not audited, nor is a read. A refusal (`ToolError`) commits nothing,
+ *      unless it says it `changed` something: then what was staged is committed, audited with
+ *      the refusal. Any other error commits nothing.
  *
  * A platform tool (`platformRegistry`, run by `/admin` with `platform(db)`) is audited the same way
  * in `platform_audit_log`, since what it changes belongs to no org.
- *
- * D1 has no interactive transactions, so the audit row is written after the change succeeds.
- * Should that write fail, the error propagates (a 500) and the change stands unrecorded; it is
- * not retried silently.
  */
-import { NotInOrgError, type OrgScope } from '@signforge/db';
+import { NotInOrgError, type OrgScope, type Staged, type Write } from '@signforge/db';
+import { canonicalJson } from '@signforge/contract';
 import { z } from 'zod';
 import { checkOutput } from './output';
 import type { UploadSigner } from './upload';
@@ -86,8 +87,23 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
     return fail('invalid_input', z.prettifyError(parsed.error), parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })));
   }
 
-  const audit = (target: { kind: string; id: string } | undefined, detail: Record<string, unknown>) =>
-    caller.org.auditLog.append({
+  // A retry of a creation made with this key gets the first result, and writes nothing.
+  const keyed = tool.idempotent ? idempotencyOf(caller.org, tool.name, parsed.data) : undefined;
+  if (keyed) {
+    const prior = await keyed.find();
+    if (prior) return prior;
+  }
+
+  const writes: Write[] = [];
+  const write = <T>(change: Staged<T>): T => {
+    if (!tool.mutates) throw new Error(`${tool.name} is a read and cannot write`);
+    writes.push(...change.writes);
+    return change.row;
+  };
+  // The writes and their audit row, in one atomic batch. Nothing staged, nothing written.
+  const commit = async (target: { kind: string; id: string } | undefined, detail: Record<string, unknown>) => {
+    if (!writes.length) return;
+    const audit = caller.org.auditLog.stage({
       actorKind: caller.actor.kind,
       actorId: caller.actor.id,
       clientId: caller.actor.clientId ?? null,
@@ -96,14 +112,16 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
       targetId: target?.id ?? null,
       detailJson: JSON.stringify({ input: redact(parsed.data), ...detail }),
     });
+    await caller.org.commit([...writes, ...audit.writes]);
+  };
 
   let output: unknown;
   try {
-    output = await tool.handler({ org: caller.org, actor: caller.actor, input: parsed.data, blobs: caller.blobs, uploads: caller.uploads });
+    output = await tool.handler({ org: caller.org, actor: caller.actor, input: parsed.data, blobs: caller.blobs, uploads: caller.uploads, write });
   } catch (err) {
     if (err instanceof ToolError) {
       // A refusal that changed something is recorded too, with what was refused.
-      if (tool.mutates && err.changed) await audit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
+      if (err.changed) await commit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
       return fail(err.code, err.message, err.details);
     }
     if (err instanceof NotInOrgError) return fail('not_found', err.message);
@@ -111,8 +129,43 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
   }
 
   checkOutput(tool, output);
-  if (tool.mutates) await audit(tool.target?.(parsed.data, output), {});
+  if (keyed && writes.length) writes.push(...(await keyed.record(output)));
+  try {
+    await commit(tool.target?.(parsed.data, output), {});
+  } catch (err) {
+    // A concurrent call with the same key committed first, and this batch failed on its record.
+    const prior = await keyed?.find();
+    if (prior) return prior;
+    throw err;
+  }
   return { ok: true, output };
+}
+
+/**
+ * The idempotency record of a keyed call: `find` returns the first call's result if this key was
+ * used for the same tool and input (a conflict if not), `record` stages this call's.
+ */
+function idempotencyOf(org: DataScope, action: string, input: unknown) {
+  const { idempotencyKey: key, ...rest } = input as { idempotencyKey?: string };
+  if (key === undefined) return undefined;
+  if (!('idempotency' in org)) throw new Error(`${action} takes an idempotency key, which only an org's scope records`);
+  const inputSha256 = sha256Hex(canonicalJson(rest));
+  return {
+    find: async (): Promise<DispatchResult | undefined> => {
+      const prior = await org.idempotency.get(key);
+      if (!prior) return undefined;
+      if (prior.action !== action || prior.inputSha256 !== (await inputSha256)) {
+        return fail('conflict', `idempotency key ${JSON.stringify(key)} was used for a different call; use a new key for a new creation`);
+      }
+      return { ok: true, output: JSON.parse(prior.outputJson) };
+    },
+    record: async (output: unknown) => org.idempotency.stage({ key, action, inputSha256: await inputSha256, outputJson: JSON.stringify(output) }).writes,
+  };
+}
+
+async function sha256Hex(text: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema input and output. */

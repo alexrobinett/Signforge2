@@ -36,6 +36,13 @@
       "when": 1794925910158,
       "tag": "0004_platform_audit_log",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794934088585,
+      "tag": "0005_idempotency_keys",
+      "breakpoints": true
     }
   ]
 }
