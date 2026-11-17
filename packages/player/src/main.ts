@@ -137,6 +137,8 @@ const state = {
   log: [] as PlayRecord[],
   /** Frames longer than 50 ms: when in the spot they happened and what the player was doing. */
   stalls: [] as { spot: string; atMs: number; ms: number; phase: string; next: string }[],
+  /** How long each of the last 50 prepares took, from the start of loading to ready: the 500 ms budget. */
+  prepares: [] as { spot: string; ms: number }[],
 };
 Object.assign(window, { __sf: state });
 
@@ -250,7 +252,10 @@ async function prepareStep(slot: Slot, step: Step, manifest: ScreenManifest): Pr
     slot.el.style.transition = 'none';
     slot.el.style.zIndex = '1';
     slot.el.style.opacity = '1';
+    const t0 = performance.now();
     await slot.prepare(step.spot, manifest);
+    state.prepares.push({ spot: step.spot.id, ms: Math.round(performance.now() - t0) });
+    if (state.prepares.length > 50) state.prepares.shift();
     return true;
   } catch (err) {
     state.skipped++;

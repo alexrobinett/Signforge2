@@ -5,6 +5,8 @@
 import {
   SUPPORTED_PROTOCOLS,
   type FrameClock,
+  type FrameFont,
+  type FrameTheme,
   type HostMessage,
   type Orientation,
   type ScreenManifest,
@@ -54,6 +56,8 @@ interface LiveFrame {
   spot: TemplateSpot;
   manifest: ScreenManifest;
   assets: Record<string, Blob>;
+  /** The screen's brand kit as the frame takes it; protocol 2 only. */
+  theme?: FrameTheme;
   orientation: Orientation;
   viewport: { width: number; height: number };
   /** Settles on the frame's next `ready` or `error`. */
@@ -65,6 +69,45 @@ async function spotAssets(spot: TemplateSpot): Promise<Record<string, Blob>> {
   const assets: Record<string, Blob> = {};
   await Promise.all(Object.entries(spot.assets).map(async ([field, sha]) => (assets[field] = await getFile(sha))));
   return assets;
+}
+
+/** The last manifest's theme: every template spot of a manifest shares it, so its files are read once. */
+let themeCache: { manifest: string; theme: Promise<FrameTheme | undefined> } | undefined;
+
+/**
+ * The manifest's brand kit as `init` sends it: fonts and logo as Blobs, like `assets`, since an
+ * object URL made here would not resolve in the frame's opaque origin. Undefined without a kit.
+ */
+function brandTheme(manifest: ScreenManifest): Promise<FrameTheme | undefined> {
+  if (themeCache?.manifest !== manifest.id) {
+    const theme = loadTheme(manifest);
+    themeCache = { manifest: manifest.id, theme };
+    // A failed read is not kept: the next spot tries again.
+    theme.catch(() => {
+      if (themeCache?.theme === theme) themeCache = undefined;
+    });
+  }
+  return themeCache.theme;
+}
+
+async function loadTheme({ brand }: ScreenManifest): Promise<FrameTheme | undefined> {
+  if (!brand) return undefined;
+  const font = async (f: NonNullable<typeof brand.fonts.body>): Promise<FrameFont> => ({
+    family: f.family,
+    files: await Promise.all(f.files.map(async (x) => ({ weight: x.weight, style: x.style, data: await getFile(x.file) }))),
+  });
+  const [display, body, onDark, onLight] = await Promise.all([
+    brand.fonts.display && font(brand.fonts.display),
+    brand.fonts.body && font(brand.fonts.body),
+    brand.logo && getFile(brand.logo.onDark),
+    brand.logo?.onLight && getFile(brand.logo.onLight),
+  ]);
+  return {
+    colors: brand.colors,
+    shape: brand.shape,
+    fonts: { ...(display ? { display } : {}), ...(body ? { body } : {}) },
+    ...(onDark ? { logo: { onDark, ...(onLight ? { onLight } : {}) } } : {}),
+  };
 }
 
 export class Slot {
@@ -163,6 +206,8 @@ export class Slot {
     if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
     const html = await (await getFile(t.html)).text();
     const assets = await spotAssets(spot);
+    // Protocol 1 bundles predate the theme.
+    const theme = protocol >= 2 ? await brandTheme(manifest) : undefined;
     alive(signal);
 
     // Fit the template to the screen. On an orientation it does not support it is letterboxed
@@ -201,7 +246,18 @@ export class Slot {
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.srcdoc = html;
 
-    const live: LiveFrame = (this.live = { frame, wrapper, protocol, html: t.html, spot, manifest, assets, orientation, viewport: { width: w, height: h } });
+    const live: LiveFrame = (this.live = {
+      frame,
+      wrapper,
+      protocol,
+      html: t.html,
+      spot,
+      manifest,
+      assets,
+      theme,
+      orientation,
+      viewport: { width: w, height: h },
+    });
     // A second load is a navigation, which the policy turned into an error page. Fail the spot; if
     // it is already playing, blank it until the next spot.
     let loads = 0;
@@ -236,6 +292,7 @@ export class Slot {
             timezone: live.manifest.screen.timezone,
             locale: live.manifest.screen.locale ?? 'en-US',
             clock: frameClock(),
+            ...(live.theme ? { theme: live.theme } : {}),
           });
         } else if (e.data.type === 'ready') live.waiter?.resolve();
         else if (e.data.type === 'error') live.waiter?.reject(new Error(`template error: ${e.data.message}`));
@@ -264,8 +321,9 @@ export class Slot {
     }
     const signal = this.abort.signal;
     const assets = await spotAssets(spot);
+    const theme = await brandTheme(manifest);
     alive(signal);
-    Object.assign(live, { spot, manifest, assets });
+    Object.assign(live, { spot, manifest, assets, theme });
     this.spot = spot;
     let timer = 0;
     try {

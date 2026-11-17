@@ -219,6 +219,76 @@ export interface TemplateCheckReport {
   /** Bytes of the built HTML file. */
   bundleBytes: number;
   checks: { check: TemplateCheckName; ok: boolean; problems: string[] }[];
+  /**
+   * Findings that do not stop a template shipping: colour literals outside a `var(--sf-*)`
+   * fallback (`brandColourWarnings`). Absent on reports stored before the lint existed.
+   */
+  warnings?: string[];
+}
+
+/** Named colours the lint knows. Not the whole CSS list: the ones a template is likely to write. */
+const NAMED_COLOURS =
+  /\b(?:white|black|red|green|blue|yellow|orange|purple|pink|gray|grey|silver|navy|teal|maroon|olive|lime|aqua|cyan|magenta|fuchsia|gold|brown|indigo|violet|beige|ivory|coral|salmon|tomato|crimson|khaki)\b/gi;
+const COLOUR_FUNCTION = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/gi;
+/** Properties where a bare word may be a colour; anywhere else `white` could be a name. */
+const COLOUR_PROPERTY = /color|background|border|outline|shadow|fill|stroke|text-decoration|column-rule|^--/i;
+
+/** `text` with every `name(...)` call (balanced) replaced by spaces, so offsets stay put. */
+function blankCalls(text: string, name: RegExp): string {
+  let out = text;
+  for (const m of [...text.matchAll(name)]) {
+    let depth = 0;
+    let i = m.index! + m[0].length - 1;
+    for (; i < text.length; i++) {
+      if (text[i] === '(') depth++;
+      else if (text[i] === ')' && --depth === 0) break;
+    }
+    out = out.slice(0, m.index!) + ' '.repeat(i + 1 - m.index!) + out.slice(i + 1);
+  }
+  return out;
+}
+
+/**
+ * The brand colour lint: colours in a template's CSS should come from `var(--sf-*)` or be built on
+ * one (`color-mix()`, gradients), with a literal only as the fallback inside `var()`, so the
+ * template follows the screen's brand kit and still renders without one. A literal elsewhere is a
+ * warning, not a failure: shadows, scrims and weather's sky colours use literals on purpose.
+ * Reads `.css` sources and the `<style>` elements of `.html` sources.
+ */
+export function brandColourWarnings(sources: Record<string, string>): string[] {
+  const warnings: string[] = [];
+  for (const [name, text] of Object.entries(sources)) {
+    let css: string;
+    if (name.endsWith('.css')) css = text;
+    else if (name.endsWith('.html')) {
+      // Everything outside <style> becomes blank, newlines kept, so line numbers stay the file's.
+      const blank = (t: string) => t.replace(/[^\n]/g, ' ');
+      css = '';
+      let at = 0;
+      for (const m of text.matchAll(/(<style[^>]*>)([\s\S]*?)<\/style>/gi)) {
+        css += blank(text.slice(at, m.index! + m[1]!.length)) + m[2];
+        at = m.index! + m[1]!.length + m[2]!.length;
+      }
+      css += blank(text.slice(at));
+    } else continue;
+    css = css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
+    for (const d of css.matchAll(/([-\w]+)\s*:\s*([^;{}]+)(?=[;}])/g)) {
+      const prop = d[1]!;
+      const value = blankCalls(blankCalls(d[2]!, /\bvar\(/gi), /\burl\(/gi);
+      const found: { at: number; text: string }[] = [];
+      for (const m of value.matchAll(/#[0-9a-f]{3,8}\b/gi)) found.push({ at: m.index!, text: m[0] });
+      const calls = blankCalls(value, COLOUR_FUNCTION);
+      for (const m of value.matchAll(COLOUR_FUNCTION)) {
+        const end = calls.slice(m.index!).search(/\S/);
+        found.push({ at: m.index!, text: d[2]!.slice(m.index!, end < 0 ? undefined : m.index! + end).trim() });
+      }
+      if (COLOUR_PROPERTY.test(prop)) for (const m of calls.matchAll(NAMED_COLOURS)) found.push({ at: m.index!, text: m[0] });
+      const line = css.slice(0, d.index!).split('\n').length;
+      for (const f of found.sort((a, b) => a.at - b.at))
+        warnings.push(`${name}:${line}: literal colour ${f.text} in ${prop}; use var(--sf-*) with it as the fallback`);
+    }
+  }
+  return warnings;
 }
 
 /**
@@ -258,7 +328,7 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
     { check: 'source-code', ok: true, problems: source },
   ];
   for (const c of checks) c.ok = !c.problems.length;
-  return { ok: checks.every((c) => c.ok), bundleBytes, checks };
+  return { ok: checks.every((c) => c.ok), bundleBytes, checks, warnings: brandColourWarnings(sources) };
 }
 
 // ------------------------------------------------------------ frame protocol

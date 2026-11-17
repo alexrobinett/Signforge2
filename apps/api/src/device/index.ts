@@ -2,6 +2,7 @@
  * `/v1/device`: what a screen fetches, authenticated by its bearer credential. Shapes are the
  * device API section of `packages/contract`; routes are in docs/backend-plan.md#screens.
  */
+import { isCatalogueFontFile } from '@signforge/compiler';
 import { isId, type DataSnapshot } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { Hono } from 'hono';
@@ -66,9 +67,10 @@ device.get('/blobs/:sha256', async (c) => {
   const listed = manifests.find((m) => m.files.has(sha));
   if (!listed) return notFound('file not found');
 
-  // The org's own copy, or for a base template's HTML the shared one. Never another org's prefix.
+  // The org's own copy, or for a base template's HTML or a catalogue brand font the shared one.
+  // Never another org's prefix.
   let obj = await c.env.BLOBS.get(orgBlobKey(screen.orgId, sha));
-  if (!obj && manifests.some((m) => m.baseHtml.has(sha))) obj = await c.env.BLOBS.get(baseBlobKey(sha));
+  if (!obj && (isCatalogueFontFile(sha) || manifests.some((m) => m.baseHtml.has(sha)))) obj = await c.env.BLOBS.get(baseBlobKey(sha));
   if (!obj) return notFound('file not found');
 
   return new Response(obj.body, {

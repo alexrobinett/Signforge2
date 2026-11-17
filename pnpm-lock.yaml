@@ -193,6 +193,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@signforge/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
       '@signforge/contract':
         specifier: workspace:*
         version: link:../../packages/contract

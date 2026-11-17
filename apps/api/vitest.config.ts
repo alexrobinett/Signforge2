@@ -1,6 +1,8 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 import { buildTemplate } from '@signforge/cli/template';
-import { existsSync, readdirSync } from 'node:fs';
+// fonts.ts directly: Node loads this config, and the compiler's index uses extensionless imports.
+import { FONTS, fontFilePath } from '../../packages/compiler/src/fonts.ts';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 
 // Tests run inside workerd with the bindings of wrangler.jsonc's `dev` environment, backed by local storage.
@@ -21,6 +23,13 @@ async function templateBuilds() {
   return JSON.stringify(builds);
 }
 
+// FONT_FILES: the catalogue's WOFF2 files from fonts/, by repo path, base64, for `sf fonts push`.
+function fontFiles() {
+  const root = new URL('../../', import.meta.url).pathname;
+  const paths = FONTS.flatMap((f) => f.files.map((x) => fontFilePath(f, x)));
+  return JSON.stringify(Object.fromEntries(paths.map((p) => [p, readFileSync(`${root}${p}`).toString('base64')])));
+}
+
 export default defineConfig({
   plugins: [
     cloudflareTest(async () => ({
@@ -30,6 +39,7 @@ export default defineConfig({
           ADMIN_TOKEN: 'test-admin-token',
           TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname),
           TEMPLATE_BUILDS: await templateBuilds(),
+          FONT_FILES: fontFiles(),
         },
       },
     })),

@@ -489,3 +489,33 @@ describe('preview channel', () => {
     expect(validatePreviewHostMessage(draft({ files: { [sha]: 'x' } }))).toEqual([`file "${sha.slice(0, 12)}" is not a Blob`]);
   });
 });
+
+describe('brand colour lint', () => {
+  const lint = (sources: Record<string, string>) => checkTemplateBundle({ manifest: template, html: '<p>', sources: { 'main.ts': '', ...sources } });
+
+  it('warns on a literal colour outside a var() fallback, and passes the template', () => {
+    const css = [
+      '.a { color: var(--sf-text, #f8fafc); background: var(--sf-bg, rgb(2 6 23)); }',
+      '.b { border-color: color-mix(in srgb, var(--sf-accent, #22d3ee) 40%, transparent); }',
+      '.c {',
+      '  color: #fff;',
+      '  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);',
+      '  background: linear-gradient(white, var(--sf-surface));',
+      '}',
+      '/* a note: #123456 in a comment is not a colour */',
+      '.d { font-family: var(--sf-font-display, Inter), sans-serif; }',
+    ].join('\n');
+    const report = lint({ 'style.css': css });
+    expect(report.ok).toBe(true);
+    expect(report.warnings).toEqual([
+      'style.css:4: literal colour #fff in color; use var(--sf-*) with it as the fallback',
+      'style.css:5: literal colour rgba(0, 0, 0, 0.4) in box-shadow; use var(--sf-*) with it as the fallback',
+      'style.css:6: literal colour white in background; use var(--sf-*) with it as the fallback',
+    ]);
+  });
+
+  it('reads the style elements of index.html too, and nothing else', () => {
+    const report = lint({ 'index.html': '<style>\n.x { fill: hsl(200 50% 50%) }\n</style><p style="x">#abc</p>', 'main.ts': 'const c = "#000";' });
+    expect(report.warnings).toEqual(['index.html:2: literal colour hsl(200 50% 50%) in fill; use var(--sf-*) with it as the fallback']);
+  });
+});

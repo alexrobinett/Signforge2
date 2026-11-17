@@ -117,6 +117,23 @@ Each template now runs inside a same-origin wrapper frame (see Template containm
 
 No spot was skipped in any run. Overall and while playing, the wrapper makes no difference beyond run-to-run noise, and every run is inside the 1% budget. During the 600 ms fade the wrapper runs drop slightly more frames (4.0 to 5.6% against 2.6 to 4.5%); the ranges overlap, so three runs cannot tell whether that is real.
 
+## Brand fonts (M3-39, 2026-11-17)
+
+The full 16-spot stress playlist (fade 600 ms), 290 s per run, two runs per variant, alternating, with the M3-39 player (prepare time is `__sf.prepares`: start of loading to ready). Variants: **plain**, `examples/stress` as is; **kit only**, the same with a brand kit (Montserrat display, Inter body, 6 WOFF2 files, 128 kB, and a logo) that the templates do not use; **fonts used**, the kit plus the templates' styles switched to `var(--sf-font-body)` for text and `var(--sf-font-display)` for `h1`-`h3` (a scratch edit, not committed).
+
+| Variant | Overall dropped | While loading next | Prepares over 500 ms | Prepare median | Slowest prepare |
+| --- | --- | --- | --- | --- | --- |
+| Plain | 0.34, 0.54% | 2.6, 4.8% | 4/33, 2/33 | 260, 247 ms | 1225 ms |
+| Kit only | 0.35, 0.46% | 2.9, 3.7% | 4/33, 2/33 | 256, 259 ms | 900 ms |
+| Fonts used | 0.32, 0.32% | 1.7, 2.3% | 10/33, 9/33 | 362, 384 ms | 1618 ms |
+
+Nothing was skipped, and no frame took 150 ms or more. Frames do not regress. Prepare time, median per spot, plain against fonts used: clock 203 to 252, menu 201 to 246, weather-live 204 to 255, sport-drinks 288 to 386 ms: a brand font adds 30 to 100 ms on most templates. Over the budget: energy (cstore-promo) 235 to 1138 ms, news 467 to 1076 ms, photo-promo over a 4K photo 260-323 to 515-690 ms. Why those three cost more is not found yet; it must be before M3-25 moves templates onto the brand fonts.
+
+Decoding is not the cost: the 6 files decode in 14 ms (`new FontFace(...).load()` in the player page, median of 5). Two things were measured and fixed on the way:
+
+- Faces built from bytes in the frame (`new FontFace(name, buffer)`) are a new typeface in every document, and about one prepare in three of photo-river (photo-promo, 4K photo) then took about 1.1 s to paint, whether or not text used the face. As `@font-face` with `data:` URLs (how templates already ship their own fonts), one in fifteen did. The SDK uses `data:` URLs.
+- A family the template's styles never reference is not loaded at all, so a kit costs today's templates nothing (the kit-only row).
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.

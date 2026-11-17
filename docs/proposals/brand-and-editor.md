@@ -1,6 +1,6 @@
 # Proposal: brand-aware templates and the live editor
 
-Status: decided 2026-11-17 (see **Decisions** at the end); built through M3-38, M3-39, M3-25, M3-40 and M3-16. Nothing here is built yet. It changes the contract and the template SDK, so it is decided before the CMS editor (M3-16) and before more templates are written.
+Status: decided 2026-11-17 (see **Decisions** at the end); built through M3-38, M3-39, M3-25, M3-40 and M3-16. Built so far: brand kits (M3-38) and the theme in the player and SDK (M3-39). It changes the contract and the template SDK, so it is decided before the CMS editor (M3-16) and before more templates are written.
 
 ## Where we are
 
