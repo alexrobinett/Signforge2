@@ -2,6 +2,7 @@ packages:
   - apps/*
   - packages/*
   - templates/*
+  - spike/m3-platform
 allowBuilds:
   esbuild: true
   workerd: true

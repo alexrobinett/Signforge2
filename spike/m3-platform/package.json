@@ -1,0 +1,21 @@
+{
+  "name": "@signforge/spike-m3-platform",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "wrangler types >/dev/null && tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "better-auth": "^1.7.0",
+    "ical.js": "^2.2.1",
+    "mp4box": "^2.5.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.4",
+    "auth": "1.7.25",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.164.0"
+  }
+}
