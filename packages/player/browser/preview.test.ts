@@ -55,7 +55,9 @@ async function openPreview(origin: string, content?: Content, extra: Record<stri
       blobRequests.push(blob[1]!);
       const body = content?.blobs.get(blob[1]!);
       const cors = { 'access-control-allow-origin': server.url, 'access-control-allow-credentials': 'true' };
-      return body ? route.fulfill({ status: 200, body, headers: { ...cors, 'content-type': 'application/octet-stream' } }) : route.fulfill({ status: 404, headers: cors });
+      return body
+        ? route.fulfill({ status: 200, body, headers: { ...cors, 'content-type': 'application/octet-stream' } })
+        : route.fulfill({ status: 404, headers: cors });
     }
     return route.fulfill({ status: 200, contentType: 'text/html', body: extra[url.pathname] ?? '<!doctype html><title>editor</title><body style="margin:0">' });
   });
@@ -95,7 +97,7 @@ async function openPreview(origin: string, content?: Content, extra: Record<stri
   const shownFrame = async (): Promise<Frame | undefined> => {
     for (const frame of player().childFrames()) {
       const el = await frame.frameElement().catch(() => undefined);
-      const shown = await el?.evaluate((e) => (e.parentElement!.style.zIndex === '2' && getComputedStyle(e.parentElement!).opacity === '1'));
+      const shown = await el?.evaluate((e) => e.parentElement!.style.zIndex === '2' && getComputedStyle(e.parentElement!).opacity === '1');
       if (shown) return frame;
     }
     return undefined;
@@ -121,7 +123,10 @@ async function openPreview(origin: string, content?: Content, extra: Record<stri
       const frame = await shownFrame();
       if (!frame) return undefined;
       const marked = await (await frame.frameElement()).evaluate((e) => (e as Element).getAttribute('data-test-mark') === '1');
-      return frame.evaluate((marked) => ({ label: document.getElementById('label')?.textContent ?? '', items: document.getElementById('box')?.textContent ?? '', marked }), marked);
+      return frame.evaluate(
+        (marked) => ({ label: document.getElementById('label')?.textContent ?? '', items: document.getElementById('box')?.textContent ?? '', marked }),
+        marked,
+      );
     },
     async mark() {
       const frame = await shownFrame();

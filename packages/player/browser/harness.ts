@@ -64,7 +64,9 @@ export function useHarness(): Harness {
     // preview.test.ts frames the player (127.0.0.1) from pages on made-up hosts that Playwright
     // answers; Chromium's local network access checks would block that as a public site framing a
     // local one, which is a property of the test setup, not of a CMS deployment.
-    browser = await chromium.launch({ args: ['--disable-features=LocalNetworkAccessChecks,PrivateNetworkAccessForNavigations,BlockInsecurePrivateNetworkRequests'] });
+    browser = await chromium.launch({
+      args: ['--disable-features=LocalNetworkAccessChecks,PrivateNetworkAccessForNavigations,BlockInsecurePrivateNetworkRequests'],
+    });
   });
   afterEach(async () => {
     await Promise.all(contexts.splice(0).map((c) => c.close()));
