@@ -13,14 +13,17 @@
  *                 ?spots=a,b      play only these spots, in order, ignoring the schedule (testing)
  *                 ?transition=cut|fade<ms>|<ms>  override the playlist transition (testing)
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
+ *                 ?source=preview  the CMS editor's preview: play drafts the framing CMS page posts (src/preview.ts)
  */
 import { requiredFiles, type DeviceCommand, type ScreenManifest, type Spot, type Transition } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { DeviceCredential } from './credential';
 import { dataRejections, dataSettled, dataStatus, startDataLoop } from './data';
 import { activeOverride, setOverride, wakeable } from './override';
+import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
 import { NudgeSocket } from './socket';
+import { SOURCE } from './source';
 import { PinSet, UnauthorisedError, loadManifests, rememberGood, requestPersistence, sync } from './store';
 
 const query = new URLSearchParams(location.search);
@@ -223,6 +226,7 @@ async function prepareStep(slot: Slot, step: Step, manifest: ScreenManifest): Pr
     state.skipped++;
     state.lastError = `${step.spot.id}: ${err instanceof Error ? err.message : String(err)}`;
     console.warn('[sf] skipped', state.lastError);
+    preview?.failed(state.lastError);
     slot.el.style.opacity = '0';
     slot.clear();
     return false;
@@ -230,7 +234,9 @@ async function prepareStep(slot: Slot, step: Step, manifest: ScreenManifest): Pr
 }
 
 function record(step: Step, manifestId: string): void {
-  if (manifestId !== state.lastGood && source?.id === manifestId) {
+  preview?.played(manifestId, step.spot.id);
+  // A draft in the preview is never a screen's last good manifest.
+  if (SOURCE === 'device' && manifestId !== state.lastGood && source?.id === manifestId) {
     state.lastGood = manifestId;
     lastGood = source;
     pins.hold('last-good', requiredFiles(source));
@@ -494,22 +500,23 @@ function command(c: DeviceCommand): void {
   } else console.warn('[sf] reboot: the supervisor cannot reboot the device yet');
 }
 
-/** The nudge socket, when content comes from the API. */
-const socket = credential
-  ? new NudgeSocket({
-      base: new URL(CONTENT, location.href).href.replace(/\/$/, ''),
-      headers: deviceHeaders,
-      status: () => ({ active: manifest?.id, displayOn: state.displayOn }),
-      onNudge: () => poll.wake(),
-      onCommand: command,
-      onUnauthorised: unauthorised,
-      onChange: (open) => {
-        state.socket = open;
-        // Down: back to polling, starting now.
-        if (!open) poll.wake();
-      },
-    })
-  : undefined;
+/** The nudge socket, when a screen's content comes from the API (never in the preview). */
+const socket =
+  credential && SOURCE === 'device'
+    ? new NudgeSocket({
+        base: new URL(CONTENT, location.href).href.replace(/\/$/, ''),
+        headers: deviceHeaders,
+        status: () => ({ active: manifest?.id, displayOn: state.displayOn }),
+        onNudge: () => poll.wake(),
+        onCommand: command,
+        onUnauthorised: unauthorised,
+        onChange: (open) => {
+          state.socket = open;
+          // Down: back to polling, starting now.
+          if (!open) poll.wake();
+        },
+      })
+    : undefined;
 
 async function syncLoop(): Promise<never> {
   return forever('sync', async () => {
@@ -581,6 +588,26 @@ function adopt(next: ScreenManifest): void {
   else sequencer = new Sequencer(next);
 }
 
+// ------------------------------------------------------------------- preview
+/** Set in preview mode: where the playback loop reports to the CMS. */
+let preview: Preview | undefined;
+
+/** Preview: adopt a draft, and show the new version of the spot on screen at once if it has one. */
+async function adoptDraft(next: ScreenManifest): Promise<string | undefined> {
+  adopt(next);
+  const slot = slots[front === 0 ? 0 : 1];
+  const spot = slot.spot && manifest?.spots[slot.spot.id];
+  if (!spot || !manifest) return undefined;
+  try {
+    await slot.update(spot, manifest);
+    return spot.id;
+  } catch (err) {
+    state.lastError = `${spot.id}: ${err instanceof Error ? err.message : String(err)}`;
+    preview?.failed(state.lastError);
+    return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------- boot
 async function boot(): Promise<void> {
   if (query.get('debug')) {
@@ -604,6 +631,13 @@ async function boot(): Promise<void> {
     setInterval(renderHud, 500);
   }
   requestAnimationFrame(monitor);
+  if (SOURCE === 'preview') {
+    // No service worker, storage, sync, data loop, display hours or watchdog reload: the CMS page
+    // owns what plays, and a reload would lose the draft.
+    preview = startPreview({ adopt: adoptDraft, status });
+    void playbackLoop();
+    return;
+  }
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[sf] no service worker', e));
   state.persistent = await requestPersistence();
 

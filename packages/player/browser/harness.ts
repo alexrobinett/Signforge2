@@ -57,6 +57,8 @@ export interface Harness {
   openPlayer(setup?: (server: FixtureServer) => void, query?: Record<string, string> | ((server: FixtureServer) => Record<string, string>)): Promise<Player>;
   /** A blank page in a fresh context, for hosting a template without the player. */
   blankPage(): Promise<Page>;
+  /** A fixture server for this test, closed after it: the player at its `url`, for a page to frame. */
+  playerServer(): Promise<FixtureServer>;
 }
 
 /** Register the hooks for one test file and return its harness. */
@@ -68,7 +70,12 @@ export function useHarness(): Harness {
   const servers: FixtureServer[] = [];
 
   beforeAll(async () => {
-    browser = await chromium.launch();
+    // preview.test.ts frames the player (127.0.0.1) from pages on made-up hosts that Playwright
+    // answers; Chromium's local network access checks would block that as a public site framing a
+    // local one, which is a property of the test setup, not of a CMS deployment.
+    browser = await chromium.launch({
+      args: ['--disable-features=LocalNetworkAccessChecks,PrivateNetworkAccessForNavigations,BlockInsecurePrivateNetworkRequests'],
+    });
   });
   afterEach(async () => {
     await Promise.all(contexts.splice(0).map((c) => c.close()));
@@ -88,6 +95,11 @@ export function useHarness(): Harness {
     templateHtml,
     content: (spots, opts) => buildContent(templateHtml, spots, opts),
     blankPage: newPage,
+    async playerServer() {
+      const server = await FixtureServer.start(playerDir);
+      servers.push(server);
+      return server;
+    },
     async openPlayer(setup, query = {}) {
       const server = await FixtureServer.start(playerDir);
       servers.push(server);

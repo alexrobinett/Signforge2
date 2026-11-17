@@ -142,3 +142,13 @@ export function dataSettled(ids: string[], timeoutMs: number): Promise<void> {
 export function dataStatus(): Record<string, string> {
   return Object.fromEntries([...snapshots].map(([id, s]) => [id, s.fetchedAt]));
 }
+
+/**
+ * Preview: the CMS posts each source's latest snapshot with the draft, in place of the data loop.
+ * Every source of the draft counts as loaded, with or without one, so no spot waits for a feed.
+ * Bound values are still checked against their fields when a spot plays.
+ */
+export function usePostedData(manifest: ScreenManifest, posted: readonly DataSnapshot[]): void {
+  for (const s of posted) snapshots.set(s.id, s);
+  for (const id of Object.keys(manifest.dataSources)) if (!settled.has(id)) markSettled(id);
+}

@@ -626,3 +626,36 @@ export type ServerSocketMessage = { type: 'manifest'; id: string } | { type: 'co
 
 /** Screen to server, over the socket. */
 export type DeviceSocketMessage = { type: 'applied'; manifest: string };
+
+// -------------------------------------------------------------- preview channel
+// The CMS editor runs the real player build in an iframe, in preview mode (`?source=preview`).
+// The CMS page posts the draft to it; the player accepts messages only from the CMS origin and
+// only while that origin frames it. See docs/architecture.md (Player, Content sources).
+
+/** The preview channel's version, in every message both ways. */
+export const PREVIEW_PROTOCOL = 1;
+
+/** CMS page to preview player. */
+export interface PreviewDraftMessage {
+  sfPreview: number;
+  type: 'draft';
+  /** A compiled draft manifest. Its first spot plays now, and later drafts update it in place. */
+  manifest: ScreenManifest;
+  /**
+   * Files of the manifest, by hash. A file not here is fetched from `<cms>/api/blobs/<sha256>`
+   * with the user's session, so the CMS posts only what is not saved yet.
+   */
+  files?: Record<string, Blob>;
+  /** The latest snapshot of each data source the draft binds. */
+  data?: DataSnapshot[];
+}
+export type PreviewHostMessage = PreviewDraftMessage;
+
+/** Preview player to CMS page. */
+export type PreviewPlayerMessage =
+  /** The player is listening: post the draft. */
+  | { sfPreview: number; type: 'listening' }
+  /** A spot of the draft is on screen. */
+  | { sfPreview: number; type: 'playing'; manifest: string; spot: string }
+  /** The draft was refused or a spot could not be shown. */
+  | { sfPreview: number; type: 'error'; message: string };
