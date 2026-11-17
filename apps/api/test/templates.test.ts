@@ -2,7 +2,7 @@
 // (packages/cli/src/template-push.ts): every template in templates/ becomes an approved base
 // template, read back through the CMS's tool route; the server's checks reject what the build
 // would; versions are immutable; org templates stay in their org.
-import type { TemplateManifest } from '@signforge/contract';
+import { PROTOCOL_VERSION, type TemplateManifest } from '@signforge/contract';
 import { pushTemplate, TemplatePushError, type TemplatePushOptions } from '@signforge/cli/template-push';
 import { platform, scoped } from '@signforge/db';
 import { env, exports } from 'cloudflare:workers';
@@ -79,7 +79,7 @@ describe('sf template seed', () => {
     }
     const weather = templates.find((x) => x.key === 'weather')!;
     const got = (await (await member.tool('get_template', { templateId: weather.id })).json()) as { template: { versions: { manifest: TemplateManifest }[] } };
-    expect(got.template.versions[0]!.manifest).toMatchObject({ id: 'weather', orientations: expect.any(Array), protocol: 1 });
+    expect(got.template.versions[0]!.manifest).toMatchObject({ id: 'weather', orientations: expect.any(Array), protocol: PROTOCOL_VERSION });
 
     // Readable, not changeable, by an org.
     const retire = await member.tool('set_template_version_status', { templateVersionId: weather.versions[0]!.id, status: 'retired' });
@@ -103,7 +103,7 @@ describe("the server's checks", () => {
   });
 
   it('refuse an existing version with different bytes', async () => {
-    const message = await rejection(push(card({ id: 'clock', version: '1.0.0', css: 'h1{color:red}' })));
+    const message = await rejection(push(card({ id: 'clock', version: BUILDS.find((b) => b.dir === 'clock')!.manifest.version, css: 'h1{color:red}' })));
     expect(message).toMatch(/409/);
     expect(message).toMatch(/bump the version/);
   });

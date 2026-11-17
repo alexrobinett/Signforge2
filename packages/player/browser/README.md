@@ -32,6 +32,7 @@ Testing-only query options the tests use: `?poll=<s>`, `?stall=<s>` (the downloa
 | `playback.test.ts` | Two spots play in order and loop; a spot whose template throws in `prepare` is skipped; a template that never reports ready is skipped after the ready timeout |
 | `sync.test.ts` | A stalled download is abandoned after the stall timeout and the player recovers; a 304 poll changes nothing; a new manifest is adopted at the next poll |
 | `sdk.test.ts` | The SDK on its own: `loaded` → `init` → `ready` with data bound and animations held, `play` starts them; an error in `prepare` is reported; a `prepare` that never finishes never reports ready |
+| `templates.test.ts` | Every template in `templates/`, built by `sf build`'s builder: new data after the first `init` (with `reset`, and without) leaves the same document as a fresh load; clock, agenda and news show the time from `init`'s clock |
 
 Protocol 1 has no `done` message: a spot ends when the player moves on.
 

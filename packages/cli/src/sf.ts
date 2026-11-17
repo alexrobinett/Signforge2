@@ -257,7 +257,7 @@ async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.text();
       const data = src.format === 'ical' ? normaliseFeed('ical', body, { now, ...(src.horizonDays ? { horizonDays: src.horizonDays } : {}) }) : src.format === 'rss' ? normaliseFeed('rss', body) : JSON.parse(body);
-      const snapshot: DataSnapshot = { id, fetchedAt: now.toISOString(), data };
+      const snapshot: DataSnapshot = { id, version: now.getTime(), fetchedAt: now.toISOString(), data };
       writeFileSync(join(outDir, `${id}.json`), JSON.stringify(snapshot));
       const count = src.format === 'ical' ? `${(data as CalendarFeed).events.length} events` : src.format === 'rss' ? `${(data as NewsFeed).items.length} items` : 'json';
       console.log(`  ${id}: ${count}`);

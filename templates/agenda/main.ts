@@ -1,4 +1,4 @@
-import { dayKey, defineTemplate, formatter } from '@signforge/template-sdk';
+import { dayKey, defineTemplate, formatter, now as clockNow } from '@signforge/template-sdk';
 
 interface Event {
   title: string;
@@ -14,7 +14,7 @@ const asDate = (s: string, allDay: boolean) => (allDay ? new Date(`${s.slice(0, 
 defineTemplate({
   prepare(ctx) {
     document.documentElement.style.setProperty('--accent', String(ctx.data.accent));
-    const now = new Date();
+    const now = clockNow();
     const today = dayKey(ctx, now);
     const tomorrow = dayKey(ctx, new Date(now.getTime() + 864e5));
     document.getElementById('today')!.textContent = formatter(ctx, { weekday: 'long', month: 'long', day: 'numeric' }).format(now);

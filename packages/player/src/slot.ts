@@ -2,7 +2,7 @@
  * A slot holds one spot. The player owns two and alternates: one is on screen while the
  * other loads the next spot out of sight, so a swap only happens between two finished frames.
  */
-import { SUPPORTED_PROTOCOLS, type HostMessage, type Orientation, type ScreenManifest, type Spot, type TemplateMessage } from '@signforge/contract';
+import { SUPPORTED_PROTOCOLS, type FrameClock, type HostMessage, type Orientation, type ScreenManifest, type Spot, type TemplateMessage } from '@signforge/contract';
 import { resolveSpotData } from '@signforge/player-core';
 import { liveData } from './data';
 import { getBlob } from './store';
@@ -13,6 +13,12 @@ export const READY_TIMEOUT_MS = 2000;
 // A template gets no network at all: scripts and styles are inline, media arrives as blobs.
 const TEMPLATE_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; font-src data:";
+
+/**
+ * The time templates show. The device clock, uncorrected, until the sync loop keeps an offset from
+ * server time (M3-07); that offset goes here.
+ */
+const frameClock = (): FrameClock => ({ now: Date.now(), offsetMs: 0 });
 
 /** Throw if the load was cancelled while it waited. */
 function alive(signal: AbortSignal): void {
@@ -130,7 +136,7 @@ export class Slot {
       addEventListener('message', (e: MessageEvent<TemplateMessage>) => {
         if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
         if (e.data.type === 'loaded') {
-          post({ sf: protocol, type: 'init', data: resolveSpotData(spot, liveData), assets, durationMs: spot.durationMs, orientation, viewport: { width: w, height: h }, timezone: manifest.screen.timezone, locale: manifest.screen.locale ?? 'en-US' });
+          post({ sf: protocol, type: 'init', data: resolveSpotData(spot, liveData), assets, durationMs: spot.durationMs, orientation, viewport: { width: w, height: h }, timezone: manifest.screen.timezone, locale: manifest.screen.locale ?? 'en-US', clock: frameClock() });
         } else if (e.data.type === 'ready') resolve();
         else if (e.data.type === 'error') reject(new Error(`template error: ${e.data.message}`));
       }, { signal });

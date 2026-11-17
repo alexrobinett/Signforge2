@@ -39,7 +39,9 @@ async function refresh(base: string, id: string, headers: Record<string, string>
     console.warn(`[sf] snapshot for ${id} ignored: ${problems[0] ?? `it is for "${String(next.id)}"`}`);
     return;
   }
-  if (next.fetchedAt === snapshots.get(id)?.fetchedAt) return;
+  // Keep the newest: an older snapshot can arrive after a newer one. (A copy stored before
+  // snapshots had versions has none, and any versioned one replaces it.)
+  if (next.version <= (snapshots.get(id)?.version ?? -1)) return;
   snapshots.set(id, next);
   await (await caches.open(STATE)).put(key(id), new Response(text, { headers: { 'content-type': 'application/json' } }));
 }

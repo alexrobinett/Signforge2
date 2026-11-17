@@ -75,6 +75,7 @@ device.get('/data/:file', async (c) => {
   if (!manifests.some((m) => m.dataSources.has(id))) return notFound('data source not found');
   const snap = await scoped(c.env.DB, screen.orgId).dataSources.snapshot(id);
   if (!snap) return notFound('no snapshot yet');
-  const body: DataSnapshot = { id, fetchedAt: new Date(snap.fetchedAt).toISOString(), data: JSON.parse(snap.dataJson) };
+  // The stored version is a hash, for telling whether data changed; a screen orders snapshots by the fetch time.
+  const body: DataSnapshot = { id, version: snap.fetchedAt, fetchedAt: new Date(snap.fetchedAt).toISOString(), data: JSON.parse(snap.dataJson) };
   return c.json(body, 200, { 'cache-control': 'no-store' });
 });
