@@ -18,11 +18,20 @@ function recordingD1(real: D1Database) {
     const note = () => {
       if (WRITE_SQL.test(sql)) outside.push(sql);
     };
-    const call = (method: 'run' | 'all' | 'raw' | 'first') => (...args: unknown[]) => {
-      note();
-      return (stmt[method] as (...a: unknown[]) => unknown).apply(stmt, args);
+    const call =
+      (method: 'run' | 'all' | 'raw' | 'first') =>
+      (...args: unknown[]) => {
+        note();
+        return (stmt[method] as (...a: unknown[]) => unknown).apply(stmt, args);
+      };
+    const w = {
+      real: stmt,
+      bind: (...values: unknown[]) => wrap(stmt.bind(...values), sql),
+      run: call('run'),
+      all: call('all'),
+      raw: call('raw'),
+      first: call('first'),
     };
-    const w = { real: stmt, bind: (...values: unknown[]) => wrap(stmt.bind(...values), sql), run: call('run'), all: call('all'), raw: call('raw'), first: call('first') };
     return w as unknown as D1PreparedStatement;
   };
   const db = {
@@ -47,6 +56,12 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   bundle: () => 'b'.repeat(64),
   sources: () => 'c'.repeat(64),
   asset: (o) => o.asset,
+  brandKit: (o) => o.brandKit,
+  logoOnDarkAsset: (o) => o.asset,
+  logoOnLightAsset: (o) => o.asset,
+  // Catalogue ids, the same for every org.
+  displayFont: () => 'base/oswald',
+  bodyFont: () => 'base/inter',
 };
 
 function withOwnIds(example: unknown, o: SeededOrg): unknown {
@@ -72,11 +87,20 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   delete_asset: async (o) => {
     await o.scope.playlists.setItems(o.playlist, [o.templateSpot]);
     await o.scope.spots.delete(o.imageSpot);
+    await o.scope.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
   },
   // Pending, both renditions, and an upload whose bytes do not hash to the claim: finalize rejects it.
   finalize_asset: async (o) => {
     await o.scope.assets.update(o.asset, { status: 'pending' });
-    await o.scope.assets.renditions.insert({ assetId: o.asset, orientation: 'portrait', sha256: 'b'.repeat(64), type: 'image/jpeg', size: 900, width: 1080, height: 1920 });
+    await o.scope.assets.renditions.insert({
+      assetId: o.asset,
+      orientation: 'portrait',
+      sha256: 'b'.repeat(64),
+      type: 'image/jpeg',
+      size: 900,
+      width: 1080,
+      height: 1920,
+    });
     await env.BLOBS.put(uploadKey(o.orgId, o.asset, 'b'.repeat(64)), 'not the claimed bytes');
   },
 };
@@ -90,7 +114,10 @@ async function runRecorded(tool: AnyTool, input: unknown) {
   await PREPARE[tool.name]?.(o);
   const { db, outside } = recordingD1(env.DB);
   const caller: Caller = {
-    org: scoped(db, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-g', clientId: 'test' }, blobs: env.BLOBS,
+    org: scoped(db, o.orgId),
+    role: 'owner',
+    actor: { kind: 'user', id: 'user-g', clientId: 'test' },
+    blobs: env.BLOBS,
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
   };
   const reg = new Map([[tool.name, tool]]);

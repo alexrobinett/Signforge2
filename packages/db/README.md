@@ -66,7 +66,7 @@ From `docs/backend-plan.md#data-model-d1`, checked against the migrated database
 - Every tenant table has `org_id NOT NULL`; its indexes lead with `org_id`; every row is unique on `(org_id, id)`.
 - References between tenant rows are composite `(org_id, x_id)` foreign keys.
 
-Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); nor is `platform_audit_log` (changes made outside any org); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. Every tenant `org_id` references Better Auth's `organization(id)`, without cascade.
+Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); nor is `platform_audit_log` (changes made outside any org); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. Every tenant `org_id` references Better Auth's `organization(id)`, without cascade. `brand_kits` is keyed `(org_id, id)` rather than by a global `id`, and its ids are always the server's: `brandKits.insert` ignores an `id` the caller passes. `brand_assignments` has no id; it is unique per target (the org, a group, a screen) by partial indexes.
 
 Local D1 enforces foreign keys (`PRAGMA foreign_keys` is 1, and a test shows a cross-org row is refused). Production is verified in M3-00. Isolation does not depend on it: the repositories filter every query.
 

@@ -28,6 +28,7 @@ export { r2Presigner, type R2PresignConfig, type UploadSigner } from './upload';
 export { MAX_RENDITION_BYTES, UPLOAD_URL_SECONDS, type AssetView, type RenditionView } from './assets';
 export type { ScreenView, CredentialView } from './screens';
 export type { GroupView } from './groups';
+export { kitColors, type BrandKitView, type StoredColors } from './brand';
 export type { StoredCheckReport, TemplateVersionView, TemplateView } from './templates';
 export {
   compileInputFor,

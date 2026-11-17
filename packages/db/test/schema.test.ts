@@ -33,6 +33,8 @@ describe('schema', () => {
       'asset_renditions',
       'assets',
       'audit_log',
+      'brand_assignments',
+      'brand_kits',
       'data_snapshots',
       'data_sources',
       'idempotency_keys',

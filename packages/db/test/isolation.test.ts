@@ -60,6 +60,7 @@ describe("a call made for org B with org A's ids", () => {
       ['dataSources.snapshot', () => b.dataSources.snapshot(a.dataSource)],
       ['dataSources.snapshots', () => b.dataSources.snapshots([a.dataSource])],
       ['playCounts.list', () => b.playCounts.list({ from: a.hour, to: a.hour + 3_600_000, screenId: a.screen })],
+      ['brandKits.get', () => b.brandKits.get(a.brandKit)],
     ];
     for (const [name, read] of reads) {
       const got = await read();
@@ -84,6 +85,8 @@ describe("a call made for org B with org A's ids", () => {
       dataSources: await b.dataSources.list(),
       auditLog: await b.auditLog.list(),
       playCounts: await b.playCounts.list({ from: 0, to: Number.MAX_SAFE_INTEGER }),
+      brandKits: await b.brandKits.list(),
+      brandAssignments: await b.brandKits.assignments.list(),
     };
     for (const [name, rows] of Object.entries(lists)) {
       expect(rows.length, name).toBeGreaterThan(0);
@@ -113,7 +116,9 @@ describe("a call made for org B with org A's ids", () => {
       () => b.scheduleEntries.delete(a.scheduleEntry),
       () => b.publishes.delete(a.publish),
       () => b.dataSources.delete(a.dataSource),
-    ]) expect(await del()).toBe(false);
+      () => b.brandKits.delete(a.brandKit),
+    ])
+      expect(await del()).toBe(false);
 
     const ra = s.a.scope;
     expect(await ra.screens.get(a.screen)).toMatchObject({ name: 'org-a lobby', desiredManifestId: null });
@@ -181,7 +186,9 @@ describe('rows a scope writes', () => {
     expect(await b.idempotency.get('k-iso')).toMatchObject({ orgId: 'org-b', action: 'x' });
     await expect(b.screenGroups.stage.setMembers(a.group, [s.b.screen]), 'stage.setMembers: A group').rejects.toBeInstanceOf(NotInOrgError);
     await expect(b.screenGroups.stage.setMembers(s.b.group, [a.screen]), 'stage.setMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
-    await expect(b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })).rejects.toBeInstanceOf(NotInOrgError);
+    await expect(b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })).rejects.toBeInstanceOf(
+      NotInOrgError,
+    );
   });
 
   it('commit atomically: one failing statement and none take effect', async () => {
