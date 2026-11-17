@@ -4,7 +4,7 @@
  * the MCP server and WebMCP all call tools through `dispatch` (./dispatch.ts); none of them
  * reaches the database another way.
  */
-import type { OrgScope, PlatformScope } from '@signforge/db';
+import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
 import type { UploadSigner } from './upload';
 
@@ -50,14 +50,21 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   blobs: R2Bucket;
   /** Signs direct uploads to that bucket (./upload.ts). Undefined where uploads are not configured. */
   uploads?: UploadSigner;
+  /**
+   * Add a staged change (a repository's `stage.*`) to this call's writes, and get its row back.
+   * A tool never writes to D1 itself: the dispatcher runs the writes and the audit row in one
+   * atomic batch after the handler returns. Only a tool with `mutates` may call it.
+   */
+  write: <T>(change: Staged<T>) => T;
 }
 
 export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict';
 
 /**
  * A refusal a handler means to return. Anything else a handler throws is a bug and propagates.
- * A refusal that changed something on the way (`finalize_asset` marks a bad upload rejected) sets
- * `changed`, and the dispatcher audits it like a success.
+ * Either way nothing the handler staged is written, unless the refusal sets `changed`: then what
+ * it staged before refusing (`finalize_asset` marks a bad upload rejected) is committed and
+ * audited with the refusal.
  */
 export class ToolError extends Error {
   constructor(
@@ -80,8 +87,13 @@ export interface Tool<S extends z.ZodType = z.ZodType, O = unknown, D extends Da
   description: string;
   scope: Scope;
   minRole: Role;
-  /** True if the tool changes data. Changes are audited; reads are not. */
+  /** True if the tool changes data. It stages its changes with `ctx.write`; they are audited, reads are not. */
   mutates: boolean;
+  /**
+   * True for a tool that creates something. Its input then has an optional `idempotencyKey`
+   * (`fields.ts`), and the dispatcher makes a retry with the same key return the first result.
+   */
+  idempotent?: boolean;
   input: S;
   /** A valid input, shown to agents and used by the generated tests. Id fields name their kind (`screenId`, `groupIds`). */
   example: z.input<S>;

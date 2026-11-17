@@ -94,10 +94,9 @@ export const renameScreen = defineTool({
   input: z.object({ screenId: id('screen'), name: name('screen') }),
   example: { screenId: 'scr_example', name: 'Lobby' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
-  handler: async ({ org, input }) => {
-    const row = await org.screens.update(input.screenId, { name: input.name });
-    if (!row) throw notFound('screen', input.screenId);
-    return { screen: screenView(row) };
+  handler: async ({ org, input, write }) => {
+    const screen = await requireScreen(org, input.screenId);
+    return { screen: screenView(write(org.screens.stage.update(screen, { name: input.name }))) };
   },
 });
 
@@ -119,14 +118,14 @@ export const updateScreenSettings = defineTool({
     .refine((v) => v.timezone !== undefined || v.locale !== undefined || v.orientation !== undefined || v.displayHours !== undefined, 'give at least one setting to change'),
   example: { screenId: 'scr_example', timezone: 'Europe/London', displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }] } },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
-  handler: async ({ org, input }) => {
-    const row = await org.screens.update(input.screenId, {
+  handler: async ({ org, input, write }) => {
+    const screen = await requireScreen(org, input.screenId);
+    const row = write(org.screens.stage.update(screen, {
       timezone: input.timezone,
       locale: input.locale,
       orientation: input.orientation,
       displayHoursJson: input.displayHours === undefined ? undefined : input.displayHours === null ? null : JSON.stringify(input.displayHours),
-    });
-    if (!row) throw notFound('screen', input.screenId);
+    }));
     return { screen: screenView(row) };
   },
 });
@@ -141,13 +140,11 @@ export const revokeScreenCredential = defineTool({
   input: z.object({ screenId: id('screen'), credentialId: id('credential') }),
   example: { screenId: 'scr_example', credentialId: 'crd_example' },
   target: (input) => ({ kind: 'credential', id: input.credentialId }),
-  handler: async ({ org, input }) => {
+  handler: async ({ org, input, write }) => {
     const cred = await org.screens.credentials.get(input.credentialId);
     if (!cred || cred.screenId !== input.screenId) throw notFound('credential', input.credentialId);
     if (cred.revokedAt != null) return { credential: credentialView(cred) };
-    const row = await org.screens.credentials.update(cred.id, { revokedAt: Date.now() });
-    if (!row) throw notFound('credential', input.credentialId);
-    return { credential: credentialView(row) };
+    return { credential: credentialView(write(org.screens.credentials.stage.update(cred, { revokedAt: Date.now() }))) };
   },
 });
 

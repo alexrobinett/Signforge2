@@ -19,7 +19,7 @@ export const publishManifestToScreen = defineTool({
   }),
   example: { screenId: 'scr_example', manifestId: '0'.repeat(64) },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
-  handler: async ({ org, blobs, input }) => {
+  handler: async ({ org, blobs, input, write }) => {
     const screen = await org.screens.get(input.screenId);
     if (!screen) throw notFound('screen', input.screenId);
     // A manifest is stored only once every file it lists is in R2 (the /admin upload checks), so
@@ -27,8 +27,9 @@ export const publishManifestToScreen = defineTool({
     if (!(await blobs.head(manifestKey(org.orgId, screen.id, input.manifestId)))) {
       throw new ToolError('not_found', `manifest ${input.manifestId} has not been uploaded for screen ${screen.id}`);
     }
-    if (!(await org.screens.setDesiredManifest(screen.id, input.manifestId))) throw notFound('screen', input.screenId);
-    return { screenId: screen.id, manifestId: input.manifestId, changed: screen.desiredManifestId !== input.manifestId };
+    const changed = screen.desiredManifestId !== input.manifestId;
+    if (changed) write(org.screens.stage.setDesiredManifest(screen.id, input.manifestId));
+    return { screenId: screen.id, manifestId: input.manifestId, changed };
   },
 });
 
