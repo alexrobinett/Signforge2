@@ -1,6 +1,6 @@
 # M3-22 Feed normalisers
 
-Status: open  ·  Size: S  ·  Depends on: nothing
+Status: done  ·  Size: S  ·  Depends on: nothing
 
 ## Goal
 
@@ -23,6 +23,6 @@ Status: open  ·  Size: S  ·  Depends on: nothing
 
 ## Done when
 
-- [ ] Fixture tests pass, including a weekly recurring meeting with one cancelled and one moved instance.
-- [ ] Runs inside workerd (vitest pool).
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [x] Fixture tests pass, including a weekly recurring meeting with one cancelled and one moved instance.
+- [x] Runs inside workerd (vitest pool).
+- [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
