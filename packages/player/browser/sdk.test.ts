@@ -30,7 +30,17 @@ async function host(data: Record<string, unknown>): Promise<Host> {
         if (e.source !== frame.contentWindow || e.data?.sf !== sf) return;
         w.msgs.push(e.data.type === 'error' ? `error:${e.data.message}` : e.data.type);
         if (e.data.type === 'loaded') {
-          const init = { sf, type: 'init', data, assets: {}, durationMs: 5000, orientation: 'landscape', viewport: { width: 960, height: 540 }, timezone: 'UTC', locale: 'en-US' };
+          const init = {
+            sf,
+            type: 'init',
+            data,
+            assets: {},
+            durationMs: 5000,
+            orientation: 'landscape',
+            viewport: { width: 960, height: 540 },
+            timezone: 'UTC',
+            locale: 'en-US',
+          };
           frame.contentWindow!.postMessage(init, '*');
         }
       });
@@ -45,7 +55,8 @@ async function host(data: Record<string, unknown>): Promise<Host> {
     page,
     frame,
     messages: () => page.evaluate(() => (window as unknown as { msgs: string[] }).msgs),
-    post: (type) => page.evaluate(({ type, sf }) => document.querySelector('iframe')!.contentWindow!.postMessage({ sf, type }, '*'), { type, sf: PROTOCOL_VERSION }),
+    post: (type) =>
+      page.evaluate(({ type, sf }) => document.querySelector('iframe')!.contentWindow!.postMessage({ sf, type }, '*'), { type, sf: PROTOCOL_VERSION }),
   };
 }
 

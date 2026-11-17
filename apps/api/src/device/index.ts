@@ -10,6 +10,8 @@ import { cors } from 'hono/cors';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
 import { deviceAuth, type DeviceEnv } from './auth';
 import { screenManifests } from './manifests';
+import { socketRoute } from './socket';
+import { syncRoute } from './sync';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -39,7 +41,11 @@ device.use(
     maxAge: 86400,
   }),
 );
+// Before the bearer middleware: the socket authenticates with its ticket (./socket.ts).
+device.get('/ws', socketRoute);
 device.use('*', deviceAuth);
+
+device.post('/sync', syncRoute);
 
 device.get('/manifest.json', async (c) => {
   const screen = c.get('screen');

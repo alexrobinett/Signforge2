@@ -89,6 +89,8 @@ export interface ContentOptions {
   variant?: string;
   /** The screen's brand kit, with its font files and logo as bytes. */
   brand?: FixtureBrand;
+  /** Change the manifest (schedule, playlists, display hours) before its id is computed. */
+  edit?: (m: Omit<ScreenManifest, 'id'>) => void;
 }
 
 export interface FixtureBrand {
@@ -105,7 +107,7 @@ export interface FixtureBrand {
 export function buildContent(
   templateHtml: string,
   spots: FixtureSpot[],
-  { transition = { type: 'cut' }, schema = MANIFEST_SCHEMA, variant, brand }: ContentOptions = {},
+  { transition = { type: 'cut' }, schema = MANIFEST_SCHEMA, variant, brand, edit }: ContentOptions = {},
 ): Content {
   const html = Buffer.from(variant ? `${templateHtml}<!-- ${variant} -->` : templateHtml);
   const key = schema === 1 ? 'fixture@1.0.0' : TEMPLATE_KEY;
@@ -159,6 +161,7 @@ export function buildContent(
     defaultPlaylist: 'main',
     ...(brand ? { brand: { id: 'kit', colors: brand.colors, shape: brand.shape, fonts, ...(logo ? { logo } : {}) } } : {}),
   };
+  edit?.(body);
   const manifest: ScreenManifest = { ...body, id: sha256(manifestIdInput(body)) };
   return { manifest, blobs };
 }

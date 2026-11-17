@@ -17,6 +17,9 @@
       // Cloudflare Email Sending. Dev records mail instead of sending it (src/email); the binding is
       // here so its type is generated. Secrets (AUTH_SECRET, GITHUB_*) are listed in src/env.d.ts.
       "send_email": [{ "name": "EMAIL" }],
+      // One Durable Object per screen, holding its nudge socket (src/device/screen-object.ts).
+      "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
       // A placeholder id: dev only ever runs locally.
       "d1_databases": [
         {
@@ -41,6 +44,8 @@
       "main": "src/index.ts",
       "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
       "send_email": [{ "name": "EMAIL" }],
+      "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
       "d1_databases": [
         {
           "binding": "DB",
@@ -56,6 +61,8 @@
       "main": "src/index.ts",
       "vars": { "ENVIRONMENT": "prod", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
       "send_email": [{ "name": "EMAIL" }],
+      "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
       "d1_databases": [
         {
           "binding": "DB",

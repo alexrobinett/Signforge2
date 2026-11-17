@@ -23,6 +23,7 @@ import {
   validateServerSocketMessage,
   validateSpotData,
   validateSyncRequest,
+  MAX_SYNC_PLAY_COUNTS,
   validateSyncResponse,
   validateTemplateManifest,
   type BrandKit,
@@ -160,12 +161,13 @@ const validSyncRequest = (): SyncRequest => ({
   seq: 3,
   epoch: 'e7Hq2',
   player: { version: '1.2.3', manifestSchemas: [2, 3], protocols: [1, 2] },
-  manifest: { active: 'm1', filesMissing: 0 },
+  manifest: { active: 'm1', filesMissing: 0, fallbackFrom: 'm2' },
   display: { on: true, methods: { signal: 'ok' }, override: { state: 'off', until: '2026-11-17T18:00:00Z' } },
   deviceTime: '2026-11-17T13:05:00Z',
   clock: { offsetMs: -1200, trusted: true },
-  playCounts: [{ hour: '2026-11-17T13:00Z', spot: 'menu', manifest: 'm1', plays: 4, ms: 32_000 }],
+  playCounts: [{ hour: '2026-11-17T13:00Z', spot: 'menu', plays: 4, ms: 32_000 }],
   snapshots: { feed: 1_763_384_400_000 },
+  dataRejected: { feed: 2 },
 });
 
 const validSyncResponse = (): SyncResponse => ({
@@ -430,12 +432,32 @@ describe('snapshots and device bodies', () => {
   it('rejects a sync request with bad counts', () => {
     const r = validSyncRequest() as unknown as Record<string, unknown>;
     r.seq = -1;
-    r.playCounts = [{ hour: '2026-11-17T13:30Z', spot: 'menu', manifest: 'm1', plays: 1.5, ms: 10 }];
+    r.playCounts = [{ hour: '2026-11-17T13:30Z', spot: 'menu', plays: 1.5, ms: 10 }];
     expect(validateSyncRequest(r)).toEqual([
       'seq must be a whole number, 0 or more',
       'play count 1: hour must be the start of a UTC hour, e.g. 2026-11-17T13:00Z',
       'play count 1: plays must be a whole number, 0 or more',
     ]);
+  });
+
+  it('bounds the play counts in one sync, and checks the heartbeat extras', () => {
+    const r = validSyncRequest() as unknown as Record<string, unknown>;
+    r.playCounts = Array.from({ length: MAX_SYNC_PLAY_COUNTS + 1 }, (_, i) => ({ hour: '2026-11-17T13:00Z', spot: `s${i}`, plays: 1, ms: 1 }));
+    r.manifest = { filesMissing: 0, fallbackFrom: '' };
+    r.dataRejected = { feed: -1 };
+    expect(validateSyncRequest(r)).toEqual([
+      'manifest needs filesMissing, and active and fallbackFrom when there are any',
+      `playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`,
+      'dataRejected: "feed" must be a source id with a count',
+    ]);
+    const { dataRejected: _, ...without } = validSyncRequest();
+    expect(validateSyncRequest(without)).toEqual([]);
+  });
+
+  it('lets a screen with nothing published sync, for its socket ticket', () => {
+    const { desiredManifest: _, ...unpublished } = validSyncResponse();
+    expect(validateSyncResponse(unpublished)).toEqual([]);
+    expect(validateSyncResponse({ ...validSyncResponse(), desiredManifest: '' })).toEqual(['desiredManifest must be a manifest id when present']);
   });
 
   it('rejects a paired response whose credential is for another screen', () => {

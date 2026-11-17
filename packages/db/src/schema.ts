@@ -188,6 +188,14 @@ export const screens = sqliteTable(
     reportedManifestId: text('reported_manifest_id'),
     lastSeenAt: integer('last_seen_at'),
     playerVersion: text('player_version'),
+    /**
+     * The screen's last heartbeat (`ScreenHeartbeat` in the API): display, clock, cache, fallback and
+     * refused data, as its last sync reported them. Null until it first syncs.
+     */
+    heartbeatJson: text('heartbeat_json'),
+    /** The `epoch` of the screen's play count batches, and the highest `seq` stored in it (contract `SyncRequest`). */
+    syncEpoch: text('sync_epoch'),
+    syncAckSeq: integer('sync_ack_seq').notNull().default(0),
     status: text('status', { enum: ['active', 'revoked'] })
       .notNull()
       .default('active'),

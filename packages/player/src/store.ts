@@ -150,6 +150,10 @@ export class PinSet implements Iterable<string> {
   }
 }
 
+/** Files of the manifest last synced that were missing and are not yet downloaded. */
+let missingNow = 0;
+export const filesMissing = (): number => missingNow;
+
 export interface SyncResult {
   manifest?: ScreenManifest;
   /** True when a new manifest was downloaded and made active. */
@@ -214,6 +218,7 @@ export async function sync(base: string, { currentId, headers = {}, stallMs = ST
   // under storage pressure if persistence was refused. Fetch back whatever is missing.
   const blobs = await caches.open(BLOBS);
   const { missing } = planSync(next, (await heldKeys(blobs)).hashes);
+  missingNow = missing.length;
   for (const sha of missing) {
     const type = next.files[sha]?.type ?? 'application/octet-stream';
     await fetchFile({ url: `${base}/blobs/${sha}`, sha, type, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` }).catch(
@@ -222,6 +227,7 @@ export async function sync(base: string, { currentId, headers = {}, stallMs = ST
         throw new Error(`file ${sha.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`);
       },
     );
+    missingNow--;
   }
 
   if (!same || rewrite) await (await caches.open(STATE)).put(ACTIVE, jsonResponse(text));

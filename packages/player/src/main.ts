@@ -5,7 +5,9 @@
  * Query options:  ?content=<url>  where manifest.json and blobs/ live (default ./content). On another
  *                                 origin it is the API's device base (`https://<api>/v1/device`) and every
  *                                 request carries the screen's credential, collected from the supervisor
- *                 ?poll=<seconds> how often to look for a new manifest (default 30)
+ *                 ?poll=<seconds> how often to look for a new manifest while the socket is down (default 30).
+ *                                 With the API, each look is a sync; while the socket is up the server
+ *                                 sets the interval (`nextSyncS`, 5 minutes)
  *                 ?stall=<seconds> give up on a download that receives nothing for this long (default 30; testing)
  *                 ?debug=1        show the on-screen status overlay
  *                 ?hb=1           with debug, also show a moving speck so every frame is drawn. It costs
@@ -15,14 +17,31 @@
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
  *                 ?source=preview  the CMS editor's preview: play drafts the framing CMS page posts (src/preview.ts)
  */
-import { requiredFiles, type ScreenManifest, type Spot, type Transition } from '@signforge/contract';
+import {
+  SUPPORTED_MANIFEST_SCHEMAS,
+  SUPPORTED_PROTOCOLS,
+  requiredFiles,
+  validateSyncResponse,
+  type DeviceCommand,
+  type ScreenManifest,
+  type Spot,
+  type SyncRequest,
+  type SyncResponse,
+  type Transition,
+} from '@signforge/contract';
 import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
+import { clock, now, synced } from './clock';
 import { DeviceCredential } from './credential';
-import { dataRejections, dataSettled, dataStatus, startDataLoop } from './data';
+import { dataRejections, dataSettled, dataStatus, heldVersions, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
+import { activeOverride, setOverride, wakeable } from './override';
+import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
 import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
+import { NudgeSocket, UnauthorisedSync } from './socket';
 import { SOURCE } from './source';
-import { PinSet, UnauthorisedError, loadManifests, rememberGood, requestPersistence, sync } from './store';
+import { PinSet, UnauthorisedError, filesMissing, loadManifests, rememberGood, requestPersistence, sync } from './store';
+
+declare const __SF_PLAYER_VERSION__: string;
 
 const query = new URLSearchParams(location.search);
 const CONTENT = query.get('content') ?? './content';
@@ -42,6 +61,12 @@ let supervisorToken = '';
  */
 const credential = new URL(CONTENT, location.href).origin === location.origin ? undefined : new DeviceCredential(SUPERVISOR);
 const deviceHeaders = async () => (credential ? credential.headers() : {});
+/** Static content: while nothing nudges, the manifest is polled this often. */
+const SOCKET_POLL_MS = 300_000;
+/** With the API, even an unchanged manifest is fetched this often, to put back files the browser evicted. */
+const FILE_CHECK_MS = 3_600_000;
+/** A reload command is obeyed at most this often, so a player that cannot play what it is sent does not reload in a loop. */
+const RELOAD_GAP_MS = 15 * 60_000;
 
 const statusEl = document.getElementById('status')!;
 const hudEl = document.getElementById('hud')!;
@@ -71,16 +96,26 @@ const state = {
   online: navigator.onLine,
   /** Why the API refused this screen ('not authorised'), or '' while it accepts it. */
   auth: '',
-  /** False outside the screen's display hours. */
+  /** False outside the screen's display hours, or while an override turns the panel off. */
   displayOn: true,
+  /** Whether the nudge socket to the API is open. While it is, the manifest is not polled. */
+  socket: false,
   /** How the supervisor last switched the panel, or why it could not. */
   display: '',
+  /** The correction from server time, and whether the player trusts its clock (src/clock.ts). */
+  get clock(): { offsetMs: number; trusted: boolean } {
+    return { offsetMs: clock.offsetMs, trusted: clock.trusted };
+  },
+  /** Plays counted and not yet acknowledged by a sync. */
+  get playsPending(): number {
+    return pendingPlays();
+  },
   persistent: false,
   /** The id of the last manifest that played a spot: the one the player falls back to. */
   lastGood: '',
   /**
    * The id of the newest manifest while the player falls back from it, because nothing in it
-   * played for a full pass of its playlist; '' otherwise. Reported in the heartbeat once M3-07 lands.
+   * played for a full pass of its playlist; '' otherwise. Reported in the heartbeat (`manifest.fallbackFrom`).
    */
   fallback: '',
   /** JS heap in MB, where the browser reports it. */
@@ -149,6 +184,7 @@ function renderHud(): void {
   const pct = f.count ? ((100 * f.dropped) / (f.count + f.dropped)).toFixed(2) : '0';
   hudEl.textContent =
     `manifest ${state.manifestId}  ${state.online ? 'online' : 'OFFLINE'}${state.auth ? `  ${state.auth.toUpperCase()}` : ''}\n` +
+    `clock ${clock.offsetMs >= 0 ? '+' : ''}${(clock.offsetMs / 1000).toFixed(1)} s${clock.trusted ? '' : '  UNTRUSTED'}  plays pending ${pendingPlays()}\n` +
     `playlist ${state.playlist}\nspot     ${state.spot}\n` +
     `played ${state.played}  skipped ${state.skipped}${state.displayOn ? '' : '  ASLEEP'}\n` +
     `frames ${f.count}  dropped ${pct}%  worst ${f.maxMs} ms` +
@@ -244,11 +280,14 @@ function record(step: Step, manifestId: string): void {
   state.spot = step.spot.id;
   state.playlist = step.playlist.id;
   state.played++;
+  const at = now();
+  // On a clock it does not trust the screen cannot say which hour a play was in: not counted.
+  if (SOURCE === 'device' && clock.trusted) recordPlay(at, step.spot.id, step.spot.durationMs);
   state.log.push({
     spot: step.spot.id,
     playlist: step.playlist.id,
     manifest: manifestId,
-    startedAt: new Date().toISOString(),
+    startedAt: new Date(at).toISOString(),
     durationMs: step.spot.durationMs,
   });
   if (state.log.length > 500) state.log.shift();
@@ -340,7 +379,7 @@ async function playbackLoop(): Promise<never> {
     if (!state.displayOn) return;
 
     const m = manifest;
-    const step = sequencer.next(new Date());
+    const step = sequencer.next(new Date(now()), { clockTrusted: clock.trusted });
     if (!step) {
       for (const s of slots) {
         s.clear();
@@ -423,6 +462,9 @@ async function playbackLoop(): Promise<never> {
 }
 
 // ------------------------------------------------------------------- display
+/** What the supervisor reported for each power method at the last switch, for the heartbeat. */
+let displayMethods: Record<string, string> | undefined;
+
 /** Ask the device supervisor to power the panel. Without one (a browser, the demo) the player just goes dark. */
 async function setPanel(on: boolean, retry = true): Promise<void> {
   try {
@@ -440,18 +482,25 @@ async function setPanel(on: boolean, retry = true): Promise<void> {
       supervisorToken = '';
       return setPanel(on, false);
     }
-    state.display = res.ok ? JSON.stringify(await res.json()) : `supervisor ${res.status}`;
+    if (res.ok) {
+      const reply = (await res.json()) as Record<string, unknown>;
+      state.display = JSON.stringify(reply);
+      displayMethods = Object.fromEntries(Object.entries(reply).filter((e): e is [string, string] => typeof e[1] === 'string'));
+    } else state.display = `supervisor ${res.status}`;
   } catch {
     state.display = 'no supervisor';
   }
 }
 
 /** Follow the screen's display hours. Checked often rather than timed, so clock and DST changes are harmless. */
+const display = wakeable();
 async function displayLoop(): Promise<never> {
   let applied: boolean | undefined;
   return forever('display', async () => {
     if (manifest) {
-      const on = displayOn(manifest.screen.displayHours, localTime(new Date(), manifest.screen.timezone));
+      const at = new Date(now());
+      const override = activeOverride(at);
+      const on = override ? override.state === 'on' : displayOn(manifest.screen.displayHours, localTime(at, manifest.screen.timezone));
       if (on !== applied) {
         applied = on;
         console.info(`[sf] display ${on ? 'on' : 'off'}`);
@@ -471,43 +520,206 @@ async function displayLoop(): Promise<never> {
         }
       }
     }
-    await sleep(15_000);
+    // A display override from the socket wakes this at once.
+    await display.wait(15_000);
   });
 }
 
 // ---------------------------------------------------------------------- sync
+const poll = wakeable();
+
+/** The server answered, but refused the credential: not offline. Keep playing; pairing (M3-08) takes it from here. */
+function unauthorised(): void {
+  state.online = true;
+  state.auth = credential?.held ? 'not authorised' : 'no credential';
+  credential?.forget();
+  if (!manifest) status('SignForge\nThis screen is not authorised.');
+}
+
+function command(c: DeviceCommand): void {
+  console.info(`[sf] command ${c.type}`);
+  if (c.type === 'reload') reload();
+  else if (c.type === 'display') {
+    setOverride(c.override);
+    display.wake();
+  } else console.warn('[sf] reboot: the supervisor cannot reboot the device yet');
+}
+
+/**
+ * Reload the player, unless it did so recently: the server sends `reload` on every sync while
+ * this build cannot play what it compiles, and a reload only helps once the device has a newer one.
+ */
+function reload(): void {
+  const KEY = 'sf.reloadedAt';
+  let last = 0;
+  try {
+    last = Number(localStorage.getItem(KEY)) || 0;
+  } catch {
+    // Storage unavailable: reload anyway.
+  }
+  const t = Date.now();
+  if (t >= last && t - last < RELOAD_GAP_MS) return console.warn('[sf] reload: already reloaded in the last 15 minutes');
+  try {
+    localStorage.setItem(KEY, String(t));
+  } catch {
+    // As above.
+  }
+  location.reload();
+}
+
+/** Content from the API (on another origin, with a credential): the sync carries everything. */
+const API = !!credential && SOURCE === 'device';
+const BASE = new URL(CONTENT, location.href).href.replace(/\/$/, '');
+
+/** The nudge socket, when a screen's content comes from the API (never in the preview). */
+const socket = API
+  ? new NudgeSocket({
+      base: BASE,
+      ticket: () => nextTicket(),
+      onNudge: () => poll.wake(),
+      onCommand: command,
+      onUnauthorised: unauthorised,
+      onChange: (open) => {
+        state.socket = open;
+        // Down: back to polling, starting now.
+        if (!open) poll.wake();
+      },
+    })
+  : undefined;
+
+/** Fetch the manifest; adopt it if new. Downloads every file it names that is missing. */
+async function fetchManifest(): Promise<void> {
+  // While falling back, the manifest that failed counts as current: the server's answer is
+  // 304 until it publishes something newer.
+  const result = await sync(CONTENT, {
+    currentId: state.fallback || manifest?.id,
+    headers: await deviceHeaders(),
+    ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
+    pinned: pins,
+  });
+  if (result.changed && result.manifest) {
+    console.info(`[sf] manifest ${result.manifest.id} active (${result.downloaded} files downloaded)`);
+    adopt(result.manifest);
+  }
+}
+
+// ------------------------------------------------------------ sync with the API
+/** Callers waiting for the next sync's socket ticket. */
+let ticketWaiters: { resolve: (t: string) => void; reject: (e: unknown) => void }[] = [];
+/** The last sync's ticket while nobody has used it, and when it came (`performance.now()`). */
+let spareTicket: { value: string; at: number } | undefined;
+
+/** A socket ticket: one a sync brought in the last 30 seconds (they last 60), or the next sync's. */
+function nextTicket(): Promise<string> {
+  if (spareTicket && performance.now() - spareTicket.at < 30_000) {
+    const t = spareTicket.value;
+    spareTicket = undefined;
+    return Promise.resolve(t);
+  }
+  return new Promise((resolve, reject) => {
+    ticketWaiters.push({ resolve, reject });
+    poll.wake();
+  });
+}
+
+function settleTickets(result: { ticket: string } | { error: unknown }): void {
+  const waiting = ticketWaiters;
+  ticketWaiters = [];
+  if ('ticket' in result) {
+    spareTicket = waiting.length ? undefined : { value: result.ticket, at: performance.now() };
+    for (const w of waiting) w.resolve(result.ticket);
+  } else for (const w of waiting) w.reject(result.error);
+}
+
+/** When the manifest was last fetched in full, to put back evicted files (`performance.now()`). */
+let lastFileCheck = Number.NEGATIVE_INFINITY;
+
+/** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. Returns when to sync next, in seconds. */
+async function apiSync(): Promise<number> {
+  const batch = playBatch(now());
+  const req: SyncRequest = {
+    seq: batch.seq,
+    epoch: batch.epoch,
+    player: { version: __SF_PLAYER_VERSION__, manifestSchemas: SUPPORTED_MANIFEST_SCHEMAS, protocols: SUPPORTED_PROTOCOLS },
+    manifest: { ...(manifest ? { active: manifest.id } : {}), filesMissing: filesMissing(), ...(state.fallback ? { fallbackFrom: state.fallback } : {}) },
+    display: { on: state.displayOn, ...(displayMethods ? { methods: displayMethods } : {}), ...withOverride() },
+    deviceTime: new Date().toISOString(),
+    clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
+    playCounts: batch.counts,
+    snapshots: heldVersions(),
+    dataRejected: dataRejections(),
+  };
+  const sentAt = Date.now();
+  const res = await fetch(`${BASE}/sync`, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: { ...(await deviceHeaders()), 'content-type': 'application/json' },
+    body: JSON.stringify(req),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const receivedAt = Date.now();
+  if (res.status === 401) throw new UnauthorisedError();
+  if (!res.ok) throw new Error(`sync: HTTP ${res.status}`);
+  const reply = (await res.json()) as unknown;
+  const problems = validateSyncResponse(reply);
+  if (problems.length) throw new Error(`sync: ${problems.join('; ')}`);
+  const r = reply as SyncResponse;
+  synced(r.serverTime, sentAt, receivedAt);
+  if (r.epoch === batch.epoch) acknowledgePlays(r.epoch, r.ackSeq);
+  settleTickets({ ticket: r.socketTicket });
+  state.online = true;
+  state.auth = '';
+  state.lastSync = new Date(now()).toISOString();
+
+  let failed: unknown;
+  const current = state.fallback || manifest?.id;
+  if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
+    try {
+      await fetchManifest();
+      lastFileCheck = performance.now();
+    } catch (err) {
+      failed = err;
+    }
+  }
+  await offerSnapshots(r.snapshots, manifest);
+  for (const c of r.commands) command(c);
+  if (failed) throw failed;
+  return r.nextSyncS;
+}
+
+const withOverride = () => {
+  const o = activeOverride(new Date(now()));
+  return o ? { override: o } : {};
+};
+
+/** Sleep `s` seconds give or take 10%, so screens that synced together drift apart. */
+const jittered = (s: number) => s * 1000 * (0.9 + Math.random() * 0.2);
+
 async function syncLoop(): Promise<never> {
+  let nextSyncS = SOCKET_POLL_MS / 1000;
   return forever('sync', async () => {
     try {
-      // While falling back, the manifest that failed counts as current: the server's answer is
-      // 304 until it publishes something newer.
-      const result = await sync(CONTENT, {
-        currentId: state.fallback || manifest?.id,
-        headers: await deviceHeaders(),
-        ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
-        pinned: pins,
-      });
-      state.online = true;
-      state.auth = '';
-      state.lastSync = new Date().toISOString();
-      if (result.changed && result.manifest) {
-        console.info(`[sf] manifest ${result.manifest.id} active (${result.downloaded} files downloaded)`);
-        adopt(result.manifest);
+      if (API) nextSyncS = await apiSync();
+      else {
+        await fetchManifest();
+        state.online = true;
+        state.auth = '';
+        state.lastSync = new Date(now()).toISOString();
       }
     } catch (err) {
+      if (API) settleTickets({ error: err instanceof UnauthorisedError ? new UnauthorisedSync('sync: not authorised') : err });
+      // The sync's own data has gone as far as it will: spots waiting for feeds start with what is stored.
+      if (API) settleSources(manifest);
       if (err instanceof UnauthorisedError) {
-        // The server answered, so this is not offline. Keep playing; pairing (M3-08) takes it from here.
-        state.online = true;
-        state.auth = credential?.held ? 'not authorised' : 'no credential';
-        credential?.forget();
-        if (!manifest) status('SignForge\nThis screen is not authorised.');
-        await sleep(POLL_MS);
+        unauthorised();
+        await poll.wait(POLL_MS);
         return;
       }
       state.online = false;
       if (!manifest) status(`SignForge\nWaiting for content…\n${err instanceof Error ? err.message : String(err)}`);
     }
-    await sleep(POLL_MS);
+    // Polling is the fallback: while the socket is open, the server says when to look.
+    await poll.wait(socket?.open ? jittered(nextSyncS) : POLL_MS);
   });
 }
 
@@ -542,7 +754,9 @@ function adopt(next: ScreenManifest): void {
   next = applyOverrides(next);
   manifest = next;
   wakeData();
+  if (API) void restoreSources(next);
   state.manifestId = next.id;
+  socket?.reportApplied(next.id);
   // The sequencer keeps its place; the change shows at the next spot boundary.
   if (sequencer) sequencer.setManifest(next);
   else sequencer = new Sequencer(next);
@@ -600,6 +814,7 @@ async function boot(): Promise<void> {
   }
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[sf] no service worker', e));
   state.persistent = await requestPersistence();
+  await loadPlays();
 
   const stored = await loadManifests().catch((err: unknown) => {
     console.warn('[sf] could not read stored manifests', err);
@@ -621,7 +836,9 @@ async function boot(): Promise<void> {
   }, 10_000);
 
   void syncLoop();
-  wakeData = startDataLoop(CONTENT, () => manifest, deviceHeaders);
+  socket?.start();
+  // From the API, snapshots come on the sync; static content has no sync, so each source is fetched.
+  if (!API) wakeData = startDataLoop(CONTENT, () => manifest, deviceHeaders);
   void playbackLoop();
   void displayLoop();
 }

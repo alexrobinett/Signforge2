@@ -6,7 +6,7 @@ import { findDeviceScreen, type DeviceScreen } from '@signforge/db';
 import { createMiddleware } from 'hono/factory';
 import { hashSecret, parseCredential } from './credential';
 
-export type DeviceEnv = { Bindings: Env; Variables: { screen: DeviceScreen } };
+export type DeviceEnv = { Bindings: Env; Variables: { screen: DeviceScreen /** The id of the credential the request presented. */; credentialId: string } };
 
 /** One response for every failure, so a caller cannot tell an unknown screen from a wrong secret. */
 const unauthorized = () =>
@@ -33,10 +33,11 @@ export const deviceAuth = createMiddleware<DeviceEnv>(async (c, next) => {
   const [hash, screen] = await Promise.all([hashSecret(parsed.secret), findDeviceScreen(c.env.DB, parsed.screenId)]);
   if (!screen) return unauthorized();
   // Check every live credential, so the time taken does not depend on which one matched.
-  let ok = false;
-  for (const stored of screen.secretHashes) ok = sameHash(hash, stored) || ok;
-  if (!ok) return unauthorized();
+  let matched: string | undefined;
+  for (const stored of screen.credentials) if (sameHash(hash, stored.secretHash)) matched = stored.id;
+  if (!matched) return unauthorized();
 
   c.set('screen', screen);
+  c.set('credentialId', matched);
   await next();
 });
