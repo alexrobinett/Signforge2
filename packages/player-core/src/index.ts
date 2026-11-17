@@ -153,8 +153,9 @@ export class Sequencer {
     return this.manifest.id;
   }
 
-  next(now: Date): Step | undefined {
-    const playlist = resolvePlaylist(this.manifest, now);
+  /** The next spot at `now`. On a clock the screen does not trust, bounded entries are skipped (`resolvePlaylist`). */
+  next(now: Date, opts: { clockTrusted?: boolean } = {}): Step | undefined {
+    const playlist = resolvePlaylist(this.manifest, now, opts);
     if (playlist.id !== this.playlistId) {
       this.playlistId = playlist.id;
       this.index = -1;
@@ -169,9 +170,9 @@ export class Sequencer {
   }
 
   /** What `next` would return, without moving. Used to prepare the following spot early. */
-  peek(now: Date): Step | undefined {
+  peek(now: Date, opts: { clockTrusted?: boolean } = {}): Step | undefined {
     const saved = { playlistId: this.playlistId, index: this.index };
-    const step = this.next(now);
+    const step = this.next(now, opts);
     this.playlistId = saved.playlistId;
     this.index = saved.index;
     return step;
@@ -253,3 +254,6 @@ export function planSync(next: ScreenManifest, have: Iterable<string>): { missin
     stale: [...held].filter((h) => !need.has(h)),
   };
 }
+
+export { Clock, CLOCK_JUMP_MS, type ClockOptions, type PersistedClock } from './clock';
+export { PlayLedger, hourOf, type PlayBatch } from './plays';

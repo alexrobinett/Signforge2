@@ -32,6 +32,8 @@ export interface PlayerState {
   auth: string;
   /** Whether the nudge socket is open. */
   socket: boolean;
+  /** The correction from server time, and whether the player trusts its clock. */
+  clock: { offsetMs: number; trusted: boolean };
 }
 
 export interface Player {
@@ -116,7 +118,7 @@ export function useHarness(): Harness {
         page.evaluate(() => {
           const s = (window as unknown as { __sf?: PlayerState }).__sf;
           if (!s) throw new Error('the player has not started');
-          const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log, data, dataRejected, displayOn, auth, socket } = s;
+          const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log, data, dataRejected, displayOn, auth, socket, clock } = s;
           return {
             manifestId,
             playlist,
@@ -133,6 +135,7 @@ export function useHarness(): Harness {
             displayOn,
             auth,
             socket,
+            clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
           };
         });
       const until = async (predicate: (s: PlayerState) => boolean, timeoutMs = 10_000) => {

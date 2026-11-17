@@ -1,8 +1,9 @@
 /**
- * Live data on the device. For each data source in the manifest the player fetches the latest
- * snapshot from `data/<id>.json` (with the device credential when the base is the API), keeps it
- * in memory for spots to read, and stores it on disk so the last good value survives a restart
- * with no network.
+ * Live data on the device. Snapshots arrive two ways: from the device API, on each sync's response
+ * (`offerSnapshots`), which sends only those newer than the screen reports holding; or, for static
+ * content beside the player (the demo, `sf build` output), by fetching `data/<id>.json` for each
+ * source in the manifest (`startDataLoop`). Either way the latest is kept in memory for spots to
+ * read and stored on disk, so the last good value survives a restart with no network.
  *
  * Live data is checked twice. A snapshot is kept only if it is well formed and fills at least one
  * field bound to it in the current manifest; and each bound value is checked against its field
@@ -16,6 +17,8 @@ const STATE = 'sf-state-v1';
 const key = (id: string) => `/_sf/data/${id}`;
 
 const snapshots = new Map<string, DataSnapshot>();
+/** The highest version offered per source, kept or refused: reported on sync so a refused one is not sent again. */
+const seen = new Map<string, number>();
 const checkedAt = new Map<string, number>();
 /** Sources whose first load has finished, with or without data. */
 const settled = new Set<string>();
@@ -56,32 +59,64 @@ async function restore(id: string): Promise<void> {
   if (res) snapshots.set(id, (await res.json()) as DataSnapshot);
 }
 
-async function refresh(base: string, id: string, manifest: ScreenManifest, headers: Record<string, string>): Promise<void> {
-  const res = await fetch(`${base}/data/${id}.json`, { cache: 'no-store', headers, signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) return;
-  const text = await res.text();
-  const next = JSON.parse(text) as DataSnapshot;
+/** Keep `next` as the source's latest if it is well formed, newer, and fits a bound field. */
+async function offer(id: string, next: DataSnapshot, manifest: ScreenManifest | undefined): Promise<void> {
   // A malformed snapshot never replaces the last good one, which is also what survives offline.
   const problems = validateDataSnapshot(next);
   if (problems.length || next.id !== id) {
     reportRejected([{ source: id, problem: `snapshot ignored: ${problems[0] ?? `it is for "${String(next.id)}"`}` }]);
     return;
   }
+  if (Number.isSafeInteger(next.version) && next.version >= 0) seen.set(id, Math.max(seen.get(id) ?? -1, next.version));
   // Keep the newest: an older snapshot can arrive after a newer one. (A copy stored before
   // snapshots had versions has none, and any versioned one replaces it.)
   if (next.version <= (snapshots.get(id)?.version ?? -1)) return;
   // Nor does one that fits none of the fields bound to it: the last good one stays the latest.
-  const fit = snapshotFit(manifest, next);
+  const fit = manifest ? snapshotFit(manifest, next) : { fits: true, problems: [] };
   if (fit.problems.length && !fit.fits) {
     reportRejected([{ source: id, problem: `snapshot fits no bound field: ${fit.problems[0]}` }]);
     return;
   }
   snapshots.set(id, next);
-  await (await caches.open(STATE)).put(key(id), new Response(text, { headers: { 'content-type': 'application/json' } }));
+  await (await caches.open(STATE)).put(key(id), new Response(JSON.stringify(next), { headers: { 'content-type': 'application/json' } }));
+}
+
+async function refresh(base: string, id: string, manifest: ScreenManifest, headers: Record<string, string>): Promise<void> {
+  const res = await fetch(`${base}/data/${id}.json`, { cache: 'no-store', headers, signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) return;
+  await offer(id, (await res.json()) as DataSnapshot, manifest);
 }
 
 /**
- * Keep every source in the current manifest fresh. Returns `wake`, which runs a pass now: call it
+ * Snapshots from a sync's response, checked against `manifest` (the one playing once the sync
+ * has adopted any new one). Then every source of the manifest counts as loaded: a spot waiting for
+ * its feed starts with what there is.
+ */
+export async function offerSnapshots(list: readonly DataSnapshot[], manifest: ScreenManifest | undefined): Promise<void> {
+  for (const snap of list)
+    await offer(String((snap as { id?: unknown }).id), snap, manifest).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+  settleSources(manifest);
+}
+
+/** Load the stored snapshots of `manifest`'s sources, for a screen whose data comes on sync. */
+export async function restoreSources(manifest: ScreenManifest): Promise<void> {
+  await Promise.all(Object.keys(manifest.dataSources).map((id) => restore(id).catch(() => undefined)));
+}
+
+/** Every source of `manifest` has had its first load, with or without data (no network: the stored copy). */
+export function settleSources(manifest: ScreenManifest | undefined): void {
+  for (const id of Object.keys(manifest?.dataSources ?? {})) if (!settled.has(id)) markSettled(id);
+}
+
+/** The version of each snapshot held, or refused, by source: what a sync reports. */
+export function heldVersions(): Record<string, number> {
+  const out = Object.fromEntries(seen);
+  for (const [id, snap] of snapshots) if (Number.isSafeInteger(snap.version)) out[id] = Math.max(out[id] ?? -1, snap.version);
+  return out;
+}
+
+/**
+ * Static content: keep every source in the current manifest fresh by fetching it. Returns `wake`, which runs a pass now: call it
  * when a manifest is adopted, so a fresh screen does not wait for the next scheduled pass (on a
  * cold boot the first pass runs before any manifest has loaded and finds no sources). Fetch
  * failures are silent: the last good value stays.

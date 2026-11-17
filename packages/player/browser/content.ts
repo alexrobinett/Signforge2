@@ -84,6 +84,8 @@ export interface ContentOptions {
   schema?: number;
   /** Appended to the template as a comment, so the template file (and its hash) differs from other content's. */
   variant?: string;
+  /** Change the manifest (schedule, playlists, display hours) before its id is computed. */
+  edit?: (m: Omit<ScreenManifest, 'id'>) => void;
 }
 
 /**
@@ -93,7 +95,7 @@ export interface ContentOptions {
 export function buildContent(
   templateHtml: string,
   spots: FixtureSpot[],
-  { transition = { type: 'cut' }, schema = MANIFEST_SCHEMA, variant }: ContentOptions = {},
+  { transition = { type: 'cut' }, schema = MANIFEST_SCHEMA, variant, edit }: ContentOptions = {},
 ): Content {
   const html = Buffer.from(variant ? `${templateHtml}<!-- ${variant} -->` : templateHtml);
   const key = schema === 1 ? 'fixture@1.0.0' : TEMPLATE_KEY;
@@ -133,6 +135,7 @@ export function buildContent(
     schedule: [],
     defaultPlaylist: 'main',
   };
+  edit?.(body);
   const manifest: ScreenManifest = { ...body, id: sha256(manifestIdInput(body)) };
   return { manifest, blobs };
 }

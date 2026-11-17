@@ -12,6 +12,7 @@ import {
   type TemplateMessage,
 } from '@signforge/contract';
 import { resolveSpotData } from '@signforge/player-core';
+import { clock, now } from './clock';
 import { liveData, reportRejected } from './data';
 import { getFile } from './source';
 
@@ -30,11 +31,8 @@ const WRAPPER_HTML =
   "<script>relay=(w,m)=>w.postMessage(m,'*')</script>";
 type WrapperWindow = Window & { relay: (to: Window, m: HostMessage) => void };
 
-/**
- * The time templates show. The device clock, uncorrected, until the sync loop keeps an offset from
- * server time (M3-07); that offset goes here.
- */
-const frameClock = (): FrameClock => ({ now: Date.now(), offsetMs: 0 });
+/** Corrected time and the offset the SDK's `now()` adds to the frame's own clock (src/clock.ts). */
+const frameClock = (): FrameClock => ({ now: now(), offsetMs: clock.offsetMs });
 
 /** Throw if the load was cancelled while it waited. */
 function alive(signal: AbortSignal): void {

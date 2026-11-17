@@ -2,25 +2,15 @@
  * The nudge socket (docs/backend-plan.md, Screens): one WebSocket from the screen to its Durable
  * Object, so a publish or a command reaches the screen at once instead of at the next poll.
  *
- * To open it the player syncs (`POST <api>/sync`, with the credential as a bearer header) for a
- * 60-second ticket, then connects to `<api>/ws?ticket=`: the credential never goes in a URL.
+ * To open it the player asks its sync loop for a ticket (each sync returns one, good for 60
+ * seconds), then connects to `<api>/ws?ticket=`: the credential never goes in a URL.
  * While open it sends `ping` every PING_MS, which the server's runtime answers with `pong`
  * without waking the object; a missing pong means the connection is dead and it reconnects. It
  * reconnects with exponential backoff and full jitter, so a fleet that lost the server together
  * does not come back together. Server messages are checked against the contract before use.
  *
- * The sync here carries no play counts and keeps no `seq`: M3-07 makes it the full heartbeat.
  */
-import {
-  SUPPORTED_MANIFEST_SCHEMAS,
-  SUPPORTED_PROTOCOLS,
-  validateServerSocketMessage,
-  validateSyncResponse,
-  type DeviceCommand,
-  type ServerSocketMessage,
-  type SyncRequest,
-  type SyncResponse,
-} from '@signforge/contract';
+import { validateServerSocketMessage, type DeviceCommand, type ServerSocketMessage } from '@signforge/contract';
 
 /** How often to ping. Under the usual 100-second idle timeouts of proxies and NAT. */
 export const PING_MS = 50_000;
@@ -32,11 +22,9 @@ const BACKOFF_MAX_MS = 60_000;
 export interface NudgeSocketOptions {
   /** The API's device base, e.g. `https://api.example/v1/device`. */
   base: string;
-  /** The credential header, collected from the supervisor. */
-  headers: () => Promise<Record<string, string>>;
-  /** What the screen reports in its sync. */
-  status: () => { active?: string; displayOn: boolean };
-  /** A new manifest is published, or the socket (re)connected and may have missed one: sync now. */
+  /** A fresh socket ticket, from a sync. Rejects with `UnauthorisedSync` if the server refused the credential. */
+  ticket: () => Promise<string>;
+  /** A new manifest is published: sync now. */
   onNudge: () => void;
   onCommand: (command: DeviceCommand) => void;
   /** The server refused the credential (a 401 on sync, or `revoked` on the socket). */
@@ -49,13 +37,10 @@ export interface NudgeSocketOptions {
 export class UnauthorisedSync extends Error {}
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const randomId = () => `e${crypto.getRandomValues(new Uint32Array(2)).join('')}`;
 
 export class NudgeSocket {
   private ws: WebSocket | undefined;
   private applied = '';
-  /** Names this run's (empty) seq numbers until M3-07 keeps a counter; never from the clock. */
-  private readonly epoch = randomId();
   private stopped = false;
   /** Told it was revoked: wait long before trying again, the credential is dead. */
   private revoked = false;
@@ -92,7 +77,7 @@ export class NudgeSocket {
     while (!this.stopped) {
       let opened = false;
       try {
-        const ticket = await this.ticket();
+        const ticket = await this.opts.ticket();
         opened = await this.connect(ticket);
       } catch (err) {
         if (err instanceof UnauthorisedSync) this.opts.onUnauthorised();
@@ -104,34 +89,6 @@ export class NudgeSocket {
       const ceiling = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** Math.min(failures, 10));
       await sleep(BACKOFF_MIN_MS / 2 + Math.random() * ceiling);
     }
-  }
-
-  private async ticket(): Promise<string> {
-    const s = this.opts.status();
-    const body: SyncRequest = {
-      seq: 0,
-      epoch: this.epoch,
-      player: { version: 'dev', manifestSchemas: SUPPORTED_MANIFEST_SCHEMAS, protocols: SUPPORTED_PROTOCOLS },
-      manifest: { ...(s.active ? { active: s.active } : {}), filesMissing: 0 },
-      display: { on: s.displayOn },
-      deviceTime: new Date().toISOString(),
-      clock: { offsetMs: 0, trusted: false },
-      playCounts: [],
-      snapshots: {},
-    };
-    const res = await fetch(`${this.opts.base}/sync`, {
-      method: 'POST',
-      cache: 'no-store',
-      headers: { ...(await this.opts.headers()), 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (res.status === 401) throw new UnauthorisedSync('sync: not authorised');
-    if (!res.ok) throw new Error(`sync: HTTP ${res.status}`);
-    const reply = (await res.json()) as unknown;
-    const problems = validateSyncResponse(reply);
-    if (problems.length) throw new Error(`sync: ${problems.join('; ')}`);
-    return (reply as SyncResponse).socketTicket;
   }
 
   /** Open a socket and resolve when it closes: true if it was open at all. */
@@ -149,8 +106,7 @@ export class NudgeSocket {
         opened = true;
         this.opts.onChange?.(true);
         if (this.applied) this.send({ type: 'applied', manifest: this.applied });
-        // It may have missed a nudge while it was down.
-        this.opts.onNudge();
+        // No sync here for nudges missed while it was down: the sync that issued the ticket was just now.
         pinger = setInterval(() => {
           ws.send('ping');
           deadline ??= setTimeout(() => ws.close(4000, 'no pong'), PONG_TIMEOUT_MS);

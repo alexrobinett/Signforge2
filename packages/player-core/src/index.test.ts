@@ -74,6 +74,8 @@ describe('schedule', () => {
     const m = manifest({ schedule: [{ id: 't', playlist: 'takeover', priority: 99, target: 'screen', endsAt: '2026-11-16T17:30:00Z' }] });
     expect(resolvePlaylist(m, at('12:00'), { clockTrusted: false }).id).toBe('all');
     expect(resolvePlaylist(manifest(), at('07:30'), { clockTrusted: false }).id).toBe('breakfast');
+    expect(new Sequencer(m).next(at('12:00'), { clockTrusted: false })?.playlist.id).toBe('all');
+    expect(new Sequencer(m).next(at('12:00'))?.playlist.id).toBe('takeover');
   });
 
   it('handles a window that crosses midnight and belongs to the day it started', () => {
