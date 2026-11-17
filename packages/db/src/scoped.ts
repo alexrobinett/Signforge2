@@ -127,6 +127,22 @@ export function scoped(d1: D1Database, orgId: string) {
             .where(and(eq(s.screenCredentials.orgId, orgId), eq(s.screenCredentials.screenId, screenId)))
             .orderBy(asc(s.screenCredentials.createdAt)).all(),
       },
+      /**
+       * Make `manifestId` the screen's desired manifest. The one it replaces becomes the previous
+       * manifest, whose files a screen still mid-download may fetch. Setting the current one again
+       * changes nothing. Returns false if the org has no such screen.
+       */
+      setDesiredManifest: async (screenId: string, manifestId: string) => {
+        const sc = s.screens;
+        const row = await db.update(sc)
+          .set({
+            previousManifestId: sql`CASE WHEN ${sc.desiredManifestId} IS ${manifestId} THEN ${sc.previousManifestId} ELSE ${sc.desiredManifestId} END`,
+            desiredManifestId: manifestId,
+          })
+          .where(and(eq(sc.orgId, orgId), eq(sc.id, screenId)))
+          .returning({ id: sc.id }).get();
+        return row !== undefined;
+      },
       /** Ids of the groups a screen belongs to. */
       groupsOf: async (screenId: string) =>
         (await db.select({ id: m.groupId }).from(m).where(and(eq(m.orgId, orgId), eq(m.screenId, screenId))).all()).map((r) => r.id),

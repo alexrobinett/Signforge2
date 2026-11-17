@@ -96,6 +96,7 @@ describe("a call made for org B with org A's ids", () => {
     const b = s.b.scope;
     expect(await b.screens.update(a.screen, { name: 'hijacked' })).toBeUndefined();
     expect(await b.screens.credentials.update(a.credential, { revokedAt: 1 })).toBeUndefined();
+    expect(await b.screens.setDesiredManifest(a.screen, 'f'.repeat(64))).toBe(false);
     expect(await b.spots.update(a.imageSpot, { name: 'hijacked' })).toBeUndefined();
     expect(await b.templates.update(a.template, { name: 'hijacked' })).toBeUndefined();
     expect(await b.screenGroups.removeMember(a.group, a.screen)).toBe(false);
@@ -115,7 +116,7 @@ describe("a call made for org B with org A's ids", () => {
     ]) expect(await del()).toBe(false);
 
     const ra = s.a.scope;
-    expect(await ra.screens.get(a.screen)).toMatchObject({ name: 'org-a lobby' });
+    expect(await ra.screens.get(a.screen)).toMatchObject({ name: 'org-a lobby', desiredManifestId: null });
     expect((await ra.screens.credentials.get(a.credential))?.revokedAt).toBeNull();
     expect(await ra.spots.get(a.imageSpot)).toMatchObject({ name: 'Logo' });
     expect(await ra.screenGroups.members(a.group)).toEqual([a.screen]);

@@ -1,0 +1,1 @@
+ALTER TABLE `screens` ADD `previous_manifest_id` text;

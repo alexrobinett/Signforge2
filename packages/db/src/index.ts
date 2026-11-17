@@ -8,6 +8,7 @@ import type * as s from './schema';
 
 export { scoped, NotInOrgError, type OrgScope, type NewRow, type RowPatch } from './scoped';
 export { newId } from './ids';
+export { findDeviceScreen, type DeviceScreen } from './device';
 
 // Row shapes, as types only.
 export type Screen = typeof s.screens.$inferSelect;

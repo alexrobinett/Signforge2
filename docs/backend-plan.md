@@ -30,7 +30,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 | Table | Key columns |
 | --- | --- |
 | Better Auth's own: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation` | `organization` adds the default playlist and quotas. Roles: owner, editor, viewer. |
-| `screens` | name, timezone, locale, orientation, `display_hours_json`, `desired_manifest_id`, `reported_manifest_id`, last seen, player version, status |
+| `screens` | name, timezone, locale, orientation, `display_hours_json`, `desired_manifest_id`, `previous_manifest_id` (whose files stay servable while a screen switches), `reported_manifest_id`, last seen, player version, status |
 | `screen_groups`, `screen_group_members` | |
 | `screen_credentials` | screen, secret hash, last used, revoked at |
 | `pairing_codes` | code, poll-token hash, expires at, claimed org and screen |
@@ -82,6 +82,7 @@ Pairing calls are rate limited. For zero-touch installs, the CMS mints a credent
 **Credential**
 - An opaque token, `sfd_<screenId>.<32 random bytes>`, stored as a SHA-256. It is not a JWT.
 - Revoking is one row update, then the Durable Object closes the socket.
+- Until pairing exists, `pnpm --filter @signforge/api dev:screen [--content dist/content]` creates a screen in local D1, loads a build into local R2, and prints a credential.
 
 **The screen's Durable Object** holds the desired and reported manifest IDs and one hibernating WebSocket.
 - Keepalive pings get an automatic reply without waking it.
@@ -97,8 +98,8 @@ Pairing calls are rate limited. For zero-touch installs, the CMS mints a credent
 | `POST /v1/device/pair/start` | Get a code and poll token |
 | `POST /v1/device/pair/poll` | Collect the credential |
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
-| `GET /v1/device/blobs/:sha256` | File from R2, cached forever |
-| `GET /v1/device/data/:id.json` | Snapshot, for first load |
+| `GET /v1/device/blobs/:sha256` | File from R2, cached forever. Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
+| `GET /v1/device/data/:id.json` | Snapshot, for first load. Only sources the screen's manifest lists. |
 | `POST /v1/device/sync` | Heartbeat, play counts, snapshot changes |
 | `GET /v1/device/ws?ticket=` | Nudge socket |
 
