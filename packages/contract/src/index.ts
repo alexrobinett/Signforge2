@@ -71,7 +71,7 @@ export type Sha256 = string;
 
 export type ScalarFieldDef =
   | { type: 'text'; label: string; default?: string; maxLength?: number }
-  | { type: 'number'; label: string; default?: number; min?: number; max?: number; /** Counted from `min`, or from 0 without one. */ step?: number }
+  | { type: 'number'; label: string; default?: number; min?: number; max?: number /** Counted from `min`, or from 0 without one. */; step?: number }
   | { type: 'boolean'; label: string; default?: boolean }
   | { type: 'color'; label: string; default?: string }
   | { type: 'select'; label: string; options: string[]; default?: string };
@@ -170,7 +170,8 @@ export function imageSizeProblem(width: number, height: number, box: ScreenBox):
     const mp = (n: number) => (n / 1e6).toFixed(1);
     return `${width}x${height} is ${mp(width * height)} million pixels; a screen decodes at most ${mp(MAX_IMAGE_PIXELS)} million (3840x2160)`;
   }
-  if (!(width <= box.w || height <= box.h)) return `${width}x${height} is larger than a ${box.w >= box.h ? 'landscape' : 'portrait'} screen needs: scale it to cover ${box.w}x${box.h}`;
+  if (!(width <= box.w || height <= box.h))
+    return `${width}x${height} is larger than a ${box.w >= box.h ? 'landscape' : 'portrait'} screen needs: scale it to cover ${box.w}x${box.h}`;
   return undefined;
 }
 
@@ -183,11 +184,15 @@ export const fitsScreenBox = (width: number, height: number, box: ScreenBox) => 
  * against the author's own files, not the bundled SDK.
  */
 export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
-  { pattern: /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b/, reason: 'templates may not make network requests; bind to a data source instead' },
+  {
+    pattern: /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b/,
+    reason: 'templates may not make network requests; bind to a data source instead',
+  },
   { pattern: /\bimport\s*\(/, reason: 'templates may not load code at run time' },
   {
     // Bare `location.x` / `location =` and `window.location`, but not a data field such as `event.location`.
-    pattern: /(?<![.\w$])location\s*(?:[.[]|=(?!=))|\b(?:window|document|self|globalThis)\s*\.\s*location\b|\bwindow\.open\b|(?<![.\w$])(?:top|parent|opener)\s*\./,
+    pattern:
+      /(?<![.\w$])location\s*(?:[.[]|=(?!=))|\b(?:window|document|self|globalThis)\s*\.\s*location\b|\bwindow\.open\b|(?<![.\w$])(?:top|parent|opener)\s*\./,
     reason: 'templates may not navigate or reach outside their frame',
   },
   { pattern: /@import\b/, reason: 'stylesheets must be bundled, not imported at run time' },
@@ -231,13 +236,19 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
   if (/\b(?:src|href)\s*=\s*["']https?:/i.test(html) || /url\(\s*["']?https?:/i.test(html)) network.push('a template may not load anything from the network');
 
   // Comments are stripped first, so a note about `fetch` is not a call to it. `//` after a colon is a URL, and is kept.
-  const own = Object.values(sources).map((text) => text.replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm, '')).join('\n');
+  const own = Object.values(sources)
+    .map((text) => text.replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm, ''))
+    .join('\n');
   const source = Object.keys(sources).length ? matches(FORBIDDEN_TEMPLATE_CODE, own) : ['no source files were given'];
 
   const checks: TemplateCheckReport['checks'] = [
     { check: 'manifest', ok: !manifestProblems.length, problems: manifestProblems },
     { check: 'forbidden-css', ok: true, problems: matches(FORBIDDEN_CSS, html) },
-    { check: 'size', ok: true, problems: bundleBytes > TEMPLATE_BUDGET.maxBundleBytes ? [`bundle is ${bundleBytes} bytes; the budget is ${TEMPLATE_BUDGET.maxBundleBytes}`] : [] },
+    {
+      check: 'size',
+      ok: true,
+      problems: bundleBytes > TEMPLATE_BUDGET.maxBundleBytes ? [`bundle is ${bundleBytes} bytes; the budget is ${TEMPLATE_BUDGET.maxBundleBytes}`] : [],
+    },
     { check: 'network', ok: true, problems: network },
     { check: 'source-code', ok: true, problems: source },
   ];
@@ -262,15 +273,9 @@ export interface InitPayload {
   locale: string;
 }
 
-export type HostMessage =
-  | ({ sf: number; type: 'init' } & InitPayload)
-  | { sf: number; type: 'play' }
-  | { sf: number; type: 'stop' };
+export type HostMessage = ({ sf: number; type: 'init' } & InitPayload) | { sf: number; type: 'play' } | { sf: number; type: 'stop' };
 
-export type TemplateMessage =
-  | { sf: number; type: 'loaded' }
-  | { sf: number; type: 'ready' }
-  | { sf: number; type: 'error'; message: string };
+export type TemplateMessage = { sf: number; type: 'loaded' } | { sf: number; type: 'ready' } | { sf: number; type: 'error'; message: string };
 
 // ------------------------------------------------------------------ live data
 // A data source is a JSON feed the server polls. Screens never call the feed themselves:
@@ -491,15 +496,10 @@ export interface SyncResponse {
 
 export type DeviceCommand =
   /** Reload the player, e.g. after the server stops producing a schema this build can play. */
-  | { type: 'reload' }
-  | { type: 'display'; override: DisplayOverride | null }
-  | { type: 'reboot' };
+  { type: 'reload' } | { type: 'display'; override: DisplayOverride | null } | { type: 'reboot' };
 
 /** Server to screen, over the socket. Kept rare: the socket exists to nudge, not to carry data. */
-export type ServerSocketMessage =
-  | { type: 'manifest'; id: string }
-  | { type: 'command'; command: DeviceCommand }
-  | { type: 'revoked' };
+export type ServerSocketMessage = { type: 'manifest'; id: string } | { type: 'command'; command: DeviceCommand } | { type: 'revoked' };
 
 /** Screen to server, over the socket. */
 export type DeviceSocketMessage = { type: 'applied'; manifest: string };

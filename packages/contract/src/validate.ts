@@ -10,10 +10,7 @@
  * Lookups by a key taken from the input go through `own`: `fields["constructor"]` is a function on
  * every plain object, and must not count as a field.
  */
-import {
-  ID_PATTERN, SUPPORTED_MANIFEST_SCHEMAS, templateKey,
-  type DisplayHours, type FieldDef, type ScalarFieldDef, type ScreenManifest,
-} from './index.ts';
+import { ID_PATTERN, SUPPORTED_MANIFEST_SCHEMAS, templateKey, type DisplayHours, type FieldDef, type ScalarFieldDef, type ScreenManifest } from './index.ts';
 
 // ------------------------------------------------------------------ helpers
 
@@ -104,7 +101,8 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       if (!isNum(v)) return `field "${name}" must be a number`;
       if (def.min !== undefined && v < def.min) return `field "${name}" must be at least ${def.min}`;
       if (def.max !== undefined && v > def.max) return `field "${name}" must be at most ${def.max}`;
-      if (def.step !== undefined && !onStep(v, def.step, def.min ?? 0)) return `field "${name}" must be a multiple of ${def.step}${def.min ? ` from ${def.min}` : ''}`;
+      if (def.step !== undefined && !onStep(v, def.step, def.min ?? 0))
+        return `field "${name}" must be a multiple of ${def.step}${def.min ? ` from ${def.min}` : ''}`;
       return undefined;
     case 'boolean':
       return typeof v === 'boolean' ? undefined : `field "${name}" must be true or false`;
@@ -221,7 +219,9 @@ export function validateSpotData(fields: unknown, data: unknown, assets: unknown
   if (!isObj(assets)) errors.push('assets is not an object');
   if (!isObj(bindings)) errors.push('bindings is not an object');
   if (errors.length) return errors;
-  const d = data as Obj, a = assets as Obj, b = bindings as Obj;
+  const d = data as Obj,
+    a = assets as Obj,
+    b = bindings as Obj;
 
   for (const [name, binding] of Object.entries(b)) {
     const def = own(fields, name);
@@ -262,7 +262,8 @@ function windowProblems(where: string, w: unknown, required: boolean): string[] 
     const v = w[k];
     if (v === undefined ? required : !isStr(v) || !TIME.test(v)) out.push(`${where}: ${k} must be HH:MM`);
   }
-  if (w.days !== undefined && (!Array.isArray(w.days) || w.days.some((d) => !Number.isInteger(d) || (d as number) < 0 || (d as number) > 6))) out.push(`${where}: days must be 0-6`);
+  if (w.days !== undefined && (!Array.isArray(w.days) || w.days.some((d) => !Number.isInteger(d) || (d as number) < 0 || (d as number) > 6)))
+    out.push(`${where}: days must be 0-6`);
   for (const k of ['startDate', 'endDate'] as const) if (w[k] !== undefined && !(isStr(w[k]) && DATE.test(w[k]))) out.push(`${where}: ${k} must be YYYY-MM-DD`);
   return out;
 }
@@ -275,7 +276,8 @@ export function displayHoursProblems(hours: unknown): string[] {
   else for (const w of hours.weekly) errors.push(...windowProblems('display hours', w, true));
   if (hours.exceptions !== undefined && !Array.isArray(hours.exceptions)) errors.push('display hours exceptions must be a list');
   for (const e of Array.isArray(hours.exceptions) ? (hours.exceptions as unknown[]) : []) {
-    const date = own(e, 'date'), on = own(e, 'on');
+    const date = own(e, 'date'),
+      on = own(e, 'on');
     if (!isStr(date) || !DATE.test(date) || !Array.isArray(on)) {
       errors.push(`display hours exception "${show(date)}" is malformed`);
       continue;
@@ -310,7 +312,8 @@ export function requiredFiles(manifest: ScreenManifest): Set<string> {
 export function validateManifest(m: unknown): string[] {
   if (!isObj(m)) return ['manifest is not an object'];
   const errors: string[] = [];
-  if (!SUPPORTED_MANIFEST_SCHEMAS.includes(m.schema as number)) errors.push(`manifest schema ${show(m.schema)} is not one this player can play (${SUPPORTED_MANIFEST_SCHEMAS.join(', ')})`);
+  if (!SUPPORTED_MANIFEST_SCHEMAS.includes(m.schema as number))
+    errors.push(`manifest schema ${show(m.schema)} is not one this player can play (${SUPPORTED_MANIFEST_SCHEMAS.join(', ')})`);
   if (!isText(m.id)) errors.push('id is missing');
   if (!isInstant(m.generatedAt)) errors.push('generatedAt must be an ISO 8601 time');
 
@@ -327,7 +330,8 @@ export function validateManifest(m: unknown): string[] {
   }
 
   const { files, templates, spots, playlists, dataSources, schedule } = m;
-  if (!isObj(files) || !isObj(spots) || !isObj(playlists) || !isObj(templates) || !Array.isArray(schedule) || !isObj(dataSources)) return [...errors, 'manifest is incomplete'];
+  if (!isObj(files) || !isObj(spots) || !isObj(playlists) || !isObj(templates) || !Array.isArray(schedule) || !isObj(dataSources))
+    return [...errors, 'manifest is incomplete'];
   if (!own(playlists, m.defaultPlaylist)) errors.push('defaultPlaylist does not exist');
 
   for (const [sha, f] of Object.entries(files)) {
@@ -389,7 +393,8 @@ export function validateManifest(m: unknown): string[] {
         const fields = own(t, 'fields');
         if (isObj(fields)) errors.push(...prefix(where, validateSpotData(fields, spot.data, spot.assets, bindings)));
         const d = own(t, 'duration');
-        const minMs = own(d, 'minMs'), maxMs = own(d, 'maxMs');
+        const minMs = own(d, 'minMs'),
+          maxMs = own(d, 'maxMs');
         if (isNum(spot.durationMs) && isNum(minMs) && isNum(maxMs) && (spot.durationMs < minMs || spot.durationMs > maxMs)) {
           errors.push(`${where}: duration ${spot.durationMs} ms is outside the template's range ${minMs} to ${maxMs}`);
         }
@@ -545,7 +550,8 @@ export function validateSyncRequest(r: unknown): string[] {
     errors.push('player needs a version and the manifest schemas and protocols it supports');
   }
   const m = r.manifest;
-  if (!isObj(m) || (m.active !== undefined && !isText(m.active)) || !isCount(m.filesMissing)) errors.push('manifest needs filesMissing, and active when there is one');
+  if (!isObj(m) || (m.active !== undefined && !isText(m.active)) || !isCount(m.filesMissing))
+    errors.push('manifest needs filesMissing, and active when there is one');
   errors.push(...displayStatusProblems(r.display));
   if (!isInstant(r.deviceTime)) errors.push('deviceTime must be an ISO 8601 time');
   errors.push(...list('play count', r.playCounts, playCountProblems));

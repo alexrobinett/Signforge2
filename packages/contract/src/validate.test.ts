@@ -1,16 +1,37 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
-  SCREEN_BOX, displayHoursProblems, fitsScreenBox, imageSizeProblem, validateDataSnapshot, validateDeviceCommand, validateDeviceSocketMessage,
-  validateManifest, validatePairPollResponse, validatePairStartResponse, validateServerSocketMessage, validateSpotData, validateSyncRequest,
-  validateSyncResponse, validateTemplateManifest, type FieldDef, type ScreenManifest, type SyncRequest, type SyncResponse, type TemplateManifest,
+  SCREEN_BOX,
+  displayHoursProblems,
+  fitsScreenBox,
+  imageSizeProblem,
+  validateDataSnapshot,
+  validateDeviceCommand,
+  validateDeviceSocketMessage,
+  validateManifest,
+  validatePairPollResponse,
+  validatePairStartResponse,
+  validateServerSocketMessage,
+  validateSpotData,
+  validateSyncRequest,
+  validateSyncResponse,
+  validateTemplateManifest,
+  type FieldDef,
+  type ScreenManifest,
+  type SyncRequest,
+  type SyncResponse,
+  type TemplateManifest,
 } from './index';
 
 /** Any JSON value, including the keys that trip up naive lookups. */
 const json = fc.letrec((tie) => ({
   value: fc.oneof(
     { depthSize: 'small' },
-    fc.constant(null), fc.boolean(), fc.double(), fc.integer(), fc.string(),
+    fc.constant(null),
+    fc.boolean(),
+    fc.double(),
+    fc.integer(),
+    fc.string(),
     fc.array(tie('value'), { maxLength: 4 }),
     fc.dictionary(fc.oneof(fc.string(), fc.constantFrom('__proto__', 'constructor', 'toString', 'type', 'id', 'kind')), tie('value'), { maxKeys: 5 }),
   ),
@@ -56,25 +77,48 @@ describe('image size', () => {
 // ------------------------------------------------------------------ fixtures
 
 const template: TemplateManifest = {
-  id: 'menu', version: '1.0.0', name: 'Menu', background: '#000', orientations: ['landscape'], uses: [],
+  id: 'menu',
+  version: '1.0.0',
+  name: 'Menu',
+  background: '#000',
+  orientations: ['landscape'],
+  uses: [],
   duration: { defaultMs: 8000, minMs: 4000, maxMs: 20_000 },
   fields: {
     title: { type: 'text', label: 'Title', maxLength: 40 },
     price: { type: 'number', label: 'Price', min: 0, max: 100, step: 0.5, default: 5 },
     photo: { type: 'image', label: 'Photo' },
-    items: { type: 'list', label: 'Items', maxItems: 2, item: { name: { type: 'text', label: 'Name' }, hot: { type: 'boolean', label: 'Hot', default: false } } },
+    items: {
+      type: 'list',
+      label: 'Items',
+      maxItems: 2,
+      item: { name: { type: 'text', label: 'Name' }, hot: { type: 'boolean', label: 'Hot', default: false } },
+    },
   },
 };
 
 const validManifest = (): ScreenManifest => ({
-  schema: 2, id: 'm1', generatedAt: '2026-11-17T00:00:00.000Z',
-  screen: { id: 's1', name: 'Counter', timezone: 'Europe/London', orientation: 'landscape', displayHours: { weekly: [{ from: '07:00', to: '22:00', days: [1, 2] }] } },
+  schema: 2,
+  id: 'm1',
+  generatedAt: '2026-11-17T00:00:00.000Z',
+  screen: {
+    id: 's1',
+    name: 'Counter',
+    timezone: 'Europe/London',
+    orientation: 'landscape',
+    displayHours: { weekly: [{ from: '07:00', to: '22:00', days: [1, 2] }] },
+  },
   files: { 'sha-html': { size: 10, type: 'text/html' }, 'sha-photo': { size: 10, type: 'image/jpeg' } },
   templates: { 'base/menu@1.0.0': { manifest: structuredClone(template), html: 'sha-html' } },
   spots: {
     menu: {
-      id: 'menu', name: 'Menu', kind: 'template', template: 'base/menu@1.0.0', durationMs: 8000,
-      data: { title: 'Lunch', price: 7.5, items: [{ name: 'Soup', hot: true }] }, assets: { photo: 'sha-photo' },
+      id: 'menu',
+      name: 'Menu',
+      kind: 'template',
+      template: 'base/menu@1.0.0',
+      durationMs: 8000,
+      data: { title: 'Lunch', price: 7.5, items: [{ name: 'Soup', hot: true }] },
+      assets: { photo: 'sha-photo' },
       bindings: { title: { source: 'feed', path: 'headline' } },
     },
     web: { id: 'web', name: 'Web', kind: 'url', url: 'https://example.com/', durationMs: 5000 },
@@ -86,14 +130,21 @@ const validManifest = (): ScreenManifest => ({
 });
 
 const validSyncRequest = (): SyncRequest => ({
-  seq: 3, player: { version: '1.2.3', manifestSchemas: [2], protocols: [1] }, manifest: { active: 'm1', filesMissing: 0 },
+  seq: 3,
+  player: { version: '1.2.3', manifestSchemas: [2], protocols: [1] },
+  manifest: { active: 'm1', filesMissing: 0 },
   display: { on: true, methods: { signal: 'ok' }, override: { state: 'off', until: '2026-11-17T18:00:00Z' } },
-  deviceTime: '2026-11-17T13:05:00Z', playCounts: [{ hour: '2026-11-17T13:00Z', spot: 'menu', manifest: 'm1', plays: 4, ms: 32_000 }],
+  deviceTime: '2026-11-17T13:05:00Z',
+  playCounts: [{ hour: '2026-11-17T13:00Z', spot: 'menu', manifest: 'm1', plays: 4, ms: 32_000 }],
   snapshots: { feed: '2026-11-17T13:00:00Z' },
 });
 
 const validSyncResponse = (): SyncResponse => ({
-  serverTime: '2026-11-17T13:05:01Z', nextSyncS: 300, ackSeq: 3, desiredManifest: 'm1', socketTicket: 't',
+  serverTime: '2026-11-17T13:05:01Z',
+  nextSyncS: 300,
+  ackSeq: 3,
+  desiredManifest: 'm1',
+  socketTicket: 't',
   snapshots: [{ id: 'feed', fetchedAt: '2026-11-17T13:00:00Z', data: { headline: 'Hi' } }],
   commands: [{ type: 'reload' }, { type: 'display', override: null }],
 });
@@ -152,10 +203,14 @@ describe('every validator is total', () => {
       totalOn(name, mutated(make), run);
     }
   }
-  totalOn('validateSpotData', mutated(() => ({ fields: structuredClone(template.fields), ...structuredClone(validManifest().spots.menu) })), (v) => {
-    const o = v as Record<string, unknown>;
-    return validateSpotData(o.fields, o.data, o.assets, o.bindings);
-  });
+  totalOn(
+    'validateSpotData',
+    mutated(() => ({ fields: structuredClone(template.fields), ...structuredClone(validManifest().spots.menu) })),
+    (v) => {
+      const o = v as Record<string, unknown>;
+      return validateSpotData(o.fields, o.data, o.assets, o.bindings);
+    },
+  );
 });
 
 // ------------------------------------------------------------------ behaviour
@@ -257,7 +312,9 @@ describe('snapshots and device bodies', () => {
   });
 
   it('rejects unknown commands and socket messages', () => {
-    expect(validateSyncResponse({ ...validSyncResponse(), commands: [{ type: 'format' }] })).toEqual(['command 1: command type must be reload, display or reboot']);
+    expect(validateSyncResponse({ ...validSyncResponse(), commands: [{ type: 'format' }] })).toEqual([
+      'command 1: command type must be reload, display or reboot',
+    ]);
     expect(validateServerSocketMessage({ type: 'manifest' })).toEqual(['manifest message needs an id']);
   });
 });
