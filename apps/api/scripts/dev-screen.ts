@@ -39,7 +39,7 @@ console.log = console.error;
 
 const manifest = args.content ? (JSON.parse(readFileSync(join(resolve(args.content), 'manifest.json'), 'utf8')) as ScreenManifest) : undefined;
 
-const proxy = await getPlatformProxy<Env>({ configPath: new URL('../wrangler.jsonc', import.meta.url).pathname, persist: true, remoteBindings: false });
+const proxy = await getPlatformProxy<Env>({ configPath: new URL('../wrangler.jsonc', import.meta.url).pathname, environment: 'dev', persist: true, remoteBindings: false });
 try {
   const { DB, BLOBS } = proxy.env;
   // Since M3-09 a screen's org must exist in Better Auth's `organization` table. Make it if it is new.
