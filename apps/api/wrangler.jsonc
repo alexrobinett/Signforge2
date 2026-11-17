@@ -1,0 +1,25 @@
+{
+  // SignForge API: CMS API (/api), device API (/v1/device), MCP (/mcp, Milestone 4).
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "signforge-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": { "ENVIRONMENT": "dev", "BUILD_VERSION": "dev" },
+  // Local development and tests use these placeholders; real ids are set per environment.
+  "d1_databases": [{ "binding": "DB", "database_name": "signforge-dev", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-dev" }],
+  "env": {
+    "demo": {
+      "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev" },
+      "d1_databases": [{ "binding": "DB", "database_name": "signforge-demo", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-demo" }]
+    },
+    "prod": {
+      "vars": { "ENVIRONMENT": "prod", "BUILD_VERSION": "dev" },
+      "d1_databases": [{ "binding": "DB", "database_name": "signforge-prod", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-prod" }]
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@signforge/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types",
+    "typecheck": "wrangler types >/dev/null && tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@signforge/contract": "workspace:*",
+    "hono": "^4.13.19"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.4",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.164.0"
+  }
+}
