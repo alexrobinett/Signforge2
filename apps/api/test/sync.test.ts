@@ -96,7 +96,17 @@ describe('play counts', () => {
   it('for an hour that has not begun are dropped, the rest kept', async () => {
     const future = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 13) + ':00Z';
     expect(
-      await sync(s, body({ epoch: 'ep2', seq: 2, playCounts: [{ hour: future, spot: 'menu', plays: 9, ms: 1 }, { hour: HOUR, spot: 'news', plays: 1, ms: 8000 }] })),
+      await sync(
+        s,
+        body({
+          epoch: 'ep2',
+          seq: 2,
+          playCounts: [
+            { hour: future, spot: 'menu', plays: 9, ms: 1 },
+            { hour: HOUR, spot: 'news', plays: 1, ms: 8000 },
+          ],
+        }),
+      ),
     ).toMatchObject({ ackSeq: 2 });
     expect(await s.seed.scope.playCounts.list({ from: Date.parse(future), to: Date.parse(future) + 3_600_000 })).toEqual([]);
     expect((await plays(s)).at(-1)).toEqual(['news', 3, 24_000]);

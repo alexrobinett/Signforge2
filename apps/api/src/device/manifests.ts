@@ -29,7 +29,11 @@ function summarise(id: string, m: ScreenManifest): ManifestSummary {
     schema: m.schema,
     protocols: [...new Set(Object.values(m.templates ?? {}).map((t) => t.manifest?.protocol ?? 1))],
     files: new Map(Object.entries(m.files ?? {}).map(([sha, f]) => [sha, f.type])),
-    baseHtml: new Set(Object.entries(m.templates ?? {}).filter(([key]) => key.startsWith('base/')).map(([, t]) => t.html)),
+    baseHtml: new Set(
+      Object.entries(m.templates ?? {})
+        .filter(([key]) => key.startsWith('base/'))
+        .map(([, t]) => t.html),
+    ),
     dataSources: new Set(Object.keys(m.dataSources ?? {})),
   };
 }
