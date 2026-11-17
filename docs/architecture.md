@@ -108,6 +108,7 @@ The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) ar
 - The server nudges connected screens that a new manifest exists. Screens that were offline catch up when they reconnect.
 - The player downloads and verifies every file, then switches to the new manifest in one step. A partial download is never played.
 - The player evaluates the schedule on its own clock, so a timed changeover happens with the network down.
+- Manifests carry a schema number. A player release plays schema N and N−1, and the server compiles each screen at the newest schema its player reports, so a screen updated while offline still plays the manifest it cached under the previous release.
 - Data source snapshots are pushed to screens separately from manifests. Offline, a screen shows the last good value.
 
 ## Player
@@ -115,6 +116,7 @@ The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) ar
 The web player owns all content concerns and runs unchanged in any browser, including the public demo.
 
 - **Cache**: every file is stored on the device under its SHA-256 and verified on download. A service worker keeps the player itself available offline.
+- **Last known good**: the player keeps the last manifest that played a spot, with its files, until a newer manifest has played one. If nothing in a new manifest plays for a full pass of its playlist, the player falls back to the last good one and reports it (`fallback` in `__sf`, the heartbeat once it exists) until the server sends a newer manifest. A stored manifest this release's validator rejects (a dropped schema, a tightened rule) is still played when it can be run at all, since the release that stored it accepted it; one that cannot be read is ignored.
 - **Playback**: two stacked slots. The next spot loads and is fully drawn underneath the current one, and the swap happens only when it reports ready. Drawing it ahead of time matters: revealing an undrawn template cost about a second of stalled frames on the Pi. A spot that fails to become ready within 2 seconds is skipped; three failures in a row show a holding message.
 - **Transitions**, set per playlist. Spots can be any length.
   - `cut`: instant. Templates animate their own intro and outro, so this already looks smooth.

@@ -17,6 +17,10 @@ export interface PlayerState {
   skipped: number;
   lastError: string;
   online: boolean;
+  /** The id of the last manifest that played a spot. */
+  lastGood: string;
+  /** The id of a new manifest that played nothing, while the player falls back to `lastGood`; '' otherwise. */
+  fallback: string;
   log: { spot: string; manifest: string; startedAt: string }[];
 }
 
@@ -87,8 +91,8 @@ export function useHarness(): Harness {
         page.evaluate(() => {
           const s = (window as unknown as { __sf?: PlayerState }).__sf;
           if (!s) throw new Error('the player has not started');
-          const { manifestId, playlist, spot, played, skipped, lastError, online, log } = s;
-          return { manifestId, playlist, spot, played, skipped, lastError, online, log: log.map(({ spot, manifest, startedAt }) => ({ spot, manifest, startedAt })) };
+          const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log } = s;
+          return { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log: log.map(({ spot, manifest, startedAt }) => ({ spot, manifest, startedAt })) };
         });
       const until = async (predicate: (s: PlayerState) => boolean, timeoutMs = 10_000) => {
         const deadline = Date.now() + timeoutMs;

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScreenManifest } from '@signforge/contract';
 import { DeviceCredential } from './credential';
-import { UnauthorisedError, loadActiveManifest, sync } from './store';
+import { UnauthorisedError, filesToKeep, loadActiveManifest, rememberGood, sync } from './store';
 
 // ---------------------------------------------------------------- fakes
 /** Cache Storage in memory: enough of it for the store. */
@@ -127,6 +127,37 @@ describe('sync against the device API', () => {
     const r = await sync(BASE, { currentId: 'm1', headers: auth });
     expect(r).toEqual({ changed: false, downloaded: 0 });
     expect(manifestRequests().map((q) => q.headers.get('if-none-match'))).toEqual(['"m1"', null]);
+  });
+
+  it('asks again without the condition, and stores a sound copy, if the cached manifest is damaged', async () => {
+    await sync(BASE, { headers: auth });
+    await open('sf-state-v1').put('/_sf/manifest/active', new Response('{"id": "m1", "tor'));
+    api.requests = [];
+    const r = await sync(BASE, { currentId: 'm1', headers: auth });
+    expect(r).toEqual({ changed: false, downloaded: 0 });
+    expect(manifestRequests().map((q) => q.headers.get('if-none-match'))).toEqual(['"m1"', null]);
+    expect((await loadActiveManifest())?.id).toBe('m1');
+  });
+
+  it('keeps the files of the last manifest that played until a newer one has played', async () => {
+    const onlyA = (id: string) => {
+      const m = manifest(id);
+      delete (m.spots as Record<string, unknown>).b;
+      m.playlists.all!.items = [{ spot: 'a' }];
+      return m;
+    };
+    await sync(BASE, { headers: auth });
+    await rememberGood(api.manifest); // m1, using A and B, played
+    api.manifest = onlyA('m2');
+    await sync(BASE, { currentId: 'm1', headers: auth });
+    expect(await filesToKeep()).toEqual(new Set([A, B]));
+    expect(await open('sf-blobs-v1').match(`/_sf/blob/${B}`)).toBeDefined();
+
+    await rememberGood(api.manifest); // m2 played
+    api.manifest = onlyA('m3');
+    await sync(BASE, { currentId: 'm2', headers: auth });
+    expect(await filesToKeep()).toEqual(new Set([A]));
+    expect(await open('sf-blobs-v1').match(`/_sf/blob/${B}`)).toBeUndefined();
   });
 
   it('picks up a new manifest after a 304 and switches to it in one step', async () => {
