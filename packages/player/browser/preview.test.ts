@@ -95,10 +95,11 @@ async function openPreview(origin: string, content?: Content, extra: Record<stri
   };
   /** The template frame drawn on top, as the harness's `onScreen` finds it. */
   const shownFrame = async (): Promise<Frame | undefined> => {
-    for (const frame of player().childFrames()) {
-      const el = await frame.frameElement().catch(() => undefined);
+    // Each slot holds a wrapper frame, and the template frame sits inside it.
+    for (const wrapper of player().childFrames()) {
+      const el = await wrapper.frameElement().catch(() => undefined);
       const shown = await el?.evaluate((e) => e.parentElement!.style.zIndex === '2' && getComputedStyle(e.parentElement!).opacity === '1');
-      if (shown) return frame;
+      if (shown) return wrapper.childFrames()[0];
     }
     return undefined;
   };

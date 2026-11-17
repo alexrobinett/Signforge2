@@ -38,6 +38,8 @@ export interface SeededOrg {
   publish: string;
   dataSource: string;
   auditEntry: string;
+  /** A brand kit, the org's default. Its id is the server's. */
+  brandKit: string;
   /** Start of the hour the seeded play count is in. */
   hour: number;
 }
@@ -52,9 +54,7 @@ export const SEED_HOUR = Date.UTC(2026, 10, 17, 13);
 
 /** An `organization` row, as Better Auth would write it. Tenant rows reference it. */
 export async function seedOrganization(db: D1Database, orgId: string) {
-  await drizzle(db).insert(organization)
-    .values({ id: orgId, name: orgId, slug: orgId, createdAt: new Date().toISOString() })
-    .onConflictDoNothing().run();
+  await drizzle(db).insert(organization).values({ id: orgId, name: orgId, slug: orgId, createdAt: new Date().toISOString() }).onConflictDoNothing().run();
 }
 
 /** Seed one org. Ids are `<orgId>-<thing>`, so a test failure names whose row leaked. */
@@ -69,20 +69,45 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   const credential = await o.screens.credentials.insert({ id: id('credential'), screenId: screen.id, secretHash: '0'.repeat(64) });
 
   const asset = await o.assets.insert({
-    id: id('asset'), kind: 'image', name: 'logo.png', sha256: 'a'.repeat(64), type: 'image/png', size: 1000, width: 1920, height: 1080, status: 'verified',
+    id: id('asset'),
+    kind: 'image',
+    name: 'logo.png',
+    sha256: 'a'.repeat(64),
+    type: 'image/png',
+    size: 1000,
+    width: 1920,
+    height: 1080,
+    status: 'verified',
   });
   const rendition = await o.assets.renditions.insert({
-    id: id('rendition'), assetId: asset.id, orientation: 'landscape', sha256: 'b'.repeat(64), type: 'image/jpeg', size: 900, width: 1920, height: 1080,
+    id: id('rendition'),
+    assetId: asset.id,
+    orientation: 'landscape',
+    sha256: 'b'.repeat(64),
+    type: 'image/jpeg',
+    size: 900,
+    width: 1920,
+    height: 1080,
   });
 
   const template = await o.templates.insert({ id: id('template'), key: 'menu', name: 'Menu' });
   const templateVersion = await o.templates.versions.insert({
-    id: id('template-version'), templateId: template.id, version: '1.0.0', manifestJson: MANIFEST('menu'), bundleSha256: 'c'.repeat(64), status: 'approved',
+    id: id('template-version'),
+    templateId: template.id,
+    version: '1.0.0',
+    manifestJson: MANIFEST('menu'),
+    bundleSha256: 'c'.repeat(64),
+    status: 'approved',
   });
 
   const templateSpot = await o.spots.insert({
-    id: id('spot-template'), name: 'Menu', kind: 'template', durationMs: 10_000,
-    templateVersionId: baseTemplateVersion ?? templateVersion.id, dataJson: JSON.stringify({ title: 'Hello' }), assetMapJson: '{}',
+    id: id('spot-template'),
+    name: 'Menu',
+    kind: 'template',
+    durationMs: 10_000,
+    templateVersionId: baseTemplateVersion ?? templateVersion.id,
+    dataJson: JSON.stringify({ title: 'Hello' }),
+    assetMapJson: '{}',
   });
   const imageSpot = await o.spots.insert({ id: id('spot-image'), name: 'Logo', kind: 'image', durationMs: 8_000, assetId: asset.id, fit: 'cover' });
 
@@ -97,12 +122,34 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   await o.dataSources.putSnapshot(dataSource.id, { version: 'v1', fetchedAt: SEED_HOUR, dataJson: '{"t":12}' });
 
   const auditEntry = await o.auditLog.append({ id: id('audit'), actorKind: 'system', actorId: 'seed', action: 'seed', at: SEED_HOUR });
+  const kit = await o.brandKits.insert({
+    name: `${orgId} brand`,
+    colorsJson: JSON.stringify({ primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' }),
+    shape: 'soft',
+    displayFontId: 'base/inter',
+    logoOnDarkAssetId: asset.id,
+  });
+  await o.commit((await o.brandKits.assignments.stage.set({ target: 'org' }, kit.id)).writes);
   await o.playCounts.add(screen.id, [{ hour: SEED_HOUR, spotId: templateSpot.id, plays: 3, ms: 30_000 }]);
 
   return {
-    orgId, scope: o, screen: screen.id, group: group.id, credential: credential.id, asset: asset.id, rendition: rendition.id,
-    template: template.id, templateVersion: templateVersion.id, templateSpot: templateSpot.id, imageSpot: imageSpot.id,
-    playlist: playlist.id, scheduleEntry: scheduleEntry.id, publish: publish.id, dataSource: dataSource.id, auditEntry: auditEntry.id,
+    orgId,
+    scope: o,
+    screen: screen.id,
+    group: group.id,
+    credential: credential.id,
+    asset: asset.id,
+    rendition: rendition.id,
+    template: template.id,
+    templateVersion: templateVersion.id,
+    templateSpot: templateSpot.id,
+    imageSpot: imageSpot.id,
+    playlist: playlist.id,
+    scheduleEntry: scheduleEntry.id,
+    publish: publish.id,
+    dataSource: dataSource.id,
+    auditEntry: auditEntry.id,
+    brandKit: kit.id,
     hour: SEED_HOUR,
   };
 }
@@ -111,9 +158,19 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
 export async function seedBaseTemplate(db: D1Database) {
   const d = drizzle(db);
   await d.insert(templates).values({ id: 'base-clock', orgId: null, key: 'clock', name: 'Clock' }).onConflictDoNothing().run();
-  await d.insert(templateVersions).values({
-    id: 'base-clock-1', orgId: null, templateId: 'base-clock', version: '1.0.0', manifestJson: MANIFEST('clock'), bundleSha256: 'e'.repeat(64), status: 'approved',
-  }).onConflictDoNothing().run();
+  await d
+    .insert(templateVersions)
+    .values({
+      id: 'base-clock-1',
+      orgId: null,
+      templateId: 'base-clock',
+      version: '1.0.0',
+      manifestJson: MANIFEST('clock'),
+      bundleSha256: 'e'.repeat(64),
+      status: 'approved',
+    })
+    .onConflictDoNothing()
+    .run();
   return { template: 'base-clock', templateVersion: 'base-clock-1' };
 }
 

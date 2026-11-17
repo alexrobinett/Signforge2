@@ -76,6 +76,7 @@ describe('requests', () => {
   let owner: Client;
   let screenId: string;
   let assetId: string;
+  let brandKitId: string;
   let baseTemplate: string;
 
   beforeAll(async () => {
@@ -88,6 +89,13 @@ describe('requests', () => {
       await scoped(env.DB, org.id).assets.insert({ kind: 'image', name: 'a.png', sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 })
     ).id;
     await env.BLOBS.put(orgBlobKey(org.id, 'a'.repeat(64)), 'a');
+    brandKitId = (
+      await scoped(env.DB, org.id).brandKits.insert({
+        name: 'House',
+        colorsJson: JSON.stringify({ primary: '#000000', accent: '#ffffff', background: '#000000', surface: '#111111', text: '#ffffff', muted: '#aaaaaa' }),
+        shape: 'soft',
+      })
+    ).id;
     // The same session, on a D1 binding that records writes.
     owner = new Client(t, setup.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of setup.jar) owner.jar.set(k, v);
@@ -123,7 +131,9 @@ describe('requests', () => {
             ? { ...example, templateId: baseTemplate }
             : 'assetId' in example
               ? { ...example, assetId }
-              : example;
+              : 'brandKitId' in example
+                ? { ...example, brandKitId }
+                : example;
       expect((await owner.tool(tool.name, input)).status, tool.name).toBe(200);
       expect(ours(), tool.name).toEqual([]);
     }
@@ -206,6 +216,17 @@ describe('POST /api/tools/:name', () => {
   it('lists what the caller may use', async () => {
     const names = async (c: Client) => ((await (await c.get('/api/tools')).json()) as { tools: { name: string }[] }).tools.map((x) => x.name);
     expect(await names(owner)).toHaveLength(registry.size);
-    expect((await names(viewer)).sort()).toEqual(['get_asset', 'get_screen', 'get_template', 'list_assets', 'list_groups', 'list_screens', 'list_templates']);
+    expect((await names(viewer)).sort()).toEqual([
+      'get_asset',
+      'get_brand_kit',
+      'get_screen',
+      'get_template',
+      'list_assets',
+      'list_brand_kits',
+      'list_fonts',
+      'list_groups',
+      'list_screens',
+      'list_templates',
+    ]);
   });
 });

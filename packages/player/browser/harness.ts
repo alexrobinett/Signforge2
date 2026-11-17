@@ -150,10 +150,13 @@ export function useHarness(): Harness {
           if (frame === page.mainFrame()) continue;
           const el = await frame.frameElement().catch(() => undefined);
           const shown = await el?.evaluate((e) => {
-            const slot = e.parentElement!;
-            return slot.style.zIndex === '2' && getComputedStyle(slot).opacity === '1';
+            // A template frame sits in a wrapper frame, which sits in the slot.
+            const el = e as HTMLElement;
+            const slot = (el.ownerDocument.defaultView?.frameElement ?? el).closest<HTMLElement>('.slot');
+            return !!slot && slot.style.zIndex === '2' && getComputedStyle(slot).opacity === '1';
           });
           if (!shown) continue;
+          if (!(await frame.evaluate(() => !!document.getElementById('label')).catch(() => false))) continue;
           return frame.evaluate(() => ({
             label: document.getElementById('label')?.textContent ?? '',
             items: document.getElementById('box')?.textContent ?? '',

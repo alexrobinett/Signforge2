@@ -32,3 +32,5 @@ export type AuditEntry = typeof s.auditLog.$inferSelect;
 export type PlatformAuditEntry = typeof s.platformAuditLog.$inferSelect;
 export type PlayCountRow = typeof s.playCounts.$inferSelect;
 export type OrgSettings = typeof s.orgSettings.$inferSelect;
+export type BrandKitRow = typeof s.brandKits.$inferSelect;
+export type BrandAssignment = typeof s.brandAssignments.$inferSelect;

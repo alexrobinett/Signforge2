@@ -10,15 +10,29 @@
  *   - `publishOrg(org, opts)` does all three and compiles every screen. It stages its writes and
  *     never commits; the caller (M3-18's publish tool) does, through the dispatcher.
  *
- * Brand: once M3-38 lands, `compileInputFor` resolves the screen's brand kit here.
+ * Brand: `screenInput` gives the compiler the kits this screen may get (its own, its groups',
+ * the default) and its choices; the compiler picks one (`chooseBrandKit`) and freezes it into the
+ * manifest. Kits have no drafts: a publish takes each kit as it is then.
  */
-import { compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
-import { templateKey, type Binding, type DataSource, type Playlist, type Spot, type TemplateManifest, type Transition } from '@signforge/contract';
+import { compileScreen, fontById, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
+import {
+  templateKey,
+  type Binding,
+  type BrandFont,
+  type BrandKit,
+  type DataSource,
+  type Playlist,
+  type Spot,
+  type TemplateManifest,
+  type Transition,
+} from '@signforge/contract';
 import {
   draftChanged,
   published,
   type Asset,
   type AssetRendition,
+  type BrandAssignment,
+  type BrandKitRow,
   type OrgScope,
   type PlaylistRow,
   type PublishedPlaylist,
@@ -28,6 +42,7 @@ import {
   type TemplateVersion,
   type Write,
 } from '@signforge/db';
+import { kitColors } from './brand';
 
 type Orientation = Screen['orientation'];
 
@@ -46,6 +61,8 @@ export interface OrgGraph {
   items: Map<string, string[]>;
   entries: ScheduleEntryRow[];
   defaultPlaylist: string | null;
+  brandKits: Map<string, BrandKitRow>;
+  brandAssignments: BrandAssignment[];
 }
 
 export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
@@ -62,6 +79,7 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     org.scheduleEntries.list(),
     org.settings.get(),
   ]);
+  const [brandKits, brandAssignments] = await Promise.all([org.brandKits.list(), org.brandKits.assignments.list()]);
   const groupsOf = new Map<string, string[]>();
   for (const m of members) groupsOf.set(m.screenId, [...(groupsOf.get(m.screenId) ?? []), m.groupId]);
   const templateVersions: OrgGraph['templateVersions'] = new Map();
@@ -84,6 +102,8 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     items,
     entries,
     defaultPlaylist: settings?.defaultPlaylistId ?? null,
+    brandKits: new Map(brandKits.map((k) => [k.id, k])),
+    brandAssignments,
   };
 }
 
@@ -102,6 +122,71 @@ function assetFile(graph: OrgGraph, assetId: string, orientation: Orientation, f
   if (!r) return { problem: `asset ${assetId} has no ${orientation} rendition` };
   files[r.sha256] = { size: r.size, type: r.type };
   return { sha: r.sha256 };
+}
+
+/**
+ * A kit as the manifest carries it for one orientation, or why it cannot be. A logo is its
+ * asset's rendition for the screen. A catalogue font whose files are not added yet is left out,
+ * so templates draw with their own font until it is (compiler `FONTS`).
+ */
+function toBrandKit(graph: OrgGraph, row: BrandKitRow, orientation: Orientation, files: CompileInput['files']): { kit?: BrandKit; problems: string[] } {
+  const problems: string[] = [];
+  const logoFile = (assetId: string | null) => {
+    if (!assetId) return undefined;
+    const f = assetFile(graph, assetId, orientation, files);
+    if (f.problem) problems.push(`logo ${f.problem}`);
+    return f.sha;
+  };
+  const font = (id: string | null): BrandFont | undefined => {
+    const f = id ? fontById(id) : undefined;
+    if (!f?.files.length) return undefined;
+    for (const x of f.files) files[x.file] = { size: x.size, type: 'font/woff2' };
+    return { id: f.id, family: f.family, files: f.files.map(({ weight, style, file }) => ({ weight, style, file })) };
+  };
+  const onDark = logoFile(row.logoOnDarkAssetId);
+  const onLight = logoFile(row.logoOnLightAssetId);
+  const display = font(row.displayFontId);
+  const body = font(row.bodyFontId);
+  if (problems.length) return { problems };
+  return {
+    kit: {
+      id: row.id,
+      colors: kitColors(row).colors,
+      shape: row.shape,
+      fonts: { ...(display ? { display } : {}), ...(body ? { body } : {}) },
+      ...(onDark ? { logo: { onDark, ...(onLight ? { onLight } : {}) } } : {}),
+    },
+    problems,
+  };
+}
+
+/** The kits a screen may get and its choices, as `compileScreen` takes them; plus why a kit could not be built. */
+function brandInput(
+  graph: OrgGraph,
+  screen: Screen,
+  files: CompileInput['files'],
+): { brand: NonNullable<CompileInput['brand']>; unavailable: Map<string, string[]> } {
+  const groups = new Set(graph.groupsOf.get(screen.id) ?? []);
+  const brand: NonNullable<CompileInput['brand']> = { kits: {}, groups: {} };
+  for (const a of graph.brandAssignments) {
+    if (a.target === 'org') brand.default = a.brandKitId;
+    else if (a.target === 'screen' && a.screenId === screen.id) brand.screen = a.brandKitId;
+    else if (a.target === 'group' && groups.has(a.groupId!)) brand.groups[a.groupId!] = a.brandKitId;
+  }
+  const unavailable = new Map<string, string[]>();
+  const wanted = new Set([brand.screen, brand.default, ...Object.values(brand.groups)].filter((k) => k !== undefined));
+  for (const id of wanted) {
+    const row = graph.brandKits.get(id);
+    if (!row) continue;
+    // Built into a scratch file list: only the chosen kit's files belong in the manifest.
+    const own: CompileInput['files'] = {};
+    const { kit, problems } = toBrandKit(graph, row, screen.orientation, own);
+    if (kit) {
+      brand.kits[id] = kit;
+      Object.assign(files, own);
+    } else unavailable.set(id, problems);
+  }
+  return { brand, unavailable };
 }
 
 /** A spot row (draft or published version) as the contract's `Spot` for one orientation, or why it cannot be. */
@@ -163,7 +248,7 @@ function toEntry(e: ScheduleEntryRow): TargetedEntry {
 }
 
 /** A screen's published graph as `compileScreen` takes it, plus why any published spot could not be included. */
-function screenInput(graph: OrgGraph, screen: Screen): { input: CompileInput; unavailable: Map<string, string[]> } {
+function screenInput(graph: OrgGraph, screen: Screen): { input: CompileInput; unavailable: Map<string, string[]>; unavailableKits: Map<string, string[]> } {
   const templates: CompileInput['templates'] = {};
   const files: CompileInput['files'] = {};
   const spots: Spot[] = [];
@@ -184,6 +269,7 @@ function screenInput(graph: OrgGraph, screen: Screen): { input: CompileInput; un
     return pub ? [toEntry(pub)] : [];
   });
   const displayHours = screen.displayHoursJson ? JSON.parse(screen.displayHoursJson) : undefined;
+  const { brand, unavailable: unavailableKits } = brandInput(graph, screen, files);
   return {
     input: {
       screen: {
@@ -202,8 +288,10 @@ function screenInput(graph: OrgGraph, screen: Screen): { input: CompileInput; un
       schedule,
       dataSources: graph.dataSources,
       defaultPlaylist: graph.defaultPlaylist ?? '',
+      brand,
     },
     unavailable,
+    unavailableKits,
   };
 }
 
@@ -391,13 +479,17 @@ export async function publishOrg(org: OrgScope, opts: CompileOptions): Promise<{
       screens.push({ screenId: screen.id, problems: ['the organization has no default playlist'] });
       continue;
     }
-    const { input, unavailable } = screenInput(graph, screen);
+    const { input, unavailable, unavailableKits } = screenInput(graph, screen);
     const result = await compileScreen(input, opts);
     // A published spot that could not be loaded shows up as unknown; say why.
     const reasons = [...unavailable]
       .filter(([id]) => result.problems.some((p) => p.includes(`spot "${id}"`)))
       .flatMap(([id, ps]) => ps.map((p) => `spot ${id}: ${p}`));
-    const problems = [...reasons, ...result.problems];
+    // A chosen kit that could not be built shows up as not available; say why.
+    const kitReasons = [...unavailableKits]
+      .filter(([id]) => result.problems.includes(`brand: brand kit ${id} is not available`))
+      .flatMap(([id, ps]) => ps.map((p) => `brand: brand kit ${id}: ${p}`));
+    const problems = [...reasons, ...kitReasons, ...result.problems];
     screens.push(result.manifest ? { screenId: screen.id, manifest: result.manifest, problems } : { screenId: screen.id, problems });
   }
   return { writes, drafts, screens };

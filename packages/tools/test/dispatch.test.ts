@@ -47,15 +47,20 @@ describe('the registry', () => {
 
   it('lists the first tools', () => {
     expect([...registry.keys()].sort()).toEqual([
+      'assign_brand_kit',
       'create_asset_upload',
+      'create_brand_kit',
       'create_group',
       'delete_asset',
       'delete_group',
       'finalize_asset',
       'get_asset',
+      'get_brand_kit',
       'get_screen',
       'get_template',
       'list_assets',
+      'list_brand_kits',
+      'list_fonts',
       'list_groups',
       'list_screens',
       'list_templates',
@@ -64,8 +69,10 @@ describe('the registry', () => {
       'rename_group',
       'rename_screen',
       'revoke_screen_credential',
+      'set_default_brand_kit',
       'set_group_members',
       'set_template_version_status',
+      'update_brand_kit',
       'update_screen_settings',
     ]);
   });
@@ -74,7 +81,7 @@ describe('the registry', () => {
     const keyed = TOOLS.filter((t) => t.idempotent)
       .map((t) => t.name)
       .sort();
-    expect(keyed).toEqual(['create_asset_upload', 'create_group']);
+    expect(keyed).toEqual(['create_asset_upload', 'create_brand_kit', 'create_group']);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
     for (const name of keyed) {
       const schema = describeTools(registry, { role: 'owner' }).find((t) => t.name === name)!.inputSchema as {
@@ -131,7 +138,18 @@ describe('roles and scopes', () => {
 
   it('decide what GET /api/tools lists', () => {
     const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes }).map((t) => t.name);
-    expect(names('viewer').sort()).toEqual(['get_asset', 'get_screen', 'get_template', 'list_assets', 'list_groups', 'list_screens', 'list_templates']);
+    expect(names('viewer').sort()).toEqual([
+      'get_asset',
+      'get_brand_kit',
+      'get_screen',
+      'get_template',
+      'list_assets',
+      'list_brand_kits',
+      'list_fonts',
+      'list_groups',
+      'list_screens',
+      'list_templates',
+    ]);
     expect(names('editor')).not.toContain('revoke_screen_credential');
     expect(names('editor')).not.toContain('set_template_version_status');
     expect(names('owner')).toHaveLength(TOOLS.length);
