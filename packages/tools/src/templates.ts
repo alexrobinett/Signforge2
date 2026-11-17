@@ -40,6 +40,7 @@ const checkReportOutput = z.object({
   ok: z.boolean(),
   bundleBytes: z.number(),
   checks: z.array(z.object({ check: z.enum(TEMPLATE_CHECKS), ok: z.boolean(), problems: z.array(z.string()) })),
+  warnings: z.array(z.string()).optional().describe('Findings that do not stop the version: colour literals outside a var(--sf-*) fallback'),
   checkedAt: z.number(),
   sourcesSha256: z.string(),
 });
@@ -145,7 +146,7 @@ const sourcesSchema = z.record(z.string(), z.string());
 export const registerTemplateVersion = defineSharedTool({
   name: 'register_template_version',
   description:
-    "Register a built template version whose bundle and sources are already uploaded (`sf template push` does both). The server lints them as `sf build` does: the manifest, forbidden CSS (backdrop-filter), the 600 kB size budget and network references on the bundle, and forbidden code (fetch, navigation) on the author's sources. A version that fails is refused with each problem and nothing is stored. Versions are immutable: registering an existing version with the same bundle and manifest changes nothing, and with different ones is refused; bump the version instead. A new version is a draft. Returns { template, version, changed }.",
+    "Register a built template version whose bundle and sources are already uploaded (`sf template push` does both). The server lints them as `sf build` does: the manifest, forbidden CSS (backdrop-filter), the 600 kB size budget and network references on the bundle, and forbidden code (fetch, navigation) on the author's sources. Colour literals in the CSS outside a var(--sf-*) fallback are reported as warnings in the check report and do not stop the version. A version that fails is refused with each problem and nothing is stored. Versions are immutable: registering an existing version with the same bundle and manifest changes nothing, and with different ones is refused; bump the version instead. A new version is a draft. Returns { template, version, changed }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,

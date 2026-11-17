@@ -11,15 +11,33 @@
  * through `formatter(ctx, { hour: 'numeric' })`, and the time from `now()`, never `new Date()`:
  * the screen corrects its clock from the server, and the device's own clock may be wrong.
  *
+ * Brand (protocol 2). When the screen has a brand kit, `init` carries it as `theme`, and before
+ * `prepare` the SDK sets on the root `--sf-primary`, `--sf-on-primary`, `--sf-accent`,
+ * `--sf-on-accent`, `--sf-bg`, `--sf-surface`, `--sf-text`, `--sf-muted`, `--sf-radius` (square
+ * 0, soft 12px, round 9999px) and, for each brand font, `--sf-font-display` / `--sf-font-body`;
+ * it decodes the fonts (registered as `sf-brand-display` and `sf-brand-body`, from their bytes, so
+ * no URL is fetched), and an `<img data-sf-src="$brand.logo">` gets the logo for the brand's
+ * background (onLight on a light one, when the kit has it). Write every brand value with a
+ * fallback, `var(--sf-accent, #22d3ee)`: without a kit nothing is set and the template draws as
+ * it is. `ready` waits for the fonts.
+ *
  * New data (protocol 2). On `reset`, or an `init` after the first, the SDK stops the template,
  * restores the document exactly as it loaded, and initialises again, so `prepare` always starts
  * from clean markup. Look elements up inside the hooks, not once at the top of `main.ts`: a reset
  * replaces them. State a template keeps outside the DOM must be cleared in `stop`.
  */
-import { PROTOCOL_VERSION, type HostMessage, type InitPayload, type TemplateMessage } from '@signforge/contract';
+import {
+  BRAND_CSS_VARS,
+  PROTOCOL_VERSION,
+  type BrandShape,
+  type FrameTheme,
+  type HostMessage,
+  type InitPayload,
+  type TemplateMessage,
+} from '@signforge/contract';
 
 export interface TemplateContext extends Omit<InitPayload, 'assets' | 'theme'> {
-  /** Image fields as object URLs. */
+  /** Image fields as object URLs; `$brand.logo` too when the brand kit has a logo. */
   assets: Record<string, string>;
   root: HTMLElement;
 }
@@ -41,6 +59,8 @@ export const now = (): Date => new Date(Date.now() + offsetMs);
 export function defineTemplate(hooks: TemplateHooks = {}): void {
   let ctx: TemplateContext | undefined;
   let urls: string[] = [];
+  /** Brand font faces this init added to `document.fonts`. */
+  let faces: FontFace[] = [];
   /** The document as it loaded, taken before the first init touches it. */
   let pristine: { body: HTMLElement; attrs: [string, string][] } | undefined;
   /** Counts inits and resets, so a prepare still running for older data never reports ready. */
@@ -54,6 +74,8 @@ export function defineTemplate(hooks: TemplateHooks = {}): void {
     document.getAnimations().forEach((a) => a.cancel());
     urls.forEach((u) => URL.revokeObjectURL(u));
     urls = [];
+    faces.forEach((f) => document.fonts.delete(f));
+    faces = [];
     if (!pristine) return;
     const root = document.documentElement;
     for (const a of [...root.attributes]) root.removeAttribute(a.name);
@@ -78,6 +100,13 @@ export function defineTemplate(hooks: TemplateHooks = {}): void {
         run = ++generation;
         const assets: Record<string, string> = {};
         for (const [k, blob] of Object.entries(m.assets)) urls.push((assets[k] = URL.createObjectURL(blob)));
+        if (m.theme) {
+          const added = await applyTheme(m.theme, root);
+          // Superseded while the fonts decoded: the reset's restore ran before these were added.
+          if (run !== generation) return added.faces.forEach((f) => document.fonts.delete(f));
+          faces.push(...added.faces);
+          if (added.logo) urls.push((assets[BRAND_LOGO] = URL.createObjectURL(added.logo)));
+        }
         ctx = {
           data: m.data,
           assets,
@@ -118,6 +147,54 @@ export function defineTemplate(hooks: TemplateHooks = {}): void {
 
   addEventListener('error', (e) => send({ sf: PROTOCOL_VERSION, type: 'error', message: e.message }));
   send({ sf: PROTOCOL_VERSION, type: 'loaded' });
+}
+
+/** The `data-sf-src` value that takes the brand kit's logo. */
+export const BRAND_LOGO = '$brand.logo';
+
+const RADIUS: Record<BrandShape, string> = { square: '0px', soft: '12px', round: '9999px' };
+
+/**
+ * Set the theme's custom properties on the root and decode its fonts. Returns the faces added to
+ * `document.fonts` (the caller removes them on reset) and the logo for the brand's background.
+ */
+async function applyTheme(theme: FrameTheme, root: HTMLElement): Promise<{ faces: FontFace[]; logo?: Blob }> {
+  for (const [name, value] of Object.entries(theme.colors)) {
+    const v = BRAND_CSS_VARS[name as keyof typeof theme.colors];
+    if (v) root.style.setProperty(v, value);
+  }
+  root.style.setProperty(BRAND_CSS_VARS.radius, RADIUS[theme.shape] ?? RADIUS.soft);
+  const faces: FontFace[] = [];
+  for (const role of ['display', 'body'] as const) {
+    const font = theme.fonts[role];
+    if (!font?.files.length) continue;
+    const family = `sf-brand-${role}`;
+    for (const f of font.files) {
+      // From the bytes: no URL, so the template's no-network policy stays as it is.
+      const face = new FontFace(family, await f.data.arrayBuffer(), { weight: String(f.weight), style: f.style });
+      document.fonts.add(face);
+      faces.push(face);
+    }
+    root.style.setProperty(role === 'display' ? BRAND_CSS_VARS.fontDisplay : BRAND_CSS_VARS.fontBody, `${family}, sans-serif`);
+  }
+  // Decode now, inside prepare: a face no text uses yet would otherwise load on first paint.
+  await Promise.all(faces.map((f) => f.load()));
+  const logo = theme.logo && (theme.logo.onLight && isLight(theme.colors.background) ? theme.logo.onLight : theme.logo.onDark);
+  return { faces, logo };
+}
+
+/** Whether a `#rgb`/`#rrggbb` colour is light enough that dark text (and a logo for light) reads better on it. */
+function isLight(color: string): boolean {
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color)?.[1];
+  if (!hex) return false;
+  const full = hex.length === 3 ? [...hex].map((c) => c + c).join('') : hex;
+  const [r, g, b] = [0, 2, 4].map((i) => {
+    const c = Number.parseInt(full.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const l = 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  // Black on it has more contrast than white: the WCAG crossover, at about 0.179.
+  return (l + 0.05) / 0.05 > 1.05 / (l + 0.05);
 }
 
 function bind(ctx: TemplateContext): void {

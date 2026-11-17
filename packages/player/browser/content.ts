@@ -9,6 +9,9 @@ import {
   PROTOCOL_VERSION,
   manifestIdInput,
   type Binding,
+  type BrandColors,
+  type BrandFont,
+  type BrandShape,
   type DataSource,
   type ScreenManifest,
   type Spot,
@@ -62,6 +65,15 @@ export interface ContentOptions {
   schema?: number;
   /** Appended to the template as a comment, so the template file (and its hash) differs from other content's. */
   variant?: string;
+  /** The screen's brand kit, with its font files and logo as bytes. */
+  brand?: FixtureBrand;
+}
+
+export interface FixtureBrand {
+  colors: BrandColors;
+  shape: BrandShape;
+  fonts: Partial<Record<'display' | 'body', { id: string; family: string; files: { weight: number; data: Buffer }[] }>>;
+  logo?: { onDark: Buffer; onLight?: Buffer };
 }
 
 /**
@@ -71,7 +83,7 @@ export interface ContentOptions {
 export function buildContent(
   templateHtml: string,
   spots: FixtureSpot[],
-  { transition = { type: 'cut' }, schema = MANIFEST_SCHEMA, variant }: ContentOptions = {},
+  { transition = { type: 'cut' }, schema = MANIFEST_SCHEMA, variant, brand }: ContentOptions = {},
 ): Content {
   const html = Buffer.from(variant ? `${templateHtml}<!-- ${variant} -->` : templateHtml);
   const key = schema === 1 ? 'fixture@1.0.0' : TEMPLATE_KEY;
@@ -97,6 +109,19 @@ export function buildContent(
       (spotMap[s.id] as Extract<Spot, { kind: 'template' }>).assets.file = sha;
     }
   }
+  const addFile = (data: Buffer, type: string) => {
+    const sha = sha256(data);
+    blobs.set(sha, data);
+    files[sha] = { size: data.byteLength, type };
+    return sha;
+  };
+  const fonts: Partial<Record<'display' | 'body', BrandFont>> = {};
+  for (const [role, f] of Object.entries(brand?.fonts ?? {}) as ['display' | 'body', NonNullable<FixtureBrand['fonts']['body']>][])
+    fonts[role] = { id: f.id, family: f.family, files: f.files.map((x) => ({ weight: x.weight, style: 'normal', file: addFile(x.data, 'font/woff2') })) };
+  const logo = brand?.logo && {
+    onDark: addFile(brand.logo.onDark, 'image/png'),
+    ...(brand.logo.onLight ? { onLight: addFile(brand.logo.onLight, 'image/png') } : {}),
+  };
   const dataSources: Record<string, DataSource> = {};
   for (const b of spots.flatMap((s) => Object.values(s.bindings ?? {}))) dataSources[b.source] = { id: b.source, refreshS: MIN_REFRESH_S };
   const body: Omit<ScreenManifest, 'id'> = {
@@ -110,6 +135,7 @@ export function buildContent(
     dataSources,
     schedule: [],
     defaultPlaylist: 'main',
+    ...(brand ? { brand: { id: 'kit', colors: brand.colors, shape: brand.shape, fonts, ...(logo ? { logo } : {}) } } : {}),
   };
   const manifest: ScreenManifest = { ...body, id: sha256(manifestIdInput(body)) };
   return { manifest, blobs };

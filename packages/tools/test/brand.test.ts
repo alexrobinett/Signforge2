@@ -1,6 +1,7 @@
 // The brand tool group, and brand kits through the publish: a kit is frozen into each manifest
 // and an edit reaches screens only at the next publish.
 import type { Spot, TemplateManifest } from '@signforge/contract';
+import { fontById } from '@signforge/compiler';
 import { scoped, type OrgScope } from '@signforge/db';
 import { seedOrganization } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
@@ -200,7 +201,7 @@ describe('brand at publish', () => {
     expect((await org.screens.get(lobby.id))?.desiredManifestId).not.toBe(stored?.desiredManifestId);
   });
 
-  it('carries the logo as the rendition for the screen, and leaves out fonts whose files are not in the catalogue yet', async () => {
+  it('carries the logo as the rendition for the screen, and the catalogue font with its files', async () => {
     const { call, org, lobby } = await setup('brand-logo');
     const logo = await org.assets.insert({
       kind: 'image',
@@ -218,7 +219,10 @@ describe('brand at publish', () => {
     const manifest = (await publishOrg(org, opts)).screens.find((s) => s.screenId === lobby.id)!.manifest!;
     expect(manifest.brand?.logo).toEqual({ onDark: sha('c') });
     expect(manifest.files[sha('c')]).toEqual({ size: 500, type: 'image/png' });
-    expect(manifest.brand?.fonts).toEqual({});
+    const inter = fontById('base/inter')!;
+    expect(manifest.brand?.fonts.body).toEqual({ id: 'base/inter', family: 'Inter', files: inter.files.map(({ weight, style, file }) => ({ weight, style, file })) });
+    expect(manifest.brand?.fonts.display).toBeUndefined();
+    for (const f of inter.files) expect(manifest.files[f.file]).toEqual({ size: f.size, type: 'font/woff2' });
   });
 
   it('refuses to delete an asset a kit uses as its logo', async () => {

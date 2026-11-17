@@ -71,8 +71,21 @@ A template that has not reported `ready` within 2 seconds is skipped.
 - `defineTemplate({ prepare, play })` hooks for anything markup cannot do, such as building rows from a list or drawing to a canvas. `prepare` may be async; ready is reported after it resolves. A `stop` hook exists in the SDK but the player does not call it today: a template is simply removed.
 - `formatter(ctx, options)` and `dayKey(ctx, date)` format dates and times in the screen's time zone and locale. Use them for anything shown: the device's own clock settings may not match the screen's location.
 - `now()` is the screen's time: the device clock corrected from the server. Use it, never `new Date()` or `Date.now()`, for anything that depends on the time: a Pi has no battery-backed clock, and after a power cut its own clock can be days out.
-- A theme (brand colours, fonts and logo) arrives in `init` as `theme`. Applying it is M3-39; the CSS custom property names are `BRAND_CSS_VARS` in the contract.
-- A colour field may default to a brand token, `"$brand.<colour>"` with one of the contract's `BRAND_COLORS` (`"$brand.accent"`). The server's compiler replaces it with the screen's brand colour at publish, so `data` only ever holds colours; a token naming no brand colour is a problem of the spot.
+- The screen's brand (protocol 2): see Brand below.
+
+## Brand
+
+When the screen has a brand kit, the player sends it in `init` as `theme`, and before `prepare` the SDK applies it:
+
+- Colours and shape as custom properties on the root (`BRAND_CSS_VARS` in the contract): `--sf-primary`, `--sf-on-primary`, `--sf-accent`, `--sf-on-accent`, `--sf-bg`, `--sf-surface`, `--sf-text`, `--sf-muted`, and `--sf-radius` (square `0px`, soft `12px`, round `9999px`).
+- Brand fonts: `--sf-font-display` and `--sf-font-body`, each set only when the kit has that font. The SDK registers the faces from their bytes as `sf-brand-display` and `sf-brand-body` and decodes them before `ready`, so the first frame draws with them. No URL is fetched, so the template's no-network policy is unchanged.
+- The logo: `<img data-sf-src="$brand.logo">` gets the kit's logo, the on-light version when `--sf-bg` is light and the kit has one, else the on-dark one. It is also `ctx.assets['$brand.logo']`.
+
+Write every brand value with a fallback, so the template still draws on a screen with no kit, where nothing is set: `color: var(--sf-text, #f8fafc)`, `font-family: var(--sf-font-display, Inter), sans-serif`, and give the logo `<img>` a `src` of its own (a `data:` URL) or hide it when it has none. Colours built on a token are fine: `color-mix(in srgb, var(--sf-accent, #22d3ee) 30%, transparent)`.
+
+A colour field may default to a brand token, `"$brand.<colour>"` with one of the contract's `BRAND_COLORS` (`"$brand.accent"`). The server's compiler replaces it with the screen's brand colour at publish, so `data` only ever holds colours; a token naming no brand colour is a problem of the spot.
+
+**Colour lint.** `sf build` and the server warn on a colour literal in a template's CSS (`style.css`, and `<style>` in `index.html`) that is not the fallback inside a `var()`: a hex colour, `rgb()`/`hsl()` and the like anywhere, and named colours (`white`) in colour properties. It is a warning: the version still builds and registers, and the warnings are kept on its check report. Shadows, scrims and weather's sky colours use literals on purpose.
 
 ## Live data
 
@@ -107,7 +120,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 **Isolation**
 - No network. The template runs in a sandboxed frame under a policy that blocks every request. Scripts and styles must be inline after the build, and images arrive from the player.
 - No storage, cookies or access to anything outside its own frame.
-- Fonts ship inside the bundle. Reference a font file from `style.css` and the build inlines it. Use a font you are licensed to redistribute.
+- Fonts ship inside the bundle. Reference a font file from `style.css` and the build inlines it. Use a font you are licensed to redistribute. Brand fonts are the exception: they come with the theme (see Brand), from the curated catalogue in `fonts/`.
 - Data is fixed for one play. New values arrive with the next `init`, from a clean document (see Lifecycle).
 - Decoration must not fail the spot. If an optional effect cannot be drawn, catch the error and show the content without it; a template that rejects in `prepare` is skipped.
 
@@ -116,11 +129,12 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 | Limit | Value |
 | --- | --- |
 | Built bundle size | 600 kB |
-| `init` to `ready` | 500 ms |
+| `init` to `ready` | 500 ms, brand fonts included |
+| Brand font family (all weights, WOFF2) | 150 kB |
 | Dropped frames over a play | 1% |
 | Longest single frame | 50 ms |
 
-`sf build` and `sf template push` enforce manifest validity, the forbidden-CSS list, bundle size, the no-network rule and the forbidden-code list (`checkTemplateBundle` in `packages/contract`). The server repeats the same checks when a version is registered and stores the report on it: the first four on the uploaded bundle, the code list on the author's own `index.html`, `style.css` and `main.ts`, which are uploaded alongside it (the bundle holds the SDK, which itself calls `parent.postMessage`).
+`sf build` and `sf template push` enforce manifest validity, the forbidden-CSS list, bundle size, the no-network rule and the forbidden-code list (`checkTemplateBundle` in `packages/contract`), and warn on colour literals (see Brand). The server repeats the same checks when a version is registered and stores the report on it: the first four on the uploaded bundle, the code list on the author's own `index.html`, `style.css` and `main.ts`, which are uploaded alongside it (the bundle holds the SDK, which itself calls `parent.postMessage`).
 
 These checks are a lint, not a security boundary: string matching can be evaded. What keeps a screen safe is the sandbox the template runs in and its policy that blocks every request.
 

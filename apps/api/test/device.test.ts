@@ -4,6 +4,7 @@ import type { ScreenManifest } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
+import { FONTS } from '@signforge/compiler';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mintCredential, parseCredential } from '../src/device/credential';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
@@ -55,6 +56,8 @@ const BLOB2 = sha('b');
 const UNLISTED = sha('c');
 const BASE_HTML = sha('e');
 const B_BLOB = sha('f');
+/** A catalogue brand font: public bytes, kept once under sys/b/. */
+const FONT = FONTS[0]!.files[0]!.file;
 
 beforeAll(async () => {
   a = await setUp('dev-a');
@@ -73,13 +76,14 @@ beforeAll(async () => {
   await env.BLOBS.put(
     manifestKey(A, a.seed.screen, M2),
     JSON.stringify(
-      manifest(M2, [BLOB2, B_BLOB], {
+      manifest(M2, [BLOB2, B_BLOB, FONT], {
         dataSources: { 'dev-a-source': { id: 'dev-a-source', refreshS: 300 }, 'dev-b-source': { id: 'dev-b-source', refreshS: 300 } },
       }),
     ),
   );
   for (const s of [BLOB1, BLOB2, UNLISTED]) await env.BLOBS.put(orgBlobKey(A, s), `blob ${s.slice(0, 4)}`);
   await env.BLOBS.put(baseBlobKey(BASE_HTML), '<!doctype html>');
+  await env.BLOBS.put(baseBlobKey(FONT), 'wOF2 font');
   await env.BLOBS.put(orgBlobKey(b.seed.orgId, B_BLOB), 'org b secret');
   await env.BLOBS.put(manifestKey(b.seed.orgId, b.seed.screen, M1), JSON.stringify(manifest(M1, [B_BLOB])));
 
@@ -207,6 +211,11 @@ describe('GET /v1/device/blobs/:sha256', () => {
   it('serves the previous manifest too, and a base template from the shared prefix', async () => {
     expect(await (await get(`/blobs/${BLOB1}`, a.credential)).text()).toBe('blob aaaa');
     expect(await (await get(`/blobs/${BASE_HTML}`, a.credential)).text()).toBe('<!doctype html>');
+  });
+
+  it('serves a catalogue brand font from the shared prefix, only to a screen whose manifest lists it', async () => {
+    expect(await (await get(`/blobs/${FONT}`, a.credential)).text()).toBe('wOF2 font');
+    expect((await get(`/blobs/${FONT}`, b.credential)).status).toBe(404);
   });
 
   it("is a 404 for another org's blob, even one the manifest lists", async () => {

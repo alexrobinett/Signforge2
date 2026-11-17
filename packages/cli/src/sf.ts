@@ -6,6 +6,7 @@
  *   sf push <out-dir> --screen <id> --api <url>
  *   sf template push <template-dir> --api <url> [--org <id>] [--approve]
  *   sf template seed [templates-dir] --api <url>
+ *   sf fonts push --api <url>
  *
  * Reads a content project (screen, spots, playlists, schedule, media), builds every template
  * it uses into one self-contained HTML file, checks it against the contract, and writes an
@@ -22,7 +23,13 @@
  * `sf template push` builds one template, uploads its bundle and the author's sources, and
  * registers the version; the API repeats the build's checks (./template-push.ts). Without `--org`
  * it is a base template every org can use. `sf template seed` pushes every template in
- * `templates/` as an approved base template, and is run on each deploy.
+ * `templates/` as an approved base template, and the brand font catalogue (`fonts/`, as
+ * `sf fonts push` does), and is run on each deploy.
+ *
+ * A project may have a `brand.json`: the screen's brand kit, as the CMS would publish it, with
+ * fonts named by catalogue id and logos as media paths:
+ *   { "colors": { ... all eight ... }, "shape": "soft",
+ *     "fonts": { "display": "base/oswald", "body": "base/inter" }, "logo": { "onDark": "logo.svg" } }
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -33,9 +40,14 @@ import {
   SCREEN_BOX,
   VIDEO_SPEC,
   coverSize,
+  validateBrandKit,
   templateKey,
   type ScreenBox,
   type Binding,
+  type BrandColors,
+  type BrandFont,
+  type BrandKit,
+  type BrandShape,
   type CalendarFeed,
   type DataSnapshot,
   type DataSource,
@@ -46,10 +58,10 @@ import {
   type Transition,
 } from '@signforge/contract';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
-import { compileScreen, spotProblems, type CompileInput, type TargetedEntry } from '@signforge/compiler';
+import { compileScreen, fontById, fontFilePath, onColor, spotProblems, type CompileInput, type TargetedEntry } from '@signforge/compiler';
 import { push, PushError } from './push';
 import { buildTemplate, type BuiltTemplate } from './template';
-import { pushTemplate, TemplatePushError } from './template-push';
+import { pushFonts, pushTemplate, TemplatePushError } from './template-push';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html',
@@ -294,11 +306,24 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
     if (elsewhere) console.warn(`  note: schedule entry ${e.id} targets ${e.target} "${e.targetId}", which is not this screen; it is left out`);
   }
 
+  const brand = await readBrand(projectDir, problems, addBlob, addMedia);
+
   const files: CompileInput['files'] = {};
   for (const [hash, b] of blobs) files[hash] = { size: b.data.length, type: b.type };
 
   const result = await compileScreen(
-    { screen, groups, templates, files, spots, playlists, dataSources, schedule, defaultPlaylist: sched.defaultPlaylist },
+    {
+      screen,
+      groups,
+      templates,
+      files,
+      spots,
+      playlists,
+      dataSources,
+      schedule,
+      defaultPlaylist: sched.defaultPlaylist,
+      ...(brand ? { brand: { kits: { [brand.id]: brand }, groups: {}, default: brand.id } } : {}),
+    },
     { hash: (text) => sha256(text), now: new Date() },
   );
   problems.list.push(...result.problems);
@@ -324,6 +349,49 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
     `  manifest ${manifest.id.slice(0, 16)}: ${Object.keys(manifest.spots).length} spots, ${Object.keys(manifest.playlists).length} playlists, ${Object.keys(manifest.files).length} files, ${(total / 1024).toFixed(0)} kB`,
   );
   console.log(`  wrote ${outDir}`);
+}
+
+/**
+ * The project's `brand.json` as the brand kit the screen gets, or undefined without one. Fonts are
+ * catalogue ids, read from the repo's fonts/; logos are media paths. `onPrimary` and `onAccent`
+ * may be left out, and are derived for contrast as the CMS does.
+ */
+async function readBrand(
+  projectDir: string,
+  problems: Problems,
+  addBlob: (data: Buffer, type: string) => string,
+  addMedia: (rel: string, where: string) => Promise<string>,
+): Promise<BrandKit | undefined> {
+  const path = join(projectDir, 'brand.json');
+  if (!existsSync(path)) return undefined;
+  const b = readJson<{
+    colors: Omit<BrandColors, 'onPrimary' | 'onAccent'> & Partial<Pick<BrandColors, 'onPrimary' | 'onAccent'>>;
+    shape?: BrandShape;
+    fonts?: { display?: string; body?: string };
+    logo?: { onDark: string; onLight?: string };
+  }>(path);
+  const repo = resolve(import.meta.dirname, '../../..');
+  const font = (id: string | undefined, role: string): BrandFont | undefined => {
+    if (!id) return undefined;
+    const f = fontById(id);
+    if (!f) {
+      problems.add('brand', [`${role} font "${id}" is not in the catalogue`]);
+      return undefined;
+    }
+    for (const x of f.files) addBlob(readFileSync(join(repo, fontFilePath(f, x))), 'font/woff2');
+    return { id: f.id, family: f.family, files: f.files.map(({ weight, style, file }) => ({ weight, style, file })) };
+  };
+  const display = font(b.fonts?.display, 'display');
+  const body = font(b.fonts?.body, 'body');
+  const colors: BrandColors = { ...b.colors, onPrimary: b.colors.onPrimary ?? onColor(b.colors.primary), onAccent: b.colors.onAccent ?? onColor(b.colors.accent) };
+  const kit: BrandKit = { id: 'local', colors, shape: b.shape ?? 'soft', fonts: { ...(display ? { display } : {}), ...(body ? { body } : {}) } };
+  if (b.logo) {
+    const onDark = await addMedia(b.logo.onDark, 'brand');
+    const onLight = b.logo.onLight ? await addMedia(b.logo.onLight, 'brand') : undefined;
+    kit.logo = { onDark, ...(onLight ? { onLight } : {}) };
+  }
+  problems.add('brand', validateBrandKit(kit));
+  return kit;
 }
 
 /**
@@ -371,8 +439,21 @@ function adminToken(command: string): string {
   }
   return token;
 }
+/** `sf fonts push`: the catalogue's files from the repo's fonts/ to the API's sys/b/. */
+async function uploadFonts(token: string): Promise<void> {
+  const root = resolve(import.meta.dirname, '../../..');
+  console.log('Pushing the brand font catalogue');
+  try {
+    await pushFonts({ api: flag('api')!, token, read: (path) => readFileSync(join(root, path)), log: (l) => console.log(`  ${l}`) });
+  } catch (err) {
+    if (!(err instanceof TemplatePushError)) throw err;
+    console.error(`  failed: ${err.message}`);
+    process.exit(1);
+  }
+}
+
 const USAGE =
-  'usage:\n  sf build <project-dir> [--out <dir>] [--templates <dir>]\n  sf feeds <project-dir> [--out <dir>]   (live data snapshots, default dist/content/data)\n  sf push <out-dir> --screen <id> --api <url>   (token in SF_ADMIN_TOKEN)\n  sf template push <template-dir> --api <url> [--org <id>] [--approve]   (base template unless --org)\n  sf template seed [templates-dir] --api <url>   (every template, as approved base templates)';
+  'usage:\n  sf build <project-dir> [--out <dir>] [--templates <dir>]\n  sf feeds <project-dir> [--out <dir>]   (live data snapshots, default dist/content/data)\n  sf push <out-dir> --screen <id> --api <url>   (token in SF_ADMIN_TOKEN)\n  sf template push <template-dir> --api <url> [--org <id>] [--approve]   (base template unless --org)\n  sf template seed [templates-dir] --api <url>   (every template, as approved base templates, and the brand fonts)\n  sf fonts push --api <url>   (the brand font catalogue, to sys/b/)';
 const flag = (name: string, fallback?: string) => {
   const i = rest.indexOf(`--${name}`);
   return i >= 0 && rest[i + 1] ? rest[i + 1]! : fallback;
@@ -405,6 +486,8 @@ if (cmd === 'build' && dirArg) {
     console.error(`sf push failed: ${err.message}`);
     process.exit(1);
   }
+} else if (cmd === 'fonts' && dirArg === 'push' && flag('api')) {
+  await uploadFonts(adminToken('sf fonts push'));
 } else if (cmd === 'template' && (dirArg === 'push' || dirArg === 'seed') && flag('api')) {
   const token = adminToken(`sf template ${dirArg}`);
   const org = flag('org');
@@ -422,6 +505,7 @@ if (cmd === 'build' && dirArg) {
           .sort()
       : [target];
   const owner = org ? { org } : ('base' as const);
+  if (dirArg === 'seed') await uploadFonts(token);
   let failed = 0;
   for (const dir of dirs) {
     console.log(`Pushing ${basename(dir)} to ${org ? `org ${org}` : 'base templates'}`);

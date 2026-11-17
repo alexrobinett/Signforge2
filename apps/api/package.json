@@ -11,6 +11,7 @@
     "dev:screen": "wrangler d1 migrations apply DB --local --env dev >&2 && tsx scripts/dev-screen.ts"
   },
   "dependencies": {
+    "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
     "@signforge/tools": "workspace:*",

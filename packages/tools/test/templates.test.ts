@@ -51,6 +51,8 @@ describe('register_template_version', () => {
     expect(first.changed).toBe(true);
     expect(first.version).toMatchObject({ key: `${o.orgId}/promo@1.0.0`, status: 'draft', bundleSha256: ids.bundleId });
     expect(first.version.checkReport).toMatchObject({ ok: true, sourcesSha256: ids.sourcesId, checks: expect.arrayContaining([{ check: 'forbidden-css', ok: true, problems: [] }]) });
+    // A colour literal outside var() is a warning: the version still registers.
+    expect(first.version.checkReport.warnings).toEqual(['style.css:1: literal colour red in color; use var(--sf-*) with it as the fallback']);
 
     const again = await call('register_template_version', { manifest: manifest(), ...ids });
     expect(again).toMatchObject({ changed: false, version: { id: first.version.id } });
