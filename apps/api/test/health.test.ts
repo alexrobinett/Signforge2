@@ -1,6 +1,5 @@
 import { MANIFEST_SCHEMA } from '@signforge/contract';
 import { exports } from 'cloudflare:workers';
-import { MANIFEST_SCHEMA } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
 
 describe('health', () => {
