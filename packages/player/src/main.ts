@@ -10,7 +10,6 @@
  *                 ?spots=a,b      play only these spots, in order, ignoring the schedule (testing)
  *                 ?transition=cut|fade<ms>|<ms>  override the playlist transition (testing)
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
- *                 ?supervisorToken=<token>  the secret the supervisor expects, written into the kiosk URL on the device
  */
 import type { ScreenManifest, Spot, Transition } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, type Step } from '@signforge/player-core';
@@ -25,7 +24,8 @@ const POLL_MS = Number(query.get('poll') ?? 30) * 1000;
 const PREPARE_LEAD_MS = 3000;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
-const SUPERVISOR_TOKEN = query.get('supervisorToken') ?? '';
+/** The supervisor's secret, collected from it at first use. Never in the URL: templates can read that. */
+let supervisorToken = '';
 
 const statusEl = document.getElementById('status')!;
 const hudEl = document.getElementById('hud')!;
@@ -315,13 +315,22 @@ async function playbackLoop(): Promise<never> {
 
 // ------------------------------------------------------------------- display
 /** Ask the device supervisor to power the panel. Without one (a browser, the demo) the player just goes dark. */
-async function setPanel(on: boolean): Promise<void> {
+async function setPanel(on: boolean, retry = true): Promise<void> {
   try {
+    if (!supervisorToken) {
+      const t = await fetch(`${SUPERVISOR}/token`, { signal: AbortSignal.timeout(5000) });
+      if (t.ok) supervisorToken = ((await t.json()) as { token: string }).token;
+    }
     const res = await fetch(`${SUPERVISOR}/display/${on ? 'on' : 'off'}`, {
       method: 'POST',
-      headers: { 'x-sf-token': SUPERVISOR_TOKEN },
+      headers: { 'x-sf-token': supervisorToken },
       signal: AbortSignal.timeout(15_000),
     });
+    // The supervisor makes a new token if its file is lost: collect it again, once.
+    if (res.status === 403 && retry) {
+      supervisorToken = '';
+      return setPanel(on, false);
+    }
     state.display = res.ok ? JSON.stringify(await res.json()) : `supervisor ${res.status}`;
   } catch {
     state.display = 'no supervisor';

@@ -18,6 +18,7 @@ Get built templates into the system with the build's checks repeated on the serv
 - Server repeats manifest validation, forbidden CSS, size and network checks on the bundle; stores a check report.
 - Base templates (org null) seeded from `templates/` on deploy.
 - Versions are immutable; a template version is draft, approved or retired.
+- Server checks are a lint over the bundle, not a security boundary (the SDK itself calls `parent.postMessage`). Check the author's sources where the CLI uploads them; record that the sandbox is the guarantee.
 
 ## Out of scope
 

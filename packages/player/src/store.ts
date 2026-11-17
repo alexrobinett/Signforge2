@@ -11,9 +11,53 @@ const STATE = 'sf-state-v1';
 const ACTIVE = '/_sf/manifest/active';
 const blobKey = (sha: string) => `/_sf/blob/${sha}`;
 
+/** The manifest last made active, if it is one this player can still play. */
 export async function loadActiveManifest(): Promise<ScreenManifest | undefined> {
   const res = await (await caches.open(STATE)).match(ACTIVE);
-  return res ? ((await res.json()) as ScreenManifest) : undefined;
+  if (!res) return undefined;
+  const m = (await res.json()) as ScreenManifest;
+  // A player update can tighten the rules; a stored manifest that now fails waits for a fresh one.
+  const problems = validateManifest(m);
+  if (problems.length) {
+    console.warn(`[sf] cached manifest ${m.id} ignored: ${problems[0]}`);
+    return undefined;
+  }
+  return m;
+}
+
+/** A download may take as long as it needs, but gives up after this long without receiving anything. */
+const STALL_MS = 30_000;
+
+async function download(url: string): Promise<ArrayBuffer> {
+  const ctl = new AbortController();
+  let timer = setTimeout(() => ctl.abort(new Error('download stalled')), STALL_MS);
+  const nudge = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => ctl.abort(new Error('download stalled')), STALL_MS);
+  };
+  try {
+    const r = await fetch(url, { cache: 'no-store', signal: ctl.signal });
+    if (!r.ok || !r.body) throw new Error(`request failed: ${r.status}`);
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const reader = r.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      nudge();
+      chunks.push(value);
+      size += value.byteLength;
+    }
+    const out = new Uint8Array(size);
+    let at = 0;
+    for (const c of chunks) {
+      out.set(c, at);
+      at += c.byteLength;
+    }
+    return out.buffer;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function getBlob(sha: string): Promise<Blob> {
@@ -61,9 +105,9 @@ export async function sync(base: string, currentId?: string): Promise<SyncResult
   const { missing, stale } = planSync(next, await heldHashes());
   if (same && !missing.length) return { changed: false, downloaded: 0 };
   for (const sha of missing) {
-    const r = await fetch(`${base}/blobs/${sha}`, { cache: 'no-store', signal: AbortSignal.timeout(120_000) });
-    if (!r.ok) throw new Error(`file ${sha.slice(0, 12)} request failed: ${r.status}`);
-    const buf = await r.arrayBuffer();
+    const buf = await download(`${base}/blobs/${sha}`).catch((err: unknown) => {
+      throw new Error(`file ${sha.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`);
+    });
     if ((await sha256(buf)) !== sha) throw new Error(`file ${sha.slice(0, 12)} failed verification`);
     await blobs.put(blobKey(sha), new Response(buf, { headers: { 'content-type': next.files[sha]?.type ?? 'application/octet-stream' } }));
   }

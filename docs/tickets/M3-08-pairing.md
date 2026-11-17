@@ -16,7 +16,7 @@ An unpaired screen shows a code; claiming it gives the screen its credential.
 - `POST /v1/device/pair/start` and `/pair/poll` as in the plan; codes expire after 15 minutes; rate limited.
 - A claim operation (API only here; the CMS form is M3-11) that creates the screen and binds the code.
 - Player: with no credential, show the code full screen (large, OLED-safe: moves every minute) and poll; store the credential when it arrives.
-- On revoke, the player behaves as the owner decides (see below).
+- On revoke (socket `revoked`, or a 401 on any device request), the player behaves as the owner decides (see below).
 
 ## Out of scope
 

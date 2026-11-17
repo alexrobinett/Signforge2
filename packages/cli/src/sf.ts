@@ -19,7 +19,7 @@ import { build } from 'esbuild';
 import sharp from 'sharp';
 import {
   FORBIDDEN_CSS,
-  FORBIDDEN_TEMPLATE_CODE, MANIFEST_SCHEMA, TEMPLATE_BUDGET, VIDEO_SPEC, templateKey, validateSpotData, validateTemplateManifest,
+  FORBIDDEN_TEMPLATE_CODE, MANIFEST_SCHEMA, PROTOCOL_VERSION, TEMPLATE_BUDGET, manifestIdInput, VIDEO_SPEC, templateKey, validateSpotData, validateTemplateManifest,
   type Binding, type DataSource, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TemplateManifest, type Transition,
 } from '@signforge/contract';
 import { validateManifest } from '@signforge/player-core';
@@ -138,7 +138,8 @@ export async function buildTemplate(dir: string, problems: Problems): Promise<Bu
   const bytes = Buffer.byteLength(html);
   if (bytes > TEMPLATE_BUDGET.maxBundleBytes) problems.add(where, [`bundle is ${bytes} bytes; the budget is ${TEMPLATE_BUDGET.maxBundleBytes}`]);
   console.log(`  template ${templateKey(manifest)}  ${(bytes / 1024).toFixed(0)} kB (budget ${TEMPLATE_BUDGET.maxBundleBytes / 1000} kB)`);
-  return { manifest, html };
+  // The bundle embeds this build's SDK, so it speaks this protocol for as long as it exists.
+  return { manifest: { ...manifest, protocol: PROTOCOL_VERSION }, html };
 }
 
 interface SpotFile {
@@ -244,8 +245,8 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
   const files: ScreenManifest['files'] = {};
   for (const [hash, b] of [...blobs].sort(([a], [b]) => a.localeCompare(b))) files[hash] = { size: b.data.length, type: b.type };
 
-  const body = { schema: MANIFEST_SCHEMA as typeof MANIFEST_SCHEMA, screen, files, templates, spots, playlists, dataSources, schedule: sched.entries ?? [], defaultPlaylist: sched.defaultPlaylist };
-  const manifest: ScreenManifest = { ...body, id: sha256(JSON.stringify(body)).slice(0, 16), generatedAt: new Date().toISOString() };
+  const body = { schema: MANIFEST_SCHEMA, screen, files, templates, spots, playlists, dataSources, schedule: sched.entries ?? [], defaultPlaylist: sched.defaultPlaylist };
+  const manifest: ScreenManifest = { ...body, id: sha256(manifestIdInput(body)), generatedAt: new Date().toISOString() };
   problems.add('manifest', validateManifest(manifest));
 
   if (problems.list.length) {

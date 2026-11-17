@@ -18,6 +18,8 @@ Status: open  ·  Size: M  ·  Depends on: M3-02
 - Manifest id is the hash of the body without `generatedAt`, so unchanged screens are skipped.
 - Resolves template defaults, bindings, data sources, display hours, schedule targets (org, group, screen).
 - `sf build` switches to it, so the CLI and the server cannot drift.
+- Manifest id exactly as the contract defines it (`manifestIdInput`, full SHA-256).
+- Template keys namespaced by owner (`base/` or org id), with the contract and player updated to match.
 
 ## Out of scope
 

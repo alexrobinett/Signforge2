@@ -18,6 +18,7 @@ Replace manifest polling with a push: each screen holds one hibernating WebSocke
 - Messages server to screen: `manifest`, `command`, `revoked`. Screen to server: `applied`, written through to D1.
 - Player: socket client with jittered reconnect; on `manifest` it syncs immediately. Polling stays only as the fallback when the socket is down.
 - Add the message types to `packages/contract`.
+- Commands arrive and act at once: a display override must not wait for `displayLoop`'s 15-second check.
 
 ## Out of scope
 

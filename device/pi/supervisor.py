@@ -14,7 +14,10 @@ Two methods, because panels differ:
 Both run every time; whichever the panel honours does the work.
 
 Listens on 127.0.0.1 only, and acts only on requests that carry the device's secret token
-(~/signforge/supervisor.token, created on first run and passed to the player in the kiosk URL).
+(~/signforge/supervisor.token, created on first run). The player collects it from GET /token, which
+answers only the player's own origin: browsers always send Origin on a cross-origin request and a
+page cannot forge it, so a template (origin "null") or a web page cannot obtain it. Keeping it out
+of the kiosk URL matters because a template frame can read its parent's URL.
 A plain POST from any page would otherwise reach it without a CORS preflight: the token header
 forces one, the preflight is granted only to the player's origin, and a request whose Host is not
 this address (DNS rebinding) is refused.
@@ -143,6 +146,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if self.path == "/token":
+            if not (self.origin_ok() and self.host_ok()):
+                return self.reply(403, {"error": "forbidden"})
+            return self.reply(200, {"token": TOKEN})
         if not self.authorised():
             return self.reply(403, {"error": "forbidden"})
         self.reply(200, state) if self.path == "/display" else self.reply(404, {"error": "not found"})

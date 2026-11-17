@@ -16,6 +16,7 @@ Fetch feeds on a schedule in the Worker and deliver snapshots to screens; retire
 - A one-minute Cron Trigger polls due sources: conditional requests, backoff to 6 hours, write only on change.
 - Fetch guards: https only, default ports, no IP literals, private-range check, manual redirects (3 max), 5-second timeout, categorised errors.
 - Per-org limits from the plan.
+- Snapshot shape: add a content `version` (hash) and `checkedAt`, a staleness limit after which a screen shows the static fallback, and the 64 kB cap, in `packages/contract`. Retire `refreshS` as a screen-side poll interval.
 
 ## Out of scope
 

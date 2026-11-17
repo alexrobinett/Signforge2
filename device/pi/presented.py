@@ -5,10 +5,6 @@ rAF counter, over the same window.   Usage: presented.py [secs] [url-query]
 import json, sys, time, urllib.request
 from collections import Counter
 import websocket
-import os as _os
-_tf = _os.path.expanduser("~/signforge/supervisor.token")
-# Keep the supervisor token in every URL the tools load, so display power keeps working after a test.
-TOKEN = f"supervisorToken={open(_tf).read().strip()}&" if _os.path.exists(_tf) else ""
 
 SECS = float(sys.argv[1]) if len(sys.argv) > 1 else 40
 QUERY = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -31,7 +27,7 @@ def ev(x):
         except Exception:
             time.sleep(0.5)
 if QUERY:
-    call(p, "Page.navigate", url=f"http://127.0.0.1:8090/index.html?{TOKEN}debug=1&poll=600&{QUERY}")
+    call(p, "Page.navigate", url=f"http://127.0.0.1:8090/index.html?debug=1&poll=600&{QUERY}")
     time.sleep(10)
 ev("__sf.frames = {count: 0, dropped: 0, maxMs: 0}; __sf.byPhase = {}; __sf.stalls.length = 0; 1")
 call(b, "Tracing.start", transferMode="ReturnAsStream", traceConfig={"includedCategories": ["viz", "benchmark"], "excludedCategories": ["*"]})

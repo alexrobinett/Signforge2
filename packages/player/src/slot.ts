@@ -2,7 +2,7 @@
  * A slot holds one spot. The player owns two and alternates: one is on screen while the
  * other loads the next spot out of sight, so a swap only happens between two finished frames.
  */
-import { PROTOCOL_VERSION, type HostMessage, type Orientation, type ScreenManifest, type Spot, type TemplateMessage } from '@signforge/contract';
+import { SUPPORTED_PROTOCOLS, type HostMessage, type Orientation, type ScreenManifest, type Spot, type TemplateMessage } from '@signforge/contract';
 import { resolveSpotData } from '@signforge/player-core';
 import { liveData } from './data';
 import { getBlob } from './store';
@@ -89,6 +89,9 @@ export class Slot {
   private async template(spot: Extract<Spot, { kind: 'template' }>, manifest: ScreenManifest, signal: AbortSignal): Promise<void> {
     const t = manifest.templates[spot.template];
     if (!t) throw new Error(`template ${spot.template} is not in the manifest`);
+    // Speak the protocol the bundle was built against: published bundles never change.
+    const protocol = t.manifest.protocol ?? 1;
+    if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
     const html = await (await getBlob(t.html)).text();
     const assets: Record<string, Blob> = {};
     await Promise.all(Object.entries(spot.assets).map(async ([field, sha]) => (assets[field] = await getBlob(sha))));
@@ -125,15 +128,15 @@ export class Slot {
     const post = (m: HostMessage) => frame.contentWindow?.postMessage(m, '*');
     const ready = new Promise<void>((resolve, reject) => {
       addEventListener('message', (e: MessageEvent<TemplateMessage>) => {
-        if (e.source !== frame.contentWindow || e.data?.sf !== PROTOCOL_VERSION) return;
+        if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
         if (e.data.type === 'loaded') {
-          post({ sf: PROTOCOL_VERSION, type: 'init', data: resolveSpotData(spot, liveData), assets, durationMs: spot.durationMs, orientation, viewport: { width: w, height: h }, timezone: manifest.screen.timezone, locale: manifest.screen.locale ?? 'en-US' });
+          post({ sf: protocol, type: 'init', data: resolveSpotData(spot, liveData), assets, durationMs: spot.durationMs, orientation, viewport: { width: w, height: h }, timezone: manifest.screen.timezone, locale: manifest.screen.locale ?? 'en-US' });
         } else if (e.data.type === 'ready') resolve();
         else if (e.data.type === 'error') reject(new Error(`template error: ${e.data.message}`));
       }, { signal });
       signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
     });
-    this.startPlayback = () => post({ sf: PROTOCOL_VERSION, type: 'play' });
+    this.startPlayback = () => post({ sf: protocol, type: 'play' });
     this.el.appendChild(frame);
     await ready;
     alive(signal);

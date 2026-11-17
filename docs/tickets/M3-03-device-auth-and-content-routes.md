@@ -18,6 +18,7 @@ Serve a screen its manifest, files and data snapshots from the Worker, authentic
 - `GET /v1/device/blobs/:sha256`: streamed from R2, `cache-control: immutable`, only blobs listed in the screen's current or previous manifest.
 - `GET /v1/device/data/:id.json`: latest snapshot for a source the screen's manifest lists.
 - A script that creates a screen and prints a credential, for the Pi until pairing exists.
+- Use the device API types in `packages/contract`; ids follow `ID_PATTERN`.
 
 ## Out of scope
 

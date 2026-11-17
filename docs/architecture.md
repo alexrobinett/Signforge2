@@ -96,6 +96,8 @@ Rive was evaluated as an alternative template format because it has a native App
 
 The CMS preview runs the same bundle the player runs.
 
+The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) are a lint that catches mistakes; string matching can be evaded. Before agents can submit templates, add a runtime control: the headless render in step 3 runs with request and navigation logging, and any attempt fails the check. The sandbox and its policy stay the boundary on screens.
+
 ## Content delivery
 
 - Editing in the CMS never changes a live screen.

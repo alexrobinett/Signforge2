@@ -7,10 +7,6 @@
 """
 import json, sys, time, urllib.request
 import websocket
-import os as _os
-_tf = _os.path.expanduser("~/signforge/supervisor.token")
-# Keep the supervisor token in every URL the tools load, so display power keeps working after a test.
-TOKEN = f"supervisorToken={open(_tf).read().strip()}&" if _os.path.exists(_tf) else ""
 
 secs, transition, specs = float(sys.argv[1]), sys.argv[2], sys.argv[3:]
 page = next(t for t in json.load(urllib.request.urlopen("http://127.0.0.1:9222/json")) if t["type"] == "page" and ":8090/" in t["url"])
@@ -37,7 +33,7 @@ def pct(c):
 print(f"{'spots':38s} {'all%':>6s} {'play%':>6s} {'load%':>6s} {'trans%':>6s} {'worst':>6s}  big stalls")
 for spec in specs:
     spots, _, extra = spec.partition('&')
-    call("Page.navigate", url=f"http://127.0.0.1:8090/index.html?{TOKEN}debug=1&poll=600&transition={transition}&spots={spots.replace('+', ',')}&{extra}")
+    call("Page.navigate", url=f"http://127.0.0.1:8090/index.html?debug=1&poll=600&transition={transition}&spots={spots.replace('+', ',')}&{extra}")
     time.sleep(10)
     ev("__sf.frames = {count: 0, dropped: 0, maxMs: 0}; __sf.byPhase = {}; __sf.stalls.length = 0; 1")
     time.sleep(secs)

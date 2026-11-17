@@ -106,6 +106,12 @@ describe('display hours', () => {
     expect(displayOn(hours, ny('2026-11-27T14:00:00-05:00'))).toBe(false);
   });
 
+  it('lets an exception close the morning tail of the night before', () => {
+    const fri = { weekly: [{ days: [5], from: '18:00', to: '02:00' }], exceptions: [{ date: '2026-11-20', on: [] }] };
+    expect(displayOn(fri, ny('2026-11-21T01:00:00-05:00'))).toBe(false); // Friday closed, so no Saturday-morning tail
+    expect(displayOn({ weekly: fri.weekly }, ny('2026-11-21T01:00:00-05:00'))).toBe(true);
+  });
+
   it('accepts 24:00 as the end of the day', () => {
     expect(displayOn({ weekly: [{ days: [1], from: '20:00', to: '24:00' }] }, ny('2026-11-16T23:59:00-05:00'))).toBe(true);
   });
@@ -178,6 +184,26 @@ describe('files', () => {
     expect(validateManifest(hours)).toEqual(['display hours have no weekly list']);
     const window = manifest({ schedule: [{ id: 'e', playlist: 'all', priority: 1, target: 'screen', from: '7am' }] });
     expect(validateManifest(window)).toEqual(['schedule entry "e": from must be HH:MM']);
+  });
+
+  it('rejects playlists, sources and entries the player could not run', () => {
+    const m = manifest({ dataSources: { w: { id: 'w', refreshS: 0 } } });
+    (m.playlists.all as { transition?: unknown }).transition = undefined;
+    m.schedule[0]!.priority = 'high' as never;
+    m.spots.b = { ...m.spots.b!, id: 'not-b' };
+    expect(validateManifest(m)).toEqual([
+      'spot "b" is listed under a different id ("not-b")',
+      'schedule entry "e1": priority must be a number',
+      'playlist "all": transition must be cut, fade or crossfade with ms between 1 and 10000',
+      'data source "w": refreshS must be at least 60',
+    ]);
+  });
+
+  it('holds every id to one grammar and accepts the schemas this player supports', () => {
+    expect(validateManifest(manifest({ schema: 2 }))).toEqual(['manifest schema 2 is not one this player can play (1)']);
+    const m = manifest();
+    m.screen.id = '../etc';
+    expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);
   });
 
   it('only accepts https pages for URL spots', () => {

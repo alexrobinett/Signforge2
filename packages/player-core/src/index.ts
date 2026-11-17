@@ -2,7 +2,7 @@
  * Player logic with no browser dependency: which playlist is live, what plays next,
  * and which files a manifest still needs. The browser shell supplies time, storage and frames.
  */
-import { MANIFEST_SCHEMA, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
+import { SUPPORTED_MANIFEST_SCHEMAS, isId, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
 
 // ------------------------------------------------------------------ schedule
 
@@ -67,7 +67,13 @@ export function displayOn(hours: DisplayHours | undefined, t: LocalTime): boolea
   if (!hours) return true;
   const exception = hours.exceptions?.find((e) => e.date === t.date);
   if (exception) return exception.on.some((w) => toMinutes(w.to) > toMinutes(w.from) && inWindow(w, t.minutes));
-  return hours.weekly.some((w) => entryApplies({ id: '', playlist: '', priority: 0, target: 'screen', ...w }, t));
+  return hours.weekly.some((w) => {
+    if (!entryApplies({ id: '', playlist: '', priority: 0, target: 'screen', ...w }, t)) return false;
+    // The after-midnight tail of an overnight window belongs to the previous date, so an
+    // exception on that date replaces it too.
+    const tail = toMinutes(w.to) <= toMinutes(w.from) && t.minutes < toMinutes(w.to);
+    return !(tail && hours.exceptions?.some((e) => e.date === previousDate(t.date)));
+  });
 }
 
 const LEVEL: Record<TargetLevel, number> = { org: 0, group: 1, screen: 2 };
@@ -165,6 +171,8 @@ export function resolveSpotData(spot: Extract<Spot, { kind: 'template' }>, snaps
 
 // --------------------------------------------------------------------- files
 
+/** A screen checks a data source no more often than this. */
+const MIN_REFRESH_S = 60;
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -202,13 +210,15 @@ export function validateManifest(m: unknown): string[] {
   const errors: string[] = [];
   const s = m as Partial<ScreenManifest> | null;
   if (!s || typeof s !== 'object') return ['manifest is not an object'];
-  if (s.schema !== MANIFEST_SCHEMA) errors.push(`unsupported schema ${String(s.schema)}`);
+  if (!SUPPORTED_MANIFEST_SCHEMAS.includes(s.schema as number)) errors.push(`manifest schema ${String(s.schema)} is not one this player can play (${SUPPORTED_MANIFEST_SCHEMAS.join(', ')})`);
   if (!s.id) errors.push('id is missing');
   if (!s.screen?.timezone) errors.push('screen.timezone is missing');
   if (!s.files || !s.spots || !s.playlists || !s.templates || !s.schedule || !s.dataSources) return [...errors, 'manifest is incomplete'];
   if (!s.playlists[s.defaultPlaylist ?? '']) errors.push('defaultPlaylist does not exist');
   for (const sha of requiredFiles(s as ScreenManifest)) if (!s.files[sha]) errors.push(`file ${sha.slice(0, 12)} is referenced but not listed`);
-  for (const spot of Object.values(s.spots)) {
+  for (const [key, spot] of Object.entries(s.spots)) {
+    if (spot.id !== key) errors.push(`spot "${key}" is listed under a different id ("${spot.id}")`);
+    if (!isId(key)) errors.push(`spot id "${key}" is not a valid id`);
     if (spot.kind === 'template' && !s.templates[spot.template]) errors.push(`spot "${spot.id}" uses unknown template ${spot.template}`);
     if (!(spot.durationMs > 0)) errors.push(`spot "${spot.id}" has no duration`);
     if (spot.kind === 'url' && !safeUrl(spot.url)) errors.push(`spot "${spot.id}" needs an absolute https URL`);
@@ -219,7 +229,14 @@ export function validateManifest(m: unknown): string[] {
     }
   }
   if (s.screen?.timezone && !validTimezone(s.screen.timezone)) errors.push(`screen.timezone "${s.screen.timezone}" is not a time zone`);
-  for (const e of s.schedule) errors.push(...windowProblems(`schedule entry "${e.id}"`, e, false));
+  if (s.screen?.id !== undefined && !isId(s.screen.id)) errors.push(`screen id "${s.screen.id}" is not a valid id`);
+  for (const e of s.schedule) {
+    if (!isId(e.id)) errors.push(`schedule entry id "${e.id}" is not a valid id`);
+    if (typeof e.priority !== 'number' || !Number.isFinite(e.priority)) errors.push(`schedule entry "${e.id}": priority must be a number`);
+    if (!['org', 'group', 'screen'].includes(e.target)) errors.push(`schedule entry "${e.id}": target must be org, group or screen`);
+    if (!s.playlists[e.playlist]) errors.push(`schedule entry "${e.id}" plays unknown playlist "${e.playlist}"`);
+    errors.push(...windowProblems(`schedule entry "${e.id}"`, e, false));
+  }
   const hours = s.screen?.displayHours;
   if (hours) {
     if (!Array.isArray(hours.weekly)) errors.push('display hours have no weekly list');
@@ -232,8 +249,24 @@ export function validateManifest(m: unknown): string[] {
       }
     }
   }
-  for (const p of Object.values(s.playlists)) {
+  for (const [key, p] of Object.entries(s.playlists)) {
+    if (p.id !== key) errors.push(`playlist "${key}" is listed under a different id ("${p.id}")`);
+    if (!isId(key)) errors.push(`playlist id "${key}" is not a valid id`);
+    const tr = p.transition as { type?: string; ms?: unknown } | undefined;
+    const okMs = (ms: unknown) => typeof ms === 'number' && ms >= 1 && ms <= 10_000;
+    if (!tr || !(tr.type === 'cut' || ((tr.type === 'fade' || tr.type === 'crossfade') && okMs(tr.ms)))) {
+      errors.push(`playlist "${key}": transition must be cut, fade or crossfade with ms between 1 and 10000`);
+    }
+    if (!Array.isArray(p.items)) {
+      errors.push(`playlist "${key}" has no items list`);
+      continue;
+    }
     for (const item of p.items) if (!s.spots[item.spot]) errors.push(`playlist "${p.id}" lists unknown spot "${item.spot}"`);
+  }
+  for (const [key, d] of Object.entries(s.dataSources)) {
+    if (d.id !== key) errors.push(`data source "${key}" is listed under a different id ("${d.id}")`);
+    if (!isId(key)) errors.push(`data source id "${key}" is not a valid id`);
+    if (!(typeof d.refreshS === 'number' && d.refreshS >= MIN_REFRESH_S)) errors.push(`data source "${key}": refreshS must be at least ${MIN_REFRESH_S}`);
   }
   return errors;
 }

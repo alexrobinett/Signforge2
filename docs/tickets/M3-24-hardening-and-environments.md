@@ -17,6 +17,8 @@ Make Milestone 3 safe to leave running: quotas, cleanup, environments, and a pub
 - dev, demo and prod deployed with one command each; secrets documented.
 - Audit log view in the CMS.
 - Reconnect jitter checked under an API deploy with many simulated screens.
+- Player releases: the API hosts content-addressed player builds; sync names the release a screen should run; the supervisor downloads, verifies and swaps it.
+- URL spots: at publish, check the page allows framing (`X-Frame-Options`, `frame-ancestors`), since a blocked page still fires `load`.
 
 ## Out of scope
 

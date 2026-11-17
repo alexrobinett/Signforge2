@@ -21,7 +21,7 @@ packages/feeds       iCal and RSS normalising, ported from datad.py with fixture
 packages/tools       one registry of operations (zod input, scope, role, handler); the CMS, MCP and WebMCP all call it
 ```
 
-Two Workers on one hostname, so cookies stay same-origin. They are split because CMS deploys happen often, and redeploying the Worker that hosts the Durable Objects drops every screen's socket. The player ships as static assets at `/play` on the API Worker.
+Two Workers on one hostname, so cookies stay same-origin. They are split because CMS deploys happen often, and redeploying the Worker that hosts the Durable Objects drops every screen's socket. The API Worker also hosts each player release as a content-addressed bundle. The screen does not load the player from Cloudflare: see **Where the player runs**.
 
 ## Data model (D1)
 
@@ -55,7 +55,9 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 - **Video** is checked by `packages/media-check` reading the MP4 header against `VIDEO_SPEC`: in the browser before upload, and again in the Worker over R2 range reads, because the client cannot be trusted (**verify** mp4box.js runs in workerd).
 - **Transport.** Files go straight to R2 by presigned PUT, multipart for video. A finalize call re-hashes the file and marks it verified.
 
-**Templates** are not built in a Worker. `sf template push` builds locally or in CI with today's `buildTemplate` and uploads the result. The Worker repeats the string checks: manifest, forbidden CSS, size, network references. Building agent-submitted templates on a CI runner is Milestone 4.
+**Templates** are not built in a Worker. The server's checks on an uploaded bundle are a lint, not a boundary: the bundle contains the SDK, whose own `parent.postMessage` would trip the code denylist, and string checks can be evaded. The sandbox and its policy are the guarantee.
+
+**Template keys** are namespaced by owner (`base/` or the org id) so a base template and an org template with the same id and version cannot collide in a manifest. `sf template push` builds locally or in CI with today's `buildTemplate` and uploads the result. The Worker repeats the string checks: manifest, forbidden CSS, size, network references. Building agent-submitted templates on a CI runner is Milestone 4.
 
 **R2 layout**
 
@@ -100,7 +102,22 @@ Pairing calls are rate limited. For zero-touch installs, the CMS mints a credent
 | `POST /v1/device/sync` | Heartbeat, play counts, snapshot changes |
 | `GET /v1/device/ws?ticket=` | Nudge socket |
 
-The player's existing relative fetches (`manifest.json`, `blobs/`, `data/`) survive with `/v1/device` as the content base. The player adds a bearer header and replaces its 30-second poll with the socket and sync. Its service worker already leaves `/v1/` alone, so device API responses are never stored in the shell cache.
+The device API's request and response shapes are in `packages/contract` (device API section). Changes the player needs, beyond pointing its content base at `/v1/device`:
+- Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files.
+- Replace the per-source data poll with snapshots delivered on sync. Left as it is, every screen sends a request per source per refresh, which the cost table does not include.
+- Count plays per UTC hour, persist the counts, and send them with a batch number until acknowledged.
+- Treat a 401 as revoked, not offline: show a pairing code (open question 2).
+- Act on socket commands at once, including a display override.
+- Correct its clock from server time.
+
+Its service worker already leaves `/v1/` alone, so device API responses are never stored in the shell cache.
+
+**Where the player runs.** The player is served by the device, from `http://127.0.0.1:8090`, and the supervisor updates it. Each sync reports the player version; the server names the release a screen should run, and the supervisor downloads, verifies by hash, and swaps it in between plays. Three reasons, all from the code as it stands:
+- The page talks to the supervisor on loopback. From a public origin that becomes a cross-origin request to the local network, which recent Chromium gates behind a permission prompt a kiosk cannot answer (**verify** on the Pi's Chromium).
+- Secrets stay off URLs. The screen's credential and the supervisor's token are handed to the page by the supervisor over loopback, only to the player's own origin. A template frame can read its parent's URL, so nothing secret goes there.
+- The same local origin is what makes a web-page spot on a public site unable to reach the device: Chromium blocks public pages from requesting loopback.
+
+**Clock.** A Pi has no battery-backed clock, and the schedule and display hours run on it. The player keeps the offset from the last sync's server time, persists it, and uses corrected time everywhere it reads the clock. Large drift is reported.
 
 **Display power**
 - **Hours.** Display hours are part of the screen's manifest, so a change is a publish and works offline. The player already enforces them (see `architecture.md`).
@@ -186,4 +203,4 @@ Each slice ends with something working on the real Pi.
 5. Are hourly play counts enough, or is per-play proof of play needed?
 6. Per-org limits on storage, screens and data sources, given there is no billing?
 7. Can editors publish, or only owners? Can an agent with publish scope go live without a person approving?
-8. Should the player be served from Cloudflare and update itself, or be pinned in the Pi image?
+8. ~~Should the player be served from Cloudflare and update itself, or be pinned in the Pi image?~~ Decided by the code: served by the device and updated by the supervisor (see **Where the player runs**). Confirm.

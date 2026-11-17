@@ -17,6 +17,7 @@ Manage screens from the CMS: claim, list, edit, revoke, display hours.
 - Screen list with online state, last seen, manifest rollout state, display state.
 - Display hours editor: weekly windows and dated exceptions, validated with `player-core` so the CMS rejects what the player would.
 - Revoke with confirmation.
+- Display override (wake now, sleep now) as a `DisplayOverride` with `until` computed by the server: the next scheduled change, or a fixed limit when the screen has no display hours. Delivered by socket command and in the sync response; persisted on the screen.
 
 ## Out of scope
 

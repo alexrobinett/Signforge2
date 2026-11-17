@@ -14,10 +14,11 @@ Point the player at the API: content base URL, credential, and conditional manif
 
 ## Scope
 
-- Credential stored on the device (Cache Storage or a file the kiosk passes in), sent as a bearer header on every device request.
-- Manifest fetch sends `If-None-Match` and treats 304 as unchanged.
+- Credential held by the supervisor (a 0600 file) and handed to the page over loopback the way the supervisor token is (`GET /token` in `device/pi/supervisor.py`): only to the player's origin, never in a URL. Sent as a bearer header on every device request.
+- Manifest fetch sends `If-None-Match`; a 304 still runs the missing-file check against the cached manifest.
 - The Pi's kiosk configuration selects the API base.
 - Everything that works today against static files keeps working: offline start, atomic switch, data snapshots.
+- A 401 is not offline: keep playing and show a small 'not authorised' state in the debug overlay until pairing (M3-08) handles it.
 
 ## Out of scope
 
@@ -31,4 +32,4 @@ Point the player at the API: content base URL, credential, and conditional manif
 
 ## Owner decision
 
-Q8 in the backend plan: player served from Cloudflare and self-updating, or pinned in the Pi image. Default if unanswered: served from the API at `/play`.
+Q8 in the backend plan: player served from Cloudflare and self-updating, or pinned in the Pi image. Decided in the backend plan (**Where the player runs**): served by the device. The supervisor fetching player releases is M3-24's; here the Pi keeps today's deploy script.

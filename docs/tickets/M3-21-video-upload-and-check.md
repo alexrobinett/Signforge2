@@ -17,6 +17,8 @@ Accept only video the Pi plays well, checked in the browser and again on the ser
 - `packages/media-check`: read the MP4 header for codec, profile, level, pixel format, size, frame rate, bit rate; compare with `VIDEO_SPEC`. Same code in browser and Worker.
 - Multipart upload to R2; server re-checks by range reads before marking verified.
 - Rejections explain how to export a compliant file.
+- Restate `VIDEO_SPEC` in codec terms an MP4 header parser can check (profile, level, chroma format and bit depth from the SPS, progressive), and add a maximum file size. Keep `sf build`'s ffprobe check consistent with it.
+- Fail closed: a file whose profile, level or frame rate cannot be read is rejected.
 
 ## Out of scope
 

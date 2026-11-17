@@ -17,6 +17,10 @@ One periodic HTTP call that carries everything chatty, so the socket stays silen
 - Request and response types in `packages/contract`.
 - Player: sync loop every 5 minutes with jitter; applies snapshots; records clock skew from server time.
 - `play_counts` upserts; `screens` last-seen and status.
+- Rewrite `packages/player/src/data.ts` to take snapshots from the sync response instead of polling each source.
+- Play counts per UTC hour (`PlayCount`), persisted in Cache Storage, sent with `seq` until `ackSeq` covers them; the server ignores a repeated `seq`.
+- Clock: keep the offset from `serverTime`, persist it, and read corrected time everywhere the player uses `new Date()` (schedule, display hours, play counts).
+- Report supported manifest schemas and protocols (`SUPPORTED_MANIFEST_SCHEMAS`, `SUPPORTED_PROTOCOLS`); the server sends `reload` when a screen's player cannot play what it compiles.
 
 ## Out of scope
 
@@ -27,4 +31,6 @@ One periodic HTTP call that carries everything chatty, so the socket stays silen
 - [ ] Play counts on the server match the Pi's play log for a 30-minute run.
 - [ ] A changed snapshot reaches the Pi on its next sync.
 - [ ] D1 writes per sync measured and recorded in the ticket's PR; within the plan's budget.
+- [ ] A retried sync (same `seq`) does not double count.
+- [ ] With the Pi's clock set an hour wrong and the network up, schedule and display hours follow server time after one sync.
 - [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.

@@ -3,12 +3,54 @@
  *
  *   template author  <-> player   TemplateManifest, the frame protocol
  *   publisher        <-> player   ScreenManifest
+ *   screen           <-> server   the device API: pairing, sync, socket messages
  *
  * Nothing here depends on a browser or on Node.
+ *
+ * Versioning. Screens and template bundles outlive any one release, so both versions are ranges:
+ *  - A template bundle records the frame protocol it was built against (`TemplateManifest.protocol`)
+ *    and the player speaks every protocol in SUPPORTED_PROTOCOLS. A bundle is immutable; a protocol
+ *    change must never strand templates already published.
+ *  - A player reports the manifest schemas it can play in every sync. The server compiles each
+ *    screen at the newest schema that screen supports, and tells an outdated player to reload.
  */
 
+/** The frame protocol this build of the SDK speaks. Stamped into every template bundle. */
 export const PROTOCOL_VERSION = 1;
+/** Frame protocols this player can drive. */
+export const SUPPORTED_PROTOCOLS: readonly number[] = [1];
+/** The manifest schema this build produces. */
 export const MANIFEST_SCHEMA = 1;
+/** Manifest schemas this player can play. */
+export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [1];
+
+/**
+ * Every id a screen sees (screen, spot, playlist, schedule entry, data source, group, org) goes
+ * into URLs, storage keys and the screen credential, so all of them share one grammar: letters,
+ * digits, `_` and `-`, no dots or slashes, at most 64 characters.
+ */
+export const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+export const isId = (v: unknown): v is string => typeof v === 'string' && ID_PATTERN.test(v);
+
+/**
+ * JSON with object keys sorted at every level, so equal content always serialises the same.
+ * A manifest's id is the lowercase hex SHA-256 of `canonicalJson` of the manifest without its
+ * `id` and `generatedAt`: publishing unchanged content to a screen gives the same id, and the
+ * screen is skipped.
+ */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+}
+
+/** The part of a manifest its id is computed from. */
+export const manifestIdInput = (m: Omit<ScreenManifest, 'id' | 'generatedAt'> & Partial<Pick<ScreenManifest, 'id' | 'generatedAt'>>): string => {
+  const { id: _id, generatedAt: _at, ...body } = m;
+  return canonicalJson(body);
+};
 
 export type Orientation = 'landscape' | 'portrait';
 export type Capability = 'canvas' | 'webgl' | 'audio';
@@ -44,6 +86,8 @@ export interface TemplateManifest {
   uses: Capability[];
   /** CSS colour shown behind the template when it is scaled onto an orientation it does not support. */
   background: string;
+  /** The frame protocol the bundle speaks. Set by the build, not the author; absent means 1. */
+  protocol?: number;
 }
 
 export const templateKey = (m: Pick<TemplateManifest, 'id' | 'version'>) => `${m.id}@${m.version}`;
@@ -192,14 +236,14 @@ export interface InitPayload {
 }
 
 export type HostMessage =
-  | ({ sf: typeof PROTOCOL_VERSION; type: 'init' } & InitPayload)
-  | { sf: typeof PROTOCOL_VERSION; type: 'play' }
-  | { sf: typeof PROTOCOL_VERSION; type: 'stop' };
+  | ({ sf: number; type: 'init' } & InitPayload)
+  | { sf: number; type: 'play' }
+  | { sf: number; type: 'stop' };
 
 export type TemplateMessage =
-  | { sf: typeof PROTOCOL_VERSION; type: 'loaded' }
-  | { sf: typeof PROTOCOL_VERSION; type: 'ready' }
-  | { sf: typeof PROTOCOL_VERSION; type: 'error'; message: string };
+  | { sf: number; type: 'loaded' }
+  | { sf: number; type: 'ready' }
+  | { sf: number; type: 'error'; message: string };
 
 // ------------------------------------------------------------------ live data
 // A data source is a JSON feed the server polls. Screens never call the feed themselves:
@@ -321,8 +365,8 @@ export interface DisplayHours {
 }
 
 export interface ScreenManifest {
-  schema: typeof MANIFEST_SCHEMA;
-  /** Hash of the content below. */
+  schema: number;
+  /** SHA-256 of the rest of the manifest; see `canonicalJson`. */
   id: string;
   generatedAt: string;
   screen: { id: string; name: string; timezone: string; locale?: string; orientation: Orientation; displayHours?: DisplayHours };
@@ -336,3 +380,99 @@ export interface ScreenManifest {
   /** Plays when no schedule entry applies, so a screen is never blank. */
   defaultPlaylist: string;
 }
+
+// ------------------------------------------------------------------- device API
+// What a screen and the server say to each other, under /v1/device. See docs/backend-plan.md.
+
+/** `POST /v1/device/pair/start` */
+export interface PairStartResponse {
+  /** Shown on screen; the user types it into the CMS. */
+  code: string;
+  /** Secret, kept by the screen, to collect the credential. Never shown. */
+  pollToken: string;
+  expiresAt: string;
+}
+
+/** `POST /v1/device/pair/poll` with `{ pollToken }` */
+export type PairPollResponse =
+  | { status: 'waiting' }
+  | { status: 'expired' }
+  /** Returned once. The credential is `sfd_<screenId>.<secret>`, sent as a bearer token on every device request. */
+  | { status: 'paired'; screenId: string; credential: string };
+
+/**
+ * A temporary display state set from the CMS, for someone standing at a dark screen. The server
+ * computes `until` (normally the next scheduled change), so the screen needs no schedule logic
+ * of its own to expire it. Persisted on the screen.
+ */
+export interface DisplayOverride {
+  state: 'on' | 'off';
+  until: string;
+}
+
+export interface DisplayStatus {
+  on: boolean;
+  /** What the supervisor reported for each power method, e.g. `{ signal: 'ok', cec: 'not acknowledged' }`. */
+  methods?: Record<string, string>;
+  override?: DisplayOverride;
+}
+
+/**
+ * Plays of one spot in one UTC hour. Counted on the screen, persisted across reloads, and sent
+ * until a sync acknowledges them.
+ */
+export interface PlayCount {
+  /** Start of the hour in UTC: `2026-11-17T13:00Z`. */
+  hour: string;
+  spot: string;
+  manifest: string;
+  plays: number;
+  ms: number;
+}
+
+/** `POST /v1/device/sync`, every few minutes and whenever the socket is down. */
+export interface SyncRequest {
+  /**
+   * Increases by one per batch of play counts. A retried request repeats its number, and the
+   * server ignores counts for a number it has already acknowledged.
+   */
+  seq: number;
+  player: { version: string; manifestSchemas: readonly number[]; protocols: readonly number[] };
+  manifest: { active?: string; filesMissing: number };
+  display: DisplayStatus;
+  /** The screen's clock when it sent this; the server measures drift from it. */
+  deviceTime: string;
+  playCounts: PlayCount[];
+  /** Data snapshot versions the screen holds, by source id. */
+  snapshots: Record<string, string>;
+}
+
+export interface SyncResponse {
+  serverTime: string;
+  /** When to sync next. */
+  nextSyncS: number;
+  /** The highest `seq` whose play counts are stored. The screen drops those counts. */
+  ackSeq: number;
+  /** The manifest the screen should be on. Fetch it if it differs from the active one. */
+  desiredManifest: string;
+  /** Snapshots that are newer than what the screen holds. */
+  snapshots: DataSnapshot[];
+  /** Short-lived ticket for `GET /v1/device/ws?ticket=`. */
+  socketTicket: string;
+  commands: DeviceCommand[];
+}
+
+export type DeviceCommand =
+  /** Reload the player, e.g. after the server stops producing a schema this build can play. */
+  | { type: 'reload' }
+  | { type: 'display'; override: DisplayOverride | null }
+  | { type: 'reboot' };
+
+/** Server to screen, over the socket. Kept rare: the socket exists to nudge, not to carry data. */
+export type ServerSocketMessage =
+  | { type: 'manifest'; id: string }
+  | { type: 'command'; command: DeviceCommand }
+  | { type: 'revoked' };
+
+/** Screen to server, over the socket. */
+export type DeviceSocketMessage = { type: 'applied'; manifest: string };
