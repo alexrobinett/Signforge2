@@ -7,9 +7,11 @@
     "sf": "./src/sf.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/player-core": "workspace:*",
     "esbuild": "^0.28.2",

@@ -1,0 +1,257 @@
+{
+  "dataSources": {},
+  "defaultPlaylist": "all-day",
+  "files": {
+    "2d4a1954105fb462525246efe2d408721fa416a04d629a09d7f7ec9f2b05bc17": {
+      "size": 72132,
+      "type": "text/html"
+    },
+    "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb": {
+      "size": 582,
+      "type": "image/svg+xml"
+    },
+    "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
+      "size": 639,
+      "type": "image/svg+xml"
+    }
+  },
+  "id": "486ce7a346ebd0f2fd174cfcfb179a9f25f4bed043fdf33d7daf84c8e82ab927",
+  "playlists": {
+    "all-day": {
+      "id": "all-day",
+      "items": [
+        {
+          "spot": "sport-drinks"
+        },
+        {
+          "spot": "energy"
+        },
+        {
+          "spot": "coffee"
+        }
+      ],
+      "name": "All day",
+      "transition": {
+        "ms": 600,
+        "type": "fade"
+      }
+    },
+    "breakfast": {
+      "id": "breakfast",
+      "items": [
+        {
+          "spot": "coffee"
+        },
+        {
+          "spot": "sport-drinks"
+        }
+      ],
+      "name": "Breakfast",
+      "transition": {
+        "type": "cut"
+      }
+    }
+  },
+  "schedule": [
+    {
+      "from": "06:00",
+      "id": "breakfast",
+      "playlist": "breakfast",
+      "priority": 10,
+      "target": "group",
+      "to": "10:00"
+    }
+  ],
+  "schema": 2,
+  "screen": {
+    "displayHours": {
+      "exceptions": [
+        {
+          "date": "2026-11-26",
+          "on": []
+        },
+        {
+          "date": "2026-12-24",
+          "on": [
+            {
+              "from": "08:00",
+              "to": "14:00"
+            }
+          ]
+        }
+      ],
+      "weekly": [
+        {
+          "days": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "from": "06:00",
+          "to": "22:00"
+        },
+        {
+          "days": [
+            0,
+            6
+          ],
+          "from": "08:00",
+          "to": "20:00"
+        }
+      ]
+    },
+    "id": "demo-counter",
+    "name": "Demo counter screen",
+    "orientation": "landscape",
+    "timezone": "America/New_York"
+  },
+  "spots": {
+    "coffee": {
+      "durationMs": 5000,
+      "file": "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb",
+      "fit": "cover",
+      "id": "coffee",
+      "kind": "image",
+      "name": "Coffee still"
+    },
+    "energy": {
+      "assets": {
+        "imageCenter": "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9",
+        "imageLeft": "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3",
+        "imageRight": "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04"
+      },
+      "data": {
+        "detail": "Selected 473 mL cans",
+        "disclaimer": "While supplies last.",
+        "points": "650",
+        "price": "7",
+        "product": "Energy Drinks",
+        "promo": "Mix and match 3",
+        "quantity": "3"
+      },
+      "durationMs": 12000,
+      "id": "energy",
+      "kind": "template",
+      "name": "Energy drinks 3 for $7",
+      "template": "base/cstore-promo@1.0.0"
+    },
+    "sport-drinks": {
+      "assets": {
+        "imageCenter": "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f",
+        "imageLeft": "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04",
+        "imageRight": "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2"
+      },
+      "data": {
+        "detail": "All flavours, 710 mL",
+        "disclaimer": "Limited time offer. See store for details.",
+        "points": "400",
+        "price": "4",
+        "product": "Sport Drinks",
+        "promo": "Buy any 2",
+        "quantity": "2"
+      },
+      "durationMs": 8000,
+      "id": "sport-drinks",
+      "kind": "template",
+      "name": "Sport drinks 2 for $4",
+      "template": "base/cstore-promo@1.0.0"
+    }
+  },
+  "templates": {
+    "base/cstore-promo@1.0.0": {
+      "html": "2d4a1954105fb462525246efe2d408721fa416a04d629a09d7f7ec9f2b05bc17",
+      "manifest": {
+        "background": "#06122b",
+        "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
+        "duration": {
+          "defaultMs": 8000,
+          "maxMs": 60000,
+          "minMs": 4000
+        },
+        "fields": {
+          "detail": {
+            "default": "All flavours, 710 mL",
+            "label": "Detail line",
+            "maxLength": 40,
+            "type": "text"
+          },
+          "disclaimer": {
+            "default": "",
+            "label": "Disclaimer",
+            "maxLength": 120,
+            "type": "text"
+          },
+          "imageCenter": {
+            "label": "Centre product",
+            "type": "image"
+          },
+          "imageLeft": {
+            "label": "Left product",
+            "type": "image"
+          },
+          "imageRight": {
+            "label": "Right product",
+            "type": "image"
+          },
+          "points": {
+            "default": "400",
+            "label": "Points",
+            "maxLength": 5,
+            "type": "text"
+          },
+          "price": {
+            "default": "4",
+            "label": "Price",
+            "maxLength": 5,
+            "type": "text"
+          },
+          "product": {
+            "default": "Sport Drinks",
+            "label": "Product name",
+            "maxLength": 18,
+            "type": "text"
+          },
+          "promo": {
+            "default": "Buy any 2",
+            "label": "Promo line",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "quantity": {
+            "default": "2",
+            "label": "Quantity",
+            "maxLength": 2,
+            "type": "text"
+          }
+        },
+        "id": "cstore-promo",
+        "name": "C-Store Promo",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 1,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    }
+  }
+}

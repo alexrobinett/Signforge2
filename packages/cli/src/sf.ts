@@ -18,11 +18,10 @@ import { basename, extname, join, resolve } from 'node:path';
 import { build } from 'esbuild';
 import sharp from 'sharp';
 import {
-  FORBIDDEN_CSS,
-  FORBIDDEN_TEMPLATE_CODE, MANIFEST_SCHEMA, PROTOCOL_VERSION, TEMPLATE_BUDGET, manifestIdInput, VIDEO_SPEC, templateKey, validateSpotData, validateTemplateManifest,
-  type Binding, type DataSource, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TemplateManifest, type Transition,
+  FORBIDDEN_CSS, FORBIDDEN_TEMPLATE_CODE, PROTOCOL_VERSION, TEMPLATE_BUDGET, VIDEO_SPEC, templateKey, validateTemplateManifest,
+  type Binding, type DataSource, type Playlist, type ScreenManifest, type Spot, type TemplateManifest, type Transition,
 } from '@signforge/contract';
-import { validateManifest } from '@signforge/player-core';
+import { compileScreen, type CompileInput, type TargetedEntry } from '@signforge/compiler';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html', '.webm': 'video/webm', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -155,9 +154,14 @@ interface SpotFile {
   durationMs?: number;
 }
 
+/**
+ * A local project describes one screen. Its schedule entries may name a `targetId`; one that does
+ * not applies to this screen, and the screen belongs to the groups listed in `screen.json`
+ * (`groups`, default `["local"]`).
+ */
 async function buildProject(projectDir: string, outDir: string, templatesDir: string): Promise<void> {
   const problems = new Problems();
-  const screen = readJson<ScreenManifest['screen']>(join(projectDir, 'screen.json'));
+  const { groups = ['local'], ...screen } = readJson<ScreenManifest['screen'] & { groups?: string[] }>(join(projectDir, 'screen.json'));
   const blobs = new Map<string, { data: Buffer; type: string }>();
   const addBlob = (data: Buffer, type: string) => {
     const hash = sha256(data);
@@ -181,11 +185,12 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
     return addBlob(fitted.get(rel)!, type);
   };
 
+  // What the server would hold after upload: built templates and media as hashed files.
+  // Checking spots against their templates and assembling the manifest is the compiler's job.
   console.log(`Building ${projectDir}`);
-  const templates: ScreenManifest['templates'] = {};
+  const templates: CompileInput['templates'] = {};
   const built = new Map<string, BuiltTemplate>();
-
-  const spots: Record<string, Spot> = {};
+  const spots: Spot[] = [];
   for (const f of jsonFiles(join(projectDir, 'spots'))) {
     const id = basename(f, '.json');
     const where = `spot ${id}`;
@@ -200,68 +205,61 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
       const t = built.get(s.template)!;
       const key = templateKey(t.manifest);
       templates[key] = { manifest: t.manifest, html: addBlob(Buffer.from(t.html), 'text/html') };
-      const data = s.data ?? {};
       const assets: Record<string, string> = {};
       for (const [field, rel] of Object.entries(s.assets ?? {})) assets[field] = await addMedia(rel, where);
-      problems.add(where, validateSpotData(t.manifest.fields, data, assets, s.bindings));
       const durationMs = s.durationMs ?? t.manifest.duration.defaultMs;
-      if (durationMs < t.manifest.duration.minMs || durationMs > t.manifest.duration.maxMs) {
-        problems.add(where, [`duration ${durationMs} ms is outside the template's range ${t.manifest.duration.minMs} to ${t.manifest.duration.maxMs}`]);
-      }
-      // Defaults are resolved here so the player never needs the field schema.
-      const resolved: Record<string, unknown> = {};
-      for (const [name, def] of Object.entries(t.manifest.fields)) {
-        if (def.type === 'list') {
-          const rows = (data[name] ?? def.default ?? []) as Record<string, unknown>[];
-          resolved[name] = rows.map((row) => Object.fromEntries(Object.entries(def.item).map(([k, d]) => [k, row[k] ?? d.default])));
-        } else if (def.type !== 'image') resolved[name] = data[name] ?? def.default;
-      }
-      spots[id] = { id, name: s.name, kind: 'template', template: key, data: resolved, assets, durationMs, ...(s.bindings ? { bindings: s.bindings } : {}) };
+      spots.push({ id, name: s.name, kind: 'template', template: key, data: s.data ?? {}, assets, durationMs, ...(s.bindings ? { bindings: s.bindings } : {}) });
     } else if (s.kind === 'image' || s.kind === 'video') {
       if (!s.file) problems.add(where, ['file is required']);
       if (!s.durationMs) problems.add(where, ['durationMs is required']);
-      spots[id] = { id, name: s.name, kind: s.kind, file: await addMedia(s.file ?? '', where), fit: s.fit ?? 'cover', durationMs: s.durationMs ?? 0 };
+      spots.push({ id, name: s.name, kind: s.kind, file: await addMedia(s.file ?? '', where), fit: s.fit ?? 'cover', durationMs: s.durationMs ?? 0 });
     } else if (s.kind === 'url') {
-      spots[id] = { id, name: s.name, kind: 'url', url: s.url ?? '', durationMs: s.durationMs ?? 0 };
+      spots.push({ id, name: s.name, kind: 'url', url: s.url ?? '', durationMs: s.durationMs ?? 0 });
     } else {
       problems.add(where, [`unknown kind "${String(s.kind)}"`]);
     }
   }
 
-  const playlists: Record<string, Playlist> = {};
-  for (const f of jsonFiles(join(projectDir, 'playlists'))) {
+  const playlists: Playlist[] = jsonFiles(join(projectDir, 'playlists')).map((f) => {
     const id = basename(f, '.json');
     const p = readJson<{ name: string; transition?: Transition; items: string[] }>(join(projectDir, 'playlists', f));
-    playlists[id] = { id, name: p.name, transition: p.transition ?? { type: 'cut' }, items: p.items.map((spot) => ({ spot })) };
-  }
+    return { id, name: p.name, transition: p.transition ?? { type: 'cut' }, items: p.items.map((spot) => ({ spot })) };
+  });
 
   // Data sources. The feed URL stays on the publishing side; screens only learn the id and refresh rate.
   const sourcesPath = join(projectDir, 'data-sources.json');
   const sourceDefs = existsSync(sourcesPath) ? readJson<Record<string, { url: string; refreshS: number; format?: 'json' | 'ical' | 'rss' }>>(sourcesPath) : {};
-  const dataSources: Record<string, DataSource> = {};
-  for (const [id, d] of Object.entries(sourceDefs)) dataSources[id] = { id, refreshS: d.refreshS };
+  const dataSources: DataSource[] = Object.entries(sourceDefs).map(([id, d]) => ({ id, refreshS: d.refreshS }));
 
-  const sched = readJson<{ defaultPlaylist: string; entries?: ScheduleEntry[] }>(join(projectDir, 'schedule.json'));
-  const files: ScreenManifest['files'] = {};
-  for (const [hash, b] of [...blobs].sort(([a], [b]) => a.localeCompare(b))) files[hash] = { size: b.data.length, type: b.type };
+  const sched = readJson<{ defaultPlaylist: string; entries?: TargetedEntry[] }>(join(projectDir, 'schedule.json'));
+  const schedule = (sched.entries ?? []).map((e) => ({ ...e, targetId: e.targetId ?? (e.target === 'screen' ? screen.id : e.target === 'group' ? groups[0] : undefined) }));
+  for (const e of schedule) {
+    const elsewhere = (e.target === 'group' && !groups.includes(e.targetId ?? '')) || (e.target === 'screen' && e.targetId !== screen.id);
+    if (elsewhere) console.warn(`  note: schedule entry ${e.id} targets ${e.target} "${e.targetId}", which is not this screen; it is left out`);
+  }
 
-  const body = { schema: MANIFEST_SCHEMA, screen, files, templates, spots, playlists, dataSources, schedule: sched.entries ?? [], defaultPlaylist: sched.defaultPlaylist };
-  const manifest: ScreenManifest = { ...body, id: sha256(manifestIdInput(body)), generatedAt: new Date().toISOString() };
-  problems.add('manifest', validateManifest(manifest));
+  const files: CompileInput['files'] = {};
+  for (const [hash, b] of blobs) files[hash] = { size: b.data.length, type: b.type };
 
-  if (problems.list.length) {
+  const result = await compileScreen(
+    { screen, groups, templates, files, spots, playlists, dataSources, schedule, defaultPlaylist: sched.defaultPlaylist },
+    { hash: (text) => sha256(text), now: new Date() },
+  );
+  problems.list.push(...result.problems);
+  const manifest = result.manifest;
+  if (problems.list.length || !manifest) {
     console.error(`\n${problems.list.length} problem(s):`);
     for (const p of problems.list) console.error(`  - ${p}`);
     process.exit(1);
   }
 
   mkdirSync(join(outDir, 'blobs'), { recursive: true });
-  for (const [hash, b] of blobs) writeFileSync(join(outDir, 'blobs', hash), b.data);
+  for (const hash of Object.keys(manifest.files)) writeFileSync(join(outDir, 'blobs', hash), blobs.get(hash)!.data);
   writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   // For the stand-in fetcher on the device. With a backend this list never leaves the server.
   writeFileSync(join(outDir, 'data-sources.json'), JSON.stringify(sourceDefs, null, 2));
-  const total = [...blobs.values()].reduce((n, b) => n + b.data.length, 0);
-  console.log(`  manifest ${manifest.id}: ${Object.keys(spots).length} spots, ${Object.keys(playlists).length} playlists, ${blobs.size} files, ${(total / 1024).toFixed(0)} kB`);
+  const total = Object.values(manifest.files).reduce((n, f) => n + f.size, 0);
+  console.log(`  manifest ${manifest.id.slice(0, 16)}: ${Object.keys(manifest.spots).length} spots, ${Object.keys(manifest.playlists).length} playlists, ${Object.keys(manifest.files).length} files, ${(total / 1024).toFixed(0)} kB`);
   console.log(`  wrote ${outDir}`);
 }
 

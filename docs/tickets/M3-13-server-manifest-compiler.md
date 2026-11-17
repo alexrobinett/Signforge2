@@ -1,6 +1,6 @@
 # M3-13 Server manifest compiler
 
-Status: open  ·  Size: M  ·  Depends on: M3-02
+Status: done (m3-13-compiler)  ·  Size: M  ·  Depends on: M3-02
 
 ## Goal
 
@@ -27,6 +27,15 @@ Status: open  ·  Size: M  ·  Depends on: M3-02
 
 ## Done when
 
-- [ ] Golden tests: `examples/demo` and `examples/stress` compile to manifests equal to today's `sf build` output, apart from `generatedAt`.
-- [ ] Output passes `validateManifest`.
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [x] Golden tests: `examples/demo` and `examples/stress` compile through the compiler to the same manifests the old `sf build` produced, apart from `generatedAt` (verified before the deliberate changes below; goldens now in `packages/cli/test/golden`).
+- [x] Output passes `validateManifest`.
+- [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+
+## Notes
+
+- Seams: `compileScreen()` (targeting, defaults, problems, pruning, stable ids) and `sf build`'s golden output (`packages/cli/test/golden`).
+- A screen's manifest carries only what its schedule can reach (owner decision, 2026-11-17).
+- The input is the compiler's own `CompileInput`, not database rows: M3-02's repositories map onto it, so the compiler does not depend on the schema.
+- Goldens were then regenerated, deliberately, for manifest schema 2 (`<owner>/` template keys, its own contract commit). Pruning changed nothing in the examples: everything in them is reachable.
+- The golden test compares template bundles by key, not bytes: the minifier renames variables whenever bundled SDK or contract code changes, which is not compiler behaviour.
+- Every spot and schedule entry is checked, reachable or not, and spot and manifest problems are reported in one pass.

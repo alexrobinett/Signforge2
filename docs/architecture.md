@@ -101,7 +101,9 @@ The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) ar
 ## Content delivery
 
 - Editing in the CMS never changes a live screen.
-- Publishing compiles one immutable manifest per screen: the schedule for the coming days, the spots, and the hash of every template bundle and asset.
+- Publishing compiles one immutable manifest per screen: the schedule for the coming days, the spots, and the hash of every template bundle and asset. One compiler (`packages/compiler`) does this for the server and for `sf build`.
+- A screen's manifest carries only what its schedule can reach: the playlists of the entries that target it, their spots, templates, files and data sources. Downloads stay small and no screen holds another's content.
+- Template versions are referred to as `<owner>/<id>@<version>`, where the owner is `base` for the platform's templates or the org's id.
 - Publish happens immediately or at a set time.
 - The server nudges connected screens that a new manifest exists. Screens that were offline catch up when they reconnect.
 - The player downloads and verifies every file, then switches to the new manifest in one step. A partial download is never played.

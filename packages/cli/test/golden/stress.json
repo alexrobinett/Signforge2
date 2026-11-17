@@ -1,0 +1,1044 @@
+{
+  "dataSources": {
+    "holidays": {
+      "id": "holidays",
+      "refreshS": 3600
+    },
+    "news": {
+      "id": "news",
+      "refreshS": 300
+    },
+    "weather": {
+      "id": "weather",
+      "refreshS": 60
+    }
+  },
+  "defaultPlaylist": "stress",
+  "files": {
+    "02003e52669a00433f3b2779954dad5febc7cefde21edbd2fb4800df1f678232": {
+      "size": 69472,
+      "type": "text/html"
+    },
+    "047882e8d18dd26c8e9b5c175d8db151e3276917ea1c273dd02b14e006b63e07": {
+      "size": 69835,
+      "type": "text/html"
+    },
+    "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
+      "size": 203915,
+      "type": "image/jpeg"
+    },
+    "13e5b4d30ef207fd89c1cc9f8ce8f23781e9a6d71deb9f0dacf8550ce315a17b": {
+      "size": 320263,
+      "type": "image/jpeg"
+    },
+    "2d4a1954105fb462525246efe2d408721fa416a04d629a09d7f7ec9f2b05bc17": {
+      "size": 72132,
+      "type": "text/html"
+    },
+    "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "36baf4242886bf3c6b0e2bcbf839978a02725b234d982f487f065939dcc3e82b": {
+      "size": 68304,
+      "type": "text/html"
+    },
+    "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
+      "size": 360551,
+      "type": "image/jpeg"
+    },
+    "6156267b1157f930485c90af15d0d68e9840feb7a187c983c7e616f8c93fc43b": {
+      "size": 73737,
+      "type": "text/html"
+    },
+    "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "8343f84e67436f8ea11501e9c693aa21904a018f09e1b293de81a48d380dba2a": {
+      "size": 70825,
+      "type": "text/html"
+    },
+    "857b55f754e4785a097b8e2965ed720e4ea7d110c4ab12f332082ead483ed640": {
+      "size": 70950,
+      "type": "text/html"
+    },
+    "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
+      "size": 9600472,
+      "type": "video/mp4"
+    },
+    "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
+      "size": 639,
+      "type": "image/svg+xml"
+    },
+    "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
+      "size": 182996,
+      "type": "image/jpeg"
+    },
+    "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688": {
+      "size": 421529,
+      "type": "image/jpeg"
+    }
+  },
+  "id": "efeb18adef8ffeea6f48636ea4dd9e2577f513dc14041e0988132041f11fa74d",
+  "playlists": {
+    "stress": {
+      "id": "stress",
+      "items": [
+        {
+          "spot": "sport-drinks"
+        },
+        {
+          "spot": "clock"
+        },
+        {
+          "spot": "photo-river"
+        },
+        {
+          "spot": "holidays"
+        },
+        {
+          "spot": "video-pan"
+        },
+        {
+          "spot": "news"
+        },
+        {
+          "spot": "weather-live"
+        },
+        {
+          "spot": "still-snow"
+        },
+        {
+          "spot": "menu"
+        },
+        {
+          "spot": "photo-berries"
+        },
+        {
+          "spot": "weather-rain"
+        },
+        {
+          "spot": "meeting-room"
+        },
+        {
+          "spot": "energy"
+        },
+        {
+          "spot": "photo-kitchen"
+        },
+        {
+          "spot": "weather-snow"
+        },
+        {
+          "spot": "still-strawberries"
+        }
+      ],
+      "name": "Stress loop",
+      "transition": {
+        "ms": 600,
+        "type": "fade"
+      }
+    }
+  },
+  "schedule": [],
+  "schema": 2,
+  "screen": {
+    "id": "stress-screen",
+    "name": "Stress test screen",
+    "orientation": "landscape",
+    "timezone": "America/New_York"
+  },
+  "spots": {
+    "clock": {
+      "assets": {},
+      "data": {
+        "accent": "#7cc4ff",
+        "greeting": "",
+        "hour24": false,
+        "message": "Welcome to SignForge",
+        "seconds": false
+      },
+      "durationMs": 8000,
+      "id": "clock",
+      "kind": "template",
+      "name": "Clock",
+      "template": "base/clock@1.0.0"
+    },
+    "energy": {
+      "assets": {
+        "imageCenter": "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9",
+        "imageLeft": "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3",
+        "imageRight": "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04"
+      },
+      "data": {
+        "detail": "Selected 473 mL cans",
+        "disclaimer": "While supplies last.",
+        "points": "650",
+        "price": "7",
+        "product": "Energy Drinks",
+        "promo": "Mix and match 3",
+        "quantity": "3"
+      },
+      "durationMs": 12000,
+      "id": "energy",
+      "kind": "template",
+      "name": "Energy drinks 3 for $7",
+      "template": "base/cstore-promo@1.0.0"
+    },
+    "holidays": {
+      "assets": {},
+      "bindings": {
+        "events": {
+          "path": "events",
+          "source": "holidays"
+        }
+      },
+      "data": {
+        "accent": "#ffb547",
+        "empty": "Nothing scheduled",
+        "events": [],
+        "rows": 5,
+        "subtitle": "From Google Calendar",
+        "title": "Holidays"
+      },
+      "durationMs": 10000,
+      "id": "holidays",
+      "kind": "template",
+      "name": "US holidays (Google Calendar)",
+      "template": "base/agenda@1.0.0"
+    },
+    "meeting-room": {
+      "assets": {},
+      "data": {
+        "accent": "#5cd6a9",
+        "empty": "Nothing scheduled",
+        "events": [
+          {
+            "allDay": false,
+            "end": "2026-11-17T23:59:00-05:00",
+            "location": "Room 4B",
+            "start": "2026-11-17T09:00:00-05:00",
+            "title": "Design review"
+          },
+          {
+            "allDay": false,
+            "end": "2026-11-18T14:30:00-05:00",
+            "location": "Room 4B",
+            "start": "2026-11-18T13:00:00-05:00",
+            "title": "Quarterly planning with the regional team"
+          },
+          {
+            "allDay": true,
+            "end": "2026-11-26",
+            "location": "",
+            "start": "2026-11-25",
+            "title": "Thanksgiving potluck"
+          },
+          {
+            "allDay": false,
+            "end": "2026-11-30T11:00:00-05:00",
+            "location": "Video call",
+            "start": "2026-11-30T10:00:00-05:00",
+            "title": "Vendor demo"
+          }
+        ],
+        "rows": 4,
+        "subtitle": "Today's bookings",
+        "title": "Room 4B"
+      },
+      "durationMs": 8000,
+      "id": "meeting-room",
+      "kind": "template",
+      "name": "Meeting room (fixed data)",
+      "template": "base/agenda@1.0.0"
+    },
+    "menu": {
+      "assets": {},
+      "data": {
+        "accent": "#e9b44c",
+        "footnote": "Oat, almond or soy milk +$0.60",
+        "items": [
+          {
+            "description": "Rotating single origin",
+            "name": "Drip coffee",
+            "price": "$2.25",
+            "tag": ""
+          },
+          {
+            "description": "Steeped 18 hours",
+            "name": "Cold brew",
+            "price": "$3.95",
+            "tag": "Popular"
+          },
+          {
+            "description": "Double shot, steamed milk",
+            "name": "Latte",
+            "price": "$4.50",
+            "tag": ""
+          },
+          {
+            "description": "House maple syrup, oat milk",
+            "name": "Maple oat latte",
+            "price": "$5.25",
+            "tag": "New"
+          },
+          {
+            "description": "Equal parts foam",
+            "name": "Cappuccino",
+            "price": "$4.25",
+            "tag": ""
+          },
+          {
+            "description": "Spiced black tea concentrate",
+            "name": "Chai",
+            "price": "$4.25",
+            "tag": ""
+          },
+          {
+            "description": "Dark cocoa, whipped cream",
+            "name": "Hot chocolate",
+            "price": "$3.75",
+            "tag": ""
+          },
+          {
+            "description": "Ceremonial grade, whisked",
+            "name": "Matcha",
+            "price": "$4.95",
+            "tag": "Vegan"
+          }
+        ],
+        "subtitle": "Made to order, all day",
+        "theme": "dark",
+        "title": "Coffee bar"
+      },
+      "durationMs": 10000,
+      "id": "menu",
+      "kind": "template",
+      "name": "Coffee menu",
+      "template": "base/menu-board@1.0.0"
+    },
+    "news": {
+      "assets": {},
+      "bindings": {
+        "items": {
+          "path": "items",
+          "source": "news"
+        }
+      },
+      "data": {
+        "accent": "#ff4d5e",
+        "crawlSpeed": 6,
+        "items": [],
+        "source": "NPR",
+        "title": "Latest news"
+      },
+      "durationMs": 15000,
+      "id": "news",
+      "kind": "template",
+      "name": "NPR headlines",
+      "template": "base/news@1.0.0"
+    },
+    "photo-berries": {
+      "assets": {
+        "photo": "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8"
+      },
+      "data": {
+        "body": "Local berries, by the pint",
+        "eyebrow": "This week",
+        "headline": "Fresh picked",
+        "price": "$3.99"
+      },
+      "durationMs": 6000,
+      "id": "photo-berries",
+      "kind": "template",
+      "name": "Photo promo, 1080p photo",
+      "template": "base/photo-promo@1.0.0"
+    },
+    "photo-kitchen": {
+      "assets": {
+        "photo": "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702"
+      },
+      "data": {
+        "body": "Breakfast sandwiches all day",
+        "eyebrow": "Made here",
+        "headline": "Hot and ready",
+        "price": "$4.49"
+      },
+      "durationMs": 8000,
+      "id": "photo-kitchen",
+      "kind": "template",
+      "name": "Photo promo, 4K photo 2",
+      "template": "base/photo-promo@1.0.0"
+    },
+    "photo-river": {
+      "assets": {
+        "photo": "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688"
+      },
+      "data": {
+        "body": "Trail snacks and cold drinks, ready to go",
+        "eyebrow": "Weekend escape",
+        "headline": "Go further",
+        "price": "2/$5"
+      },
+      "durationMs": 10000,
+      "id": "photo-river",
+      "kind": "template",
+      "name": "Photo promo, 4K photo",
+      "template": "base/photo-promo@1.0.0"
+    },
+    "sport-drinks": {
+      "assets": {
+        "imageCenter": "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f",
+        "imageLeft": "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04",
+        "imageRight": "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2"
+      },
+      "data": {
+        "detail": "All flavours, 710 mL",
+        "disclaimer": "Limited time offer. See store for details.",
+        "points": "400",
+        "price": "4",
+        "product": "Sport Drinks",
+        "promo": "Buy any 2",
+        "quantity": "2"
+      },
+      "durationMs": 8000,
+      "id": "sport-drinks",
+      "kind": "template",
+      "name": "Sport drinks 2 for $4",
+      "template": "base/cstore-promo@1.0.0"
+    },
+    "still-snow": {
+      "durationMs": 5000,
+      "file": "13e5b4d30ef207fd89c1cc9f8ce8f23781e9a6d71deb9f0dacf8550ce315a17b",
+      "fit": "cover",
+      "id": "still-snow",
+      "kind": "image",
+      "name": "Still image, 4K"
+    },
+    "still-strawberries": {
+      "durationMs": 5000,
+      "file": "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8",
+      "fit": "cover",
+      "id": "still-strawberries",
+      "kind": "image",
+      "name": "Still image, 1080p"
+    },
+    "video-pan": {
+      "durationMs": 10000,
+      "file": "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169",
+      "fit": "cover",
+      "id": "video-pan",
+      "kind": "video",
+      "name": "Video, 1080p 30 fps, 8 Mbit"
+    },
+    "weather-live": {
+      "assets": {},
+      "bindings": {
+        "code": {
+          "path": "current.weather_code",
+          "source": "weather"
+        },
+        "high": {
+          "path": "daily.temperature_2m_max.0",
+          "source": "weather"
+        },
+        "humidity": {
+          "path": "current.relative_humidity_2m",
+          "source": "weather"
+        },
+        "isDay": {
+          "path": "current.is_day",
+          "source": "weather"
+        },
+        "low": {
+          "path": "daily.temperature_2m_min.0",
+          "source": "weather"
+        },
+        "temp": {
+          "path": "current.temperature_2m",
+          "source": "weather"
+        },
+        "wind": {
+          "path": "current.wind_speed_10m",
+          "source": "weather"
+        }
+      },
+      "data": {
+        "city": "Atlanta",
+        "code": 1,
+        "high": 78,
+        "humidity": 50,
+        "isDay": 1,
+        "low": 61,
+        "temp": 72,
+        "unit": "\u00b0F",
+        "wind": 5,
+        "windUnit": "mph"
+      },
+      "durationMs": 10000,
+      "id": "weather-live",
+      "kind": "template",
+      "name": "Weather, live",
+      "template": "base/weather@1.0.0"
+    },
+    "weather-rain": {
+      "assets": {},
+      "data": {
+        "city": "Seattle",
+        "code": 63,
+        "high": 55,
+        "humidity": 88,
+        "isDay": 1,
+        "low": 47,
+        "temp": 52,
+        "unit": "\u00b0F",
+        "wind": 12,
+        "windUnit": "mph"
+      },
+      "durationMs": 8000,
+      "id": "weather-rain",
+      "kind": "template",
+      "name": "Weather, rain (fixed data)",
+      "template": "base/weather@1.0.0"
+    },
+    "weather-snow": {
+      "assets": {},
+      "data": {
+        "city": "Denver",
+        "code": 73,
+        "high": 31,
+        "humidity": 80,
+        "isDay": 0,
+        "low": 19,
+        "temp": 28,
+        "unit": "\u00b0F",
+        "wind": 8,
+        "windUnit": "mph"
+      },
+      "durationMs": 8000,
+      "id": "weather-snow",
+      "kind": "template",
+      "name": "Weather, snow (fixed data)",
+      "template": "base/weather@1.0.0"
+    }
+  },
+  "templates": {
+    "base/agenda@1.0.0": {
+      "html": "857b55f754e4785a097b8e2965ed720e4ea7d110c4ab12f332082ead483ed640",
+      "manifest": {
+        "background": "#0d1117",
+        "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
+        "duration": {
+          "defaultMs": 10000,
+          "maxMs": 120000,
+          "minMs": 5000
+        },
+        "fields": {
+          "accent": {
+            "default": "#ffb547",
+            "label": "Accent colour",
+            "type": "color"
+          },
+          "empty": {
+            "default": "Nothing scheduled",
+            "label": "Shown when there is nothing coming up",
+            "maxLength": 48,
+            "type": "text"
+          },
+          "events": {
+            "default": [],
+            "item": {
+              "allDay": {
+                "default": false,
+                "label": "All day",
+                "type": "boolean"
+              },
+              "end": {
+                "default": "",
+                "label": "End",
+                "type": "text"
+              },
+              "location": {
+                "default": "",
+                "label": "Location",
+                "type": "text"
+              },
+              "start": {
+                "label": "Start (YYYY-MM-DD or ISO time)",
+                "type": "text"
+              },
+              "title": {
+                "label": "Title",
+                "maxLength": 80,
+                "type": "text"
+              }
+            },
+            "label": "Events",
+            "maxItems": 25,
+            "type": "list"
+          },
+          "rows": {
+            "default": 5,
+            "label": "Events to show",
+            "max": 6,
+            "min": 1,
+            "type": "number"
+          },
+          "subtitle": {
+            "default": "",
+            "label": "Subtitle",
+            "maxLength": 48,
+            "type": "text"
+          },
+          "title": {
+            "default": "Coming up",
+            "label": "Title",
+            "maxLength": 32,
+            "type": "text"
+          }
+        },
+        "id": "agenda",
+        "name": "Agenda",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 1,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
+    "base/clock@1.0.0": {
+      "html": "02003e52669a00433f3b2779954dad5febc7cefde21edbd2fb4800df1f678232",
+      "manifest": {
+        "background": "#05070d",
+        "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
+        "duration": {
+          "defaultMs": 10000,
+          "maxMs": 3600000,
+          "minMs": 4000
+        },
+        "fields": {
+          "accent": {
+            "default": "#7cc4ff",
+            "label": "Accent colour",
+            "type": "color"
+          },
+          "greeting": {
+            "default": "",
+            "label": "Greeting (empty for good morning/afternoon/evening)",
+            "maxLength": 40,
+            "type": "text"
+          },
+          "hour24": {
+            "default": false,
+            "label": "24-hour time",
+            "type": "boolean"
+          },
+          "message": {
+            "default": "",
+            "label": "Message",
+            "maxLength": 80,
+            "type": "text"
+          },
+          "seconds": {
+            "default": false,
+            "label": "Show seconds",
+            "type": "boolean"
+          }
+        },
+        "id": "clock",
+        "name": "Clock",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 1,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
+    "base/cstore-promo@1.0.0": {
+      "html": "2d4a1954105fb462525246efe2d408721fa416a04d629a09d7f7ec9f2b05bc17",
+      "manifest": {
+        "background": "#06122b",
+        "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
+        "duration": {
+          "defaultMs": 8000,
+          "maxMs": 60000,
+          "minMs": 4000
+        },
+        "fields": {
+          "detail": {
+            "default": "All flavours, 710 mL",
+            "label": "Detail line",
+            "maxLength": 40,
+            "type": "text"
+          },
+          "disclaimer": {
+            "default": "",
+            "label": "Disclaimer",
+            "maxLength": 120,
+            "type": "text"
+          },
+          "imageCenter": {
+            "label": "Centre product",
+            "type": "image"
+          },
+          "imageLeft": {
+            "label": "Left product",
+            "type": "image"
+          },
+          "imageRight": {
+            "label": "Right product",
+            "type": "image"
+          },
+          "points": {
+            "default": "400",
+            "label": "Points",
+            "maxLength": 5,
+            "type": "text"
+          },
+          "price": {
+            "default": "4",
+            "label": "Price",
+            "maxLength": 5,
+            "type": "text"
+          },
+          "product": {
+            "default": "Sport Drinks",
+            "label": "Product name",
+            "maxLength": 18,
+            "type": "text"
+          },
+          "promo": {
+            "default": "Buy any 2",
+            "label": "Promo line",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "quantity": {
+            "default": "2",
+            "label": "Quantity",
+            "maxLength": 2,
+            "type": "text"
+          }
+        },
+        "id": "cstore-promo",
+        "name": "C-Store Promo",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 1,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
+    "base/menu-board@1.0.0": {
+      "html": "047882e8d18dd26c8e9b5c175d8db151e3276917ea1c273dd02b14e006b63e07",
+      "manifest": {
+        "background": "#14110f",
+        "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
+        "duration": {
+          "defaultMs": 12000,
+          "maxMs": 3600000,
+          "minMs": 5000
+        },
+        "fields": {
+          "accent": {
+            "default": "#e9b44c",
+            "label": "Accent colour",
+            "type": "color"
+          },
+          "footnote": {
+            "default": "",
+            "label": "Footnote",
+            "maxLength": 120,
+            "type": "text"
+          },
+          "items": {
+            "item": {
+              "description": {
+                "default": "",
+                "label": "Description",
+                "maxLength": 70,
+                "type": "text"
+              },
+              "name": {
+                "label": "Name",
+                "maxLength": 36,
+                "type": "text"
+              },
+              "price": {
+                "label": "Price",
+                "maxLength": 10,
+                "type": "text"
+              },
+              "tag": {
+                "default": "",
+                "label": "Tag",
+                "options": [
+                  "",
+                  "New",
+                  "Popular",
+                  "Vegan",
+                  "Spicy",
+                  "Limited"
+                ],
+                "type": "select"
+              }
+            },
+            "label": "Items",
+            "maxItems": 12,
+            "type": "list"
+          },
+          "subtitle": {
+            "default": "",
+            "label": "Subtitle",
+            "maxLength": 60,
+            "type": "text"
+          },
+          "theme": {
+            "default": "dark",
+            "label": "Theme",
+            "options": [
+              "dark",
+              "light"
+            ],
+            "type": "select"
+          },
+          "title": {
+            "default": "Menu",
+            "label": "Title",
+            "maxLength": 32,
+            "type": "text"
+          }
+        },
+        "id": "menu-board",
+        "name": "Menu Board",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 1,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
+    "base/news@1.0.0": {
+      "html": "8343f84e67436f8ea11501e9c693aa21904a018f09e1b293de81a48d380dba2a",
+      "manifest": {
+        "background": "#0b0d12",
+        "description": "The top story large, the next few below, and every headline in a crawl along the bottom. Bind items to an RSS data source.",
+        "duration": {
+          "defaultMs": 15000,
+          "maxMs": 300000,
+          "minMs": 6000
+        },
+        "fields": {
+          "accent": {
+            "default": "#ff4d5e",
+            "label": "Accent colour",
+            "type": "color"
+          },
+          "crawlSpeed": {
+            "default": 6,
+            "label": "Crawl speed (screen widths per minute)",
+            "max": 20,
+            "min": 2,
+            "type": "number"
+          },
+          "items": {
+            "default": [],
+            "item": {
+              "published": {
+                "default": "",
+                "label": "Published (ISO time)",
+                "type": "text"
+              },
+              "source": {
+                "default": "",
+                "label": "Source",
+                "type": "text"
+              },
+              "title": {
+                "label": "Headline",
+                "maxLength": 200,
+                "type": "text"
+              }
+            },
+            "label": "Headlines",
+            "maxItems": 30,
+            "type": "list"
+          },
+          "source": {
+            "default": "",
+            "label": "Source credit",
+            "maxLength": 40,
+            "type": "text"
+          },
+          "title": {
+            "default": "Latest news",
+            "label": "Title",
+            "maxLength": 32,
+            "type": "text"
+          }
+        },
+        "id": "news",
+        "name": "News",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 1,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
+    "base/photo-promo@1.0.0": {
+      "html": "36baf4242886bf3c6b0e2bcbf839978a02725b234d982f487f065939dcc3e82b",
+      "manifest": {
+        "background": "#000000",
+        "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
+        "duration": {
+          "defaultMs": 8000,
+          "maxMs": 60000,
+          "minMs": 4000
+        },
+        "fields": {
+          "body": {
+            "default": "",
+            "label": "Body line",
+            "maxLength": 60,
+            "type": "text"
+          },
+          "eyebrow": {
+            "default": "This week",
+            "label": "Eyebrow",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "headline": {
+            "default": "Fresh picked",
+            "label": "Headline",
+            "maxLength": 28,
+            "type": "text"
+          },
+          "photo": {
+            "label": "Background photo",
+            "type": "image"
+          },
+          "price": {
+            "default": "$3.99",
+            "label": "Price tag",
+            "maxLength": 8,
+            "type": "text"
+          }
+        },
+        "id": "photo-promo",
+        "name": "Photo Promo",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 1,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
+    "base/weather@1.0.0": {
+      "html": "6156267b1157f930485c90af15d0d68e9840feb7a187c983c7e616f8c93fc43b",
+      "manifest": {
+        "background": "#0b1a33",
+        "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source.",
+        "duration": {
+          "defaultMs": 8000,
+          "maxMs": 60000,
+          "minMs": 4000
+        },
+        "fields": {
+          "city": {
+            "default": "Atlanta",
+            "label": "City",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "code": {
+            "default": 1,
+            "label": "WMO weather code",
+            "type": "number"
+          },
+          "high": {
+            "default": 78,
+            "label": "Today's high",
+            "type": "number"
+          },
+          "humidity": {
+            "default": 50,
+            "label": "Humidity %",
+            "type": "number"
+          },
+          "isDay": {
+            "default": 1,
+            "label": "Daytime (1) or night (0)",
+            "type": "number"
+          },
+          "low": {
+            "default": 61,
+            "label": "Today's low",
+            "type": "number"
+          },
+          "temp": {
+            "default": 72,
+            "label": "Temperature",
+            "type": "number"
+          },
+          "unit": {
+            "default": "\u00b0F",
+            "label": "Temperature unit",
+            "options": [
+              "\u00b0F",
+              "\u00b0C"
+            ],
+            "type": "select"
+          },
+          "wind": {
+            "default": 5,
+            "label": "Wind speed",
+            "type": "number"
+          },
+          "windUnit": {
+            "default": "mph",
+            "label": "Wind unit",
+            "options": [
+              "mph",
+              "km/h"
+            ],
+            "type": "select"
+          }
+        },
+        "id": "weather",
+        "name": "Weather Now",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 1,
+        "uses": [
+          "canvas"
+        ],
+        "version": "1.0.0"
+      }
+    }
+  }
+}
