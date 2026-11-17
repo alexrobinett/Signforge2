@@ -48,6 +48,7 @@ describe('the registry', () => {
   it('lists the first tools', () => {
     expect([...registry.keys()].sort()).toEqual([
       'assign_brand_kit',
+      'claim_screen',
       'create_asset_upload',
       'create_brand_kit',
       'create_group',
@@ -81,7 +82,7 @@ describe('the registry', () => {
     const keyed = TOOLS.filter((t) => t.idempotent)
       .map((t) => t.name)
       .sort();
-    expect(keyed).toEqual(['create_asset_upload', 'create_brand_kit', 'create_group']);
+    expect(keyed).toEqual(['claim_screen', 'create_asset_upload', 'create_brand_kit', 'create_group']);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
     for (const name of keyed) {
       const schema = describeTools(registry, { role: 'owner' }).find((t) => t.name === name)!.inputSchema as {

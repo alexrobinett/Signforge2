@@ -1,6 +1,6 @@
 /**
  * Create a test screen in the local D1 that `wrangler dev` uses, and print its credential.
- * For the Pi until pairing (M3-08) exists. Local only: it never touches Cloudflare.
+ * For local work without pairing a screen (M3-08 pairs one). Local only: it never touches Cloudflare.
  *
  *   pnpm --filter @signforge/api dev:screen [--content <dir>] [--data <dir>] [--org <id>] [--name <name>]
  *

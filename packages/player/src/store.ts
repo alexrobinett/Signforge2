@@ -248,3 +248,13 @@ async function cleanup(blobs: Cache, active: ScreenManifest, pinned: Iterable<st
 export async function requestPersistence(): Promise<boolean> {
   return (await navigator.storage?.persist?.()) ?? false;
 }
+
+/**
+ * Forget everything a screen was sent: files, manifests (active and last good), unsent play
+ * counts and data snapshots. For a revoked screen (owner decision Q2): it keeps nothing of the
+ * org that revoked it. The player shell, cached by the service worker, stays.
+ */
+export async function wipeContent(): Promise<void> {
+  await Promise.all([caches.delete(BLOBS), caches.delete(STATE)]);
+  missingNow = 0;
+}

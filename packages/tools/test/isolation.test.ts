@@ -1,7 +1,7 @@
 // Generated from the registry: every tool, called as org B's owner with org A's ids, finds
 // nothing and changes nothing. A new tool is covered as soon as it is registered; a new kind of
 // id field fails here until it is mapped to one of org A's rows below.
-import { scoped } from '@signforge/db';
+import { scoped, startPairing } from '@signforge/db';
 import { seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -89,7 +89,10 @@ beforeAll(async () => {
     actor: { kind: 'user', id: 'user-b', clientId: 'test' },
     blobs: env.BLOBS,
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
+    rateLimit: async () => true,
   };
+  // claim_screen's example code, open to claim.
+  await startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() });
   before = await orgAState();
 });
 

@@ -32,6 +32,8 @@ export interface PlayerState {
   auth: string;
   /** Whether the nudge socket is open. */
   socket: boolean;
+  /** The pairing code on screen, or '' when none is shown. */
+  pairing: string;
   /** The correction from server time, and whether the player trusts its clock. */
   clock: { offsetMs: number; trusted: boolean };
 }
@@ -139,6 +141,7 @@ export function useHarness(): Harness {
             auth,
             socket,
             clock,
+            pairing,
           } = s;
           return {
             manifestId,
@@ -156,6 +159,7 @@ export function useHarness(): Harness {
             displayOn,
             auth,
             socket,
+            pairing,
             clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
           };
         });

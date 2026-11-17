@@ -230,6 +230,7 @@ export function scoped(d1: D1Database, orgId: string) {
   const ps = s.publishScreens;
   const snap = s.dataSnapshots;
   const pc = s.playCounts;
+  const pcodes = s.pairingCodes;
 
   return {
     orgId,
@@ -323,6 +324,42 @@ export function scoped(d1: D1Database, orgId: string) {
             .where(and(eq(m.orgId, orgId), eq(m.screenId, screenId)))
             .all()
         ).map((r) => r.id),
+    },
+
+    /**
+     * Claiming a pairing code (M3-08). A code belongs to no org until claimed, so `open` reads it
+     * by code alone, and says only whether it can be claimed now: an unknown, expired or claimed
+     * code are all false, so a claim cannot tell another org's code from a wrong guess.
+     */
+    pairing: {
+      open: async (code: string, now: number): Promise<boolean> =>
+        (await db
+          .select({ id: pcodes.id })
+          .from(pcodes)
+          .where(and(eq(pcodes.code, code), isNull(pcodes.claimedOrgId), sql`${pcodes.expiresAt} > ${now}`))
+          .get()) !== undefined,
+      stage: {
+        /**
+         * Bind an open code to `screenId`, staged after the screen's insert (the code references
+         * it). The batch fails, writing nothing, if the code was not open when it ran: expired, or
+         * claimed by someone else first. The second statement is that check.
+         */
+        claim: (code: string, screenId: string, now: number): Staged =>
+          staged(
+            undefined,
+            db
+              .update(pcodes)
+              .set({ claimedOrgId: orgId, claimedScreenId: screenId, claimedAt: now })
+              .where(and(eq(pcodes.code, code), isNull(pcodes.claimedOrgId), sql`${pcodes.expiresAt} > ${now}`)),
+            // json() of text that is not JSON raises an error, which aborts the batch.
+            db
+              .select({
+                open: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${pcodes} WHERE ${pcodes.code} = ${code} AND ${pcodes.claimedOrgId} = ${orgId} AND ${pcodes.claimedScreenId} = ${screenId}) THEN '1' ELSE 'pairing code is not open' END)`,
+              })
+              .from(s.organization)
+              .where(eq(s.organization.id, orgId)),
+          ),
+      },
     },
 
     screenGroups: {

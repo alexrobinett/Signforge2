@@ -224,32 +224,51 @@ describe('file cleanup and pins', () => {
 });
 
 describe('DeviceCredential', () => {
+  const noSupervisor = vi.fn(async () => Promise.reject(new TypeError('Failed to fetch')));
+
   it('collects the credential from the supervisor once and sends it as a bearer header', async () => {
     const f = vi.fn(async () => Response.json({ credential: 'sfd_scr_1.secret' }));
-    const c = new DeviceCredential('http://127.0.0.1:8091', f);
+    const c = new DeviceCredential('http://127.0.0.1:8091', noSupervisor, f);
     expect(await c.headers()).toEqual({ authorization: 'Bearer sfd_scr_1.secret' });
     expect(await c.headers()).toEqual({ authorization: 'Bearer sfd_scr_1.secret' });
     expect(f).toHaveBeenCalledTimes(1);
     expect(String((f.mock.calls[0] as unknown[])[0])).toBe('http://127.0.0.1:8091/credential');
   });
 
-  it('sends nothing while the supervisor has none, and asks again after forget()', async () => {
+  it('says none while the supervisor has none, and takes one installed later', async () => {
     const f = vi.fn(async () => Response.json({ error: 'no credential' }, { status: 404 }));
-    const c = new DeviceCredential('http://127.0.0.1:8091', f);
+    const c = new DeviceCredential('http://127.0.0.1:8091', noSupervisor, f);
+    expect(await c.check()).toBe('none');
     expect(await c.headers()).toEqual({});
     f.mockImplementation(async () => Response.json({ credential: 'sfd_scr_1.new' }));
+    expect(await c.check()).toBe('held');
     expect(await c.headers()).toEqual({ authorization: 'Bearer sfd_scr_1.new' });
-    c.forget();
-    expect(c.held).toBe(false);
-    await c.headers();
-    expect(f).toHaveBeenCalledTimes(3);
   });
 
-  it('treats an unreachable supervisor as no credential', async () => {
-    const c = new DeviceCredential(
-      'http://127.0.0.1:8091',
-      vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))),
-    );
+  it('on revoke, deletes it from the supervisor and never uses it again', async () => {
+    const f = vi.fn(async () => Response.json({ credential: 'sfd_scr_1.old' }));
+    const send = vi.fn(async () => Response.json({}));
+    const c = new DeviceCredential('http://127.0.0.1:8091', send, f);
+    expect(await c.check()).toBe('held');
+    await c.revoke();
+    expect(send).toHaveBeenCalledWith('/credential', { method: 'DELETE' });
+    // A supervisor that still hands it out (its delete failed) is not believed.
+    expect(await c.check()).toBe('none');
+    expect(c.held).toBe(false);
+  });
+
+  it('hands a paired credential to the supervisor, and uses it even when the supervisor cannot take it', async () => {
+    const send = vi.fn(async (_path: string, _init: RequestInit) => Promise.reject(new TypeError('Failed to fetch')));
+    const c = new DeviceCredential('http://127.0.0.1:8091', send, noSupervisor);
+    await c.adopt('sfd_scr_2.paired');
+    expect(send.mock.calls[0]![0]).toBe('/credential');
+    expect(JSON.parse(String(send.mock.calls[0]![1].body))).toEqual({ credential: 'sfd_scr_2.paired' });
+    expect(await c.headers()).toEqual({ authorization: 'Bearer sfd_scr_2.paired' });
+  });
+
+  it('treats an unreachable supervisor as unknown, sending nothing', async () => {
+    const c = new DeviceCredential('http://127.0.0.1:8091', noSupervisor, noSupervisor);
+    expect(await c.check()).toBe('unknown');
     expect(await c.headers()).toEqual({});
   });
 });

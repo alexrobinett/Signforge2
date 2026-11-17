@@ -4,34 +4,93 @@
  * The device supervisor holds it in a 0600 file and hands it over loopback, only to the player's
  * own origin, the same way it hands over its token. It never goes in the URL: a template frame can
  * read its parent's address. It is sent as a bearer header on every device request.
+ *
+ * Pairing (src/pairing.ts) gives the screen a new one, which is stored with the supervisor; a
+ * revoked one is deleted there. Without a supervisor (a browser) a paired credential lasts until
+ * the page reloads.
  */
+
+/** A request to the supervisor that needs its token (the player's `supervisorFetch`). */
+export type SupervisorSend = (path: string, init: RequestInit) => Promise<Response>;
+
+/** What the player knows of its credential: one to send, none (the supervisor said so), or no word from a supervisor. */
+export type CredentialState = 'held' | 'none' | 'unknown';
+
 export class DeviceCredential {
   private value = '';
+  /** Credentials the server refused: if the supervisor still has one, it is not used again. */
+  private readonly refused = new Set<string>();
+  /** A paired credential the supervisor has not taken yet. */
+  private unsaved = false;
+  /** When the last save was tried (`Date.now()`), so a missing supervisor is not asked on every request. */
+  private triedSaveAt = 0;
 
   constructor(
     private readonly supervisor: string,
+    private readonly send: SupervisorSend,
     private readonly fetchImpl: typeof fetch = (...a) => fetch(...a),
   ) {}
 
-  /** Headers for a device request. Empty while the supervisor has no credential to give. */
-  async headers(): Promise<Record<string, string>> {
-    if (!this.value) {
-      try {
-        const res = await this.fetchImpl(`${this.supervisor}/credential`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
-        if (res.ok) this.value = ((await res.json()) as { credential?: string }).credential ?? '';
-      } catch {
-        // No supervisor (a browser, the demo): requests go without one and the server says 401.
-      }
+  /** Collect the credential from the supervisor if none is held, and say what came of it. */
+  async check(): Promise<CredentialState> {
+    if (this.value) {
+      if (this.unsaved && Date.now() - this.triedSaveAt > 60_000) await this.save();
+      return 'held';
     }
+    try {
+      const res = await this.fetchImpl(`${this.supervisor}/credential`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+      if (res.status === 404) return 'none';
+      if (!res.ok) return 'unknown';
+      const got = ((await res.json()) as { credential?: string }).credential ?? '';
+      if (!got || this.refused.has(got)) return 'none';
+      this.value = got;
+      return 'held';
+    } catch {
+      // No supervisor (a browser, the demo), or not up yet.
+      return 'unknown';
+    }
+  }
+
+  /** Headers for a device request. Empty while there is no credential. */
+  async headers(): Promise<Record<string, string>> {
+    await this.check();
     return this.value ? { authorization: `Bearer ${this.value}` } : {};
   }
 
-  /** The server refused it. Collect it again next time, in case a new one was installed. */
-  forget(): void {
+  /** A credential from pairing: used from now on, and handed to the supervisor to keep (retried a minute later until it takes it). */
+  async adopt(credential: string): Promise<void> {
+    this.value = credential;
+    this.unsaved = true;
+    await this.save();
+  }
+
+  /** The server refused the credential: drop it, never use it again, and delete it from the supervisor. */
+  async revoke(): Promise<void> {
+    if (this.value) this.refused.add(this.value);
     this.value = '';
+    this.unsaved = false;
+    try {
+      await this.send('/credential', { method: 'DELETE' });
+    } catch {
+      // No supervisor: nothing stored to delete. One that is down keeps it, and it is refused here.
+    }
   }
 
   get held(): boolean {
     return this.value !== '';
+  }
+
+  private async save(): Promise<void> {
+    this.triedSaveAt = Date.now();
+    try {
+      const res = await this.send('/credential', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ credential: this.value }),
+      });
+      if (res.ok) this.unsaved = false;
+    } catch {
+      // Tried again at the next check.
+    }
   }
 }

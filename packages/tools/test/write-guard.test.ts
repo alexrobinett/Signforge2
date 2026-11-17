@@ -2,7 +2,7 @@
 // one batch (staged with `ctx.write`), never straight to D1, so a change cannot land without its
 // audit row. Each tool runs its example, with ids pointing at its own org's rows, on a D1 that
 // records every statement run outside `batch()`.
-import { scoped } from '@signforge/db';
+import { scoped, startPairing } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -83,6 +83,8 @@ function withOwnIds(example: unknown, o: SeededOrg): unknown {
 
 /** Clear what would make a tool's example refuse before it writes. */
 const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
+  // Its example code, open to claim.
+  claim_screen: () => startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() }),
   delete_group: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
   delete_asset: async (o) => {
     await o.scope.playlists.setItems(o.playlist, [o.templateSpot]);
@@ -119,6 +121,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
     actor: { kind: 'user', id: 'user-g', clientId: 'test' },
     blobs: env.BLOBS,
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
+    rateLimit: async () => true,
   };
   const reg = new Map([[tool.name, tool]]);
   const result = await dispatch(reg, tool.name, input ?? withOwnIds(tool.example, o), caller);

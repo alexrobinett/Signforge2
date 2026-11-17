@@ -10,6 +10,7 @@ import { cors } from 'hono/cors';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
 import { deviceAuth, type DeviceEnv } from './auth';
 import { screenManifests } from './manifests';
+import { pairPoll, pairStart } from './pairing';
 import { socketRoute } from './socket';
 import { syncRoute } from './sync';
 
@@ -43,6 +44,9 @@ device.use(
 );
 // Before the bearer middleware: the socket authenticates with its ticket (./socket.ts).
 device.get('/ws', socketRoute);
+// And pairing, which a screen does before it has a credential (./pairing.ts).
+device.post('/pair/start', pairStart);
+device.post('/pair/poll', pairPoll);
 device.use('*', deviceAuth);
 
 device.post('/sync', syncRoute);
