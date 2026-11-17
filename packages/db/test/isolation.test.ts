@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { NotInOrgError, scoped } from '../src/index';
+import { findMembership, NotInOrgError, scoped } from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 let s: Seeded;
@@ -177,5 +177,22 @@ describe('composite foreign keys', () => {
     const insert = env.DB.prepare('INSERT INTO playlist_items (org_id, playlist_id, position, spot_id) VALUES (?, ?, ?, ?)');
     await expect(insert.bind('org-b', s.b.playlist, 99, s.a.imageSpot).run()).rejects.toThrow(/FOREIGN KEY/);
     await expect(insert.bind('org-b', s.a.playlist, 99, s.b.imageSpot).run()).rejects.toThrow(/FOREIGN KEY/);
+  });
+
+  it('stop a row for an org that does not exist', async () => {
+    const insert = env.DB.prepare("INSERT INTO screen_groups (id, org_id, name, created_at, updated_at) VALUES ('g', 'org-nobody', 'x', 0, 0)");
+    await expect(insert.run()).rejects.toThrow(/FOREIGN KEY/);
+  });
+});
+
+describe('findMembership', () => {
+  it("returns a member's role and nothing for anyone else", async () => {
+    const at = new Date().toISOString();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('usr-1', 'U', 'u@test', 1, ?, ?)").bind(at, at),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('mem-1', 'org-a', 'usr-1', 'editor', ?)").bind(at),
+    ]);
+    expect(await findMembership(env.DB, 'org-a', 'usr-1')).toEqual({ role: 'editor' });
+    expect(await findMembership(env.DB, 'org-b', 'usr-1')).toBeUndefined();
   });
 });

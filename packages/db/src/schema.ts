@@ -14,18 +14,133 @@
  *    A spot references a template version by id alone, and the repository checks the version is
  *    the org's own or a base one.
  *  - `pairing_codes` exist before any org claims them, so `claimed_org_id` is nullable.
- *  - `org_id` does not yet reference Better Auth's `organization` table; M3-09 adds that table.
+ *
+ * Every tenant `org_id` references Better Auth's `organization` table, with no cascade: an org
+ * cannot be deleted while it holds content.
  */
 import { sql } from 'drizzle-orm';
-import { check, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { check, customType, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
-const orgId = () => text('org_id').notNull();
+const orgId = () => text('org_id').notNull().references(() => organization.id);
 const created = () => integer('created_at').notNull().$defaultFn(() => Date.now());
 const updated = () =>
   integer('updated_at')
     .notNull()
     .$defaultFn(() => Date.now())
     .$onUpdateFn(() => Date.now());
+
+// --------------------------------------------------------------- Better Auth
+
+/*
+ * Better Auth's tables (M3-09), as `auth generate` in apps/api writes them for its options:
+ * camelCase columns, `date` columns holding ISO strings. Better Auth reads and writes them
+ * itself; apps/api/test/auth-schema.test.ts checks it finds nothing missing. Not tenant tables.
+ */
+const date = customType<{ data: string }>({ dataType: () => 'date' });
+const bigint = customType<{ data: number }>({ dataType: () => 'bigint' });
+
+export const user = sqliteTable('user', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  emailVerified: integer('emailVerified').notNull(),
+  image: text('image'),
+  createdAt: date('createdAt').notNull(),
+  updatedAt: date('updatedAt').notNull(),
+});
+
+export const session = sqliteTable(
+  'session',
+  {
+    id: text('id').primaryKey(),
+    expiresAt: date('expiresAt').notNull(),
+    token: text('token').notNull().unique(),
+    createdAt: date('createdAt').notNull(),
+    updatedAt: date('updatedAt').notNull(),
+    ipAddress: text('ipAddress'),
+    userAgent: text('userAgent'),
+    userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    activeOrganizationId: text('activeOrganizationId'),
+  },
+  (t) => [index('session_userId_idx').on(t.userId)],
+);
+
+export const account = sqliteTable(
+  'account',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('accountId').notNull(),
+    providerId: text('providerId').notNull(),
+    userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    accessToken: text('accessToken'),
+    refreshToken: text('refreshToken'),
+    idToken: text('idToken'),
+    accessTokenExpiresAt: date('accessTokenExpiresAt'),
+    refreshTokenExpiresAt: date('refreshTokenExpiresAt'),
+    scope: text('scope'),
+    password: text('password'),
+    createdAt: date('createdAt').notNull(),
+    updatedAt: date('updatedAt').notNull(),
+  },
+  (t) => [index('account_userId_idx').on(t.userId)],
+);
+
+export const verification = sqliteTable(
+  'verification',
+  {
+    id: text('id').primaryKey(),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: date('expiresAt').notNull(),
+    createdAt: date('createdAt').notNull(),
+    updatedAt: date('updatedAt').notNull(),
+  },
+  (t) => [index('verification_identifier_idx').on(t.identifier)],
+);
+
+export const organization = sqliteTable('organization', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  logo: text('logo'),
+  createdAt: date('createdAt').notNull(),
+  metadata: text('metadata'),
+});
+
+export const member = sqliteTable(
+  'member',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organizationId').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+    userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    createdAt: date('createdAt').notNull(),
+  },
+  (t) => [index('member_organizationId_idx').on(t.organizationId), index('member_userId_idx').on(t.userId)],
+);
+
+export const invitation = sqliteTable(
+  'invitation',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organizationId').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    role: text('role'),
+    status: text('status').notNull(),
+    expiresAt: date('expiresAt').notNull(),
+    createdAt: date('createdAt').notNull(),
+    inviterId: text('inviterId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  },
+  (t) => [index('invitation_organizationId_idx').on(t.organizationId), index('invitation_email_idx').on(t.email)],
+);
+
+/** Better Auth's rate-limit counters, per IP and path: in D1 so they survive restarts. */
+export const rateLimit = sqliteTable('rateLimit', {
+  id: text('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  count: integer('count').notNull(),
+  lastRequest: bigint('lastRequest').notNull(),
+});
 
 // ------------------------------------------------------------------ screens
 
@@ -168,7 +283,7 @@ export const templates = sqliteTable(
   'templates',
   {
     id: text('id').primaryKey(),
-    orgId: text('org_id'),
+    orgId: text('org_id').references(() => organization.id),
     /** The template's own id from `template.json`, e.g. `menu-board`. */
     key: text('key').notNull(),
     name: text('name').notNull(),
@@ -186,7 +301,7 @@ export const templateVersions = sqliteTable(
   'template_versions',
   {
     id: text('id').primaryKey(),
-    orgId: text('org_id'),
+    orgId: text('org_id').references(() => organization.id),
     templateId: text('template_id').notNull(),
     version: text('version').notNull(),
     /** The contract's `TemplateManifest`. */

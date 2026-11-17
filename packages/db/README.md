@@ -16,9 +16,19 @@ Every repository query is filtered by the scope's org, and every row it writes i
 
 The table objects (`src/schema.ts`) are not exported. `test/node/boundary.test.ts` fails if anything outside this package imports them; code elsewhere imports `@signforge/db`, and tests may also import `@signforge/db/testing`.
 
-`@signforge/db/testing` has `seedTwoOrgs(db)`: two orgs, `org-a` and `org-b`, each with one of everything, for isolation tests.
+`@signforge/db/testing` has `seedTwoOrgs(db)`: two orgs, `org-a` and `org-b`, each with one of everything, for isolation tests. `seedOrganization(db, orgId)` writes just the `organization` row, which every tenant row needs.
 
-Code that has to find a row before it knows the org (device auth by screen id, pairing, the data-source poller) gets a narrow function here, added by the ticket that needs it. It does not get the tables.
+Code that has to find a row before it knows the org (device auth by screen id, pairing, the data-source poller) gets a narrow function here, added by the ticket that needs it. It does not get the tables. So far: `findMembership(db, orgId, userId)`, which `apps/api` uses to re-check the active org on every request.
+
+## Better Auth's tables
+
+`user`, `session`, `account`, `verification`, `organization`, `member`, `invitation` and `rateLimit` are defined in `src/schema.ts` as Better Auth's CLI generates them for `apps/api`'s options (camelCase columns, `date` columns holding ISO strings), and migrated like any other table. Better Auth reads and writes them itself through the D1 binding. `apps/api/test/auth-platform.test.ts` asks Better Auth whether anything is missing, so a plugin or option change that needs a new column fails there. To see what Better Auth wants:
+
+```sh
+cd apps/api && pnpm exec auth generate --config auth.config.ts --output /tmp/better-auth.sql --yes
+```
+
+Then mirror the change in `src/schema.ts` and run `generate`.
 
 ## Schema rules
 
@@ -28,7 +38,7 @@ From `docs/backend-plan.md#data-model-d1`, checked against the migrated database
 - Every tenant table has `org_id NOT NULL`; its indexes lead with `org_id`; every row is unique on `(org_id, id)`.
 - References between tenant rows are composite `(org_id, x_id)` foreign keys.
 
-Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. `org_id` does not reference an organizations table yet: M3-09 adds Better Auth's tables.
+Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. Every tenant `org_id` references Better Auth's `organization(id)`, without cascade.
 
 Local D1 enforces foreign keys (`PRAGMA foreign_keys` is 1, and a test shows a cross-org row is refused). Production is verified in M3-00. Isolation does not depend on it: the repositories filter every query.
 
@@ -41,4 +51,4 @@ pnpm --filter @signforge/db generate         # writes migrations/NNNN_*.sql
 cd apps/api && pnpm exec wrangler d1 migrations apply DB --local
 ```
 
-`apps/api/wrangler.jsonc` points `migrations_dir` here. Tests in both packages apply the same migrations to their local D1 before running.
+`apps/api/wrangler.jsonc` points `migrations_dir` here. `0001_better_auth` rebuilds every tenant table to add the `organization` foreign key; it is safe only on a database with no tenant rows, which held for every environment when it was written. Tests in both packages apply the same migrations to their local D1 before running.

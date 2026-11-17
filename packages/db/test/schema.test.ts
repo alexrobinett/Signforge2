@@ -3,8 +3,9 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 
-/** Tables whose rows exist before or outside any org. */
-const NOT_TENANT = new Set(['pairing_codes']);
+/** Tables whose rows exist before or outside any org: pairing codes and Better Auth's own. */
+const AUTH_TABLES = ['account', 'invitation', 'member', 'organization', 'rateLimit', 'session', 'user', 'verification'];
+const NOT_TENANT = new Set(['pairing_codes', ...AUTH_TABLES]);
 /** Tables where a null org means a base row shared by every org. */
 const NULLABLE_ORG = new Set(['templates', 'template_versions']);
 /** Indexes that deliberately do not lead with org_id. */
@@ -22,6 +23,11 @@ async function tables() {
 }
 
 describe('schema', () => {
+  it("has Better Auth's tables", async () => {
+    const names = (await all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")).map((r) => r.name);
+    for (const t of AUTH_TABLES) expect(names, t).toContain(t);
+  });
+
   it('has the tables in the plan', async () => {
     expect(await tables()).toEqual([
       'asset_renditions', 'assets', 'audit_log', 'data_snapshots', 'data_sources', 'play_counts', 'playlist_items', 'playlists',
@@ -63,8 +69,16 @@ describe('schema', () => {
       for (const parts of byId.values()) {
         const from = parts.map((p) => p.from);
         if (FK_EXCEPTIONS.has(`${t}.${from.join()}`)) continue;
+        if (parts[0]!.table === 'organization') continue;
         expect(parts.find((p) => p.from === 'org_id')?.to, `${t}(${from.join()}) -> ${parts[0]!.table}`).toBe('org_id');
       }
+    }
+  });
+
+  it("references the organization from every tenant table's org_id", async () => {
+    for (const t of await tables()) {
+      const fks = await all<{ table: string; from: string; to: string }>(`PRAGMA foreign_key_list(${t})`);
+      expect(fks.find((f) => f.from === 'org_id' && f.table === 'organization')?.to, t).toBe('id');
     }
   });
 
