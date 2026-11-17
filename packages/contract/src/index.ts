@@ -371,13 +371,14 @@ export interface BrandKit {
 }
 
 // ------------------------------------------------------------------ live data
-// A data source is a JSON feed the server polls. Screens never call the feed themselves:
-// they fetch the latest snapshot from `data/<id>.json` beside the manifest, keep the last
-// good one on disk, and read bound fields from it each time a spot starts.
+// A data source is a JSON feed the server polls. Screens never call the feed themselves: from
+// the API they get snapshots on each sync (`SyncResponse.snapshots`); static content has them at
+// `data/<id>.json` beside the manifest. A screen keeps the last good one on disk and reads bound
+// fields from it each time a spot starts.
 
 export interface DataSource {
   id: string;
-  /** How often a screen checks for a newer snapshot. */
+  /** How often a screen on static content checks for a newer snapshot. From the API, snapshots come on each sync. */
   refreshS: number;
 }
 
