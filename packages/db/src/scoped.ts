@@ -182,6 +182,7 @@ export function scoped(d1: D1Database, orgId: string) {
   const publishes = entity(db, orgId, s.publishes, 'pub');
   const dataSources = entity(db, orgId, s.dataSources, 'src');
   const audit = entity(db, orgId, s.auditLog, 'aud');
+  const brandKitRows = entity(db, orgId, s.brandKits, 'bk');
 
   /** A spot may use the org's own template versions or base ones; the foreign key cannot say so. */
   const checkTemplateVersion = async (id: string | null | undefined) => {
@@ -203,6 +204,18 @@ export function scoped(d1: D1Database, orgId: string) {
     const rows = unique.map((screenId) => ({ orgId, groupId, screenId }));
     return staged(undefined, db.delete(m).where(and(eq(m.orgId, orgId), eq(m.groupId, groupId))), ...chunk(rows, 3).map((part) => db.insert(m).values(part)));
   };
+  /** A kit's logos must be the org's own assets. */
+  const checkLogos = async (v: { logoOnDarkAssetId?: string | null; logoOnLightAssetId?: string | null }) => {
+    for (const id of [v.logoOnDarkAssetId, v.logoOnLightAssetId]) if (id != null && !(await assets.get(id))) throw new NotInOrgError('asset', id);
+  };
+  const ba = s.brandAssignments;
+  type BrandTarget = { target: 'org' } | { target: 'group'; groupId: string } | { target: 'screen'; screenId: string };
+  const whereTarget = (t: BrandTarget) =>
+    t.target === 'org'
+      ? and(eq(ba.orgId, orgId), eq(ba.target, 'org'))
+      : t.target === 'group'
+        ? and(eq(ba.orgId, orgId), eq(ba.groupId, t.groupId))
+        : and(eq(ba.orgId, orgId), eq(ba.screenId, t.screenId));
   const pi = s.playlistItems;
   const ps = s.publishScreens;
   const snap = s.dataSnapshots;
@@ -480,6 +493,61 @@ export function scoped(d1: D1Database, orgId: string) {
               .values(row)
               .onConflictDoUpdate({ target: os.orgId, set: { defaultPlaylistId: id, updatedAt: row.updatedAt } }),
           );
+        },
+      },
+    },
+
+    /**
+     * Brand kits. Ids are always the server's (`bk_...`): an `id` a caller passes is ignored, so
+     * no org can pick an id another org holds.
+     */
+    brandKits: {
+      ...brandKitRows,
+      insert: async (values: NewRow<typeof s.brandKits>) => {
+        await checkLogos(values);
+        return brandKitRows.insert({ ...values, id: undefined });
+      },
+      update: async (id: string, patch: RowPatch<typeof s.brandKits>) => {
+        await checkLogos(patch);
+        return brandKitRows.update(id, patch);
+      },
+      stage: {
+        ...brandKitRows.stage,
+        insert: async (values: NewRow<typeof s.brandKits>) => {
+          await checkLogos(values);
+          return brandKitRows.stage.insert({ ...values, id: undefined });
+        },
+        update: async (current: typeof s.brandKits.$inferSelect, patch: RowPatch<typeof s.brandKits>) => {
+          await checkLogos(patch);
+          return brandKitRows.stage.update(current, patch);
+        },
+      },
+      /** Which kit applies where (`brand_assignments`): the org default, groups, screens. */
+      assignments: {
+        /** Every assignment in the org, by target then group or screen id. */
+        list: () => db.select().from(ba).where(eq(ba.orgId, orgId)).orderBy(asc(ba.target), asc(ba.groupId), asc(ba.screenId)).all(),
+        stage: {
+          /**
+           * Make `brandKitId` the kit of the org (its default), a group or a screen; null removes
+           * the choice. Throws `NotInOrgError` for a kit, group or screen the org does not have.
+           * Pass `newKit` for a kit staged earlier in the same batch, which is not stored yet.
+           */
+          set: async (target: BrandTarget, brandKitId: string | null, { newKit = false } = {}): Promise<Staged> => {
+            if (brandKitId !== null && !newKit && !(await brandKitRows.get(brandKitId))) throw new NotInOrgError('brand kit', brandKitId);
+            if (target.target === 'group' && !(await screenGroups.get(target.groupId))) throw new NotInOrgError('group', target.groupId);
+            if (target.target === 'screen' && !(await screens.get(target.screenId))) throw new NotInOrgError('screen', target.screenId);
+            const clear = db.delete(ba).where(whereTarget(target));
+            if (brandKitId === null) return staged(undefined, clear);
+            const row = {
+              orgId,
+              target: target.target,
+              groupId: target.target === 'group' ? target.groupId : null,
+              screenId: target.target === 'screen' ? target.screenId : null,
+              brandKitId,
+              updatedAt: Date.now(),
+            };
+            return staged(undefined, clear, db.insert(ba).values(row));
+          },
         },
       },
     },

@@ -478,6 +478,73 @@ export const orgSettings = sqliteTable(
   (t) => [foreignKey({ columns: [t.orgId, t.defaultPlaylistId], foreignColumns: [playlists.orgId, playlists.id] })],
 );
 
+// --------------------------------------------------------------------- brand
+
+/**
+ * Brand kits: an org's colours, fonts, logo and shape. Keyed `(org_id, id)` and the id is always
+ * made by the server (`bk_...`), never chosen by a caller, so two orgs can never collide on one.
+ * Read at publish and frozen into each manifest; editing a kit reaches screens at the next publish.
+ */
+export const brandKits = sqliteTable(
+  'brand_kits',
+  {
+    id: text('id').notNull(),
+    orgId: orgId(),
+    name: text('name').notNull(),
+    /**
+     * The contract's `BrandColors` as `#rrggbb`, except that `onPrimary` and `onAccent` may be
+     * absent: absent means derived for contrast at publish (compiler `onColor`).
+     */
+    colorsJson: text('colors_json').notNull(),
+    shape: text('shape', { enum: ['square', 'soft', 'round'] }).notNull(),
+    /** Font catalogue ids (compiler `FONTS`), `<owner>/<id>`. Null: the template's own font. */
+    displayFontId: text('display_font_id'),
+    bodyFontId: text('body_font_id'),
+    /** Image assets, SVG or PNG. */
+    logoOnDarkAssetId: text('logo_on_dark_asset_id'),
+    logoOnLightAssetId: text('logo_on_light_asset_id'),
+    createdAt: created(),
+    updatedAt: updated(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.id] }),
+    foreignKey({ columns: [t.orgId, t.logoOnDarkAssetId], foreignColumns: [assets.orgId, assets.id] }),
+    foreignKey({ columns: [t.orgId, t.logoOnLightAssetId], foreignColumns: [assets.orgId, assets.id] }),
+  ],
+);
+
+/**
+ * Which kit applies where: the org's default (`org`), a group's, a screen's. At most one per
+ * target. A screen uses its own, else its groups' (a conflict when they differ), else the
+ * default: compiler `chooseBrandKit`. Deleting a group or screen drops its row.
+ */
+export const brandAssignments = sqliteTable(
+  'brand_assignments',
+  {
+    orgId: orgId(),
+    target: text('target', { enum: ['org', 'group', 'screen'] }).notNull(),
+    groupId: text('group_id'),
+    screenId: text('screen_id'),
+    brandKitId: text('brand_kit_id').notNull(),
+    updatedAt: updated(),
+  },
+  (t) => [
+    uniqueIndex('brand_assignments_org_uq').on(t.orgId).where(sql`${t.target} = 'org'`),
+    uniqueIndex('brand_assignments_group_uq').on(t.orgId, t.groupId).where(sql`${t.groupId} IS NOT NULL`),
+    uniqueIndex('brand_assignments_screen_uq').on(t.orgId, t.screenId).where(sql`${t.screenId} IS NOT NULL`),
+    index('brand_assignments_kit_idx').on(t.orgId, t.brandKitId),
+    foreignKey({ columns: [t.orgId, t.brandKitId], foreignColumns: [brandKits.orgId, brandKits.id] }),
+    foreignKey({ columns: [t.orgId, t.groupId], foreignColumns: [screenGroups.orgId, screenGroups.id] }).onDelete('cascade'),
+    foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
+    check(
+      'brand_assignments_target_ck',
+      sql`(${t.target} = 'org' AND ${t.groupId} IS NULL AND ${t.screenId} IS NULL)
+        OR (${t.target} = 'group' AND ${t.groupId} IS NOT NULL AND ${t.screenId} IS NULL)
+        OR (${t.target} = 'screen' AND ${t.screenId} IS NOT NULL AND ${t.groupId} IS NULL)`,
+    ),
+  ],
+);
+
 // ---------------------------------------------------------------- publishing
 
 export const publishes = sqliteTable(

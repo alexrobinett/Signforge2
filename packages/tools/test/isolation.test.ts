@@ -23,12 +23,20 @@ const ORG_A_IDS: Record<string, (a: SeededOrg) => string> = {
   bundle: () => BUNDLE,
   sources: () => SOURCES,
   asset: (a) => a.asset,
+  brandKit: (a) => a.brandKit,
+  logoOnDarkAsset: (a) => a.asset,
+  logoOnLightAsset: (a) => a.asset,
 };
+
+/** Ids that name a catalogue every org shares, not an org's row. */
+const CATALOGUE_IDS: Record<string, string> = { displayFont: 'base/oswald', bodyFont: 'base/inter' };
 
 /** `example` with every id field replaced by org A's id of that kind. Also says whether it named any. */
 function withOrgAIds(example: unknown, a: SeededOrg): { input: unknown; ids: number } {
   let ids = 0;
   const pick = (key: string, kind: string) => {
+    // Font ids name the shared catalogue, not an org's row: any org may use them.
+    if (CATALOGUE_IDS[kind]) return CATALOGUE_IDS[kind];
     const get = ORG_A_IDS[kind];
     if (!get) throw new Error(`input field "${key}" names ids of kind "${kind}": add it to ORG_A_IDS`);
     ids++;
@@ -65,6 +73,8 @@ async function orgAState() {
     assets: await a.assets.list(),
     renditions: await a.assets.renditions.list(),
     audit: await a.auditLog.list(),
+    brandKits: await a.brandKits.list(),
+    brandAssignments: await a.brandKits.assignments.list(),
   };
 }
 
@@ -73,7 +83,11 @@ beforeAll(async () => {
   await env.BLOBS.put(manifestKey('org-a', s.a.screen, MANIFEST), '{}');
   await env.BLOBS.put(orgBlobKey('org-a', BUNDLE), '<!doctype html>');
   await env.BLOBS.put(orgBlobKey('org-a', SOURCES), '{}');
-  callerB = { org: scoped(env.DB, 'org-b'), role: 'owner', actor: { kind: 'user', id: 'user-b', clientId: 'test' }, blobs: env.BLOBS,
+  callerB = {
+    org: scoped(env.DB, 'org-b'),
+    role: 'owner',
+    actor: { kind: 'user', id: 'user-b', clientId: 'test' },
+    blobs: env.BLOBS,
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
   };
   before = await orgAState();

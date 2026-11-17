@@ -72,6 +72,7 @@ A template that has not reported `ready` within 2 seconds is skipped.
 - `formatter(ctx, options)` and `dayKey(ctx, date)` format dates and times in the screen's time zone and locale. Use them for anything shown: the device's own clock settings may not match the screen's location.
 - `now()` is the screen's time: the device clock corrected from the server. Use it, never `new Date()` or `Date.now()`, for anything that depends on the time: a Pi has no battery-backed clock, and after a power cut its own clock can be days out.
 - A theme (brand colours, fonts and logo) arrives in `init` as `theme`. Applying it is M3-39; the CSS custom property names are `BRAND_CSS_VARS` in the contract.
+- A colour field may default to a brand token, `"$brand.<colour>"` with one of the contract's `BRAND_COLORS` (`"$brand.accent"`). The server's compiler replaces it with the screen's brand colour at publish, so `data` only ever holds colours; a token naming no brand colour is a problem of the spot.
 
 ## Live data
 

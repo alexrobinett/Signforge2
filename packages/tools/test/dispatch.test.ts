@@ -4,7 +4,20 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { defineTool, describeTools, dispatch, effectiveScopes, platformRegistry, redact, registry, ROLES, TOOLS, type Caller, type Role, type Scope } from '../src';
+import {
+  defineTool,
+  describeTools,
+  dispatch,
+  effectiveScopes,
+  platformRegistry,
+  redact,
+  registry,
+  ROLES,
+  TOOLS,
+  type Caller,
+  type Role,
+  type Scope,
+} from '../src';
 
 let o: SeededOrg;
 const caller = (role: Role, scopes?: Scope[], actor: Caller['actor'] = { kind: 'user', id: 'user-1', clientId: 'cms' }): Caller => ({
@@ -33,19 +46,47 @@ describe('the registry', () => {
 
   it('lists the first tools', () => {
     expect([...registry.keys()].sort()).toEqual([
-      'create_asset_upload', 'create_group', 'delete_asset', 'delete_group', 'finalize_asset', 'get_asset', 'get_screen', 'get_template',
-      'list_assets', 'list_groups', 'list_screens', 'list_templates', 'publish_manifest_to_screen',
-      'register_template_version', 'rename_group', 'rename_screen', 'revoke_screen_credential', 'set_group_members', 'set_template_version_status',
+      'assign_brand_kit',
+      'create_asset_upload',
+      'create_brand_kit',
+      'create_group',
+      'delete_asset',
+      'delete_group',
+      'finalize_asset',
+      'get_asset',
+      'get_brand_kit',
+      'get_screen',
+      'get_template',
+      'list_assets',
+      'list_brand_kits',
+      'list_fonts',
+      'list_groups',
+      'list_screens',
+      'list_templates',
+      'publish_manifest_to_screen',
+      'register_template_version',
+      'rename_group',
+      'rename_screen',
+      'revoke_screen_credential',
+      'set_default_brand_kit',
+      'set_group_members',
+      'set_template_version_status',
+      'update_brand_kit',
       'update_screen_settings',
     ]);
   });
 
   it('gives every creating tool an idempotency key', () => {
-    const keyed = TOOLS.filter((t) => t.idempotent).map((t) => t.name).sort();
-    expect(keyed).toEqual(['create_asset_upload', 'create_group']);
+    const keyed = TOOLS.filter((t) => t.idempotent)
+      .map((t) => t.name)
+      .sort();
+    expect(keyed).toEqual(['create_asset_upload', 'create_brand_kit', 'create_group']);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
     for (const name of keyed) {
-      const schema = describeTools(registry, { role: 'owner' }).find((t) => t.name === name)!.inputSchema as { properties: Record<string, unknown>; required?: string[] };
+      const schema = describeTools(registry, { role: 'owner' }).find((t) => t.name === name)!.inputSchema as {
+        properties: Record<string, unknown>;
+        required?: string[];
+      };
       expect(schema.properties, name).toHaveProperty('idempotencyKey');
       expect(schema.required ?? [], name).not.toContain('idempotencyKey');
     }
@@ -68,7 +109,10 @@ describe('roles and scopes', () => {
   it('let viewers read and nothing else', async () => {
     expect(await dispatch(registry, 'list_screens', {}, caller('viewer'))).toMatchObject({ ok: true });
     expect(await dispatch(registry, 'rename_screen', { screenId: o.screen, name: 'x' }, caller('viewer'))).toMatchObject({ ok: false, error: 'forbidden' });
-    expect(await dispatch(registry, 'publish_manifest_to_screen', { screenId: o.screen, manifestId: 'f'.repeat(64) }, caller('viewer'))).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await dispatch(registry, 'publish_manifest_to_screen', { screenId: o.screen, manifestId: 'f'.repeat(64) }, caller('viewer'))).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
   });
 
   it('let editors publish and manage screens, and keep credential revocation for owners', async () => {
@@ -76,18 +120,35 @@ describe('roles and scopes', () => {
     // Forbidden on role, before the input is looked at.
     expect(await dispatch(registry, 'revoke_screen_credential', {}, caller('editor'))).toMatchObject({ ok: false, error: 'forbidden' });
     // Allowed past the check: the manifest was never uploaded, so it is not found.
-    expect(await dispatch(registry, 'publish_manifest_to_screen', { screenId: o.screen, manifestId: 'f'.repeat(64) }, caller('editor'))).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await dispatch(registry, 'publish_manifest_to_screen', { screenId: o.screen, manifestId: 'f'.repeat(64) }, caller('editor'))).toMatchObject({
+      ok: false,
+      error: 'not_found',
+    });
   });
 
   it('refuse a tool outside the grant even for an owner', async () => {
     const draftOnly = caller('owner', ['content:read', 'content:draft'], { kind: 'agent', id: 'grant-1', clientId: 'agent-app' });
-    expect(await dispatch(registry, 'publish_manifest_to_screen', { screenId: o.screen, manifestId: 'f'.repeat(64) }, draftOnly)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await dispatch(registry, 'publish_manifest_to_screen', { screenId: o.screen, manifestId: 'f'.repeat(64) }, draftOnly)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
     expect(await dispatch(registry, 'rename_screen', { screenId: o.screen, name: 'x' }, draftOnly)).toMatchObject({ ok: false, error: 'forbidden' });
   });
 
   it('decide what GET /api/tools lists', () => {
     const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes }).map((t) => t.name);
-    expect(names('viewer').sort()).toEqual(['get_asset', 'get_screen', 'get_template', 'list_assets', 'list_groups', 'list_screens', 'list_templates']);
+    expect(names('viewer').sort()).toEqual([
+      'get_asset',
+      'get_brand_kit',
+      'get_screen',
+      'get_template',
+      'list_assets',
+      'list_brand_kits',
+      'list_fonts',
+      'list_groups',
+      'list_screens',
+      'list_templates',
+    ]);
     expect(names('editor')).not.toContain('revoke_screen_credential');
     expect(names('editor')).not.toContain('set_template_version_status');
     expect(names('owner')).toHaveLength(TOOLS.length);
@@ -117,7 +178,12 @@ describe('the audit log', () => {
     expect(await dispatch(registry, 'rename_group', { groupId: o.group, name: 'Audited' }, agent)).toMatchObject({ ok: true });
     const [entry] = await org.auditLog.list({ limit: 1 });
     expect(entry).toMatchObject({
-      actorKind: 'agent', actorId: 'grant-9', clientId: 'oauth-client-9', action: 'rename_group', targetKind: 'group', targetId: o.group,
+      actorKind: 'agent',
+      actorId: 'grant-9',
+      clientId: 'oauth-client-9',
+      action: 'rename_group',
+      targetKind: 'group',
+      targetId: o.group,
     });
     expect(JSON.parse(entry!.detailJson!)).toEqual({ input: { groupId: o.group, name: 'Audited' } });
   });
@@ -154,12 +220,23 @@ describe('the audit log', () => {
     expect(await dispatch(reg, 'set_feed_secret', input, caller('owner'))).toMatchObject({ ok: true });
     const [entry] = await scoped(env.DB, o.orgId).auditLog.list({ limit: 1 });
     expect(entry!.detailJson).not.toMatch(/sk_live_123|tok_456/);
-    expect(JSON.parse(entry!.detailJson!)).toEqual({ input: { screenId: o.screen, apiKey: '[redacted]', nested: { token: '[redacted]', credentialId: 'crd_1' } } });
+    expect(JSON.parse(entry!.detailJson!)).toEqual({
+      input: { screenId: o.screen, apiKey: '[redacted]', nested: { token: '[redacted]', credentialId: 'crd_1' } },
+    });
   });
 
   it('redact() knows the usual names', () => {
-    expect(redact({ password: 'p', secret: 's', code: '123456', pairingCode: 'ABC', authorization: 'Bearer x', urlEncrypted: 'e', name: 'n', screenIds: ['a'] })).toEqual({
-      password: '[redacted]', secret: '[redacted]', code: '[redacted]', pairingCode: '[redacted]', authorization: '[redacted]', urlEncrypted: '[redacted]', name: 'n', screenIds: ['a'],
+    expect(
+      redact({ password: 'p', secret: 's', code: '123456', pairingCode: 'ABC', authorization: 'Bearer x', urlEncrypted: 'e', name: 'n', screenIds: ['a'] }),
+    ).toEqual({
+      password: '[redacted]',
+      secret: '[redacted]',
+      code: '[redacted]',
+      pairingCode: '[redacted]',
+      authorization: '[redacted]',
+      urlEncrypted: '[redacted]',
+      name: 'n',
+      screenIds: ['a'],
     });
   });
 });

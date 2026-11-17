@@ -58,14 +58,27 @@ export type AssetView = z.infer<typeof assetOutput>;
 
 // SVG renditions have no pixel size; the column is NOT NULL, so they store 0.
 const renditionView = (r: AssetRendition): RenditionView => ({
-  orientation: r.orientation, sha256: r.sha256, type: r.type, size: r.size, width: r.width || null, height: r.height || null,
+  orientation: r.orientation,
+  sha256: r.sha256,
+  type: r.type,
+  size: r.size,
+  width: r.width || null,
+  height: r.height || null,
 });
 
 const assetView = (a: Asset, renditions: AssetRendition[]): AssetView => ({
-  id: a.id, name: a.name, kind: a.kind, status: a.status, sha256: a.sha256, type: a.type, size: a.size,
-  width: a.width || null, height: a.height || null,
+  id: a.id,
+  name: a.name,
+  kind: a.kind,
+  status: a.status,
+  sha256: a.sha256,
+  type: a.type,
+  size: a.size,
+  width: a.width || null,
+  height: a.height || null,
   renditions: renditions.map(renditionView).sort((x, y) => ORIENTATIONS.indexOf(x.orientation) - ORIENTATIONS.indexOf(y.orientation)),
-  createdAt: a.createdAt, updatedAt: a.updatedAt,
+  createdAt: a.createdAt,
+  updatedAt: a.updatedAt,
 });
 
 async function requireAsset(org: OrgScope, assetId: string) {
@@ -79,7 +92,11 @@ const pixels = z.number().int().positive().max(65_535);
 const renditionInput = z.object({
   sha256: z.string().regex(SHA256, 'not a SHA-256 (64 lowercase hex characters)'),
   type: z.enum(RENDITION_TYPES),
-  size: z.number().int().positive().max(MAX_RENDITION_BYTES, `a rendition may be at most ${MAX_RENDITION_BYTES / 1024 / 1024} MB`),
+  size: z
+    .number()
+    .int()
+    .positive()
+    .max(MAX_RENDITION_BYTES, `a rendition may be at most ${MAX_RENDITION_BYTES / 1024 / 1024} MB`),
   width: pixels.nullable().describe('Pixels, as displayed; null for SVG'),
   height: pixels.nullable().describe('Pixels, as displayed; null for SVG'),
 });
@@ -102,7 +119,12 @@ export const listAssets = defineTool({
     const q = input.query?.toLowerCase();
     const matching = (await org.assets.list()).filter((a) => (!q || a.name.toLowerCase().includes(q)) && (!input.status || a.status === input.status));
     // Newest first: created time descending, then id descending.
-    const { rows, next } = page(matching, (a) => [-a.createdAt, a.id], input, (x, y) => Number(x[0]) - Number(y[0]) || (x[1] === y[1] ? 0 : String(x[1]) < String(y[1]) ? 1 : -1));
+    const { rows, next } = page(
+      matching,
+      (a) => [-a.createdAt, a.id],
+      input,
+      (x, y) => Number(x[0]) - Number(y[0]) || (x[1] === y[1] ? 0 : String(x[1]) < String(y[1]) ? 1 : -1),
+    );
     const [renditions, usage] = await Promise.all([org.assets.renditions.list(), org.assets.usage(rows.map((a) => a.id))]);
     const byAsset = Map.groupBy(renditions, (r) => r.assetId);
     return { assets: rows.map((a) => ({ ...assetView(a, byAsset.get(a.id) ?? []), usageCount: usage.get(a.id)?.length ?? 0 })), next };
@@ -153,12 +175,16 @@ export const createAssetUpload = defineTool({
         }
       }
       const { landscape: l, portrait: p } = renditions;
-      if ((l.type === 'image/svg+xml') !== (p.type === 'image/svg+xml')) ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'an SVG is sent as it is for both orientations' });
-      if (l.sha256 === p.sha256 && (l.type !== p.type || l.size !== p.size)) ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'the same file cannot have two types or sizes' });
+      if ((l.type === 'image/svg+xml') !== (p.type === 'image/svg+xml'))
+        ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'an SVG is sent as it is for both orientations' });
+      if (l.sha256 === p.sha256 && (l.type !== p.type || l.size !== p.size))
+        ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'the same file cannot have two types or sizes' });
     }),
   output: z.object({
     asset: assetOutput,
-    uploads: z.array(z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() })).describe('One per file the server does not already hold'),
+    uploads: z
+      .array(z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() }))
+      .describe('One per file the server does not already hold'),
   }),
   example: {
     name: 'Summer menu photo',
@@ -172,20 +198,42 @@ export const createAssetUpload = defineTool({
     if (!uploads) throw new Error('direct uploads are not configured on this server (R2 S3 credentials)');
     const { landscape, portrait } = input.renditions;
     // The asset and both renditions are written in one batch: never an asset without its renditions.
-    const asset = write(org.assets.stage.insert({
-      kind: 'image', name: input.name, sha256: landscape.sha256, type: landscape.type, size: landscape.size,
-      width: landscape.width, height: landscape.height, status: 'pending',
-    }));
+    const asset = write(
+      org.assets.stage.insert({
+        kind: 'image',
+        name: input.name,
+        sha256: landscape.sha256,
+        type: landscape.type,
+        size: landscape.size,
+        width: landscape.width,
+        height: landscape.height,
+        status: 'pending',
+      }),
+    );
     const renditions = ORIENTATIONS.map((o) => {
       const r = input.renditions[o];
-      return write(org.assets.renditions.stage.insert({ assetId: asset.id, orientation: o, sha256: r.sha256, type: r.type, size: r.size, width: r.width ?? 0, height: r.height ?? 0 }));
+      return write(
+        org.assets.renditions.stage.insert({
+          assetId: asset.id,
+          orientation: o,
+          sha256: r.sha256,
+          type: r.type,
+          size: r.size,
+          width: r.width ?? 0,
+          height: r.height ?? 0,
+        }),
+      );
     });
     const files = new Map([landscape, portrait].map((r) => [r.sha256, r]));
     const targets = [];
     for (const r of files.values()) {
       // Already stored and checked (an earlier upload, or `sf push`): finalize reads it from there.
       if (await blobs.head(orgBlobKey(org.orgId, r.sha256))) continue;
-      const signed = await uploads.presignPut(uploadKey(org.orgId, asset.id, r.sha256), { contentType: r.type, contentLength: r.size, expiresInSeconds: UPLOAD_URL_SECONDS });
+      const signed = await uploads.presignPut(uploadKey(org.orgId, asset.id, r.sha256), {
+        contentType: r.type,
+        contentLength: r.size,
+        expiresInSeconds: UPLOAD_URL_SECONDS,
+      });
       targets.push({ sha256: r.sha256, method: 'PUT' as const, url: signed.url, headers: { 'content-type': r.type }, expiresAt: signed.expiresAt });
     }
     return { asset: assetView(asset, renditions), uploads: targets };
@@ -200,7 +248,7 @@ interface Problem {
 export const finalizeAsset = defineTool({
   name: 'finalize_asset',
   description:
-    "Finish an upload started with create_asset_upload, once every file is PUT. The server re-hashes each file in storage and checks its type, size and pixel size against what was claimed and against the screen box. If all pass, the asset becomes verified and usable. If any fails, its files are deleted, the asset is marked rejected, and the call is refused with each problem; upload it again as a new asset. An asset without both renditions, or a file not uploaded yet, is refused without changing anything. Finalizing a verified asset changes nothing. Returns { asset, changed }.",
+    'Finish an upload started with create_asset_upload, once every file is PUT. The server re-hashes each file in storage and checks its type, size and pixel size against what was claimed and against the screen box. If all pass, the asset becomes verified and usable. If any fails, its files are deleted, the asset is marked rejected, and the call is refused with each problem; upload it again as a new asset. An asset without both renditions, or a file not uploaded yet, is refused without changing anything. Finalizing a verified asset changes nothing. Returns { asset, changed }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -216,7 +264,11 @@ export const finalizeAsset = defineTool({
     // Both renditions, or the asset cannot be verified: a screen of either orientation needs its own.
     const absent = ORIENTATIONS.filter((o) => !renditions.some((r) => r.orientation === o));
     if (absent.length) {
-      throw new ToolError('conflict', `asset ${asset.id} has no ${absent.join(' or ')} rendition; upload the image again`, absent.map((path) => ({ path, message: 'no rendition' })));
+      throw new ToolError(
+        'conflict',
+        `asset ${asset.id} has no ${absent.join(' or ')} rendition; upload the image again`,
+        absent.map((path) => ({ path, message: 'no rendition' })),
+      );
     }
 
     const bySha = Map.groupBy(renditions, (r) => r.sha256);
@@ -250,7 +302,8 @@ export const finalizeAsset = defineTool({
       else if (info.type !== first.type) problems.push({ path: where, message: `the file is ${info.type}, not the claimed ${first.type}` });
       else if (info.width !== null && info.height !== null) {
         for (const r of rows) {
-          if (info.width !== r.width || info.height !== r.height) problems.push({ path: r.orientation, message: `the image is ${info.width}x${info.height}, not the claimed ${r.width}x${r.height}` });
+          if (info.width !== r.width || info.height !== r.height)
+            problems.push({ path: r.orientation, message: `the image is ${info.width}x${info.height}, not the claimed ${r.width}x${r.height}` });
           else {
             const message = imageSizeProblem(info.width, info.height, SCREEN_BOX[r.orientation]);
             if (message) problems.push({ path: r.orientation, message });
@@ -266,7 +319,11 @@ export const finalizeAsset = defineTool({
       throw new ToolError('invalid_input', `the upload was rejected and deleted: ${problems.map((p) => `${p.path}: ${p.message}`).join('; ')}`, problems, true);
     }
     if (missing.length) {
-      throw new ToolError('invalid_input', `not uploaded yet: ${missing.join(', ')}`, missing.map((path) => ({ path, message: 'not uploaded yet' })));
+      throw new ToolError(
+        'invalid_input',
+        `not uploaded yet: ${missing.join(', ')}`,
+        missing.map((path) => ({ path, message: 'not uploaded yet' })),
+      );
     }
 
     // Move each checked upload to its content-addressed key; one already there is the same bytes.
@@ -284,7 +341,7 @@ export const finalizeAsset = defineTool({
 export const deleteAsset = defineTool({
   name: 'delete_asset',
   description:
-    "Delete an asset from the library. Refused with a conflict while any spot uses it (details list the spot ids); change or delete those spots first. Screens already playing it keep their copy until their next publish. Returns { deleted: assetId }.",
+    'Delete an asset from the library. Refused with a conflict while any spot uses it, or a brand kit uses it as its logo (details list the spot or brand kit ids); change or delete those first. Screens already playing it keep their copy until their next publish. Returns { deleted: assetId }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -296,6 +353,11 @@ export const deleteAsset = defineTool({
     const asset = await requireAsset(org, input.assetId);
     const spotIds = (await org.assets.usage([asset.id])).get(asset.id) ?? [];
     if (spotIds.length) throw new ToolError('conflict', `asset ${asset.id} is used by ${spotIds.length} spot${spotIds.length === 1 ? '' : 's'}`, { spotIds });
+    const brandKitIds = (await org.brandKits.list()).filter((k) => k.logoOnDarkAssetId === asset.id || k.logoOnLightAssetId === asset.id).map((k) => k.id);
+    if (brandKitIds.length)
+      throw new ToolError('conflict', `asset ${asset.id} is the logo of ${brandKitIds.length} brand kit${brandKitIds.length === 1 ? '' : 's'}`, {
+        brandKitIds,
+      });
     // Uploads never finalized. Stored files stay: other assets and published manifests may name the same bytes.
     const renditions = await org.assets.renditions.forAsset(asset.id);
     const staged = [...new Set(renditions.map((r) => uploadKey(org.orgId, asset.id, r.sha256)))];
