@@ -6,6 +6,7 @@
  *                                 origin it is the API's device base (`https://<api>/v1/device`) and every
  *                                 request carries the screen's credential, collected from the supervisor
  *                 ?poll=<seconds> how often to look for a new manifest (default 30)
+ *                 ?stall=<seconds> give up on a download that receives nothing for this long (default 30; testing)
  *                 ?debug=1        show the on-screen status overlay
  *                 ?hb=1           with debug, also show a moving speck so every frame is drawn. It costs
  *                                 the Pi 4 about 7% of frames: use it only to validate measurements
@@ -23,6 +24,7 @@ import { UnauthorisedError, loadActiveManifest, requestPersistence, sync } from 
 const query = new URLSearchParams(location.search);
 const CONTENT = query.get('content') ?? './content';
 const POLL_MS = Number(query.get('poll') ?? 30) * 1000;
+const STALL_OVERRIDE_MS = query.get('stall') ? Number(query.get('stall')) * 1000 : undefined;
 /** How long before the end of a spot the next one starts loading. */
 const PREPARE_LEAD_MS = 3000;
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -387,7 +389,7 @@ async function displayLoop(): Promise<never> {
 async function syncLoop(): Promise<never> {
   return forever('sync', async () => {
     try {
-      const result = await sync(CONTENT, { currentId: manifest?.id, headers: await deviceHeaders() });
+      const result = await sync(CONTENT, { currentId: manifest?.id, headers: await deviceHeaders(), ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}) });
       state.online = true;
       state.auth = '';
       state.lastSync = new Date().toISOString();
