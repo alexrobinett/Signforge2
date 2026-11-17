@@ -11,8 +11,8 @@
  * every plain object, and must not count as a field.
  */
 import {
-  ID_PATTERN, SUPPORTED_MANIFEST_SCHEMAS, templateKey,
-  type DisplayHours, type FieldDef, type ScalarFieldDef, type ScreenManifest,
+  BRAND_COLORS, BRAND_SHAPES, ID_PATTERN, SUPPORTED_MANIFEST_SCHEMAS, templateKey,
+  type BrandKit, type DisplayHours, type FieldDef, type ScalarFieldDef, type ScreenManifest,
 } from './index.ts';
 
 // ------------------------------------------------------------------ helpers
@@ -45,6 +45,9 @@ export function show(v: unknown): string {
 }
 
 const prefix = (where: string, problems: string[]) => problems.map((p) => `${where}: ${p}`);
+/** Check each item of a list; problems are prefixed with the 1-based position. */
+const list = (where: string, v: unknown, check: (item: unknown) => string[]): string[] =>
+  Array.isArray(v) ? v.flatMap((item, i) => prefix(`${where} ${i + 1}`, check(item))) : [`${where} must be a list`];
 
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -290,14 +293,57 @@ export function displayHoursProblems(hours: unknown): string[] {
   return errors;
 }
 
-// ------------------------------------------------------------- screen manifest
-
 /** A screen checks a data source no more often than this. */
 export const MIN_REFRESH_S = 60;
+
+// ---------------------------------------------------------------------- brand
+
+/** Every file a brand kit refers to. The kit must already be valid. */
+const brandFiles = (b: BrandKit): string[] => [
+  ...[b.fonts.display, b.fonts.body].flatMap((f) => f?.files.map((x) => x.file) ?? []),
+  ...(b.logo ? [b.logo.onDark, b.logo.onLight].filter(isText) : []),
+];
+
+function fontProblems(where: string, f: unknown): string[] {
+  if (!isObj(f)) return [`${where} font must be an object`];
+  const errors: string[] = [];
+  const [owner, id, more] = isStr(f.id) ? f.id.split('/') : [];
+  if (more !== undefined || !(owner === 'base' || isIdValue(owner)) || !isStr(id) || !/^[a-z0-9][a-z0-9-]*$/.test(id)) errors.push(`${where} font id must be <owner>/<id>`);
+  if (!isText(f.family)) errors.push(`${where} font needs a family`);
+  if (Array.isArray(f.files) && !f.files.length) errors.push(`${where} font has no files`);
+  errors.push(...list(`${where} font file`, f.files, (x) => {
+    if (!isObj(x)) return ['is not an object'];
+    const out: string[] = [];
+    if (!(Number.isSafeInteger(x.weight) && (x.weight as number) >= 1 && (x.weight as number) <= 1000)) out.push('weight must be 1 to 1000');
+    if (x.style !== 'normal' && x.style !== 'italic') out.push('style must be normal or italic');
+    if (!isText(x.file)) out.push('file must name a file');
+    return out;
+  }));
+  return errors;
+}
+
+/** Check a brand kit as the manifest carries it. Problems are not prefixed; the manifest adds `brand: `. */
+export function validateBrandKit(b: unknown): string[] {
+  if (!isObj(b)) return ['brand must be an object'];
+  const errors: string[] = [];
+  if (!isIdValue(b.id)) errors.push('id is not a valid id');
+  if (!isObj(b.colors)) errors.push('colors must be an object');
+  else for (const c of BRAND_COLORS) if (!isText(own(b.colors, c))) errors.push(`colour "${c}" must be a CSS colour`);
+  if (!(BRAND_SHAPES as readonly unknown[]).includes(b.shape)) errors.push(`shape must be ${BRAND_SHAPES.slice(0, -1).join(', ')} or ${BRAND_SHAPES.at(-1)}`);
+  if (!isObj(b.fonts)) errors.push('fonts must be an object');
+  else for (const k of ['display', 'body'] as const) if (b.fonts[k] !== undefined) errors.push(...fontProblems(k, b.fonts[k]));
+  if (b.logo !== undefined && !(isObj(b.logo) && isText(b.logo.onDark) && (b.logo.onLight === undefined || isText(b.logo.onLight)))) {
+    errors.push('logo needs an onDark file, and onLight is a file when present');
+  }
+  return errors;
+}
+
+// ------------------------------------------------------------- screen manifest
 
 /** Every file hash a manifest refers to. The manifest must already be valid. */
 export function requiredFiles(manifest: ScreenManifest): Set<string> {
   const out = new Set<string>();
+  if (manifest.brand) brandFiles(manifest.brand).forEach((f) => out.add(f));
   for (const t of Object.values(manifest.templates)) out.add(t.html);
   for (const s of Object.values(manifest.spots)) {
     if (s.kind === 'template') Object.values(s.assets).forEach((a) => out.add(a));
@@ -404,6 +450,17 @@ export function validateManifest(m: unknown): string[] {
     }
   }
 
+  if (m.brand !== undefined) {
+    errors.push(...prefix('brand', validateBrandKit(m.brand)));
+    // Read leniently, so a brand file that is not listed is reported even when the kit has other problems.
+    const fonts = [own(own(m.brand, 'fonts'), 'display'), own(own(m.brand, 'fonts'), 'body')].flatMap((f) => {
+      const files = own(f, 'files');
+      return Array.isArray(files) ? files.map((x) => own(x, 'file')) : [];
+    });
+    const logo = own(m.brand, 'logo');
+    for (const sha of [...fonts, own(logo, 'onDark'), own(logo, 'onLight')]) if (isText(sha)) referenced.add(sha);
+  }
+
   for (const sha of referenced) if (!own(files, sha)) errors.push(`file ${sha.slice(0, 12)} is referenced but not listed`);
 
   for (const e of schedule as unknown[]) {
@@ -417,6 +474,8 @@ export function validateManifest(m: unknown): string[] {
     if (e.target !== 'org' && e.target !== 'group' && e.target !== 'screen') errors.push(`${where}: target must be org, group or screen`);
     if (!own(playlists, e.playlist)) errors.push(`${where} plays unknown playlist "${show(e.playlist)}"`);
     errors.push(...windowProblems(where, e, false));
+    for (const k of ['startsAt', 'endsAt'] as const) if (e[k] !== undefined && !isInstant(e[k])) errors.push(`${where}: ${k} must be an ISO 8601 time`);
+    if (isInstant(e.startsAt) && isInstant(e.endsAt) && !(Date.parse(e.endsAt) > Date.parse(e.startsAt))) errors.push(`${where}: endsAt must be after startsAt`);
   }
 
   for (const [key, p] of Object.entries(playlists)) {
@@ -457,6 +516,7 @@ export function validateDataSnapshot(s: unknown): string[] {
   if (!isObj(s)) return ['snapshot is not an object'];
   const errors: string[] = [];
   if (!isIdValue(s.id)) errors.push(`snapshot id "${show(s.id)}" is not a valid id`);
+  if (!isCount(s.version)) errors.push('snapshot version must be a whole number, 0 or more');
   if (!isInstant(s.fetchedAt)) errors.push('snapshot fetchedAt must be an ISO 8601 time');
   if (!Object.hasOwn(s, 'data')) errors.push('snapshot has no data');
   return errors;
@@ -464,8 +524,6 @@ export function validateDataSnapshot(s: unknown): string[] {
 
 // ------------------------------------------------------------------ device API
 
-const list = (where: string, v: unknown, check: (item: unknown) => string[]): string[] =>
-  Array.isArray(v) ? v.flatMap((item, i) => prefix(`${where} ${i + 1}`, check(item))) : [`${where} must be a list`];
 
 /** `POST /v1/device/pair/start`, as the screen receives it. */
 export function validatePairStartResponse(r: unknown): string[] {
@@ -536,6 +594,7 @@ export function validateSyncRequest(r: unknown): string[] {
   if (!isObj(r)) return ['request is not an object'];
   const errors: string[] = [];
   if (!isCount(r.seq)) errors.push('seq must be a whole number, 0 or more');
+  if (!isIdValue(r.epoch)) errors.push('epoch must be a valid id');
   const p = r.player;
   if (!isObj(p) || !isText(p.version) || !versions(p.manifestSchemas) || !versions(p.protocols)) {
     errors.push('player needs a version and the manifest schemas and protocols it supports');
@@ -544,9 +603,10 @@ export function validateSyncRequest(r: unknown): string[] {
   if (!isObj(m) || (m.active !== undefined && !isText(m.active)) || !isCount(m.filesMissing)) errors.push('manifest needs filesMissing, and active when there is one');
   errors.push(...displayStatusProblems(r.display));
   if (!isInstant(r.deviceTime)) errors.push('deviceTime must be an ISO 8601 time');
+  if (!isObj(r.clock) || !isNum(r.clock.offsetMs) || typeof r.clock.trusted !== 'boolean') errors.push('clock needs offsetMs and whether the screen trusts it');
   errors.push(...list('play count', r.playCounts, playCountProblems));
   if (!isObj(r.snapshots)) errors.push('snapshots must map source ids to versions');
-  else for (const [k, v] of Object.entries(r.snapshots)) if (!isIdValue(k) || !isStr(v)) errors.push(`snapshots: "${k}" must be a source id with a version`);
+  else for (const [k, v] of Object.entries(r.snapshots)) if (!isIdValue(k) || !isCount(v)) errors.push(`snapshots: "${k}" must be a source id with a version number`);
   return errors;
 }
 
@@ -556,6 +616,7 @@ export function validateSyncResponse(r: unknown): string[] {
   const errors: string[] = [];
   if (!isInstant(r.serverTime)) errors.push('serverTime must be an ISO 8601 time');
   if (!isNum(r.nextSyncS) || r.nextSyncS <= 0) errors.push('nextSyncS must be above 0');
+  if (!isIdValue(r.epoch)) errors.push('epoch must be a valid id');
   if (!isCount(r.ackSeq)) errors.push('ackSeq must be a whole number, 0 or more');
   if (!isText(r.desiredManifest)) errors.push('desiredManifest is missing');
   errors.push(...list('snapshot', r.snapshots, validateDataSnapshot));
