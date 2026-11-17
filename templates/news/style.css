@@ -11,13 +11,16 @@ body { font-family: "Inter", sans-serif; color: #fff; font-feature-settings: "tn
 :root { --accent: #ff4d5e; }
 html, body { background: #0b0d12; }
 .stage { --u: 1vmin; --out: calc(var(--sf-duration, 15s) - 0.6s); position: fixed; inset: 0; overflow: hidden;
-  display: grid; grid-template-rows: auto 1fr auto; background: radial-gradient(100% 80% at 80% 0%, #1b2233 0%, #0b0d12 60%); }
+  display: grid; grid-template-rows: auto 1fr auto;
+  /* One column exactly the screen's width. Without this the column grows to the widest unwrapped
+     headline and every line runs off screen instead of wrapping or ending in an ellipsis. */
+  grid-template-columns: minmax(0, 1fr); background: radial-gradient(100% 80% at 80% 0%, #1b2233 0%, #0b0d12 60%); }
 header { display: flex; justify-content: space-between; align-items: center; padding: calc(var(--u) * 5) calc(var(--u) * 8) 0;
   will-change: opacity; animation: fade-in .6s ease both, fade-out .5s ease-in forwards; animation-delay: 0s, var(--out); }
 .badge { background: var(--accent); font-size: calc(var(--u) * 2.8); font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
   padding: calc(var(--u) * .9) calc(var(--u) * 2); border-radius: calc(var(--u) * .8); }
 .clock { font-size: calc(var(--u) * 3.2); font-weight: 600; color: rgba(255,255,255,.7); }
-main { padding: calc(var(--u) * 5) calc(var(--u) * 8) 0; align-self: center; }
+main { padding: calc(var(--u) * 5) calc(var(--u) * 8) 0; align-self: center; min-width: 0; }
 main > * { will-change: transform, opacity; animation: rise-in .8s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards; }
 .age { font-size: calc(var(--u) * 2.8); font-weight: 600; color: var(--accent); animation-delay: .15s, var(--out); }
 .lead { font-size: calc(var(--u) * 7.4); font-weight: 800; line-height: 1.08; letter-spacing: -.02em; margin-top: calc(var(--u) * 1.4);

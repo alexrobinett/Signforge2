@@ -1,0 +1,16 @@
+{
+  "name": "The New York Times (live)",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 15000,
+  "data": {
+    "title": "Top stories",
+    "source": "The New York Times"
+  },
+  "bindings": {
+    "items": {
+      "source": "news-nyt",
+      "path": "items"
+    }
+  }
+}

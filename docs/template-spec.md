@@ -91,6 +91,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 
 **Text**
 - Fit the space you have. Clamp long text with `-webkit-line-clamp` or `text-overflow: ellipsis`, and drop list rows that do not fit rather than letting them run off screen (see `templates/agenda/main.ts`).
+- Give grid and flex tracks a zero minimum (`minmax(0, 1fr)`, `min-width: 0`). A track's default minimum is its content's width, so one unwrapped line (`nowrap`, a long headline) widens the whole column past the screen and every clamp or ellipsis in it stops working. Found on live news feeds.
 - A crawl or ticker is one strip of text holding its content twice, sliding left by exactly one copy. It loops seamlessly and costs nothing measurable.
 
 **Isolation**

@@ -1,0 +1,16 @@
+{
+  "name": "The Verge (live)",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 15000,
+  "data": {
+    "title": "Tech",
+    "source": "The Verge"
+  },
+  "bindings": {
+    "items": {
+      "source": "news-verge",
+      "path": "items"
+    }
+  }
+}

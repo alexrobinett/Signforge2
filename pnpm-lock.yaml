@@ -236,6 +236,9 @@ importers:
       '@signforge/contract':
         specifier: workspace:*
         version: link:../contract
+      '@signforge/feeds':
+        specifier: workspace:*
+        version: link:../feeds
       '@signforge/player-core':
         specifier: workspace:*
         version: link:../player-core

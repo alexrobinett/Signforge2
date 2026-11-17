@@ -1,0 +1,16 @@
+{
+  "name": "Le Monde (live)",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 15000,
+  "data": {
+    "title": "\u00c0 la une",
+    "source": "Le Monde"
+  },
+  "bindings": {
+    "items": {
+      "source": "news-lemonde",
+      "path": "items"
+    }
+  }
+}

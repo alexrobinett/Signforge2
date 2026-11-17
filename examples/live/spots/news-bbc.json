@@ -1,0 +1,16 @@
+{
+  "name": "BBC News (live)",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 15000,
+  "data": {
+    "title": "World",
+    "source": "BBC News"
+  },
+  "bindings": {
+    "items": {
+      "source": "news-bbc",
+      "path": "items"
+    }
+  }
+}

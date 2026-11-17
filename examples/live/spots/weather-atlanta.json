@@ -1,0 +1,39 @@
+{
+  "name": "Weather Atlanta (live)",
+  "kind": "template",
+  "template": "weather",
+  "durationMs": 10000,
+  "data": {
+    "city": "Atlanta"
+  },
+  "bindings": {
+    "temp": {
+      "source": "weather-atlanta",
+      "path": "current.temperature_2m"
+    },
+    "code": {
+      "source": "weather-atlanta",
+      "path": "current.weather_code"
+    },
+    "isDay": {
+      "source": "weather-atlanta",
+      "path": "current.is_day"
+    },
+    "wind": {
+      "source": "weather-atlanta",
+      "path": "current.wind_speed_10m"
+    },
+    "humidity": {
+      "source": "weather-atlanta",
+      "path": "current.relative_humidity_2m"
+    },
+    "high": {
+      "source": "weather-atlanta",
+      "path": "daily.temperature_2m_max.0"
+    },
+    "low": {
+      "source": "weather-atlanta",
+      "path": "daily.temperature_2m_min.0"
+    }
+  }
+}

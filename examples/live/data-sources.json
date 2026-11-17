@@ -1,0 +1,50 @@
+{
+  "news-npr": {
+    "url": "https://feeds.npr.org/1001/rss.xml",
+    "format": "rss",
+    "refreshS": 300
+  },
+  "news-bbc": {
+    "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "format": "rss",
+    "refreshS": 300
+  },
+  "news-nyt": {
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+    "format": "rss",
+    "refreshS": 300
+  },
+  "news-verge": {
+    "url": "https://www.theverge.com/rss/index.xml",
+    "format": "rss",
+    "refreshS": 300
+  },
+  "news-hn": {
+    "url": "https://hnrss.org/frontpage",
+    "format": "rss",
+    "refreshS": 300
+  },
+  "news-lemonde": {
+    "url": "https://www.lemonde.fr/rss/une.xml",
+    "format": "rss",
+    "refreshS": 300
+  },
+  "holidays-us": {
+    "url": "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics",
+    "format": "ical",
+    "refreshS": 3600
+  },
+  "holidays-uk": {
+    "url": "https://calendar.google.com/calendar/ical/en.uk%23holiday%40group.v.calendar.google.com/public/basic.ics",
+    "format": "ical",
+    "refreshS": 3600
+  },
+  "weather-atlanta": {
+    "url": "https://api.open-meteo.com/v1/forecast?latitude=33.749&longitude=-84.388&current=temperature_2m,weather_code,is_day,wind_speed_10m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FNew_York&forecast_days=1",
+    "refreshS": 300
+  },
+  "weather-reykjavik": {
+    "url": "https://api.open-meteo.com/v1/forecast?latitude=64.1466&longitude=-21.9426&current=temperature_2m,weather_code,is_day,wind_speed_10m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=Atlantic%2FReykjavik&forecast_days=1",
+    "refreshS": 300
+  }
+}

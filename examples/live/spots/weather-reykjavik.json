@@ -1,0 +1,39 @@
+{
+  "name": "Weather Reykjav\u00edk (live)",
+  "kind": "template",
+  "template": "weather",
+  "durationMs": 10000,
+  "data": {
+    "city": "Reykjav\u00edk"
+  },
+  "bindings": {
+    "temp": {
+      "source": "weather-reykjavik",
+      "path": "current.temperature_2m"
+    },
+    "code": {
+      "source": "weather-reykjavik",
+      "path": "current.weather_code"
+    },
+    "isDay": {
+      "source": "weather-reykjavik",
+      "path": "current.is_day"
+    },
+    "wind": {
+      "source": "weather-reykjavik",
+      "path": "current.wind_speed_10m"
+    },
+    "humidity": {
+      "source": "weather-reykjavik",
+      "path": "current.relative_humidity_2m"
+    },
+    "high": {
+      "source": "weather-reykjavik",
+      "path": "daily.temperature_2m_max.0"
+    },
+    "low": {
+      "source": "weather-reykjavik",
+      "path": "daily.temperature_2m_min.0"
+    }
+  }
+}

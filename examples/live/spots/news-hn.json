@@ -1,0 +1,16 @@
+{
+  "name": "Hacker News (live)",
+  "kind": "template",
+  "template": "news",
+  "durationMs": 15000,
+  "data": {
+    "title": "Front page",
+    "source": "Hacker News"
+  },
+  "bindings": {
+    "items": {
+      "source": "news-hn",
+      "path": "items"
+    }
+  }
+}

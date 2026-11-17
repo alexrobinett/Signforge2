@@ -1,0 +1,17 @@
+{
+  "name": "Bank holidays United Kingdom (live)",
+  "kind": "template",
+  "template": "agenda",
+  "durationMs": 10000,
+  "data": {
+    "title": "Bank holidays",
+    "subtitle": "United Kingdom",
+    "rows": 5
+  },
+  "bindings": {
+    "events": {
+      "source": "holidays-uk",
+      "path": "events"
+    }
+  }
+}

@@ -24,8 +24,9 @@ import { build } from 'esbuild';
 import sharp from 'sharp';
 import {
   FORBIDDEN_CSS, FORBIDDEN_TEMPLATE_CODE, PROTOCOL_VERSION, TEMPLATE_BUDGET, VIDEO_SPEC, templateKey, validateTemplateManifest,
-  type Binding, type DataSource, type Playlist, type ScreenManifest, type Spot, type TemplateManifest, type Transition,
+  type Binding, type CalendarFeed, type DataSnapshot, type DataSource, type NewsFeed, type Playlist, type ScreenManifest, type Spot, type TemplateManifest, type Transition,
 } from '@signforge/contract';
+import { FeedError, normaliseFeed } from '@signforge/feeds';
 import { compileScreen, type CompileInput, type TargetedEntry } from '@signforge/compiler';
 import { push, PushError } from './push';
 
@@ -269,14 +270,45 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
   console.log(`  wrote ${outDir}`);
 }
 
+/**
+ * Fetch every data source a project lists, convert it the way the server will, and write the
+ * snapshots the player reads (`<out>/<id>.json`). For testing templates against live data until
+ * the server's poller (M3-23) exists. Failures are reported per source; the others still write.
+ */
+async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
+  const sources = readJson<Record<string, { url: string; format?: 'json' | 'ical' | 'rss' }>>(join(projectDir, 'data-sources.json'));
+  mkdirSync(outDir, { recursive: true });
+  const now = new Date();
+  let failed = 0;
+  for (const [id, src] of Object.entries(sources)) {
+    try {
+      const res = await fetch(src.url, { headers: { 'user-agent': 'signforge-dev' }, signal: AbortSignal.timeout(20_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.text();
+      const data = src.format === 'ical' ? normaliseFeed('ical', body, { now }) : src.format === 'rss' ? normaliseFeed('rss', body) : JSON.parse(body);
+      const snapshot: DataSnapshot = { id, fetchedAt: now.toISOString(), data };
+      writeFileSync(join(outDir, `${id}.json`), JSON.stringify(snapshot));
+      const count = src.format === 'ical' ? `${(data as CalendarFeed).events.length} events` : src.format === 'rss' ? `${(data as NewsFeed).items.length} items` : 'json';
+      console.log(`  ${id}: ${count}`);
+    } catch (err) {
+      failed++;
+      console.error(`  ${id}: failed (${err instanceof FeedError ? err.code : err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+  if (failed) process.exitCode = 1;
+}
+
 const [cmd, dirArg, ...rest] = process.argv.slice(2);
-const USAGE = 'usage:\n  sf build <project-dir> [--out <dir>] [--templates <dir>]\n  sf push <out-dir> --screen <id> --api <url>   (token in SF_ADMIN_TOKEN)';
+const USAGE = 'usage:\n  sf build <project-dir> [--out <dir>] [--templates <dir>]\n  sf feeds <project-dir> [--out <dir>]   (live data snapshots, default dist/content/data)\n  sf push <out-dir> --screen <id> --api <url>   (token in SF_ADMIN_TOKEN)';
 const flag = (name: string, fallback?: string) => {
   const i = rest.indexOf(`--${name}`);
   return i >= 0 && rest[i + 1] ? rest[i + 1]! : fallback;
 };
 if (cmd === 'build' && dirArg) {
   await buildProject(resolve(dirArg), resolve(flag('out', 'dist/content')!), resolve(flag('templates', 'templates')!));
+} else if (cmd === 'feeds' && dirArg) {
+  console.log(`Fetching feeds for ${dirArg}`);
+  await fetchFeeds(resolve(dirArg), resolve(flag('out', 'dist/content/data')!));
 } else if (cmd === 'push' && dirArg && flag('screen') && flag('api')) {
   const token = process.env.SF_ADMIN_TOKEN;
   if (!token) {
