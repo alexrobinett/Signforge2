@@ -13,7 +13,6 @@
   "dependencies": {
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
-    "@signforge/player-core": "workspace:*",
     "@signforge/tools": "workspace:*",
     "better-auth": "^1.7.25",
     "hono": "^4.13.19"

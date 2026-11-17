@@ -13,7 +13,7 @@ A screen that was playing keeps playing. Two ways it can go blank today:
 
 - docs/reviews/2026-11-17-full-review.md (single-reviewer findings)
 - packages/player/src/store.ts (`loadActiveManifest`, `sync`)
-- packages/player-core (`validateManifest`, `SUPPORTED_MANIFEST_SCHEMAS`)
+- packages/contract (`validateManifest`, `SUPPORTED_MANIFEST_SCHEMAS`; validation moved there from player-core in M3-31)
 
 ## Scope
 

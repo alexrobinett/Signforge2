@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateManifest } from '@signforge/player-core';
+import { validateManifest } from '@signforge/contract';
 import { compileScreen } from '../src/index';
 import { opts, org, promo } from './fixtures';
 

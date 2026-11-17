@@ -10,6 +10,7 @@ Images for screens, prepared in the browser before upload. The CMS's asset libra
   - A JPEG is encoded as JPEG. Any other type (PNG, WebP, AVIF, GIF) is encoded as WebP, which keeps transparency. Quality is 0.85, as `sf build` uses.
   - Some files ship unchanged (`original: true`): a JPEG, PNG or WebP that needs no scaling and has no EXIF rotation, and any SVG (for both orientations).
   - Files over 50 MB are refused before decoding (`maxSourceBytes`).
+  - A very long strip keeps its size under the cover rule (a 65,535x1,080 PNG already has a side in the box), so its rendition can be over the contract's `MAX_IMAGE_PIXELS`. `create_asset_upload` refuses it, before anything is uploaded; crop it first.
 - **`sha256Hex(blob)`** returns the SHA-256 of the bytes, computed with Web Crypto. That needs a secure context (https or localhost), as the CMS is.
 - **`uploadImage(file, { callTool })`** runs the whole upload:
   1. It makes the renditions.

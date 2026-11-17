@@ -63,7 +63,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 Details:
 
 - **Lists page.** Every `list_*` tool takes `limit` (default 50, at most 200) and `cursor`, and returns `next`. Pass `next` back as `cursor`, with the same filters, for the following page; `next` is `null` on the last page. A cursor is opaque. It holds the sort key of the last row returned, so rows added or removed between calls are neither repeated nor skipped. A cursor the server did not make is `invalid_input`. The repositories still read the org's whole list and the tool cuts the page; paging in SQL can wait until lists are large.
-- **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by player-core's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
+- **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by the contract's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
 - **`get_screen`.** Credentials come back without their hashes.
 - **`publish_manifest_to_screen`.** The manifest must already be stored for that screen. `sf push` stores manifests now; the server compiler will in M3-13.
 - **Templates.** An org sees its own templates and the base ones (`owner: 'base'`). Each version carries its manifest, its status (`draft`, `approved`, `retired`) and the server's check report. Only approved versions should be offered for new spots.
@@ -72,10 +72,10 @@ Details:
 
 - **Uploading an image.** The browser does the scaling with `@signforge/media`, and `uploadImage` there runs these steps:
   1. **`create_asset_upload`.** The input names each rendition (`landscape`, `portrait`) with its `sha256`, `type` (JPEG, PNG, WebP or SVG), `size` in bytes (at most 20 MB), and `width` and `height` as displayed (`null` for SVG).
-     - A raster rendition must be no larger than the cover rule allows for its screen box (`fitsScreenBox` in the contract): at least one side within 1920x1080, or 1080x1920 for portrait.
+     - A raster rendition must be no larger than the cover rule allows for its screen box (`imageSizeProblem` in the contract): at least one side within 1920x1080, or 1080x1920 for portrait. It must also decode to at most `MAX_IMAGE_PIXELS` (3840x2160, about 8.3 million pixels), so a 65,535x1,080 strip, which has a side in the box, is still refused.
      - It creates the asset as `pending`. For each file the org does not already hold, it returns `{ sha256, method: 'PUT', url, headers, expiresAt }`. The URL is an R2 presigned PUT to `up/<org>/<asset>/<sha256>` that lasts 15 minutes. It signs the content type and length, so R2 refuses any other.
   2. **PUT** each file to its `url` with the `headers` given.
-  3. **`finalize_asset`.** It reads each file back from R2, re-hashes it, checks the size, reads the type and pixel size from the bytes (`readImageInfo`), and checks the screen box again.
+  3. **`finalize_asset`.** It reads each file back from R2, re-hashes it, checks the size, reads the type and pixel size from the bytes (`readImageInfo`), and checks the screen box and pixel cap again.
      - **All pass.** The files move to `o/<org>/b/<sha256>` and the asset becomes `verified`.
      - **Any fails.** Every upload for the asset is deleted, the asset becomes `rejected`, and the call is refused with `invalid_input`, one `details` entry per problem. That refusal is audited, because it changed the asset.
      - **A file not yet uploaded.** The call is refused and nothing changes.
