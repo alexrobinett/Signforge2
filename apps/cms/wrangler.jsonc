@@ -4,21 +4,32 @@
   // routes take `<host>/api/*`, and this Worker takes the rest of `<host>/*`. Routes are added per
   // environment when hostnames exist (M3-24). See apps/cms/README.md.
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "signforge-cms",
-  "main": "@tanstack/react-start/server-entry",
+  // No top-level entry point, name, vars or API binding, on purpose, as in apps/api: every
+  // environment is explicit, so a build or deploy that names none fails instead of shipping dev
+  // settings. Vite picks the environment from CLOUDFLARE_ENV; the package scripts set it for dev.
+  // Each environment's `API` is that environment's API Worker, called from server code without
+  // leaving Cloudflare.
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  "vars": { "ENVIRONMENT": "dev" },
-  // The API, called from server code without leaving Cloudflare. In dev it is the API's
-  // `wrangler dev`, found through Wrangler's dev registry.
-  "services": [{ "binding": "API", "service": "signforge-api" }],
   "env": {
+    // Local development and tests (`CLOUDFLARE_ENV=dev vite dev`). Never deployed. The API is its
+    // `wrangler dev --env dev`, found through Wrangler's dev registry.
+    "dev": {
+      "name": "signforge-cms",
+      "main": "@tanstack/react-start/server-entry",
+      "vars": { "ENVIRONMENT": "dev" },
+      "services": [{ "binding": "API", "service": "signforge-api" }]
+    },
     "demo": {
+      "name": "signforge-cms-demo",
+      "main": "@tanstack/react-start/server-entry",
       "vars": { "ENVIRONMENT": "demo" },
       "services": [{ "binding": "API", "service": "signforge-api-demo" }]
     },
     "prod": {
+      "name": "signforge-cms-prod",
+      "main": "@tanstack/react-start/server-entry",
       "vars": { "ENVIRONMENT": "prod" },
       "services": [{ "binding": "API", "service": "signforge-api-prod" }]
     }
