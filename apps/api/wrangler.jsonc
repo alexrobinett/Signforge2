@@ -17,7 +17,7 @@
     "demo": {
       "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
       "send_email": [{ "name": "EMAIL" }],
-      "d1_databases": [{ "binding": "DB", "database_name": "signforge-demo", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
+      "d1_databases": [{ "binding": "DB", "database_name": "signforge-demo", "database_id": "ba1469f4-9efc-4bea-bb76-9c53c0ae6238", "migrations_dir": "../../packages/db/migrations" }],
       "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-demo" }]
     },
     "prod": {
