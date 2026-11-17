@@ -41,6 +41,7 @@ function Sidebar({ shell }: { shell: Shell }) {
 export function AppShell({ shell, children }: { shell: Shell; children: ReactNode }) {
   const [drawer, setDrawer] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the trigger: navigating closes the drawer.
   useEffect(() => setDrawer(false), [pathname]);
 
   return (
