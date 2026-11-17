@@ -199,7 +199,7 @@ describe('GET /v1/device/blobs/:sha256', () => {
   it('streams a blob the desired manifest lists, cached forever', async () => {
     const res = await get(`/blobs/${BLOB2}`, a.credential);
     expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(res.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
     expect(res.headers.get('content-type')).toBe('image/png');
     expect(await res.text()).toBe('blob bbbb');
   });

@@ -400,6 +400,15 @@ export function scoped(d1: D1Database, orgId: string) {
             .where(and(eq(tv.orgId, orgId), eq(tv.templateId, templateId), eq(tv.version, version)))
             .get();
         },
+        /** A base version whose bundle is this hash: base bundles live in R2's shared prefix, which every org may read. */
+        baseBundle: (bundleSha256: string) => {
+          const tv = s.templateVersions;
+          return db
+            .select()
+            .from(tv)
+            .where(and(isNull(tv.orgId), eq(tv.bundleSha256, bundleSha256)))
+            .get();
+        },
         /** Versions of one template, if the org can see it. */
         forTemplate: async (templateId: string) => {
           const tv = s.templateVersions;

@@ -7,6 +7,7 @@ import { registry } from '@signforge/tools';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import app from '../src/index';
+import { orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
 
 /**
@@ -86,6 +87,7 @@ describe('requests', () => {
     assetId = (
       await scoped(env.DB, org.id).assets.insert({ kind: 'image', name: 'a.png', sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 })
     ).id;
+    await env.BLOBS.put(orgBlobKey(org.id, 'a'.repeat(64)), 'a');
     brandKitId = (
       await scoped(env.DB, org.id).brandKits.insert({
         name: 'House',
@@ -105,7 +107,11 @@ describe('requests', () => {
     expect(gets.length).toBeGreaterThan(0);
     for (const r of gets) {
       writes.length = 0;
-      const path = r.slice('GET '.length).replace(/:\w+/g, 'x');
+      // A hash names the org's one file; any other parameter is a placeholder.
+      const path = r
+        .slice('GET '.length)
+        .replace(/:sha256/g, 'a'.repeat(64))
+        .replace(/:\w+/g, 'x');
       const res = await owner.get(path);
       expect(res.status, r).toBe(200);
       expect(ours(), r).toEqual([]);
