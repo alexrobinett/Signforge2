@@ -13,7 +13,9 @@ html, body { background: #05070d; }
 .stage { --u: 1vmin; --out: calc(var(--sf-duration, 10s) - 0.6s); position: fixed; inset: 0; overflow: hidden;
   background: radial-gradient(120% 120% at 50% 110%, #101a33 0%, #05070d 60%); display: grid; place-items: center; }
 .blob { position: absolute; border-radius: 50%; opacity: .5; will-change: transform; animation: wander 40s ease-in-out infinite alternate; }
-.b1 { width: 80vmin; height: 80vmin; left: -20vmin; top: -25vmin; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 45%, transparent), transparent); }
+/* The accent glow sits behind the time and breathes slowly, wide and faint, so it reads as light, not a smudge. */
+.b1 { width: 130vmin; height: 90vmin; left: 50%; top: 50%; margin: -45vmin 0 0 -65vmin; opacity: .4; animation-name: breathe; animation-duration: 24s;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 30%, transparent), color-mix(in srgb, var(--accent) 10%, transparent) 55%, transparent); }
 .b2 { width: 70vmin; height: 70vmin; right: -15vmin; bottom: -30vmin; animation-duration: 52s; animation-direction: alternate-reverse;
   background: radial-gradient(closest-side, rgba(170, 120, 255, .35), transparent); }
 .content { position: relative; text-align: center; will-change: transform; animation: drift 90s ease-in-out infinite alternate; }
@@ -28,5 +30,6 @@ html, body { background: #05070d; }
 [data-orientation="portrait"] .time { font-size: calc(var(--u) * 24); }
 @keyframes rise-in { from { transform: translateY(5vh); opacity: 0 } }
 @keyframes fade-out { to { opacity: 0 } }
+@keyframes breathe { from { transform: scale(.92) } to { transform: scale(1.08) } }
 @keyframes wander { to { transform: translate(18vmin, 12vmin) scale(1.15) } }
 @keyframes drift { from { transform: translate(-1.2vmin, -1vmin) } to { transform: translate(1.2vmin, 1vmin) } }

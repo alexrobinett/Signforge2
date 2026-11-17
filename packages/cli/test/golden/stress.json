@@ -180,7 +180,7 @@
         "imageRight": "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04"
       },
       "data": {
-        "detail": "Selected 473 mL cans",
+        "detail": "Selected 500 mL bottles",
         "disclaimer": "While supplies last.",
         "points": "650",
         "price": "7",
@@ -207,7 +207,7 @@
         "empty": "Nothing scheduled",
         "events": [],
         "rows": 5,
-        "subtitle": "From Google Calendar",
+        "subtitle": "United States",
         "title": "Holidays"
       },
       "durationMs": 10000,
@@ -224,35 +224,42 @@
         "events": [
           {
             "allDay": false,
-            "end": "2026-11-17T23:59:00-05:00",
-            "location": "Room 4B",
+            "end": "2026-11-17T10:30:00-05:00",
+            "location": "Product design",
             "start": "2026-11-17T09:00:00-05:00",
             "title": "Design review"
           },
           {
             "allDay": false,
-            "end": "2026-11-18T14:30:00-05:00",
-            "location": "Room 4B",
-            "start": "2026-11-18T13:00:00-05:00",
+            "end": "2026-11-17T14:30:00-05:00",
+            "location": "Operations",
+            "start": "2026-11-17T13:00:00-05:00",
             "title": "Quarterly planning with the regional team"
           },
           {
-            "allDay": true,
-            "end": "2026-11-26",
-            "location": "",
-            "start": "2026-11-25",
-            "title": "Thanksgiving potluck"
+            "allDay": false,
+            "end": "2026-11-18T12:00:00-05:00",
+            "location": "People team",
+            "start": "2026-11-18T10:00:00-05:00",
+            "title": "Candidate interviews"
           },
           {
             "allDay": false,
-            "end": "2026-11-30T11:00:00-05:00",
-            "location": "Video call",
-            "start": "2026-11-30T10:00:00-05:00",
+            "end": "2026-11-19T16:00:00-05:00",
+            "location": "IT, with a video link",
+            "start": "2026-11-19T15:00:00-05:00",
             "title": "Vendor demo"
+          },
+          {
+            "allDay": false,
+            "end": "2026-11-20T12:00:00-05:00",
+            "location": "Engineering",
+            "start": "2026-11-20T11:00:00-05:00",
+            "title": "Sprint retrospective"
           }
         ],
         "rows": 4,
-        "subtitle": "Today's bookings",
+        "subtitle": "This week's bookings",
         "title": "Room 4B"
       },
       "durationMs": 8000,

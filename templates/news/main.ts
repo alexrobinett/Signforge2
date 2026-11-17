@@ -6,14 +6,15 @@ interface Item {
   source: string;
 }
 
-function ago(iso: string, now: Date): string {
+/** "33 minutes ago", "il y a 2 heures": the item's age in the screen's language. */
+function ago(iso: string, now: Date, locale: string): string {
   const t = new Date(iso).getTime();
   if (!iso || Number.isNaN(t)) return '';
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const mins = Math.max(0, Math.round((now.getTime() - t) / 60000));
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 60) return rtf.format(-mins, 'minute');
   const hrs = Math.round(mins / 60);
-  return hrs < 24 ? `${hrs} hr ago` : `${Math.round(hrs / 24)} d ago`;
+  return hrs < 24 ? rtf.format(-hrs, 'hour') : rtf.format(-Math.round(hrs / 24), 'day');
 }
 
 defineTemplate({
@@ -28,14 +29,17 @@ defineTemplate({
     document.getElementById('credit')!.textContent = credit;
     if (lead) {
       document.getElementById('lead')!.textContent = lead.title;
-      document.getElementById('age')!.textContent = ago(lead.published, now);
+      document.getElementById('age')!.textContent = ago(lead.published, now, ctx.locale);
     }
+    // Portrait has the height for more secondary headlines; drop any that do not fit.
     const more = document.getElementById('more')!;
-    for (const item of rest.slice(0, 3)) {
+    for (const item of rest.slice(0, ctx.orientation === 'portrait' ? 5 : 3)) {
       const li = document.createElement('li');
       li.textContent = item.title;
       more.appendChild(li);
     }
+    const main = document.querySelector('main')!;
+    while (more.children.length && main.scrollHeight > main.clientHeight + 1) more.lastElementChild!.remove();
 
     // The crawl holds the headlines twice and slides by exactly one copy, so it loops seamlessly.
     const crawl = document.getElementById('crawl')!;

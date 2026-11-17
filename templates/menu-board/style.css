@@ -33,10 +33,17 @@ h1::after { content: ""; display: block; width: calc(var(--u) * 10); height: .5v
 .price { font-size: calc(var(--u) * 3.7); font-weight: 800; color: var(--accent); }
 .desc { font-size: calc(var(--u) * 2.4); color: var(--muted); margin-top: calc(var(--u) * .5); }
 .desc:empty { display: none; }
-.footnote { text-align: center; font-size: calc(var(--u) * 2); color: var(--muted); margin-top: calc(var(--u) * 3);
+.footnote { text-align: center; font-size: calc(var(--u) * 2.8); color: var(--muted); margin-top: calc(var(--u) * 3);
   animation: fade-in .8s ease both, fade-out .5s ease-in forwards; animation-delay: 1s, var(--out); }
 .footnote:empty { display: none; }
-[data-orientation="portrait"] .items { grid-template-columns: minmax(0, 1fr); }
+/* Portrait: header, list and footnote sit together as one block centred on the screen, with
+   larger rows, instead of the list floating in the middle of a tall gap. */
+[data-orientation="portrait"] .stage { justify-content: center; }
+[data-orientation="portrait"] .items { flex: 0 1 auto; min-height: 0; grid-template-columns: minmax(0, 1fr); row-gap: calc(var(--u) * 3); }
+[data-orientation="portrait"] .item { padding: calc(var(--u) * 2) calc(var(--u) * 2.6); }
+[data-orientation="portrait"] .name, [data-orientation="portrait"] .price { font-size: calc(var(--u) * 4.4); }
+[data-orientation="portrait"] .desc { font-size: calc(var(--u) * 2.9); }
+[data-orientation="portrait"] .footnote { margin-top: calc(var(--u) * 5); }
 @keyframes rise-in { from { transform: translateY(3vh); opacity: 0 } }
 @keyframes fade-in { from { opacity: 0 } }
 @keyframes fade-out { to { opacity: 0 } }

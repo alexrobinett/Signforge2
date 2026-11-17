@@ -26,8 +26,11 @@ body { font-family: "Inter", sans-serif; color: #fff; }
 .glow-in { position: absolute; inset: 0; border-radius: 50%;
   background: radial-gradient(circle, rgba(120,190,255,.5), rgba(120,190,255,.18) 40%, rgba(120,190,255,0) 70%); }
 
-.copy { padding-left: calc(var(--u) * 8); position: relative; z-index: 2; }
-.copy::before { content: ""; position: absolute; inset: -4vmin -2vmin -4vmin 2vmin; border-radius: 4vmin; z-index: -1;
+/* The panel is the copy block's own box: even padding on every side, and a margin that keeps
+   it at least 5vmin from each screen edge in both orientations. */
+.copy { margin-left: calc(var(--u) * 5); padding: calc(var(--u) * 5); justify-self: start; min-width: 0; max-width: calc(100% - var(--u) * 5);
+  position: relative; z-index: 2; }
+.copy::before { content: ""; position: absolute; inset: 0; border-radius: 4vmin; z-index: -1;
   background: linear-gradient(135deg, rgba(255,255,255,.16), rgba(255,255,255,.04));
   border: .15vmin solid rgba(255,255,255,.18);
   animation: fade-in .6s ease both, fade-out .5s ease-in forwards; animation-delay: 0s, var(--out); }
@@ -45,7 +48,7 @@ body { font-family: "Inter", sans-serif; color: #fff; }
 .l3 { font-size: calc(var(--u) * 3); font-weight: 500; text-transform: none; animation-delay: .65s, var(--out); }
 
 .products { position: relative; height: 100%; z-index: 1; }
-.product { position: absolute; bottom: 9%; height: 70%; aspect-ratio: 1 / 2.8; will-change: transform, opacity;
+.product { position: absolute; bottom: 8%; height: 60%; aspect-ratio: 1 / 2.8; will-change: transform, opacity;
   animation: rise-in 1.1s cubic-bezier(.2,1.2,.3,1) both, sink-out .6s ease-in forwards; }
 .bob { width: 100%; height: 100%; animation: bob 3.2s ease-in-out infinite alternate; will-change: transform; }
 .product img { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -53,10 +56,11 @@ body { font-family: "Inter", sans-serif; color: #fff; }
 .product::before { content: ""; position: absolute; left: -10%; right: -10%; bottom: -4%; height: 9%; border-radius: 50%;
   background: radial-gradient(closest-side, rgba(0,0,0,.5), rgba(0,0,0,0)); }
 .p1 { left: 14%; animation-delay: .6s, var(--out); } .p1 .bob { animation-delay: -.4s; }
-.p2 { left: 36%; height: 80%; z-index: 2; animation-delay: .45s, var(--out); }
+.p2 { left: 36%; height: 69%; z-index: 2; animation-delay: .45s, var(--out); }
 .p3 { left: 60%; animation-delay: .75s, var(--out); } .p3 .bob { animation-delay: -1.1s; }
 
-.badge { position: absolute; right: 5%; top: 7%; width: calc(var(--u) * 27); aspect-ratio: 1; z-index: 3;
+/* Top right, above the shortest product's cap. */
+.badge { position: absolute; right: 4%; top: 4%; width: calc(var(--u) * 24); aspect-ratio: 1; z-index: 3;
   display: grid; place-items: center; text-align: center; will-change: transform, opacity;
   animation: badge-in .9s cubic-bezier(.2,1.5,.3,1) both, shrink-out .5s ease-in forwards; animation-delay: 1s, var(--out); }
 .badge .disc { position: absolute; inset: 6%; border-radius: 50%; background: #fff;
@@ -67,15 +71,16 @@ body { font-family: "Inter", sans-serif; color: #fff; }
 .badge b { display: block; font-size: calc(var(--u) * 9); letter-spacing: -.03em; }
 
 .legal { position: absolute; left: calc(var(--u) * 8); right: calc(var(--u) * 8); bottom: calc(var(--u) * 3.5);
-  font-size: calc(var(--u) * 1.6); z-index: 3; --rest: .7;
+  font-size: calc(var(--u) * 2.4); z-index: 3; --rest: .75;
   animation: fade-in .8s ease both, fade-out .5s ease-in forwards; animation-delay: 1.2s, var(--out); }
 
 [data-orientation="portrait"] .stage { grid-template-columns: 1fr; grid-template-rows: 44fr 56fr; }
-[data-orientation="portrait"] .copy { padding: calc(var(--u) * 10) calc(var(--u) * 8) 0; align-self: start; }
+[data-orientation="portrait"] .copy { margin: calc(var(--u) * 8) calc(var(--u) * 5) 0; align-self: start; }
 [data-orientation="portrait"] .glow { right: -10vmin; top: 68%; }
-[data-orientation="portrait"] .badge { top: 40%; right: 6%; }
-[data-orientation="portrait"] .product { height: 78%; }
-[data-orientation="portrait"] .p2 { height: 88%; }
+/* Between the copy panel and the products, right of the tallest bottle. */
+[data-orientation="portrait"] .badge { top: 40%; right: 5%; }
+[data-orientation="portrait"] .product { height: 68%; }
+[data-orientation="portrait"] .p2 { height: 76%; }
 
 @keyframes pop-in    { from { transform: scale(.3); opacity: 0 } }
 @keyframes slide-in  { from { transform: translateX(-30vw); opacity: 0 } }
