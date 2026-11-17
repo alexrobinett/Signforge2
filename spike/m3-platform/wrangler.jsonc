@@ -1,0 +1,18 @@
+{
+  // M3-00 throwaway spike. Every resource is prefixed sf-spike- and deleted after the run.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "sf-spike-m3",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "d1_databases": [{ "binding": "DB", "database_name": "sf-spike-db", "database_id": "050f7215-8ccd-4925-bf75-9f2fcf541bd8", "migrations_dir": "migrations" }],
+  // R2 is not enabled on the account (API error 10042), so the bucket exists only locally.
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "sf-spike-media" }],
+  "durable_objects": { "bindings": [{ "name": "SCREEN", "class_name": "SpikeScreen" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SpikeScreen"] }],
+  "queues": {
+    "producers": [{ "binding": "FANOUT", "queue": "sf-spike-fanout" }],
+    "consumers": [{ "queue": "sf-spike-fanout", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 0 }]
+  }
+}

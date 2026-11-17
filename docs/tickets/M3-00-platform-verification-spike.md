@@ -1,6 +1,6 @@
 # M3-00 Platform verification spike
 
-Status: open  ·  Size: M  ·  Depends on: nothing
+Status: done  ·  Size: M  ·  Depends on: nothing
 
 ## Goal
 
@@ -25,6 +25,6 @@ Settle every **verify** item in `docs/backend-plan.md` with a small, throwaway p
 
 ## Done when
 
-- [ ] `spike/m3-platform/RESULTS.md` answers each item yes or no with the evidence and the version tested.
-- [ ] `docs/backend-plan.md` has every **verify** replaced with the finding, or a changed plan where the answer was no.
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [x] `spike/m3-platform/RESULTS.md` answers each item yes or no with the evidence and the version tested.
+- [x] `docs/backend-plan.md` has every **verify** replaced with the finding, or a changed plan where the answer was no.
+- [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
