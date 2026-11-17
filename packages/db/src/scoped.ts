@@ -14,7 +14,7 @@ import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
-import { commit, fullRow, staged, updateSet, type Staged, type Write } from './writes';
+import { commit, fullRow, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
@@ -34,11 +34,6 @@ export class NotInOrgError extends Error {
 type Guarded = 'orgId' | 'id' | 'createdAt' | 'publishedJson' | 'publishedAt';
 export type NewRow<T extends SQLiteTable> = Omit<T['$inferInsert'], Guarded> & { id?: string };
 export type RowPatch<T extends SQLiteTable> = Partial<Omit<T['$inferInsert'], Guarded>>;
-
-function strip<T extends object>(v: T): T {
-  const { orgId: _o, id: _i, createdAt: _c, publishedJson: _pj, publishedAt: _pa, ...rest } = v as Record<string, unknown>;
-  return rest as T;
-}
 
 /** D1 binds at most 100 parameters per statement; leave one for the org. */
 function chunk<T>(rows: T[], columns: number): T[][] {

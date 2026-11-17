@@ -46,6 +46,15 @@ interface ColumnInfo {
 }
 
 /**
+ * A caller's values without the fields it may never set (`Guarded` in ./scoped.ts): the org, the
+ * id, the creation time and a draft's published version. `scoped` and `platform` both use it.
+ */
+export function strip<T extends object>(v: T): T {
+  const { orgId: _o, id: _i, createdAt: _c, publishedJson: _pj, publishedAt: _pa, ...rest } = v as Record<string, unknown>;
+  return rest as T;
+}
+
+/**
  * Every column's value for a new row: what was given, else its default, else null. Defaults are
  * resolved here, not by SQLite, so the staged row is the stored one.
  */

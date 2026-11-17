@@ -71,3 +71,11 @@ describe('import boundary', () => {
     }
   });
 });
+
+describe('guarded fields', () => {
+  // `scoped` and `platform` must drop the same fields from a caller's values: one `strip`.
+  it('are stripped by one function, in src/writes.ts', () => {
+    const defining = readdirSync(join(PKG, 'src')).filter((f) => /\bfunction strip\b/.test(readFileSync(join(PKG, 'src', f), 'utf8')));
+    expect(defining).toEqual(['writes.ts']);
+  });
+});

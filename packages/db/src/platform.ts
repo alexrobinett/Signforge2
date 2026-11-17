@@ -13,17 +13,11 @@ import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { assertId, newId } from './ids';
 import type { NewRow, RowPatch } from './scoped';
 import * as s from './schema';
-import { commit, fullRow, staged, updateSet, type Staged, type Write } from './writes';
+import { commit, fullRow, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type Template = typeof s.templates.$inferSelect;
 type TemplateVersion = typeof s.templateVersions.$inferSelect;
-
-/** Fields a caller may never set, as in `scoped`. */
-function strip<T extends object>(v: T) {
-  const { orgId: _o, id: _i, createdAt: _c, ...rest } = v as Record<string, unknown>;
-  return rest;
-}
 
 export function platform(d1: D1Database) {
   const db: Db = drizzle(d1);
