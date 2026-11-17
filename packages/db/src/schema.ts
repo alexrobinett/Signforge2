@@ -41,6 +41,8 @@ export const screens = sqliteTable(
     /** The contract's `DisplayHours`, or null for always on. */
     displayHoursJson: text('display_hours_json'),
     desiredManifestId: text('desired_manifest_id'),
+    /** The desired manifest before the current one. A screen may still be fetching its files, so they stay servable. */
+    previousManifestId: text('previous_manifest_id'),
     reportedManifestId: text('reported_manifest_id'),
     lastSeenAt: integer('last_seen_at'),
     playerVersion: text('player_version'),
