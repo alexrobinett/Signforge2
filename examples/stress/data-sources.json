@@ -6,7 +6,8 @@
   "holidays": {
     "url": "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics",
     "format": "ical",
-    "refreshS": 3600
+    "refreshS": 3600,
+    "horizonDays": 120
   },
   "news": {
     "url": "https://feeds.npr.org/1001/rss.xml",

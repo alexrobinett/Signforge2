@@ -43,7 +43,12 @@ defineTemplate({
 
     // The crawl holds the headlines twice and slides by exactly one copy, so it loops seamlessly.
     const crawl = document.getElementById('crawl')!;
-    if (!items.length) return;
+    // With no headlines (a feed that failed or has not loaded yet) there is no crawl: hide the bar
+    // rather than show an empty white strip.
+    if (!items.length) {
+      document.querySelector('footer')!.hidden = true;
+      return;
+    }
     for (let copy = 0; copy < 2; copy++) {
       for (const item of items) {
         const span = document.createElement('span');

@@ -43,6 +43,7 @@ M3-00, M3-01 and M3-22 have no dependencies and can run in parallel. The first P
 | [M3-21](M3-21-video-upload-and-check.md) | Video upload and check | M | M3-14, M3-00 |
 | [M3-22](M3-22-feed-normalisers.md) | Feed normalisers | S | — |
 | [M3-23](M3-23-data-source-poller.md) | Data source poller | M | M3-22, M3-07, M3-12 |
+| [M3-25](M3-25-brand-tokens-and-template-polish.md) | Brand tokens and template polish | L | owner decisions |
 | [M3-24](M3-24-hardening-and-environments.md) | Hardening and environments | M | M3-23, M3-19, M3-21 |
 
 Sizes: S is up to half a day of agent work, M about a day, L more than a day (split it if it grows).

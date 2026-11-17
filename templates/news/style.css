@@ -37,6 +37,7 @@ footer { display: flex; align-items: stretch; height: calc(var(--u) * 9); margin
 .label { flex: none; display: grid; place-items: center; padding: 0 calc(var(--u) * 3); background: var(--accent); color: #fff;
   font-size: calc(var(--u) * 2.6); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; z-index: 1; }
 .label:empty { display: none; }
+footer[hidden] { display: none; }
 .track { flex: 1; overflow: hidden; display: flex; align-items: center; }
 .crawl { flex: none; display: flex; white-space: nowrap; font-size: calc(var(--u) * 3.6); font-weight: 600; will-change: transform;
   animation: crawl var(--crawl-s, 60s) linear infinite; }

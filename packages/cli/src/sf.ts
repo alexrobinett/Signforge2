@@ -247,7 +247,7 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
  * the server's poller (M3-23) exists. Failures are reported per source; the others still write.
  */
 async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
-  const sources = readJson<Record<string, { url: string; format?: 'json' | 'ical' | 'rss' }>>(join(projectDir, 'data-sources.json'));
+  const sources = readJson<Record<string, { url: string; format?: 'json' | 'ical' | 'rss'; horizonDays?: number }>>(join(projectDir, 'data-sources.json'));
   mkdirSync(outDir, { recursive: true });
   const now = new Date();
   let failed = 0;
@@ -256,7 +256,7 @@ async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
       const res = await fetch(src.url, { headers: { 'user-agent': 'signforge-dev' }, signal: AbortSignal.timeout(20_000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.text();
-      const data = src.format === 'ical' ? normaliseFeed('ical', body, { now }) : src.format === 'rss' ? normaliseFeed('rss', body) : JSON.parse(body);
+      const data = src.format === 'ical' ? normaliseFeed('ical', body, { now, ...(src.horizonDays ? { horizonDays: src.horizonDays } : {}) }) : src.format === 'rss' ? normaliseFeed('rss', body) : JSON.parse(body);
       const snapshot: DataSnapshot = { id, fetchedAt: now.toISOString(), data };
       writeFileSync(join(outDir, `${id}.json`), JSON.stringify(snapshot));
       const count = src.format === 'ical' ? `${(data as CalendarFeed).events.length} events` : src.format === 'rss' ? `${(data as NewsFeed).items.length} items` : 'json';

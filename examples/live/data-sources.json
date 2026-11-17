@@ -32,12 +32,14 @@
   "holidays-us": {
     "url": "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics",
     "format": "ical",
-    "refreshS": 3600
+    "refreshS": 3600,
+    "horizonDays": 120
   },
   "holidays-uk": {
     "url": "https://calendar.google.com/calendar/ical/en.uk%23holiday%40group.v.calendar.google.com/public/basic.ics",
     "format": "ical",
-    "refreshS": 3600
+    "refreshS": 3600,
+    "horizonDays": 120
   },
   "weather-atlanta": {
     "url": "https://api.open-meteo.com/v1/forecast?latitude=33.749&longitude=-84.388&current=temperature_2m,weather_code,is_day,wind_speed_10m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FNew_York&forecast_days=1",

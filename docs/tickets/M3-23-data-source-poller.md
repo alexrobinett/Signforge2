@@ -18,6 +18,8 @@ Fetch feeds on a schedule in the Worker and deliver snapshots to screens; retire
 - Per-org limits from the plan.
 - Snapshot shape: add a content `version` (hash) and `checkedAt`, a staleness limit after which a screen shows the static fallback, and the 64 kB cap, in `packages/contract`. Retire `refreshS` as a screen-side poll interval.
 - `packages/feeds` caps a recurring event at 500 occurrences counted from its first, so a daily event begun more than about 500 days ago shows nothing. Raise the cap or start expansion near `now` (see `packages/feeds/README.md`).
+- Calendar sources carry a look-ahead (`horizonDays`, as `sf feeds` reads from `data-sources.json`): a holiday board needs months, a meeting room days. Store it on the data source and pass it to `parseCalendar`.
+- News language: carry the feed's language (RSS `<language>`, Atom `xml:lang`) into `NewsFeed` (contract first, own commit) so the news template's age label is in the feed's language, falling back to the screen's locale. The visual re-review found a French feed labelled "11 minutes ago".
 
 ## Out of scope
 
