@@ -17,6 +17,7 @@ export const publishManifestToScreen = defineTool({
     screenId: id('screen'),
     manifestId: z.string().regex(SHA256, 'not a manifest id (64 lowercase hex characters)').describe("The manifest's id, the SHA-256 in its `id` field"),
   }),
+  output: z.object({ screenId: z.string(), manifestId: z.string(), changed: z.boolean().describe('False if it was already the desired manifest') }),
   example: { screenId: 'scr_example', manifestId: '0'.repeat(64) },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, blobs, input }) => {
