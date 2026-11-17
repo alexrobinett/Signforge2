@@ -9,6 +9,7 @@ import type * as s from './schema';
 export { scoped, NotInOrgError, type OrgScope, type NewRow, type RowPatch } from './scoped';
 export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
+export type { Staged, Write } from './writes';
 export { findDeviceScreen, type DeviceScreen } from './device';
 export { findMembership, organizationExists } from './members';
 

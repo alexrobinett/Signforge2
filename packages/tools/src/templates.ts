@@ -164,7 +164,7 @@ export const registerTemplateVersion = defineSharedTool({
     sourcesId: '1'.repeat(64),
   },
   target: (_input, output) => ({ kind: 'template_version', id: output.version.id }),
-  handler: async ({ org, blobs, input }) => {
+  handler: async ({ org, blobs, input, write }) => {
     const [bundle, sourcesObj] = await Promise.all([blobs.get(blobKey(org, input.bundleId)), blobs.get(blobKey(org, input.sourcesId))]);
     if (!bundle) throw new ToolError('not_found', `bundle ${input.bundleId} has not been uploaded`);
     if (!sourcesObj) throw new ToolError('not_found', `sources ${input.sourcesId} have not been uploaded`);
@@ -198,13 +198,14 @@ export const registerTemplateVersion = defineSharedTool({
       }
     }
 
+    // A new template and its first version are written together.
     const template = existing
-      ? existing.name === manifest.name ? existing : (await org.templates.update(existing.id, { name: manifest.name }))!
-      : await org.templates.insert({ key: manifest.id, name: manifest.name });
+      ? write(org.templates.stage.update(existing, { name: manifest.name }))
+      : write(org.templates.stage.insert({ key: manifest.id, name: manifest.name }));
     const stored: StoredCheckReport = { ...report, checkedAt: Date.now(), sourcesSha256: input.sourcesId };
-    const version = await org.templates.versions.insert({
+    const version = write(org.templates.versions.stage.insert({
       templateId: template.id, version: manifest.version, manifestJson, bundleSha256: input.bundleId, status: 'draft', checkReportJson: JSON.stringify(stored),
-    });
+    }));
     return { template: templateView(template, [version]), version: versionView(version), changed: true };
   },
 });
@@ -223,14 +224,12 @@ export const setTemplateVersionStatus = defineSharedTool({
   output: z.object({ version: versionOutput, changed: z.boolean() }),
   example: { templateVersionId: 'tpv_example', status: 'approved' },
   target: (input) => ({ kind: 'template_version', id: input.templateVersionId }),
-  handler: async ({ org, input }) => {
+  handler: async ({ org, input, write }) => {
     // The scope's own version only: an org may read a base version but not change it.
     const current = await org.templates.versions.get(input.templateVersionId);
     if (!current || current.orgId !== org.orgId) throw notFound('template version', input.templateVersionId);
     if (current.status === input.status) return { version: versionView(current), changed: false };
-    const updated = await org.templates.versions.update(current.id, { status: input.status });
-    if (!updated) throw notFound('template version', input.templateVersionId);
-    return { version: versionView(updated), changed: true };
+    return { version: versionView(write(org.templates.versions.stage.update(current, { status: input.status }))), changed: true };
   },
 });
 

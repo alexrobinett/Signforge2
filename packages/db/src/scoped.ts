@@ -13,6 +13,7 @@ import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
 import * as s from './schema';
+import { commit, fullRow, staged, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
@@ -66,6 +67,22 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
       return (await db.update(t).set(set as never).where(mine(id)).returning().get()) as Row | undefined;
     },
     delete: async (id: string): Promise<boolean> => (await db.delete(t).where(mine(id)).returning({ id: t.id }).all()).length > 0,
+    /** The same changes, staged for the scope's `commit` (./writes.ts). */
+    stage: {
+      insert: (values: NewRow<T>): Staged<Row> => {
+        const id = values.id ?? newId(prefix);
+        assertId(id);
+        const row = fullRow(t, { ...strip(values as object), id, orgId });
+        return staged(row as Row, db.insert(t).values(row as never));
+      },
+      /** `current` is the row as read; the staged row is it with the patch applied. An empty patch stages nothing. */
+      update: (current: Row, patch: RowPatch<T>): Staged<Row> => {
+        const set = updateSet(t, strip(patch as Record<string, unknown>));
+        if (!Object.keys(set).length) return { row: current, writes: [] };
+        return staged({ ...current, ...set } as Row, db.update(t).set(set as never).where(mine((current as { id: string }).id)));
+      },
+      delete: (id: string): Staged => staged(undefined, db.delete(t).where(mine(id))),
+    },
   };
 }
 
@@ -111,6 +128,19 @@ export function scoped(d1: D1Database, orgId: string) {
   };
 
   const m = s.screenGroupMembers;
+
+  /**
+   * A group's members replaced. The group may be one staged in the same batch (`knownGroup`).
+   * Throws `NotInOrgError` if the group or any screen is not the org's.
+   */
+  const stageMembers = async (groupId: string, screenIds: readonly string[], knownGroup = false): Promise<Staged> => {
+    if (!knownGroup && !(await screenGroups.get(groupId))) throw new NotInOrgError('group', groupId);
+    const unique = [...new Set(screenIds)];
+    const found = new Set((await screens.getMany(unique)).map((r) => r.id));
+    for (const id of unique) if (!found.has(id)) throw new NotInOrgError('screen', id);
+    const rows = unique.map((screenId) => ({ orgId, groupId, screenId }));
+    return staged(undefined, db.delete(m).where(and(eq(m.orgId, orgId), eq(m.groupId, groupId))), ...chunk(rows, 3).map((part) => db.insert(m).values(part)));
+  };
   const pi = s.playlistItems;
   const ps = s.publishScreens;
   const snap = s.dataSnapshots;
@@ -118,6 +148,8 @@ export function scoped(d1: D1Database, orgId: string) {
 
   return {
     orgId,
+    /** Run staged writes (from any `stage` of this scope) in one atomic batch: all of them take effect, or none. */
+    commit: (writes: readonly Write[]) => commit(db, writes),
     screens: {
       ...screens,
       credentials: {
@@ -143,6 +175,19 @@ export function scoped(d1: D1Database, orgId: string) {
           .returning({ id: sc.id }).get();
         return row !== undefined;
       },
+      stage: {
+        ...screens.stage,
+        /** As `setDesiredManifest`, staged. Stages nothing for a screen the org does not have. */
+        setDesiredManifest: (screenId: string, manifestId: string): Staged => {
+          const sc = s.screens;
+          return staged(undefined, db.update(sc)
+            .set({
+              previousManifestId: sql`CASE WHEN ${sc.desiredManifestId} IS ${manifestId} THEN ${sc.previousManifestId} ELSE ${sc.desiredManifestId} END`,
+              desiredManifestId: manifestId,
+            })
+            .where(and(eq(sc.orgId, orgId), eq(sc.id, screenId))));
+        },
+      },
       /** Ids of the groups a screen belongs to. */
       groupsOf: async (screenId: string) =>
         (await db.select({ id: m.groupId }).from(m).where(and(eq(m.orgId, orgId), eq(m.screenId, screenId))).all()).map((r) => r.id),
@@ -162,15 +207,12 @@ export function scoped(d1: D1Database, orgId: string) {
         (await db.delete(m).where(and(eq(m.orgId, orgId), eq(m.groupId, groupId), eq(m.screenId, screenId))).returning().all()).length > 0,
       /** Replace a group's members. Throws `NotInOrgError`, changing nothing, if the group or any screen is not the org's. */
       setMembers: async (groupId: string, screenIds: readonly string[]) => {
-        if (!(await screenGroups.get(groupId))) throw new NotInOrgError('group', groupId);
-        const unique = [...new Set(screenIds)];
-        const found = new Set((await screens.getMany(unique)).map((r) => r.id));
-        for (const id of unique) if (!found.has(id)) throw new NotInOrgError('screen', id);
-        const rows = unique.map((screenId) => ({ orgId, groupId, screenId }));
-        await db.batch([
-          db.delete(m).where(and(eq(m.orgId, orgId), eq(m.groupId, groupId))),
-          ...chunk(rows, 3).map((part) => db.insert(m).values(part)),
-        ]);
+        await commit(db, (await stageMembers(groupId, screenIds)).writes);
+      },
+      stage: {
+        ...screenGroups.stage,
+        /** As `setMembers`, staged. Pass `newGroup` for a group staged in the same batch, which is not stored yet. */
+        setMembers: (groupId: string, screenIds: readonly string[], { newGroup = false } = {}) => stageMembers(groupId, screenIds, newGroup),
       },
     },
 
@@ -247,6 +289,17 @@ export function scoped(d1: D1Database, orgId: string) {
         await checkTemplateVersion(patch.templateVersionId);
         return spotRows.update(id, patch);
       },
+      stage: {
+        ...spotRows.stage,
+        insert: async (values: NewRow<typeof s.spots>) => {
+          await checkTemplateVersion(values.templateVersionId);
+          return spotRows.stage.insert(values);
+        },
+        update: async (current: typeof s.spots.$inferSelect, patch: RowPatch<typeof s.spots>) => {
+          await checkTemplateVersion(patch.templateVersionId);
+          return spotRows.stage.update(current, patch);
+        },
+      },
     },
 
     playlists: {
@@ -302,12 +355,25 @@ export function scoped(d1: D1Database, orgId: string) {
 
     auditLog: {
       append: (entry: NewRow<typeof s.auditLog>) => audit.insert(entry),
+      /** The audit row for a change, staged to commit with it. */
+      stage: (entry: NewRow<typeof s.auditLog>) => audit.stage.insert(entry),
       /** Newest first. */
       list: ({ limit = 50, before }: { limit?: number; before?: number } = {}) => {
         const a = s.auditLog;
         const where: SQL[] = [eq(a.orgId, orgId)];
         if (before != null) where.push(lt(a.at, before));
         return db.select().from(a).where(and(...where)).orderBy(desc(a.at), desc(a.id)).limit(limit).all();
+      },
+    },
+
+    idempotency: {
+      /** The record of an earlier call made with `key`, if any. */
+      get: (key: string) =>
+        db.select().from(s.idempotencyKeys).where(and(eq(s.idempotencyKeys.orgId, orgId), eq(s.idempotencyKeys.key, key))).get(),
+      /** The record of this call, staged to commit with its change. A second record of the same key fails the batch. */
+      stage: (entry: Omit<typeof s.idempotencyKeys.$inferInsert, 'orgId' | 'createdAt'>): Staged<typeof s.idempotencyKeys.$inferSelect> => {
+        const row = fullRow(s.idempotencyKeys, { ...entry, orgId });
+        return staged(row as typeof s.idempotencyKeys.$inferSelect, db.insert(s.idempotencyKeys).values(row as never));
       },
     },
 

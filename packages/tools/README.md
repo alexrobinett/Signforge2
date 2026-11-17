@@ -45,7 +45,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `update_screen_settings` | screens:manage | editor | `{ screenId, timezone?, locale?, orientation?, displayHours? }` | `{ screen }` |
 | `revoke_screen_credential` | screens:manage | owner | `{ screenId, credentialId }` | `{ credential }` |
 | `list_groups` | content:read | viewer | `{ limit?, cursor? }` | `{ groups: Group[], next }`, by id |
-| `create_group` | screens:manage | editor | `{ name, screenIds? }` | `{ group }` |
+| `create_group` | screens:manage | editor | `{ name, screenIds?, idempotencyKey? }` | `{ group }` |
 | `rename_group` | screens:manage | editor | `{ groupId, name }` | `{ group }` |
 | `delete_group` | screens:manage | editor | `{ groupId }` | `{ deleted }`, or 409 while a schedule entry targets the group |
 | `set_group_members` | screens:manage | editor | `{ groupId, screenIds }` | `{ group }` |
@@ -56,12 +56,13 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `set_template_version_status` | content:publish | owner | `{ templateVersionId, status }` | `{ version, changed }` |
 | `list_assets` | content:read | viewer | `{ query?, status?, limit?, cursor? }` | `{ assets: (Asset & { usageCount })[], next }`, newest first |
 | `get_asset` | content:read | viewer | `{ assetId }` | `{ asset, spotIds }` |
-| `create_asset_upload` | content:draft | editor | `{ name, renditions: { landscape, portrait } }` | `{ asset, uploads }` |
+| `create_asset_upload` | content:draft | editor | `{ name, renditions: { landscape, portrait }, idempotencyKey? }` | `{ asset, uploads }` |
 | `finalize_asset` | content:draft | editor | `{ assetId }` | `{ asset, changed }` |
 | `delete_asset` | content:draft | editor | `{ assetId }` | `{ deleted }`, or 409 while a spot uses the asset |
 
 Details:
 
+- **Idempotency keys.** The creating tools (`create_group`, `create_asset_upload`) take an optional `idempotencyKey`: 8 to 128 printable ASCII characters the caller picks for one creation, such as a UUID. The CMS should send one with every create. A retry with the same key and input returns the first call's output and writes nothing, even when two calls race. The same key with a different input is refused with `conflict`. Keys are per org and kept for now (expiry is M3-24). A retried `create_asset_upload` returns the first call's upload URLs, which expire at their `expiresAt`. `register_template_version` needs no key: a version is registered once, and registering it again returns `changed: false`.
 - **Lists page.** Every `list_*` tool takes `limit` (default 50, at most 200) and `cursor`, and returns `next`. Pass `next` back as `cursor`, with the same filters, for the following page; `next` is `null` on the last page. A cursor is opaque. It holds the sort key of the last row returned, so rows added or removed between calls are neither repeated nor skipped. A cursor the server did not make is `invalid_input`. The repositories still read the org's whole list and the tool cuts the page; paging in SQL can wait until lists are large.
 - **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by the contract's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
 - **`get_screen`.** Credentials come back without their hashes.
@@ -73,9 +74,9 @@ Details:
 - **Uploading an image.** The browser does the scaling with `@signforge/media`, and `uploadImage` there runs these steps:
   1. **`create_asset_upload`.** The input names each rendition (`landscape`, `portrait`) with its `sha256`, `type` (JPEG, PNG, WebP or SVG), `size` in bytes (at most 20 MB), and `width` and `height` as displayed (`null` for SVG).
      - A raster rendition must be no larger than the cover rule allows for its screen box (`imageSizeProblem` in the contract): at least one side within 1920x1080, or 1080x1920 for portrait. It must also decode to at most `MAX_IMAGE_PIXELS` (3840x2160, about 8.3 million pixels), so a 65,535x1,080 strip, which has a side in the box, is still refused.
-     - It creates the asset as `pending`. For each file the org does not already hold, it returns `{ sha256, method: 'PUT', url, headers, expiresAt }`. The URL is an R2 presigned PUT to `up/<org>/<asset>/<sha256>` that lasts 15 minutes. It signs the content type and length, so R2 refuses any other.
+     - It creates the asset as `pending`, with both renditions, in one write. For each file the org does not already hold, it returns `{ sha256, method: 'PUT', url, headers, expiresAt }`. The URL is an R2 presigned PUT to `up/<org>/<asset>/<sha256>` that lasts 15 minutes. It signs the content type and length, so R2 refuses any other.
   2. **PUT** each file to its `url` with the `headers` given.
-  3. **`finalize_asset`.** It reads each file back from R2, re-hashes it, checks the size, reads the type and pixel size from the bytes (`readImageInfo`), and checks the screen box and pixel cap again.
+  3. **`finalize_asset`.** It refuses with `conflict`, changing nothing, unless the asset has both renditions. It reads each file back from R2, re-hashes it, checks the size, reads the type and pixel size from the bytes (`readImageInfo`), and checks the screen box and pixel cap again.
      - **All pass.** The files move to `o/<org>/b/<sha256>` and the asset becomes `verified`.
      - **Any fails.** Every upload for the asset is deleted, the asset becomes `rejected`, and the call is refused with `invalid_input`, one `details` entry per problem. That refusal is audited, because it changed the asset.
      - **A file not yet uploaded.** The call is refused and nothing changes.
@@ -107,19 +108,22 @@ Owner decision Q7 (can editors publish?) is still open. The table shows the defa
 1. Finds the tool.
 2. Checks the role and scopes.
 3. Validates the input.
-4. Runs the handler with `{ org: scoped(db, orgId), actor, input, blobs, uploads }`. In tests it then parses the output with the tool's output schema and throws on a mismatch (`setOutputChecks(true)`, called by `test/setup.ts` here and in `apps/api`). Production skips the parse.
-5. For a tool that changes data, appends to `audit_log`:
+4. For a keyed creation, returns the first result if the key was used before (see Idempotency keys above).
+5. Runs the handler with `{ org: scoped(db, orgId), actor, input, blobs, uploads, write }`.
+   A handler reads through `ctx.org` but never writes: it stages each change with `ctx.write(org.<repo>.stage.<op>(...))`, which returns the row as it will be (see `packages/db`'s README).
+   In tests it then parses the output with the tool's output schema and throws on a mismatch, before anything is written (`setOutputChecks(true)`, called by `test/setup.ts` here and in `apps/api`). Production skips the parse.
+6. Commits the staged writes in one D1 `batch()`, together with an `audit_log` row and, for a keyed creation, its idempotency record. The batch is atomic: if the audit row cannot be written, the change is not made either, and the request fails. The audit row holds:
    - actor kind and id;
    - client id (`cms`, `sf-push`, or an agent's OAuth client);
    - action (the tool name);
    - target;
    - `detail_json` holding the input, with secret-looking fields redacted (`redact()`).
 
-Reads are not audited, and neither are refusals, except a refusal that changed something on the way. A handler marks one with `new ToolError(code, message, details, true)`, and it is audited with `refused: { error, message }` in its detail. So far only `finalize_asset` does this, when it rejects an upload. D1 has no interactive transactions, so the audit row is written after the change. If that write fails, the request fails, and the change stands without an audit row.
+A call that staged nothing changed nothing, and writes nothing: no audit row either (publishing the current manifest again, revoking a revoked credential). Reads are not audited. A refusal (`ToolError`) or any other error discards what was staged, except a refusal that changed something on the way: a handler marks one with `new ToolError(code, message, details, true)`, and what it staged is committed, audited with `refused: { error, message }` in its detail. So far only `finalize_asset` does this, when it rejects an upload. Files in R2 are not part of the batch: `finalize_asset` moves or deletes uploads before its batch, so a failed batch can leave a verified file in place (harmless; finalize finds it again) or a rejected upload deleted with its asset still pending (finalize then reports it not uploaded).
 
 ### The platform registry
 
-`platformRegistry` holds `register_template_version` and `set_template_version_status` again, dispatched with `platform(db)` (from `@signforge/db`) instead of an org's scope, so they write base templates. Its changes are audited in `platform_audit_log`, because they belong to no org. Only `/admin` uses it. It is never served on `/api`, so no org member can change a base template. A tool works on both scopes when it is declared with `defineSharedTool` and reaches data only through what both scopes share (`templates`, `auditLog`, `orgId`, which is null on the platform's).
+`platformRegistry` holds `register_template_version` and `set_template_version_status` again, dispatched with `platform(db)` (from `@signforge/db`) instead of an org's scope, so they write base templates. Its changes are audited in `platform_audit_log`, because they belong to no org. Only `/admin` uses it. It is never served on `/api`, so no org member can change a base template. A tool works on both scopes when it is declared with `defineSharedTool` and reaches data only through what both scopes share (`templates`, `auditLog`, `commit`, `orgId`, which is null on the platform's).
 
 Callers so far:
 
@@ -139,7 +143,7 @@ Callers so far:
    - A `list_*` tool pages: spread `pageInput` (`src/paging.ts`) into its input, add `next: nextOutput` to its output, and cut the rows with `page()`.
    - Give an `example`.
 2. Name id fields after their kind, such as `screenId` or `playlistIds`.
-3. Reach data only through `ctx.org`. A missing row is `throw notFound(...)`, and a repository's `NotInOrgError` maps to `not_found` on its own.
+3. Reach data only through `ctx.org`, and write only by staging: `ctx.write(ctx.org.<repo>.stage.<op>(...))`. A creating tool sets `idempotent: true` and adds `idempotencyKey` (`src/fields.ts`) to its input. A missing row is `throw notFound(...)`, and a repository's `NotInOrgError` maps to `not_found` on its own.
 4. Add it to `TOOLS` in `src/registry.ts`.
 
 `test/isolation.test.ts` then calls it as org B's owner, with org A's ids put into its example, and expects `not_found`. A tool with no id fields must succeed without returning anything of org A's. An id field of a new kind fails that test until you map it in `ORG_A_IDS`.
@@ -148,7 +152,8 @@ Callers so far:
 
 - `test/isolation.test.ts`: generated from the registry, as above.
 - `test/conventions.test.ts`: fails on a tool without an output schema or a `list_*` tool without paging, and checks the output check and paging itself.
-- `test/dispatch.test.ts`: role and scope checks, validation, the audit log and redaction.
+- `test/write-guard.test.ts`: generated from the registry. It runs every tool that changes data on a D1 that records any write sent outside `batch()`, and fails if there is one. A tool whose example refuses before writing is set up to get further in `PREPARE`.
+- `test/dispatch.test.ts`: role and scope checks, validation, the audit log and redaction, a failing audit row rolling the change back, and idempotency keys.
 - `test/tools.test.ts`, `test/templates.test.ts`, `test/assets.test.ts`: what each tool does.
 
 They run in workerd against local D1, with `packages/db`'s migrations applied, and local R2.
