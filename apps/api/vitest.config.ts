@@ -1,6 +1,6 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 import { buildTemplate } from '@signforge/cli/template';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 
 // Tests run inside workerd with the bindings from wrangler.jsonc, backed by local storage.
@@ -11,7 +11,8 @@ import { defineConfig } from 'vitest/config';
 async function templateBuilds() {
   const root = new URL('../../templates/', import.meta.url).pathname;
   const builds = [];
-  for (const dir of readdirSync(root).sort()) {
+  // Only folders that hold a template: a stray .DS_Store or README must not break the run.
+  for (const dir of readdirSync(root).filter((d) => existsSync(`${root}${d}/template.json`)).sort()) {
     const { manifest, html, sources, problems } = await buildTemplate(`${root}${dir}`);
     builds.push({ dir, manifest, html, sources, problems });
   }
