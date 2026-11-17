@@ -1,6 +1,5 @@
 /** Input fields shared by several tools. */
-import { ID_PATTERN } from '@signforge/contract';
-import { displayHoursProblems, validTimezone } from '@signforge/player-core';
+import { displayHoursProblems, ID_PATTERN, validTimezone } from '@signforge/contract';
 import { z } from 'zod';
 
 /** An id of a row in this org. A tool's id fields are named for their kind: `screenId`, `groupIds`. */
@@ -39,7 +38,7 @@ const hhmm = z.string().describe('HH:MM, 24-hour; 24:00 is end of day');
 const window = z.object({ from: hhmm, to: hhmm });
 
 /**
- * The contract's `DisplayHours`, checked by player-core's `displayHoursProblems`: the same check
+ * The contract's `DisplayHours`, checked by the contract's `displayHoursProblems`: the same check
  * the player and `validateManifest` run, so nothing a screen would refuse is ever stored.
  */
 export const displayHours = z

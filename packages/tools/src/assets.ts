@@ -6,16 +6,18 @@
  *   - the bytes hash to the SHA-256 the uploader claimed, and have the claimed size;
  *   - the bytes are a JPEG, PNG, WebP or SVG of the claimed type (read from the bytes);
  *   - a raster rendition has the claimed size in pixels, as displayed, and is no larger than its
- *     screen box allows under the cover rule (`fitsScreenBox`, the rule `sf build` follows).
+ *     screen box allows under the cover rule, and within the decoded-pixel cap
+ *     (`imageSizeProblem` in the contract; the cover rule is the one `sf build` follows).
  *
  * A file that passes moves to `o/<org>/b/<sha256>`, where manifests reference it. One that fails
  * is deleted, and the asset is marked rejected. Video is M3-21.
  */
-import { fitsScreenBox, SCREEN_BOX } from '@signforge/contract';
+import { imageSizeProblem, SCREEN_BOX } from '@signforge/contract';
 import type { Asset, AssetRendition, OrgScope } from '@signforge/db';
 import { readImageInfo, RENDITION_TYPES } from '@signforge/media/image-info';
 import { z } from 'zod';
 import { id, idempotencyKey, name } from './fields';
+import { nextOutput, page, pageInput } from './paging';
 import { orgBlobKey, uploadKey } from './r2';
 import { defineTool, notFound, ToolError } from './tool';
 
@@ -28,32 +30,31 @@ const ORIENTATIONS = ['landscape', 'portrait'] as const;
 type Orientation = (typeof ORIENTATIONS)[number];
 const STATUSES = ['pending', 'verified', 'rejected'] as const;
 
-export interface RenditionView {
-  orientation: Orientation;
-  sha256: string;
-  type: string;
-  size: number;
-  /** Null for SVG. */
-  width: number | null;
-  height: number | null;
-}
+export const renditionOutput = z.object({
+  orientation: z.enum(ORIENTATIONS),
+  sha256: z.string(),
+  type: z.string(),
+  size: z.number(),
+  width: z.number().nullable().describe('Null for SVG'),
+  height: z.number().nullable().describe('Null for SVG'),
+});
+export type RenditionView = z.infer<typeof renditionOutput>;
 
-export interface AssetView {
-  id: string;
-  name: string;
-  kind: 'image' | 'video';
-  /** `pending` until `finalize_asset` checks the upload; only `verified` assets may be used. */
-  status: (typeof STATUSES)[number];
-  /** The landscape rendition's. */
-  sha256: string;
-  type: string;
-  size: number;
-  width: number | null;
-  height: number | null;
-  renditions: RenditionView[];
-  createdAt: number;
-  updatedAt: number;
-}
+export const assetOutput = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(['image', 'video']),
+  status: z.enum(STATUSES).describe('pending until finalize_asset checks the upload; only verified assets may be used'),
+  sha256: z.string().describe("The landscape rendition's, as are type, size, width and height"),
+  type: z.string(),
+  size: z.number(),
+  width: z.number().nullable(),
+  height: z.number().nullable(),
+  renditions: z.array(renditionOutput),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type AssetView = z.infer<typeof assetOutput>;
 
 // SVG renditions have no pixel size; the column is NOT NULL, so they store 0.
 const renditionView = (r: AssetRendition): RenditionView => ({
@@ -86,23 +87,25 @@ const renditionInput = z.object({
 export const listAssets = defineTool({
   name: 'list_assets',
   description:
-    "List the organization's assets (uploaded images), newest first, each with its landscape and portrait renditions and usageCount: how many spots use it. An asset is usable once its status is verified. Pass query to match names (case-insensitive substring) and status to filter. Returns { assets: Asset[] }.",
+    "List the organization's assets (uploaded images), newest first, a page at a time, each with its landscape and portrait renditions and usageCount: how many spots use it. An asset is usable once its status is verified. Pass query to match names (case-insensitive substring) and status to filter. Returns { assets: Asset[], next }; pass next as cursor, with the same query and status, for the following page.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
   input: z.object({
     query: z.string().trim().max(100).optional().describe('Part of the name, any case'),
     status: z.enum(STATUSES).optional(),
+    ...pageInput,
   }),
+  output: z.object({ assets: z.array(assetOutput.extend({ usageCount: z.number().describe('How many spots use it') })), next: nextOutput }),
   example: {},
   handler: async ({ org, input }) => {
     const q = input.query?.toLowerCase();
-    const rows = (await org.assets.list())
-      .filter((a) => (!q || a.name.toLowerCase().includes(q)) && (!input.status || a.status === input.status))
-      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
+    const matching = (await org.assets.list()).filter((a) => (!q || a.name.toLowerCase().includes(q)) && (!input.status || a.status === input.status));
+    // Newest first: created time descending, then id descending.
+    const { rows, next } = page(matching, (a) => [-a.createdAt, a.id], input, (x, y) => Number(x[0]) - Number(y[0]) || (x[1] === y[1] ? 0 : String(x[1]) < String(y[1]) ? 1 : -1));
     const [renditions, usage] = await Promise.all([org.assets.renditions.list(), org.assets.usage(rows.map((a) => a.id))]);
     const byAsset = Map.groupBy(renditions, (r) => r.assetId);
-    return { assets: rows.map((a) => ({ ...assetView(a, byAsset.get(a.id) ?? []), usageCount: usage.get(a.id)?.length ?? 0 })) };
+    return { assets: rows.map((a) => ({ ...assetView(a, byAsset.get(a.id) ?? []), usageCount: usage.get(a.id)?.length ?? 0 })), next };
   },
 });
 
@@ -113,6 +116,7 @@ export const getAsset = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ assetId: id('asset') }),
+  output: z.object({ asset: assetOutput, spotIds: z.array(z.string()) }),
   example: { assetId: 'ast_example' },
   handler: async ({ org, input }) => {
     const a = await requireAsset(org, input.assetId);
@@ -143,15 +147,19 @@ export const createAssetUpload = defineTool({
           if (r.width !== null || r.height !== null) ctx.addIssue({ code: 'custom', path, message: 'an SVG has no pixel size: send width and height as null' });
         } else if (r.width === null || r.height === null) {
           ctx.addIssue({ code: 'custom', path, message: 'a raster rendition needs its width and height' });
-        } else if (!fitsScreenBox(r.width, r.height, SCREEN_BOX[o])) {
-          const box = SCREEN_BOX[o];
-          ctx.addIssue({ code: 'custom', path, message: `${r.width}x${r.height} is larger than a ${o} screen needs: scale it to cover ${box.w}x${box.h}` });
+        } else {
+          const message = imageSizeProblem(r.width, r.height, SCREEN_BOX[o]);
+          if (message) ctx.addIssue({ code: 'custom', path, message });
         }
       }
       const { landscape: l, portrait: p } = renditions;
       if ((l.type === 'image/svg+xml') !== (p.type === 'image/svg+xml')) ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'an SVG is sent as it is for both orientations' });
       if (l.sha256 === p.sha256 && (l.type !== p.type || l.size !== p.size)) ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'the same file cannot have two types or sizes' });
     }),
+  output: z.object({
+    asset: assetOutput,
+    uploads: z.array(z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() })).describe('One per file the server does not already hold'),
+  }),
   example: {
     name: 'Summer menu photo',
     renditions: {
@@ -159,7 +167,7 @@ export const createAssetUpload = defineTool({
       portrait: { sha256: '2'.repeat(64), type: 'image/jpeg', size: 690_000, width: 2880, height: 1920 },
     },
   },
-  target: (_input, output: { asset: AssetView }) => ({ kind: 'asset', id: output.asset.id }),
+  target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
   handler: async ({ org, blobs, uploads, input, write }) => {
     if (!uploads) throw new Error('direct uploads are not configured on this server (R2 S3 credentials)');
     const { landscape, portrait } = input.renditions;
@@ -197,6 +205,7 @@ export const finalizeAsset = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ assetId: id('asset') }),
+  output: z.object({ asset: assetOutput, changed: z.boolean() }),
   example: { assetId: 'ast_example' },
   target: (input) => ({ kind: 'asset', id: input.assetId }),
   handler: async ({ org, blobs, input, write }) => {
@@ -242,8 +251,9 @@ export const finalizeAsset = defineTool({
       else if (info.width !== null && info.height !== null) {
         for (const r of rows) {
           if (info.width !== r.width || info.height !== r.height) problems.push({ path: r.orientation, message: `the image is ${info.width}x${info.height}, not the claimed ${r.width}x${r.height}` });
-          else if (!fitsScreenBox(info.width, info.height, SCREEN_BOX[r.orientation])) {
-            problems.push({ path: r.orientation, message: `${info.width}x${info.height} is larger than a ${r.orientation} screen needs` });
+          else {
+            const message = imageSizeProblem(info.width, info.height, SCREEN_BOX[r.orientation]);
+            if (message) problems.push({ path: r.orientation, message });
           }
         }
       }
@@ -279,6 +289,7 @@ export const deleteAsset = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ assetId: id('asset') }),
+  output: z.object({ deleted: z.string().describe("The deleted asset's id") }),
   example: { assetId: 'ast_example' },
   target: (input) => ({ kind: 'asset', id: input.assetId }),
   handler: async ({ org, blobs, input, write }) => {

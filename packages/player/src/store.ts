@@ -3,8 +3,8 @@
  * downloaded once however many manifests use it, and a manifest only goes live when every file
  * it names is present and verified.
  */
-import type { ScreenManifest } from '@signforge/contract';
-import { planSync, validateManifest } from '@signforge/player-core';
+import { validateManifest, type ScreenManifest } from '@signforge/contract';
+import { planSync } from '@signforge/player-core';
 
 const BLOBS = 'sf-blobs-v1';
 const STATE = 'sf-state-v1';
@@ -26,14 +26,14 @@ export async function loadActiveManifest(): Promise<ScreenManifest | undefined> 
 }
 
 /** A download may take as long as it needs, but gives up after this long without receiving anything. */
-const STALL_MS = 30_000;
+export const STALL_MS = 30_000;
 
-async function download(url: string, headers: Record<string, string>): Promise<ArrayBuffer> {
+async function download(url: string, headers: Record<string, string>, stallMs: number): Promise<ArrayBuffer> {
   const ctl = new AbortController();
-  let timer = setTimeout(() => ctl.abort(new Error('download stalled')), STALL_MS);
+  let timer = setTimeout(() => ctl.abort(new Error('download stalled')), stallMs);
   const nudge = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => ctl.abort(new Error('download stalled')), STALL_MS);
+    timer = setTimeout(() => ctl.abort(new Error('download stalled')), stallMs);
   };
   try {
     const r = await fetch(url, { cache: 'no-store', headers, signal: ctl.signal });
@@ -100,13 +100,15 @@ export interface SyncOptions {
   currentId?: string;
   /** Sent on every request: the device credential when the content base is the API. */
   headers?: Record<string, string>;
+  /** Give up on a download after this long without receiving anything. Default `STALL_MS`. */
+  stallMs?: number;
 }
 
 /**
  * Fetch the manifest at `base`. If it is new, download and verify every missing file, then
  * make it active in one step. Any failure leaves the current manifest and files untouched.
  */
-export async function sync(base: string, { currentId, headers = {} }: SyncOptions = {}): Promise<SyncResult> {
+export async function sync(base: string, { currentId, headers = {}, stallMs = STALL_MS }: SyncOptions = {}): Promise<SyncResult> {
   const get = (conditional: boolean) =>
     fetch(`${base}/manifest.json`, {
       // no-store keeps the browser's HTTP cache out of it, so the condition is ours to send.
@@ -141,7 +143,7 @@ export async function sync(base: string, { currentId, headers = {} }: SyncOption
   const { missing, stale } = planSync(next, await heldHashes());
   if (same && !missing.length) return { changed: false, downloaded: 0 };
   for (const sha of missing) {
-    const buf = await download(`${base}/blobs/${sha}`, headers).catch((err: unknown) => {
+    const buf = await download(`${base}/blobs/${sha}`, headers, stallMs).catch((err: unknown) => {
       if (err instanceof UnauthorisedError) throw err;
       throw new Error(`file ${sha.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`);
     });

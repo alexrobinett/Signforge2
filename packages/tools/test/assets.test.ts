@@ -87,6 +87,16 @@ describe('create_asset_upload', () => {
     expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, type: 'image/gif' }, portrait: ok } })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, size: 30 * 1024 * 1024 }, portrait: ok } })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
+
+  it('refuses an image whose decoded size is over the pixel cap, though one side fits the box', async () => {
+    const strip = { sha256: '3'.repeat(64), type: 'image/png', size: 1000, width: 65_535, height: 1080 };
+    const ok = { sha256: '2'.repeat(64), type: 'image/jpeg', size: 1000, width: 1080, height: 1920 };
+    const r = await run('create_asset_upload', { name: 'x', renditions: { landscape: strip, portrait: ok } });
+    expect(r).toMatchObject({
+      ok: false, error: 'invalid_input',
+      details: [{ path: 'renditions.landscape', message: '65535x1080 is 70.8 million pixels; a screen decodes at most 8.3 million (3840x2160)' }],
+    });
+  });
 });
 
 describe('finalize_asset', () => {

@@ -12,10 +12,11 @@ Lists the tools the caller's role may use:
 
 ```json
 { "tools": [{ "name": "rename_screen", "description": "…", "scope": "screens:manage", "minRole": "editor",
-              "mutates": true, "inputSchema": { "type": "object", … }, "example": { … } }] }
+              "mutates": true, "inputSchema": { "type": "object", … }, "outputSchema": { "type": "object", … },
+              "example": { … } }] }
 ```
 
-`inputSchema` is JSON Schema, generated from the zod input. A viewer gets only the read tools. Use the list to hide the controls a user cannot use.
+`inputSchema` and `outputSchema` are JSON Schema, generated from the tool's zod input and output. A viewer gets only the read tools. Use the list to hide the controls a user cannot use.
 
 ### `POST /api/tools/:name`
 
@@ -38,22 +39,22 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 
 | Name | Scope | Min role | Input | Output |
 | --- | --- | --- | --- | --- |
-| `list_screens` | content:read | viewer | `{}` | `{ screens: Screen[] }` |
+| `list_screens` | content:read | viewer | `{ limit?, cursor? }` | `{ screens: Screen[], next }`, by id |
 | `get_screen` | content:read | viewer | `{ screenId }` | `{ screen, groupIds, credentials }` |
 | `rename_screen` | screens:manage | editor | `{ screenId, name }` | `{ screen }` |
 | `update_screen_settings` | screens:manage | editor | `{ screenId, timezone?, locale?, orientation?, displayHours? }` | `{ screen }` |
 | `revoke_screen_credential` | screens:manage | owner | `{ screenId, credentialId }` | `{ credential }` |
-| `list_groups` | content:read | viewer | `{}` | `{ groups: Group[] }` |
+| `list_groups` | content:read | viewer | `{ limit?, cursor? }` | `{ groups: Group[], next }`, by id |
 | `create_group` | screens:manage | editor | `{ name, screenIds?, idempotencyKey? }` | `{ group }` |
 | `rename_group` | screens:manage | editor | `{ groupId, name }` | `{ group }` |
 | `delete_group` | screens:manage | editor | `{ groupId }` | `{ deleted }`, or 409 while a schedule entry targets the group |
 | `set_group_members` | screens:manage | editor | `{ groupId, screenIds }` | `{ group }` |
 | `publish_manifest_to_screen` | content:publish | editor | `{ screenId, manifestId }` | `{ screenId, manifestId, changed }` |
-| `list_templates` | content:read | viewer | `{ status? }` | `{ templates: Template[] }`, base first |
+| `list_templates` | content:read | viewer | `{ status?, limit?, cursor? }` | `{ templates: Template[], next }`, base first, then by name |
 | `get_template` | content:read | viewer | `{ templateId }` | `{ template }` |
 | `register_template_version` | content:draft | editor | `{ manifest, bundleId, sourcesId }` | `{ template, version, changed }` |
 | `set_template_version_status` | content:publish | owner | `{ templateVersionId, status }` | `{ version, changed }` |
-| `list_assets` | content:read | viewer | `{ query?, status? }` | `{ assets: (Asset & { usageCount })[] }`, newest first |
+| `list_assets` | content:read | viewer | `{ query?, status?, limit?, cursor? }` | `{ assets: (Asset & { usageCount })[], next }`, newest first |
 | `get_asset` | content:read | viewer | `{ assetId }` | `{ asset, spotIds }` |
 | `create_asset_upload` | content:draft | editor | `{ name, renditions: { landscape, portrait }, idempotencyKey? }` | `{ asset, uploads }` |
 | `finalize_asset` | content:draft | editor | `{ assetId }` | `{ asset, changed }` |
@@ -62,7 +63,8 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 Details:
 
 - **Idempotency keys.** The creating tools (`create_group`, `create_asset_upload`) take an optional `idempotencyKey`: 8 to 128 printable ASCII characters the caller picks for one creation, such as a UUID. The CMS should send one with every create. A retry with the same key and input returns the first call's output and writes nothing, even when two calls race. The same key with a different input is refused with `conflict`. Keys are per org and kept for now (expiry is M3-24). A retried `create_asset_upload` returns the first call's upload URLs, which expire at their `expiresAt`. `register_template_version` needs no key: a version is registered once, and registering it again returns `changed: false`.
-- **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by player-core's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
+- **Lists page.** Every `list_*` tool takes `limit` (default 50, at most 200) and `cursor`, and returns `next`. Pass `next` back as `cursor`, with the same filters, for the following page; `next` is `null` on the last page. A cursor is opaque. It holds the sort key of the last row returned, so rows added or removed between calls are neither repeated nor skipped. A cursor the server did not make is `invalid_input`. The repositories still read the org's whole list and the tool cuts the page; paging in SQL can wait until lists are large.
+- **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by the contract's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
 - **`get_screen`.** Credentials come back without their hashes.
 - **`publish_manifest_to_screen`.** The manifest must already be stored for that screen. `sf push` stores manifests now; the server compiler will in M3-13.
 - **Templates.** An org sees its own templates and the base ones (`owner: 'base'`). Each version carries its manifest, its status (`draft`, `approved`, `retired`) and the server's check report. Only approved versions should be offered for new spots.
@@ -71,10 +73,10 @@ Details:
 
 - **Uploading an image.** The browser does the scaling with `@signforge/media`, and `uploadImage` there runs these steps:
   1. **`create_asset_upload`.** The input names each rendition (`landscape`, `portrait`) with its `sha256`, `type` (JPEG, PNG, WebP or SVG), `size` in bytes (at most 20 MB), and `width` and `height` as displayed (`null` for SVG).
-     - A raster rendition must be no larger than the cover rule allows for its screen box (`fitsScreenBox` in the contract): at least one side within 1920x1080, or 1080x1920 for portrait.
+     - A raster rendition must be no larger than the cover rule allows for its screen box (`imageSizeProblem` in the contract): at least one side within 1920x1080, or 1080x1920 for portrait. It must also decode to at most `MAX_IMAGE_PIXELS` (3840x2160, about 8.3 million pixels), so a 65,535x1,080 strip, which has a side in the box, is still refused.
      - It creates the asset as `pending`, with both renditions, in one write. For each file the org does not already hold, it returns `{ sha256, method: 'PUT', url, headers, expiresAt }`. The URL is an R2 presigned PUT to `up/<org>/<asset>/<sha256>` that lasts 15 minutes. It signs the content type and length, so R2 refuses any other.
   2. **PUT** each file to its `url` with the `headers` given.
-  3. **`finalize_asset`.** It refuses with `conflict`, changing nothing, unless the asset has both renditions. It reads each file back from R2, re-hashes it, checks the size, reads the type and pixel size from the bytes (`readImageInfo`), and checks the screen box again.
+  3. **`finalize_asset`.** It refuses with `conflict`, changing nothing, unless the asset has both renditions. It reads each file back from R2, re-hashes it, checks the size, reads the type and pixel size from the bytes (`readImageInfo`), and checks the screen box and pixel cap again.
      - **All pass.** The files move to `o/<org>/b/<sha256>` and the asset becomes `verified`.
      - **Any fails.** Every upload for the asset is deleted, the asset becomes `rejected`, and the call is refused with `invalid_input`, one `details` entry per problem. That refusal is audited, because it changed the asset.
      - **A file not yet uploaded.** The call is refused and nothing changes.
@@ -83,7 +85,7 @@ Details:
 - **`delete_asset`.** It refuses with `conflict` while a spot uses the asset, and `details.spotIds` lists the spots. A pending asset's uploads are deleted with it. Files in `o/<org>/b/` stay, because other assets or published manifests may name the same bytes; blob cleanup is M3-24.
 - **Upload configuration.** The dispatcher passes `caller.uploads`, an `UploadSigner` (`r2Presigner` in `src/upload.ts`), to the handlers. `/api/tools` builds it from the Worker's settings (`apps/api/src/uploads.ts`). Without one, `create_asset_upload` fails with a 500.
 
-Each tool's `description` is written for an agent choosing a tool, and its `example` is a valid input.
+Each tool's `description` is written for an agent choosing a tool, its `output` is the zod schema of what it returns, and its `example` is a valid input.
 
 ## Roles and scopes
 
@@ -109,6 +111,7 @@ Owner decision Q7 (can editors publish?) is still open. The table shows the defa
 4. For a keyed creation, returns the first result if the key was used before (see Idempotency keys above).
 5. Runs the handler with `{ org: scoped(db, orgId), actor, input, blobs, uploads, write }`.
    A handler reads through `ctx.org` but never writes: it stages each change with `ctx.write(org.<repo>.stage.<op>(...))`, which returns the row as it will be (see `packages/db`'s README).
+   In tests it then parses the output with the tool's output schema and throws on a mismatch, before anything is written (`setOutputChecks(true)`, called by `test/setup.ts` here and in `apps/api`). Production skips the parse.
 6. Commits the staged writes in one D1 `batch()`, together with an `audit_log` row and, for a keyed creation, its idempotency record. The batch is atomic: if the audit row cannot be written, the change is not made either, and the request fails. The audit row holds:
    - actor kind and id;
    - client id (`cms`, `sf-push`, or an agent's OAuth client);
@@ -136,6 +139,8 @@ Callers so far:
    - Give it the narrowest scope and role.
    - Set `mutates: true` if it changes anything.
    - Give a `target` for the audit log.
+   - Give an `output` schema: what it returns, as zod. The handler's return type is checked against it at compile time, and every output against it in tests.
+   - A `list_*` tool pages: spread `pageInput` (`src/paging.ts`) into its input, add `next: nextOutput` to its output, and cut the rows with `page()`.
    - Give an `example`.
 2. Name id fields after their kind, such as `screenId` or `playlistIds`.
 3. Reach data only through `ctx.org`, and write only by staging: `ctx.write(ctx.org.<repo>.stage.<op>(...))`. A creating tool sets `idempotent: true` and adds `idempotencyKey` (`src/fields.ts`) to its input. A missing row is `throw notFound(...)`, and a repository's `NotInOrgError` maps to `not_found` on its own.
@@ -146,6 +151,7 @@ Callers so far:
 ## Tests
 
 - `test/isolation.test.ts`: generated from the registry, as above.
+- `test/conventions.test.ts`: fails on a tool without an output schema or a `list_*` tool without paging, and checks the output check and paging itself.
 - `test/write-guard.test.ts`: generated from the registry. It runs every tool that changes data on a D1 that records any write sent outside `batch()`, and fails if there is one. A tool whose example refuses before writing is set up to get further in `PREPARE`.
 - `test/dispatch.test.ts`: role and scope checks, validation, the audit log and redaction, a failing audit row rolling the change back, and idempotency keys.
 - `test/tools.test.ts`, `test/templates.test.ts`, `test/assets.test.ts`: what each tool does.

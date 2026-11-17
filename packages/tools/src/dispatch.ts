@@ -19,6 +19,7 @@
 import { NotInOrgError, type OrgScope, type Staged, type Write } from '@signforge/db';
 import { canonicalJson } from '@signforge/contract';
 import { z } from 'zod';
+import { checkOutput } from './output';
 import type { UploadSigner } from './upload';
 import { ROLE_SCOPES, ROLES, ToolError, type Actor, type AnyTool, type DataScope, type Role, type Scope, type ToolErrorCode } from './tool';
 
@@ -127,6 +128,7 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
     throw err;
   }
 
+  checkOutput(tool, output);
   if (keyed && writes.length) writes.push(...(await keyed.record(output)));
   try {
     await commit(tool.target?.(parsed.data, output), {});
@@ -166,7 +168,7 @@ async function sha256Hex(text: string) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role and JSON Schema input. */
+/** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema input and output. */
 export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, caller: Pick<Caller, 'role' | 'scopes'>) {
   return [...registry.values()]
     .filter((t) => permits(caller, t))
@@ -177,6 +179,7 @@ export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, calle
       minRole: t.minRole,
       mutates: t.mutates,
       inputSchema: z.toJSONSchema(t.input, { io: 'input', unrepresentable: 'any' }),
+      outputSchema: z.toJSONSchema(t.output, { io: 'output', unrepresentable: 'any' }),
       example: t.example,
     }));
 }

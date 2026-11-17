@@ -122,6 +122,7 @@ describe('every tool that changes data', () => {
       minRole: 'editor',
       mutates: true,
       input: z.object({ screenId: z.string() }),
+      output: z.object({ screen: z.unknown() }),
       example: { screenId: 'scr_example' },
       handler: async ({ org, input }) => ({ screen: await org.screens.update(input.screenId, { name: 'rogue' }) }),
     });
@@ -139,6 +140,7 @@ describe('every tool that changes data', () => {
       minRole: 'editor',
       mutates: true,
       input: z.object({ screenId: z.string() }),
+      output: z.object({ screen: z.unknown() }),
       example: { screenId: 'scr_example' },
       handler: async ({ org, input, write }) => ({ screen: write(org.screens.stage.update((await org.screens.get(input.screenId))!, { name: 'staged' })) }),
     });

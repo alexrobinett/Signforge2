@@ -3,36 +3,31 @@ import type { DisplayHours } from '@signforge/contract';
 import type { OrgScope, Screen, ScreenCredential } from '@signforge/db';
 import { z } from 'zod';
 import { displayHours, id, locale, name, orientation, timezone } from './fields';
+import { nextOutput, page, pageInput } from './paging';
 import { defineTool, notFound } from './tool';
 
 /** A screen as tools return it. Times are milliseconds since the epoch. */
-export interface ScreenView {
-  id: string;
-  name: string;
-  timezone: string;
-  locale: string | null;
-  orientation: 'landscape' | 'portrait';
-  /** Null means always on. */
-  displayHours: DisplayHours | null;
-  status: 'active' | 'revoked';
-  /** The manifest the screen should play, and the one before it. */
-  desiredManifestId: string | null;
-  previousManifestId: string | null;
-  /** The manifest the screen last said it is playing. */
-  reportedManifestId: string | null;
-  lastSeenAt: number | null;
-  playerVersion: string | null;
-  createdAt: number;
-  updatedAt: number;
-}
+export const screenOutput = z.object({
+  id: z.string(),
+  name: z.string(),
+  timezone: z.string(),
+  locale: z.string().nullable(),
+  orientation,
+  displayHours: displayHours.nullable().describe('Null means always on'),
+  status: z.enum(['active', 'revoked']),
+  desiredManifestId: z.string().nullable().describe('The manifest the screen should play'),
+  previousManifestId: z.string().nullable().describe('The one before it, kept while the screen switches'),
+  reportedManifestId: z.string().nullable().describe('The manifest the screen last said it is playing'),
+  lastSeenAt: z.number().nullable(),
+  playerVersion: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type ScreenView = z.infer<typeof screenOutput>;
 
 /** A credential, without its hash. */
-export interface CredentialView {
-  id: string;
-  createdAt: number;
-  lastUsedAt: number | null;
-  revokedAt: number | null;
-}
+export const credentialOutput = z.object({ id: z.string(), createdAt: z.number(), lastUsedAt: z.number().nullable(), revokedAt: z.number().nullable() });
+export type CredentialView = z.infer<typeof credentialOutput>;
 
 export const screenView = (s: Screen): ScreenView => ({
   id: s.id,
@@ -61,13 +56,18 @@ async function requireScreen(org: OrgScope, screenId: string) {
 
 export const listScreens = defineTool({
   name: 'list_screens',
-  description: 'List every screen in the organization with its settings, status and manifests, ordered by id. Returns { screens: Screen[] }.',
+  description:
+    'List the screens in the organization with their settings, status and manifests, ordered by id, a page at a time. Returns { screens: Screen[], next }; pass next as cursor for the following page.',
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({}),
+  input: z.object({ ...pageInput }),
+  output: z.object({ screens: z.array(screenOutput), next: nextOutput }),
   example: {},
-  handler: async ({ org }) => ({ screens: (await org.screens.list()).map(screenView) }),
+  handler: async ({ org, input }) => {
+    const { rows, next } = page(await org.screens.list(), (s) => [s.id], input);
+    return { screens: rows.map(screenView), next };
+  },
 });
 
 export const getScreen = defineTool({
@@ -77,6 +77,7 @@ export const getScreen = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ screenId: id('screen') }),
+  output: z.object({ screen: screenOutput, groupIds: z.array(z.string()), credentials: z.array(credentialOutput) }),
   example: { screenId: 'scr_example' },
   handler: async ({ org, input }) => {
     const screen = await requireScreen(org, input.screenId);
@@ -92,6 +93,7 @@ export const renameScreen = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ screenId: id('screen'), name: name('screen') }),
+  output: z.object({ screen: screenOutput }),
   example: { screenId: 'scr_example', name: 'Lobby' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, write }) => {
@@ -116,6 +118,7 @@ export const updateScreenSettings = defineTool({
       displayHours: displayHours.nullable().optional(),
     })
     .refine((v) => v.timezone !== undefined || v.locale !== undefined || v.orientation !== undefined || v.displayHours !== undefined, 'give at least one setting to change'),
+  output: z.object({ screen: screenOutput }),
   example: { screenId: 'scr_example', timezone: 'Europe/London', displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }] } },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, write }) => {
@@ -138,6 +141,7 @@ export const revokeScreenCredential = defineTool({
   minRole: 'owner',
   mutates: true,
   input: z.object({ screenId: id('screen'), credentialId: id('credential') }),
+  output: z.object({ credential: credentialOutput }),
   example: { screenId: 'scr_example', credentialId: 'crd_example' },
   target: (input) => ({ kind: 'credential', id: input.credentialId }),
   handler: async ({ org, input, write }) => {

@@ -1,6 +1,6 @@
 /**
- * What a tool is. A tool is one operation on an org's data with a stable name, a zod input, a
- * description written for an agent, the scope and minimum role it needs, and a handler. The CMS,
+ * What a tool is. A tool is one operation on an org's data with a stable name, a zod input, a zod
+ * output, a description written for an agent, the scope and minimum role it needs, and a handler. The CMS,
  * the MCP server and WebMCP all call tools through `dispatch` (./dispatch.ts); none of them
  * reaches the database another way.
  */
@@ -80,7 +80,7 @@ export class ToolError extends Error {
 
 export const notFound = (what: string, id: string) => new ToolError('not_found', `${what} ${id} not found`);
 
-export interface Tool<S extends z.ZodType = z.ZodType, O = unknown, D extends DataScope = OrgScope> {
+export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.ZodType, D extends DataScope = OrgScope> {
   /** Stable: the CMS, agents and the audit log refer to it. snake_case, as MCP clients expect. */
   name: string;
   /** For an agent choosing a tool: what it does, when to use it, what it returns. */
@@ -95,18 +95,23 @@ export interface Tool<S extends z.ZodType = z.ZodType, O = unknown, D extends Da
    */
   idempotent?: boolean;
   input: S;
+  /**
+   * What the tool returns. Shown to agents as JSON Schema, and checked against every output in
+   * tests (./output.ts); production trusts the handler. A list tool pages (./paging.ts).
+   */
+  output: R;
   /** A valid input, shown to agents and used by the generated tests. Id fields name their kind (`screenId`, `groupIds`). */
   example: z.input<S>;
   /** What the change was made to, for the audit log. */
-  target?: (input: z.output<S>, output: NoInfer<O>) => { kind: string; id: string };
-  handler: (ctx: ToolContext<z.output<S>, D>) => Promise<O>;
+  target?: (input: z.output<S>, output: NoInfer<z.output<R>>) => { kind: string; id: string };
+  handler: (ctx: ToolContext<z.output<S>, D>) => Promise<NoInfer<z.output<R>>>;
 }
 
 /** Declare a tool, keeping its input and output types. */
-export const defineTool = <S extends z.ZodType, O>(tool: Tool<S, O>): Tool<S, O> => tool;
+export const defineTool = <S extends z.ZodType, R extends z.ZodType>(tool: Tool<S, R>): Tool<S, R> => tool;
 
 /** Declare a tool that works on an org's scope and on the platform's alike (templates). */
-export const defineSharedTool = <S extends z.ZodType, O>(tool: Tool<S, O, DataScope>): Tool<S, O, DataScope> => tool;
+export const defineSharedTool = <S extends z.ZodType, R extends z.ZodType>(tool: Tool<S, R, DataScope>): Tool<S, R, DataScope> => tool;
 
 /** Any registered tool. */
 export type AnyTool<D extends DataScope = OrgScope> = Tool<z.ZodType, any, D>;
