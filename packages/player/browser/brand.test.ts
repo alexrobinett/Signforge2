@@ -16,7 +16,8 @@ import { useHarness, type Player } from './harness';
 
 const h = useHarness();
 
-const font = (dir: string, weights: number[]) => weights.map((weight) => ({ weight, data: readFileSync(join(import.meta.dirname, '../../../fonts', dir, `${weight}-normal.woff2`)) }));
+const font = (dir: string, weights: number[]) =>
+  weights.map((weight) => ({ weight, data: readFileSync(join(import.meta.dirname, '../../../fonts', dir, `${weight}-normal.woff2`)) }));
 
 /** A solid PNG of the given size, so a test can tell two logos apart by their decoded width. */
 function png(width: number, height: number): Buffer {
@@ -33,7 +34,12 @@ function png(width: number, height: number): Buffer {
   ihdr.writeUInt32BE(height, 4);
   ihdr.set([8, 2, 0, 0, 0], 8); // 8-bit RGB
   const rows = Buffer.concat(Array.from({ length: height }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0xcc)])));
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
 }
 
 const colors: BrandColors = {
@@ -51,7 +57,10 @@ const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => Number.parseInt(hex.sli
 const brand: FixtureBrand = {
   colors,
   shape: 'round',
-  fonts: { display: { id: 'base/oswald', family: 'Oswald', files: font('oswald', [500, 700]) }, body: { id: 'base/inter', family: 'Inter', files: font('inter', [400, 600, 800]) } },
+  fonts: {
+    display: { id: 'base/oswald', family: 'Oswald', files: font('oswald', [500, 700]) },
+    body: { id: 'base/inter', family: 'Inter', files: font('inter', [400, 600, 800]) },
+  },
   // On a dark background the SDK picks onDark (4 px wide), not onLight (1 px).
   logo: { onDark: png(4, 1), onLight: png(1, 4) },
 };
@@ -170,7 +179,18 @@ describe('brand in the SDK', () => {
           if (e.source !== frame.contentWindow || e.data?.sf !== sf) return;
           w.msgs.push(e.data.type);
           if (e.data.type === 'loaded') {
-            const base = { sf, type: 'init', data: { label: 'x' }, assets: {}, durationMs: 5000, orientation: 'landscape', viewport: { width: 960, height: 540 }, timezone: 'UTC', locale: 'en-US', clock: { now: Date.now(), offsetMs: 0 } };
+            const base = {
+              sf,
+              type: 'init',
+              data: { label: 'x' },
+              assets: {},
+              durationMs: 5000,
+              orientation: 'landscape',
+              viewport: { width: 960, height: 540 },
+              timezone: 'UTC',
+              locale: 'en-US',
+              clock: { now: Date.now(), offsetMs: 0 },
+            };
             // The first init carries the theme; the one after the reset does not.
             frame.contentWindow!.postMessage(w.inits++ === 0 ? { ...base, theme: t } : base, '*');
           }

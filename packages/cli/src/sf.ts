@@ -383,7 +383,11 @@ async function readBrand(
   };
   const display = font(b.fonts?.display, 'display');
   const body = font(b.fonts?.body, 'body');
-  const colors: BrandColors = { ...b.colors, onPrimary: b.colors.onPrimary ?? onColor(b.colors.primary), onAccent: b.colors.onAccent ?? onColor(b.colors.accent) };
+  const colors: BrandColors = {
+    ...b.colors,
+    onPrimary: b.colors.onPrimary ?? onColor(b.colors.primary),
+    onAccent: b.colors.onAccent ?? onColor(b.colors.accent),
+  };
   const kit: BrandKit = { id: 'local', colors, shape: b.shape ?? 'soft', fonts: { ...(display ? { display } : {}), ...(body ? { body } : {}) } };
   if (b.logo) {
     const onDark = await addMedia(b.logo.onDark, 'brand');

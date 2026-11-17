@@ -220,7 +220,11 @@ describe('brand at publish', () => {
     expect(manifest.brand?.logo).toEqual({ onDark: sha('c') });
     expect(manifest.files[sha('c')]).toEqual({ size: 500, type: 'image/png' });
     const inter = fontById('base/inter')!;
-    expect(manifest.brand?.fonts.body).toEqual({ id: 'base/inter', family: 'Inter', files: inter.files.map(({ weight, style, file }) => ({ weight, style, file })) });
+    expect(manifest.brand?.fonts.body).toEqual({
+      id: 'base/inter',
+      family: 'Inter',
+      files: inter.files.map(({ weight, style, file }) => ({ weight, style, file })),
+    });
     expect(manifest.brand?.fonts.display).toBeUndefined();
     for (const f of inter.files) expect(manifest.files[f.file]).toEqual({ size: f.size, type: 'font/woff2' });
   });

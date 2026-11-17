@@ -12,8 +12,16 @@ const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString
 const sha256 = async (s: string) => hex(await crypto.subtle.digest('SHA-256', encoder.encode(s)));
 
 const manifest = (over: Record<string, unknown> = {}) => ({
-  id: 'promo', version: '1.0.0', name: 'Promo', fields: { title: { type: 'text', label: 'Title', default: 'Hi' } },
-  duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 }, orientations: ['landscape'], uses: [], background: '#000', protocol: 1, ...over,
+  id: 'promo',
+  version: '1.0.0',
+  name: 'Promo',
+  fields: { title: { type: 'text', label: 'Title', default: 'Hi' } },
+  duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 },
+  orientations: ['landscape'],
+  uses: [],
+  background: '#000',
+  protocol: 1,
+  ...over,
 });
 const html = (css = 'h1{color:red}', script = 'parent.postMessage({type:"loaded"},"*")') =>
   `<!doctype html><html><head><style>${css}</style></head><body><h1 data-sf="title"></h1><script>${script}</script></body></html>`;
@@ -41,7 +49,13 @@ const call = async <T = any>(name: string, input: unknown, as: Caller = owner): 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'tpl-org');
   owner = { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS };
-  system = { org: platform(env.DB), role: 'owner', scopes: ['content:draft', 'content:publish'], actor: { kind: 'system', id: 'sf-push', clientId: 'sf-push' }, blobs: env.BLOBS };
+  system = {
+    org: platform(env.DB),
+    role: 'owner',
+    scopes: ['content:draft', 'content:publish'],
+    actor: { kind: 'system', id: 'sf-push', clientId: 'sf-push' },
+    blobs: env.BLOBS,
+  };
 });
 
 describe('register_template_version', () => {
@@ -50,7 +64,11 @@ describe('register_template_version', () => {
     const first = await call('register_template_version', { manifest: manifest(), ...ids });
     expect(first.changed).toBe(true);
     expect(first.version).toMatchObject({ key: `${o.orgId}/promo@1.0.0`, status: 'draft', bundleSha256: ids.bundleId });
-    expect(first.version.checkReport).toMatchObject({ ok: true, sourcesSha256: ids.sourcesId, checks: expect.arrayContaining([{ check: 'forbidden-css', ok: true, problems: [] }]) });
+    expect(first.version.checkReport).toMatchObject({
+      ok: true,
+      sourcesSha256: ids.sourcesId,
+      checks: expect.arrayContaining([{ check: 'forbidden-css', ok: true, problems: [] }]),
+    });
     // A colour literal outside var() is a warning: the version still registers.
     expect(first.version.checkReport.warnings).toEqual(['style.css:1: literal colour red in color; use var(--sf-*) with it as the fallback']);
 
@@ -82,19 +100,26 @@ describe('register_template_version', () => {
 
   it('rejects an invalid manifest, a bundle over budget and a network reference', async () => {
     const big = await orgUpload(html(`h1{content:"${'x'.repeat(600_001)}"}`));
-    expect(await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'big' }), ...big }, owner))
-      .toMatchObject({ ok: false, details: [{ path: 'size', message: expect.stringMatching(/budget/) }] });
+    expect(await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'big' }), ...big }, owner)).toMatchObject({
+      ok: false,
+      details: [{ path: 'size', message: expect.stringMatching(/budget/) }],
+    });
     const net = await orgUpload(html('h1{background:url(https://example.com/x.png)}'));
-    expect(await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'net' }), ...net }, owner))
-      .toMatchObject({ ok: false, details: [{ path: 'network' }] });
+    expect(await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'net' }), ...net }, owner)).toMatchObject({
+      ok: false,
+      details: [{ path: 'network' }],
+    });
     const ok = await orgUpload(html());
-    expect(await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'Bad Id', duration: {} }), ...ok }, owner))
-      .toMatchObject({ ok: false, details: [{ path: 'manifest' }, { path: 'manifest' }] });
+    expect(await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'Bad Id', duration: {} }), ...ok }, owner)).toMatchObject({
+      ok: false,
+      details: [{ path: 'manifest' }, { path: 'manifest' }],
+    });
   });
 
   it('needs the files uploaded first', async () => {
-    expect(await dispatch(registry, 'register_template_version', { manifest: manifest(), bundleId: 'e'.repeat(64), sourcesId: 'e'.repeat(64) }, owner))
-      .toMatchObject({ ok: false, error: 'not_found' });
+    expect(
+      await dispatch(registry, 'register_template_version', { manifest: manifest(), bundleId: 'e'.repeat(64), sourcesId: 'e'.repeat(64) }, owner),
+    ).toMatchObject({ ok: false, error: 'not_found' });
   });
 });
 
@@ -106,8 +131,10 @@ describe('base templates', () => {
     const reg = await dispatch(platformRegistry, 'register_template_version', { manifest: manifest({ id: 'base-promo' }), ...ids }, system);
     expect(reg).toMatchObject({ ok: true, output: { changed: true, version: { key: 'base/base-promo@1.0.0', status: 'draft' } } });
     baseVersion = (reg as { output: { version: { id: string } } }).output.version.id;
-    expect(await dispatch(platformRegistry, 'set_template_version_status', { templateVersionId: baseVersion, status: 'approved' }, system))
-      .toMatchObject({ ok: true, output: { changed: true, version: { status: 'approved' } } });
+    expect(await dispatch(platformRegistry, 'set_template_version_status', { templateVersionId: baseVersion, status: 'approved' }, system)).toMatchObject({
+      ok: true,
+      output: { changed: true, version: { status: 'approved' } },
+    });
 
     const audit = await platform(env.DB).auditLog.list({ limit: 2 });
     expect(audit.map((a) => a.action)).toEqual(['set_template_version_status', 'register_template_version']);
@@ -116,8 +143,10 @@ describe('base templates', () => {
 
   it("does not look in an org's prefix for a base template's files", async () => {
     const ids = await orgUpload(html('h1{color:green}'));
-    expect(await dispatch(platformRegistry, 'register_template_version', { manifest: manifest({ id: 'stray' }), ...ids }, system))
-      .toMatchObject({ ok: false, error: 'not_found' });
+    expect(await dispatch(platformRegistry, 'register_template_version', { manifest: manifest({ id: 'stray' }), ...ids }, system)).toMatchObject({
+      ok: false,
+      error: 'not_found',
+    });
   });
 
   it('are listed for every org, which can read but not change them', async () => {
@@ -127,8 +156,10 @@ describe('base templates', () => {
     const got = await call('get_template', { templateId: templates[0].id });
     expect(got.template.versions[0].checkReport).toMatchObject({ ok: true });
 
-    expect(await dispatch(registry, 'set_template_version_status', { templateVersionId: baseVersion, status: 'retired' }, owner))
-      .toMatchObject({ ok: false, error: 'not_found' });
+    expect(await dispatch(registry, 'set_template_version_status', { templateVersionId: baseVersion, status: 'retired' }, owner)).toMatchObject({
+      ok: false,
+      error: 'not_found',
+    });
     // Registering the same id and version in the org makes the org's own template, not a change to the base one.
     const ids = await orgUpload(html('h1{color:purple}'));
     expect((await call('register_template_version', { manifest: manifest({ id: 'base-promo' }), ...ids })).version.key).toBe(`${o.orgId}/base-promo@1.0.0`);
@@ -140,7 +171,10 @@ describe('set_template_version_status', () => {
     const { templates } = await call('list_templates', { status: 'draft' });
     const draft = templates.find((t: { key: string }) => t.key === 'promo').versions[0].id;
     const editor = { ...owner, role: 'editor' as const };
-    expect(await dispatch(registry, 'set_template_version_status', { templateVersionId: draft, status: 'approved' }, editor)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await dispatch(registry, 'set_template_version_status', { templateVersionId: draft, status: 'approved' }, editor)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
     expect((await call('set_template_version_status', { templateVersionId: draft, status: 'approved' })).changed).toBe(true);
     expect((await call('set_template_version_status', { templateVersionId: draft, status: 'approved' })).changed).toBe(false);
     expect((await call('set_template_version_status', { templateVersionId: draft, status: 'retired' })).version.status).toBe('retired');

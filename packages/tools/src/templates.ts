@@ -30,7 +30,10 @@ const STATUSES = ['draft', 'approved', 'retired'] as const;
  */
 const manifestOutput = z
   .custom<TemplateManifest>(
-    (v) => z.looseObject({ id: z.string(), version: z.string(), name: z.string(), fields: z.record(z.string(), z.unknown()), orientations: z.array(z.string()) }).safeParse(v).success,
+    (v) =>
+      z
+        .looseObject({ id: z.string(), version: z.string(), name: z.string(), fields: z.record(z.string(), z.unknown()), orientations: z.array(z.string()) })
+        .safeParse(v).success,
     'not a template manifest',
   )
   .describe("The template's template.json, as built: id, version, name, fields, duration, orientations, uses, background");
@@ -158,8 +161,15 @@ export const registerTemplateVersion = defineSharedTool({
   output: z.object({ template: templateOutput, version: versionOutput, changed: z.boolean() }),
   example: {
     manifest: {
-      id: 'promo', version: '1.0.0', name: 'Promo', fields: { title: { type: 'text', label: 'Title', default: 'Hello' } },
-      duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 }, orientations: ['landscape'], uses: [], background: '#000', protocol: 1,
+      id: 'promo',
+      version: '1.0.0',
+      name: 'Promo',
+      fields: { title: { type: 'text', label: 'Title', default: 'Hello' } },
+      duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 },
+      orientations: ['landscape'],
+      uses: [],
+      background: '#000',
+      protocol: 1,
     },
     bundleId: '0'.repeat(64),
     sourcesId: '1'.repeat(64),
@@ -174,7 +184,9 @@ export const registerTemplateVersion = defineSharedTool({
     try {
       sources = sourcesSchema.parse(JSON.parse(await sourcesObj.text()));
     } catch {
-      throw new ToolError('invalid_input', 'the sources are not a JSON object of file name to text', [{ path: 'sourcesId', message: 'not a JSON object of file name to text' }]);
+      throw new ToolError('invalid_input', 'the sources are not a JSON object of file name to text', [
+        { path: 'sourcesId', message: 'not a JSON object of file name to text' },
+      ]);
     }
 
     const report = checkTemplateBundle({ manifest: input.manifest, html, sources });
@@ -191,9 +203,14 @@ export const registerTemplateVersion = defineSharedTool({
       if (prior) {
         const same = prior.bundleSha256 === input.bundleId && canonicalJson(JSON.parse(prior.manifestJson)) === canonicalJson(manifest);
         if (!same) {
-          throw new ToolError('conflict', `${templateKey(manifest, org.orgId ?? 'base')} is already registered with a different bundle or manifest; versions never change, so bump the version`, {
-            versionId: prior.id, bundleSha256: prior.bundleSha256,
-          });
+          throw new ToolError(
+            'conflict',
+            `${templateKey(manifest, org.orgId ?? 'base')} is already registered with a different bundle or manifest; versions never change, so bump the version`,
+            {
+              versionId: prior.id,
+              bundleSha256: prior.bundleSha256,
+            },
+          );
         }
         return { template: templateView(existing, [prior]), version: versionView(prior), changed: false };
       }
@@ -204,9 +221,16 @@ export const registerTemplateVersion = defineSharedTool({
       ? write(org.templates.stage.update(existing, { name: manifest.name }))
       : write(org.templates.stage.insert({ key: manifest.id, name: manifest.name }));
     const stored: StoredCheckReport = { ...report, checkedAt: Date.now(), sourcesSha256: input.sourcesId };
-    const version = write(org.templates.versions.stage.insert({
-      templateId: template.id, version: manifest.version, manifestJson, bundleSha256: input.bundleId, status: 'draft', checkReportJson: JSON.stringify(stored),
-    }));
+    const version = write(
+      org.templates.versions.stage.insert({
+        templateId: template.id,
+        version: manifest.version,
+        manifestJson,
+        bundleSha256: input.bundleId,
+        status: 'draft',
+        checkReportJson: JSON.stringify(stored),
+      }),
+    );
     return { template: templateView(template, [version]), version: versionView(version), changed: true };
   },
 });
@@ -214,7 +238,7 @@ export const registerTemplateVersion = defineSharedTool({
 export const setTemplateVersionStatus = defineSharedTool({
   name: 'set_template_version_status',
   description:
-    "Approve a template version, so spots may use it, or retire it, so no new spot does. Spots already using a retired version keep playing it. Base templates belong to the platform; an org can change only its own. Setting the status it already has changes nothing. Returns { version, changed }.",
+    'Approve a template version, so spots may use it, or retire it, so no new spot does. Spots already using a retired version keep playing it. Base templates belong to the platform; an org can change only its own. Setting the status it already has changes nothing. Returns { version, changed }.',
   scope: 'content:publish',
   minRole: 'owner',
   mutates: true,

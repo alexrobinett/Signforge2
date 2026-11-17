@@ -109,9 +109,7 @@ export const FONTS: readonly CatalogueFont[] = [
     roles: ['display'],
     weights: [400],
     licence: ofl('Copyright 2019 The Bebas Neue Project Authors', 'https://github.com/dharmatype/Bebas-Neue'),
-    files: [
-      { weight: 400, style: 'normal', file: 'a7c90c89240c134f7fdd33d40c000ec90b79d675ea53e8cc5a6d423c073de412', size: 13768 },
-    ],
+    files: [{ weight: 400, style: 'normal', file: 'a7c90c89240c134f7fdd33d40c000ec90b79d675ea53e8cc5a6d423c073de412', size: 13768 }],
   },
   {
     id: 'base/playfair-display',

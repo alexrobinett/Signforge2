@@ -63,7 +63,9 @@ export async function pushTemplate(opts: TemplatePushOptions): Promise<TemplateP
       try {
         const j = JSON.parse(text) as { error?: string; problems?: string[] };
         detail = [j.error, ...(j.problems ?? []).map((p) => `  - ${p}`)].filter(Boolean).join('\n');
-      } catch { /* not JSON */ }
+      } catch {
+        /* not JSON */
+      }
       throw new TemplatePushError(`${method} ${path}: ${res.status}${detail ? `\n${detail}` : ''}`);
     }
     return JSON.parse(text) as T;
@@ -76,7 +78,12 @@ export async function pushTemplate(opts: TemplatePushOptions): Promise<TemplateP
   await call('PUT', `${prefix}/blobs/${sourcesId}`, sources as BodyInit, 'application/json');
   log(`uploaded bundle ${bundleId.slice(0, 12)} (${(bundle.byteLength / 1024).toFixed(0)} kB) and sources ${sourcesId.slice(0, 12)}`);
 
-  const r = await call<TemplatePushResult>('PUT', `${prefix}/templates`, JSON.stringify({ manifest: opts.manifest, bundleId, sourcesId, approve: opts.approve ?? false }), 'application/json');
+  const r = await call<TemplatePushResult>(
+    'PUT',
+    `${prefix}/templates`,
+    JSON.stringify({ manifest: opts.manifest, bundleId, sourcesId, approve: opts.approve ?? false }),
+    'application/json',
+  );
   log(r.changed ? `${r.key} registered, ${r.status}` : `${r.key} was already registered with these bytes (${r.status}); nothing changed`);
   return r;
 }
@@ -103,7 +110,8 @@ export async function pushFonts(opts: {
     for (const f of font.files) {
       const path = fontFilePath(font, f);
       const data = await opts.read(path);
-      if ((await sha256(data as BufferSource)) !== f.file) throw new TemplatePushError(`${path} does not match the catalogue's sha256 for ${font.id} ${f.weight}`);
+      if ((await sha256(data as BufferSource)) !== f.file)
+        throw new TemplatePushError(`${path} does not match the catalogue's sha256 for ${font.id} ${f.weight}`);
       files.push({ path, sha: f.file, data });
     }
   let bytes = 0;
