@@ -19,7 +19,7 @@ function manifest(id: string, files: string[], extra: Partial<ScreenManifest> = 
     id,
     generatedAt: '2026-11-17T00:00:00.000Z',
     screen: { id: 'x', name: 'x', timezone: 'UTC', orientation: 'landscape' },
-    files: Object.fromEntries(files.map((f) => [f, { size: 4, type: 'image/png' }])),
+    files: Object.fromEntries(files.map((f) => [f, { size: 4, type: f === BASE_HTML ? 'text/html' : 'image/png' }])),
     templates: {},
     spots: {},
     playlists: {},
@@ -211,6 +211,18 @@ describe('GET /v1/device/blobs/:sha256', () => {
   it('serves the previous manifest too, and a base template from the shared prefix', async () => {
     expect(await (await get(`/blobs/${BLOB1}`, a.credential)).text()).toBe('blob aaaa');
     expect(await (await get(`/blobs/${BASE_HTML}`, a.credential)).text()).toBe('<!doctype html>');
+  });
+
+  it('never lets a blob run as a page on the API origin', async () => {
+    const html = await get(`/blobs/${BASE_HTML}`, a.credential);
+    expect(html.headers.get('content-type')).toBe('text/html');
+    expect(html.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(html.headers.get('content-security-policy')).toMatch(/^sandbox; default-src 'none'/);
+    expect(html.headers.get('content-disposition')).toBe('attachment');
+    const png = await get(`/blobs/${BLOB2}`, a.credential);
+    expect(png.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(png.headers.get('content-security-policy')).toMatch(/^sandbox; default-src 'none'/);
+    expect(png.headers.get('content-disposition')).toBeNull();
   });
 
   it('serves a catalogue brand font from the shared prefix, only to a screen whose manifest lists it', async () => {

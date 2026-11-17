@@ -7,7 +7,7 @@ import { isId, type DataSnapshot } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
+import { baseBlobKey, blobHeaders, manifestKey, orgBlobKey } from '../r2';
 import { deviceAuth, type DeviceEnv } from './auth';
 import { screenManifests } from './manifests';
 import { pairPoll, pairStart } from './pairing';
@@ -77,15 +77,7 @@ device.get('/blobs/:sha256', async (c) => {
   if (!obj && (isCatalogueFontFile(sha) || manifests.some((m) => m.baseHtml.has(sha)))) obj = await c.env.BLOBS.get(baseBlobKey(sha));
   if (!obj) return notFound('file not found');
 
-  return new Response(obj.body, {
-    headers: {
-      'content-type': listed.files.get(sha) || obj.httpMetadata?.contentType || 'application/octet-stream',
-      'content-length': String(obj.size),
-      etag: `"${sha}"`,
-      // private: the response needs the credential, so no shared cache may keep it.
-      'cache-control': 'private, max-age=31536000, immutable',
-    },
-  });
+  return new Response(obj.body, { headers: blobHeaders(sha, listed.files.get(sha) || obj.httpMetadata?.contentType || 'application/octet-stream', obj.size) });
 });
 
 device.get('/data/:file', async (c) => {
