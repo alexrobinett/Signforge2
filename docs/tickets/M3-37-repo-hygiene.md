@@ -24,7 +24,7 @@ What a reviewer sees first should look like product work (Fable). Pulled forward
 
 ## Done when
 
-- [ ] CI is green on a pull request. Not ticked: the repo was not pushed during this work, so no pull request ran. The workflow (`.github/workflows/ci.yml`) was run step by step locally on macOS instead, all passing: `pnpm install --frozen-lockfile`, `playwright install chromium`, `pnpm typecheck --force` (20/20), `pnpm lint`, `pnpm format:check --since=m3-foundations` (the PR base here; 14 files, clean), `pnpm test --force` (20/20), `pnpm --filter @signforge/cms test:e2e` (2 passed). Its first real run on Ubuntu is still to be seen.
+- [ ] CI is green on a pull request. Not ticked: the repo was not pushed during this work, so no pull request ran. The workflow (`.github/workflows/ci.yml`) was run step by step locally on macOS instead, all passing: `pnpm install --frozen-lockfile`, `playwright install chromium`, `pnpm typecheck --force` (20/20), `pnpm lint`, `pnpm format:check --since=m3-foundations` (the PR base here; 14 files, clean), `pnpm test --force` (21/21 tasks, including M3-26's 20 player browser tests and the CMS e2e run, 2 passed). Its first real run on Ubuntu is still to be seen.
 - [x] A bare `wrangler deploy` in `apps/api` does not ship dev settings. Dev moved to `env.dev`; the top level has no entry point, name, vars or bindings. In `apps/api`, 2026-11-17:
 
   ```
