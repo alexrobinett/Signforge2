@@ -43,6 +43,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 | `publishes`, `publish_screens` | status, publish at, actor; which manifest each screen got. Rollout status is a join against `screens.reported_manifest_id`. |
 | `data_sources`, `data_snapshots` | format, encrypted URL (a private calendar URL is a secret), refresh, next poll at, ETag, failures; latest snapshot, at most 64 kB |
 | `audit_log` | when, actor kind (user, agent, device, system), actor, action, target, detail |
+| `idempotency_keys` | key, action, input hash, the first result: a retried creation returns it and writes nothing |
 | `play_counts` | screen, hour, spot: plays and milliseconds |
 
 ## Publishing
@@ -162,7 +163,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
   - OAuth through Better Auth's provider plugin (`@better-auth/oauth-provider`). Its source has dynamic client registration (off by default) and S256 PKCE, required for public clients; it is first run in Milestone 4. A grant is bound to one org.
   - Scopes: `content:read`, `content:draft` (the default), `content:publish` (separate, off by default, never more than the user's role allows), `screens:manage`.
   - Without publish scope, the publish tool creates a pending publish for a person to approve.
-  - The tool registry is built in Milestone 3 as the CMS's own API, and the audit log is written in its dispatcher, so the MCP server and WebMCP become thin adapters. It is `packages/tools`, served at `POST /api/tools/:name` (its README has the contract); on `/api` nothing else but Better Auth changes data, and a test enumerating the routes enforces it.
+  - The tool registry is built in Milestone 3 as the CMS's own API, and the audit log is written in its dispatcher, so the MCP server and WebMCP become thin adapters. Tools stage their writes; the dispatcher runs them with the audit row in one atomic D1 batch, so no change lands unrecorded, and creating tools take an idempotency key. It is `packages/tools`, served at `POST /api/tools/:name` (its README has the contract); on `/api` nothing else but Better Auth changes data, and a test enumerating the routes enforces it.
 
 ## Cost at 1,000 screens
 
