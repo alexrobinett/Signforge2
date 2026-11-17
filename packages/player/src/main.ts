@@ -17,7 +17,7 @@
 import type { ScreenManifest, Spot, Transition } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, type Step } from '@signforge/player-core';
 import { DeviceCredential } from './credential';
-import { dataSettled, dataStatus, startDataLoop } from './data';
+import { dataRejections, dataSettled, dataStatus, startDataLoop } from './data';
 import { Slot } from './slot';
 import { UnauthorisedError, loadActiveManifest, requestPersistence, sync } from './store';
 
@@ -81,6 +81,10 @@ const state = {
   get data(): Record<string, string> {
     return dataStatus();
   },
+  /** Live values and snapshots refused per data source: a broken feed shows here. */
+  get dataRejected(): Record<string, number> {
+    return dataRejections();
+  },
   /** Frame pacing since the last reset. */
   frames: { count: 0, dropped: 0, maxMs: 0 },
   /** The same, split by what the player was doing: playing, loading the next spot, or transitioning. */
@@ -137,6 +141,7 @@ function renderHud(): void {
     `played ${state.played}  skipped ${state.skipped}${state.displayOn ? '' : '  ASLEEP'}\n` +
     `frames ${f.count}  dropped ${pct}%  worst ${f.maxMs} ms` +
     Object.entries(dataStatus()).map(([id, at]) => `\ndata ${id}  ${at.slice(11, 19)}Z`).join('') +
+    Object.entries(dataRejections()).map(([id, n]) => `\ndata ${id}  ${n} REFUSED`).join('') +
     (state.lastError ? `\nlast error: ${state.lastError}` : '');
 }
 
@@ -478,7 +483,7 @@ async function boot(): Promise<void> {
   }, 10_000);
 
   void syncLoop();
-  wakeData = startDataLoop(CONTENT, () => manifest?.dataSources ?? {}, deviceHeaders);
+  wakeData = startDataLoop(CONTENT, () => manifest, deviceHeaders);
   void playbackLoop();
   void displayLoop();
 }

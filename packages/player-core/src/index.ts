@@ -2,7 +2,7 @@
  * Player logic with no browser dependency: which playlist is live, what plays next,
  * and which files a manifest still needs. Checking a manifest is the contract's job. The browser shell supplies time, storage and frames.
  */
-import { requiredFiles, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
+import { readPath, requiredFiles, validateBoundValue, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
 
 /**
  * Validation lives in the contract, which the server imports too. Re-exported here while callers
@@ -151,28 +151,55 @@ export class Sequencer {
 
 // ----------------------------------------------------------------- live data
 
-/** Read a dot path out of a JSON value. Returns undefined when any step is missing. */
-export function readPath(data: unknown, path: string): unknown {
-  let v: unknown = data;
-  for (const key of path.split('.')) {
-    if (v === null || typeof v !== 'object') return undefined;
-    v = (v as Record<string, unknown>)[key];
-  }
-  return v;
+/** A live value that was refused: the source it came from and what is wrong with it. */
+export interface Rejected {
+  source: string;
+  problem: string;
 }
 
 /**
- * The data a template spot plays with: its static values, with each bound field replaced by
- * the latest snapshot value. A missing source or path leaves the static fallback in place.
+ * The data a template spot plays with: its static values, with each bound field replaced by the
+ * latest snapshot value when that value fits the field (`validateBoundValue`). A missing source
+ * leaves the static fallback in place quietly; a value that is missing at its path or does not
+ * fit also leaves the fallback, and is listed in `rejected` so a broken feed can be seen.
  */
-export function resolveSpotData(spot: Extract<Spot, { kind: 'template' }>, snapshots: ReadonlyMap<string, DataSnapshot>): Record<string, unknown> {
+export function resolveSpotData(
+  spot: Extract<Spot, { kind: 'template' }>,
+  fields: unknown,
+  snapshots: ReadonlyMap<string, DataSnapshot>,
+): { data: Record<string, unknown>; rejected: Rejected[] } {
   const data = { ...spot.data };
+  const rejected: Rejected[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    const v = snapshot ? readPath(snapshot.data, b.path) : undefined;
-    if (v !== undefined && v !== null) data[field] = v;
+    if (!snapshot) continue;
+    const v = readPath(snapshot.data, b.path);
+    const problems = validateBoundValue(fields, field, v);
+    if (problems.length) rejected.push(...problems.map((problem) => ({ source: b.source, problem })));
+    else data[field] = v;
   }
-  return data;
+  return { data, rejected };
+}
+
+/**
+ * How a snapshot serves the spots of a manifest: how many bound values it would fill, and what is
+ * wrong with the rest. A snapshot that fills none while some spot binds to it is broken for this
+ * screen, and must not replace the last good one.
+ */
+export function snapshotFit(manifest: ScreenManifest, snapshot: DataSnapshot): { fits: number; problems: string[] } {
+  let fits = 0;
+  const problems: string[] = [];
+  for (const spot of Object.values(manifest.spots)) {
+    if (spot.kind !== 'template') continue;
+    const fields = manifest.templates[spot.template]?.manifest.fields;
+    for (const [field, b] of Object.entries(spot.bindings ?? {})) {
+      if (b.source !== snapshot.id) continue;
+      const p = validateBoundValue(fields, field, readPath(snapshot.data, b.path));
+      if (p.length) problems.push(...p.map((e) => `spot "${spot.id}": ${e}`));
+      else fits++;
+    }
+  }
+  return { fits, problems };
 }
 
 // --------------------------------------------------------------------- files

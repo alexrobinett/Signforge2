@@ -4,7 +4,7 @@
  */
 import { SUPPORTED_PROTOCOLS, type HostMessage, type Orientation, type ScreenManifest, type Spot, type TemplateMessage } from '@signforge/contract';
 import { resolveSpotData } from '@signforge/player-core';
-import { liveData } from './data';
+import { liveData, reportRejected } from './data';
 import { getBlob } from './store';
 
 /** A spot that has not reported ready by this point is skipped. */
@@ -130,7 +130,9 @@ export class Slot {
       addEventListener('message', (e: MessageEvent<TemplateMessage>) => {
         if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
         if (e.data.type === 'loaded') {
-          post({ sf: protocol, type: 'init', data: resolveSpotData(spot, liveData), assets, durationMs: spot.durationMs, orientation, viewport: { width: w, height: h }, timezone: manifest.screen.timezone, locale: manifest.screen.locale ?? 'en-US' });
+          const { data, rejected } = resolveSpotData(spot, t.manifest.fields, liveData);
+          reportRejected(rejected);
+          post({ sf: protocol, type: 'init', data, assets, durationMs: spot.durationMs, orientation, viewport: { width: w, height: h }, timezone: manifest.screen.timezone, locale: manifest.screen.locale ?? 'en-US' });
         } else if (e.data.type === 'ready') resolve();
         else if (e.data.type === 'error') reject(new Error(`template error: ${e.data.message}`));
       }, { signal });
