@@ -280,7 +280,10 @@ describe('files', () => {
   });
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
+    // A release plays schema N and N-1, so a screen updated while offline keeps its cached manifest.
+    expect(validateManifest(manifest({ schema: 2 }))).toEqual([]);
     expect(validateManifest(manifest({ schema: 1 }))).toEqual(['manifest schema 1 is not one this player can play (2, 3)']);
+    expect(validateManifest(manifest({ schema: 4 }))).toEqual(['manifest schema 4 is not one this player can play (2, 3)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);

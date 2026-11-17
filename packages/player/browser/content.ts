@@ -56,12 +56,25 @@ const templateManifest: TemplateManifest = {
   protocol: PROTOCOL_VERSION,
 };
 
+export interface ContentOptions {
+  transition?: Transition;
+  /** Manifest schema. Schema 1 keys templates without their owner. Default `MANIFEST_SCHEMA`. */
+  schema?: number;
+  /** Appended to the template as a comment, so the template file (and its hash) differs from other content's. */
+  variant?: string;
+}
+
 /**
  * One playlist (`main`, the default) of the given spots, in order. Change any spot's label to get
  * a manifest with a new id, as a publish would.
  */
-export function buildContent(templateHtml: string, spots: FixtureSpot[], { transition = { type: 'cut' } as Transition } = {}): Content {
-  const html = Buffer.from(templateHtml);
+export function buildContent(
+  templateHtml: string,
+  spots: FixtureSpot[],
+  { transition = { type: 'cut' }, schema = MANIFEST_SCHEMA, variant }: ContentOptions = {},
+): Content {
+  const html = Buffer.from(variant ? `${templateHtml}<!-- ${variant} -->` : templateHtml);
+  const key = schema === 1 ? 'fixture@1.0.0' : TEMPLATE_KEY;
   const htmlSha = sha256(html);
   const spotMap: Record<string, Spot> = {};
   const blobs = new Map<string, Buffer>([[htmlSha, html]]);
@@ -71,7 +84,7 @@ export function buildContent(templateHtml: string, spots: FixtureSpot[], { trans
       id: s.id,
       name: s.id,
       kind: 'template',
-      template: TEMPLATE_KEY,
+      template: key,
       durationMs: s.durationMs ?? 1000,
       data: { label: s.label ?? s.id, mode: s.mode ?? 'ok', ...(s.items ? { items: s.items } : {}) },
       assets: {},
@@ -87,11 +100,11 @@ export function buildContent(templateHtml: string, spots: FixtureSpot[], { trans
   const dataSources: Record<string, DataSource> = {};
   for (const b of spots.flatMap((s) => Object.values(s.bindings ?? {}))) dataSources[b.source] = { id: b.source, refreshS: MIN_REFRESH_S };
   const body: Omit<ScreenManifest, 'id'> = {
-    schema: MANIFEST_SCHEMA,
+    schema,
     generatedAt: new Date().toISOString(),
     screen: { id: 'test-screen', name: 'Test screen', timezone: 'UTC', orientation: 'landscape' },
     files,
-    templates: { [TEMPLATE_KEY]: { manifest: templateManifest, html: htmlSha } },
+    templates: { [key]: { manifest: templateManifest, html: htmlSha } },
     spots: spotMap,
     playlists: { main: { id: 'main', name: 'Main', transition, items: spots.map((s) => ({ spot: s.id })) } },
     dataSources,

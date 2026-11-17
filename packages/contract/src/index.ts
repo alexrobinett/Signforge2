@@ -14,6 +14,8 @@
  *    change must never strand templates already published.
  *  - A player reports the manifest schemas it can play in every sync. The server compiles each
  *    screen at the newest schema that screen supports, and tells an outdated player to reload.
+ *  - A player release plays schema N and N-1, so a screen updated while offline still plays the
+ *    manifest it cached under the previous release.
  */
 
 import { validateTemplateManifest } from './validate.ts';
@@ -36,7 +38,7 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  */
 export const MANIFEST_SCHEMA = 3;
 /** Manifest schemas this player can play: the current one and the one before it. */
-export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [2, 3];
+export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
 /**
  * Every id a screen sees (screen, spot, playlist, schedule entry, data source, group, org) goes

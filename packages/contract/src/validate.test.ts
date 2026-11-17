@@ -351,6 +351,7 @@ describe('versions', () => {
     delete old.brand;
     (old.schedule as unknown[]).pop();
     expect(validateManifest(old)).toEqual([]);
+    expect(validateManifest({ ...validManifest(), schema: 1 })).toEqual(['manifest schema 1 is not one this player can play (2, 3)']);
   });
 
   it('drives protocol 1 and 2 bundles, and refuses a newer one', () => {

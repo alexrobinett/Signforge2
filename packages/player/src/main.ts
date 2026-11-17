@@ -14,12 +14,12 @@
  *                 ?transition=cut|fade<ms>|<ms>  override the playlist transition (testing)
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
  */
-import type { ScreenManifest, Spot, Transition } from '@signforge/contract';
+import { requiredFiles, type ScreenManifest, type Spot, type Transition } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { DeviceCredential } from './credential';
 import { dataRejections, dataSettled, dataStatus, startDataLoop } from './data';
 import { Slot } from './slot';
-import { PinSet, UnauthorisedError, loadActiveManifest, requestPersistence, sync } from './store';
+import { PinSet, UnauthorisedError, loadManifests, rememberGood, requestPersistence, sync } from './store';
 
 const query = new URLSearchParams(location.search);
 const CONTENT = query.get('content') ?? './content';
@@ -73,6 +73,13 @@ const state = {
   /** How the supervisor last switched the panel, or why it could not. */
   display: '',
   persistent: false,
+  /** The id of the last manifest that played a spot: the one the player falls back to. */
+  lastGood: '',
+  /**
+   * The id of the newest manifest while the player falls back from it, because nothing in it
+   * played for a full pass of its playlist; '' otherwise. Reported in the heartbeat once M3-07 lands.
+   */
+  fallback: '',
   /** JS heap in MB, where the browser reports it. */
   get heapMb(): number {
     const m = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
@@ -217,6 +224,12 @@ async function prepareStep(slot: Slot, step: Step, manifest: ScreenManifest): Pr
 }
 
 function record(step: Step, manifestId: string): void {
+  if (manifestId !== state.lastGood && source?.id === manifestId) {
+    state.lastGood = manifestId;
+    lastGood = source;
+    pins.hold('last-good', requiredFiles(source));
+    rememberGood(source).catch((err: unknown) => console.warn('[sf] could not store the last good manifest', err));
+  }
   state.spot = step.spot.id;
   state.playlist = step.playlist.id;
   state.played++;
@@ -239,12 +252,28 @@ resetSleepSignal();
 const hold = (ms: number) => Promise.race([sleep(ms), fellAsleep]);
 
 let manifest: ScreenManifest | undefined;
+/** `manifest` as it arrived, before testing overrides: what is stored as the last good one. */
+let source: ScreenManifest | undefined;
+/** The last manifest that played a spot. */
+let lastGood: ScreenManifest | undefined;
 let sequencer: Sequencer | undefined;
 /**
  * Files cache cleanup must keep beyond the active manifest's: the spot on screen (`playing`) and
  * the spot loading (`preparing`), either of which may come from a manifest just replaced.
  */
 const pins = new PinSet();
+
+/**
+ * Nothing in the current manifest has played for a full pass of its playlist: go back to the
+ * last manifest that played, until the server sends a newer one.
+ */
+function fallBack(): void {
+  if (!lastGood || !manifest || lastGood.id === manifest.id) return;
+  const from = manifest.id;
+  console.warn(`[sf] manifest ${from} played nothing in a full pass; falling back to ${lastGood.id}`);
+  adopt(lastGood);
+  state.fallback = from;
+}
 
 /**
  * Run a loop body forever. A bug or a bad value must never end playback: log it, wait, try again.
@@ -268,6 +297,9 @@ async function playbackLoop(): Promise<never> {
   let currentManifest: ScreenManifest | undefined;
   let startedAt = 0;
   let failures = 0;
+  /** Spots of the current manifest that failed in a row, never reset by the pause below. */
+  let failedInManifest = 0;
+  let failingManifest = '';
 
   return forever('playback', async () => {
     if (!manifest || !sequencer) {
@@ -329,6 +361,16 @@ async function playbackLoop(): Promise<never> {
     phase = 'play';
     if (!state.displayOn) return;
     if (!ok) {
+      if (failingManifest !== m.id) {
+        failingManifest = m.id;
+        failedInManifest = 0;
+      }
+      if (++failedInManifest >= step.playlist.items.length && m.id !== state.lastGood && lastGood) {
+        failures = 0;
+        failedInManifest = 0;
+        fallBack();
+        return;
+      }
       if (++failures >= MAX_CONSECUTIVE_FAILURES) {
         current?.clear();
         if (current) current.el.style.opacity = '0';
@@ -343,6 +385,7 @@ async function playbackLoop(): Promise<never> {
       return;
     }
     failures = 0;
+    failedInManifest = 0;
 
     // Hold the current spot for its full length; a crossfade overlaps its last moments.
     if (currentSpot) await hold(startedAt + currentSpot.durationMs - fadeMs - performance.now());
@@ -425,8 +468,10 @@ async function displayLoop(): Promise<never> {
 async function syncLoop(): Promise<never> {
   return forever('sync', async () => {
     try {
+      // While falling back, the manifest that failed counts as current: the server's answer is
+      // 304 until it publishes something newer.
       const result = await sync(CONTENT, {
-        currentId: manifest?.id,
+        currentId: state.fallback || manifest?.id,
         headers: await deviceHeaders(),
         ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
         pinned: pins,
@@ -481,6 +526,8 @@ function applyOverrides(m: ScreenManifest): ScreenManifest {
 let wakeData = () => {};
 
 function adopt(next: ScreenManifest): void {
+  source = next;
+  state.fallback = '';
   next = applyOverrides(next);
   manifest = next;
   wakeData();
@@ -516,7 +563,15 @@ async function boot(): Promise<void> {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[sf] no service worker', e));
   state.persistent = await requestPersistence();
 
-  const cached = await loadActiveManifest().catch(() => undefined);
+  const stored = await loadManifests().catch((err: unknown) => {
+    console.warn('[sf] could not read stored manifests', err);
+    return {} as Awaited<ReturnType<typeof loadManifests>>;
+  });
+  lastGood = stored.lastGood;
+  // Its files stay until a newer manifest has played, in case the active one plays nothing.
+  if (lastGood) pins.hold('last-good', requiredFiles(lastGood));
+  state.lastGood = lastGood?.id ?? '';
+  const cached = stored.active ?? stored.lastGood;
   if (cached) adopt(cached);
   else status('SignForge\nWaiting for content…');
 
