@@ -83,7 +83,7 @@ Rive was evaluated as an alternative template format because it has a native App
 - `backdrop-filter` is not allowed over moving content; it is the one effect the spike found expensive on a Pi 4. Shadows, blur and glows are fine.
 - At most about 50 DOM elements may animate at once. Denser effects such as particles go in a single 2D or WebGL canvas.
 - Layout is fluid and sized relative to the screen, so one template is crisp at any resolution of an orientation it supports.
-- The template runs in a sandboxed frame with no network access, no storage and no reach outside its frame. The build produces one self-contained HTML file per template; the player loads it from its cache into the frame and passes image files in with the spot's data, under a content security policy that blocks every request.
+- The template runs in a sandboxed frame with no network access, no storage and no reach outside its frame, including by navigating it (see Template containment under Player). The build produces one self-contained HTML file per template; the player loads it from its cache into the frame and passes image files in with the spot's data, under a content security policy that blocks every request.
 - Hard budgets, measured on a Pi 4 at 1080p 60 Hz: at most 1% dropped frames over a full play, no frame longer than 50 ms after play starts, and at most 500 ms to ready from cached files. A built bundle may be at most 600 kB, checked by `sf build` and again by the server.
 
 ### Submission and review
@@ -136,6 +136,24 @@ The web player owns all content concerns and runs unchanged in any browser, incl
   - At start, before a sync: the persisted offset is used, but the clock is **not trusted** if the corrected time is earlier than `syncedAt` (time went backwards: a reboot without a clock) or earlier than the player's build time. With no persisted offset, the same build-time floor applies.
   - On an untrusted clock the screen keeps playing: the schedule's local windows still apply, but entries with absolute bounds (takeovers) do not (`resolvePlaylist` with `clockTrusted: false`), the display stays on whatever its hours say, and plays are not counted, since their hour is unknown. The first good sync makes it trusted again. Each sync reports `clock: { offsetMs, trusted }`.
 - **Play counts** are sent with a `seq` until acknowledged. A screen that loses its counter (re-imaged, storage cleared) makes a new random `epoch` and starts again at 1; the server keeps the highest acknowledged `seq` per epoch, so a repeat is ignored and a fresh counter is not.
+
+### Template containment
+
+Each template runs two frames deep. The slot holds a **wrapper frame**: a `srcdoc` document the player writes, on the player's origin, whose only content is a content security policy (`default-src 'none'` plus inline scripts and styles, `blob:`/`data:` media and `data:` fonts) and a one-line `relay` function. Inside it, the template's own frame has `sandbox="allow-scripts"` and the template's HTML as `srcdoc`.
+
+- The template's frame inherits the wrapper's policy before any of its markup runs, and a document cannot drop a policy it was given. So the template cannot fetch, load media or fonts from the network, or open frames.
+- Where the template's frame may navigate is decided by the **wrapper's** policy (`frame-src`, falling back to `'none'`), not by the template's. A template that sets `location`, follows a link, or adds a `<meta http-equiv=refresh>` gets an error page and no request is made. The player sees that frame load a second time, fails the spot (or blanks it if it is already playing) and moves on.
+- The sandbox stops the rest: no popups, no form submission, no navigating the wrapper or the top page, and an opaque origin, so no access to the player's DOM, Cache Storage or local storage.
+- The SDK accepts messages only from its `parent`, which is now the wrapper. The player posts through the wrapper's `relay`, so messages come from the right window, and listens for the template's messages on the wrapper's window. Published bundles are unchanged.
+
+Alternatives considered:
+
+- **Sandbox flags alone** (no `allow-top-navigation`, no `allow-popups`, no `allow-forms`): they stop navigating other frames, but a frame may always navigate itself, and the new document carries none of the old one's policy.
+- **A policy in the template's own document** (the meta tag the player used to inject, or a header from the service worker on a template URL): it belongs to the document, so it dies when the template navigates away. The service worker is also missing on the first load, and it does not see an opaque-origin frame's requests.
+- **A policy on the player page** cannot be strict enough: URL spots need `frame-src https:`.
+- **A check after the fact** (counting the frame's `load` events, the old approach) fires after the request has been made, and never if the new page does not finish loading.
+
+Browser tests in `packages/player/browser/containment.test.ts` try each way out. The wrapper adds one same-origin frame per slot; its cost on the Pi is in `spike/pi-perf/RESULTS.md`.
 
 ### Video
 

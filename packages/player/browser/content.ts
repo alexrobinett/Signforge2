@@ -19,10 +19,31 @@ import {
   type Transition,
 } from '@signforge/contract';
 
+/** How the fixture template behaves; see `fixtures/template.ts`. */
+export type FixtureMode =
+  | 'ok'
+  | 'throw'
+  | 'hang'
+  // Hostile: each tries to reach `target`.
+  | 'navigate'
+  | 'navigate-on-play'
+  | 'navigate-data'
+  | 'navigate-top'
+  | 'refresh'
+  | 'link'
+  | 'form'
+  | 'open'
+  | 'iframe'
+  | 'fetch'
+  | 'image'
+  | 'font';
+
 export interface FixtureSpot {
   id: string;
   /** How the fixture template behaves for this spot. */
-  mode?: 'ok' | 'throw' | 'hang';
+  mode?: FixtureMode;
+  /** For the hostile modes: the URL the template tries to reach. */
+  target?: string;
   /** Shown by the template. Defaults to the id. */
   label?: string;
   durationMs?: number;
@@ -50,6 +71,7 @@ const templateManifest: TemplateManifest = {
   fields: {
     label: { type: 'text', label: 'Label', maxLength: 40 },
     mode: { type: 'text', label: 'Mode' },
+    target: { type: 'text', label: 'Target' },
     items: { type: 'list', label: 'Items', maxItems: 3, default: [], item: { title: { type: 'text', label: 'Title' } } },
   },
   duration: { defaultMs: 1000, minMs: 100, maxMs: 60_000 },
@@ -98,7 +120,7 @@ export function buildContent(
       kind: 'template',
       template: key,
       durationMs: s.durationMs ?? 1000,
-      data: { label: s.label ?? s.id, mode: s.mode ?? 'ok', ...(s.items ? { items: s.items } : {}) },
+      data: { label: s.label ?? s.id, mode: s.mode ?? 'ok', ...(s.items ? { items: s.items } : {}), target: s.target ?? '' },
       assets: {},
       ...(s.bindings ? { bindings: s.bindings } : {}),
     };

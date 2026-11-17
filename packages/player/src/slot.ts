@@ -20,8 +20,17 @@ import { getFile } from './source';
 /** A spot that has not reported ready by this point is skipped. */
 export const READY_TIMEOUT_MS = 2000;
 
-// A template gets no network at all: scripts and styles are inline, media arrives as blobs.
+// A template gets no network at all: scripts and styles are inline, media arrives as blobs. No
+// `frame-src`, so it falls back to `'none'`: the template cannot load a frame or navigate its own.
 const TEMPLATE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; font-src data:";
+// The document around each template; see `template()`. Its one script is `relay`: templates
+// accept messages only from their `parent`, which is now the wrapper, and a message's source is
+// the window whose code called postMessage. So the player posts through a function of the wrapper.
+const WRAPPER_HTML =
+  `<!doctype html><meta http-equiv="Content-Security-Policy" content="${TEMPLATE_CSP}">` +
+  '<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style>' +
+  "<script>relay=(w,m)=>w.postMessage(m,'*')</script>";
+type WrapperWindow = Window & { relay: (to: Window, m: HostMessage) => void };
 
 /**
  * The time templates show. The device clock, uncorrected, until the sync loop keeps an offset from
@@ -41,6 +50,8 @@ type TemplateSpot = Extract<Spot, { kind: 'template' }>;
 /** A slot's template frame, and what its next `init` sends. */
 interface LiveFrame {
   frame: HTMLIFrameElement;
+  /** The wrapper frame's window: the template's `parent`. */
+  wrapper: WrapperWindow;
   protocol: number;
   /** The bundle's hash: an update to another bundle is a fresh load. */
   html: string;
@@ -174,7 +185,8 @@ export class Slot {
   private live?: LiveFrame;
 
   private post(m: HostMessage): void {
-    this.live?.frame.contentWindow?.postMessage(m, '*');
+    const live = this.live;
+    if (live?.frame.contentWindow) live.wrapper.relay(live.frame.contentWindow, m);
   }
 
   /** Wait for the frame's next `ready`; `send` starts what leads to it. */
@@ -215,29 +227,45 @@ export class Slot {
       this.el.style.background = t.manifest.background;
     }
 
-    const frame = document.createElement('iframe');
+    // The template runs in a wrapper frame the player writes and the template cannot touch. The
+    // wrapper's policy is the template's too: a srcdoc document inherits its parent's, before any
+    // markup of its own runs, and no document can drop a policy it was given. The wrapper's
+    // policy, not the template's, also decides where the template's frame may navigate: nowhere
+    // (`frame-src` falls back to `default-src 'none'`). A template that tries is replaced by an
+    // error page, without a request. See "Template containment" in docs/architecture.md.
+    const wrapperFrame = document.createElement('iframe');
+    wrapperFrame.style.width = `${w}px`;
+    wrapperFrame.style.height = `${h}px`;
+    wrapperFrame.srcdoc = WRAPPER_HTML;
+    const wrapped = new Promise<void>((resolve) => wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal }));
+    this.el.appendChild(wrapperFrame);
+    await wrapped;
+    alive(signal);
+    const wrapper = wrapperFrame.contentWindow as WrapperWindow;
+    const frame = wrapper.document.createElement('iframe');
+    // Scripts only: an opaque origin, so no access to the player, the wrapper or their storage;
+    // no popups, forms, or navigating any frame but its own.
     frame.setAttribute('sandbox', 'allow-scripts');
-    frame.style.width = `${w}px`;
-    frame.style.height = `${h}px`;
-    // The policy goes first, before anything the template wrote, so no markup can run ahead of it.
-    frame.srcdoc = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${TEMPLATE_CSP}">${html.replace(/^\s*<!doctype[^>]*>/i, '')}`;
-    // The policy cannot stop a frame navigating itself. A template that does is blanked.
+    frame.srcdoc = html;
+
+    const live: LiveFrame = (this.live = { frame, wrapper, protocol, html: t.html, spot, manifest, assets, theme, orientation, viewport: { width: w, height: h } });
+    // A second load is a navigation, which the policy turned into an error page. Fail the spot; if
+    // it is already playing, blank it until the next spot.
     let loads = 0;
     frame.addEventListener(
       'load',
       () => {
-        if (++loads > 1) {
-          console.warn(`[sf] template ${spot.template} navigated away; removed`);
-          frame.remove();
-        }
+        if (++loads < 2) return;
+        console.warn(`[sf] template ${spot.template} navigated away; removed`);
+        wrapperFrame.remove();
+        live.waiter?.reject(new Error('template navigated away'));
       },
       { signal },
     );
-
-    const live: LiveFrame = (this.live = { frame, protocol, html: t.html, spot, manifest, assets, theme, orientation, viewport: { width: w, height: h } });
     // One listener for the frame's life. It reads `live`, so after an update (`reset`) the frame's
-    // next `loaded` gets the new spot's init.
-    addEventListener(
+    // next `loaded` gets the new spot's init. The template's `parent` is the wrapper, so its
+    // messages arrive there.
+    wrapper.addEventListener(
       'message',
       (e: MessageEvent<TemplateMessage>) => {
         if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
@@ -263,7 +291,7 @@ export class Slot {
       { signal },
     );
     this.startPlayback = () => this.post({ sf: protocol, type: 'play' });
-    const ready = this.nextReady(() => this.el.appendChild(frame), signal);
+    const ready = this.nextReady(() => wrapper.document.body.appendChild(frame), signal);
     await ready;
     alive(signal);
   }
