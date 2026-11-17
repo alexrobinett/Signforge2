@@ -176,7 +176,8 @@ const MIN_REFRESH_S = 60;
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-function validTimezone(tz: string): boolean {
+/** Whether `tz` is an IANA time zone this runtime knows. */
+export function validTimezone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
     return true;
@@ -204,6 +205,21 @@ function windowProblems(where: string, w: { from?: string; to?: string; days?: n
   else if (required && !Array.isArray(w.days) && 'days' in w) out.push(`${where}: days must be a list`);
   for (const k of ['startDate', 'endDate'] as const) if (w[k] !== undefined && !DATE.test(String(w[k]))) out.push(`${where}: ${k} must be YYYY-MM-DD`);
   return out;
+}
+
+/** What is wrong with a screen's display hours, as `validateManifest` checks them. Empty if they are valid. */
+export function displayHoursProblems(hours: DisplayHours): string[] {
+  const errors: string[] = [];
+  if (!Array.isArray(hours.weekly)) errors.push('display hours have no weekly list');
+  else for (const w of hours.weekly) errors.push(...windowProblems('display hours', w, true));
+  for (const e of hours.exceptions ?? []) {
+    if (!DATE.test(e.date) || !Array.isArray(e.on)) errors.push(`display hours exception "${e.date}" is malformed`);
+    else for (const w of e.on) {
+      errors.push(...windowProblems(`display hours on ${e.date}`, w, true));
+      if (toMinutes(w.to) <= toMinutes(w.from)) errors.push(`display hours on ${e.date}: ${w.from}-${w.to} must end after it starts`);
+    }
+  }
+  return errors;
 }
 
 export function validateManifest(m: unknown): string[] {
@@ -247,18 +263,7 @@ export function validateManifest(m: unknown): string[] {
     if (!s.playlists[e.playlist]) errors.push(`schedule entry "${e.id}" plays unknown playlist "${e.playlist}"`);
     errors.push(...windowProblems(`schedule entry "${e.id}"`, e, false));
   }
-  const hours = s.screen?.displayHours;
-  if (hours) {
-    if (!Array.isArray(hours.weekly)) errors.push('display hours have no weekly list');
-    else for (const w of hours.weekly) errors.push(...windowProblems('display hours', w, true));
-    for (const e of hours.exceptions ?? []) {
-      if (!DATE.test(e.date) || !Array.isArray(e.on)) errors.push(`display hours exception "${e.date}" is malformed`);
-      else for (const w of e.on) {
-        errors.push(...windowProblems(`display hours on ${e.date}`, w, true));
-        if (toMinutes(w.to) <= toMinutes(w.from)) errors.push(`display hours on ${e.date}: ${w.from}-${w.to} must end after it starts`);
-      }
-    }
-  }
+  if (s.screen?.displayHours) errors.push(...displayHoursProblems(s.screen.displayHours));
   for (const [key, p] of Object.entries(s.playlists)) {
     if (p.id !== key) errors.push(`playlist "${key}" is listed under a different id ("${p.id}")`);
     if (!isId(key)) errors.push(`playlist id "${key}" is not a valid id`);

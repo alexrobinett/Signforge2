@@ -14,7 +14,8 @@
  *
  * `sf push` uploads such a directory to the API and makes it a screen's desired manifest. It is
  * temporary, until the CMS publishes: it calls the `/admin` routes with the `ADMIN_TOKEN` deploy
- * secret, read from the `SF_ADMIN_TOKEN` environment variable. See ./push.ts.
+ * secret, read from the `SF_ADMIN_TOKEN` environment variable; the API publishes through its tool
+ * registry and audits it as `sf-push`. See ./push.ts.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';

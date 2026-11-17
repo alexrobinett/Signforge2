@@ -1,24 +1,11 @@
-// A session for org A cannot read or change org B's data, even with org B's ids.
+// A session for org A cannot read or change org B's data, even with org B's ids, through the
+// real tool route. packages/tools/test/isolation.test.ts covers every tool the same way.
 import { env, exports } from 'cloudflare:workers';
 import { scoped } from '@signforge/db';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { Client, email, testApp, type Api } from './client';
+import { Client, email, testApp } from './client';
 
-/** Routes a CMS handler would have: they only ever see `c.var.org`. */
-function probeRoutes(api: Api) {
-  api.get('/probe/screens', async (c) => c.json({ orgId: c.var.orgId, role: c.var.role, screens: await c.var.org.screens.list() }));
-  api.get('/probe/screens/:id', async (c) => {
-    const row = await c.var.org.screens.get(c.req.param('id'));
-    return row ? c.json(row) : c.json({ error: 'not_found' }, 404);
-  });
-  api.patch('/probe/screens/:id', async (c) => {
-    const { name } = await c.req.json<{ name: string }>();
-    const row = await c.var.org.screens.update(c.req.param('id'), { name });
-    return row ? c.json(row) : c.json({ error: 'not_found' }, 404);
-  });
-}
-
-const t = testApp({ extend: probeRoutes });
+const t = testApp();
 const alice = new Client(t);
 const bob = new Client(t);
 let orgA: string;
@@ -37,29 +24,28 @@ beforeAll(async () => {
 
 describe('a session for org A', () => {
   it('sees its own org through the scope', async () => {
-    const res = await alice.get('/api/probe/screens');
+    expect((await alice.session()).body.organization).toEqual({ id: orgA, role: 'owner' });
+    const res = await alice.tool('list_screens');
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { orgId: string; role: string; screens: { id: string }[] };
-    expect(body).toMatchObject({ orgId: orgA, role: 'owner' });
-    expect(body.screens.map((s) => s.id)).toEqual([screenA]);
-    expect((await alice.get(`/api/probe/screens/${screenA}`)).status).toBe(200);
+    expect(((await res.json()) as { screens: { id: string }[] }).screens.map((s) => s.id)).toEqual([screenA]);
+    expect((await alice.tool('get_screen', { screenId: screenA })).status).toBe(200);
   });
 
   it("cannot read or change org B's screen by id", async () => {
-    expect((await alice.get(`/api/probe/screens/${screenB}`)).status).toBe(404);
-    expect((await alice.patch(`/api/probe/screens/${screenB}`, { name: 'hijacked' })).status).toBe(404);
+    expect((await alice.tool('get_screen', { screenId: screenB })).status).toBe(404);
+    expect((await alice.tool('rename_screen', { screenId: screenB, name: 'hijacked' })).status).toBe(404);
     expect(await scoped(env.DB, orgB).screens.get(screenB)).toMatchObject({ name: 'B lobby' });
   });
 
   it('cannot pick org B from the request', async () => {
     // The org comes from the session alone; nothing in the request selects it.
-    const res = await alice.get(`/api/probe/screens?organizationId=${orgB}&orgId=${orgB}`, { 'x-organization-id': orgB });
-    expect(((await res.json()) as { orgId: string }).orgId).toBe(orgA);
+    const res = await alice.post(`/api/tools/list_screens?organizationId=${orgB}&orgId=${orgB}`, { organizationId: orgB, orgId: orgB }, { 'x-organization-id': orgB });
+    expect(((await res.json()) as { screens: { id: string }[] }).screens.map((s) => s.id)).toEqual([screenA]);
   });
 
   it('cannot make org B active', async () => {
     expect((await alice.setActive(orgB)).status).toBe(403);
-    expect((await alice.get(`/api/probe/screens/${screenB}`)).status).toBe(404);
+    expect((await alice.tool('get_screen', { screenId: screenB })).status).toBe(404);
   });
 
   it('loses org B as soon as it is removed, though its cache cookie still names org B', async () => {
@@ -67,13 +53,13 @@ describe('a session for org A', () => {
     const invite = await bob.ok<{ id: string }>('/api/auth/organization/invite-member', { email: (await alice.session()).body.user.email, role: 'viewer', organizationId: orgB });
     await alice.ok('/api/auth/organization/accept-invitation', { invitationId: invite.id });
     expect((await alice.setActive(orgB)).status).toBe(200);
-    expect((await alice.get(`/api/probe/screens/${screenB}`)).status).toBe(200);
+    expect((await alice.tool('get_screen', { screenId: screenB })).status).toBe(200);
 
     // Bob removes her. Her session cache cookie (valid for minutes) still says org B is active.
     const cookieBefore = alice.cookie;
     await bob.ok('/api/auth/organization/remove-member', { memberIdOrEmail: (await alice.session()).body.user.email, organizationId: orgB });
     expect(alice.cookie).toBe(cookieBefore);
-    const res = await alice.get(`/api/probe/screens/${screenB}`);
+    const res = await alice.tool('get_screen', { screenId: screenB });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'not_a_member' });
   });
@@ -81,7 +67,7 @@ describe('a session for org A', () => {
 
 describe('credentials stay on their own tree', () => {
   it('/api refuses a device credential, even alongside a valid session', async () => {
-    const res = await bob.get('/api/probe/screens', { authorization: 'Bearer crd_secret' });
+    const res = await bob.tool('list_screens', {}, { authorization: 'Bearer crd_secret' });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: 'device_credential_not_accepted' });
     expect((await bob.get('/api/session', { authorization: 'Bearer crd_secret' })).status).toBe(401);
@@ -89,7 +75,8 @@ describe('credentials stay on their own tree', () => {
 
   it('/api refuses a request with no session', async () => {
     const anon = new Client(t);
-    expect((await anon.get('/api/probe/screens')).status).toBe(401);
+    expect((await anon.tool('list_screens')).status).toBe(401);
+    expect((await anon.get('/api/tools')).status).toBe(401);
     expect((await anon.get('/api/session')).status).toBe(401);
   });
 

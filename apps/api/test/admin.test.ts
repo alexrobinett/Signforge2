@@ -1,5 +1,6 @@
-// The temporary /admin tree that `sf push` publishes through, driven by the real client
-// (packages/cli/src/push.ts) against local D1 and R2, then read back through the device API.
+// The temporary /admin tree that `sf push` uploads through (its publish step runs the tool),
+// driven by the real client (packages/cli/src/push.ts) against local D1 and R2, then read back
+// through the device API.
 import { manifestIdInput, type ScreenManifest } from '@signforge/contract';
 import { push, PushError, type PushOptions } from '@signforge/cli/push';
 import { scoped } from '@signforge/db';
@@ -120,6 +121,12 @@ describe('push', () => {
     const s = await org.scope.screens.get(org.screen);
     expect(s?.desiredManifestId).toBe(first.manifest.id);
     expect(s?.previousManifestId).toBeNull();
+
+    // The publish ran the tool through the dispatcher, audited as sf push; both pushes are recorded.
+    const audit = (await org.scope.auditLog.list()).filter((e) => e.action === 'publish_manifest_to_screen');
+    expect(audit).toHaveLength(2);
+    expect(audit[0]).toMatchObject({ actorKind: 'system', actorId: 'sf-push', clientId: 'sf-push', targetKind: 'screen', targetId: org.screen });
+    expect(JSON.parse(audit[0]!.detailJson!)).toEqual({ input: { screenId: org.screen, manifestId: first.manifest.id } });
   });
 
   it('stores base template HTML under sys/b/ and the rest under the org', async () => {

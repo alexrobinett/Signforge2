@@ -1,27 +1,34 @@
 /**
- * `/admin`: publishing from `sf push` until the CMS exists. TEMPORARY, protected by the
- * `ADMIN_TOKEN` deploy secret (see ./auth.ts); M3-12's tool registry replaces the whole tree.
+ * `/admin`: uploads for `sf push`, protected by the `ADMIN_TOKEN` deploy secret (see ./auth.ts).
+ * TEMPORARY: it moves bytes into R2 until the CMS uploads assets (M3-14) and agents get OAuth
+ * grants (Milestone 4). Making a manifest live is not done here: the last step runs the
+ * `publish_manifest_to_screen` tool through the dispatcher, as the CMS does, and is audited with
+ * the system actor `sf-push`.
  *
  * The push protocol, in order (packages/cli/src/push.ts is the client):
  *
  *   POST /admin/screens/:screen/missing      body: the manifest. Which of its files R2 lacks.
  *   PUT  /admin/screens/:screen/blobs/:sha   body: a file, stored under the screen's org.
  *   PUT  /admin/base/blobs/:sha              body: a base template's HTML, stored under sys/b/.
- *   PUT  /admin/screens/:screen/manifest     body: the manifest. Stored, then made desired.
+ *   PUT  /admin/screens/:screen/manifest     body: the manifest. Stored, then published by the tool.
  *
  * Keys follow docs/backend-plan.md#publishing and the device blob route: a base template's HTML
  * is read from `sys/b/`, every other file from the org's prefix. Every file is checked against
  * its hash before it is stored, and a manifest is checked by `validateManifest` and against its
- * own id before it is. Pushing the same build again uploads nothing and changes nothing.
+ * own id before it is. Blobs and manifests are content-addressed and inert: nothing plays them
+ * until a publish names them. Pushing the same build again uploads nothing and changes nothing.
  */
 import { manifestIdInput, type ScreenManifest } from '@signforge/contract';
 import { findDeviceScreen, scoped } from '@signforge/db';
+import { dispatch, registry, type Caller } from '@signforge/tools';
 import { validateManifest } from '@signforge/player-core';
 import { Hono, type Context } from 'hono';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
 import { adminAuth, type AdminEnv } from './auth';
 
 const SHA256 = /^[0-9a-f]{64}$/;
+/** The audit log's actor and client for a publish from `sf push`. */
+export const SF_PUSH = 'sf-push';
 const encoder = new TextEncoder();
 
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -111,6 +118,18 @@ admin.put('/screens/:screen/manifest', async (c) => {
 
   const key = manifestKey(screen.orgId, screen.screenId, manifest.id);
   if (!(await c.env.BLOBS.head(key))) await c.env.BLOBS.put(key, text, { httpMetadata: { contentType: 'application/json' } });
-  await scoped(c.env.DB, screen.orgId).screens.setDesiredManifest(screen.screenId, manifest.id);
-  return c.json({ manifestId: manifest.id, changed: screen.desiredManifestId !== manifest.id });
+
+  // The deploy secret speaks for every org, so the system actor publishes with the owner's role,
+  // but its grant is publishing alone.
+  const caller: Caller = {
+    org: scoped(c.env.DB, screen.orgId),
+    role: 'owner',
+    scopes: ['content:publish'],
+    actor: { kind: 'system', id: SF_PUSH, clientId: SF_PUSH },
+    blobs: c.env.BLOBS,
+  };
+  const result = await dispatch(registry, 'publish_manifest_to_screen', { screenId: screen.screenId, manifestId: manifest.id }, caller);
+  if (!result.ok) return fail(c, result.error === 'not_found' ? 404 : 409, result.message);
+  const { changed } = result.output as { changed: boolean };
+  return c.json({ manifestId: manifest.id, changed });
 });

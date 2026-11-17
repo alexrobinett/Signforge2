@@ -1,6 +1,6 @@
 /**
  * Deploy-secret authentication for `/admin`. TEMPORARY: the admin tree exists so `sf push` can
- * publish before the CMS does, and M3-12's tool registry replaces it (and this secret).
+ * upload builds before the CMS uploads assets (M3-14) and agents hold OAuth grants (Milestone 4).
  *
  * `ADMIN_TOKEN` is a Worker secret (locally, `apps/api/.dev.vars`, which is gitignored). While it
  * is unset or empty the whole tree answers 404, as if it did not exist. The header read is

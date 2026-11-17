@@ -22,9 +22,13 @@ Code that has to find a row before it knows the org (device auth by screen id, p
 
 - `findMembership(db, orgId, userId)`: re-checks the active org on every `/api` request.
 - `findDeviceScreen(db, screenId)` (`src/device.ts`): a screen's org, desired and previous manifest ids, and the hashes of its unrevoked credentials (none if the screen is revoked). The device API checks the secret against them, then uses `scoped(db, orgId)`.
-  The temporary `/admin` push routes (M3-04) also use it to find a screen's org, behind the deploy secret, until M3-12 replaces them.
+  The temporary `/admin` upload routes (M3-04) also use it to find a screen's org, behind the deploy secret. The publish they end with goes through the tool registry with `scoped(db, orgId)`.
 
 `org.screens.setDesiredManifest(screenId, manifestId)` keeps the manifest it replaces as `previous_manifest_id`, whose files a screen mid-switch may still fetch.
+
+`org.screenGroups.setMembers(groupId, screenIds)` replaces a group's members in one batch, after checking the group and every screen are the org's (`NotInOrgError` otherwise, changing nothing).
+
+`org.auditLog.append(...)` is called by the tool dispatcher (`packages/tools`) and nothing else. Each row records the actor kind and id, the client id (`client_id`: `cms`, `sf-push`, an agent's OAuth client), the action, the target and a redacted detail.
 
 ## Better Auth's tables
 
