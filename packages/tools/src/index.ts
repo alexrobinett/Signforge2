@@ -2,7 +2,23 @@
  * `@signforge/tools`: one registry of operations that the CMS, the MCP server and WebMCP call.
  * See README.md for the route the CMS uses and how to add a tool.
  */
-export { SCOPES, ROLES, ROLE_SCOPES, ToolError, defineTool, defineSharedTool, notFound, type Actor, type AnyTool, type DataScope, type Role, type Scope, type Tool, type ToolContext, type ToolErrorCode } from './tool';
+export {
+  SCOPES,
+  ROLES,
+  ROLE_SCOPES,
+  ToolError,
+  defineTool,
+  defineSharedTool,
+  notFound,
+  type Actor,
+  type AnyTool,
+  type DataScope,
+  type Role,
+  type Scope,
+  type Tool,
+  type ToolContext,
+  type ToolErrorCode,
+} from './tool';
 export { dispatch, describeTools, effectiveScopes, permits, redact, type Caller, type DispatchResult } from './dispatch';
 export { setOutputChecks } from './output';
 export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
@@ -13,3 +29,14 @@ export { MAX_RENDITION_BYTES, UPLOAD_URL_SECONDS, type AssetView, type Rendition
 export type { ScreenView, CredentialView } from './screens';
 export type { GroupView } from './groups';
 export type { StoredCheckReport, TemplateVersionView, TemplateView } from './templates';
+export {
+  compileInputFor,
+  loadCompileInput,
+  loadOrg,
+  promoteDrafts,
+  publishOrg,
+  type DraftKind,
+  type DraftReport,
+  type OrgGraph,
+  type ScreenPublish,
+} from './publishing';

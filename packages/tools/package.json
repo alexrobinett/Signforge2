@@ -11,6 +11,7 @@
     "test": "vitest run && vitest run -c vitest.e2e.config.ts"
   },
   "dependencies": {
+    "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
     "@signforge/media": "workspace:*",

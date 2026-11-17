@@ -1,6 +1,6 @@
 # M3-34 Publish model and drafts
 
-Status: open  ·  Size: M  ·  Depends on: M3-33
+Status: done (branch m3-34-publish-model-drafts)  ·  Size: M  ·  Depends on: M3-33
 
 ## Goal
 
@@ -22,6 +22,12 @@ One broken or unfinished spot must not block every screen's publish (review A4),
 
 ## Done when
 
-- [ ] Test: an org with one broken draft spot publishes every screen.
-- [ ] Test: the loader plus compiler produce the same manifest as `sf build` for `examples/stress`.
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [x] Test: an org with one broken draft spot publishes every screen. `packages/tools/test/publishing.test.ts` "publishes every screen when one draft spot is broken, and reports that spot", plus held drafts keeping their published version and one bad screen not stopping the others.
+- [x] Test: the loader plus compiler produce the same manifest as `sf build` for `examples/stress`. Same file, "with the compiler, produces the manifest sf build produces for examples/stress": the stress golden seeded into D1 as base templates, assets, spots, a playlist and data sources, then promoted, loaded and compiled; the body equals the golden and the id is the hash of its body. (The golden's stored `id` is stale: `golden.test.ts` does not compare it.)
+- [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated: `docs/backend-plan.md` (Drafts, Default playlist decision, data model), `packages/db/README.md`, `packages/tools/README.md`.
+
+## Notes
+
+- Default playlist (owner decision): an org setting, table `org_settings`; recorded in `docs/backend-plan.md#publishing`.
+- Brand: `packages/tools/src/publishing.ts` marks where `compileInputFor` resolves the screen's brand kit once M3-38 lands. Nothing to pass yet.
+- Not here: deleting spots or playlists that a published version still uses must be refused by the tools that delete them (M3-16, M3-17). A tool to show draft problems in the CMS comes with the editor (M3-16); `promoteDrafts` reports them.
