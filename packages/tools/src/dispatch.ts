@@ -18,6 +18,7 @@
  */
 import { NotInOrgError, type OrgScope } from '@signforge/db';
 import { z } from 'zod';
+import { checkOutput } from './output';
 import type { UploadSigner } from './upload';
 import { ROLE_SCOPES, ROLES, ToolError, type Actor, type AnyTool, type DataScope, type Role, type Scope, type ToolErrorCode } from './tool';
 
@@ -109,11 +110,12 @@ export async function dispatch<D extends DataScope>(registry: ReadonlyMap<string
     throw err;
   }
 
+  checkOutput(tool, output);
   if (tool.mutates) await audit(tool.target?.(parsed.data, output), {});
   return { ok: true, output };
 }
 
-/** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role and JSON Schema input. */
+/** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema input and output. */
 export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, caller: Pick<Caller, 'role' | 'scopes'>) {
   return [...registry.values()]
     .filter((t) => permits(caller, t))
@@ -124,6 +126,7 @@ export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, calle
       minRole: t.minRole,
       mutates: t.mutates,
       inputSchema: z.toJSONSchema(t.input, { io: 'input', unrepresentable: 'any' }),
+      outputSchema: z.toJSONSchema(t.output, { io: 'output', unrepresentable: 'any' }),
       example: t.example,
     }));
 }
