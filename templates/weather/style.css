@@ -26,7 +26,8 @@ body { font-family: "Inter", sans-serif; color: #fff; }
   -webkit-mask: radial-gradient(circle, transparent 36%, #000 37%, #000 62%, transparent 70%); mask: radial-gradient(circle, transparent 36%, #000 37%, #000 62%, transparent 70%); }
 .night .orb .disc { background: radial-gradient(circle at 35% 35%, #ffffff, #dfe7f5 60%, #aab7d1); box-shadow: 0 0 8vmin rgba(200, 220, 255, .5); }
 .night .orb .rays { display: none; }
-.rain .orb, .storm .orb, .snow .orb, .fog .orb { opacity: 0; animation: none; }
+/* Overcast, rain, snow and fog hide the sun or moon: only partly cloudy shows it behind clouds. */
+.cloudy .orb, .rain .orb, .storm .orb, .snow .orb, .fog .orb { opacity: 0; animation: none; }
 
 .cloud { position: absolute; width: 46vmin; height: 15vmin; border-radius: 10vmin; background: #fff; opacity: 0;
   will-change: transform; animation: drift 26s linear infinite; }
