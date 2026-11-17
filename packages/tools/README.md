@@ -12,10 +12,11 @@ Lists the tools the caller's role may use:
 
 ```json
 { "tools": [{ "name": "rename_screen", "description": "…", "scope": "screens:manage", "minRole": "editor",
-              "mutates": true, "inputSchema": { "type": "object", … }, "example": { … } }] }
+              "mutates": true, "inputSchema": { "type": "object", … }, "outputSchema": { "type": "object", … },
+              "example": { … } }] }
 ```
 
-`inputSchema` is JSON Schema, generated from the zod input. A viewer gets only the read tools. Use the list to hide the controls a user cannot use.
+`inputSchema` and `outputSchema` are JSON Schema, generated from the tool's zod input and output. A viewer gets only the read tools. Use the list to hide the controls a user cannot use.
 
 ### `POST /api/tools/:name`
 
@@ -38,22 +39,22 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 
 | Name | Scope | Min role | Input | Output |
 | --- | --- | --- | --- | --- |
-| `list_screens` | content:read | viewer | `{}` | `{ screens: Screen[] }` |
+| `list_screens` | content:read | viewer | `{ limit?, cursor? }` | `{ screens: Screen[], next }`, by id |
 | `get_screen` | content:read | viewer | `{ screenId }` | `{ screen, groupIds, credentials }` |
 | `rename_screen` | screens:manage | editor | `{ screenId, name }` | `{ screen }` |
 | `update_screen_settings` | screens:manage | editor | `{ screenId, timezone?, locale?, orientation?, displayHours? }` | `{ screen }` |
 | `revoke_screen_credential` | screens:manage | owner | `{ screenId, credentialId }` | `{ credential }` |
-| `list_groups` | content:read | viewer | `{}` | `{ groups: Group[] }` |
+| `list_groups` | content:read | viewer | `{ limit?, cursor? }` | `{ groups: Group[], next }`, by id |
 | `create_group` | screens:manage | editor | `{ name, screenIds? }` | `{ group }` |
 | `rename_group` | screens:manage | editor | `{ groupId, name }` | `{ group }` |
 | `delete_group` | screens:manage | editor | `{ groupId }` | `{ deleted }`, or 409 while a schedule entry targets the group |
 | `set_group_members` | screens:manage | editor | `{ groupId, screenIds }` | `{ group }` |
 | `publish_manifest_to_screen` | content:publish | editor | `{ screenId, manifestId }` | `{ screenId, manifestId, changed }` |
-| `list_templates` | content:read | viewer | `{ status? }` | `{ templates: Template[] }`, base first |
+| `list_templates` | content:read | viewer | `{ status?, limit?, cursor? }` | `{ templates: Template[], next }`, base first, then by name |
 | `get_template` | content:read | viewer | `{ templateId }` | `{ template }` |
 | `register_template_version` | content:draft | editor | `{ manifest, bundleId, sourcesId }` | `{ template, version, changed }` |
 | `set_template_version_status` | content:publish | owner | `{ templateVersionId, status }` | `{ version, changed }` |
-| `list_assets` | content:read | viewer | `{ query?, status? }` | `{ assets: (Asset & { usageCount })[] }`, newest first |
+| `list_assets` | content:read | viewer | `{ query?, status?, limit?, cursor? }` | `{ assets: (Asset & { usageCount })[], next }`, newest first |
 | `get_asset` | content:read | viewer | `{ assetId }` | `{ asset, spotIds }` |
 | `create_asset_upload` | content:draft | editor | `{ name, renditions: { landscape, portrait } }` | `{ asset, uploads }` |
 | `finalize_asset` | content:draft | editor | `{ assetId }` | `{ asset, changed }` |
@@ -61,6 +62,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 
 Details:
 
+- **Lists page.** Every `list_*` tool takes `limit` (default 50, at most 200) and `cursor`, and returns `next`. Pass `next` back as `cursor`, with the same filters, for the following page; `next` is `null` on the last page. A cursor is opaque. It holds the sort key of the last row returned, so rows added or removed between calls are neither repeated nor skipped. A cursor the server did not make is `invalid_input`. The repositories still read the org's whole list and the tool cuts the page; paging in SQL can wait until lists are large.
 - **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by the contract's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
 - **`get_screen`.** Credentials come back without their hashes.
 - **`publish_manifest_to_screen`.** The manifest must already be stored for that screen. `sf push` stores manifests now; the server compiler will in M3-13.
@@ -82,7 +84,7 @@ Details:
 - **`delete_asset`.** It refuses with `conflict` while a spot uses the asset, and `details.spotIds` lists the spots. A pending asset's uploads are deleted with it. Files in `o/<org>/b/` stay, because other assets or published manifests may name the same bytes; blob cleanup is M3-24.
 - **Upload configuration.** The dispatcher passes `caller.uploads`, an `UploadSigner` (`r2Presigner` in `src/upload.ts`), to the handlers. `/api/tools` builds it from the Worker's settings (`apps/api/src/uploads.ts`). Without one, `create_asset_upload` fails with a 500.
 
-Each tool's `description` is written for an agent choosing a tool, and its `example` is a valid input.
+Each tool's `description` is written for an agent choosing a tool, its `output` is the zod schema of what it returns, and its `example` is a valid input.
 
 ## Roles and scopes
 
@@ -105,7 +107,7 @@ Owner decision Q7 (can editors publish?) is still open. The table shows the defa
 1. Finds the tool.
 2. Checks the role and scopes.
 3. Validates the input.
-4. Runs the handler with `{ org: scoped(db, orgId), actor, input, blobs, uploads }`.
+4. Runs the handler with `{ org: scoped(db, orgId), actor, input, blobs, uploads }`. In tests it then parses the output with the tool's output schema and throws on a mismatch (`setOutputChecks(true)`, called by `test/setup.ts` here and in `apps/api`). Production skips the parse.
 5. For a tool that changes data, appends to `audit_log`:
    - actor kind and id;
    - client id (`cms`, `sf-push`, or an agent's OAuth client);
@@ -133,6 +135,8 @@ Callers so far:
    - Give it the narrowest scope and role.
    - Set `mutates: true` if it changes anything.
    - Give a `target` for the audit log.
+   - Give an `output` schema: what it returns, as zod. The handler's return type is checked against it at compile time, and every output against it in tests.
+   - A `list_*` tool pages: spread `pageInput` (`src/paging.ts`) into its input, add `next: nextOutput` to its output, and cut the rows with `page()`.
    - Give an `example`.
 2. Name id fields after their kind, such as `screenId` or `playlistIds`.
 3. Reach data only through `ctx.org`. A missing row is `throw notFound(...)`, and a repository's `NotInOrgError` maps to `not_found` on its own.
@@ -143,6 +147,7 @@ Callers so far:
 ## Tests
 
 - `test/isolation.test.ts`: generated from the registry, as above.
+- `test/conventions.test.ts`: fails on a tool without an output schema or a `list_*` tool without paging, and checks the output check and paging itself.
 - `test/dispatch.test.ts`: role and scope checks, validation, the audit log and redaction.
 - `test/tools.test.ts`, `test/templates.test.ts`, `test/assets.test.ts`: what each tool does.
 

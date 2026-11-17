@@ -130,6 +130,7 @@ describe('the audit log', () => {
       minRole: 'editor',
       mutates: true,
       input: z.object({ screenId: z.string(), apiKey: z.string(), nested: z.object({ token: z.string(), credentialId: z.string() }) }),
+      output: z.object({ done: z.boolean() }),
       example: { screenId: 's', apiKey: 'k', nested: { token: 't', credentialId: 'c' } },
       handler: async () => ({ done: true }),
     });
