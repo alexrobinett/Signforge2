@@ -108,7 +108,7 @@ The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) ar
 - The server nudges connected screens that a new manifest exists. Screens that were offline catch up when they reconnect.
 - The player downloads and verifies every file, then switches to the new manifest in one step. A partial download is never played.
 - The player evaluates the schedule on its own clock, so a timed changeover happens with the network down.
-- Data source snapshots are pushed to screens separately from manifests. Offline, a screen shows the last good value.
+- Data source snapshots are pushed to screens separately from manifests. Offline, a screen shows the last good value. A snapshot that is malformed, or that fits none of the fields bound to it, never becomes the last good value; a bound value that does not fit its field leaves the spot's static fallback on screen. Refusals are counted per source (`__sf.dataRejected` on the player).
 
 ## Player
 
