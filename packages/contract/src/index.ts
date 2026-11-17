@@ -115,6 +115,20 @@ export type TemplateOwner = 'base' | (string & {});
  */
 export const templateKey = (m: Pick<TemplateManifest, 'id' | 'version'>, owner: TemplateOwner = 'base') => `${owner}/${m.id}@${m.version}`;
 
+/** Whether a template key (`templateKey`) names a base template, the platform's own. */
+export const isBaseTemplateKey = (key: string) => key.startsWith('base/');
+
+/**
+ * The bundle hashes of a manifest's base templates. Their bytes live under the shared R2 prefix,
+ * every other file under the org's (the device blob route, the `/admin` upload).
+ */
+export const baseTemplateHtml = (m: { templates?: ScreenManifest['templates'] }): Set<Sha256> =>
+  new Set(
+    Object.entries(m.templates ?? {})
+      .filter(([key]) => isBaseTemplateKey(key))
+      .map(([, t]) => t.html),
+  );
+
 /** Budgets a built template bundle must meet. Measured on a Raspberry Pi 4 at 1080p 60 Hz. */
 export const TEMPLATE_BUDGET = {
   /** Size of the single built HTML file, fonts included. */
