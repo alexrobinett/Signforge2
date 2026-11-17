@@ -109,7 +109,7 @@ Pairing calls are rate limited. For zero-touch installs, the CMS mints a credent
 | `GET /v1/device/ws?ticket=` | Nudge socket |
 
 The device API's request and response shapes are in `packages/contract` (device API section). Changes the player needs, beyond pointing its content base at `/v1/device`:
-- Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files.
+- Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files. Done in M3-05: `?content=<api>/v1/device` in the kiosk URL, the credential from the supervisor's `GET /credential`.
 - Replace the per-source data poll with snapshots delivered on sync. Left as it is, every screen sends a request per source per refresh, which the cost table does not include.
 - Count plays per UTC hour, persist the counts, and send them with a batch number until acknowledged.
 - Treat a 401 as revoked, not offline: show a pairing code (open question 2).

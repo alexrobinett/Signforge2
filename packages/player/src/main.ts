@@ -2,7 +2,9 @@
  * SignForge player shell. Boots from the cached manifest, keeps content in sync, and runs the
  * playback loop: play the current spot, prepare the next out of sight, swap when it is ready.
  *
- * Query options:  ?content=<url>  where manifest.json and blobs/ live (default ./content)
+ * Query options:  ?content=<url>  where manifest.json and blobs/ live (default ./content). On another
+ *                                 origin it is the API's device base (`https://<api>/v1/device`) and every
+ *                                 request carries the screen's credential, collected from the supervisor
  *                 ?poll=<seconds> how often to look for a new manifest (default 30)
  *                 ?debug=1        show the on-screen status overlay
  *                 ?hb=1           with debug, also show a moving speck so every frame is drawn. It costs
@@ -13,9 +15,10 @@
  */
 import type { ScreenManifest, Spot, Transition } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, type Step } from '@signforge/player-core';
+import { DeviceCredential } from './credential';
 import { dataSettled, dataStatus, startDataLoop } from './data';
 import { Slot } from './slot';
-import { loadActiveManifest, requestPersistence, sync } from './store';
+import { UnauthorisedError, loadActiveManifest, requestPersistence, sync } from './store';
 
 const query = new URLSearchParams(location.search);
 const CONTENT = query.get('content') ?? './content';
@@ -28,6 +31,12 @@ const DATA_WAIT_MS = 3000;
 const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
 /** The supervisor's secret, collected from it at first use. Never in the URL: templates can read that. */
 let supervisorToken = '';
+/**
+ * Content on another origin is the API, which needs the screen's credential. Static content served
+ * beside the player (the default, the demo) gets no credential, so it never leaves the device.
+ */
+const credential = new URL(CONTENT, location.href).origin === location.origin ? undefined : new DeviceCredential(SUPERVISOR);
+const deviceHeaders = async () => (credential ? credential.headers() : {});
 
 const statusEl = document.getElementById('status')!;
 const hudEl = document.getElementById('hud')!;
@@ -55,6 +64,8 @@ const state = {
   lastError: '',
   lastSync: '',
   online: navigator.onLine,
+  /** Why the API refused this screen ('not authorised'), or '' while it accepts it. */
+  auth: '',
   /** False outside the screen's display hours. */
   displayOn: true,
   /** How the supervisor last switched the panel, or why it could not. */
@@ -119,7 +130,7 @@ function renderHud(): void {
   const f = state.frames;
   const pct = f.count ? ((100 * f.dropped) / (f.count + f.dropped)).toFixed(2) : '0';
   hudEl.textContent =
-    `manifest ${state.manifestId}  ${state.online ? 'online' : 'OFFLINE'}\n` +
+    `manifest ${state.manifestId}  ${state.online ? 'online' : 'OFFLINE'}${state.auth ? `  ${state.auth.toUpperCase()}` : ''}\n` +
     `playlist ${state.playlist}\nspot     ${state.spot}\n` +
     `played ${state.played}  skipped ${state.skipped}${state.displayOn ? '' : '  ASLEEP'}\n` +
     `frames ${f.count}  dropped ${pct}%  worst ${f.maxMs} ms` +
@@ -376,14 +387,24 @@ async function displayLoop(): Promise<never> {
 async function syncLoop(): Promise<never> {
   return forever('sync', async () => {
     try {
-      const result = await sync(CONTENT, manifest?.id);
+      const result = await sync(CONTENT, { currentId: manifest?.id, headers: await deviceHeaders() });
       state.online = true;
+      state.auth = '';
       state.lastSync = new Date().toISOString();
       if (result.changed && result.manifest) {
         console.info(`[sf] manifest ${result.manifest.id} active (${result.downloaded} files downloaded)`);
         adopt(result.manifest);
       }
     } catch (err) {
+      if (err instanceof UnauthorisedError) {
+        // The server answered, so this is not offline. Keep playing; pairing (M3-08) takes it from here.
+        state.online = true;
+        state.auth = credential?.held ? 'not authorised' : 'no credential';
+        credential?.forget();
+        if (!manifest) status('SignForge\nThis screen is not authorised.');
+        await sleep(POLL_MS);
+        return;
+      }
       state.online = false;
       if (!manifest) status(`SignForge\nWaiting for content…\n${err instanceof Error ? err.message : String(err)}`);
     }
@@ -455,7 +476,7 @@ async function boot(): Promise<void> {
   }, 10_000);
 
   void syncLoop();
-  wakeData = startDataLoop(CONTENT, () => manifest?.dataSources ?? {});
+  wakeData = startDataLoop(CONTENT, () => manifest?.dataSources ?? {}, deviceHeaders);
   void playbackLoop();
   void displayLoop();
 }

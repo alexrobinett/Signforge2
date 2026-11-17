@@ -28,7 +28,7 @@ export async function loadActiveManifest(): Promise<ScreenManifest | undefined> 
 /** A download may take as long as it needs, but gives up after this long without receiving anything. */
 const STALL_MS = 30_000;
 
-async function download(url: string): Promise<ArrayBuffer> {
+async function download(url: string, headers: Record<string, string>): Promise<ArrayBuffer> {
   const ctl = new AbortController();
   let timer = setTimeout(() => ctl.abort(new Error('download stalled')), STALL_MS);
   const nudge = () => {
@@ -36,7 +36,8 @@ async function download(url: string): Promise<ArrayBuffer> {
     timer = setTimeout(() => ctl.abort(new Error('download stalled')), STALL_MS);
   };
   try {
-    const r = await fetch(url, { cache: 'no-store', signal: ctl.signal });
+    const r = await fetch(url, { cache: 'no-store', headers, signal: ctl.signal });
+    if (r.status === 401) throw new UnauthorisedError();
     if (!r.ok || !r.body) throw new Error(`request failed: ${r.status}`);
     const chunks: Uint8Array[] = [];
     let size = 0;
@@ -84,13 +85,48 @@ export interface SyncResult {
 }
 
 /**
+ * The server refused the screen's credential. Not offline: the server answered. The player keeps
+ * playing what it has; pairing (M3-08) decides what a revoked screen shows.
+ */
+export class UnauthorisedError extends Error {
+  constructor() {
+    super('not authorised');
+    this.name = 'UnauthorisedError';
+  }
+}
+
+export interface SyncOptions {
+  /** The id of the manifest playing now. Sent as `If-None-Match`, so an unchanged manifest is a 304. */
+  currentId?: string;
+  /** Sent on every request: the device credential when the content base is the API. */
+  headers?: Record<string, string>;
+}
+
+/**
  * Fetch the manifest at `base`. If it is new, download and verify every missing file, then
  * make it active in one step. Any failure leaves the current manifest and files untouched.
  */
-export async function sync(base: string, currentId?: string): Promise<SyncResult> {
-  const res = await fetch(`${base}/manifest.json`, { cache: 'no-store', signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) throw new Error(`manifest request failed: ${res.status}`);
-  const text = await res.text();
+export async function sync(base: string, { currentId, headers = {} }: SyncOptions = {}): Promise<SyncResult> {
+  const get = (conditional: boolean) =>
+    fetch(`${base}/manifest.json`, {
+      // no-store keeps the browser's HTTP cache out of it, so the condition is ours to send.
+      cache: 'no-store',
+      headers: conditional && currentId ? { ...headers, 'if-none-match': `"${currentId}"` } : headers,
+      signal: AbortSignal.timeout(20_000),
+    });
+  let res = await get(true);
+  let text: string | undefined;
+  if (res.status === 304) {
+    // Unchanged: the active manifest is still the one to check for missing files. If it has
+    // gone from the cache, ask again in full.
+    text = await (await (await caches.open(STATE)).match(ACTIVE))?.text();
+    if (!text) res = await get(false);
+  }
+  if (res.status === 401) throw new UnauthorisedError();
+  if (!text) {
+    if (!res.ok) throw new Error(`manifest request failed: ${res.status}`);
+    text = await res.text();
+  }
   const next = JSON.parse(text) as ScreenManifest;
   const same = next.id === currentId;
 
@@ -105,7 +141,8 @@ export async function sync(base: string, currentId?: string): Promise<SyncResult
   const { missing, stale } = planSync(next, await heldHashes());
   if (same && !missing.length) return { changed: false, downloaded: 0 };
   for (const sha of missing) {
-    const buf = await download(`${base}/blobs/${sha}`).catch((err: unknown) => {
+    const buf = await download(`${base}/blobs/${sha}`, headers).catch((err: unknown) => {
+      if (err instanceof UnauthorisedError) throw err;
       throw new Error(`file ${sha.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`);
     });
     if ((await sha256(buf)) !== sha) throw new Error(`file ${sha.slice(0, 12)} failed verification`);

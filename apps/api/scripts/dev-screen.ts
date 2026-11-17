@@ -8,8 +8,8 @@
  *            local R2 under the plan's layout, and the manifest becomes the screen's desired one.
  * --data     a directory of `<sourceId>.json` files, stored as the latest snapshot of each data
  *            source the manifest lists.
- * --org      the org to put the screen in (default `dev`). There is no organizations table
- *            until M3-09, so any id matching ID_PATTERN works.
+ * --org      the org to put the screen in (default `dev`), created in the `organization` table if
+ *            it is not there yet. Any id matching ID_PATTERN works.
  *
  * The credential is the only thing written to stdout, once. Everything else goes to stderr.
  * Do not paste it anywhere: anyone holding it can fetch this screen's content.
@@ -20,6 +20,7 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { ScreenManifest } from '@signforge/contract';
 import { newId, scoped } from '@signforge/db';
+import { seedOrganization } from '@signforge/db/testing';
 import { getPlatformProxy } from 'wrangler';
 import { mintCredential } from '../src/device/credential';
 import { manifestKey, orgBlobKey } from '../src/r2';
@@ -41,6 +42,8 @@ const manifest = args.content ? (JSON.parse(readFileSync(join(resolve(args.conte
 const proxy = await getPlatformProxy<Env>({ configPath: new URL('../wrangler.jsonc', import.meta.url).pathname, persist: true, remoteBindings: false });
 try {
   const { DB, BLOBS } = proxy.env;
+  // Since M3-09 a screen's org must exist in Better Auth's `organization` table. Make it if it is new.
+  await seedOrganization(DB, args.org!);
   const org = scoped(DB, args.org!);
 
   const screen = await org.screens.insert({

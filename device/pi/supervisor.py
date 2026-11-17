@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Device supervisor: the part of the Pi the browser cannot reach. For now it powers the panel.
+"""Device supervisor: the part of the Pi the browser cannot reach. It powers the panel and holds
+the screen's credential.
 
 The player decides *when* (it owns the schedule, display hours included, and works offline);
 the supervisor only does *how*, over a local HTTP API:
@@ -7,6 +8,7 @@ the supervisor only does *how*, over a local HTTP API:
   POST /display/on    signal on at 1080p60, then wake the TV and select this input over CEC
   POST /display/off   put the TV in standby over CEC, then turn the video signal off
   GET  /display       last state and which methods worked
+  GET  /credential    the screen's API credential, for the player's own origin (see below)
 
 Two methods, because panels differ:
   CEC     TVs and commercial displays. Ignored by most monitors.
@@ -21,6 +23,11 @@ of the kiosk URL matters because a template frame can read its parent's URL.
 A plain POST from any page would otherwise reach it without a CORS preflight: the token header
 forces one, the preflight is granted only to the player's origin, and a request whose Host is not
 this address (DNS rebinding) is refused.
+
+The screen's API credential (`sfd_<screen>.<secret>`) lives in ~/signforge/device.credential, mode
+0600, installed by hand until pairing (M3-08) writes it. GET /credential hands it to the player under
+the same rule as /token: the player's origin, this Host, never in a URL. It is read on each request,
+so a new credential needs no restart; 404 while there is none.
 """
 import hmac, json, os, secrets, subprocess, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +37,7 @@ MODE = "1920x1080@60"
 CEC_DEV = "/dev/cec0"  # HDMI 0, the port next to the power socket
 PLAYER_ORIGINS = set(os.environ.get("SF_PLAYER_ORIGINS", "http://127.0.0.1:8090").split())
 TOKEN_FILE = os.path.expanduser("~/signforge/supervisor.token")
+CREDENTIAL_FILE = os.path.expanduser("~/signforge/device.credential")
 
 
 def load_token():
@@ -42,6 +50,18 @@ def load_token():
 
 
 TOKEN = load_token()
+
+
+def load_credential():
+    """The screen's credential, or None. Tightens the file to 0600 if it was left readable."""
+    try:
+        st = os.stat(CREDENTIAL_FILE)
+        if st.st_mode & 0o077:
+            os.chmod(CREDENTIAL_FILE, 0o600)
+        with open(CREDENTIAL_FILE) as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
 lock = threading.Lock()
 state = {"on": True, "cec": "unknown", "signal": "unknown"}
 
@@ -125,6 +145,7 @@ class Handler(BaseHTTPRequestHandler):
         data = json.dumps(body).encode()
         self.send_response(code)
         self.send_header("content-type", "application/json")
+        self.send_header("cache-control", "no-store")
         if self.origin_ok():
             self.send_header("access-control-allow-origin", self.headers["Origin"])
         self.send_header("content-length", str(len(data)))
@@ -150,6 +171,11 @@ class Handler(BaseHTTPRequestHandler):
             if not (self.origin_ok() and self.host_ok()):
                 return self.reply(403, {"error": "forbidden"})
             return self.reply(200, {"token": TOKEN})
+        if self.path == "/credential":
+            if not (self.origin_ok() and self.host_ok()):
+                return self.reply(403, {"error": "forbidden"})
+            cred = load_credential()
+            return self.reply(200, {"credential": cred}) if cred else self.reply(404, {"error": "no credential"})
         if not self.authorised():
             return self.reply(403, {"error": "forbidden"})
         self.reply(200, state) if self.path == "/display" else self.reply(404, {"error": "not found"})
