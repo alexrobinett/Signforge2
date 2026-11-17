@@ -3,7 +3,15 @@
  * uses the fixture template (`fixtures/template.ts`); its `mode` decides how the template behaves.
  */
 import { createHash } from 'node:crypto';
-import { MANIFEST_SCHEMA, PROTOCOL_VERSION, manifestIdInput, type ScreenManifest, type Spot, type TemplateManifest, type Transition } from '@signforge/contract';
+import {
+  MANIFEST_SCHEMA,
+  PROTOCOL_VERSION,
+  manifestIdInput,
+  type ScreenManifest,
+  type Spot,
+  type TemplateManifest,
+  type Transition,
+} from '@signforge/contract';
 
 export interface FixtureSpot {
   id: string;
@@ -47,7 +55,11 @@ export interface ContentOptions {
   variant?: string;
 }
 
-export function buildContent(templateHtml: string, spots: FixtureSpot[], { transition = { type: 'cut' }, schema = MANIFEST_SCHEMA, variant }: ContentOptions = {}): Content {
+export function buildContent(
+  templateHtml: string,
+  spots: FixtureSpot[],
+  { transition = { type: 'cut' }, schema = MANIFEST_SCHEMA, variant }: ContentOptions = {},
+): Content {
   const html = Buffer.from(variant ? `${templateHtml}<!-- ${variant} -->` : templateHtml);
   const key = schema === 1 ? 'fixture@1.0.0' : TEMPLATE_KEY;
   const htmlSha = sha256(html);

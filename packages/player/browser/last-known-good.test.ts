@@ -15,8 +15,20 @@ async function restart(p: Player): Promise<void> {
 
 describe('last known good', () => {
   it('falls back to the last manifest that played when every spot of a new one fails, and stays there offline', async () => {
-    const good = h.content([{ id: 'a', durationMs: 600 }, { id: 'b', durationMs: 600 }], { variant: 'good' });
-    const broken = h.content([{ id: 'x', mode: 'throw', durationMs: 600 }, { id: 'y', mode: 'throw', durationMs: 600 }], { variant: 'broken' });
+    const good = h.content(
+      [
+        { id: 'a', durationMs: 600 },
+        { id: 'b', durationMs: 600 },
+      ],
+      { variant: 'good' },
+    );
+    const broken = h.content(
+      [
+        { id: 'x', mode: 'throw', durationMs: 600 },
+        { id: 'y', mode: 'throw', durationMs: 600 },
+      ],
+      { variant: 'broken' },
+    );
     const p = await h.openPlayer((s) => s.publish(good));
     await p.until((s) => s.lastGood === good.manifest.id);
 
@@ -38,7 +50,13 @@ describe('last known good', () => {
 
   it('plays a new manifest once one of its spots plays, and adopts it as the last good one', async () => {
     const first = h.content([{ id: 'a', durationMs: 600 }], { variant: 'first' });
-    const second = h.content([{ id: 'x', mode: 'throw', durationMs: 600 }, { id: 'c', durationMs: 600 }], { variant: 'second' });
+    const second = h.content(
+      [
+        { id: 'x', mode: 'throw', durationMs: 600 },
+        { id: 'c', durationMs: 600 },
+      ],
+      { variant: 'second' },
+    );
     const p = await h.openPlayer((s) => s.publish(first));
     await p.until((s) => s.lastGood === first.manifest.id);
 
@@ -49,7 +67,13 @@ describe('last known good', () => {
   });
 
   it('plays a cached schema N-1 manifest after a restart with no network', async () => {
-    const old = h.content([{ id: 'a', durationMs: 600 }, { id: 'b', durationMs: 600 }], { schema: 1 });
+    const old = h.content(
+      [
+        { id: 'a', durationMs: 600 },
+        { id: 'b', durationMs: 600 },
+      ],
+      { schema: 1 },
+    );
     expect(old.manifest.schema).toBe(1);
     const p = await h.openPlayer((s) => s.publish(old));
     await p.until((s) => s.log.length >= 1);

@@ -92,7 +92,18 @@ export function useHarness(): Harness {
           const s = (window as unknown as { __sf?: PlayerState }).__sf;
           if (!s) throw new Error('the player has not started');
           const { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log } = s;
-          return { manifestId, playlist, spot, played, skipped, lastError, online, lastGood, fallback, log: log.map(({ spot, manifest, startedAt }) => ({ spot, manifest, startedAt })) };
+          return {
+            manifestId,
+            playlist,
+            spot,
+            played,
+            skipped,
+            lastError,
+            online,
+            lastGood,
+            fallback,
+            log: log.map(({ spot, manifest, startedAt }) => ({ spot, manifest, startedAt })),
+          };
         });
       const until = async (predicate: (s: PlayerState) => boolean, timeoutMs = 10_000) => {
         const deadline = Date.now() + timeoutMs;

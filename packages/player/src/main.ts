@@ -116,7 +116,7 @@ function monitor(t: number): void {
     // The display's frame interval is the median of the first two seconds of frames.
     if (!interval) {
       warmup.push(d);
-      if (warmup.length < 120) return void requestAnimationFrame(monitor), void (lastFrame = t);
+      if (warmup.length < 120) return (void requestAnimationFrame(monitor), void (lastFrame = t));
       interval = warmup.sort((x, y) => x - y)[60]!;
     }
     const missed = Math.max(0, Math.round(d / interval) - 1);
@@ -143,7 +143,9 @@ function renderHud(): void {
     `playlist ${state.playlist}\nspot     ${state.spot}\n` +
     `played ${state.played}  skipped ${state.skipped}${state.displayOn ? '' : '  ASLEEP'}\n` +
     `frames ${f.count}  dropped ${pct}%  worst ${f.maxMs} ms` +
-    Object.entries(dataStatus()).map(([id, at]) => `\ndata ${id}  ${at.slice(11, 19)}Z`).join('') +
+    Object.entries(dataStatus())
+      .map(([id, at]) => `\ndata ${id}  ${at.slice(11, 19)}Z`)
+      .join('') +
     (state.lastError ? `\nlast error: ${state.lastError}` : '');
 }
 
@@ -223,7 +225,13 @@ function record(step: Step, manifestId: string): void {
   state.spot = step.spot.id;
   state.playlist = step.playlist.id;
   state.played++;
-  state.log.push({ spot: step.spot.id, playlist: step.playlist.id, manifest: manifestId, startedAt: new Date().toISOString(), durationMs: step.spot.durationMs });
+  state.log.push({
+    spot: step.spot.id,
+    playlist: step.playlist.id,
+    manifest: manifestId,
+    startedAt: new Date().toISOString(),
+    durationMs: step.spot.durationMs,
+  });
   if (state.log.length > 500) state.log.shift();
   lastProgress = performance.now();
 }
@@ -433,7 +441,11 @@ async function syncLoop(): Promise<never> {
     try {
       // While falling back, the manifest that failed counts as current: the server's answer is
       // 304 until it publishes something newer.
-      const result = await sync(CONTENT, { currentId: state.fallback || manifest?.id, headers: await deviceHeaders(), ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}) });
+      const result = await sync(CONTENT, {
+        currentId: state.fallback || manifest?.id,
+        headers: await deviceHeaders(),
+        ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
+      });
       state.online = true;
       state.auth = '';
       state.lastSync = new Date().toISOString();
@@ -460,10 +472,19 @@ async function syncLoop(): Promise<never> {
 
 /** Testing override: an ad hoc playlist of the given spots, replacing the schedule. */
 function applyOverrides(m: ScreenManifest): ScreenManifest {
-  const ids = query.get('spots')?.split(',').filter((id) => m.spots[id]);
+  const ids = query
+    .get('spots')
+    ?.split(',')
+    .filter((id) => m.spots[id]);
   const t = query.get('transition');
   const transition: Transition | undefined =
-    t === 'cut' ? { type: 'cut' } : t?.startsWith('fade') ? { type: 'fade', ms: Number(t.slice(4)) || 500 } : t ? { type: 'crossfade', ms: Number(t) } : undefined;
+    t === 'cut'
+      ? { type: 'cut' }
+      : t?.startsWith('fade')
+        ? { type: 'fade', ms: Number(t.slice(4)) || 500 }
+        : t
+          ? { type: 'crossfade', ms: Number(t) }
+          : undefined;
   if (!ids?.length && !transition) return m;
   const playlists = { ...m.playlists };
   if (ids?.length) playlists.__test = { id: '__test', name: 'Test', transition: transition ?? { type: 'cut' }, items: ids.map((spot) => ({ spot })) };
