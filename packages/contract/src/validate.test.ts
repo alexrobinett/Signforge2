@@ -453,7 +453,9 @@ describe('takeovers', () => {
     const m = validManifest();
     m.schedule[1] = { ...m.schedule[1]!, startsAt: '2026-11-17T16:00:00Z', endsAt: '2026-11-17T14:00:00Z' };
     expect(validateManifest(m)).toEqual(['schedule entry "takeover": endsAt must be after startsAt']);
-    m.schedule[1] = { ...m.schedule[1]!, startsAt: 'soon', endsAt: undefined };
+    const open = { ...m.schedule[1]!, startsAt: 'soon' };
+    delete open.endsAt;
+    m.schedule[1] = open;
     expect(validateManifest(m)).toEqual(['schedule entry "takeover": startsAt must be an ISO 8601 time']);
   });
 });
