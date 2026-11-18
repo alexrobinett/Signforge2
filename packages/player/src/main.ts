@@ -375,6 +375,8 @@ function fallBack(): void {
   console.warn(`[sf] manifest ${from} played nothing in a full pass; falling back to ${lastGood.id}`);
   adopt(lastGood);
   state.fallback = from;
+  // Its files may have been evicted while another manifest played: the next sync checks them.
+  lastFileCheck = Number.NEGATIVE_INFINITY;
 }
 
 /**

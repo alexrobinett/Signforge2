@@ -91,6 +91,34 @@ describe('last known good', () => {
     expect(s.fallback).toBe(c.manifest.id);
   });
 
+  it('takes a healthy publish at once while a file only the last good manifest uses cannot be fetched', async () => {
+    const good = h.content(
+      [
+        { id: 'a', asset: randomBytes(4096), durationMs: 600 },
+        { id: 'b', durationMs: 600 },
+      ],
+      { variant: 'good' },
+    );
+    const broken = h.content([{ id: 'x', mode: 'throw', durationMs: 600 }], { variant: 'broken' });
+    // Its one file, the template, is A's: already held.
+    const healthy = h.content([{ id: 'd', durationMs: 600 }], { variant: 'good' });
+    const asset = (good.manifest.spots.a as Extract<Spot, { kind: 'template' }>).assets.file!;
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(good);
+    }, api);
+    await p.until((s) => s.lastGood === good.manifest.id && s.log.some((l) => l.spot === 'a'));
+    p.server.publish(broken);
+    await p.until((s) => s.fallback === broken.manifest.id);
+    // A's own file is evicted, and the server no longer has it (a static deploy deleted it).
+    await p.page.evaluate(async (sha) => (await caches.open('sf-blobs-v1')).delete(`/_sf/blob/${sha}`), asset);
+    p.server.intercept(new RegExp(`^/content/blobs/${asset}$`), { status: 404 });
+
+    p.server.publish(healthy);
+    const s = await p.until((s) => s.manifestId === healthy.manifest.id && s.log.some((l) => l.spot === 'd'), 15_000);
+    expect(s.fallback).toBe('');
+  });
+
   it('plays a new manifest once one of its spots plays, and adopts it as the last good one', async () => {
     const first = h.content([{ id: 'a', durationMs: 600 }], { variant: 'first' });
     const second = h.content(
