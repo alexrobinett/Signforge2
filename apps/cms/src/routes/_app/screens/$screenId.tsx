@@ -362,7 +362,6 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
   const id = useId();
   const draft = useAppStore((s) => s.screens.page.settings);
   const saving = useAppStore((s) => s.screens.page.saving);
-  const error = useAppStore((s) => s.screens.page.saveError);
   const renameDraft = useAppStore((s) => s.renameDraft);
   const chooseDraftZone = useAppStore((s) => s.chooseDraftZone);
   const chooseDraftOrientation = useAppStore((s) => s.chooseDraftOrientation);
@@ -430,9 +429,7 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
               </div>
             </fieldset>
           )}
-          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
-            {error}
-          </p>
+          <SaveError />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={close}>
               Cancel
@@ -447,10 +444,26 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
   );
 }
 
+/** Why a save was refused; when the screen changed since the editor opened, a reload to start again from what is there now. */
+function SaveError() {
+  const error = useAppStore((s) => s.screens.page.saveError);
+  const stale = useAppStore((s) => s.screens.page.stale);
+  const reload = useAppStore((s) => s.reloadScreenEditor);
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-2 text-sm font-medium text-destructive empty:hidden">
+      {error}
+      {stale && (
+        <Button type="button" variant="outline" size="sm" onClick={() => void reload()}>
+          <RotateCwIcon aria-hidden /> Reload
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function HoursDialog({ screen }: { screen: ScreenView }) {
   const hours = useAppStore((s) => s.screens.page.hours);
   const saving = useAppStore((s) => s.screens.page.saving);
-  const error = useAppStore((s) => s.screens.page.saveError);
   const editDraftHours = useAppStore((s) => s.editDraftHours);
   const saveDisplayHours = useAppStore((s) => s.saveDisplayHours);
   const close = useAppStore((s) => s.closeScreenEditor);
@@ -472,9 +485,7 @@ function HoursDialog({ screen }: { screen: ScreenView }) {
         </DialogHeader>
         <form onSubmit={save} className="grid gap-4">
           <DisplayHoursEditor value={hours} onChange={editDraftHours} />
-          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
-            {error}
-          </p>
+          <SaveError />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={close}>
               Cancel

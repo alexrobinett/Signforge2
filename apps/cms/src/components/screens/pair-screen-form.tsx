@@ -1,6 +1,6 @@
 /**
  * Claim the code a screen shows: name it, give its time zone, orientation, groups and display
- * hours. `claim_screen` makes the screen; its groups are then set with `set_group_members`, the
+ * hours. `claim_screen` makes the screen; it is then added to its groups with `add_group_members`, the
  * same tools an agent would use (M3-08: no groups in the claim).
  */
 import { LoaderCircleIcon } from 'lucide-react';
@@ -54,7 +54,7 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
 
   function submit(e: SubmitEvent) {
     e.preventDefault();
-    if (ready) void pairScreen(groups, browser);
+    if (ready) void pairScreen(browser);
   }
 
   return (

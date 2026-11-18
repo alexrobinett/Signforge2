@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0c4ed26f-0abf-4151-8fbe-6f45b83e3c58",
+  "id": "1f077e9a-e5f6-4d1b-a30e-b8c9e2d68c22",
   "prevId": "471c3ad5-98fd-4369-9a65-1e194595a2b0",
   "tables": {
     "account": {
@@ -644,6 +644,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -1254,14 +1262,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'device'"
         },
         "expires_at": {
           "name": "expires_at",
@@ -2235,6 +2235,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -2317,14 +2325,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'device'"
-        },
         "display_hours_json": {
           "name": "display_hours_json",
           "type": "text",
@@ -2403,6 +2403,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'active'"
+        },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
         },
         "created_at": {
           "name": "created_at",

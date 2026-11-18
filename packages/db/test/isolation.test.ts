@@ -195,8 +195,12 @@ describe('rows a scope writes', () => {
     expect(await b.screenGroups.get(smuggled.row.id)).toEqual(smuggled.row);
     expect(await s.a.scope.idempotency.get('k-iso')).toBeUndefined();
     expect(await b.idempotency.get('k-iso')).toMatchObject({ orgId: 'org-b', action: 'x' });
-    await expect(b.screenGroups.stage.setMembers(a.group, [s.b.screen]), 'stage.setMembers: A group').rejects.toBeInstanceOf(NotInOrgError);
-    await expect(b.screenGroups.stage.setMembers(s.b.group, [a.screen]), 'stage.setMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
+    const bGroup = (await b.screenGroups.get(s.b.group))!;
+    for (const op of ['setMembers', 'addMembers', 'removeMembers'] as const) {
+      await expect(b.screenGroups.stage[op](aGroup, [s.b.screen]), `stage.${op}: A group`).rejects.toBeInstanceOf(NotInOrgError);
+    }
+    await expect(b.screenGroups.stage.setMembers(bGroup, [a.screen]), 'stage.setMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
+    await expect(b.screenGroups.stage.addMembers(bGroup, [a.screen]), 'stage.addMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
     await expect(b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })).rejects.toBeInstanceOf(
       NotInOrgError,
     );
