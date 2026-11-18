@@ -359,3 +359,18 @@ describe('findMembership', () => {
     expect(await findMembership(env.DB, 'org-b', 'usr-1')).toBeUndefined();
   });
 });
+
+describe('the audit log', () => {
+  it('lists rows written in the same millisecond newest first', async () => {
+    const at = Date.UTC(2100, 0, 1);
+    const actions = Array.from({ length: 10 }, (_, i) => `same-ms-${i}`);
+    const target = { kind: 'screen', id: s.a.screen };
+    for (const action of actions) {
+      await s.a.scope.auditLog.append({ actorKind: 'system', actorId: 'test', action, at, targetKind: target.kind, targetId: target.id });
+      await platform(env.DB).auditLog.append({ actorKind: 'system', actorId: 'test', action, at });
+    }
+    const newestFirst = actions.toReversed();
+    expect((await s.a.scope.auditLog.list({ target })).map((a) => a.action)).toEqual(newestFirst);
+    expect((await platform(env.DB).auditLog.list({ limit: 10 })).map((a) => a.action)).toEqual(newestFirst);
+  });
+});
