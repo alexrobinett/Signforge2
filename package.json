@@ -5,7 +5,7 @@
   "scripts": {
     "typecheck": "turbo run typecheck",
     "test": "turbo run test test:e2e",
-    "lint": "biome lint . && pnpm --filter @signforge/cms lint",
+    "lint": "biome lint --error-on-warnings . && pnpm --filter @signforge/cms lint",
     "format": "biome format --write --changed --no-errors-on-unmatched",
     "format:check": "biome format --changed --no-errors-on-unmatched",
     "build:player": "pnpm --filter @signforge/player build",

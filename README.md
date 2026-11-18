@@ -70,6 +70,6 @@ Put the player on the test Pi: `pnpm build && pnpm deploy:pi`. Measure playback 
 
 ## Conventions
 
-- `pnpm lint` runs Biome across the workspace, then ESLint on the CMS for its React rules ([`apps/cms/README.md`](apps/cms/README.md#react-rules)). The formatter checks only files a change touches (`pnpm format:check`, against `master`; `pnpm format` fixes them), so the existing code is formatted as it is edited rather than in one sweeping commit.
+- `pnpm lint` runs Biome across the workspace, where a warning fails like an error, then ESLint on the CMS for its React rules ([`apps/cms/README.md`](apps/cms/README.md#react-rules)). The formatter checks only files a change touches (`pnpm format:check`, against `master`; `pnpm format` fixes them), so the existing code is formatted as it is edited rather than in one sweeping commit.
 - CI (`.github/workflows/ci.yml`) runs install, typecheck, lint, the format check, the tests and the CMS end-to-end run.
 - Work is cut into tickets in [`docs/tickets/`](docs/tickets/README.md); `AGENTS.md` has the rules that are not written down elsewhere.

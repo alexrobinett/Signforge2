@@ -27,7 +27,6 @@ export const MAX_RENDITION_BYTES = 20 * 1024 * 1024;
 export const UPLOAD_URL_SECONDS = 15 * 60;
 
 const ORIENTATIONS = ['landscape', 'portrait'] as const;
-type Orientation = (typeof ORIENTATIONS)[number];
 const STATUSES = ['pending', 'verified', 'rejected'] as const;
 
 export const renditionOutput = z.object({
