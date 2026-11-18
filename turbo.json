@@ -1,28 +1,27 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "boundaries": {
+    "tags": {
+      "contract": {
+        "dependencies": {
+          "allow": []
+        }
+      }
+    }
+  },
   "tasks": {
     "typecheck": {
-      "dependsOn": [
-        "^typecheck"
-      ]
+      "dependsOn": ["^typecheck"]
     },
     "test": {
-      "dependsOn": [
-        "^typecheck"
-      ]
+      "dependsOn": ["^typecheck"]
     },
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "dist/**"
-      ]
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
     },
     "test:e2e": {
-      "dependsOn": [
-        "^typecheck"
-      ],
+      "dependsOn": ["^typecheck"],
       "cache": false
     }
   }

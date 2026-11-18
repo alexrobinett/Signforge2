@@ -10,7 +10,7 @@ import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readImageInfo } from '@signforge/media/image-info';
-import { pixel, QUADRANTS, rotatedPhoto } from '../../../media/test/fixtures';
+import { pixel, QUADRANTS, rotatedPhoto } from '@signforge/media/testing';
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 const S3 = { bucket: 'media-e2e', accessKeyId: 'media-e2e', secretAccessKey: 'media-e2e-secret' };
@@ -29,28 +29,49 @@ async function bundle(entry: string, options: Parameters<typeof build>[0]) {
 
 function migrations(): string[][] {
   const dir = here('../../../db/migrations/');
-  return readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
-    .map((f) => readFileSync(dir + f, 'utf8').split('--> statement-breakpoint').map((s) => s.trim()).filter(Boolean));
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) =>
+      readFileSync(dir + f, 'utf8')
+        .split('--> statement-breakpoint')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
 }
 
 beforeAll(async () => {
   photo = await rotatedPhoto();
   const script = await bundle(here('../harness-worker.ts'), {
-    format: 'esm', platform: 'neutral', target: 'es2024', conditions: ['workerd', 'worker', 'browser'], mainFields: ['module', 'main'], external: ['cloudflare:*', 'node:*'],
+    format: 'esm',
+    platform: 'neutral',
+    target: 'es2024',
+    conditions: ['workerd', 'worker', 'browser'],
+    mainFields: ['module', 'main'],
+    external: ['cloudflare:*', 'node:*'],
   });
-  mf = new Miniflare(convertV4MiniflareOptions({
-    modules: true, script, compatibilityDate: '2026-11-01', compatibilityFlags: ['nodejs_compat'], host: '127.0.0.1', port: 0,
-    d1Databases: ['DB'],
-    r2Buckets: { BLOBS: { id: S3.bucket, s3Credentials: { accessKeyId: S3.accessKeyId, secretAccessKey: S3.secretAccessKey } } },
-    bindings: { MIGRATIONS: JSON.stringify(migrations()), S3: JSON.stringify(S3) },
-  }));
+  mf = new Miniflare(
+    convertV4MiniflareOptions({
+      modules: true,
+      script,
+      compatibilityDate: '2026-11-01',
+      compatibilityFlags: ['nodejs_compat'],
+      host: '127.0.0.1',
+      port: 0,
+      d1Databases: ['DB'],
+      r2Buckets: { BLOBS: { id: S3.bucket, s3Credentials: { accessKeyId: S3.accessKeyId, secretAccessKey: S3.secretAccessKey } } },
+      bindings: { MIGRATIONS: JSON.stringify(migrations()), S3: JSON.stringify(S3) },
+    }),
+  );
   origin = (await mf.ready).origin;
   expect((await fetch(`${origin}/setup`, { method: 'POST' })).status).toBe(200);
 
   browser = await chromium.launch({ executablePath: process.env.SF_CHROMIUM || undefined });
   page = await browser.newPage();
   await page.goto(`${origin}/`);
-  await page.addScriptTag({ content: await bundle(here('../../../media/src/index.ts'), { format: 'iife', globalName: 'SFMedia', platform: 'browser', target: 'chrome120' }) });
+  await page.addScriptTag({
+    content: await bundle(here('../../../media/src/index.ts'), { format: 'iife', globalName: 'SFMedia', platform: 'browser', target: 'chrome120' }),
+  });
   await page.evaluate(() => {
     (globalThis as any).callTool = async (name: string, input: unknown) => {
       const res = await fetch(`/tools/${name}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
@@ -94,7 +115,10 @@ describe('a 4K phone photo with an EXIF rotation', () => {
     ]);
 
     // What R2 holds: the pixels themselves are turned (no EXIF left to rely on), quadrants in place.
-    for (const [r, w, h] of [[result.landscape, 1920, 1080], [result.portrait, 3413, 1920]] as const) {
+    for (const [r, w, h] of [
+      [result.landscape, 1920, 1080],
+      [result.portrait, 3413, 1920],
+    ] as const) {
       const bytes = await stored(r.sha256);
       expect(bytes, r.sha256).not.toBeNull();
       expect(readImageInfo(new Uint8Array(bytes!))).toEqual({ type: 'image/jpeg', width: w, height: h, orientation: 1 });
@@ -127,16 +151,19 @@ describe('the presigned PUT and the server check', () => {
   it('refuses bytes that do not match the claimed hash, and removes them from R2', async () => {
     const { created, landscape } = await start('tampered');
     const target = created.uploads.find((u: { sha256: string }) => u.sha256 === landscape.sha256);
-    const outcome = await page.evaluate(async ({ assetId, target, size }) => {
-      // Same length and type, other bytes: the signature binds those, not the content.
-      const status = (await fetch(target.url, { method: 'PUT', headers: target.headers, body: new Uint8Array(size).fill(7) })).status;
-      try {
-        await (globalThis as any).callTool('finalize_asset', { assetId });
-        return { statuses: [status], refused: null };
-      } catch (err: any) {
-        return { statuses: [status], refused: err.result };
-      }
-    }, { assetId: created.asset.id, target, size: landscape.size });
+    const outcome = await page.evaluate(
+      async ({ assetId, target, size }) => {
+        // Same length and type, other bytes: the signature binds those, not the content.
+        const status = (await fetch(target.url, { method: 'PUT', headers: target.headers, body: new Uint8Array(size).fill(7) })).status;
+        try {
+          await (globalThis as any).callTool('finalize_asset', { assetId });
+          return { statuses: [status], refused: null };
+        } catch (err: any) {
+          return { statuses: [status], refused: err.result };
+        }
+      },
+      { assetId: created.asset.id, target, size: landscape.size },
+    );
 
     expect(outcome.statuses).toEqual([200]);
     expect(outcome.refused).toMatchObject({ ok: false, error: 'invalid_input' });
@@ -151,14 +178,17 @@ describe('the presigned PUT and the server check', () => {
   it('signs the size and type: R2 refuses a PUT of another length or type, or to another key', async () => {
     const { created, landscape } = await start('resized');
     const target = created.uploads.find((u: { sha256: string }) => u.sha256 === landscape.sha256);
-    const statuses = await page.evaluate(async ({ target, size }) => {
-      const put = (url: string, body: BodyInit, headers = target.headers) => fetch(url, { method: 'PUT', headers, body }).then((r) => r.status);
-      return {
-        longer: await put(target.url, new Uint8Array(size + 1)),
-        otherType: await put(target.url, new Uint8Array(size), { 'content-type': 'text/html' }),
-        otherKey: await put(target.url.replace(/\/up\/[^?]+/, '/o/org-e2e/b/' + '0'.repeat(64)), new Uint8Array(size)),
-      };
-    }, { target, size: landscape.size });
+    const statuses = await page.evaluate(
+      async ({ target, size }) => {
+        const put = (url: string, body: BodyInit, headers = target.headers) => fetch(url, { method: 'PUT', headers, body }).then((r) => r.status);
+        return {
+          longer: await put(target.url, new Uint8Array(size + 1)),
+          otherType: await put(target.url, new Uint8Array(size), { 'content-type': 'text/html' }),
+          otherKey: await put(target.url.replace(/\/up\/[^?]+/, '/o/org-e2e/b/' + '0'.repeat(64)), new Uint8Array(size)),
+        };
+      },
+      { target, size: landscape.size },
+    );
     expect(statuses).toEqual({ longer: 403, otherType: 403, otherKey: 403 });
   }, 30_000);
 });
