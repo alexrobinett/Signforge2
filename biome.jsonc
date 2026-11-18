@@ -53,7 +53,8 @@
     },
     {
       // Type assertions belong here: test doubles and fixtures, Drizzle row typing in the db layer,
-      // the contract's validators, which read untrusted JSON field by field, and throwaway spikes.
+      // the contract's validators, which read untrusted JSON field by field, the contract's parsers,
+      // which own the one cast from a checked value to its shape, and throwaway spikes.
       "includes": [
         "**/test/**",
         "**/*.test.ts",
@@ -61,6 +62,7 @@
         "**/e2e/**",
         "packages/player/browser/**",
         "packages/db/src/**",
+        "packages/contract/src/parse.ts",
         "packages/contract/src/validate.ts",
         "spike/**"
       ],
@@ -88,7 +90,7 @@
         "packages/cli/src/template.ts",
         "packages/compiler/src/brand.ts",
         "packages/compiler/src/index.ts",
-        "packages/contract/src/index.ts",
+        "packages/contract/src/shapes.ts",
         "packages/feeds/src/ical.ts",
         "packages/feeds/src/index.ts",
         "packages/feeds/src/news.ts",
@@ -104,7 +106,6 @@
         "packages/player/src/pairing.ts",
         "packages/player/src/preview.ts",
         "packages/player/src/slot.ts",
-        "packages/player/src/socket.ts",
         "packages/player/src/store.ts",
         "packages/player/vite.config.ts",
         "packages/template-sdk/src/index.ts",
