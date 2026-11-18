@@ -209,7 +209,7 @@ Built in M3-23: the poller is `apps/api/src/data/poller.ts`, the fetch guards `a
 | Worker CPU | 30M ms | $0.02/M ms | about 20M ms |
 | Durable Object duration | 400k GB-s | $12.50/M GB-s | about 270k: tight |
 | Durable Object requests | 1M | $0.15/M | under 0.3M, or up to 2.5M if auto-responded pings bill at 20:1 |
-| D1 writes | 50M | $1.00/M | about 30M (measured per sync, see Screens: Sync); each index a write touches counts as another row |
+| D1 writes | 50M | $1.00/M | about 31M (measured per sync, see Screens: Sync); each index a write touches counts as another row |
 | D1 reads | 25B | $0.001/M | about 30M |
 | D1 storage | 5 GB | $0.75/GB-month | about 1 GB with 90 days of play counts |
 | R2 | 10 GB, 1M Class A, 10M Class B | $0.015/GB-month, $4.50/M A, $0.36/M B | about 50 GB, about $0.60 |
