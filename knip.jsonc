@@ -11,11 +11,15 @@
     // The Worker entry (wrangler.jsonc names `main` per environment, which knip's plugin misses: its
     // exports include the Durable Object classes). auth.config.ts and the `auth` package are the
     // Better Auth CLI (`pnpm exec auth generate --config auth.config.ts`).
-    "apps/api": { "entry": ["src/index.ts", "auth.config.ts"], "ignoreDependencies": ["auth"] },
+    // The templates and their SDK are built by vitest.config.ts for the tests, not imported; declared
+    // so that Turbo reruns the tests when one changes (docs/ci.md).
+    "apps/api": { "entry": ["src/index.ts", "auth.config.ts"], "ignoreDependencies": ["auth", "@signforge/template-.*"] },
     // shadcn/ui primitives are kept whole as generated, so an unused part (DialogFooter) stays.
-    "apps/cms": { "ignoreIssues": { "src/components/ui/**": ["exports"] } },
+    // The e2e run starts the API from apps/api; declaring it makes Turbo rerun the e2e when the API changes.
+    "apps/cms": { "ignoreIssues": { "src/components/ui/**": ["exports"] }, "ignoreDependencies": ["@signforge/api"] },
     // The fixture template is bundled by the browser tests' global setup; sw.js is served as is.
-    "packages/player": { "entry": ["browser/fixtures/template.ts", "public/sw.js"] },
+    // templates.test.ts plays every template from templates/: declared as for apps/api.
+    "packages/player": { "entry": ["browser/fixtures/template.ts", "public/sw.js"], "ignoreDependencies": ["@signforge/template-(?!sdk).*"] },
     // Bundled into a Worker by the upload e2e test.
     "packages/tools": { "entry": ["test/harness-worker.ts"] },
     // Read by url() in each template's style.css; the template build inlines it as a data URL.
