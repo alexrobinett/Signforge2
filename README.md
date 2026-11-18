@@ -4,7 +4,7 @@ Digital signage that keeps playing when the network does not. A CMS publishes im
 
 ![A price promo template playing on the test Pi](docs/images/promo-on-pi.jpg)
 
-*The C-Store promo template, captured on the test Pi (Raspberry Pi 400, Chromium kiosk, 1080p). The CMS so far is the signed-in shell in [`docs/tickets/M3-10/`](docs/tickets/M3-10/06-overview.png).*
+*The C-Store promo template, captured on the test Pi (Raspberry Pi 400, Chromium kiosk, 1080p). What the CMS does so far is in [`docs/architecture.md`](docs/architecture.md#milestone-3-so-far).*
 
 ## How it works
 
@@ -16,19 +16,36 @@ The full design is in [`docs/architecture.md`](docs/architecture.md); the backen
 
 All numbers are from a Raspberry Pi 400 (Pi 4 class) at 1080p 60 Hz, from [`spike/pi-perf/RESULTS.md`](spike/pi-perf/RESULTS.md). A laptop draws every template without dropping a frame, so it is not used to judge performance.
 
-The real player, a 16-spot playlist (price and photo promos, 1080p30 video, live weather, clock, calendar agendas, an RSS crawl, a menu board), 150 s per run:
+Template budgets: at most 1% dropped frames over a play, no frame over 50 ms after play starts, ready within 500 ms from cache, and a 600 kB bundle.
 
-| Transition | Dropped frames overall | While playing | Worst frame |
-| --- | --- | --- | --- |
-| Cut | 0.16% | 0.00% | 17 ms |
-| Fade through black, 600 ms | 0.20% | 0.01% | 50 ms |
-| Crossfade, 600 ms | 0.94% | 0.10% | 50 ms |
+The latest full run, 2026-11-18 (RESULTS, Linux tuning, "Final: everything kept"): the player and templates at 0d4b75a, on a Pi set up with `device/pi/tune.sh`, playing the 16-spot stress playlist (`examples/stress`, no brand kit: price and photo promos, 1080p30 video, weather, clock, calendar agendas, an RSS crawl, a menu board), 290 s per run.
 
-- Template budgets: at most 1% dropped frames over a play, no frame over 50 ms after play starts, ready within 500 ms from cache, and a 600 kB bundle.
-- Time from load to ready: 100 to 230 ms.
-- Video is decoded in hardware: 1080p30 drops about 1% of video frames, so that is the one accepted profile.
-- The same promo built in Rive ran at 21.5 fps against 59.4 fps for HTML, so templates stay HTML.
-- A Pi 4 cannot animate at 4K (16 to 33% dropped frames), so the kiosk outputs 1080p and lets a 4K panel upscale.
+| Measure | Result | Budget |
+| --- | --- | --- |
+| Dropped frames overall, cut (3 runs) | 0.35, 0.37, 0.43% | 1% |
+| Dropped frames overall, fade 600 ms (3 runs) | 0.43, 0.44, 0.46% | 1% |
+| Dropped during the fade | 1.14% | |
+| Dropped while the next spot loads | 8.1–11.5% | |
+| Prepare (load to ready), median per run | 220–233 ms | 500 ms |
+| First prepare after a kiosk restart (5 restarts) | 596–850 ms, median 622 | 500 ms |
+| Worst frame | 300 ms | 50 ms |
+| Kernel start to first spot | 22.0 s | |
+| Peak temperature | 56.4 C, never throttled | |
+
+Over budget:
+
+- **The first prepare after a kiosk restart**: 596–850 ms with the kept settings, 547–998 ms across every Linux setting tried; the second prepare is 219–243 ms. Most of it is starting the template renderer process. A blank sandboxed frame made at boot is the proposed fix ([#38](https://github.com/alexrobinett/Signforge2/issues/38)).
+- **News with brand fonts, loading under a playing video**: 1421–1622 ms on the first prepare after video-pan, then about 550 ms (M3-25's branch, merged in b658899; fade 600 ms, 290 s runs). The video layer is opaque and covers the 1 px gap that keeps the loading spot drawn, so Chromium throttles it ([M3-45](docs/tickets/M3-45-prepare-under-a-playing-video.md)).
+- **One frame of 300–383 ms on the first weather-rain prepare after Chromium starts**, in 5 of the 8 first runs after a fresh start (0d4b75a). Not traced.
+- **Frames over 50 ms**: apart from that frame, the worst frame was up to 133 ms in the tuning runs (0d4b75a) and 83–167 ms in M3-25's runs.
+
+Since those runs, M3-25 made a video spot ready at `canplaythrough`: video-pan prepared in 843–963 ms in the tuning runs and in 254–399 ms after the fix.
+
+Earlier baselines, each from an older build and workload:
+
+- **Third round** (301eee9, 2026-11-17): the Milestone 2 player before the wrapper frame and brand fonts, the 16-spot playlist, 150 s, one run each: 0.16% dropped overall with cuts, 0.20% with a 600 ms fade, 0.94% with a 600 ms crossfade, which drops 10% during its fade. Crossfade is offered but not the default.
+- **Video** (third round): 1080p30 is decoded in hardware and drops about 1% of video frames, so it is the one accepted profile; 1080p60 drops about 18%.
+- **Milestone 1 spike** (2026-11-16): one template, the C-Store promo, in the spike's harness, 20 s per run. Load to ready took 100 to 230 ms. The same promo built in Rive ran at 21.5 fps against 59.4 fps for HTML, so templates stay HTML. At 4K the Pi drops 16 to 33% of frames, so the kiosk outputs 1080p and lets a 4K panel upscale.
 
 ## Repository
 
