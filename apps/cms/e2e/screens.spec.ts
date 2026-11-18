@@ -1,32 +1,9 @@
-import { expect, request as playwrightRequest, test, type APIRequestContext, type Page } from '@playwright/test';
-import { fillUntilEnabled, hydrated, screenshot } from './helpers';
-import { API_PORT, CMS_URL, codeFor } from './servers';
+import { expect, test, type APIRequestContext } from '@playwright/test';
+import { fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
-const ADDRESS = { 'cf-connecting-ip': '192.0.2.11' };
-const API = `http://127.0.0.1:${API_PORT}/api`;
-
-/**
- * Sign in by email code straight against the API, under this spec's own address (through the dev
- * CMS every request comes from one address), and give the browser the session cookies.
- */
-async function signInAs(page: Page, email: string) {
-  // Its own request context, so the device calls below go without the session cookie.
-  const request = await playwrightRequest.newContext();
-  const sent = await request.post(`${API}/auth/email-otp/send-verification-otp`, { headers: ADDRESS, data: { email, type: 'sign-in' } });
-  expect(sent.status()).toBe(200);
-  const signedIn = await request.post(`${API}/auth/sign-in/email-otp`, { headers: ADDRESS, data: { email, otp: await codeFor(email) } });
-  expect(signedIn.status()).toBe(200);
-  const cookies = signedIn.headersArray().filter((h) => h.name.toLowerCase() === 'set-cookie');
-  await page.context().addCookies(
-    cookies.map((h) => {
-      const [pair = ''] = h.value.split(';');
-      const at = pair.indexOf('=');
-      return { name: pair.slice(0, at), value: pair.slice(at + 1), url: CMS_URL };
-    }),
-  );
-  await request.dispose();
-}
+const ADDRESS = '192.0.2.11';
 
 const DEVICE = `http://127.0.0.1:${API_PORT}/v1/device`;
 
@@ -66,20 +43,12 @@ async function sync(request: APIRequestContext, credential: string, display = { 
   return (await res.json()) as { commands: unknown[] };
 }
 
-async function shots(page: Page, name: string) {
-  await screenshot(page, `${name}-light`);
-  if (!process.env.E2E_SCREENSHOTS) return;
-  await page.evaluate(() => document.documentElement.classList.add('dark'));
-  await screenshot(page, `${name}-dark`);
-  await page.evaluate(() => document.documentElement.classList.remove('dark'));
-}
-
 test('pair a screen from the empty Screens page, watch it come online, wake, identify, set its hours and revoke it', async ({ page, request }) => {
   test.setTimeout(120_000);
   await page.goto('/sign-in');
   await hydrated(page);
   await shots(page, '10-sign-in');
-  await signInAs(page, `e2e-screens-${Date.now()}@example.com`);
+  await signInAs(page, `e2e-screens-${Date.now()}@example.com`, ADDRESS);
   await page.goto('/');
   await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
