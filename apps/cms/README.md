@@ -65,8 +65,9 @@ src/components/ui/        shadcn/ui components (components.json is set up for th
 - **No `create` from `zustand`.** It makes one store for the whole server, shared between requests. Use `useAppStore`.
 - **React hooks rules** (`eslint-plugin-react-hooks`, recommended).
 - **Slop rules** (`eslint-plugin-slop`, every rule, whole files): no em dashes, no inflated words, non-JSDoc comments of 50 words at most, `/** */` on exported things, no trivial wrappers or type aliases.
+- **Typed rules** (typescript-eslint, with type information): no floating or misused promises, no condition the types say is always true or false (a fallback for a field that is required), no assertion that changes nothing, every case of a union switch and no needless `default`, only `Error`s thrown (TanStack's `redirect()` and `notFound()` excepted), and no deprecated APIs (React's `FormEvent`: use `SubmitEvent`). They add about 2 s to the lint.
 
-If a rule must be broken, use `// eslint-disable-next-line <rule> -- <why>`. There are none today.
+If a rule must be broken, use `// eslint-disable-next-line <rule> -- <why>`: a disable without a reason, or one that no longer silences anything, is an error. There are none today.
 
 typescript-eslint, which parses TypeScript for ESLint, cannot load TypeScript 7. So this package's `typescript` devDependency is an alias for `@typescript/typescript6`, the TypeScript 6 API, as the TypeScript 7 release notes recommend. `tsc` still runs TypeScript 7, from the repo root.
 

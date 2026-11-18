@@ -24,7 +24,7 @@ export async function createOrganization(router: AnyRouter, name: string) {
   const base = slugify(name);
   let res = await authClient.organization.create({ name, slug: base });
   if (res.error && slugTaken(res.error)) res = await authClient.organization.create({ name, slug: `${base}-${suffix()}` });
-  if (res.error || !res.data) throw new OrgActionError(authErrorMessage(res.error, 'Could not create the organization.'));
+  if (res.error) throw new OrgActionError(authErrorMessage(res.error, 'Could not create the organization.'));
   await router.invalidate();
   return res.data;
 }
