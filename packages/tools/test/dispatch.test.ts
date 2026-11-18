@@ -72,6 +72,7 @@ describe('the registry', () => {
       'remove_group_members',
       'rename_group',
       'rename_screen',
+      'renew_asset_upload',
       'restart_screen',
       'revoke_screen_credential',
       'set_default_brand_kit',
