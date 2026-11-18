@@ -68,7 +68,12 @@ describe('Google Calendar export', () => {
       timed('Design review', '2026-11-18T13:00:00-05:00', '2026-11-18T14:30:00-05:00', 'Room 4B, 2nd floor'),
       timed('Standup', '2026-11-19T09:30:00-05:00', '2026-11-19T09:45:00-05:00'),
       // UTC stays UTC; the folded SUMMARY is unfolded.
-      timed('All-hands: Q4 results and the road to the new year in one long title that Google folded', '2026-11-19T17:00:00+00:00', '2026-11-19T18:00:00+00:00', 'Main hall'),
+      timed(
+        'All-hands: Q4 results and the road to the new year in one long title that Google folded',
+        '2026-11-19T17:00:00+00:00',
+        '2026-11-19T18:00:00+00:00',
+        'Main hall',
+      ),
       timed('Standup', '2026-11-20T09:30:00-05:00', '2026-11-20T09:45:00-05:00'),
       // No DTEND: an hour, as datad.py did.
       timed('Fire drill', '2026-11-23T16:00:00-05:00', '2026-11-23T17:00:00-05:00'),
@@ -112,13 +117,7 @@ describe('public US holidays feed', () => {
 });
 
 describe('limits', () => {
-  const daily = (start: string) => [
-    'UID:daily@test',
-    `DTSTART:${start}`,
-    'DURATION:PT15M',
-    'RRULE:FREQ=DAILY',
-    'SUMMARY:Daily',
-  ];
+  const daily = (start: string) => ['UID:daily@test', `DTSTART:${start}`, 'DURATION:PT15M', 'RRULE:FREQ=DAILY', 'SUMMARY:Daily'];
 
   it('returns at most 25 events', () => {
     expect(parseCalendar(ics(daily('20261101T120000Z')), { now }).events).toHaveLength(25);

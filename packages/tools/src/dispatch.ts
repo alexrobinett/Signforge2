@@ -31,6 +31,7 @@ import {
   type Role,
   type Scope,
   type RateLimiter,
+  type FeedUrlSealer,
   type ScreenNotifier,
   type ToolErrorCode,
 } from './tool';
@@ -47,6 +48,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   blobs: R2Bucket;
   /** Signs direct uploads to `blobs`. Asset uploads need it; nothing else does. */
   uploads?: UploadSigner;
+  /** Seals feed URLs. The data source tools that take a URL need it. */
+  feedUrls?: FeedUrlSealer;
   /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
   screens?: ScreenNotifier;
   /** Counts attempts against the caller's rate limits. `claim_screen` refuses without one. */
@@ -68,7 +71,7 @@ export function permits(caller: Pick<Caller, 'role' | 'scopes'>, tool: AnyTool<a
   return rank(caller.role) >= rank(tool.minRole) && effectiveScopes(caller).includes(tool.scope);
 }
 
-const SECRET_KEY = /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|pairing_?code|^code$/i;
+const SECRET_KEY = /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|pairing_?code|^code$/i;
 const REDACTED = '[redacted]';
 
 /**
@@ -165,6 +168,7 @@ export async function dispatch<D extends DataScope>(
       input: parsed.data,
       blobs: caller.blobs,
       uploads: caller.uploads,
+      feedUrls: caller.feedUrls,
       write,
       notify,
       rateLimit: caller.rateLimit,

@@ -21,7 +21,12 @@ interface UploadSettings {
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;
 }
-interface Env extends AuthSettings, UploadSettings {}
+/** The data-source poller (src/data). */
+interface DataSourceSettings {
+  /** Encrypts feed URLs at rest (src/data/cipher.ts), 32+ random bytes. Required outside dev; changing it loses every stored URL. */
+  DATA_SOURCE_KEY?: string;
+}
+interface Env extends AuthSettings, UploadSettings, DataSourceSettings {}
 declare namespace Cloudflare {
-  interface Env extends AuthSettings, UploadSettings {}
+  interface Env extends AuthSettings, UploadSettings, DataSourceSettings {}
 }

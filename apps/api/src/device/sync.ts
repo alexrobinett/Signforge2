@@ -12,6 +12,7 @@ import { validateSyncRequest, type DataSnapshot, type DeviceCommand, type SyncRe
 import { scoped, type DeviceScreen } from '@signforge/db';
 import type { Context } from 'hono';
 import type { DeviceEnv } from './auth';
+import { fitsBoundFields } from '../data/fit';
 import { screenManifests, type ManifestSummary } from './manifests';
 import { issueTicket } from './ticket';
 
@@ -48,13 +49,32 @@ function canPlay(player: SyncRequest['player'], m: ManifestSummary): boolean {
   return (!Number.isInteger(m.schema) || player.manifestSchemas.includes(m.schema)) && m.protocols.every((p) => player.protocols.includes(p));
 }
 
-async function changedSnapshots(env: Env, screen: DeviceScreen, desired: ManifestSummary | undefined, held: Record<string, number>): Promise<DataSnapshot[]> {
-  if (!desired?.dataSources.size) return [];
+/**
+ * Of the desired manifest's sources: the snapshots newer than the screen holds, and for those it
+ * holds at the current version, when they were last checked, so an unchanged feed does not go
+ * stale on the screen and is not sent again.
+ */
+async function snapshotsFor(
+  env: Env,
+  screen: DeviceScreen,
+  desired: ManifestSummary | undefined,
+  held: Record<string, number>,
+): Promise<Pick<SyncResponse, 'snapshots' | 'checked'>> {
+  if (!desired?.dataSources.size) return { snapshots: [], checked: {} };
   const rows = await scoped(env.DB, screen.orgId).dataSources.snapshots([...desired.dataSources]);
   // The stored version is a hash, for telling whether data changed; a screen orders snapshots by the fetch time.
-  return rows
-    .filter((r) => r.fetchedAt > (held[r.dataSourceId] ?? -1))
-    .map((r) => ({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), data: JSON.parse(r.dataJson) as unknown }));
+  const snapshots: DataSnapshot[] = [];
+  const checked: NonNullable<SyncResponse['checked']> = {};
+  for (const r of rows) {
+    const checkedAt = new Date(r.checkedAt).toISOString();
+    if (r.fetchedAt === held[r.dataSourceId]) checked[r.dataSourceId] = { version: r.fetchedAt, checkedAt };
+    if (r.fetchedAt <= (held[r.dataSourceId] ?? -1)) continue;
+    const data: unknown = JSON.parse(r.dataJson);
+    // Stored only if it fit the spots published then; this screen's manifest may bind it differently.
+    if (fitsBoundFields(desired.bound.get(r.dataSourceId) ?? [], data))
+      snapshots.push({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), checkedAt, data });
+  }
+  return { snapshots, checked };
 }
 
 export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
@@ -104,7 +124,7 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
     epoch: req.epoch,
     ackSeq: stored.ackSeq,
     ...(screen.desiredManifestId ? { desiredManifest: screen.desiredManifestId } : {}),
-    snapshots: await changedSnapshots(c.env, screen, desired, req.snapshots),
+    ...(await snapshotsFor(c.env, screen, desired, req.snapshots)),
     socketTicket: await issueTicket(c.env, { screenId: screen.screenId, credentialId: c.get('credentialId') }),
     commands,
   };

@@ -12,6 +12,7 @@ import { describeTools, dispatch, registry, type Caller, type ToolErrorCode } fr
 import type { Hono } from 'hono';
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
+import { feedUrlSealer } from '../data/cipher';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
 
@@ -50,6 +51,7 @@ export function mountTools(api: Hono<ApiEnv>) {
       actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_CLIENT_ID },
       blobs: c.env.BLOBS,
       uploads: uploadSigner(c.env, c.req.url),
+      feedUrls: feedUrlSealer(c.env),
       screens: screenNotifier(c.env),
       // A claim counts against the member and against the address, so many accounts on one address share a limit.
       rateLimit: async () => {

@@ -13,6 +13,7 @@ export {
   type Actor,
   type AnyTool,
   type DataScope,
+  type FeedUrlSealer,
   type Role,
   type Scope,
   type RateLimitBucket,

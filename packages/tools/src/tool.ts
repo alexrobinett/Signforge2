@@ -52,6 +52,15 @@ export interface ScreenNotifier {
   revoked(screenId: string, credentialId: string): Promise<void>;
 }
 
+/**
+ * Seals a data source's feed URL for storage (`data_sources.url_encrypted`), bound to the source
+ * it belongs to, so a sealed URL copied to another row does not open. Implemented by the API with
+ * its key; only the poller unseals.
+ */
+export interface FeedUrlSealer {
+  seal(source: { orgId: string; id: string }, url: string): Promise<string>;
+}
+
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
 export interface ToolContext<I, D extends DataScope = OrgScope> {
   org: D;
@@ -61,6 +70,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   blobs: R2Bucket;
   /** Signs direct uploads to that bucket (./upload.ts). Undefined where uploads are not configured. */
   uploads?: UploadSigner;
+  /** Seals feed URLs (./data-sources.ts). Undefined where no data source tool runs. */
+  feedUrls?: FeedUrlSealer;
   /**
    * Add a staged change (a repository's `stage.*`) to this call's writes, and get its row back.
    * A tool never writes to D1 itself: the dispatcher runs the writes and the audit row in one

@@ -14,6 +14,7 @@
     "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
+    "@signforge/feeds": "workspace:*",
     "@signforge/tools": "workspace:*",
     "better-auth": "^1.7.25",
     "hono": "^4.13.19"
