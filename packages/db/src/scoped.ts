@@ -982,7 +982,10 @@ export function scoped(d1: D1Database, orgId: string) {
       append: (entry: NewRow<typeof s.auditLog>) => audit.insert(entry),
       /** The audit row for a change, staged to commit with it. */
       stage: (entry: NewRow<typeof s.auditLog>) => audit.stage.insert(entry),
-      /** Newest first. With `target`, only what was done to that one thing (a screen's recent events). */
+      /**
+       * Newest first; rows of the same millisecond by insertion order (`rowid`), as ids are random.
+       * With `target`, only what was done to that one thing (a screen's recent events).
+       */
       list: ({ limit = 50, before, target }: { limit?: number; before?: number; target?: { kind: string; id: string } } = {}) => {
         const a = s.auditLog;
         const where: SQL[] = [eq(a.orgId, orgId)];
@@ -992,7 +995,7 @@ export function scoped(d1: D1Database, orgId: string) {
           .select()
           .from(a)
           .where(and(...where))
-          .orderBy(desc(a.at), desc(a.id))
+          .orderBy(desc(a.at), desc(sql`rowid`))
           .limit(limit)
           .all();
       },
