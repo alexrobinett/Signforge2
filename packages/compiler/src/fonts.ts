@@ -57,18 +57,6 @@ export const FONTS: readonly CatalogueFont[] = [
     ],
   },
   {
-    id: 'base/source-sans-3',
-    family: 'Source Sans 3',
-    roles: ['body'],
-    weights: [400, 600, 700],
-    licence: ofl("Copyright 2010-2024 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'", 'https://github.com/adobe-fonts/source-sans'),
-    files: [
-      { weight: 400, style: 'normal', file: '0f73f35e08cde0a2f10c109c6e01d71459d97e4099ecd9a50f1b6c0209e4de2b', size: 15696 },
-      { weight: 600, style: 'normal', file: '14527d193b0e30bc32ef931549a246cdfd286573bb12869b7e052b8101a39d38', size: 15668 },
-      { weight: 700, style: 'normal', file: 'ae35266f2ab0d5314ff9a04127931eb26c793e4f1269bb240046d4d2db4b7bb1', size: 15596 },
-    ],
-  },
-  {
     id: 'base/archivo',
     family: 'Archivo',
     roles: ['display', 'body'],
@@ -110,17 +98,6 @@ export const FONTS: readonly CatalogueFont[] = [
     weights: [400],
     licence: ofl('Copyright 2019 The Bebas Neue Project Authors', 'https://github.com/dharmatype/Bebas-Neue'),
     files: [{ weight: 400, style: 'normal', file: 'a7c90c89240c134f7fdd33d40c000ec90b79d675ea53e8cc5a6d423c073de412', size: 13768 }],
-  },
-  {
-    id: 'base/playfair-display',
-    family: 'Playfair Display',
-    roles: ['display'],
-    weights: [400, 700],
-    licence: ofl('Copyright 2017 The Playfair Display Project Authors', 'https://github.com/clauseggers/Playfair-Display'),
-    files: [
-      { weight: 400, style: 'normal', file: '1fe9ad5d8b2ebd8ecb8fbd05bed1e3fdfa52dae3f1a04e1c219918442fe9394d', size: 21856 },
-      { weight: 700, style: 'normal', file: '28453852ea165c47b5a941be00e418402e1407002ed87507f062a1e316328fe6', size: 23224 },
-    ],
   },
 ];
 

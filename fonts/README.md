@@ -17,21 +17,18 @@ the same packages, except Source Sans 3, whose package carries only "Google Inc.
 | --- | --- | --- | --- | --- |
 | Inter | @fontsource/inter 5.3.0 | 400, 600, 800 | 23,664 / 24,452 / 24,400 | 72,516 |
 | Atkinson Hyperlegible | @fontsource/atkinson-hyperlegible 5.3.0 | 400, 700 | 17,208 / 17,524 | 34,732 |
-| Source Sans 3 | @fontsource/source-sans-3 5.3.1 | 400, 600, 700 | 15,696 / 15,668 / 15,596 | 46,960 |
 | Archivo | @fontsource/archivo 5.3.0 | 400, 600, 800 | 14,700 / 13,820 / 14,416 | 42,936 |
 | Montserrat | @fontsource/montserrat 5.3.0 | 400, 600, 800 | 18,780 / 18,688 / 19,012 | 56,480 |
 | Oswald | @fontsource/oswald 5.3.0 | 500, 700 | 12,704 / 12,672 | 25,376 |
 | Bebas Neue | @fontsource/bebas-neue 5.3.0 | 400 | 13,768 | 13,768 |
-| Playfair Display | @fontsource/playfair-display 5.3.0 | 400, 700 | 21,856 / 23,224 | 45,080 |
 
 ## Reserved Font Names
 
-Source Sans 3 ("Source") and Playfair Display ("Playfair Display") have Reserved Font Names. The
-OFL counts a subset as a Modified Version, which may not use a reserved name without the
-holder's permission. These are the subsets Google Fonts serves under those names, unchanged, and
-the player registers every brand font under its own name (`sf-brand-display`, `sf-brand-body`),
-not the reserved one. Whether that is enough is an owner decision before these two ship to
-customers; dropping them is deleting their directories and catalogue entries.
+Decided 2026-11-17: the catalogue has no font with a Reserved Font Name. The OFL counts a subset
+as a Modified Version, which may not carry a reserved name, and every family here must be a
+latin subset to fit the 150 kB budget (the unsubset files of Source Sans 3 and Playfair Display
+are several times larger). So Source Sans 3 and Playfair Display were dropped. Check a new
+family's `OFL.txt` for a "Reserved Font Name" line before adding it.
 
 ## Adding a family or a weight
 

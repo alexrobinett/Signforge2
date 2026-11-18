@@ -27,5 +27,5 @@ Templates draw with the brand: tokens as CSS custom properties, brand fonts and 
 - The curated fonts' WOFF2 files are in `fonts/` (latin, the catalogue's weights, with OFL texts and sizes). `sf fonts push` uploads them, and so does `sf template seed`. The device and preview blob routes serve them from `sys/b/`.
 - Fonts reach the frame as Blobs and become `@font-face` rules with `data:` URLs, so the template CSP did not need `blob:` fonts. Faces built from bytes were measured worse on the Pi; see RESULTS.md.
 - The colour lint is in the contract (`brandColourWarnings`). Its warnings are kept on the check report (`warnings`) and do not fail a build.
-- Owner decision flagged in `fonts/README.md`: Source Sans 3 and Playfair Display have Reserved Font Names, and the files are subsets.
+- Owner decision flagged in `fonts/README.md`: Source Sans 3 and Playfair Display have Reserved Font Names, and the files are subsets. Decided 2026-11-17: both dropped (a subset may not carry a reserved name, and the unsubset files break the 150 kB budget); the catalogue has six fonts. A serif without a reserved name is a follow-up.
 
