@@ -298,7 +298,7 @@ describe('concurrent publishes (R09)', () => {
       },
       read: async () => {
         // Let the calls beside it in the same Promise.all start first.
-        await null;
+        await Promise.resolve();
         if (inFlight) await inFlight;
         return read();
       },
