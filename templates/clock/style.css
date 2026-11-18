@@ -16,18 +16,19 @@ body {
   overflow: hidden;
 }
 body {
-  font-family: 'Inter', sans-serif;
-  color: #fff;
+  font-family: var(--sf-font-body, 'Inter'), sans-serif;
+  color: var(--sf-text, #fff);
   font-feature-settings: 'tnum' 1;
 }
 /* Clock. Dark by default (kind to OLED panels), and the whole block drifts slowly so no pixel
    holds the same value for long when the clock is left up for an hour. */
 :root {
-  --accent: #7cc4ff;
+  --accent: var(--sf-accent, #7cc4ff);
+  --bg: var(--sf-bg, #05070d);
 }
 html,
 body {
-  background: #05070d;
+  background: var(--bg);
 }
 .stage {
   --u: 1vmin;
@@ -35,7 +36,7 @@ body {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  background: radial-gradient(120% 120% at 50% 110%, #101a33 0%, #05070d 60%);
+  background: var(--bg);
   display: grid;
   place-items: center;
 }
@@ -65,10 +66,8 @@ body {
     transparent
   );
 }
-/* The second glow read as a leftover patch in the corner (visual review); it is gone. */
-.b2 {
-  display: none;
-}
+/* Only the centred glow: a second glow, and later a gradient rising from below the screen, read as
+   a leftover patch in the bottom-right corner (visual reviews). */
 .content {
   position: relative;
   text-align: center;
@@ -89,6 +88,7 @@ body {
   animation-delay: 0.1s, var(--out);
 }
 .time {
+  font-family: var(--sf-font-display, 'Inter'), sans-serif;
   font-size: calc(var(--u) * 30);
   font-weight: 800;
   line-height: 1;
@@ -98,7 +98,7 @@ body {
 .time .sec {
   font-size: 0.35em;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.55);
+  color: color-mix(in srgb, var(--sf-text, #fff) 55%, transparent);
   margin-left: 0.12em;
   letter-spacing: 0;
 }
@@ -110,15 +110,16 @@ body {
   vertical-align: 0.9em;
 }
 .date {
+  margin-top: calc(var(--u) * 1.2);
   font-size: calc(var(--u) * 5.6);
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.82);
+  color: color-mix(in srgb, var(--sf-text, #fff) 82%, transparent);
   animation-delay: 0.4s, var(--out);
 }
 .message {
   font-size: calc(var(--u) * 3.6);
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--sf-muted, rgba(255, 255, 255, 0.7));
   margin-top: calc(var(--u) * 4);
   animation-delay: 0.55s, var(--out);
 }

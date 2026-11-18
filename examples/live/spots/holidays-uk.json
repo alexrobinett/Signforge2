@@ -5,8 +5,7 @@
   "durationMs": 10000,
   "data": {
     "title": "Bank holidays",
-    "subtitle": "United Kingdom",
-    "rows": 5
+    "subtitle": "United Kingdom"
   },
   "bindings": {
     "events": {

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { spotsPlayed, useHarness } from './harness';
 
@@ -84,5 +86,19 @@ describe('playback loop', () => {
     // The player waited out the timeout (READY_TIMEOUT_MS, 2 s) on `slow` before giving up on it.
     const gap = Date.parse(s.log[1]!.startedAt) - Date.parse(s.log[0]!.startedAt);
     expect(gap).toBeGreaterThanOrEqual(1900);
+  });
+
+  // A paused video that has never played presents no frame, so a frame callback never came: every
+  // video prepare waited out a 600 ms timer (about 950 ms in all on the Pi, against a 500 ms budget).
+  it('has a video spot ready once it can play through, without waiting for a frame callback', async () => {
+    const video = readFileSync(join(import.meta.dirname, 'fixtures/clip.webm'));
+    const content = h.content([
+      { id: 'v', video, durationMs: 1500 },
+      { id: 'a', durationMs: 1500 },
+    ]);
+    const p = await h.openPlayer((s) => s.publish(content));
+    const s = await p.until((s) => s.prepares.filter((x) => x.spot === 'v').length >= 2);
+    expect(s.skipped).toBe(0);
+    for (const x of s.prepares.filter((x) => x.spot === 'v')) expect(x.ms).toBeLessThan(500);
   });
 });

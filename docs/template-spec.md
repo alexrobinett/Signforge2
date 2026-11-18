@@ -71,6 +71,7 @@ A template that has not reported `ready` within 2 seconds is skipped.
 - `data-orientation="landscape|portrait"` on the root element. Use it for layout, not a media query, because a letterboxed template is not the shape of the screen.
 - `defineTemplate({ prepare, play })` hooks for anything markup cannot do, such as building rows from a list or drawing to a canvas. `prepare` may be async; ready is reported after it resolves. A `stop` hook exists in the SDK but the player does not call it today: a template is simply removed.
 - `formatter(ctx, options)` and `dayKey(ctx, date)` format dates and times in the screen's time zone and locale. Use them for anything shown: the device's own clock settings may not match the screen's location.
+- `fitWords(text, fits)` shortens text to the whole words that fit, ending in "…": CSS `text-overflow` cuts after a space and shows "rain …". `fits` sets the candidate and checks for overflow (`templates/news/main.ts`); it costs about log2(words) layouts, and only for text that overflows.
 - `now()` is the screen's time: the device clock corrected from the server. Use it, never `new Date()` or `Date.now()`, for anything that depends on the time: a Pi has no battery-backed clock, and after a power cut its own clock can be days out.
 - The screen's brand (protocol 2): see Brand below.
 
@@ -82,13 +83,18 @@ When the screen has a brand kit, the player sends it in `init` as `theme`, and b
 - Brand fonts: `--sf-font-display` and `--sf-font-body`, each set when the kit has that font and the template's `<style>` uses that variable. The SDK adds them as `@font-face` rules for `sf-brand-display` and `sf-brand-body` with `data:` URLs (as a template's own fonts arrive; nothing is fetched, and the no-network policy is unchanged) and loads them before `ready`, so the first frame draws with them. A family the template never uses is not loaded: on the Pi, unused faces still slowed the first paint of a large photo. Faces built from bytes (`new FontFace(name, buffer)`) were tried first and dropped: on the Pi about one prepare in three of a template over a 4K photo then took about a second to paint.
 - The logo: `<img data-sf-src="$brand.logo">` gets the kit's logo, the on-light version when `--sf-bg` is light and the kit has one, else the on-dark one. It is also `ctx.assets['$brand.logo']`.
 
-Cost on the Pi (`spike/pi-perf/RESULTS.md`, Brand fonts and Slow prepares): a kit costs a template that does not use the brand fonts nothing; drawing in them adds about 0 to 80 ms to a prepare, and with the brand fonts every stress template prepares within 500 ms except video-pan (over in every build) and news at 517 ms once. Measure a template on the Pi after moving it onto the brand fonts.
+Cost on the Pi (`spike/pi-perf/RESULTS.md`, Brand fonts and Slow prepares): a kit costs a template that does not use the brand fonts nothing; drawing in them adds about 0 to 80 ms to a prepare, and with the shipped templates on the brand fonts (M3-25) every stress spot prepares within 500 ms except news loading under a playing video (550 ms, and 1.4 to 1.6 s when the video layer hides the frame underneath: RESULTS.md, Brand tokens and template polish). Measure a template on the Pi after moving it onto the brand fonts.
 
 Write every brand value with a fallback, so the template still draws on a screen with no kit, where nothing is set: `color: var(--sf-text, #f8fafc)`, `font-family: var(--sf-font-display, Inter), sans-serif`, and give the logo `<img>` a `src` of its own (a `data:` URL) or hide it when it has none. Colours built on a token are fine: `color-mix(in srgb, var(--sf-accent, #22d3ee) 30%, transparent)`.
 
 A colour field may default to a brand token, `"$brand.<colour>"` with one of the contract's `BRAND_COLORS` (`"$brand.accent"`). The server's compiler replaces it with the screen's brand colour at publish, so `data` only ever holds colours; a token naming no brand colour is a problem of the spot.
 
-**Colour lint.** `sf build` and the server warn on a colour literal in a template's CSS (`style.css`, and `<style>` in `index.html`) that is not the fallback inside a `var()`: a hex colour, `rgb()`/`hsl()` and the like anywhere, and named colours (`white`) in colour properties. It is a warning: the version still builds and registers, and the warnings are kept on its check report. Shadows, scrims and weather's sky colours use literals on purpose.
+**Colour lint.** `sf build` and the server warn on a colour literal in a template's CSS (`style.css`, and `<style>` in `index.html`) that is not the fallback inside a `var()`: a hex colour, `rgb()`/`hsl()` and the like anywhere, and named colours (`white`) in colour properties. It is a warning: the version still builds and registers, and the warnings are kept on its check report. The shipped templates have none (`packages/cli/test/templates.test.ts` keeps it so). How they get there:
+
+- Give each brand role its token: text `--sf-text`, secondary text `--sf-muted`, page `--sf-bg`, cards `--sf-surface`, filled shapes `--sf-primary` with `--sf-on-primary` text, highlights `--sf-accent`.
+- Shades and shadows are the kit's background mixed with `transparent` (`color-mix(in srgb, var(--sf-bg, #000) 50%, transparent)`), and text over them the kit's text: the kit keeps that pair legible, so a light kit gets a light shade with dark text. A "light" theme option swaps the two (`templates/menu-board`).
+- A colour that is not a brand role, such as a weather sky, is a mix of tokens whose two fallbacks are the same literal, so with no kit it is exactly that colour: `color-mix(in srgb, var(--sf-primary, #2f80ed) 75%, var(--sf-bg, #2f80ed))`.
+- Canvas drawing is not linted; read a token with `getComputedStyle` to follow the kit (weather's rain and snow).
 
 ## Live data
 
@@ -116,7 +122,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 - Spots can be any length in your range. Do not assume the default duration: derive end-of-spot timing from `--sf-duration`.
 
 **Text**
-- Fit the space you have. Clamp long text with `-webkit-line-clamp` or `text-overflow: ellipsis`, and drop list rows that do not fit rather than letting them run off screen (see `templates/agenda/main.ts`).
+- Fit the space you have. Clamp long text with `-webkit-line-clamp` or `text-overflow: ellipsis` (or `fitWords` to end on a word), and show as many list rows as fit rather than a fixed count, dropping those that do not fit rather than letting them run off screen (see `templates/agenda/main.ts`).
 - Give grid and flex tracks a zero minimum (`minmax(0, 1fr)`, `min-width: 0`). A track's default minimum is its content's width, so one unwrapped line (`nowrap`, a long headline) widens the whole column past the screen and every clamp or ellipsis in it stops working. Found on live news feeds.
 - A crawl or ticker is one strip of text holding its content twice, sliding left by exactly one copy. It loops seamlessly and costs nothing measurable.
 

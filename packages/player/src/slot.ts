@@ -367,13 +367,8 @@ export class Slot {
       signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
     });
     alive(signal);
-    // Wait until the first frame has been decoded and composited, so the hardware decoder is
-    // already running when the spot starts rather than spinning up on screen.
-    await new Promise<void>((resolve) => {
-      v.requestVideoFrameCallback(() => resolve());
-      setTimeout(resolve, 600);
-    });
-    alive(signal);
+    // Ready at canplaythrough. A paused video that has never played presents no frame, so waiting
+    // for a frame callback here only ever waited out a timer: 600 ms on every video prepare.
     this.startPlayback = () => void v.play();
   }
 
