@@ -39,27 +39,38 @@ const refreshCacheAfterOrgChange = createAuthMiddleware(async (ctx) => {
   if (fresh) await setSessionCookie(ctx, fresh);
 });
 
+type Row = Record<string, unknown>;
+const isRecord = (v: unknown): v is Row => typeof v === 'object' && v !== null;
+
 /**
  * Membership changes go through Better Auth's organization endpoints, not the tool registry, so
  * this writes their audit rows (F9): the endpoint's name as the action, as a tool's would be, the
  * session user as the actor, and the changed row as the target, from what the endpoint returned.
+ * The detail holds only the fields named here, never the request or the whole row: an org's
+ * `metadata` is any JSON its owners set and comes back on every rename, so it may hold a secret.
  * The row is written after the change, not with it: Better Auth runs on D1 without transactions.
  */
-const MEMBERSHIP_CHANGES: Record<string, { action: string; targetKind: 'invitation' | 'member' | 'organization'; in?: 'invitation' | 'member' }> = {
-  '/organization/invite-member': { action: 'invite_member', targetKind: 'invitation' },
-  '/organization/cancel-invitation': { action: 'cancel_invitation', targetKind: 'invitation' },
-  '/organization/reject-invitation': { action: 'reject_invitation', targetKind: 'invitation', in: 'invitation' },
-  '/organization/accept-invitation': { action: 'accept_invitation', targetKind: 'member', in: 'member' },
-  '/organization/update-member-role': { action: 'update_member_role', targetKind: 'member' },
-  '/organization/remove-member': { action: 'remove_member', targetKind: 'member', in: 'member' },
-  '/organization/leave': { action: 'leave_organization', targetKind: 'member' },
-  '/organization/update': { action: 'update_organization', targetKind: 'organization' },
+const MEMBERSHIP_CHANGES: Record<
+  string,
+  { action: string; targetKind: 'invitation' | 'member' | 'organization'; in?: 'invitation' | 'member'; detail: (row: Row, body: unknown) => Row }
+> = {
+  '/organization/invite-member': { action: 'invite_member', targetKind: 'invitation', detail: (r) => ({ email: r.email, role: r.role }) },
+  '/organization/cancel-invitation': { action: 'cancel_invitation', targetKind: 'invitation', detail: (r) => ({ email: r.email }) },
+  '/organization/reject-invitation': { action: 'reject_invitation', targetKind: 'invitation', in: 'invitation', detail: (r) => ({ email: r.email }) },
+  '/organization/accept-invitation': { action: 'accept_invitation', targetKind: 'member', in: 'member', detail: (r) => ({ userId: r.userId, role: r.role }) },
+  '/organization/update-member-role': { action: 'update_member_role', targetKind: 'member', detail: (r) => ({ userId: r.userId, role: r.role }) },
+  '/organization/remove-member': { action: 'remove_member', targetKind: 'member', in: 'member', detail: (r) => ({ userId: r.userId, role: r.role }) },
+  '/organization/leave': { action: 'leave_organization', targetKind: 'member', detail: (r) => ({ userId: r.userId, role: r.role }) },
+  // Which fields changed, and the new name and slug; never the values of the others.
+  '/organization/update': {
+    action: 'update_organization',
+    targetKind: 'organization',
+    detail: (r, body) => ({ name: r.name, slug: r.slug, changed: isRecord(body) && isRecord(body.data) ? Object.keys(body.data) : [] }),
+  },
 };
 
 /** The CMS is the only client with a session; agents come through `/mcp` (Milestone 4). */
 const CMS_CLIENT_ID = 'cms';
-
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
 /** A plugin only for its after-hook: a plugin's hooks run beside the options' own (`refreshCacheAfterOrgChange`). */
 function membershipAudit(audit: AuthDeps['audit']) {
@@ -87,7 +98,7 @@ function membershipAudit(audit: AuthDeps['audit']) {
               action: change.action,
               targetKind: change.targetKind,
               targetId: row.id,
-              detailJson: JSON.stringify({ input: ctx.body, result: row }),
+              detailJson: JSON.stringify(change.detail(row, ctx.body)),
             });
           }),
         },

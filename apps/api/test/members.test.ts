@@ -128,8 +128,8 @@ describe('the audit log', () => {
       ].sort(order),
     );
     const detail = (action: string) => JSON.parse(rows.find((r) => r.action === action)?.detailJson ?? 'null');
-    expect(detail('update_member_role')).toMatchObject({ input: { role: 'editor' }, result: { userId: joinerUser.id, role: 'editor' } });
-    expect(detail('remove_member')).toMatchObject({ result: { userId: joinerUser.id } });
+    expect(detail('update_member_role')).toEqual({ userId: joinerUser.id, role: 'editor' });
+    expect(detail('remove_member')).toEqual({ userId: joinerUser.id, role: 'editor' });
   });
 
   it('records an invitee turning an invitation down and a member leaving, as that person', async () => {
@@ -154,5 +154,23 @@ describe('the audit log', () => {
     const row = (action: string) => rows.find((r) => r.action === action);
     expect(row('reject_invitation')).toMatchObject({ actorId: no.user.id, targetKind: 'invitation', targetId: no.invite.id });
     expect(row('leave_organization')).toMatchObject({ actorId: yes.user.id, targetKind: 'member', targetId: member.id });
+  });
+
+  it('records only what each change needs, never org metadata, which can hold secrets', async () => {
+    const t = testApp();
+    const owner = new Client(t);
+    await owner.signIn(email('owner'));
+    const SECRET = 'sk-live-not-for-the-audit-log';
+    const metadata = { integrations: { feed: { token: SECRET } } };
+    const slug = `secretive-${Math.random().toString(36).slice(2, 8)}`;
+    const org = await owner.ok<{ id: string }>('/api/auth/organization/create', { name: 'Secretive', slug, metadata });
+    await owner.ok('/api/auth/organization/update', { organizationId: org.id, data: { name: 'Secretive Ltd', metadata } });
+    await owner.ok('/api/auth/organization/invite-member', { email: email('new'), role: 'viewer' });
+
+    const rows = await scoped(env.DB, org.id).auditLog.list();
+    const detail = (action: string) => JSON.parse(rows.find((r) => r.action === action)?.detailJson ?? 'null');
+    expect(detail('update_organization')).toEqual({ name: 'Secretive Ltd', slug, changed: ['name', 'metadata'] });
+    expect(detail('invite_member')).toEqual({ email: expect.stringContaining('new-'), role: 'viewer' });
+    for (const r of rows) expect(r.detailJson).not.toContain(SECRET);
   });
 });
