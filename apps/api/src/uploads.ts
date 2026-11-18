@@ -12,11 +12,16 @@
  */
 import { r2Presigner, type UploadSigner } from '@signforge/tools';
 
-export const LOCAL_S3 = { bucket: 'signforge-dev', accessKeyId: 'signforge-local', secretAccessKey: 'signforge-local-only' } as const;
+const LOCAL_S3 = { bucket: 'signforge-dev', accessKeyId: 'signforge-local', secretAccessKey: 'signforge-local-only' } as const;
 
 export function uploadSigner(env: Env, requestUrl: string): UploadSigner | undefined {
   if (env.R2_S3_ENDPOINT && env.R2_BUCKET_NAME && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY) {
-    return r2Presigner({ endpoint: env.R2_S3_ENDPOINT, bucket: env.R2_BUCKET_NAME, accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY });
+    return r2Presigner({
+      endpoint: env.R2_S3_ENDPOINT,
+      bucket: env.R2_BUCKET_NAME,
+      accessKeyId: env.R2_ACCESS_KEY_ID,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+    });
   }
   if (env.ENVIRONMENT === 'dev') {
     return r2Presigner({ endpoint: `${new URL(requestUrl).origin}/cdn-cgi/local/r2/s3`, ...LOCAL_S3 });

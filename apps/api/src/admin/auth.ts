@@ -9,7 +9,7 @@
 import { createMiddleware } from 'hono/factory';
 
 /** The secret is not in wrangler.jsonc, so `wrangler types` only knows it when `.dev.vars` exists. */
-export type AdminBindings = Env & { ADMIN_TOKEN?: string };
+type AdminBindings = Env & { ADMIN_TOKEN?: string };
 export type AdminEnv = { Bindings: AdminBindings };
 
 const json = (status: number, error: string, headers: Record<string, string> = {}) =>

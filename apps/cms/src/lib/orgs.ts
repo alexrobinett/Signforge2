@@ -7,7 +7,7 @@ import type { AnyRouter } from '@tanstack/react-router';
 import { authClient, authErrorMessage } from './auth-client';
 import { slugify } from './paths';
 
-export class OrgActionError extends Error {}
+class OrgActionError extends Error {}
 
 const suffix = () => Math.random().toString(36).slice(2, 6);
 const slugTaken = (e: { code?: string; message?: string }) => /ALREADY_EXISTS|SLUG/i.test(`${e.code ?? ''} ${e.message ?? ''}`);

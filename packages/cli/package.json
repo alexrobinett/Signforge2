@@ -19,7 +19,6 @@
     "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/feeds": "workspace:*",
-    "@signforge/player-core": "workspace:*",
     "esbuild": "^0.28.2",
     "sharp": "^0.35.5"
   },

@@ -6,6 +6,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test test:e2e",
     "lint": "biome lint --error-on-warnings . && pnpm --filter @signforge/cms lint",
+    "knip": "knip",
     "format": "biome format --write --changed --no-errors-on-unmatched",
     "format:check": "biome format --changed --no-errors-on-unmatched",
     "build:player": "pnpm --filter @signforge/player build",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.5",
+    "knip": "6.45.1",
     "tsx": "^4.23.15",
     "turbo": "^2.11.11",
     "typescript": "^7.0.2",

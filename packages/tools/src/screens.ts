@@ -26,7 +26,7 @@ export const screenOutput = z.object({
 export type ScreenView = z.infer<typeof screenOutput>;
 
 /** A credential, without its hash. */
-export const credentialOutput = z.object({ id: z.string(), createdAt: z.number(), lastUsedAt: z.number().nullable(), revokedAt: z.number().nullable() });
+const credentialOutput = z.object({ id: z.string(), createdAt: z.number(), lastUsedAt: z.number().nullable(), revokedAt: z.number().nullable() });
 export type CredentialView = z.infer<typeof credentialOutput>;
 
 export const screenView = (s: Screen): ScreenView => ({
@@ -54,7 +54,7 @@ async function requireScreen(org: OrgScope, screenId: string) {
   return row;
 }
 
-export const listScreens = defineTool({
+const listScreens = defineTool({
   name: 'list_screens',
   description:
     'List the screens in the organization with their settings, status and manifests, ordered by id, a page at a time. Returns { screens: Screen[], next }; pass next as cursor for the following page.',
@@ -70,7 +70,7 @@ export const listScreens = defineTool({
   },
 });
 
-export const getScreen = defineTool({
+const getScreen = defineTool({
   name: 'get_screen',
   description:
     'Get one screen by id: its settings, status, manifests, the ids of the groups it is in, and its credentials (never their secrets). Returns { screen, groupIds, credentials }.',
@@ -87,7 +87,7 @@ export const getScreen = defineTool({
   },
 });
 
-export const renameScreen = defineTool({
+const renameScreen = defineTool({
   name: 'rename_screen',
   description: 'Rename a screen. The name is what people see in the CMS; screens do not show it. Returns { screen }.',
   scope: 'screens:manage',
@@ -103,7 +103,7 @@ export const renameScreen = defineTool({
   },
 });
 
-export const updateScreenSettings = defineTool({
+const updateScreenSettings = defineTool({
   name: 'update_screen_settings',
   description:
     "Change a screen's time zone, locale, orientation or display hours. Give only the fields to change; null clears locale (the player's default) or display hours (always on). Display hours are checked as the player checks them. The screen picks the change up with the next publish to it. Returns { screen }.",
@@ -139,7 +139,7 @@ export const updateScreenSettings = defineTool({
   },
 });
 
-export const revokeScreenCredential = defineTool({
+const revokeScreenCredential = defineTool({
   name: 'revoke_screen_credential',
   description:
     "Revoke one of a screen's credentials, so a device holding it can no longer fetch anything; its open socket is closed. Use get_screen to see the credentials. Revoking an already revoked credential changes nothing. Owners only. Returns { credential }.",

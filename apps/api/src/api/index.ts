@@ -17,7 +17,7 @@ import { emailSenderFor, type EmailSender } from '../email';
 import { mountBlobs } from './blobs';
 import { mountTools } from './tools';
 
-export interface ApiVars {
+interface ApiVars {
   auth: Auth;
   session: AuthSession;
   /** Set by `requireOrg`. */
@@ -41,7 +41,7 @@ const refuseDeviceCredential: MiddlewareHandler<ApiEnv> = async (c, next) => {
 };
 
 /** A signed-in user, from the session cookie (or its cache cookie). */
-export const requireSession: MiddlewareHandler<ApiEnv> = async (c, next) => {
+const requireSession: MiddlewareHandler<ApiEnv> = async (c, next) => {
   const session = await c.var.auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) return c.json(error('unauthenticated'), 401);
   c.set('session', session);
@@ -54,7 +54,7 @@ export const requireSession: MiddlewareHandler<ApiEnv> = async (c, next) => {
  * still a member, and in what role, is read fresh every time. The org comes from the session
  * alone, never from the request, so ids from another org find nothing.
  */
-export const requireOrg: MiddlewareHandler<ApiEnv> = async (c, next) => {
+const requireOrg: MiddlewareHandler<ApiEnv> = async (c, next) => {
   const orgId = c.var.session.session.activeOrganizationId;
   if (!orgId) return c.json(error('no_active_organization'), 403);
   const membership = await findMembership(c.env.DB, orgId, c.var.session.user.id);

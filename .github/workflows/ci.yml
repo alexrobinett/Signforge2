@@ -30,6 +30,7 @@ jobs:
       - run: pnpm --filter @signforge/cms exec playwright install --with-deps chromium
       - run: pnpm typecheck
       - run: pnpm lint
+      - run: pnpm knip # unused files, exports and dependencies; knip.jsonc lists what it cannot see
       # Only files the change touches: the repo is not formatted wholesale yet (see README).
       - run: pnpm format:check --since=origin/${{ github.base_ref || 'master' }}
       - run: pnpm test

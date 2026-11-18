@@ -13,9 +13,9 @@
 import { validateServerSocketMessage, type DeviceCommand, type ServerSocketMessage } from '@signforge/contract';
 
 /** How often to ping. Under the usual 100-second idle timeouts of proxies and NAT. */
-export const PING_MS = 50_000;
+const PING_MS = 50_000;
 /** A ping without a pong for this long: the connection is dead. */
-export const PONG_TIMEOUT_MS = 10_000;
+const PONG_TIMEOUT_MS = 10_000;
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 60_000;
 
