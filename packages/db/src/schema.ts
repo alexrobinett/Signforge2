@@ -209,6 +209,12 @@ export const screens = sqliteTable(
     /** The desired manifest before the current one. A screen may still be fetching its files, so they stay servable. */
     previousManifestId: text('previous_manifest_id'),
     reportedManifestId: text('reported_manifest_id'),
+    /**
+     * When the screen observed `reported_manifest_id`, on the server's clock: a report replaces it
+     * only if observed later (gh-44). A report without a trusted time counts as observed when it
+     * arrived. Null on rows reported before migration 0021.
+     */
+    reportedManifestAt: integer('reported_manifest_at'),
     lastSeenAt: integer('last_seen_at'),
     playerVersion: text('player_version'),
     /**

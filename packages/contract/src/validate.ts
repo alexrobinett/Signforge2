@@ -760,7 +760,9 @@ export function validateServerSocketMessage(msg: unknown): string[] {
 export function validateDeviceSocketMessage(msg: unknown): string[] {
   if (!isObj(msg)) return ['message is not an object'];
   if (msg.type !== 'applied') return ['message type must be applied'];
-  return isManifestId(msg.manifest) ? [] : ['applied message needs a sha256 manifest id'];
+  const errors = isManifestId(msg.manifest) ? [] : ['applied message needs a sha256 manifest id'];
+  if (msg.observedAt !== undefined && !isInstant(msg.observedAt)) errors.push('applied message observedAt must be an ISO 8601 time when present');
+  return errors;
 }
 
 // ------------------------------------------------------------- preview channel

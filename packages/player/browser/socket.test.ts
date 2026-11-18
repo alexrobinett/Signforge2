@@ -14,7 +14,7 @@ it('syncs at once when the socket says a new manifest is published, and reports 
   // A poll every minute: only the socket can bring the second manifest within the test.
   const p = await h.openPlayer((server) => server.publish(first), remote('60'));
   await p.until((s) => s.manifestId === first.manifest.id && s.socket);
-  await expect.poll(() => p.server.socketMessages).toContainEqual({ type: 'applied', manifest: first.manifest.id });
+  await expect.poll(() => p.server.socketMessages).toContainEqual({ type: 'applied', manifest: first.manifest.id, observedAt: expect.any(String) });
 
   const second = h.content([{ id: 'b', durationMs: 800, label: 'second' }]);
   p.server.publish(second);
@@ -22,7 +22,22 @@ it('syncs at once when the socket says a new manifest is published, and reports 
   p.server.push({ type: 'manifest', id: second.manifest.id });
   await p.until((s) => s.log.some((l) => l.manifest === second.manifest.id), 5000);
   expect(Date.now() - pushed).toBeLessThan(5000);
-  await expect.poll(() => p.server.socketMessages).toContainEqual({ type: 'applied', manifest: second.manifest.id });
+  await expect.poll(() => p.server.socketMessages).toContainEqual({ type: 'applied', manifest: second.manifest.id, observedAt: expect.any(String) });
+});
+
+it('says when it observed what it applied, on the clock corrected from the server (gh-44)', async () => {
+  const content = h.content([{ id: 'a', durationMs: 800 }]);
+  const HOUR = 3_600_000;
+  // The server is an hour ahead of this device: the time sent is the server's.
+  const p = await h.openPlayer((server) => {
+    server.serverOffsetMs = HOUR;
+    server.publish(content);
+  }, remote('60'));
+  await p.until((s) => s.manifestId === content.manifest.id && s.socket && s.clock.trusted);
+  const applied = () => p.server.socketMessages.filter((m): m is { observedAt: string } => (m as { type?: string }).type === 'applied');
+  await expect.poll(() => applied().length).toBeGreaterThan(0);
+  const observedAt = Date.parse(applied().at(-1)!.observedAt);
+  expect(Math.abs(observedAt - (Date.now() + HOUR))).toBeLessThan(60_000);
 });
 
 it('does not sync between nudges while the socket is up, and syncs every poll when it drops', async () => {

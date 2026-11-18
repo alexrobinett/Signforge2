@@ -2,8 +2,9 @@
  * Fetching a feed URL a user typed (docs/backend-plan.md, Data sources, Fetch safety). Every hop
  * is checked before it is requested: https on the default port, a hostname rather than an IP
  * address, and a name that does not resolve to a private or reserved address. Redirects are
- * followed by hand, at most 3, each checked again. The whole fetch has 5 seconds and the body
- * 1 MB. A failure is a `FetchError` with a category; the upstream body is never echoed.
+ * followed by hand, at most 3, each checked again. The whole fetch has 5 seconds, under one
+ * signal: every DNS lookup, every hop and the body read. The body may be 1 MB. A failure is a
+ * `FetchError` with a category; the upstream body is never echoed.
  *
  * A Worker cannot pin the address it resolved, so the DNS check is a first filter and not the
  * defence against rebinding: that is Workers' outbound requests, which cannot reach private
@@ -32,8 +33,8 @@ export class FetchError extends Error {
 /** What the guards fetch and resolve with. The poller passes the Worker's own; tests stub both. */
 export interface FetchGuards {
   fetch: typeof fetch;
-  /** Every A and AAAA address of `host`. */
-  resolve: (host: string) => Promise<string[]>;
+  /** Every A and AAAA address of `host`, given up when `signal` aborts. */
+  resolve: (host: string, signal: AbortSignal) => Promise<string[]>;
   timeoutMs?: number;
 }
 
@@ -49,7 +50,7 @@ export async function guardedFetch(url: string, last: { etag?: string | null; la
   if (last.etag) headers.set('if-none-match', last.etag);
   if (last.lastModified) headers.set('if-modified-since', last.lastModified);
   try {
-    let next = await checkedUrl(url, guards);
+    let next = await checkedUrl(url, guards, signal);
     for (let hop = 0; ; hop++) {
       const res = await guards.fetch(next, { headers, redirect: 'manual', signal });
       if (res.status >= 300 && res.status < 400 && res.status !== 304) {
@@ -57,7 +58,7 @@ export async function guardedFetch(url: string, last: { etag?: string | null; la
         const location = res.headers.get('location');
         if (!location) throw new FetchError(`redirect ${res.status} without a location`, { code: 'http-status', status: res.status });
         if (hop === MAX_REDIRECTS) throw new FetchError(`more than ${MAX_REDIRECTS} redirects`, { code: 'too-many-redirects' });
-        next = await checkedUrl(new URL(location, next).href, guards);
+        next = await checkedUrl(new URL(location, next).href, guards, signal);
         continue;
       }
       if (res.status === 304) return { status: 'not-modified' };
@@ -77,11 +78,14 @@ export async function guardedFetch(url: string, last: { etag?: string | null; la
 }
 
 /** `url` if it may be fetched; otherwise the guard it fails. */
-async function checkedUrl(url: string, guards: FetchGuards): Promise<string> {
+async function checkedUrl(url: string, guards: FetchGuards, signal: AbortSignal): Promise<string> {
   const problem = feedUrlProblem(url);
   if (problem) throw new FetchError(FEED_URL_PROBLEMS[problem], { code: problem });
   const { href, hostname } = new URL(url);
-  const addresses = await guards.resolve(hostname);
+  const addresses = await guards.resolve(hostname, signal).catch((e: unknown) => {
+    if (e instanceof FetchError) throw e;
+    throw new FetchError(signal.aborted ? 'no DNS answer before the deadline' : 'DNS lookup failed', { code: 'dns', cause: e });
+  });
   if (!addresses.length) throw new FetchError('the host does not resolve', { code: 'dns' });
   if (addresses.some(isPrivate)) throw new FetchError('the host resolves to a private or reserved address', { code: 'private-address' });
   return href;
@@ -151,12 +155,12 @@ function isPrivate(address: string): boolean {
  * `resolve` for the Worker: Cloudflare's DNS over HTTPS, A and AAAA at once. A name with neither
  * resolves to nothing, which the guard refuses.
  */
-export function dohResolver(fetcher: typeof fetch): (host: string) => Promise<string[]> {
-  return async (host) => {
+export function dohResolver(fetcher: typeof fetch): FetchGuards['resolve'] {
+  return async (host, signal) => {
     const ask = async (type: 'A' | 'AAAA') => {
       const res = await fetcher(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`, {
         headers: { accept: 'application/dns-json' },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal,
       });
       if (!res.ok) throw new FetchError(`DNS lookup failed (${res.status})`, { code: 'dns' });
       const body: { Answer?: { type: number; data: string }[] } = await res.json();

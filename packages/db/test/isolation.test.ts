@@ -106,7 +106,7 @@ describe("a call made for org B with org A's ids", () => {
     expect(await b.screens.update(a.screen, { name: 'hijacked' })).toBeUndefined();
     expect(await b.screens.credentials.update(a.credential, { revokedAt: 1 })).toBeUndefined();
     expect(await b.screens.setDesiredManifest(a.screen, 'f'.repeat(64))).toBe(false);
-    await b.screens.reportManifest(a.screen, 'f'.repeat(64));
+    await b.screens.reportManifest(a.screen, 'f'.repeat(64), { arrivedAt: 1 });
     expect(
       await b.screens.sync(a.screen, {
         at: 1,

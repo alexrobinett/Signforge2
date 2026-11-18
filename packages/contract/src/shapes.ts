@@ -751,8 +751,13 @@ export const MAX_IDENTIFY_SECONDS = 60;
 /** Server to screen, over the socket. Kept rare: the socket exists to nudge, not to carry data. */
 export type ServerSocketMessage = { type: 'manifest'; id: string } | { type: 'command'; command: DeviceCommand } | { type: 'revoked' };
 
-/** Screen to server, over the socket. */
-export type DeviceSocketMessage = { type: 'applied'; manifest: string };
+/**
+ * Screen to server, over the socket. `observedAt`: when the screen saw `manifest` on screen, on
+ * its corrected clock, so the server orders it against the manifest a sync reports (gh-44).
+ * Absent from a player before it, or while the screen does not trust its clock: the server then
+ * orders the report by when it arrived.
+ */
+export type DeviceSocketMessage = { type: 'applied'; manifest: string; observedAt?: string };
 
 // -------------------------------------------------------------- preview channel
 // The CMS editor runs the real player build in an iframe, in preview mode (`?source=preview`).

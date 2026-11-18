@@ -10,7 +10,7 @@
  * does not come back together. Server messages are checked against the contract before use.
  *
  */
-import { parseServerSocketMessage, type DeviceCommand, type ServerSocketMessage } from '@signforge/contract';
+import { parseServerSocketMessage, type DeviceCommand, type DeviceSocketMessage, type ServerSocketMessage } from '@signforge/contract';
 
 /** How often to ping. Under the usual 100-second idle timeouts of proxies and NAT. */
 const PING_MS = 50_000;
@@ -27,6 +27,8 @@ export interface NudgeSocketOptions {
   /** A new manifest is published: sync now. */
   onNudge: () => void;
   onCommand: (command: DeviceCommand) => void;
+  /** The corrected time now, as `applied`'s `observedAt`; undefined while the clock is untrusted. */
+  observedAt: () => string | undefined;
   /** The server refused the credential (a 401 on sync, or `revoked` on the socket). */
   onUnauthorised: () => void;
   /** The socket opened or closed. */
@@ -62,10 +64,18 @@ export class NudgeSocket {
     this.ws?.close(1000);
   }
 
-  /** Tell the server which manifest is on screen now, and again whenever the socket reopens. */
+  /**
+   * Tell the server which manifest is on screen now, and again whenever the socket reopens, with
+   * when it was seen there: the server orders it against what a sync reports by that time (gh-44).
+   */
   reportApplied(manifestId: string): void {
     this.applied = manifestId;
-    this.send({ type: 'applied', manifest: manifestId });
+    this.sendApplied();
+  }
+
+  private sendApplied(): void {
+    const observedAt = this.opts.observedAt();
+    this.send({ type: 'applied', manifest: this.applied, ...(observedAt === undefined ? {} : { observedAt }) } satisfies DeviceSocketMessage);
   }
 
   private send(msg: unknown): void {
@@ -105,7 +115,7 @@ export class NudgeSocket {
       ws.onopen = () => {
         opened = true;
         this.opts.onChange?.(true);
-        if (this.applied) this.send({ type: 'applied', manifest: this.applied });
+        if (this.applied) this.sendApplied();
         // No sync here for nudges missed while it was down: the sync that issued the ticket was just now.
         pinger = setInterval(() => {
           ws.send('ping');

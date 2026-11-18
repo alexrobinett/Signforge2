@@ -560,6 +560,17 @@ describe('snapshots and device bodies', () => {
     expect(validateDeviceSocketMessage({ type: 'applied', manifest: upper.toLowerCase() })).toEqual([]);
   });
 
+  it('takes an applied message with or without the time the screen observed it', () => {
+    const manifest = 'a'.repeat(64);
+    expect(validateDeviceSocketMessage({ type: 'applied', manifest, observedAt: '2026-11-18T12:00:00.000Z' })).toEqual([]);
+    // A player from before gh-44 sends none.
+    expect(validateDeviceSocketMessage({ type: 'applied', manifest })).toEqual([]);
+    for (const bad of ['soon', 1795032877648, null])
+      expect(validateDeviceSocketMessage({ type: 'applied', manifest, observedAt: bad }), String(bad)).toEqual([
+        'applied message observedAt must be an ISO 8601 time when present',
+      ]);
+  });
+
   it('reports a source map with many bad entries as one problem, so the work it makes stays bounded', () => {
     const bad = Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`bad id ${i}`, -1]));
     expect(validateSyncRequest({ ...validSyncRequest(), snapshots: bad, dataRejected: bad })).toEqual([
