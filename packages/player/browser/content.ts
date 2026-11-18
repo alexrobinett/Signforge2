@@ -53,6 +53,8 @@ export interface FixtureSpot {
   bindings?: Record<string, Binding>;
   /** A file of the spot's own, passed to the template as asset `file`. */
   asset?: Buffer;
+  /** Makes this a video spot playing this file instead of a template spot (`fixtures/clip.webm`). */
+  video?: Buffer;
 }
 
 export interface Content {
@@ -116,6 +118,13 @@ export function buildContent(
   const blobs = new Map<string, Buffer>([[htmlSha, html]]);
   const files: ScreenManifest['files'] = { [htmlSha]: { size: html.byteLength, type: 'text/html' } };
   for (const s of spots) {
+    if (s.video) {
+      const sha = sha256(s.video);
+      blobs.set(sha, s.video);
+      files[sha] = { size: s.video.byteLength, type: 'video/webm' };
+      spotMap[s.id] = { id: s.id, name: s.id, kind: 'video', file: sha, fit: 'cover', durationMs: s.durationMs ?? 1000 };
+      continue;
+    }
     spotMap[s.id] = {
       id: s.id,
       name: s.id,
