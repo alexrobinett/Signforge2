@@ -149,6 +149,17 @@ describe('promotion from an old read (R09)', () => {
 });
 
 describe('publish order (R09)', () => {
+  it('orders the publishes of an org with no settings row: the first makes it, at revision 1 (review 3)', async () => {
+    const p = await seedOrg(env.DB, 'drafts-order-new');
+    const org = scoped(env.DB, p.orgId);
+    expect(await org.settings.get()).toBeUndefined();
+
+    await org.commit(org.publishes.stage.advance(0).writes);
+    await expect(org.commit(org.publishes.stage.advance(0).writes)).rejects.toMatchObject({ name: 'StaleVersionError', id: 'publish revision', version: 1 });
+    // Every setting at its default, at version 1, as with no row.
+    expect(await org.settings.get()).toMatchObject({ publishRevision: 1, rowVersion: 1, defaultPlaylistId: null, locale: null, alertsJson: null });
+  });
+
   it('moves the publish revision on from the one read, and refuses a publish read before another committed', async () => {
     const p = await seedOrg(env.DB, 'drafts-order');
     const org = scoped(env.DB, p.orgId);
