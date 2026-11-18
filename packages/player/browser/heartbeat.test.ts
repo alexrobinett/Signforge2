@@ -119,6 +119,44 @@ describe('the clock', () => {
   });
 });
 
+describe('the first trusted sync', () => {
+  it('applies the wake override it carries before the hours, so a panel kept on is never switched off', async () => {
+    const content = h.content([{ id: 'a', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }], {
+      edit: (m) => void (m.screen.displayHours = { weekly: [] }),
+    });
+    const snap = (version: number) => ({
+      id: 'news',
+      version,
+      fetchedAt: new Date(version).toISOString(),
+      checkedAt: new Date().toISOString(),
+      data: { headline: 'x' },
+    });
+    const p = await h.openPlayer((s) => s.publish(content), api);
+    await p.until((s) => s.clock.trusted && !s.displayOn, 20_000);
+    const switches = () => p.server.requestsTo(/^\/supervisor\/display\//).map((r) => r.path);
+    await expect.poll(switches, { timeout: 5000 }).toEqual(['/supervisor/display/off']);
+
+    // An untrusted cold boot with no network: on, whatever the closed hours say.
+    const cut = p.server.intercept(/^\/content\//, { status: 503 });
+    await p.page.evaluate((syncedAt) => localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: -86_400_000, syncedAt })), Date.now());
+    await p.page.reload();
+    await expect.poll(switches, { timeout: 10_000 }).toEqual(['/supervisor/display/off', '/supervisor/display/on']);
+    // Past the 3 s a panel is given to wake: the display loop now waits for its next check.
+    await new Promise((r) => setTimeout(r, 4000));
+
+    // Meanwhile someone woke the screen from the CMS: the first answer carries that override, and new data.
+    p.server.setData('news', snap(Date.now()));
+    p.server.commands.push({ type: 'display', override: { state: 'on', until: new Date(Date.now() + HOUR).toISOString() } });
+    cut();
+    await p.until((s) => s.clock.trusted);
+    await expect.poll(() => p.page.evaluate(() => localStorage.getItem('sf.displayOverride')), { timeout: 5000 }).toContain('"on"');
+    // Longer than an off switch takes (1.5 s).
+    await new Promise((r) => setTimeout(r, 4000));
+    expect(switches()).toEqual(['/supervisor/display/off', '/supervisor/display/on']);
+    expect((await p.state()).displayOn).toBe(true);
+  });
+});
+
 describe('snapshots', () => {
   it('arrive on the sync, and a changed one reaches the screen on its next sync', async () => {
     const snap = (headline: string, version: number) => ({

@@ -828,13 +828,16 @@ async function apiSync(): Promise<void> {
   syncTiming.nextSyncS = r.nextSyncS;
   const wasTrusted = clock.trusted;
   synced(r.serverTime, sentAt, receivedAt);
-  // Display hours and any saved override were set aside while the clock was untrusted.
-  if (!wasTrusted) display.wake();
   if (r.epoch === batch.epoch) acknowledgePlays(r.epoch, r.ackSeq);
   settleTickets({ ticket: r.socketTicket });
   state.online = true;
   state.auth = '';
   state.lastSync = new Date(now()).toISOString();
+  // Before anything awaits: a display override in this answer must be in place when the display
+  // loop next looks, or the first trusted look could switch the panel off and the override on again.
+  for (const c of r.commands) command(c);
+  // Display hours and any saved override were set aside while the clock was untrusted.
+  if (!wasTrusted) display.wake();
 
   const current = state.fallback || manifest?.id;
   if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
@@ -843,7 +846,6 @@ async function apiSync(): Promise<void> {
   }
   await offerSnapshots(r.snapshots, manifest);
   await offerChecked(r.checked ?? {});
-  for (const c of r.commands) command(c);
 }
 
 const withOverride = () => {
