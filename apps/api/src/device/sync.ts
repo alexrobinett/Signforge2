@@ -116,12 +116,24 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   const screen = c.get('screen');
   const now = Date.now();
 
+  const { player, manifest: m, display: d, clock } = req;
+  // Only the contract's fields, copied one by one: the parser lets unknown keys through, and the
+  // device lookup reads this row with json_extract, which a deeply nested unknown key would break.
   const heartbeat: ScreenHeartbeat = {
     at: now,
-    player: req.player,
-    manifest: req.manifest,
-    display: req.display,
-    clock: req.clock,
+    player: { version: player.version, manifestSchemas: [...player.manifestSchemas], protocols: [...player.protocols] },
+    manifest: {
+      filesMissing: m.filesMissing,
+      ...(m.active !== undefined && { active: m.active }),
+      ...(m.fallbackFrom !== undefined && { fallbackFrom: m.fallbackFrom }),
+      ...(m.lastGood !== undefined && { lastGood: m.lastGood }),
+    },
+    display: {
+      on: d.on,
+      ...(d.methods !== undefined && { methods: { ...d.methods } }),
+      ...(d.override !== undefined && { override: { state: d.override.state, until: d.override.until } }),
+    },
+    clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
     driftMs: now - Date.parse(req.deviceTime),
     // A player before gh-45 reports every source seen since it started: kept to a bounded row.
     dataRejected: Object.fromEntries(Object.entries(req.dataRejected ?? {}).slice(0, MAX_SYNC_SOURCES)),

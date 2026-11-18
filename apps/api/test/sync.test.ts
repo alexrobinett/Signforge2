@@ -240,6 +240,29 @@ describe('the heartbeat', () => {
     expect((await s.seed.scope.screens.get(s.seed.screen))?.lastSeenAt).toBe(seenAt);
   });
 
+  it('stores only the contract fields of a heartbeat, so an unknown nested key cannot lock the screen out', async () => {
+    const s = await setUp('sync-heartbeat-unknown-keys');
+    // SQLite's json_extract refuses JSON nested 1000 deep, and the device lookup reads the row with it.
+    let deep: unknown = 1;
+    for (let i = 0; i < 1000; i++) deep = { d: deep };
+    const base = body({ seq: 1 });
+    for (const [field, value] of [
+      ['player', { ...base.player, extra: deep }],
+      ['manifest', { ...base.manifest, extra: deep }],
+      ['display', { ...base.display, extra: deep }],
+      ['clock', { ...base.clock, extra: deep }],
+    ] as const) {
+      const res = await exports.default.fetch(`${BASE}/sync`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${s.credential}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ ...base, [field]: value }),
+      });
+      expect(res.status, field).toBe(200);
+      // The next ordinary sync still finds the screen.
+      expect(await sync(s, body({ seq: 1 })), field).toMatchObject({ ackSeq: 1 });
+    }
+  });
+
   it('refuses a manifest id that is not a sha256, and stores nothing', async () => {
     const s = await setUp('sync-heartbeat-bounds');
     const res = await exports.default.fetch(`${BASE}/sync`, {
