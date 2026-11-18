@@ -68,6 +68,12 @@ describe("a call made for org B with org A's ids", () => {
     }
   });
 
+  it("pages only org B's screens for the fleet poll", async () => {
+    // Its rows carry no org, so compare ids.
+    const ids = (await s.b.scope.screens.statusPage({ limit: 200 })).map((r) => r.id);
+    expect(ids).toEqual([s.b.screen]);
+  });
+
   it('lists nothing of org A', async () => {
     const b = s.b.scope;
     const lists = {

@@ -9,6 +9,7 @@ import worker from '../src/index';
 import { Client, email, testApp } from './client';
 
 const MIN = 60_000;
+const DAY = 24 * 60 * MIN;
 
 async function orgWithTeam() {
   const t = testApp();
@@ -135,5 +136,20 @@ describe('the Cron Triggers', () => {
     expect(to(outbox, 'Cron lobby')).toEqual([]);
     await runCron('*/5 * * * *', start + 16 * MIN);
     expect(to(outbox, 'Cron lobby').map((m) => m.subject)).toEqual(['Cron lobby is offline', 'Cron lobby is offline']);
+  });
+
+  it('expire idempotency keys after 7 days, on the first five-minute run of each UTC day', async () => {
+    const { org } = await orgWithTeam();
+    const scope = scoped(env.DB, org.id);
+    await scope.commit(scope.idempotency.stage({ key: 'k-retention', action: 'create_group', inputSha256: '0', outputJson: '{}' }).writes);
+    const midnight = (days: number) => Math.ceil(Date.now() / DAY) * DAY + days * DAY;
+
+    await runCron('*/5 * * * *', midnight(6));
+    expect(await scope.idempotency.get('k-retention')).toBeDefined();
+    await runCron('*/5 * * * *', midnight(8) + 5 * MIN);
+    await runCron('* * * * *', midnight(8));
+    expect(await scope.idempotency.get('k-retention')).toBeDefined();
+    await runCron('*/5 * * * *', midnight(8));
+    expect(await scope.idempotency.get('k-retention')).toBeUndefined();
   });
 });

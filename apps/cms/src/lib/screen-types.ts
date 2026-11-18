@@ -1,5 +1,5 @@
 /**
- * The screen tools' outputs as the CMS reads them (`list_screens`, `get_screen`, `list_groups` in
+ * The screen tools' outputs as the CMS reads them (`list_screens`, `list_screen_status`, `get_screen`, `list_groups` in
  * packages/tools). Kept as types here so the CMS bundle does not pull in the tools package; the
  * tools' output schemas are the source of truth.
  */
@@ -65,6 +65,9 @@ export interface ScreenView {
   createdAt: number;
   updatedAt: number;
 }
+
+/** What `list_screen_status` gives of a screen: what it is doing, for the Screens page's poll. */
+export type ScreenStatus = Pick<ScreenView, 'id' | 'state' | 'lastSeenAt' | 'desiredManifestId' | 'reportedManifestId'>;
 
 export interface GroupView {
   id: string;

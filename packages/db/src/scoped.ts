@@ -9,7 +9,7 @@
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
 import type { ScreenKind } from '@signforge/contract';
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
@@ -373,6 +373,34 @@ export function scoped(d1: D1Database, orgId: string) {
             .where(and(eq(s.screenCredentials.orgId, orgId), eq(s.screenCredentials.id, credentialId), isNull(s.screenCredentials.lastUsedAt)))
             .run();
         },
+      },
+      /**
+       * Up to `limit` screens after `afterId`, by id, with only what their state is worked out
+       * from: for the fleet poll, which must not read the org's whole list. One statement over the
+       * `(org_id, id)` index; `credentialsRevoked` is whether the screen had credentials and every
+       * one is revoked, read through `(org_id, screen_id)`.
+       */
+      statusPage: ({ afterId, limit }: { afterId?: string; limit: number }) => {
+        const sc = s.screens;
+        const c = s.screenCredentials;
+        const credentials = (more: SQL = sql`1`) => sql`SELECT 1 FROM ${c} WHERE ${c.orgId} = ${sc.orgId} AND ${c.screenId} = ${sc.id} AND ${more}`;
+        return db
+          .select({
+            id: sc.id,
+            status: sc.status,
+            timezone: sc.timezone,
+            displayHoursJson: sc.displayHoursJson,
+            desiredManifestId: sc.desiredManifestId,
+            reportedManifestId: sc.reportedManifestId,
+            lastSeenAt: sc.lastSeenAt,
+            heartbeatJson: sc.heartbeatJson,
+            credentialsRevoked: sql<boolean>`EXISTS (${credentials()}) AND NOT EXISTS (${credentials(isNull(c.revokedAt))})`.mapWith(Boolean),
+          })
+          .from(sc)
+          .where(and(eq(sc.orgId, orgId), afterId === undefined ? undefined : gt(sc.id, afterId)))
+          .orderBy(asc(sc.id))
+          .limit(limit)
+          .all();
       },
       /**
        * Make `manifestId` the screen's desired manifest. The one it replaces becomes the previous
