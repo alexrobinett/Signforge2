@@ -211,7 +211,10 @@ describe('revoking a credential whose socket is open', () => {
   const revoke = (s: Screen, as: Caller = caller(s)) =>
     dispatch(registry, 'revoke_screen_credential', { screenId: s.seed.screen, credentialId: s.credentialId }, as);
   /** The real notifier, except that the revocation's own notice never reaches the object. */
-  const unreachable = (s: Screen): Caller => ({ ...caller(s), screens: { ...screenNotifier(env), revoked: () => Promise.reject(new Error('object unreachable')) } });
+  const unreachable = (s: Screen): Caller => ({
+    ...caller(s),
+    screens: { ...screenNotifier(env), revoked: () => Promise.reject(new Error('object unreachable')) },
+  });
   const settle = () => new Promise((r) => setTimeout(r, 100));
 
   it('closes the socket instead of sending it the next command when the first close never arrived', async () => {

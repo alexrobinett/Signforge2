@@ -138,7 +138,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | `GET /v1/device/ws?ticket=` | Nudge socket |
 
 The device API's request and response shapes are in `packages/contract` (device API section). Changes the player needs, beyond pointing its content base at `/v1/device`:
-- Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files. Done in M3-05: `?content=<api>/v1/device` in the kiosk URL, the credential from the supervisor's `GET /credential`.
+- Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files. Done in M3-05: `?content=<api>/v1/device` in the kiosk URL, the credential from the supervisor's `GET /credential`, sent only when the supervisor says it is bound to that same base.
 - Replace the per-source data poll with snapshots delivered on sync. Done in M3-07: from the API the player fetches no source itself.
 - Count plays per UTC hour, persist the counts, and send them with a batch number until acknowledged. Done in M3-07.
 - Treat a 401 as revoked, not offline: wipe what it holds and show a pairing code (open question 2, the default). Done in M3-08.

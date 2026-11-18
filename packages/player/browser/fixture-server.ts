@@ -12,8 +12,9 @@
  * answered with CORS headers, so a test can serve it from another origin (`localUrl`), the way the
  * player meets the API.
  *
- * Pairing (M3-08): the supervisor holds `supervisorCredential` (GET, and POST or DELETE with its
- * token, as device/pi/supervisor.py does). Requests to the API origin (`localUrl`) need a bearer
+ * Pairing (M3-08): the supervisor holds `supervisorCredential` and the device API base it is bound
+ * to, `supervisorApi` (GET, and POST or DELETE with its token, as device/pi/supervisor.py does). At
+ * first they are `FIXTURE_CREDENTIAL` and this server's own API, `deviceApi`. Requests to the API origin (`localUrl`) need a bearer
  * credential in `authorised`; `/content/pair/start` and `/content/pair/poll` hand out codes, which a
  * test `claim`s. `revoke` refuses a credential and tells the sockets.
  */
@@ -41,6 +42,8 @@ export interface RequestRecord {
   at: number;
   /** When the client closed the connection before the response finished (an abort), else undefined. */
   abortedAt?: number;
+  /** The bearer credential the request carried, if any. */
+  bearer?: string;
 }
 
 /** The credential the supervisor holds when a test starts: accepted by the API. */
@@ -83,6 +86,8 @@ export class FixtureServer {
   loseCountReplies = 0;
   /** What the supervisor holds; undefined is a freshly flashed screen. */
   supervisorCredential: string | undefined = FIXTURE_CREDENTIAL;
+  /** The device API base the supervisor's credential is bound to: `deviceApi` once started. */
+  supervisorApi: string | undefined;
   /** Credentials the API accepts. */
   readonly authorised = new Set<string>([FIXTURE_CREDENTIAL]);
   /** Every code handed out, oldest first. */
@@ -97,6 +102,7 @@ export class FixtureServer {
   static async start(playerDir: string): Promise<FixtureServer> {
     const s = new FixtureServer(playerDir);
     await new Promise<void>((r) => s.server.listen(0, '127.0.0.1', r));
+    s.supervisorApi = s.deviceApi;
     return s;
   }
 
@@ -107,6 +113,11 @@ export class FixtureServer {
   /** The same server under another origin (`localhost`): content there is cross-origin to the player. */
   get localUrl(): string {
     return `http://localhost:${(this.server.address() as AddressInfo).port}`;
+  }
+
+  /** The device API base this server plays: content on `localUrl`, where requests need a credential. */
+  get deviceApi(): string {
+    return `${this.localUrl}/content`;
   }
 
   /** Sockets open now. */
@@ -182,7 +193,8 @@ export class FixtureServer {
   private handle(req: IncomingMessage, res: ServerResponse): void {
     const path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
     const inm = req.headers['if-none-match'];
-    const rec: RequestRecord = { path, status: 0, at: Date.now(), ...(inm ? { ifNoneMatch: String(inm) } : {}) };
+    const bearer = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
+    const rec: RequestRecord = { path, status: 0, at: Date.now(), ...(inm ? { ifNoneMatch: String(inm) } : {}), ...(bearer ? { bearer } : {}) };
     this.requests.push(rec);
     res.on('close', () => {
       if (!res.writableFinished) rec.abortedAt = Date.now();
@@ -253,7 +265,6 @@ export class FixtureServer {
         });
       }
       // The API origin needs a live credential, as /v1/device does.
-      const bearer = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
       if (req.headers.host?.startsWith('localhost') && !(bearer && this.authorised.has(bearer))) return send(401, '');
       if (rest === 'sync' && req.method === 'POST') {
         let body = '';
@@ -317,15 +328,20 @@ export class FixtureServer {
     const json = (status: number, body: unknown) => send(status, JSON.stringify(body), 'application/json');
     if (rest === 'token' && req.method === 'GET') return json(200, { token: SUPERVISOR_TOKEN });
     if (rest !== 'credential') return send(404, '');
-    if (req.method === 'GET') return this.supervisorCredential ? json(200, { credential: this.supervisorCredential }) : json(404, { error: 'no credential' });
+    if (req.method === 'GET') {
+      return this.supervisorCredential
+        ? json(200, { credential: this.supervisorCredential, api: this.supervisorApi ?? null })
+        : json(404, { error: 'no credential' });
+    }
     if (req.headers['x-sf-token'] !== SUPERVISOR_TOKEN) return json(403, { error: 'forbidden' });
     if (req.method === 'DELETE') {
       this.supervisorCredential = undefined;
+      this.supervisorApi = undefined;
       return json(200, {});
     }
     if (req.method === 'POST') {
       return void readBody(req).then((body) => {
-        this.supervisorCredential = (JSON.parse(body) as { credential: string }).credential;
+        ({ credential: this.supervisorCredential, api: this.supervisorApi } = JSON.parse(body) as { credential: string; api: string });
         json(200, {});
       });
     }

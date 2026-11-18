@@ -17,7 +17,9 @@ describe('/api/sign-in-options', () => {
   });
 
   it('does not say codes go to the terminal outside dev', async () => {
-    const res = await new Client(testApp(), undefined, { ...env, ENVIRONMENT: 'prod', AUTH_SECRET: 'a-test-secret-of-at-least-thirty-two-bytes' }).get('/api/sign-in-options');
+    const res = await new Client(testApp(), undefined, { ...env, ENVIRONMENT: 'prod', AUTH_SECRET: 'a-test-secret-of-at-least-thirty-two-bytes' }).get(
+      '/api/sign-in-options',
+    );
     expect((await res.json<{ github: boolean; codesInTerminal: boolean }>()).codesInTerminal).toBe(false);
   });
 });
