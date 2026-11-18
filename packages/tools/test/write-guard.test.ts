@@ -53,6 +53,7 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   manifest: () => 'a'.repeat(64),
   template: (o) => o.template,
   templateVersion: (o) => o.templateVersion,
+  spot: (o) => o.templateSpot,
   bundle: () => 'b'.repeat(64),
   sources: () => 'c'.repeat(64),
   asset: (o) => o.asset,

@@ -20,6 +20,7 @@ const ORG_A_IDS: Record<string, (a: SeededOrg) => string> = {
   manifest: () => MANIFEST,
   template: (a) => a.template,
   templateVersion: (a) => a.templateVersion,
+  spot: (a) => a.templateSpot,
   bundle: () => BUNDLE,
   sources: () => SOURCES,
   asset: (a) => a.asset,
@@ -75,6 +76,7 @@ async function orgAState() {
     audit: await a.auditLog.list(),
     brandKits: await a.brandKits.list(),
     brandAssignments: await a.brandKits.assignments.list(),
+    spots: await a.spots.list(),
   };
 }
 
