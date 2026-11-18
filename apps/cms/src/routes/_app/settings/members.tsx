@@ -1,14 +1,15 @@
 /**
  * Settings, Members & roles (canvas board SettingsMembers): invite by email, invites waiting for
  * a reply, each member's role, and removing someone. Roles are owner, editor and viewer (M3-09);
- * the canvas's "admin" and per-location access are not in v1. Only owners change any of it, and
- * Better Auth checks that again on every call.
+ * the canvas's "admin" and per-location access are not in v1. Owners also choose whether editors
+ * publish (Q7). Only owners change any of it, and Better Auth and the tools check that again on
+ * every call.
  */
 import { createFileRoute, getRouteApi } from '@tanstack/react-router';
 import { CheckIcon, MinusIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { PageHeader } from '~/components/page';
-import { ActionError, SettingsSection } from '~/components/settings/parts';
+import { ActionError, SaveRow, SettingsSection } from '~/components/settings/parts';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -23,13 +24,16 @@ import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
 import { useRole } from '~/lib/live';
-import { isRole, ROLE_TABLE, ROLES, type Invitation, type Member } from '~/lib/settings';
-import { getMembers } from '~/server/settings.functions';
+import { isRole, roleTable, ROLES, type Invitation, type Member, type OrgSettings } from '~/lib/settings';
+import { getMembers, getOrgSettings } from '~/server/settings.functions';
 import type { Role } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/_app/settings/members')({
-  loader: () => getMembers(),
+  loader: async () => {
+    const [people, settings] = await Promise.all([getMembers(), getOrgSettings()]);
+    return { ...people, settings };
+  },
   head: () => ({ meta: [{ title: 'Members & roles · SignForge' }] }),
   component: MembersSettings,
 });
@@ -39,7 +43,7 @@ const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.label ?? 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 function MembersSettings() {
-  const { members, invitations } = Route.useLoaderData();
+  const { members, invitations, settings } = Route.useLoaderData();
   const isOwner = useRole() === 'owner';
   const id = useId();
 
@@ -47,7 +51,7 @@ function MembersSettings() {
     <>
       <PageHeader
         title="Members & roles"
-        description={`${plural(members.length, 'person', 'people')} · ${plural(invitations.length, 'invite', 'invites')} waiting.`}
+        description={`${plural(members.length, 'person', 'people')}${isOwner ? ` · ${plural(invitations.length, 'invite', 'invites')} waiting` : ''}.`}
       />
       {isOwner && <InviteForm />}
       <SettingsSection id={`${id}-people`} title="People">
@@ -66,7 +70,12 @@ function MembersSettings() {
           </ul>
         </SettingsSection>
       )}
-      <RoleTable />
+      {settings && (
+        <>
+          <PublishingForm settings={settings} canEdit={isOwner} />
+          <RoleTable editorsPublish={settings.editorsPublish} />
+        </>
+      )}
       <RemoveDialog />
     </>
   );
@@ -201,7 +210,45 @@ function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdi
   );
 }
 
-function RoleTable() {
+function PublishingForm({ settings, canEdit }: { settings: OrgSettings; canEdit: boolean }) {
+  const id = useId();
+  const saveEditorsPublish = useAppStore((s) => s.saveEditorsPublish);
+
+  function submit(e: SubmitEvent<HTMLFormElement>) {
+    e.preventDefault();
+    void saveEditorsPublish(new FormData(e.currentTarget).get('editorsPublish') === 'on', settings.version);
+  }
+
+  return (
+    <form key={settings.version} onSubmit={submit} noValidate>
+      <SettingsSection
+        id={`${id}-publishing`}
+        title="Who publishes"
+        description="Owners always publish to screens. Turn this off and editors still edit spots, playlists and assets, and pair, restart and rename screens, but only owners publish."
+      >
+        <label className="flex items-start gap-3 text-sm">
+          <input
+            type="checkbox"
+            name="editorsPublish"
+            defaultChecked={settings.editorsPublish}
+            disabled={!canEdit}
+            aria-describedby={`${id}-publishing-help`}
+            className="mt-0.5 size-5 shrink-0 accent-primary"
+          />
+          <span>
+            <span className="block font-medium">Editors can publish</span>
+            <span id={`${id}-publishing-help`} className="block text-muted-foreground">
+              Their connected agents follow the same rule.
+            </span>
+          </span>
+        </label>
+        <SaveRow at="publishing" canEdit={canEdit} label="Save" />
+      </SettingsSection>
+    </form>
+  );
+}
+
+function RoleTable({ editorsPublish }: { editorsPublish: boolean }) {
   const id = useId();
   const mark = (yes: boolean) =>
     yes ? <CheckIcon className="mx-auto size-4" aria-label="Yes" /> : <MinusIcon className="mx-auto size-4 text-muted-foreground" aria-label="No" />;
@@ -227,7 +274,7 @@ function RoleTable() {
             </tr>
           </thead>
           <tbody className="divide-y">
-            {ROLE_TABLE.map((row) => (
+            {roleTable(editorsPublish).map((row) => (
               <tr key={row.what}>
                 <th scope="row" className="py-2 pr-3 text-left font-normal">
                   {row.what}

@@ -19,7 +19,7 @@ Status: done (branch m3-43-command-menu)  ·  Size: S  ·  Depends on: M3-11
 
 ## Done when
 
-- [x] Every tool the role allows appears, and none it does not (test against the registry). `apps/cms/test/registry/command-menu.test.ts` builds the menu from `describeTools(registry, { role })` for owner, editor and viewer and compares it with the registry: owner all tools, editor all but the owner-only ones, viewer the read tools only. The menu shows exactly what `GET /api/tools` returns, which is that list.
+- [x] Every tool the role allows appears, and none it does not (test against the registry). `apps/cms/test/registry/command-menu.test.ts` builds the menu from `describeTools(registry, { role, editorsPublish: true })` for owner, editor and viewer and compares it with the registry: owner all tools, editor all but the owner-only ones, viewer the read tools only. The menu shows exactly what `GET /api/tools` returns, which is that list.
 - [x] Keyboard only: open, filter, run, close. `apps/cms/e2e/command-menu.spec.ts` (Playwright): Ctrl/⌘+K opens with focus in the search, typing filters, Enter on "Pair a screen" opens its form, Tab/type/Enter pairs a real screen (toast), `list_screens` runs at once (toast), a `rename_screen` refusal shows the API's message and keeps the form, Escape closes, "go to screens" + Enter navigates, Ctrl/⌘+K closes again.
 - [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated (apps/cms/README.md: "Command menu", layout, checks).
 

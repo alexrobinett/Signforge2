@@ -11,7 +11,7 @@ export const ac = createAccessControl({ ...defaultStatements, content: ['read', 
 export const roles = {
   /** Everything, including members, invitations and org settings. */
   owner: ac.newRole({ ...ownerAc.statements, content: ['read', 'draft', 'publish'] }),
-  /** Makes and publishes content; cannot manage the org. */
+  /** Makes content, and publishes it unless the org says only owners do (Q7, checked by the tool dispatcher); cannot manage the org. */
   editor: ac.newRole({ content: ['read', 'draft', 'publish'] }),
   /** Reads only. */
   viewer: ac.newRole({ content: ['read'] }),

@@ -29,6 +29,7 @@ describe('org settings', () => {
           displayHours: null,
           updateWindow: { from: '02:00', to: '04:00' },
           unreachableAfterMinutes: 15,
+          editorsPublish: true,
           alerts: {
             screen_offline: { who: 'editors', email: true },
             publish_finished: { who: 'editors', email: true },
@@ -73,6 +74,15 @@ describe('org settings', () => {
     });
     const audit = await scoped(env.DB, o.orgId).auditLog.list();
     expect(audit.filter((a) => a.action === 'update_org_settings')).toHaveLength(2);
+  });
+
+  it('lets an owner stop editors publishing, and back', async () => {
+    const off = await dispatch(registry, 'update_org_settings', { editorsPublish: false }, as('owner'));
+    expect(off).toMatchObject({ ok: true, output: { settings: { editorsPublish: false, timezone: 'Europe/London' } } });
+    expect(await dispatch(registry, 'get_org_settings', {}, as('viewer'))).toMatchObject({ output: { settings: { editorsPublish: false } } });
+    expect(await dispatch(registry, 'update_org_settings', { editorsPublish: true }, as('editor'))).toMatchObject({ ok: false, error: 'forbidden' });
+    const on = await dispatch(registry, 'update_org_settings', { editorsPublish: true }, as('owner'));
+    expect(on).toMatchObject({ ok: true, output: { settings: { editorsPublish: true } } });
   });
 
   it('refuses editors and viewers, and bad values', async () => {
