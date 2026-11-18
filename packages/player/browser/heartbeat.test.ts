@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Content, ContentOptions } from './content';
 import type { FixtureServer } from './fixture-server';
-import { useHarness, type PlayerState } from './harness';
+import { useHarness, type Player, type PlayerState } from './harness';
 
 const h = useHarness();
 const HOUR = 3_600_000;
@@ -38,6 +38,23 @@ async function asleep(content: Content) {
   return { p, switches };
 }
 const closedAllWeek: ContentOptions['edit'] = (m) => void (m.screen.displayHours = { weekly: [] });
+
+/**
+ * Cut the network and boot again as a Pi with no clock does: the device clock a day behind the last
+ * sync, with a "sleep" override saved ending at `sleepUntil` if given. Returns what restores the network.
+ */
+async function coldBootWithoutClock(p: Player, sleepUntil?: number): Promise<() => void> {
+  const cut = p.server.intercept(/^\/content\//, { status: 503 });
+  await p.page.evaluate(
+    ({ syncedAt, until }) => {
+      localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: -86_400_000, syncedAt }));
+      if (until) localStorage.setItem('sf.displayOverride', JSON.stringify({ state: 'off', until }));
+    },
+    { syncedAt: Date.now(), until: sleepUntil === undefined ? '' : new Date(sleepUntil).toISOString() },
+  );
+  await p.page.reload();
+  return cut;
+}
 
 describe('play counts', () => {
   it('reach the server once an hour ends, counted once although a reply was lost', async () => {
@@ -100,17 +117,8 @@ describe('the clock', () => {
   it('keeps the panel on while it is untrusted, whatever the hours and a saved override say, and applies them once a sync trusts it', async () => {
     const { p, switches } = await asleep(h.content([{ id: 'a', durationMs: 500 }], { edit: closedAllWeek }));
 
-    // A cold boot with no network and no clock: the device clock a day behind the last sync, and a
-    // "sleep" override saved that ended an hour ago, though by that clock it has a day to run.
-    const cut = p.server.intercept(/^\/content\//, { status: 503 });
-    await p.page.evaluate(
-      ({ syncedAt, until }) => {
-        localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: -86_400_000, syncedAt }));
-        localStorage.setItem('sf.displayOverride', JSON.stringify({ state: 'off', until }));
-      },
-      { syncedAt: Date.now(), until: new Date(Date.now() - HOUR).toISOString() },
-    );
-    await p.page.reload();
+    // A "sleep" override saved that ended an hour ago, though by the clock a day behind it has a day to run.
+    const cut = await coldBootWithoutClock(p, Date.now() - HOUR);
     await expect.poll(switches, { timeout: 10_000 }).toHaveLength(2);
     expect(switches()[1]).toBe('/supervisor/display/on');
     const s = await p.until((s) => s.played >= 2);
@@ -168,18 +176,10 @@ describe('the first trusted sync', () => {
     const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 500 }])), api);
     await p.until((s) => s.clock.trusted && s.played > 0);
 
-    // Offline, a "sleep" saved with an hour to run, and a clock a day behind; the CMS cleared it meanwhile.
-    const cut = p.server.intercept(/^\/content\//, { status: 503 });
-    await p.page.evaluate(
-      ({ syncedAt, until }) => {
-        localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: -86_400_000, syncedAt }));
-        localStorage.setItem('sf.displayOverride', JSON.stringify({ state: 'off', until }));
-      },
-      { syncedAt: Date.now(), until: new Date(Date.now() + HOUR).toISOString() },
-    );
+    // A "sleep" saved with an hour to run, which the CMS cleared while the screen was offline.
     p.server.displayOverride = null;
     const reloaded = Date.now();
-    await p.page.reload();
+    const cut = await coldBootWithoutClock(p, Date.now() + HOUR);
     const switches = () =>
       p.server
         .requestsTo(/^\/supervisor\/display\//)
@@ -211,9 +211,7 @@ describe('the first trusted sync', () => {
     const { p, switches } = await asleep(content);
 
     // An untrusted cold boot with no network: on, whatever the closed hours say.
-    const cut = p.server.intercept(/^\/content\//, { status: 503 });
-    await p.page.evaluate((syncedAt) => localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: -86_400_000, syncedAt })), Date.now());
-    await p.page.reload();
+    const cut = await coldBootWithoutClock(p);
     await expect.poll(switches, { timeout: 10_000 }).toEqual(['/supervisor/display/off', '/supervisor/display/on']);
     // Past the 3 s a panel is given to wake: the display loop now waits for its next check.
     await new Promise((r) => setTimeout(r, 4000));
