@@ -81,7 +81,11 @@ describe('offline alerts', () => {
     await checkScreenAlerts(env, outbox, start + 20 * MIN);
     expect(to(outbox, 'Till 2')).toEqual([]);
     await checkScreenAlerts(env, outbox, start + 31 * MIN);
-    expect(to(outbox, 'Till 2').map((m) => m.to).sort()).toEqual([addr.owner, addr.editor, addr.viewer].sort());
+    expect(
+      to(outbox, 'Till 2')
+        .map((m) => m.to)
+        .sort(),
+    ).toEqual([addr.owner, addr.editor, addr.viewer].sort());
   });
 
   it('sends nothing with email off, and nothing for a revoked or never-seen screen', async () => {

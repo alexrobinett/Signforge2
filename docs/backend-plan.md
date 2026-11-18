@@ -31,7 +31,8 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 | Table | Key columns |
 | --- | --- |
 | Better Auth's own: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation` | `organization` adds quotas. Roles: owner, editor, viewer. |
-| `org_settings` | one row per org: the default playlist (see Publishing) |
+| `org_settings` | one row per org: the default playlist (see Publishing), defaults for new screens, the update window, the offline alert threshold and who gets which alert (M3-42) |
+| `screen_incidents` | a screen silent past its org's threshold, from then until it is heard from again: one alert email each way (M3-42) |
 | `screens` | name, timezone, locale, orientation, `display_hours_json`, `desired_manifest_id`, `previous_manifest_id` (whose files stay servable while a screen switches), `reported_manifest_id`, last seen, player version, status |
 | `screen_groups`, `screen_group_members` | |
 | `screen_credentials` | screen, secret hash, last used, revoked at |
@@ -157,6 +158,8 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
 - **Hours.** Display hours are part of the screen's manifest, so a change is a publish and works offline. The player already enforces them (see `architecture.md`).
 - **Commands.** The socket adds `wake now` and `sleep now`, a temporary override for someone standing at a dark screen. They expire at the next scheduled change, at most 12 hours. `identify` (the screen shows its name for 10 seconds) and `restart` (the player reloads) are socket-only: a screen that is not connected misses them.
 - **Status.** The display's actual state and the power method that worked are reported on sync.
+
+**Offline alerts (M3-42).** A Cron Trigger every 5 minutes, the sync interval, looks for screens silent past their org's threshold (15 minutes by default, an org setting). Each opens an incident (`screen_incidents`, at most one open per screen) and emails the members the org's alert rule names; the screen's next sync clears it with one more email. The incident is written before the email, by one check only, so an alert goes out once per incident. Email is the only channel until the integrations proposal.
 
 ## Data sources
 

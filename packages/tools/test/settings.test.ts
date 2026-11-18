@@ -6,7 +6,12 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
 
 let o: SeededOrg;
-const as = (role: Caller['role']): Caller => ({ org: scoped(env.DB, o.orgId), role, actor: { kind: 'user', id: `user-${role}`, clientId: 'cms' }, blobs: env.BLOBS });
+const as = (role: Caller['role']): Caller => ({
+  org: scoped(env.DB, o.orgId),
+  role,
+  actor: { kind: 'user', id: `user-${role}`, clientId: 'cms' },
+  blobs: env.BLOBS,
+});
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'settings-org');
@@ -36,10 +41,23 @@ describe('org settings', () => {
 
   it('lets an owner change only what is given, and audits it', async () => {
     const hours = { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }] };
-    const first = await dispatch(registry, 'update_org_settings', { timezone: 'Europe/London', locale: 'en-GB', displayHours: hours, unreachableAfterMinutes: 30 }, as('owner'));
-    expect(first).toMatchObject({ ok: true, output: { settings: { timezone: 'Europe/London', locale: 'en-GB', displayHours: hours, unreachableAfterMinutes: 30 } } });
+    const first = await dispatch(
+      registry,
+      'update_org_settings',
+      { timezone: 'Europe/London', locale: 'en-GB', displayHours: hours, unreachableAfterMinutes: 30 },
+      as('owner'),
+    );
+    expect(first).toMatchObject({
+      ok: true,
+      output: { settings: { timezone: 'Europe/London', locale: 'en-GB', displayHours: hours, unreachableAfterMinutes: 30 } },
+    });
 
-    const second = await dispatch(registry, 'update_org_settings', { locale: null, alerts: { screen_offline: { who: 'everyone', email: false } } }, as('owner'));
+    const second = await dispatch(
+      registry,
+      'update_org_settings',
+      { locale: null, alerts: { screen_offline: { who: 'everyone', email: false } } },
+      as('owner'),
+    );
     expect(second).toMatchObject({
       ok: true,
       output: {
@@ -60,7 +78,13 @@ describe('org settings', () => {
     for (const role of ['editor', 'viewer'] as const) {
       expect(await dispatch(registry, 'update_org_settings', { timezone: 'UTC' }, as(role))).toMatchObject({ ok: false, error: 'forbidden' });
     }
-    for (const bad of [{ unreachableAfterMinutes: 2 }, { updateWindow: { from: '25:00', to: '04:00' } }, { updateWindow: { from: '02:00', to: '02:00' } }, { timezone: 'Mars/Olympus' }, {}]) {
+    for (const bad of [
+      { unreachableAfterMinutes: 2 },
+      { updateWindow: { from: '25:00', to: '04:00' } },
+      { updateWindow: { from: '02:00', to: '02:00' } },
+      { timezone: 'Mars/Olympus' },
+      {},
+    ]) {
       expect(await dispatch(registry, 'update_org_settings', bad, as('owner'))).toMatchObject({ ok: false, error: 'invalid_input' });
     }
   });

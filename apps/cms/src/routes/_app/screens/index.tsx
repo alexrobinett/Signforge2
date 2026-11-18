@@ -21,6 +21,7 @@ import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKi
 import { useCanManage, useNow } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { getScreens } from '~/server/screens.functions';
+import { getOrgSettings } from '~/server/settings.functions';
 
 type View = 'tiles' | 'table';
 interface Search {
@@ -37,7 +38,11 @@ export const Route = createFileRoute('/_app/screens/')({
     ...(typeof s.group === 'string' && s.group ? { group: s.group } : {}),
     ...(isStateKind(s.status) ? { status: s.status } : {}),
   }),
-  loader: () => getScreens(),
+  // The org's settings give the pairing form its defaults for new screens.
+  loader: async () => {
+    const [screens, settings] = await Promise.all([getScreens(), getOrgSettings()]);
+    return { ...screens, settings };
+  },
   head: () => ({ meta: [{ title: 'Screens · SignForge' }] }),
   component: ScreensPage,
 });

@@ -3,6 +3,7 @@
  * hours. `claim_screen` makes the screen; its groups are then set with `set_group_members`, the
  * same tools an agent would use (M3-08: no groups in the claim).
  */
+import { getRouteApi } from '@tanstack/react-router';
 import { LoaderCircleIcon } from 'lucide-react';
 import { useId, useSyncExternalStore, type SubmitEvent } from 'react';
 import { Button } from '~/components/ui/button';
@@ -23,7 +24,7 @@ function timezones(): string[] {
 }
 
 /** Every IANA zone the browser knows, once. */
-const zones = timezones();
+export const zones = timezones();
 
 const browserZone = () => {
   try {
@@ -37,10 +38,14 @@ const browserZone = () => {
 const noChange = () => () => {};
 const useBrowserZone = () => useSyncExternalStore(noChange, browserZone, () => 'UTC');
 
+/** The form is on the Screens page, whose loader reads the org's defaults for new screens. */
+const screensPage = getRouteApi('/_app/screens/');
+
 export function PairScreenForm({ groups, compact = false }: { groups: GroupView[]; compact?: boolean }) {
   const id = useId();
   const browser = useBrowserZone();
-  const { code, name, timezone: chosenZone, orientation, groupIds, hours, pending, error } = useAppStore((s) => s.screens.pairing);
+  const orgDefaults = screensPage.useLoaderData({ select: (d) => d.settings });
+  const { code, name, timezone: chosenZone, orientation, groupIds, hours: chosenHours, pending, error } = useAppStore((s) => s.screens.pairing);
   const enterPairingCode = useAppStore((s) => s.enterPairingCode);
   const nameNewScreen = useAppStore((s) => s.nameNewScreen);
   const chooseNewScreenZone = useAppStore((s) => s.chooseNewScreenZone);
@@ -48,13 +53,15 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
   const toggleNewScreenGroup = useAppStore((s) => s.toggleNewScreenGroup);
   const setNewScreenHours = useAppStore((s) => s.setNewScreenHours);
   const pairScreen = useAppStore((s) => s.pairScreen);
-  const timezone = chosenZone ?? browser;
+  const defaults = { timezone: orgDefaults?.timezone ?? browser, locale: orgDefaults?.locale ?? null, hours: orgDefaults?.displayHours ?? null };
+  const timezone = chosenZone ?? defaults.timezone;
+  const hours = chosenHours === undefined ? defaults.hours : chosenHours;
 
   const ready = normaliseCode(code).length === PAIRING_CODE_LENGTH && name.trim().length > 0 && hoursProblems(hours).length === 0;
 
   function submit(e: SubmitEvent) {
     e.preventDefault();
-    if (ready) void pairScreen(groups, browser);
+    if (ready) void pairScreen(groups, defaults);
   }
 
   return (

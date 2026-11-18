@@ -32,7 +32,9 @@ describe('roles', () => {
         const res = await m.c.post('/api/auth/organization/update-member-role', { memberId: m.memberId, role: to, organizationId: org.id });
         expect(res.status, `${await role(m.c)} -> ${to}`).toBe(403);
       }
-      expect((await m.c.post('/api/auth/organization/update-member-role', { memberId: ownerMemberId, role: 'viewer', organizationId: org.id })).status).toBe(403);
+      expect((await m.c.post('/api/auth/organization/update-member-role', { memberId: ownerMemberId, role: 'viewer', organizationId: org.id })).status).toBe(
+        403,
+      );
     }
     expect((await viewer.c.post('/api/auth/organization/update-member-role', { memberId: editor.memberId, role: 'viewer' })).status).toBe(403);
     expect(await role(editor.c)).toBe('editor');
