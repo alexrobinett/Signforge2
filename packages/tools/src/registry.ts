@@ -17,6 +17,7 @@ import { settingsTools } from './settings';
 import { spotTools } from './spots';
 import { platformTemplateTools, templateTools } from './templates';
 import type { AnyTool, DataScope } from './tool';
+import { videoTools } from './videos';
 
 export const TOOLS: readonly AnyTool[] = [
   ...screenTools,
@@ -25,6 +26,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...publishTools,
   ...templateTools,
   ...assetTools,
+  ...videoTools,
   ...brandTools,
   ...dataSourceTools,
   ...settingsTools,

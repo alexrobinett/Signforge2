@@ -193,6 +193,64 @@ describe('the presigned PUT and the server check', () => {
   }, 30_000);
 });
 
+describe('a video', () => {
+  const clip = (name: string) => readFileSync(here(`../../../media-check/test/fixtures/${name}`)).toString('base64');
+
+  it('is checked in the browser, uploaded in presigned parts to the S3 API, and checked again', async () => {
+    const result = await page.evaluate(async (b64) => {
+      const clip = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      // A top-level free box after the clip makes it 20 MiB longer, two parts; players skip it.
+      const pad = new Uint8Array(20 * 1024 * 1024);
+      new DataView(pad.buffer).setUint32(0, pad.length);
+      pad.set([0x66, 0x72, 0x65, 0x65], 4);
+      const file = new File([clip, pad], 'promo.mp4', { type: 'video/mp4' });
+      const calls: string[] = [];
+      const callTool = (name: string, input: unknown) => (calls.push(name), (globalThis as any).callTool(name, input));
+      const { asset } = await (globalThis as any).SFMedia.uploadVideo(file, { callTool });
+      return { asset, calls, size: file.size };
+    }, clip('high.mp4'));
+    expect(result.calls).toEqual(['create_video_upload', 'finalize_video_upload']);
+    expect(result.asset).toMatchObject({ kind: 'video', status: 'verified', width: 320, height: 180, durationMs: 1000, size: result.size });
+    const obj = await (await mf.getR2Bucket('BLOBS')).head(blobKey(result.asset.sha256));
+    expect(obj?.size).toBe(result.size);
+    expect((await (await mf.getR2Bucket('BLOBS')).list({ prefix: 'up/' })).objects).toEqual([]);
+  }, 60_000);
+
+  it('that screens cannot play is refused in the browser, with how to export one, before anything is uploaded', async () => {
+    const refused = await page.evaluate(async (b64) => {
+      const file = new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'fast.mp4', { type: 'video/mp4' });
+      const calls: string[] = [];
+      try {
+        await (globalThis as any).SFMedia.uploadVideo(file, { callTool: (name: string) => (calls.push(name), Promise.reject(new Error('no call expected'))) });
+        return null;
+      } catch (err: any) {
+        return { name: err.name, problems: err.problems, message: err.message, calls };
+      }
+    }, clip('fps60.mp4'));
+    expect(refused).toMatchObject({ name: 'VideoRejectedError', problems: [{ code: 'fps', message: '60 fps is above 30' }], calls: [] });
+    expect(refused!.message).toMatch(/^60 fps is above 30\. Export it again as an MP4 with H\.264/);
+  }, 30_000);
+
+  it('that skips the browser check is rejected by the server and removed', async () => {
+    const outcome = await page.evaluate(async (b64) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const sha256 = await (globalThis as any).SFMedia.sha256Hex(bytes);
+      const call = (globalThis as any).callTool;
+      const { asset, upload } = await call('create_video_upload', { name: 'Sneaky', sha256, type: 'video/mp4', size: bytes.length });
+      const part = upload.parts[0];
+      const res = await fetch(part.url, { method: 'PUT', headers: part.headers, body: bytes });
+      try {
+        await call('finalize_video_upload', { assetId: asset.id, uploadId: upload.uploadId, parts: [{ partNumber: 1, etag: res.headers.get('etag') }] });
+        return null;
+      } catch (err: any) {
+        return { status: res.status, refused: err.result, assetId: asset.id };
+      }
+    }, clip('fps60.mp4'));
+    expect(outcome).toMatchObject({ status: 200, refused: { ok: false, error: 'invalid_input', details: [{ path: 'fps' }] } });
+    expect((await (await mf.getR2Bucket('BLOBS')).list({ prefix: `up/${ORG}/${outcome!.assetId}/` })).objects).toEqual([]);
+  }, 30_000);
+});
+
 describe('delete_asset', () => {
   it('refuses while a spot uses the asset', async () => {
     const outcome = await page.evaluate(async () => {

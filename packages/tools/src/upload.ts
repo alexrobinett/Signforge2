@@ -12,8 +12,14 @@
  */
 
 export interface UploadSigner {
-  /** A URL that accepts one PUT of exactly this type and size to `key`, until it expires. */
-  presignPut(key: string, options: { contentType: string; contentLength: number; expiresInSeconds: number }): Promise<{ url: string; expiresAt: number }>;
+  /**
+   * A URL that accepts one PUT of exactly this type and size to `key`, until it expires. `query`
+   * is signed too: `{ partNumber, uploadId }` makes it a multipart upload's UploadPart.
+   */
+  presignPut(
+    key: string,
+    options: { contentType: string; contentLength: number; expiresInSeconds: number; query?: Record<string, string> },
+  ): Promise<{ url: string; expiresAt: number }>;
 }
 
 export interface R2PresignConfig {
@@ -42,7 +48,7 @@ export function r2Presigner(config: R2PresignConfig): UploadSigner {
   const base = new URL(config.endpoint);
   const basePath = base.pathname.replace(/\/+$/, '');
   return {
-    async presignPut(key, { contentType, contentLength, expiresInSeconds }) {
+    async presignPut(key, { contentType, contentLength, expiresInSeconds, query: extra = {} }) {
       const nowMs = config.now?.() ?? Date.now();
       const amzDate = new Date(nowMs)
         .toISOString()
@@ -58,6 +64,7 @@ export function r2Presigner(config: R2PresignConfig): UploadSigner {
         ['X-Amz-Date', amzDate],
         ['X-Amz-Expires', String(expiresInSeconds)],
         ['X-Amz-SignedHeaders', signedHeaders],
+        ...Object.entries(extra),
       ];
       const query = params
         .map(([k, v]) => [uriEncode(k), uriEncode(v)])
