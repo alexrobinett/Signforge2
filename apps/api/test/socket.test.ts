@@ -8,7 +8,8 @@ import { dispatch, registry, type Caller } from '@signforge/tools';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mintCredential } from '../src/device/credential';
-import { screenNotifier } from '../src/device/screens';
+import { HOLDER_HEADER, type SocketHolder } from '../src/device/screen-object';
+import { screenNotifier, screenObject } from '../src/device/screens';
 import { issueTicket, verifyTicket } from '../src/device/ticket';
 import { manifestKey } from '../src/r2';
 
@@ -202,5 +203,61 @@ describe('GET /v1/device/ws', () => {
     await until(() => s.closed() !== undefined);
     expect(s.messages).toContainEqual({ type: 'revoked' });
     expect((await upgrade(ticket)).status).toBe(401);
+  });
+});
+
+describe('revoking a credential whose socket is open', () => {
+  const ticketFor = async (credential: string) => ((await (await sync(credential)).json()) as SyncResponse).socketTicket;
+  const revoke = (s: Screen, as: Caller = caller(s)) =>
+    dispatch(registry, 'revoke_screen_credential', { screenId: s.seed.screen, credentialId: s.credentialId }, as);
+  /** The real notifier, except that the revocation's own notice never reaches the object. */
+  const unreachable = (s: Screen): Caller => ({ ...caller(s), screens: { ...screenNotifier(env), revoked: () => Promise.reject(new Error('object unreachable')) } });
+  const settle = () => new Promise((r) => setTimeout(r, 100));
+
+  it('closes the socket instead of sending it the next command when the first close never arrived', async () => {
+    const c = await setUp('ws-c');
+    const s = await connect(await ticketFor(c.credential));
+    expect((await revoke(c, unreachable(c))).ok).toBe(true);
+    await settle();
+    expect(s.closed()).toBeUndefined();
+
+    expect((await dispatch(registry, 'identify_screen', { screenId: c.seed.screen }, caller(c, 'editor'))).ok).toBe(true);
+    await until(() => s.closed() !== undefined);
+    expect(s.messages).toEqual([{ type: 'revoked' }]);
+  });
+
+  it('closes it when the revoke is retried', async () => {
+    const c = await setUp('ws-d');
+    const s = await connect(await ticketFor(c.credential));
+    await revoke(c, unreachable(c));
+    await settle();
+    expect(s.closed()).toBeUndefined();
+
+    expect((await revoke(c)).ok).toBe(true);
+    await until(() => s.closed() !== undefined);
+    expect(s.messages).toContainEqual({ type: 'revoked' });
+  });
+
+  it('does not write what such a socket says it applied', async () => {
+    const c = await setUp('ws-e');
+    const s = await connect(await ticketFor(c.credential));
+    await revoke(c, unreachable(c));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await until(() => s.closed() !== undefined);
+    expect((await scoped(env.DB, c.seed.orgId).screens.get(c.seed.screen))?.reportedManifestId).toBeNull();
+  });
+
+  it('refuses an upgrade that reaches the object after the revocation did', async () => {
+    const c = await setUp('ws-f');
+    // The route found the credential live, then the revocation committed and told the object
+    // before the route handed the upgrade over.
+    const holder: SocketHolder = { orgId: c.seed.orgId, screenId: c.seed.screen, credentialId: c.credentialId };
+    await ticketFor(c.credential);
+    expect((await revoke(c)).ok).toBe(true);
+    const res = await screenObject(env, c.seed.screen).fetch(
+      new Request(`${BASE}/ws`, { headers: { upgrade: 'websocket', [HOLDER_HEADER]: JSON.stringify(holder) } }),
+    );
+    expect(res.status).toBe(401);
+    expect(res.webSocket).toBeNull();
   });
 });
