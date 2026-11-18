@@ -178,7 +178,7 @@ Uploaded video must match one strict profile (1080p H.264, capped bitrate). The 
 - **Cloudflare Workers**: API and MCP server.
 - **D1 with Drizzle**: relational data.
 - **R2**: assets, template bundles and manifests.
-- **Durable Objects**: one per screen, holding a sleeping WebSocket and the manifest version the screen should be on; the one it reports is written through to D1. This gives the CMS rollout status per publish. Alarms drive timed publishes.
+- **Durable Objects**: one per screen, holding a sleeping WebSocket; the desired manifest is in D1, and the one the screen reports is written through to D1. This gives the CMS rollout status per publish. Alarms drive timed publishes.
 - **CMS**: TanStack Start, React 19, Tailwind, shadcn.
 - **Auth**: Better Auth with its organization plugin.
 - **Environments**: dev, demo and prod, each deployed with one command. Dev is local only and must be named (`--env dev`); a bare `wrangler deploy` of the API fails rather than shipping dev settings.
