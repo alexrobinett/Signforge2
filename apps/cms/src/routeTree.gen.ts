@@ -15,10 +15,11 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppPlaylistsRouteImport } from './routes/_app/playlists'
 import { Route as AppScheduleRouteImport } from './routes/_app/schedule'
-import { Route as AppSpotsRouteImport } from './routes/_app/spots'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as AppScreensIndexRouteImport } from './routes/_app/screens/index'
 import { Route as AppScreensScreenIdRouteImport } from './routes/_app/screens/$screenId'
+import { Route as AppSpotsIndexRouteImport } from './routes/_app/spots/index'
+import { Route as AppSpotsSpotIdRouteImport } from './routes/_app/spots/$spotId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -49,11 +50,6 @@ const AppScheduleRoute = AppScheduleRouteImport.update({
   path: '/schedule',
   getParentRoute: () => AppRoute,
 } as any)
-const AppSpotsRoute = AppSpotsRouteImport.update({
-  id: '/spots',
-  path: '/spots',
-  getParentRoute: () => AppRoute,
-} as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
   path: '/api/$',
@@ -69,6 +65,16 @@ const AppScreensScreenIdRoute = AppScreensScreenIdRouteImport.update({
   path: '/screens/$screenId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSpotsIndexRoute = AppSpotsIndexRouteImport.update({
+  id: '/spots/',
+  path: '/spots/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSpotsSpotIdRoute = AppSpotsSpotIdRouteImport.update({
+  id: '/spots/$spotId',
+  path: '/spots/$spotId',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -76,21 +82,23 @@ export interface FileRoutesByFullPath {
   '/assets': typeof AppAssetsRoute
   '/playlists': typeof AppPlaylistsRoute
   '/schedule': typeof AppScheduleRoute
-  '/spots': typeof AppSpotsRoute
   '/api/$': typeof ApiSplatRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/spots/$spotId': typeof AppSpotsSpotIdRoute
   '/screens/': typeof AppScreensIndexRoute
+  '/spots/': typeof AppSpotsIndexRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/assets': typeof AppAssetsRoute
   '/playlists': typeof AppPlaylistsRoute
   '/schedule': typeof AppScheduleRoute
-  '/spots': typeof AppSpotsRoute
   '/api/$': typeof ApiSplatRoute
   '/': typeof AppIndexRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/spots/$spotId': typeof AppSpotsSpotIdRoute
   '/screens': typeof AppScreensIndexRoute
+  '/spots': typeof AppSpotsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -99,11 +107,12 @@ export interface FileRoutesById {
   '/_app/assets': typeof AppAssetsRoute
   '/_app/playlists': typeof AppPlaylistsRoute
   '/_app/schedule': typeof AppScheduleRoute
-  '/_app/spots': typeof AppSpotsRoute
   '/api/$': typeof ApiSplatRoute
   '/_app/': typeof AppIndexRoute
   '/_app/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/_app/spots/$spotId': typeof AppSpotsSpotIdRoute
   '/_app/screens/': typeof AppScreensIndexRoute
+  '/_app/spots/': typeof AppSpotsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -113,21 +122,23 @@ export interface FileRouteTypes {
     | '/assets'
     | '/playlists'
     | '/schedule'
-    | '/spots'
     | '/api/$'
     | '/screens/$screenId'
+    | '/spots/$spotId'
     | '/screens/'
+    | '/spots/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/sign-in'
     | '/assets'
     | '/playlists'
     | '/schedule'
-    | '/spots'
     | '/api/$'
     | '/'
     | '/screens/$screenId'
+    | '/spots/$spotId'
     | '/screens'
+    | '/spots'
   id:
     | '__root__'
     | '/_app'
@@ -135,11 +146,12 @@ export interface FileRouteTypes {
     | '/_app/assets'
     | '/_app/playlists'
     | '/_app/schedule'
-    | '/_app/spots'
     | '/api/$'
     | '/_app/'
     | '/_app/screens/$screenId'
+    | '/_app/spots/$spotId'
     | '/_app/screens/'
+    | '/_app/spots/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -192,13 +204,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppScheduleRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/spots': {
-      id: '/_app/spots'
-      path: '/spots'
-      fullPath: '/spots'
-      preLoaderRoute: typeof AppSpotsRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/api/$': {
       id: '/api/$'
       path: '/api/$'
@@ -220,6 +225,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppScreensScreenIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/spots/': {
+      id: '/_app/spots/'
+      path: '/spots'
+      fullPath: '/spots/'
+      preLoaderRoute: typeof AppSpotsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/spots/$spotId': {
+      id: '/_app/spots/$spotId'
+      path: '/spots/$spotId'
+      fullPath: '/spots/$spotId'
+      preLoaderRoute: typeof AppSpotsSpotIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -227,20 +246,22 @@ interface AppRouteChildren {
   AppAssetsRoute: typeof AppAssetsRoute
   AppPlaylistsRoute: typeof AppPlaylistsRoute
   AppScheduleRoute: typeof AppScheduleRoute
-  AppSpotsRoute: typeof AppSpotsRoute
   AppIndexRoute: typeof AppIndexRoute
   AppScreensScreenIdRoute: typeof AppScreensScreenIdRoute
+  AppSpotsSpotIdRoute: typeof AppSpotsSpotIdRoute
   AppScreensIndexRoute: typeof AppScreensIndexRoute
+  AppSpotsIndexRoute: typeof AppSpotsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAssetsRoute: AppAssetsRoute,
   AppPlaylistsRoute: AppPlaylistsRoute,
   AppScheduleRoute: AppScheduleRoute,
-  AppSpotsRoute: AppSpotsRoute,
   AppIndexRoute: AppIndexRoute,
   AppScreensScreenIdRoute: AppScreensScreenIdRoute,
+  AppSpotsSpotIdRoute: AppSpotsSpotIdRoute,
   AppScreensIndexRoute: AppScreensIndexRoute,
+  AppSpotsIndexRoute: AppSpotsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

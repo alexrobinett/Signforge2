@@ -31,5 +31,10 @@ export function useRole() {
   return app.useLoaderData().organization?.role ?? 'viewer';
 }
 
+/** The active org's id: the first part of every Query key (src/queries/). The `_app` layout renders pages only with one. */
+export function useOrgId(): string {
+  return app.useLoaderData().organization?.id ?? '';
+}
+
 /** Editors and owners manage screens; viewers read. */
 export const useCanManage = () => useRole() !== 'viewer';

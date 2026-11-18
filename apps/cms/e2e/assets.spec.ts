@@ -1,23 +1,9 @@
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { png, rotatedPhoto } from '@signforge/media/testing';
 import { fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
-import { RUN_DIR } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.21';
-
-/** A spot using the asset, written straight to the local database: spots have no tools until M3-16. */
-function seedSpotUsing(assetId: string) {
-  const sql = `INSERT INTO spots (id, org_id, name, kind, duration_ms, asset_id, fit, created_at, updated_at)
-    SELECT 'spt_e2e_assets', org_id, 'Summer menu', 'image', 10000, id, 'cover', 0, 0 FROM assets WHERE id = '${assetId}'`;
-  const run = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'dev', '--persist-to', `${RUN_DIR}state`, '--command', sql], {
-    cwd: fileURLToPath(new URL('../../api/', import.meta.url)),
-    encoding: 'utf8',
-  });
-  expect(run.status, run.stderr).toBe(0);
-}
 
 test('upload images, search them by name, see which are in use, and delete one no spot uses', async ({ page }) => {
   test.setTimeout(120_000);
@@ -61,7 +47,8 @@ test('upload images, search them by name, see which are in use, and delete one n
   // A spot uses the photo: it says so and cannot be deleted; the logo can.
   const listed = await page.request.post('/api/tools/list_assets', { data: { query: 'raspberries' } });
   const { assets } = (await listed.json()) as { assets: { id: string }[] };
-  seedSpotUsing(assets[0]!.id);
+  const made = await page.request.post('/api/tools/create_spot', { data: { name: 'Summer menu', kind: 'image', assetId: assets[0]!.id } });
+  expect(made.status(), await made.text()).toBe(200);
   await page.reload();
   await hydrated(page);
   await expect(page.getByText('2 images · 1 in use')).toBeVisible();

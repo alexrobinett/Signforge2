@@ -11,6 +11,9 @@ import { API_LOG, API_PORT, CMS_PORT, CMS_URL, RUN_DIR } from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
 const cmsDir = fileURLToPath(new URL('../', import.meta.url));
+const rootDir = fileURLToPath(new URL('../../../', import.meta.url));
+/** Turns on the API's /admin routes for this run only, so the templates can be seeded. */
+const ADMIN_TOKEN = `e2e-${crypto.randomUUID()}`;
 
 async function waitFor(url: string, timeoutMs = 90_000) {
   const deadline = Date.now() + timeoutMs;
@@ -37,6 +40,10 @@ export default async function globalSetup() {
   });
   if (migrate.status !== 0) throw new Error(`migrations failed:\n${migrate.stdout}\n${migrate.stderr}`);
 
+  // The CMS serves the player build at /player/ for the spot editor's stage.
+  const player = spawnSync('pnpm', ['player'], { cwd: cmsDir, env, encoding: 'utf8' });
+  if (player.status !== 0) throw new Error(`player build failed:\n${player.stdout}\n${player.stderr}`);
+
   const log = openSync(API_LOG, 'a');
   const children: ChildProcess[] = [
     spawn(
@@ -55,6 +62,8 @@ export default async function globalSetup() {
         '127.0.0.1',
         '--var',
         `LOCAL_S3_ORIGIN:http://127.0.0.1:${API_PORT}`,
+        '--var',
+        `ADMIN_TOKEN:${ADMIN_TOKEN}`,
       ],
       {
         cwd: apiDir,
@@ -72,6 +81,13 @@ export default async function globalSetup() {
   ];
 
   await waitFor(`http://127.0.0.1:${API_PORT}/health`);
+  // The base templates and fonts, as a deploy seeds them, for the spot editor.
+  const seed = spawnSync('pnpm', ['seed:templates', '--api', `http://127.0.0.1:${API_PORT}`], {
+    cwd: rootDir,
+    env: { ...env, SF_ADMIN_TOKEN: ADMIN_TOKEN },
+    encoding: 'utf8',
+  });
+  if (seed.status !== 0) throw new Error(`template seed failed:\n${seed.stdout}\n${seed.stderr}`);
   await waitFor(`${CMS_URL}/sign-in`);
   // The CMS reaches the API through the registry; wait until the binding answers.
   await waitFor(`${CMS_URL}/api/sign-in-options`);

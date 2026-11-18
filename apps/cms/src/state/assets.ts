@@ -36,7 +36,7 @@ export interface AssetsSlice {
 
 const initialAssets: AssetsState = { uploads: [], deleting: null, deletePending: false, deleteError: null, pickerQuery: '' };
 
-export const createAssetsSlice: SliceCreator<AssetsSlice> = (set, get, { router }) => {
+export const createAssetsSlice: SliceCreator<AssetsSlice> = (set, get, { router, queryClient }) => {
   const assets = (change: (a: AssetsState) => AssetsState) => set((s) => ({ assets: change(s.assets) }));
   const uploads = (change: (u: Upload[]) => Upload[]) => assets((a) => ({ ...a, uploads: change(a.uploads) }));
 
@@ -51,7 +51,8 @@ export const createAssetsSlice: SliceCreator<AssetsSlice> = (set, get, { router 
         try {
           await uploadImage(file, { callTool });
           uploads((u) => u.filter((x) => x.key !== key));
-          await router.invalidate();
+          // The library page reads its loader; the spot editor's picker reads the Query cache.
+          await Promise.all([router.invalidate(), queryClient.invalidateQueries({ queryKey: ['org'] })]);
         } catch (err) {
           uploads((u) => u.map((x) => (x.key === key ? { ...x, error: toolMessage(err) } : x)));
         }

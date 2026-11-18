@@ -141,7 +141,7 @@ test('an edit keeps a change someone else made while the form was open, and refu
   test.setTimeout(90_000);
   await page.goto('/sign-in');
   await hydrated(page);
-  await signInAs(page, `e2e-versions-${Date.now()}@example.com`);
+  await signInAs(page, `e2e-versions-${Date.now()}@example.com`, '192.0.2.12');
   await page.goto('/');
   await fillUntilEnabled(page, 'Organization name', 'Eastside Deli', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
