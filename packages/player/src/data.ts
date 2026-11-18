@@ -82,8 +82,8 @@ async function offer(id: string, input: unknown, manifest: ScreenManifest | unde
   await (await caches.open(STATE)).put(key(id), new Response(JSON.stringify(next), { headers: { 'content-type': 'application/json' } }));
 }
 
-async function refresh(base: string, id: string, manifest: ScreenManifest, headers: Record<string, string>): Promise<void> {
-  const res = await fetch(`${base}/data/${id}.json`, { cache: 'no-store', headers, signal: AbortSignal.timeout(15_000) });
+async function refresh(base: string, id: string, manifest: ScreenManifest): Promise<void> {
+  const res = await fetch(`${base}/data/${id}.json`, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
   if (!res.ok) return;
   await offer(id, await res.json(), manifest);
 }
@@ -121,18 +121,14 @@ export function heldVersions(): Record<string, number> {
  * cold boot the first pass runs before any manifest has loaded and finds no sources). Fetch
  * failures are silent: the last good value stays.
  */
-export function startDataLoop(
-  base: string,
-  manifest: () => ScreenManifest | undefined,
-  headers: () => Promise<Record<string, string>> = async () => ({}),
-): () => void {
+export function startDataLoop(base: string, manifest: () => ScreenManifest | undefined): () => void {
   // Every source at once: one slow feed must not hold back the others.
   const one = async (m: ScreenManifest, s: ScreenManifest['dataSources'][string]) => {
     await restore(s.id).catch(() => undefined);
     const last = checkedAt.get(s.id) ?? 0;
     if (Date.now() - last >= s.refreshS * 1000) {
       checkedAt.set(s.id, Date.now());
-      await refresh(base, s.id, m, await headers()).catch(() => undefined);
+      await refresh(base, s.id, m).catch(() => undefined);
     }
     if (!settled.has(s.id)) markSettled(s.id);
   };

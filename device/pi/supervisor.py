@@ -8,8 +8,8 @@ the supervisor only does *how*, over a local HTTP API:
   POST /display/on    signal on at 1080p60, then wake the TV and select this input over CEC
   POST /display/off   put the TV in standby over CEC, then turn the video signal off
   GET  /display       last state and which methods worked
-  GET  /credential    the screen's API credential, for the player's own origin (see below)
-  POST /credential    {"credential": "sfd_..."}: store the credential pairing gave the player
+  GET  /credential    the screen's API credential and the API it is for, for the player's own origin (see below)
+  POST /credential    {"credential": "sfd_...", "api": "https://<api>/v1/device"}: store what pairing gave the player
   DELETE /credential  forget it: the server revoked it
 
 Two methods, because panels differ:
@@ -27,13 +27,20 @@ forces one, the preflight is granted only to the player's origin, and a request 
 this address (DNS rebinding) is refused.
 
 The screen's API credential (`sfd_<screen>.<secret>`) lives in ~/signforge/device.credential, mode
-0600. Pairing (M3-08) writes it: the player pairs with the API and hands the credential here with
-POST /credential, and deletes it with DELETE /credential when the server refuses it. Both need the
-token, like the display routes. It can still be installed by hand. GET /credential hands it to the
-player under the same rule as /token: the player's origin, this Host, never in a URL. It is read on
-each request, so a new credential needs no restart; 404 while there is none.
+0600, with the device API base it was paired with on the second line. Pairing (M3-08) writes both:
+the player pairs with the API and hands them here with POST /credential, and deletes them with
+DELETE /credential when the server refuses the credential. Both need the token, like the display
+routes. They can still be installed by hand. GET /credential hands them to the player under the
+same rule as /token: the player's origin, this Host, never in a URL. The file is read on each
+request, so a new credential needs no restart; 404 while there is none.
+
+The API base is what keeps the credential at home: the kiosk URL names the API the player talks to,
+so the player sends the credential only to the API it is bound to (`"api": null` for a file with no
+second line, which the player does not use). It must be https, or http to this LAN or this machine
+for a development API, with no user, query or fragment.
 """
-import hmac, json, os, re, secrets, subprocess, threading
+import hmac, ipaddress, json, os, re, secrets, subprocess, threading
+from urllib.parse import urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8091
@@ -57,24 +64,40 @@ TOKEN = load_token()
 
 
 def load_credential():
-    """The screen's credential, or None. Tightens the file to 0600 if it was left readable."""
+    """The screen's credential and its API base (None without one), or None. Tightens the file to 0600 if it was left readable."""
     try:
         st = os.stat(CREDENTIAL_FILE)
         if st.st_mode & 0o077:
             os.chmod(CREDENTIAL_FILE, 0o600)
         with open(CREDENTIAL_FILE) as f:
-            return f.read().strip() or None
+            lines = f.read().split()
     except OSError:
         return None
+    return (lines[0], device_api(lines[1]) if len(lines) > 1 else None) if lines else None
 CREDENTIAL = re.compile(r"^sfd_[A-Za-z0-9_-]{1,64}\.[A-Za-z0-9_-]{43}$")
+API_BASE = re.compile(r"^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*$")
 
 
-def store_credential(cred):
-    """Write the credential atomically, 0600 from the start."""
+def device_api(api):
+    """`api` if it is a device API base the credential may be bound to, else None."""
+    if not isinstance(api, str) or not API_BASE.match(api):
+        return None
+    host = urlsplit(api).hostname
+    if api.startswith("http://"):
+        try:
+            if host != "localhost" and not ipaddress.ip_address(host).is_private:
+                return None
+        except ValueError:
+            return None
+    return api
+
+
+def store_credential(cred, api):
+    """Write the credential and its API base atomically, 0600 from the start."""
     tmp = CREDENTIAL_FILE + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
-        f.write(cred + "\n")
+        f.write(f"{cred}\n{api}\n")
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, CREDENTIAL_FILE)
@@ -199,8 +222,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/credential":
             if not (self.origin_ok() and self.host_ok()):
                 return self.reply(403, {"error": "forbidden"})
-            cred = load_credential()
-            return self.reply(200, {"credential": cred}) if cred else self.reply(404, {"error": "no credential"})
+            held = load_credential()
+            return self.reply(200, {"credential": held[0], "api": held[1]}) if held else self.reply(404, {"error": "no credential"})
         if not self.authorised():
             return self.reply(403, {"error": "forbidden"})
         self.reply(200, state) if self.path == "/display" else self.reply(404, {"error": "not found"})
@@ -213,12 +236,13 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/credential":
             try:
                 length = int(self.headers.get("content-length") or 0)
-                cred = json.loads(self.rfile.read(min(length, 4096)) or b"{}").get("credential")
+                body = json.loads(self.rfile.read(min(length, 4096)) or b"{}")
+                cred, api = body.get("credential"), device_api(body.get("api"))
             except (ValueError, AttributeError):
-                cred = None
-            if not isinstance(cred, str) or not CREDENTIAL.match(cred):
-                return self.reply(400, {"error": "send {\"credential\": \"sfd_<screen>.<secret>\"}"})
-            store_credential(cred)
+                cred = api = None
+            if not isinstance(cred, str) or not CREDENTIAL.match(cred) or not api:
+                return self.reply(400, {"error": "send {\"credential\": \"sfd_<screen>.<secret>\", \"api\": \"https://<api>/v1/device\"}"})
+            store_credential(cred, api)
             print("credential stored", flush=True)
             self.reply(200, {})
         else:
