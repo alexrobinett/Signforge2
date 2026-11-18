@@ -3,12 +3,14 @@
  * keeps every cookie a response sets, including the cache cookie `setActive` reissues, so the
  * next request sees the new active org.
  */
+import { ac, roles } from '@signforge/api/roles';
 import { emailOTPClient, organizationClient } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
 
 export const authClient = createAuthClient({
   basePath: '/api/auth',
-  plugins: [emailOTPClient(), organizationClient()],
+  // The API's roles (owner, editor, viewer), so member and invitation calls take them by name.
+  plugins: [emailOTPClient(), organizationClient({ ac, roles })],
 });
 
 /** Better Auth's error, as a sentence for the page. */

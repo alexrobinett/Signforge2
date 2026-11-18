@@ -15,11 +15,12 @@
     // so that Turbo reruns the tests when one changes (docs/ci.md).
     "apps/api": { "entry": ["src/index.ts", "auth.config.ts"], "ignoreDependencies": ["auth", "@signforge/template-.*"] },
     // shadcn/ui primitives are kept whole as generated, so an unused part (DialogFooter) stays.
-    // The e2e run starts the API from apps/api, builds the player into public/player, and seeds the
-    // templates with the CLI; declaring them makes Turbo rerun the e2e when one changes.
+    // The e2e run starts the API from apps/api, serves the player build as the test screen and the spot
+    // editor's stage, and seeds the templates with the CLI; declaring them makes Turbo rerun the e2e when
+    // one changes, and build the player before the CMS.
     "apps/cms": {
       "ignoreIssues": { "src/components/ui/**": ["exports"] },
-      "ignoreDependencies": ["@signforge/api", "@signforge/player", "@signforge/cli", "@signforge/template-.*"]
+      "ignoreDependencies": ["@signforge/player", "@signforge/cli", "@signforge/template-.*"]
     },
     // The fixture template is bundled by the browser tests' global setup; sw.js is served as is.
     // templates.test.ts plays every template from templates/: declared as for apps/api.

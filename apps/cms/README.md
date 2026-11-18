@@ -6,10 +6,11 @@ The web app people use to manage their screens: TanStack Start (React 19) with T
 
 The CMS and the API are two Workers on one hostname, so the session cookie is same-origin (docs/backend-plan.md#layout).
 
-- **The browser** calls `/api/...` on the page's own origin: Better Auth's client for sign-in and organizations. In a deployed environment, the API Worker's route takes `<host>/api/*` and the CMS takes the rest. If a request for `/api/*` reaches the CMS anyway, as it always does locally, `src/routes/api/$.ts` hands it to the API over the service binding unchanged.
+- **The browser** calls `/api/...` on the page's own origin: Better Auth's client for sign-in and organizations. In a deployed environment, the API Worker's route takes `<host>/api/*` and the CMS takes the rest. If a request for `/api/*` reaches the CMS anyway, as it always does locally, `src/routes/api/$.ts` hands it to the API over the service binding unchanged. `/v1/device/*` is the same (`src/routes/v1/device/$.ts`), for the test screen.
+- **The test screen** (M3-41) is the player build (`pnpm build:player`, in `dist/player`) at `/test-screen/`: `vite dev` serves it from there and `vite build` copies it into the site's assets (the `playerBuild` plugin in `vite.config.ts`, which serves the same build at `/player/` for the spot editor's stage). It talks to the device API on this origin, never with the session cookie (docs/architecture.md, "Browser test screen").
 - **Server code** (loaders, server functions) calls the API over the `API` service binding with the browser's cookies (`src/server/api.server.ts`). Any cookie the API sets on the way, such as Better Auth's refreshed cache cookie, is passed back to the browser.
 
-The CMS changes data only through Better Auth's endpoints (sign-in, sign-out, create and switch organization) and the API's tool registry: pages call `POST /api/tools/:name` from the browser (`src/lib/tools.ts`), and loaders read through the same tools as the member (`src/server/screens.functions.ts`). Do not add data routes here.
+The CMS changes data only through Better Auth's endpoints (sign-in, sign-out, create and switch organization; members, invitations and the org's name; your name and sessions) and the API's tool registry: pages call `POST /api/tools/:name` from the browser (`src/lib/tools.ts`), and loaders read through the same tools as the member (`src/server/screens.functions.ts`). Do not add data routes here.
 
 ## Look
 
@@ -28,7 +29,7 @@ pnpm --filter @signforge/api dev
 pnpm --filter @signforge/cms dev
 ```
 
-`dev` and `build` first build the player into `public/player/` (`pnpm player`), which the spot editor's stage frames at `/player/index.html?source=preview`. It is built with `CMS_ORIGIN` unset, so it takes drafts from the origin serving it: this one (docs/architecture.md, Content sources). The editor needs templates: with `ADMIN_TOKEN` set in `apps/api/.dev.vars`, `SF_ADMIN_TOKEN=<it> pnpm seed:templates --api http://localhost:8787` adds the base ones.
+The spot editor's stage frames the player build at `/player/index.html?source=preview`, served as the test screen is (below): run `pnpm build:player` first. It is built with `CMS_ORIGIN` unset, so it takes drafts from the origin serving it: this one (docs/architecture.md, Content sources). The editor needs templates: with `ADMIN_TOKEN` set in `apps/api/.dev.vars`, `SF_ADMIN_TOKEN=<it> pnpm seed:templates --api http://localhost:8787` adds the base ones.
 
 Open http://localhost:3000, enter any email address, and read the 6-digit code in the API's terminal (`[email] to you@example.com: Your SignForge code: 123456`). The sign-in page says this in dev. GitHub sign-in appears only when `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are set in `apps/api/.dev.vars`.
 
@@ -41,7 +42,7 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 | `pnpm --filter @signforge/cms typecheck` | `wrangler types --env dev`, then `tsc` |
 | `pnpm --filter @signforge/cms lint` | ESLint with the React rules below. Root `pnpm lint` runs Biome, then this through Turbo (task `lint`, cached) |
 | `pnpm --filter @signforge/cms test` | Unit tests (Vitest). `test/registry/` checks the command menu against the tool registry, under its own tsconfig: the tools package needs Workers types, which the CMS's DOM types do not load |
-| `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer; and on Screens, pair a screen (a pairing started on the API as a player would), see it sync, sleep and wake it, identify it, set its display hours, the tile and table views at desktop and phone width, and revoke it; and on Assets, upload images (scaled in the browser, PUT to the API's local bucket, checked by the server), search them, see which a spot uses, and delete one no spot uses; and on Spots, make a spot from a template, see the real player redraw as you type (and hold its last frame while a field is invalid), save the draft, keep someone else's change, and configure and preview every base template; and the command menu by keyboard alone (open, filter, pair a screen from a tool's form, run a tool at once, a refusal, go to a page, close). The screens, assets and command-menu specs sign in straight against the API, each under its own `cf-connecting-ip` (`signInAs` in `e2e/helpers.ts`), so each sign-in has its own rate limit (through the dev CMS every request has one address, and the other specs use that budget). It builds the player, starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, seeds the base templates through `/admin` with a token made for the run, so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
+| `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer; and on Screens, pair a screen (a pairing started on the API as a player would), see it sync, sleep and wake it, identify it, set its display hours, the tile and table views at desktop and phone width, and revoke it; and on Assets, upload images (scaled in the browser, PUT to the API's local bucket, checked by the server), search them, see which a spot uses, and delete one no spot uses; and on Spots, make a spot from a template, see the real player redraw as you type (and hold its last frame while a field is invalid), save the draft, keep someone else's change, and configure and preview every base template; and the command menu by keyboard alone (open, filter, pair a screen from a tool's form, run a tool at once, a refusal, go to a page, close); and Settings: an owner saves the org's name, time zone, locale, hours, alert wait and alert rules, invites an editor who follows the email's link and joins, sees the settings read-only, is made a viewer and removed; then the account page's name and theme. The screens, assets, command-menu and settings specs sign in straight against the API, each under its own `cf-connecting-ip` (`signInAs` in `e2e/helpers.ts`), so each sign-in has its own rate limit (through the dev CMS every request has one address, and the other specs use that budget). It builds the player, starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, seeds the base templates through `/admin` with the run's token (`e2e/servers.ts`), so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
 | `CLOUDFLARE_ENV=demo pnpm --filter @signforge/cms build` | Production build into `dist/` for that environment. Without `CLOUDFLARE_ENV` it fails: there is no default environment |
 
 ## Layout
@@ -53,6 +54,9 @@ src/routes/_app.tsx       signed-in layout: redirects signed-out visitors, picks
 src/routes/_app/*.tsx     Overview, Playlists, Schedule (placeholders); Assets, the image library
 src/routes/_app/spots/    Spots: the list, and one spot's editor (the form beside the live stage)
 src/routes/_app/screens/  Screens: tile wall or table (?view=table), and one screen's page
+src/routes/_app/settings/ Settings: General, Members & roles, Screens & groups, Notifications (owners change them; others read)
+src/routes/_app/account.tsx  Your account: name, sign-in methods, sessions, theme
+src/routes/accept-invitation.$invitationId.tsx  where an invitation email's link lands; outside the org gate
 src/components/screens/   status shapes and pills, thumbnails, pairing, display hours
 src/components/assets/    asset tiles, search, uploading images, and AssetPicker (the library in a dialog)
 src/components/spots/     FieldForm (a template's fields as a form), PlayerStage (the real player in an iframe), the new-spot dialog
@@ -62,8 +66,8 @@ src/components/command-menu.tsx  ⌘K: go to a section, or run a tool (entries f
 src/lib/screen-status.ts  a screen's state in words (the state itself comes from the screen tools)
 src/server/screens.functions.ts  the Screens loaders: tools called as the member, through one helper
 public/sign-in/           spots the player rendered (scripts/spot-shots.ts), for the sign-in wall
-public/player/            the player build, for the stage (`pnpm player`; not in git)
 src/routes/api/$.ts       `/api/*` handed to the API Worker
+src/routes/v1/device/$.ts `/v1/device/*` handed to the API Worker, for the test screen
 src/server/               server-only: the API binding, the shell's server functions
 src/state/                the app store: one slice per area (see State below)
 src/components/ui/        shadcn/ui components (components.json is set up for the shadcn CLI)

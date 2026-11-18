@@ -4,4 +4,3 @@ worker-configuration.d.ts
 test-results
 playwright-report
 .e2e
-public/player

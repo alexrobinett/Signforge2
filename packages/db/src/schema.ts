@@ -23,6 +23,7 @@
  * Every tenant `org_id` references Better Auth's `organization` table, with no cascade: an org
  * cannot be deleted while it holds content.
  */
+import { SCREEN_KINDS } from '@signforge/contract';
 import { sql } from 'drizzle-orm';
 import { check, customType, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
@@ -190,6 +191,8 @@ export const screens = sqliteTable(
     timezone: text('timezone').notNull(),
     locale: text('locale'),
     orientation: text('orientation', { enum: ['landscape', 'portrait'] }).notNull(),
+    /** The contract's `ScreenKind`: a device, or a test screen in a browser tab. Set at the claim, from what the screen said at pair start. */
+    kind: text('kind', { enum: SCREEN_KINDS }).notNull().default('device'),
     /** The contract's `DisplayHours`, or null for always on. */
     displayHoursJson: text('display_hours_json'),
     desiredManifestId: text('desired_manifest_id'),
@@ -278,6 +281,8 @@ export const pairingCodes = sqliteTable(
     id: text('id').primaryKey(),
     code: text('code').notNull(),
     pollTokenHash: text('poll_token_hash').notNull(),
+    /** What the screen said it is at pair start (contract `PairStartRequest`). */
+    kind: text('kind', { enum: SCREEN_KINDS }).notNull().default('device'),
     expiresAt: integer('expires_at').notNull(),
     claimedOrgId: text('claimed_org_id'),
     claimedScreenId: text('claimed_screen_id'),
@@ -508,9 +513,45 @@ export const orgSettings = sqliteTable(
       .primaryKey()
       .references(() => organization.id),
     defaultPlaylistId: text('default_playlist_id'),
+    /** Defaults for new screens (M3-42): IANA time zone, BCP 47 locale, the contract's `DisplayHours`. Null means not set. */
+    timezone: text('timezone'),
+    locale: text('locale'),
+    displayHoursJson: text('display_hours_json'),
+    /** `{ from, to }` as HH:MM local time: when player and system updates may run. Null for the default. */
+    updateWindowJson: text('update_window_json'),
+    /** How long a screen may go unheard from before it alerts. Null for the default (15 minutes). */
+    unreachableAfterMs: integer('unreachable_after_ms'),
+    /** Who gets which alert, by email (packages/tools `alerts`). Null for the defaults. */
+    alertsJson: text('alerts_json'),
+    /** An org with no row has every default, at version 1; each `settings.stage.set` moves it on. */
+    rowVersion: rowVersion(),
     updatedAt: updated(),
   },
   (t) => [foreignKey({ columns: [t.orgId, t.defaultPlaylistId], foreignColumns: [playlists.orgId, playlists.id] })],
+);
+
+/**
+ * A screen's incidents (M3-42): one row from when it was found unheard from past the org's
+ * threshold until it was heard from again. At most one open per screen (the partial index), so
+ * an alert is sent once per incident however often the check runs.
+ */
+export const screenIncidents = sqliteTable(
+  'screen_incidents',
+  {
+    id: text('id').primaryKey(),
+    orgId: orgId(),
+    screenId: text('screen_id').notNull(),
+    kind: text('kind', { enum: ['offline'] }).notNull(),
+    /** The screen's `last_seen_at` when the incident opened; it clears once the screen is seen after it. */
+    lastSeenAt: integer('last_seen_at').notNull(),
+    openedAt: integer('opened_at').notNull(),
+    clearedAt: integer('cleared_at'),
+  },
+  (t) => [
+    uniqueIndex('screen_incidents_org_id_uq').on(t.orgId, t.id),
+    uniqueIndex('screen_incidents_open_uq').on(t.orgId, t.screenId, t.kind).where(sql`${t.clearedAt} IS NULL`),
+    foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
+  ],
 );
 
 // --------------------------------------------------------------------- brand

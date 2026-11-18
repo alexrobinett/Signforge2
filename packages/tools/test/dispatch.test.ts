@@ -62,6 +62,7 @@ describe('the registry', () => {
       'get_asset',
       'get_brand_kit',
       'get_data_source',
+      'get_org_settings',
       'get_screen',
       'get_spot',
       'get_spot_preview',
@@ -89,6 +90,7 @@ describe('the registry', () => {
       'set_template_version_status',
       'update_brand_kit',
       'update_data_source',
+      'update_org_settings',
       'update_screen_settings',
       'update_spot',
     ]);
@@ -159,6 +161,7 @@ describe('roles and scopes', () => {
       'get_asset',
       'get_brand_kit',
       'get_data_source',
+      'get_org_settings',
       'get_screen',
       'get_spot',
       'get_spot_preview',
@@ -174,6 +177,7 @@ describe('roles and scopes', () => {
     ]);
     expect(names('editor')).not.toContain('revoke_screen_credential');
     expect(names('editor')).not.toContain('set_template_version_status');
+    expect(names('editor')).not.toContain('update_org_settings');
     expect(names('owner')).toHaveLength(TOOLS.length);
     const listed = describeTools(registry, { role: 'owner' }).find((t) => t.name === 'rename_screen')!;
     expect(listed).toMatchObject({ scope: 'screens:manage', minRole: 'editor', mutates: true });
@@ -354,6 +358,20 @@ describe('screen notices', () => {
   });
 });
 
+describe('claim_screen', () => {
+  it('makes a screen of the kind the screen said it is at pair start', async () => {
+    const { startPairing } = await import('@signforge/db');
+    await startPairing(env.DB, { code: 'TAB234', pollTokenHash: '8'.repeat(64), kind: 'browser', now: Date.now() });
+    const r = await dispatch(
+      registry,
+      'claim_screen',
+      { code: 'TAB234', name: 'Test screen', timezone: 'UTC', orientation: 'landscape' },
+      { ...caller('editor'), rateLimit: async () => true },
+    );
+    expect(r).toMatchObject({ ok: true, output: { screen: { name: 'Test screen', kind: 'browser' } } });
+  });
+});
+
 describe('claim_screen racing', () => {
   it('refuses the loser of two claims on one code cleanly, writing nothing', async () => {
     const { startPairing } = await import('@signforge/db');
@@ -367,7 +385,7 @@ describe('claim_screen racing', () => {
     const org = scoped(env.DB, o.orgId);
     const before = await org.screens.list();
     let checks = 0;
-    const stale = { ...org, pairing: { ...org.pairing, open: async (c: string, now: number) => checks++ === 0 || org.pairing.open(c, now) } };
+    const stale = { ...org, pairing: { ...org.pairing, open: async (c: string, now: number) => (checks++ === 0 ? 'device' : org.pairing.open(c, now)) } };
     const loser = await dispatch(registry, 'claim_screen', input, { ...caller('editor'), org: stale, rateLimit: async () => true });
     expect(loser).toMatchObject({ ok: false, error: 'not_found' });
     expect(await org.screens.list()).toEqual(before);

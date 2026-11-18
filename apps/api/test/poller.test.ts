@@ -236,14 +236,20 @@ describe('pollDataSources', () => {
     expect(await o.scope.dataSources.get(id)).toMatchObject({ failures: 0, lastError: null });
   });
 
-  it('runs from the Cron Trigger, at the time it was scheduled for', async () => {
+  it('runs from the one-minute Cron Trigger only, at the time it was scheduled for', async () => {
     // Only one source due, at a local name: the guard refuses it before any request, so the Worker's real fetch and DNS are never reached.
     for (const d of await o.scope.dataSources.list()) await o.scope.dataSources.update(d.id, { nextPollAt: Number.MAX_SAFE_INTEGER });
     const id = await source('json', 'https://printer.local/feed');
     const at = NOW + 365 * 24 * 60 * MIN;
-    const ctx = createExecutionContext();
-    await worker.scheduled(createScheduledController({ scheduledTime: at, cron: '* * * * *' }), env, ctx);
-    await waitOnExecutionContext(ctx);
+    const run = async (cron: string) => {
+      const ctx = createExecutionContext();
+      await worker.scheduled(createScheduledController({ scheduledTime: at, cron }), env, ctx);
+      await waitOnExecutionContext(ctx);
+    };
+    // The five-minute trigger is the offline alert check's: it polls nothing.
+    await run('*/5 * * * *');
+    expect(await scoped(env.DB, o.orgId).dataSources.get(id)).toMatchObject({ failures: 0, lastError: null });
+    await run('* * * * *');
     expect(await scoped(env.DB, o.orgId).dataSources.get(id)).toMatchObject({ failures: 1, lastError: 'private-address', nextPollAt: at + 10 * MIN });
   });
 });
