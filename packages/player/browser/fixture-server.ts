@@ -338,10 +338,15 @@ export class FixtureServer {
     }
   }
 
-  /** The supervisor's credential and token routes; everything else it has nothing for. */
+  /** The supervisor's credential, token and display power routes; everything else it has nothing for. */
   private supervisor(req: IncomingMessage, rest: string, send: (status: number, body?: string, type?: string) => void): void {
     const json = (status: number, body: unknown) => send(status, JSON.stringify(body), 'application/json');
     if (rest === 'token' && req.method === 'GET') return json(200, { token: SUPERVISOR_TOKEN });
+    // As device/pi/supervisor.py answers a switch: its state, and how each method went.
+    if ((rest === 'display/on' || rest === 'display/off') && req.method === 'POST') {
+      if (req.headers['x-sf-token'] !== SUPERVISOR_TOKEN) return json(403, { error: 'forbidden' });
+      return json(200, { on: rest === 'display/on', signal: 'ok', cec: 'not acknowledged' });
+    }
     if (rest !== 'credential') return send(404, '');
     if (req.method === 'GET') {
       return this.supervisorCredential

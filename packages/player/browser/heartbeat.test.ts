@@ -120,6 +120,18 @@ describe('the clock', () => {
 });
 
 describe('an untrusted clock', () => {
+  it('asks for the panel on with nothing cached to play', async () => {
+    const p = await h.openPlayer((s) => s.intercept(/^\/content\//, { status: 503 }), api);
+    await p.until((s) => !s.online);
+    await p.page.evaluate((syncedAt) => localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: 0, syncedAt })), Date.now() + 86_400_000);
+    await p.page.reload();
+    const s = await p.until((s) => !s.clock.trusted && !s.online);
+    expect(s.manifestId).toBe('');
+    await expect
+      .poll(() => p.server.requestsTo(/^\/supervisor\/display\//).map((r) => `${r.path} ${r.status}`), { timeout: 5000 })
+      .toEqual(['/supervisor/display/on 200']);
+  });
+
   it('leaves a saved override alone while syncs fail', async () => {
     const content = h.content([{ id: 'a', durationMs: 500 }]);
     const p = await h.openPlayer((s) => s.publish(content), api);

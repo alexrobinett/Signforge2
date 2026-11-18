@@ -540,57 +540,70 @@ async function playbackLoop(): Promise<never> {
 /** What the supervisor reported for each power method at the last switch, for the heartbeat. */
 let displayMethods: Record<string, string> | undefined;
 
-/** Ask the device supervisor to power the panel. Without one (a browser, the demo) the player just goes dark. */
-async function setPanel(on: boolean): Promise<void> {
-  if (KIND === 'browser') return void (state.display = 'browser: no panel');
+/** Ask the device supervisor to power the panel; true once it confirms. Without one (a browser, the demo) the player just goes dark. */
+async function setPanel(on: boolean): Promise<boolean> {
+  if (KIND === 'browser') {
+    state.display = 'browser: no panel';
+    return true;
+  }
   try {
     const res = await supervisorFetch(`/display/${on ? 'on' : 'off'}`, { method: 'POST' });
     if (res.ok) {
       const reply = (await res.json()) as Record<string, unknown>;
       state.display = JSON.stringify(reply);
       displayMethods = Object.fromEntries(Object.entries(reply).filter((e): e is [string, string] => typeof e[1] === 'string'));
-    } else state.display = `supervisor ${res.status}`;
+      return true;
+    }
+    state.display = `supervisor ${res.status}`;
   } catch {
     state.display = 'no supervisor';
   }
+  return false;
 }
+
+/** A switch the supervisor did not confirm (restarting, busy) is asked for again this soon. */
+const PANEL_RETRY_MS = 5000;
 
 /** Follow the screen's display hours. Checked often rather than timed, so clock and DST changes are harmless. */
 const display = wakeable();
 async function displayLoop(): Promise<never> {
+  /** What the loop last decided: playback follows this. */
   let applied: boolean | undefined;
+  /** The switch the supervisor last confirmed. */
+  let confirmed: boolean | undefined;
   return loopRestartingOnError('display', async () => {
-    if (manifest) {
-      // An untrusted clock is behind, by any amount: neither the hours nor a saved override can be
-      // read against it, and a dark screen in opening hours is the worse mistake. The first good
-      // sync wakes this loop to read them again.
-      let on = true;
-      if (clock.trusted) {
-        const at = new Date(now());
-        const override = activeOverride(at);
-        on = override ? override.state === 'on' : displayOn(manifest.screen.displayHours, localTime(at, manifest.screen.timezone));
+    // An untrusted clock is behind, by any amount: neither the hours nor a saved override can be
+    // read against it, and a dark screen in opening hours is the worse mistake, with or without
+    // content to show. The first good sync wakes this loop to read them again.
+    let on: boolean | undefined;
+    if (!clock.trusted) on = true;
+    else if (manifest) {
+      const at = new Date(now());
+      const override = activeOverride(at);
+      on = override ? override.state === 'on' : displayOn(manifest.screen.displayHours, localTime(at, manifest.screen.timezone));
+    }
+    if (on !== undefined && on !== applied) {
+      applied = on;
+      console.info(`[sf] display ${on ? 'on' : 'off'}`);
+      if (on) {
+        // Never let a slow or missing supervisor keep the screen dark during opening hours.
+        confirmed = (await Promise.race([setPanel(true), sleep(6000).then(() => false)])) ? true : undefined;
+        // A panel takes a few seconds to lock onto a returning signal or come out of standby;
+        // start after that so the first spot's intro is seen and the mode change is not measured.
+        await sleep(3000);
+        resetSleepSignal();
+        state.displayOn = true; // wakes the playback loop
+      } else {
+        state.displayOn = false;
+        markAsleep();
+        await sleep(1500); // let the playback loop clear the slots before the signal goes
+        confirmed = (await setPanel(false)) ? false : undefined;
       }
-      if (on !== applied) {
-        applied = on;
-        console.info(`[sf] display ${on ? 'on' : 'off'}`);
-        if (on) {
-          // Never let a slow or missing supervisor keep the screen dark during opening hours.
-          await Promise.race([setPanel(true), sleep(6000)]);
-          // A panel takes a few seconds to lock onto a returning signal or come out of standby;
-          // start after that so the first spot's intro is seen and the mode change is not measured.
-          await sleep(3000);
-          resetSleepSignal();
-          state.displayOn = true; // wakes the playback loop
-        } else {
-          state.displayOn = false;
-          markAsleep();
-          await sleep(1500); // let the playback loop clear the slots before the signal goes
-          await setPanel(false);
-        }
-      }
+    } else if (applied !== undefined && confirmed !== applied) {
+      confirmed = (await setPanel(applied)) ? applied : undefined;
     }
     // A display override from the socket wakes this at once.
-    await display.wait(15_000);
+    await display.wait(confirmed === applied ? 15_000 : PANEL_RETRY_MS);
   });
 }
 
