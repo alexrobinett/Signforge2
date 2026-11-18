@@ -7,5 +7,6 @@ export function screenNotifier(env: Pick<Env, 'SCREENS'>): ScreenNotifier {
   return {
     manifest: (screenId, manifestId) => screenObject(env, screenId).manifest(manifestId),
     revoked: (screenId, credentialId) => screenObject(env, screenId).revoked(credentialId),
+    command: (screenId, command) => screenObject(env, screenId).command(command),
   };
 }

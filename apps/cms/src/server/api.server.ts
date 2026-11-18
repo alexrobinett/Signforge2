@@ -9,17 +9,23 @@ import { appendResponseHeader, getRequest } from '@tanstack/react-start/server';
 const FORWARDED = ['cookie', 'cf-connecting-ip', 'user-agent', 'accept-language'];
 
 /**
- * Call the API as the signed-in browser, from server code. Any cookie the API sets (Better Auth
+ * Call the API as the signed-in browser, from server code: a GET, or a JSON POST with `body` (a tool's input). Any cookie the API sets (Better Auth
  * refreshing its cache cookie) goes back to the browser, which must keep every one of them.
  */
-export async function callApi(path: `/api/${string}`): Promise<Response> {
+export async function callApi(path: `/api/${string}`, body?: unknown): Promise<Response> {
   const incoming = getRequest();
   const headers = new Headers({ accept: 'application/json' });
   for (const name of FORWARDED) {
     const value = incoming.headers.get(name);
     if (value) headers.set(name, value);
   }
-  const res = await env.API.fetch(new Request(new URL(path, incoming.url), { headers }));
+  const init: RequestInit = { headers };
+  if (body !== undefined) {
+    headers.set('content-type', 'application/json');
+    init.method = 'POST';
+    init.body = JSON.stringify(body);
+  }
+  const res = await env.API.fetch(new Request(new URL(path, incoming.url), init));
   for (const cookie of res.headers.getSetCookie()) appendResponseHeader('set-cookie', cookie);
   return res;
 }
