@@ -321,6 +321,18 @@ describe('concurrent publishes (R09)', () => {
     expect(await desiredOn(org, lobby.id)).toBe(manifestOn(newer!, lobby.id));
   });
 
+  it('refuses a playlist promotion whose items were read before an items edit and its version after (review 2)', async () => {
+    const { org } = await seedSmallOrg('pub-race-items');
+    await commitPublish(org, await publishOrg(org, opts));
+    await org.playlists.setItems(x('main'), [x('still'), x('deal')]);
+    const slow = interleave(org.playlists.allItems, org.playlists.list, () => org.playlists.setItems(x('main'), [x('deal')]));
+    const stale = await publishOrg({ ...org, playlists: { ...org.playlists, allItems: slow.first, list: slow.read } }, opts);
+    expect(stale.drafts.promoted).toContainEqual({ kind: 'playlist', id: x('main') });
+
+    await expect(commitPublish(org, stale)).rejects.toBeInstanceOf(StaleVersionError);
+    expect(published((await org.playlists.get(x('main')))!)!.items).toEqual([x('deal'), x('still')]);
+  });
+
   it('refuses an older publish that commits after a newer one, so the newest content stays on screen', async () => {
     const { org, lobby } = await seedSmallOrg('pub-race-old');
     await commitPublish(org, await publishOrg(org, opts));

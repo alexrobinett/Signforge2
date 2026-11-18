@@ -52,7 +52,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 
 ## Publishing
 
-1. **Compile.** `loadOrg` (`packages/tools/src/publishing.ts`) reads the org's data in one round of about a dozen parallel queries, promotes drafts (below), and `packages/compiler` builds each target screen's manifest from the published graph. A manifest's ID is the hash of its body, so a screen whose content did not change is skipped. A screen that cannot compile keeps its manifest and is reported; the others publish.
+1. **Compile.** `loadOrg` (`packages/tools/src/publishing.ts`) reads the org's settings, with its publish revision, then the rest of its data in one round of about a dozen parallel queries (a playlist's items only after its version: see Drafts), promotes drafts (below), and `packages/compiler` builds each target screen's manifest from the published graph. A manifest's ID is the hash of its body, so a screen whose content did not change is skipped. A screen that cannot compile keeps its manifest and is reported; the others publish.
 2. **Fan out** through a Queue, 50 screens per batch. Per screen: one R2 write, one D1 row, one call to its Durable Object, so 150 calls per batch. D1, R2 and Durable Object calls share the per-invocation limit on calls to Cloudflare services: 1,000 on Free (measured), 10,000 by default on Paid. External `fetch` is limited separately, to 50 on Free. Write a batch's D1 rows in one `batch()` and make the Durable Object calls concurrently: done one at a time, a batch of 50 took 13 to 25 seconds.
 3. **Timed publish.** A per-org Durable Object holds the alarm and serialises publishes for that org. It wakes only when a publish is due.
 

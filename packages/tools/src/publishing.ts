@@ -72,7 +72,7 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
   // The publish revision first, before any content: a publish that commits after this read moves
   // it on, so whatever it changed cannot be in what is read below without failing the guard.
   const settings = await org.settings.get();
-  const [screens, members, versions, assets, renditions, dataSources, spots, playlists, items, entries] = await Promise.all([
+  const [screens, members, versions, assets, renditions, dataSources, spots, [playlists, items], entries] = await Promise.all([
     org.screens.list(),
     org.screenGroups.allMembers(),
     org.templates.versions.list(),
@@ -80,8 +80,9 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     org.assets.renditions.list(),
     org.dataSources.list(),
     org.spots.list(),
-    org.playlists.list(),
-    org.playlists.allItems(),
+    // Versions before items: an items edit moves its playlist's version on, so items newer than
+    // the version read fail that playlist's promotion guard instead of publishing unseen.
+    org.playlists.list().then(async (p) => [p, await org.playlists.allItems()] as const),
     org.scheduleEntries.list(),
   ]);
   const [brandKits, brandAssignments] = await Promise.all([org.brandKits.list(), org.brandKits.assignments.list()]);
