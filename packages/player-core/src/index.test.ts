@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
+import { SNAPSHOT_STALE_MS } from '@signforge/contract';
 import { Sequencer, displayOn, entryApplies, localTime, planSync, resolvePlaylist, resolveSpotData, snapshotFit, spotFiles, validateManifest } from './index';
 
 const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${id}`, fit: 'cover', durationMs: 5000 });
@@ -171,7 +172,14 @@ describe('Sequencer', () => {
 });
 
 describe('live data', () => {
-  const weather = { id: 'weather', version: 1, fetchedAt: 'now', data: { current: { temp: 41.2 }, daily: { max: [60.6] }, city: 7 } };
+  const NOW = Date.parse('2026-11-17T12:00:00Z');
+  const weather = {
+    id: 'weather',
+    version: 1,
+    fetchedAt: '2026-11-17T09:00:00Z',
+    checkedAt: '2026-11-17T11:55:00Z',
+    data: { current: { temp: 41.2 }, daily: { max: [60.6] }, city: 7 },
+  };
   const fields: Record<string, FieldDef> = {
     city: { type: 'text', label: 'City' },
     temp: { type: 'number', label: 'Temp', min: -100, max: 100 },
@@ -189,16 +197,23 @@ describe('live data', () => {
   };
 
   it('overlays snapshot values on the static data', () => {
-    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]))).toEqual({ data: { city: 'Atlanta', temp: 41.2, high: 60.6 }, rejected: [] });
+    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]), NOW)).toEqual({ data: { city: 'Atlanta', temp: 41.2, high: 60.6 }, rejected: [] });
   });
 
   it('falls back to the static value when there is no snapshot yet', () => {
-    expect(resolveSpotData(bound, fields, new Map())).toEqual({ data: bound.data, rejected: [] });
+    expect(resolveSpotData(bound, fields, new Map(), NOW)).toEqual({ data: bound.data, rejected: [] });
+  });
+
+  it('falls back to the static value once the server has not confirmed the snapshot for a day', () => {
+    const at = (checkedAt: string) => resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), NOW).data;
+    expect(SNAPSHOT_STALE_MS).toBe(24 * 3_600_000);
+    expect(at('2026-11-16T12:00:00Z')).toEqual({ city: 'Atlanta', temp: 41.2, high: 60.6 });
+    expect(at('2026-11-16T11:59:59Z')).toEqual(bound.data);
   });
 
   it('keeps the static value for a live value that does not fit its field, and says why', () => {
     const hot = { ...weather, data: { current: { temp: 400 }, daily: {} } };
-    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]))).toEqual({
+    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]), NOW)).toEqual({
       data: bound.data,
       rejected: [
         { source: 'weather', problem: 'field "temp" must be at most 100' },

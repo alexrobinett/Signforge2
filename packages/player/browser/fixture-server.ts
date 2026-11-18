@@ -267,10 +267,12 @@ export class FixtureServer {
             this.acked.set(sync.epoch, sync.seq);
           }
           const held = sync.snapshots ?? {};
-          const snapshots = [...this.data.values()].filter((d) => {
-            const snap = d as { id: string; version: number };
-            return snap.version > (held[snap.id] ?? -1);
-          });
+          const all = [...this.data.values()] as { id: string; version: number; checkedAt: string }[];
+          const snapshots = all.filter((snap) => snap.version > (held[snap.id] ?? -1));
+          // As the API does: when each snapshot the screen holds at its version was last checked.
+          const checked = Object.fromEntries(
+            all.filter((snap) => snap.version === held[snap.id]).map((snap) => [snap.id, { version: snap.version, checkedAt: snap.checkedAt }]),
+          );
           const reply = {
             serverTime: new Date(Date.now() + this.serverOffsetMs).toISOString(),
             nextSyncS: this.nextSyncS,
@@ -278,6 +280,7 @@ export class FixtureServer {
             ackSeq: this.acked.get(sync.epoch) ?? 0,
             ...(c ? { desiredManifest: c.manifest.id } : {}),
             snapshots,
+            checked,
             socketTicket: `ticket-${this.syncs.length}`,
             commands: this.commands.splice(0),
           };

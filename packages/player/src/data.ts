@@ -10,7 +10,7 @@
  * again when a spot plays (`resolveSpotData`), so a value that does not fit leaves the spot's
  * fallback on screen. Every refusal is counted against its source in `dataRejections`.
  */
-import { validateDataSnapshot, type DataSnapshot, type ScreenManifest } from '@signforge/contract';
+import { MIN_REFRESH_S, validateDataSnapshot, type DataSnapshot, type ScreenManifest, type SyncResponse } from '@signforge/contract';
 import { snapshotFit, type Rejected } from '@signforge/player-core';
 
 const STATE = 'sf-state-v1';
@@ -19,7 +19,8 @@ const key = (id: string) => `/_sf/data/${id}`;
 const snapshots = new Map<string, DataSnapshot>();
 /** The highest version offered per source, kept or refused: reported on sync so a refused one is not sent again. */
 const seen = new Map<string, number>();
-const checkedAt = new Map<string, number>();
+/** When static content last fetched each source's file. */
+const fetchedAt = new Map<string, number>();
 /** Sources whose first load has finished, with or without data. */
 const settled = new Set<string>();
 const waiters = new Set<() => void>();
@@ -56,8 +57,14 @@ export const liveData: ReadonlyMap<string, DataSnapshot> = snapshots;
 async function restore(id: string): Promise<void> {
   if (snapshots.has(id)) return;
   const res = await (await caches.open(STATE)).match(key(id));
-  if (res) snapshots.set(id, (await res.json()) as DataSnapshot);
+  if (!res) return;
+  const stored = (await res.json()) as DataSnapshot;
+  // A copy stored before snapshots carried checkedAt (M3-23) counts as checked when fetched; the next sync's `checked` moves it on.
+  snapshots.set(id, { ...stored, checkedAt: stored.checkedAt ?? stored.fetchedAt });
 }
+
+const store = async (id: string, snap: DataSnapshot) =>
+  (await caches.open(STATE)).put(key(id), new Response(JSON.stringify(snap), { headers: { 'content-type': 'application/json' } }));
 
 /** Keep `next` as the source's latest if it is well formed, newer, and fits a bound field. */
 async function offer(id: string, next: DataSnapshot, manifest: ScreenManifest | undefined): Promise<void> {
@@ -78,7 +85,7 @@ async function offer(id: string, next: DataSnapshot, manifest: ScreenManifest | 
     return;
   }
   snapshots.set(id, next);
-  await (await caches.open(STATE)).put(key(id), new Response(JSON.stringify(next), { headers: { 'content-type': 'application/json' } }));
+  await store(id, next);
 }
 
 async function refresh(base: string, id: string, manifest: ScreenManifest, headers: Record<string, string>): Promise<void> {
@@ -96,6 +103,21 @@ export async function offerSnapshots(list: readonly DataSnapshot[], manifest: Sc
   for (const snap of list)
     await offer(String((snap as { id?: unknown }).id), snap, manifest).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
   settleSources(manifest);
+}
+
+/**
+ * A sync's `checked`: the server confirmed a snapshot again without sending its data. Moves on the
+ * held copy's `checkedAt` (which staleness counts from) only for the version it names, so a
+ * refused newer version never freshens the older copy still held.
+ */
+export async function offerChecked(checked: NonNullable<SyncResponse['checked']>): Promise<void> {
+  for (const [id, c] of Object.entries(checked)) {
+    const held = snapshots.get(id);
+    if (!held || held.version !== c.version || Date.parse(c.checkedAt) <= Date.parse(held.checkedAt)) continue;
+    const next = { ...held, checkedAt: c.checkedAt };
+    snapshots.set(id, next);
+    await store(id, next).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+  }
 }
 
 /** Load the stored snapshots of `manifest`'s sources, for a screen whose data comes on sync. */
@@ -116,7 +138,7 @@ export function heldVersions(): Record<string, number> {
 }
 
 /**
- * Static content: keep every source in the current manifest fresh by fetching it. Returns `wake`, which runs a pass now: call it
+ * Static content: keep every source in the current manifest fresh by fetching its file each minute. Returns `wake`, which runs a pass now: call it
  * when a manifest is adopted, so a fresh screen does not wait for the next scheduled pass (on a
  * cold boot the first pass runs before any manifest has loaded and finds no sources). Fetch
  * failures are silent: the last good value stays.
@@ -129,9 +151,10 @@ export function startDataLoop(
   // Every source at once: one slow feed must not hold back the others.
   const one = async (m: ScreenManifest, s: ScreenManifest['dataSources'][string]) => {
     await restore(s.id).catch(() => undefined);
-    const last = checkedAt.get(s.id) ?? 0;
-    if (Date.now() - last >= s.refreshS * 1000) {
-      checkedAt.set(s.id, Date.now());
+    // Every source once a minute: `refreshS` is the server's poll interval, not the screen's.
+    const last = fetchedAt.get(s.id) ?? 0;
+    if (Date.now() - last >= MIN_REFRESH_S * 1000) {
+      fetchedAt.set(s.id, Date.now());
       await refresh(base, s.id, m, await headers()).catch(() => undefined);
     }
     if (!settled.has(s.id)) markSettled(s.id);

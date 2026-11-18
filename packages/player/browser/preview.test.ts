@@ -192,7 +192,13 @@ describe('preview content source', () => {
     const p = await openPreview(CMS);
     await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'listening' });
     const c = draft({ items: [{ title: 'Fallback' }], bindings: { items: { source: 'news', path: 'stories' } } });
-    const snap: DataSnapshot = { id: 'news', version: 1, fetchedAt: new Date().toISOString(), data: { stories: [{ title: 'Live story' }] } };
+    const snap: DataSnapshot = {
+      id: 'news',
+      version: 1,
+      fetchedAt: new Date().toISOString(),
+      checkedAt: new Date().toISOString(),
+      data: { stories: [{ title: 'Live story' }] },
+    };
     await p.post(c, { data: [snap] });
     await p.until((s) => s.played >= 1);
     await expect.poll(p.onScreen).toMatchObject({ items: 'Live story' });
