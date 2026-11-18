@@ -1,6 +1,7 @@
 /**
  * The screen's Durable Object (docs/backend-plan.md, Screens), one per screen, named by screen id.
- * It holds the screen's nudge socket and the desired manifest id.
+ * It holds the screen's nudge socket. The desired manifest id is in D1 (`screens.desired_manifest_id`),
+ * where sync and the manifest route read it.
  *
  * The socket hibernates: between messages the object is evicted and costs nothing. The screen's
  * keepalive (`ping`) is answered by the runtime (`setWebSocketAutoResponse`) without waking it.
@@ -58,7 +59,6 @@ export class ScreenObject extends DurableObject<Env> {
 
   /** A new desired manifest: tell the screen to sync now. */
   async manifest(id: string): Promise<void> {
-    await this.ctx.storage.put('desired', id);
     await this.send({ type: 'manifest', id });
   }
 
@@ -71,11 +71,6 @@ export class ScreenObject extends DurableObject<Env> {
   async revoked(credentialId: string): Promise<void> {
     await this.ctx.storage.put(revokedKey(credentialId), true);
     for (const ws of this.ctx.getWebSockets(credentialId)) closeRevoked(ws);
-  }
-
-  /** The desired manifest id, for tests and debugging. The reported one is in D1. */
-  async manifests(): Promise<{ desired?: string }> {
-    return { desired: await this.ctx.storage.get<string>('desired') };
   }
 
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {

@@ -62,7 +62,7 @@ A remote cache would share Turbo's cache with laptops and across pull requests. 
 
 ## Measured
 
-Wall time of each run, from creation to its last update, on GitHub's `ubuntu-24.04` runners, 2026-11-18. The baseline is the workflow before this change, which ran everything on every run. The docs, feeds and player rows are throwaway pull requests on top of this change (#9, #10, #11), each touching one place. They started with cold caches: a pull request reads only its own caches and `master`'s, and `master` has not run this workflow yet.
+Wall time of each run, from creation to its last update, on GitHub's `ubuntu-24.04` runners, 2026-11-18. The baseline is the workflow before this change, which ran everything on every run. The docs, feeds and player rows are throwaway pull requests on top of this change (#9, #10, #11), each touching one place. They started with cold caches: a pull request reads only its own caches and `master`'s, and `master` had not run this workflow yet.
 
 | Change | Wall time | What ran |
 | --- | ---: | --- |
