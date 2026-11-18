@@ -38,8 +38,8 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 | --- | --- |
 | `pnpm --filter @signforge/cms typecheck` | `wrangler types --env dev`, then `tsc` |
 | `pnpm --filter @signforge/cms lint` | ESLint with the React rules below. Root `pnpm lint` runs Biome, then this through Turbo (task `lint`, cached) |
-| `pnpm --filter @signforge/cms test` | Unit tests (Vitest) |
-| `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer; and on Screens, pair a screen (a pairing started on the API as a player would), see it sync, sleep and wake it, identify it, set its display hours, the tile and table views at desktop and phone width, and revoke it; and on Assets, upload images (scaled in the browser, PUT to the API's local bucket, checked by the server), search them, see which a spot uses, and delete one no spot uses. The screens and assets specs sign in straight against the API, each under its own `cf-connecting-ip`, so each sign-in has its own rate limit (through the dev CMS every request has one address, and the other specs use that budget). It starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
+| `pnpm --filter @signforge/cms test` | Unit tests (Vitest). `test/registry/` checks the command menu against the tool registry, under its own tsconfig: the tools package needs Workers types, which the CMS's DOM types do not load |
+| `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer; and on Screens, pair a screen (a pairing started on the API as a player would), see it sync, sleep and wake it, identify it, set its display hours, the tile and table views at desktop and phone width, and revoke it; and on Assets, upload images (scaled in the browser, PUT to the API's local bucket, checked by the server), search them, see which a spot uses, and delete one no spot uses; and the command menu by keyboard alone (open, filter, pair a screen from a tool's form, run a tool at once, a refusal, go to a page, close). The screens, assets and command-menu specs sign in straight against the API, each under its own `cf-connecting-ip` (`signInAs` in `e2e/helpers.ts`), so each sign-in has its own rate limit (through the dev CMS every request has one address, and the other specs use that budget). It starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
 | `CLOUDFLARE_ENV=demo pnpm --filter @signforge/cms build` | Production build into `dist/` for that environment. Without `CLOUDFLARE_ENV` it fails: there is no default environment |
 
 ## Layout
@@ -52,6 +52,7 @@ src/routes/_app/*.tsx     Overview, Spots, Playlists, Schedule (placeholders); A
 src/routes/_app/screens/  Screens: tile wall or table (?view=table), and one screen's page
 src/components/screens/   status shapes and pills, thumbnails, pairing, display hours
 src/components/assets/    asset tiles, search, uploading images, and AssetPicker (the library in a dialog)
+src/components/command-menu.tsx  ⌘K: go to a section, or run a tool (entries from src/lib/command-menu.ts)
 src/lib/screen-status.ts  a screen's state in words (the state itself comes from the screen tools)
 src/server/screens.functions.ts  the Screens loaders: tools called as the member, through one helper
 public/sign-in/           spots the player rendered (scripts/spot-shots.ts), for the sign-in wall
@@ -60,6 +61,15 @@ src/server/               server-only: the API binding, the shell's server funct
 src/state/                the app store: one slice per area (see State below)
 src/components/ui/        shadcn/ui components (components.json is set up for the shadcn CLI)
 ```
+
+## Command menu
+
+⌘K or Ctrl+K on any signed-in page, or "Search and actions" in the sidebar, opens it. It lists:
+
+- **Every section of the sidebar** (`SECTIONS` in `src/lib/sections.ts`). A new page gets its "Go to" entry by being added there, with nothing to change in the menu.
+- **Every tool the member's role allows**, read with the shell from `GET /api/tools` (the registry's `describeTools`, the list an agent gets), named from the first sentence of the tool's description. A tool with a required input opens a form built from its input's JSON Schema (text, number, choice, checkbox, or JSON for lists and objects; an idempotency key is filled in); one without runs at once. A field named like a route param (`screenId` on a screen's page) starts with the page's value. Results and refusals are toasts (`sonner`); a refusal keeps the form open.
+
+It opens with no motion (docs/research/cms-ux.md). State is the `commandMenu` slice (`src/state/command-menu.ts`).
 
 ## React rules
 
