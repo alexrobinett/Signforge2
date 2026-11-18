@@ -13,6 +13,7 @@ import {
   parseDisplayHours,
   parseManifest,
   parsePairPollResponse,
+  parsePairStartRequest,
   parsePairStartResponse,
   parsePreviewHostMessage,
   parseServerSocketMessage,
@@ -32,6 +33,7 @@ import {
   validateDeviceSocketMessage,
   validateManifest,
   validatePairPollResponse,
+  validatePairStartRequest,
   validatePairStartResponse,
   validatePreviewHostMessage,
   validateServerSocketMessage,
@@ -234,6 +236,7 @@ const validators: [string, (v: unknown) => string[], (() => unknown)?][] = [
   ['validateBrandKit', validateBrandKit, validBrand],
   ['validateBoundValue', (v) => validateBoundValue(template.fields, 'items', v), () => [{ name: 'Soup', hot: true }]],
   ['displayHoursProblems', displayHoursProblems, () => validManifest().screen.displayHours],
+  ['validatePairStartRequest', validatePairStartRequest, () => ({ kind: 'browser' })],
   ['validatePairStartResponse', validatePairStartResponse, () => ({ code: 'ABC123', pollToken: 'p', expiresAt: '2026-11-17T13:15:00Z' })],
   ['validatePairPollResponse', validatePairPollResponse, () => ({ status: 'paired', screenId: 's1', credential: 'sfd_s1.secret' })],
   ['validateSyncRequest', validateSyncRequest, validSyncRequest],
@@ -272,6 +275,7 @@ const parsers: [string, (v: unknown) => unknown, (v: unknown) => string[]][] = [
   ['parseDataSnapshot', parseDataSnapshot, validateDataSnapshot],
   ['parseBrandKit', parseBrandKit, validateBrandKit],
   ['parseDisplayHours', parseDisplayHours, displayHoursProblems],
+  ['parsePairStartRequest', parsePairStartRequest, validatePairStartRequest],
   ['parsePairStartResponse', parsePairStartResponse, validatePairStartResponse],
   ['parsePairPollResponse', parsePairPollResponse, validatePairPollResponse],
   ['parseSyncRequest', parseSyncRequest, validateSyncRequest],
@@ -582,5 +586,17 @@ describe('brand colour lint', () => {
   it('reads the style elements of index.html too, and nothing else', () => {
     const report = lint({ 'index.html': '<style>\n.x { fill: hsl(200 50% 50%) }\n</style><p style="x">#abc</p>', 'main.ts': 'const c = "#000";' });
     expect(report.warnings).toEqual(['index.html:2: literal colour hsl(200 50% 50%) in fill; use var(--sf-*) with it as the fallback']);
+  });
+});
+
+describe('validatePairStartRequest', () => {
+  it('takes an empty body as a device, and a known kind', () => {
+    expect(validatePairStartRequest({})).toEqual([]);
+    expect(validatePairStartRequest({ kind: 'device' })).toEqual([]);
+    expect(validatePairStartRequest({ kind: 'browser' })).toEqual([]);
+  });
+  it('refuses another kind', () => {
+    expect(validatePairStartRequest({ kind: 'tv' })).toEqual(['kind must be one of device, browser']);
+    expect(validatePairStartRequest(null)).toEqual(['request is not an object']);
   });
 });

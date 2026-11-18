@@ -20,6 +20,7 @@ import {
   MAX_IDENTIFY_SECONDS,
   MAX_SYNC_PLAY_COUNTS,
   PREVIEW_PROTOCOL,
+  SCREEN_KINDS,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
   TEMPLATE_BUDGET,
@@ -590,6 +591,13 @@ export function validateDataSnapshot(s: unknown): string[] {
 }
 
 // ------------------------------------------------------------------ device API
+
+/** `POST /v1/device/pair/start`, as the server receives it. */
+export function validatePairStartRequest(r: unknown): string[] {
+  if (!isObj(r)) return ['request is not an object'];
+  if (r.kind !== undefined && !SCREEN_KINDS.some((k) => k === r.kind)) return [`kind must be one of ${SCREEN_KINDS.join(', ')}`];
+  return [];
+}
 
 /** `POST /v1/device/pair/start`, as the screen receives it. */
 export function validatePairStartResponse(r: unknown): string[] {
