@@ -9,7 +9,11 @@ The CMS and the API are two Workers on one hostname, so the session cookie is sa
 - **The browser** calls `/api/...` on the page's own origin: Better Auth's client for sign-in and organizations. In a deployed environment, the API Worker's route takes `<host>/api/*` and the CMS takes the rest. If a request for `/api/*` reaches the CMS anyway, as it always does locally, `src/routes/api/$.ts` hands it to the API over the service binding unchanged.
 - **Server code** (loaders, server functions) calls the API over the `API` service binding with the browser's cookies (`src/server/api.server.ts`). Any cookie the API sets on the way, such as Better Auth's refreshed cache cookie, is passed back to the browser.
 
-The CMS changes data only through Better Auth's endpoints (sign-in, sign-out, create and switch organization). Every other change will go through the API's tool registry (M3-12); do not add data routes here.
+The CMS changes data only through Better Auth's endpoints (sign-in, sign-out, create and switch organization) and the API's tool registry: pages call `POST /api/tools/:name` from the browser (`src/lib/tools.ts`), and loaders read through the same tools as the member (`src/server/screens.functions.ts`). Do not add data routes here.
+
+## Look
+
+The tokens in `src/styles.css` follow `docs/proposals/cms-ui.md`: neutral white, Geist and Geist Mono, field edges at 3:1, and screen states that each have a colour, a word and a shape (online filled, updating an arc, asleep a half circle, offline hollow and grey, needs-you a triangle and the only red). `test/tokens.test.ts` checks every text pair at 4.5:1 and every edge, ring, status glyph and chart mark at 3:1, in both themes; change a colour and run it.
 
 ## Run it locally
 
@@ -34,7 +38,7 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 | --- | --- |
 | `pnpm --filter @signforge/cms typecheck` | `wrangler types --env dev`, then `tsc` |
 | `pnpm --filter @signforge/cms test` | Unit tests (Vitest) |
-| `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer. It starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
+| `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer; and on Screens, pair a screen (a pairing started on the API as a player would), see it sync, sleep and wake it, identify it, set its display hours, the tile and table views at desktop and phone width, and revoke it. The screens spec sends its own `cf-connecting-ip`, so its sign-in has its own rate limit. It starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
 | `CLOUDFLARE_ENV=demo pnpm --filter @signforge/cms build` | Production build into `dist/` for that environment. Without `CLOUDFLARE_ENV` it fails: there is no default environment |
 
 ## Layout
@@ -43,7 +47,12 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 src/routes/__root.tsx     document, theme script, fonts
 src/routes/sign-in.tsx    email code, and GitHub when the API offers it
 src/routes/_app.tsx       signed-in layout: redirects signed-out visitors, picks or creates an org
-src/routes/_app/*.tsx     Overview, Screens, Spots, Playlists, Schedule, Assets (placeholders)
+src/routes/_app/*.tsx     Overview, Spots, Playlists, Schedule, Assets (placeholders)
+src/routes/_app/screens/  Screens: tile wall or table (?view=table), and one screen's page
+src/components/screens/   status shapes and pills, thumbnails, pairing, display hours
+src/lib/screen-status.ts  a screen's state in words (the state itself comes from the screen tools)
+src/server/screens.functions.ts  the Screens loaders: tools called as the member, through one helper
+public/sign-in/           spots the player rendered (scripts/spot-shots.ts), for the sign-in wall
 src/routes/api/$.ts       `/api/*` handed to the API Worker
 src/server/               server-only: the API binding, the shell's server functions
 src/components/ui/        shadcn/ui components (components.json is set up for the shadcn CLI)

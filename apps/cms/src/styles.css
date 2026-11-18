@@ -198,6 +198,10 @@
   html {
     -webkit-text-size-adjust: 100%;
   }
+  /* A fieldset shrinks like any box (browsers default it to its content's width), so a row of chips can wrap. */
+  fieldset {
+    min-width: 0;
+  }
   body {
     @apply bg-background text-foreground antialiased;
   }
