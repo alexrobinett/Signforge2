@@ -18,7 +18,13 @@ export const MAX_PAGE_LIMIT = 200;
 
 /** The input fields a list tool adds to its own. */
 export const pageInput = {
-  limit: z.number().int().min(1).max(MAX_PAGE_LIMIT).default(DEFAULT_PAGE_LIMIT).describe(`How many to return, 1 to ${MAX_PAGE_LIMIT}; default ${DEFAULT_PAGE_LIMIT}`),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_LIMIT)
+    .default(DEFAULT_PAGE_LIMIT)
+    .describe(`How many to return, 1 to ${MAX_PAGE_LIMIT}; default ${DEFAULT_PAGE_LIMIT}`),
   cursor: z.string().max(1000).optional().describe("The previous page's next, to get the page after it"),
 };
 
@@ -37,7 +43,9 @@ function decode(cursor: string): SortKey {
   } catch {
     // fall through
   }
-  throw new ToolError('invalid_input', 'cursor is not one a list returned; start again without it', [{ path: 'cursor', message: 'not a cursor from this list' }]);
+  throw new ToolError('invalid_input', 'cursor is not one a list returned; start again without it', [
+    { path: 'cursor', message: 'not a cursor from this list' },
+  ]);
 }
 
 /** Ascending, element by element; strings by code point. */
