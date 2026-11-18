@@ -206,6 +206,114 @@ The old build logged `energy: not ready within 2000 ms` once after a restart on 
 - energy, the spot that failed on the old build, prepared in 220 to 286 ms every time, including as the second spot after each restart.
 - **Over the 500 ms budget: the first prepare after a restart.** weather-atlanta first 711 to 948 ms (later ones 323 to 454 ms); sport-drinks first 516 to 894 ms (later ones 256 to 369 ms). That is under half the 2000 ms timeout at worst; a slower cold start (a busier Pi, a first boot) is untested. When the Pi was put back on its old player and cloud config afterwards, that old build skipped `weather-atlanta: not ready within 2000 ms` repeatedly (offline, on the cached test content), so the old build still fails this way. Later prepares are within budget except weather-atlanta once at 521 ms on its rain snapshot.
 
+## The demo deploy on the Pi (2026-11-18)
+
+`m3-foundations` deployed to the demo API and CMS; the Pi runs the player built from `m3-foundations` at 0d4b75a with `kiosk.env` = `kiosk.env.cloud` (content is the demo API). Checked at 23:51 local on 2026-11-17, after M3-25 released the rig:
+
+- **Online and playing the desired manifest.** `__sf`: online, socket open, manifest `e131056e…` (`examples/live`, which the owner published to `stress-screen` with `sf push`), last good the same, clock trusted (offset 0.5 s), nothing skipped, no error. M3-25's test content (`32e3dfd8…` earlier) was no longer on the screen.
+- **A push reaches the Pi in under a second.** `sf push` of a one-word variant of `examples/live` (`abe51d22…`) from a laptop on the same Wi-Fi: the player had adopted it 742 ms after `sf push` returned. Pushing `examples/live` back: 202 ms. Times from a watcher in the page polling `__sf.manifestId` every 20 ms, against the laptop's clock corrected by the measured Pi-laptop offset (about 0.1 s).
+- **It plays at a spot boundary.** First push: adopted during holidays-us; the next spot, holidays-uk, was the first from the new manifest. Second push: adopted about 2 s before the end of news-npr, inside the 3 s in which the next spot (news-bbc) was already loading, so news-bbc played from the old manifest and news-nyt, one boundary later, from the new one. That is the player's design (a spot that is loading is not thrown away), not a delay in the push.
+- Left on `examples/live` (`e131056e…`), as found.
+
+## Linux tuning (2026-11-18)
+
+The Pi 400 tuned on the Linux side, one change at a time, with the `m3-foundations` player (0d4b75a) and the 16-spot stress playlist. Kept changes are in `device/pi/tune.sh` and the unit files; how to set up a Pi is in `device/pi/README.md`.
+
+**Method.**
+- *Playback.* `device/pi/bench.sh`, which drives `bench.py`: the whole stress playlist, alternating cut and fade 600 ms, 290 s per run after 10 s to settle, frames split by phase. Every run clears the HTTP cache and bypasses the service worker, and the soak logger is stopped. Prepares are every `__sf.prepares` entry since the page loaded. Temperature, ARM clock and throttling were sampled every 5 s.
+- *Restarts.* 5 kiosk restarts on the stress content, timed from just before `systemctl restart signforge-kiosk`: Chromium's navigation start, the first spot, the first and second prepares.
+- *Boot.* `/proc/uptime` (kernel start) at navigation and at the first spot, recorded by `signforge-bootprobe.service` from early boot, 3 reboots per variant, on the cloud config.
+- *Screening.* Chromium flags were screened with 2 runs and 5 restarts against the 6- to 9-run noise band of the same governor.
+
+**Two measurement traps found on the way.**
+- *Chromium uptime.* Prepares get slower the longer Chromium has run: the same settings gave a 247–265 ms median after about two hours and 230–240 ms on a fresh start. The first baseline was taken on a long-running Chromium and made the governor look like a 12% prepare win. Every variant below starts on a freshly restarted kiosk.
+- *The wall clock at boot.* The Pi has no real-time clock, so its time jumps when NTP first syncs (37.8 s after kernel start in one boot, after Chromium had started), and wall-clock boot timings were wrong by up to 17 s. Boot is timed from `/proc/uptime` instead.
+
+### Playback
+
+| Variant | Runs | Overall cut | Overall fade | Fade window | Loading next | Prepare median | Worst frame | Temp max |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Baseline (ondemand), Chromium up about 2 h | 3 + 3 | 0.40, 0.41, 0.40% | 0.51, 0.45, 0.52% | 1.79, 1.55, 1.71% | 7.5–9.4% | 247–265 ms | 100 ms | 56.9 C |
+| ondemand, fresh Chromium | 4 + 3 | 0.36, 0.41, 0.39, 0.49% | 0.62, 0.55, 0.60% | 2.89, 2.43, 3.00% | 7.3–12.8% | 225–240 ms | 300 ms ¹ | 54.5 C |
+| **performance** governor, fresh Chromium | 5 + 4 | 0.50, 0.30, 0.37, 0.44, 0.32% | 0.44, 0.44, 0.43, 0.42% | **1.29, 1.22, 1.30, 1.20%** | 7.4–13.0% | 219–231 ms | 317 ms ¹ | 56.9 C |
+| **Final: everything kept** (performance, unit ordering, sessions, cloud-init off) | 3 + 3 | 0.43, 0.37, 0.35% | 0.43, 0.44, 0.46% | 1.14, 1.14, 1.14% | 8.1–11.5% | 220–233 ms | 300 ms ¹ | 56.4 C |
+| performance + `--num-raster-threads=4` | 1 + 1 | 0.29% | 0.43% | 1.14% | 7.7, 9.7% | 223, 228 ms | 83 ms | 56.4 C |
+| performance, templates in the player's process ² | 1 + 1 | 1.13% | 0.95% | 1.69% | 10.0, 14.5% | 194, 199 ms | 417 ms | 56.4 C |
+| performance, `apt-daily` started during the run | 1 + 0 | 0.36% | - | - | 8.8% | 214 ms | 67 ms | 55.5 C |
+
+¹ One frame of 300–383 ms on the first weather-rain prepare after Chromium starts, while photo-berries is on screen. It happened in 5 of the 8 first runs after a fresh start, under either governor, and in no later run. Every other frame with the templates out of process was 133 ms or less.
+² `--disable-features=IsolateSandboxedIframes`: measured to find out what the template process costs, not as a candidate. It removes a process boundary that templates are meant to have.
+
+Kiosk restarts (5 each), with first spot and first prepare timed from `systemctl restart`:
+
+| Variant | Navigation | First spot | First prepare (sport-drinks) | Second prepare |
+| --- | --- | --- | --- | --- |
+| Baseline (ondemand) | 2.00–2.08 s | 3.43–3.82 s | 586, 629, 629, 865, 994 ms (median 629) | 210–282 ms |
+| performance | 2.00–2.18 s | 3.41–4.01 s | 547, 563, 642, 811, 998 ms (median 642) | 225–231 ms |
+| Final: everything kept | 2.05–2.09 s | 3.48–3.78 s | 596, 620, 622, 631, 850 ms (median 622) | 219–243 ms |
+| performance + `--num-raster-threads=4` | 2.03–2.10 s | 3.41–3.60 s | 593, 603, 614, 614, 799 ms (median 614) | 219–228 ms |
+| performance, templates in the player's process ² | 2.00–2.06 s | 3.34–3.44 s | 504, 504, 506, 513, 522 ms (median 506) | 185–222 ms |
+
+### Boot
+
+Kernel start to Chromium's navigation and to the first spot (cloud config, first spot news-npr), 3 reboots each. Each row adds to the one above.
+
+| Change | Kiosk unit starts | Navigation | First spot | Kept |
+| --- | --- | --- | --- | --- |
+| Baseline (2 valid reboots) | 23.6, 30.5 s | 33.5, 40.4 s | 36.9, 46.2 s | |
+| Kiosk and supervisor not after `network-online.target` | 17.7 s | 27.6–27.7 s | 30.8–31.1 s | yes |
+| Kiosk not after `systemd-user-sessions` (after logind and seatd) | 10.0 s | 27.5–27.6 s | 30.8–31.0 s | yes ³ |
+| `user@1000` without its login barrier | 9.9 s | 27.1–27.2 s | 30.3–32.8 s | no: reverted |
+| `systemd-user-sessions` not after `network.target` | 9.9 s | 20.5 s | 23.8–24.0 s | **yes** |
+| Governor on the kernel command line | 9.9 s | 20.5–20.6 s | 23.8–24.1 s | no: a udev rule overrides it |
+| Governor by udev rule | 9.9 s | 20.5 s | 23.2–23.9 s | yes, for playback |
+| Preload Chromium's files from early boot | 16.5–16.8 s | 23.8–23.9 s | 25.9–26.0 s | no: slower |
+| cloud-init off (`cloud-init=disabled`) | 7.7–7.9 s ⁴ | 18.5–18.7 s | 21.3–21.9 s | **yes** |
+| Final, applied by `tune.sh` (1 reboot) | | 18.6 s | 22.0 s | |
+
+³ Needed for the next row to help, so kept although it changes nothing alone.
+The kiosk column is when its main process started (`ExecMainStartTimestampMonotonic`).
+⁴ The unit itself is activated at 5.4 s (`critical-chain`); its PAM session takes the rest.
+
+**What held the kiosk back.**
+- The kiosk unit was ordered after `network-online.target`, which waits for Wi-Fi.
+- Without that, its PAM login session still waited. logind orders every non-system user's session scope after `systemd-user-sessions.service`, which upstream orders after `network.target`. A probe of the kiosk's processes at 13 and 15 s showed cage not yet exec'd, still inside PAM, waiting for the `session-1.scope` start job.
+- `network.target` comes late because NetworkManager takes 7.7 s to start on this image. It rewrites its netplan files (`/etc/netplan/90-NM-*.yaml`) at every boot, and each rewrite runs `netplan generate` and a full systemd reload (1.2 s each, four of them).
+- After that, Chromium's first start (6.7 s, against 2 s on a warm restart and 3.7 s on a restart with the page cache dropped) is mostly waiting on SD reads while `netplan` takes a whole core. Chromium was in D state on `folio_wait_bit`, and 339 MB of its files are resident after a cold start.
+- Preloading those files competed with the same boot I/O and made boot 2 s slower.
+
+Against the baseline, the kept changes:
+- Halved the frames dropped during a fade (1.14–1.30% against 1.55–3.00%).
+- Brought fade runs to 0.42–0.46% overall from 0.45–0.62%, and cut runs stay where they were.
+- Brought the first spot after boot to 21.3–22.0 s from 36.9–46.2 s.
+- Cost about 2 C (max 56.9 C, never throttled).
+
+Video-pan's prepare, loading-next drops and the first prepare after a restart did not move.
+
+### Not changed, and why
+
+- **`hdmi_enable_4kp60=1` stays.** With it the firmware runs the core and V3D (the 3D GPU) at 550 MHz instead of 500 (`vcgencmd measure_clock`, `get_config`). The kiosk outputs 1080p, but removing it would cut the GPU clock.
+- **gpu_mem and CMA.** 457 of the 512 MB CMA pool is free while playing. KMS and V3D do not use gpu_mem.
+- **Zero-copy raster.** It applies to software raster buffers (`docs/how_cc_works.md`, raster buffer providers). This Chromium already rasterizes on the GPU (Debian's `--enable-gpu-rasterization`, ANGLE on GLES). Not tested.
+- **More raster threads.** No change beyond noise (table above). cc runs GPU raster on one worker at a time.
+- **SD writes, journald and cache on tmpfs.** The SD card takes about 4.3 MB of writes in 2 minutes of playback, about 3 GB a day. Of that, Chromium wrote 1.2 MB in 90 s (session-restore files, `shared_proto_db`, GPU caches, the player's localStorage) and journald 0.2 MB. That is well within an SD card's wear leveling. A volatile journal would lose the logs that explain a reboot in the field. Chromium's HTTP disk cache is 128 kB, since the player keeps content in Cache Storage, which must persist. Not changed.
+- **Timers and services.** `apt-daily` ran in 3.8 s with no effect on frames (table above). man-db already runs at idle I/O priority and nice 19. Not changed.
+- **zram.** 30 MB of the 2 GB swap is in use, so it is not changed.
+- **I/O scheduler** (mq-deadline) and **ozone/Wayland against cage**: not tried. Nothing measured pointed at them.
+- **Overclock**: not tried. It could not be left in place, and no measurement showed the ARM clock to be the limit. Performance pins the ARM at 1.8 GHz and the hot spots are GPU and process start.
+- **NetworkManager's netplan rewrites** cost about 5 s of boot and are the biggest remaining delay. They were not touched: the network configuration is how the rig is reached, and a mistake there leaves a Pi off the network.
+
+### Still over budget
+
+- **First prepare after a kiosk restart: 547–998 ms, median 642 (budget 500).** No Linux setting changed it.
+  - Most of the excess is starting the template renderer process. With templates in the player's process it is 504–522 ms. The template frames are out-of-process (`IsolateSandboxedIframes`, two `about:srcdoc` iframe targets), the first prepare after a start launches that process, and later prepares reuse it.
+  - A player-side warm-up would recover most of it while keeping the boundary: a blank sandboxed `srcdoc` frame made at boot, before the first prepare. That is player code, and even in-process the first prepare is just over 500 ms.
+- **video-pan's prepare: 843–963 ms in every run of every variant.** This is player code, not the Pi.
+  - After `canplaythrough` (215–313 ms) the slot waits for `requestVideoFrameCallback` with a 600 ms timeout. On the Pi that callback never fires for a paused video, whether the video is on top or covered (tested 4 times in the player page). So every video prepare includes the full 600 ms.
+  - Proposed fix, for a ticket: drop that wait, or start and pause the video, and measure the frames at the start of the video spot on the Pi.
+- **A 300–383 ms frame on the first weather-rain prepare after Chromium starts** (footnote ¹). It was not traced; the template's rain-tile setup is the first suspect.
+- **Boot to first spot is 21.3–22.0 s** (from kernel start; the firmware's time before that was not measured). NetworkManager's netplan rewrites are the next 5 s.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
