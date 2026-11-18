@@ -8,7 +8,9 @@
  * `wrangler dev` (ENVIRONMENT `dev`, no endpoint set): the local bucket's S3 API, which wrangler
  * serves on the Worker's own origin at `/cdn-cgi/local/r2/s3` and checks against the credentials
  * in wrangler.jsonc's `local_dev.experimental_s3_credentials`. They are the constants below and
- * open nothing but local storage.
+ * open nothing but local storage. A request the CMS hands over its service binding carries the
+ * CMS's origin, which does not serve this bucket, so `LOCAL_S3_ORIGIN` names the API's own (the
+ * dev script and the CMS e2e set it); the local S3 API allows cross-origin PUTs.
  */
 import { r2Presigner, type UploadSigner } from '@signforge/tools';
 
@@ -24,7 +26,7 @@ export function uploadSigner(env: Env, requestUrl: string): UploadSigner | undef
     });
   }
   if (env.ENVIRONMENT === 'dev') {
-    return r2Presigner({ endpoint: `${new URL(requestUrl).origin}/cdn-cgi/local/r2/s3`, ...LOCAL_S3 });
+    return r2Presigner({ endpoint: `${env.LOCAL_S3_ORIGIN ?? new URL(requestUrl).origin}/cdn-cgi/local/r2/s3`, ...LOCAL_S3 });
   }
   return undefined;
 }

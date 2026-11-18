@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --env dev",
+    "dev": "wrangler dev --env dev --port 8787 --var LOCAL_S3_ORIGIN:http://localhost:8787",
     "types": "wrangler types --env dev --strict-vars=false",
     "typecheck": "wrangler types --env dev --strict-vars=false >/dev/null && tsc -p . && tsc -p scripts",
     "test": "vitest run",
