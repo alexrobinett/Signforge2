@@ -409,6 +409,31 @@ async function playbackLoop(): Promise<never> {
   let failedInManifest = 0;
   let failingManifest = '';
 
+  /** A spot of `m` failed to prepare or to start: fall back after a full pass of them, pause after a few in a row. */
+  async function failed(step: Step, m: ScreenManifest): Promise<void> {
+    if (failingManifest !== m.id) {
+      failingManifest = m.id;
+      failedInManifest = 0;
+    }
+    if (++failedInManifest >= step.playlist.items.length && m.id !== state.lastGood && lastGood) {
+      failures = 0;
+      failedInManifest = 0;
+      fallBack();
+      return;
+    }
+    if (++failures >= MAX_CONSECUTIVE_FAILURES) {
+      current?.clear();
+      if (current) current.el.style.opacity = '0';
+      current = undefined;
+      currentSpot = undefined;
+      pins.release('playing');
+      status('SignForge\nContent is unavailable. Retrying…');
+      lastProgress = performance.now();
+      await sleep(5000);
+      failures = 0;
+    }
+  }
+
   return loopRestartingOnError('playback', async () => {
     if (!manifest || !sequencer) {
       await sleep(500);
@@ -468,32 +493,7 @@ async function playbackLoop(): Promise<never> {
     if (!ok) pins.release('preparing');
     phase = 'play';
     if (!state.displayOn) return;
-    if (!ok) {
-      if (failingManifest !== m.id) {
-        failingManifest = m.id;
-        failedInManifest = 0;
-      }
-      if (++failedInManifest >= step.playlist.items.length && m.id !== state.lastGood && lastGood) {
-        failures = 0;
-        failedInManifest = 0;
-        fallBack();
-        return;
-      }
-      if (++failures >= MAX_CONSECUTIVE_FAILURES) {
-        current?.clear();
-        if (current) current.el.style.opacity = '0';
-        current = undefined;
-        currentSpot = undefined;
-        pins.release('playing');
-        status('SignForge\nContent is unavailable. Retrying…');
-        lastProgress = performance.now();
-        await sleep(5000);
-        failures = 0;
-      }
-      return;
-    }
-    failures = 0;
-    failedInManifest = 0;
+    if (!ok) return failed(step, m);
 
     // Hold the current spot for its full length; a crossfade overlaps its last moments.
     if (currentSpot) await hold(startedAt + currentSpot.durationMs - fadeMs - performance.now());
@@ -501,16 +501,8 @@ async function playbackLoop(): Promise<never> {
     status('');
     startedAt = performance.now();
     spotStartedAt = startedAt;
-    record(step, m.id);
     phase = 'transition';
     const { started, done } = show(slot, current, step.playlist.transition);
-    void started.then(
-      () => promote(step.spot, m.id),
-      (err: unknown) => {
-        state.lastError = `${step.spot.id}: did not start: ${err instanceof Error ? err.message : String(err)}`;
-        console.warn('[sf]', state.lastError);
-      },
-    );
     // A video keeps reading its file from the cache while it plays, and the outgoing spot is
     // still on screen until the transition ends.
     const playing = spotFiles(step.spot, m);
@@ -520,9 +512,27 @@ async function playbackLoop(): Promise<never> {
     current = slot;
     currentSpot = step.spot;
     currentManifest = m;
+    // A spot counts, and plays, once it has started: a video whose play() the browser refuses is a failed spot.
+    const playedOk = await started.then(
+      () => true,
+      (err: unknown) => {
+        state.skipped++;
+        state.lastError = `${step.spot.id}: did not start: ${err instanceof Error ? err.message : String(err)}`;
+        console.warn('[sf] skipped', state.lastError);
+        preview?.failed(state.lastError);
+        return false;
+      },
+    );
+    if (playedOk) {
+      failures = 0;
+      failedInManifest = 0;
+      record(step, m.id);
+      promote(step.spot, m.id);
+    }
     await done;
     pins.hold('playing', playing);
     phase = 'play';
+    if (!playedOk) await failed(step, m);
   });
 }
 

@@ -9,6 +9,7 @@ const h = useHarness();
 
 /** The content server stops answering, as when the screen's network goes. */
 const cutNetwork = (p: Player) => p.server.intercept(/^\/content\//, { status: 503 });
+const clip = () => readFileSync(join(import.meta.dirname, 'fixtures/clip.webm'));
 
 /** Reload the page (the cache survives) and wait for the player to start again. */
 async function restart(p: Player): Promise<void> {
@@ -88,27 +89,44 @@ describe('last known good', () => {
     expect(s.lastGood).toBe(good.manifest.id);
   });
 
-  it('takes a video manifest as the last good one only once a video has started playing', async () => {
+  it('falls back from a video manifest whose videos the browser refuses to play, offline too', async () => {
     const good = h.content([{ id: 'a', durationMs: 600 }], { variant: 'good' });
-    const clip = readFileSync(join(import.meta.dirname, 'fixtures/clip.webm'));
-    const video = h.content([{ id: 'v', video: clip, durationMs: 600 }], { variant: 'video' });
+    const video = h.content([{ id: 'v', video: clip(), durationMs: 600 }], { variant: 'video' });
     const p = await h.openPlayer((s) => s.publish(good));
     await p.until((s) => s.lastGood === good.manifest.id);
 
-    // The browser refuses to play, as it may refuse autoplay or a decoder.
-    await p.page.evaluate(() => {
-      const w = window as unknown as { realPlay: typeof HTMLMediaElement.prototype.play };
-      w.realPlay = HTMLMediaElement.prototype.play;
+    // The browser refuses to play, as it may refuse autoplay or a decoder; after a reload too.
+    const refuse = () => {
       HTMLMediaElement.prototype.play = () => Promise.reject(new DOMException('refused', 'NotAllowedError'));
-    });
+    };
+    await p.page.addInitScript(refuse);
+    await p.page.evaluate(refuse);
     p.server.publish(video);
-    const s = await p.until((s) => s.log.filter((l) => l.manifest === video.manifest.id).length >= 2);
+    let s = await p.until((s) => s.fallback === video.manifest.id);
+    const before = s.log.length;
+    s = await p.until((s) => s.log.length >= before + 2);
+    expect(s.log.filter((l) => l.manifest === video.manifest.id)).toEqual([]);
+    expect(s.log.slice(before).map((l) => l.manifest)).toEqual([good.manifest.id, good.manifest.id]);
     expect(s.lastGood).toBe(good.manifest.id);
+    expect(s.skipped).toBeGreaterThanOrEqual(1);
 
-    await p.page.evaluate(() => {
-      HTMLMediaElement.prototype.play = (window as unknown as { realPlay: typeof HTMLMediaElement.prototype.play }).realPlay;
-    });
-    await p.until((s) => s.lastGood === video.manifest.id);
+    // Restarted with no network: the video manifest again, refused again, then the good one.
+    cutNetwork(p);
+    await restart(p);
+    s = await p.until((s) => s.fallback === video.manifest.id && s.log.length >= 2, 15_000);
+    expect(s.log.map((l) => l.manifest)).toEqual([good.manifest.id, good.manifest.id]);
+  });
+
+  it('takes a video manifest as the last good one once a video has started playing', async () => {
+    const good = h.content([{ id: 'a', durationMs: 600 }], { variant: 'good' });
+    const video = h.content([{ id: 'v', video: clip(), durationMs: 600 }], { variant: 'video' });
+    const p = await h.openPlayer((s) => s.publish(good));
+    await p.until((s) => s.lastGood === good.manifest.id);
+
+    p.server.publish(video);
+    const s = await p.until((s) => s.lastGood === video.manifest.id);
+    expect(s.fallback).toBe('');
+    expect(s.log.at(-1)?.manifest).toBe(video.manifest.id);
   });
 
   it('plays a cached schema N-1 manifest after a restart with no network', async () => {
