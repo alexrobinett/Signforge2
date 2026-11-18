@@ -271,7 +271,7 @@ export function dayKey(ctx: Pick<TemplateContext, 'timezone'>, date: Date): stri
 /**
  * The longest run of `text`'s leading words, ending in "…", that `fits` accepts; `text` itself if
  * it fits. Where CSS `text-overflow: ellipsis` would cut after a space ("rain to …"), this ends on
- * a word ("rain…"). `fits` usually sets an element's text and checks it does not overflow:
+ * a word ("rain…"), and never on an opening quote or bracket. `fits` usually sets an element's text and checks it does not overflow:
  *
  *   el.textContent = fitWords(title, (s) => ((el.textContent = s), el.scrollHeight <= el.clientHeight + 1));
  *
@@ -280,11 +280,12 @@ export function dayKey(ctx: Pick<TemplateContext, 'timezone'>, date: Date): stri
 export function fitWords(text: string, fits: (candidate: string) => boolean): string {
   if (fits(text)) return text;
   const words = text.trim().split(/\s+/);
-  const cut = (n: number) =>
-    `${words
-      .slice(0, n)
-      .join(' ')
-      .replace(/[\s,;:.\-–—]+$/, '')}…`;
+  // Never end on an opening quote or bracket: a cut parenthesis reads as "(closes…".
+  const cut = (n: number) => {
+    const kept = words.slice(0, n);
+    while (kept.length > 1 && /^[([{«“‘"']/.test(kept[kept.length - 1]!)) kept.pop();
+    return `${kept.join(' ').replace(/[\s,;:.\-–—]+$/, '')}…`;
+  };
   let lo = 1;
   let hi = words.length - 1;
   while (lo < hi) {
