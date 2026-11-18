@@ -480,6 +480,9 @@ importers:
       '@signforge/media':
         specifier: workspace:*
         version: link:../media
+      '@signforge/player-core':
+        specifier: workspace:*
+        version: link:../player-core
       zod:
         specifier: ^4.6.7
         version: 4.6.7

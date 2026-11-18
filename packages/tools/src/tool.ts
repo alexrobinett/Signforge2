@@ -4,6 +4,7 @@
  * the MCP server and WebMCP all call tools through `dispatch` (./dispatch.ts); none of them
  * reaches the database another way.
  */
+import type { DeviceCommand } from '@signforge/contract';
 import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
 import type { UploadSigner } from './upload';
@@ -50,6 +51,8 @@ export interface ScreenNotifier {
   manifest(screenId: string, manifestId: string): Promise<void>;
   /** The credential was revoked: close its sockets. */
   revoked(screenId: string, credentialId: string): Promise<void>;
+  /** A command to act on now (a display override, identify, restart). A screen whose socket is down misses it. */
+  command(screenId: string, command: DeviceCommand): Promise<void>;
 }
 
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
@@ -120,6 +123,11 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * (`fields.ts`), and the dispatcher makes a retry with the same key return the first result.
    */
   idempotent?: boolean;
+  /**
+   * True for a tool whose effect is on a screen, not in the database (identify, restart): it is
+   * audited, and its notices are sent, though it stages no write.
+   */
+  alwaysAudited?: boolean;
   input: S;
   /**
    * What the tool returns. Shown to agents as JSON Schema, and checked against every output in

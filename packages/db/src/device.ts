@@ -16,6 +16,8 @@ export interface DeviceScreen {
   screenId: string;
   desiredManifestId: string | null;
   previousManifestId: string | null;
+  /** The contract's `DisplayOverride` set from the CMS, as stored; it may have ended. */
+  displayOverrideJson: string | null;
   /** Each credential that is not revoked, with the hex SHA-256 of its secret. Empty if the screen is revoked. */
   credentials: { id: string; secretHash: string /** Whether a request has authenticated with it yet. */; used: boolean }[];
 }
@@ -35,6 +37,7 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       status: sc.status,
       desiredManifestId: sc.desiredManifestId,
       previousManifestId: sc.previousManifestId,
+      displayOverrideJson: sc.displayOverrideJson,
       credentialId: cr.id,
       secretHash: cr.secretHash,
       lastUsedAt: cr.lastUsedAt,
@@ -50,6 +53,7 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
     screenId,
     desiredManifestId: first.desiredManifestId,
     previousManifestId: first.previousManifestId,
+    displayOverrideJson: first.displayOverrideJson,
     credentials:
       first.status === 'active'
         ? rows.flatMap((r) => (r.credentialId && r.secretHash ? [{ id: r.credentialId, secretHash: r.secretHash, used: r.lastUsedAt !== null }] : []))

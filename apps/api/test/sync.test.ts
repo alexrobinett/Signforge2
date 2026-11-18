@@ -5,7 +5,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mintCredential } from '../src/device/credential';
-import { parseHeartbeat } from '../src/device/sync';
+import { parseHeartbeat } from '@signforge/tools';
 import { manifestKey } from '../src/r2';
 
 const BASE = 'https://api.test/v1/device';
@@ -180,5 +180,20 @@ describe('commands', () => {
     expect((await sync(s, oldSchema)).commands).toEqual([{ type: 'reload' }]);
     const oldProtocol = body({ player: { version: '1.0.0', manifestSchemas: [MANIFEST_SCHEMA], protocols: [1] } });
     expect((await sync(s, oldProtocol)).commands).toEqual([{ type: 'reload' }]);
+  });
+
+  it("carry the screen's display override while the screen reports another, and its clearing", async () => {
+    const s = await setUp('sync-override');
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    await s.seed.scope.screens.update(s.seed.screen, { displayOverrideJson: JSON.stringify({ state: 'on', until }) });
+    expect((await sync(s, body())).commands).toEqual([{ type: 'display', override: { state: 'on', until } }]);
+    // The screen has it now: nothing more to send.
+    expect((await sync(s, body({ display: { on: true, override: { state: 'on', until } } }))).commands).toEqual([]);
+    // Cleared in the CMS, while the screen still holds it.
+    await s.seed.scope.screens.update(s.seed.screen, { displayOverrideJson: null });
+    expect((await sync(s, body({ display: { on: true, override: { state: 'on', until } } }))).commands).toEqual([{ type: 'display', override: null }]);
+    // An override that has ended is not sent.
+    await s.seed.scope.screens.update(s.seed.screen, { displayOverrideJson: JSON.stringify({ state: 'off', until: new Date(Date.now() - 1000).toISOString() }) });
+    expect((await sync(s, body())).commands).toEqual([]);
   });
 });
