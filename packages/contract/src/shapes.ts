@@ -660,8 +660,8 @@ export const MAX_SYNC_PLAY_COUNTS = 500;
 /**
  * The most sources a player reports in `snapshots` or `dataRejected`: it sends only the sources of
  * the manifests it holds. A sync with more is still taken, as players before gh-45 send every
- * source seen since they started; the server keeps at most this many of `dataRejected`, so a
- * misbehaving screen cannot write a huge row.
+ * source seen since they started; the server keeps at most this many of `dataRejected`, so that map
+ * cannot make a huge row (the body as a whole is bounded by MAX_SYNC_REQUEST_BYTES).
  */
 export const MAX_SYNC_SOURCES = 256;
 
@@ -689,7 +689,8 @@ export interface SyncRequest {
   epoch: string;
   player: { version: string; manifestSchemas: readonly number[]; protocols: readonly number[] };
   /**
-   * `active`: the manifest playing. `filesMissing`: files of the manifest being synced not yet held.
+   * `active`: the manifest playing. `filesMissing`: files not yet held, of the manifest being synced and, while
+   * falling back, of the last good one.
    * `fallbackFrom`: a newer manifest that played nothing in a full pass, so the screen went back to
    * its last good one (`active`). `lastGood`: the last manifest that played a spot, which the
    * screen may go back to, so the server lets it fetch that manifest's files. Manifest ids are

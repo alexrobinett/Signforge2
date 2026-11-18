@@ -538,6 +538,13 @@ describe('snapshots and device bodies', () => {
     expect(validateSyncRequest(without)).toEqual([]);
   });
 
+  it('checks no play count of a list over the bound, so a body at the ceiling stays one problem', () => {
+    // About MAX_SYNC_REQUEST_BYTES of `{}`: checking each entry first made a problem apiece.
+    const r = validSyncRequest() as unknown as Record<string, unknown>;
+    r.playCounts = Array.from({ length: 349_000 }, () => ({}));
+    expect(validateSyncRequest(r)).toEqual([`playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`]);
+  });
+
   it('takes only sha256 manifest ids from a screen', () => {
     const r = validSyncRequest() as unknown as Record<string, unknown>;
     // Each id on its own, so no one check hides behind another: too long, and hex in uppercase.

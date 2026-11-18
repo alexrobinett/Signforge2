@@ -707,8 +707,9 @@ export function validateSyncRequest(r: unknown): string[] {
   errors.push(...displayStatusProblems(r.display));
   if (!isInstant(r.deviceTime)) errors.push('deviceTime must be an ISO 8601 time');
   if (!isObj(r.clock) || !isNum(r.clock.offsetMs) || typeof r.clock.trusted !== 'boolean') errors.push('clock needs offsetMs and whether the screen trusts it');
-  errors.push(...list('play count', r.playCounts, playCountProblems));
+  // The bound first: a list over it is refused whole, without a problem per entry (bounded work, gh-45).
   if (Array.isArray(r.playCounts) && r.playCounts.length > MAX_SYNC_PLAY_COUNTS) errors.push(`playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`);
+  else errors.push(...list('play count', r.playCounts, playCountProblems));
   if (!isObj(r.snapshots)) errors.push('snapshots must map source ids to versions');
   else errors.push(...sourceMapProblems('snapshots', r.snapshots, 'a version number'));
   if (r.dataRejected !== undefined) {
