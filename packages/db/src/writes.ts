@@ -30,7 +30,7 @@ interface VersionGuard {
   id: string;
   /** The version the change was made from. */
   version: number;
-  /** The row's version now if it is no longer the row the change was made from, else undefined. Throws `NotInOrgError` if the row is gone. */
+  /** The row's version now if it is no longer the row the change was made from, else undefined. Throws `NotInOrgError` if the row is gone, except a draft's promotion guard, which reports a vanished draft as version 0. */
   stale: () => Promise<number | undefined>;
 }
 
@@ -63,7 +63,7 @@ export const guard = (query: unknown, g: VersionGuard): Write => ({ [QUERY]: que
 
 /**
  * Run writes in one atomic batch. Nothing to write runs nothing. A batch failed by a version
- * guard throws `StaleVersionError` (`NotInOrgError` if the row is gone), so a caller can tell a
+ * guard throws `StaleVersionError` (`NotInOrgError` if the row is gone, but version 0 for a draft that vanished during promotion), so a caller can tell a
  * refusal from a fault; any other failure is rethrown as it is.
  */
 export async function commit(db: Db, writes: readonly Write[]): Promise<void> {
