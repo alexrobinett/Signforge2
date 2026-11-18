@@ -11,6 +11,10 @@
     "items": {
       "source": "news",
       "path": "items"
+    },
+    "language": {
+      "source": "news",
+      "path": "language"
     }
   }
 }

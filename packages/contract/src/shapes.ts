@@ -394,26 +394,44 @@ export interface BrandKit {
 }
 
 // ------------------------------------------------------------------ live data
-// A data source is a JSON feed the server polls. Screens never call the feed themselves: from
+// A data source is a feed the server polls. Screens never call the feed themselves: from
 // the API they get snapshots on each sync (`SyncResponse.snapshots`); static content has them at
 // `data/<id>.json` beside the manifest. A screen keeps the last good one on disk and reads bound
-// fields from it each time a spot starts.
+// fields from it each time a spot starts, while it is fresher than `SNAPSHOT_STALE_MS`.
 
 export interface DataSource {
   id: string;
-  /** How often a screen on static content checks for a newer snapshot. From the API, snapshots come on each sync. */
+  /**
+   * Retired: no screen polls by it any more (snapshots come on sync, and static content checks
+   * every source each minute). Kept, as the server's poll interval, because players built before
+   * M3-23 require it; it goes with the next manifest schema.
+   */
   refreshS: number;
 }
+
+/** A snapshot's `data`, as JSON in UTF-8, is at most this many bytes. The server refuses a larger feed. */
+export const MAX_SNAPSHOT_BYTES = 65_536;
+
+/**
+ * A snapshot the server has not confirmed (`checkedAt`) for this long is stale: a screen plays the
+ * spot's static fallback rather than old data. The poller backs off to 6 hours on failure, so a
+ * source gets several tries before its screens fall back.
+ */
+export const SNAPSHOT_STALE_MS = 24 * 3_600_000;
 
 export interface DataSnapshot {
   id: string;
   /**
-   * Increases every time the source's data changes, so a screen keeps the newest snapshot whichever
-   * order they arrive in (a first-load fetch and a sync can cross). The server uses the time the
-   * changed data was fetched, in ms since the epoch.
+   * The content's version: it increases every time the source's data changes, and only then, so a
+   * screen keeps the newest snapshot whichever order they arrive in (a first-load fetch and a sync
+   * can cross). The server uses the time the changed data was fetched, in ms since the epoch; it
+   * tells a change by the hash of the data, which stays on the server.
    */
   version: number;
+  /** When this content was first fetched. */
   fetchedAt: string;
+  /** When the server last saw the feed still say this. Staleness counts from it. */
+  checkedAt: string;
   data: unknown;
 }
 
@@ -434,6 +452,13 @@ export interface CalendarFeed {
 }
 export interface NewsFeed {
   title: string;
+  /**
+   * The feed's language as it declares it (RSS `<language>`, Atom `xml:lang`), a BCP 47 tag such as
+   * `fr-FR`, or `''` when it declares none. A template writes the feed's own words, such as an
+   * age label, in it, and in the screen's locale when it is empty. Always present, so a spot can
+   * bind it whatever the feed.
+   */
+  language: string;
   /** Newest first. */
   items: { title: string; published: string; source: string }[];
 }
@@ -660,6 +685,12 @@ export interface SyncResponse {
   desiredManifest?: string;
   /** Snapshots that are newer than what the screen holds. */
   snapshots: DataSnapshot[];
+  /**
+   * For snapshots the screen already holds, when the server last confirmed them, by source id. A
+   * screen moves its copy's `checkedAt` on only if it holds that `version`, so an unchanged feed
+   * does not go stale and the data is not sent again.
+   */
+  checked?: Record<string, { version: number; checkedAt: string }>;
   /** Short-lived ticket for `GET /v1/device/ws?ticket=`. */
   socketTicket: string;
   commands: DeviceCommand[];
