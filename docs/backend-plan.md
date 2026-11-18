@@ -175,7 +175,7 @@ Built in M3-23: the poller is `apps/api/src/data/poller.ts`, the fetch guards `a
   - HTTPS only, on default ports, and no IP addresses.
   - Hostnames that are, or resolve to, private or reserved addresses are rejected (resolved through Cloudflare's DNS over HTTPS, A and AAAA). Local names (`localhost`, `.local`, `.internal`, a name without a dot) are refused without a lookup. A Worker cannot pin the address it checked, so this is a first filter, not the defence against DNS rebinding; that rests on Workers' outbound requests not reaching private networks.
   - Redirects are followed manually and re-checked, at most 3.
-  - 5-second timeout, and a 1 MB body.
+  - 5 seconds for the whole fetch, under one signal: every DNS lookup (one that runs it out is reported as `dns`), every redirect hop and the body read. A 1 MB body.
   - Errors are reported by category, never by echoing the upstream body.
   
   Workers cannot reach private ranges (checked in M3-00). An IP-literal request to a loopback, private, link-local or CGNAT address returns Cloudflare's `403` with `error code: 1003`. A public name that resolves to one returns `530` with `error code: 1016`. Both come back as responses, not exceptions, so the fetcher reports them as a blocked address rather than the feed's answer.
