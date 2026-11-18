@@ -1,6 +1,6 @@
 # M3-11 CMS: screens
 
-Status: open  ·  Size: M  ·  Depends on: M3-10, M3-08
+Status: done (branch m3-11-cms-screens)  ·  Size: M  ·  Depends on: M3-10, M3-08
 
 ## Goal
 
@@ -25,6 +25,7 @@ Manage screens from the CMS: claim, list, edit, revoke, display hours.
   - Status as facts, never colour alone: online; updating; "Asleep · wakes 07:00" from display hours; "Unreachable 2 h · still playing <spot>" (calm grey) when it is on the latest version; red "Needs you" only when it is behind, revoked or has nothing playable. Locations roll up to their most urgent state.
   - A screen detail page: what it should be showing, its versions, cache state (`filesMissing`), display hours with exceptions, recent events, and Identify and Restart (new `DeviceCommand`s, contract first; Reboot waits for a supervisor endpoint).
   - The empty Screens page has one action, "Open a test screen" (M3-41), and the pairing-code input.
+- **Owner decisions (2026-11-17).** Screens A's tile wall is the default view, with a toggle to a table view from B's layout on the light kit (dark only in dark mode). Geist and Geist Mono. Sign-in A (the render wall) is the sign-in: the existing page restyled with the new tokens, its auth behaviour unchanged. Not in M3: idea 8 (an agent's draft) and idea 9 (the time scrubber).
 
 ## Out of scope
 
