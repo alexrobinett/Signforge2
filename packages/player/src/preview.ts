@@ -14,8 +14,8 @@
  */
 import {
   PREVIEW_PROTOCOL,
+  parsePreviewHostMessage,
   requiredFiles,
-  validatePreviewHostMessage,
   type PreviewDraftMessage,
   type PreviewPlayerMessage,
   type ScreenManifest,
@@ -86,9 +86,9 @@ export function startPreview(hooks: PreviewHooks): Preview {
   let latest = 0;
   addEventListener('message', (e: MessageEvent<unknown>) => {
     if (e.source !== window.parent || e.origin !== CMS_ORIGIN) return;
-    const problems = validatePreviewHostMessage(e.data);
-    if (problems.length) return send({ sfPreview: PREVIEW_PROTOCOL, type: 'error', message: `draft refused: ${problems[0]}` });
-    const msg = e.data as PreviewDraftMessage;
+    const parsed = parsePreviewHostMessage(e.data);
+    if (!parsed.ok) return send({ sfPreview: PREVIEW_PROTOCOL, type: 'error', message: `draft refused: ${parsed.problems[0]}` });
+    const msg = parsed.value;
     const n = ++latest;
     void gather(msg)
       .then(async (got) => {

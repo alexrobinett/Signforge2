@@ -10,7 +10,7 @@
  * does not come back together. Server messages are checked against the contract before use.
  *
  */
-import { validateServerSocketMessage, type DeviceCommand, type ServerSocketMessage } from '@signforge/contract';
+import { parseServerSocketMessage, type DeviceCommand, type ServerSocketMessage } from '@signforge/contract';
 
 /** How often to ping. Under the usual 100-second idle timeouts of proxies and NAT. */
 export const PING_MS = 50_000;
@@ -124,9 +124,9 @@ export class NudgeSocket {
         } catch {
           return;
         }
-        const problems = validateServerSocketMessage(msg);
-        if (problems.length) return console.warn('[sf] socket: ignored a message:', problems.join('; '));
-        this.handle(msg as ServerSocketMessage, ws);
+        const parsed = parseServerSocketMessage(msg);
+        if (!parsed.ok) return console.warn('[sf] socket: ignored a message:', parsed.problems.join('; '));
+        this.handle(parsed.value, ws);
       };
       ws.onclose = () => {
         clearInterval(pinger);

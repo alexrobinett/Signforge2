@@ -10,7 +10,7 @@
  * again when a spot plays (`resolveSpotData`), so a value that does not fit leaves the spot's
  * fallback on screen. Every refusal is counted against its source in `dataRejections`.
  */
-import { validateDataSnapshot, type DataSnapshot, type ScreenManifest } from '@signforge/contract';
+import { parseDataSnapshot, type DataSnapshot, type ScreenManifest } from '@signforge/contract';
 import { snapshotFit, type Rejected } from '@signforge/player-core';
 
 const STATE = 'sf-state-v1';
@@ -59,14 +59,15 @@ async function restore(id: string): Promise<void> {
   if (res) snapshots.set(id, (await res.json()) as DataSnapshot);
 }
 
-/** Keep `next` as the source's latest if it is well formed, newer, and fits a bound field. */
-async function offer(id: string, next: DataSnapshot, manifest: ScreenManifest | undefined): Promise<void> {
+/** Keep `input` as the source's latest if it is a well-formed snapshot, newer, and fits a bound field. */
+async function offer(id: string, input: unknown, manifest: ScreenManifest | undefined): Promise<void> {
   // A malformed snapshot never replaces the last good one, which is also what survives offline.
-  const problems = validateDataSnapshot(next);
-  if (problems.length || next.id !== id) {
-    reportRejected([{ source: id, problem: `snapshot ignored: ${problems[0] ?? `it is for "${String(next.id)}"`}` }]);
+  const parsed = parseDataSnapshot(input);
+  if (!parsed.ok || parsed.value.id !== id) {
+    reportRejected([{ source: id, problem: `snapshot ignored: ${parsed.ok ? `it is for "${parsed.value.id}"` : parsed.problems[0]}` }]);
     return;
   }
+  const next = parsed.value;
   if (Number.isSafeInteger(next.version) && next.version >= 0) seen.set(id, Math.max(seen.get(id) ?? -1, next.version));
   // Keep the newest: an older snapshot can arrive after a newer one. (A copy stored before
   // snapshots had versions has none, and any versioned one replaces it.)
@@ -84,7 +85,7 @@ async function offer(id: string, next: DataSnapshot, manifest: ScreenManifest | 
 async function refresh(base: string, id: string, manifest: ScreenManifest, headers: Record<string, string>): Promise<void> {
   const res = await fetch(`${base}/data/${id}.json`, { cache: 'no-store', headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) return;
-  await offer(id, (await res.json()) as DataSnapshot, manifest);
+  await offer(id, await res.json(), manifest);
 }
 
 /**
@@ -93,8 +94,7 @@ async function refresh(base: string, id: string, manifest: ScreenManifest, heade
  * its feed starts with what there is.
  */
 export async function offerSnapshots(list: readonly DataSnapshot[], manifest: ScreenManifest | undefined): Promise<void> {
-  for (const snap of list)
-    await offer(String((snap as { id?: unknown }).id), snap, manifest).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+  for (const snap of list) await offer(snap.id, snap, manifest).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
   settleSources(manifest);
 }
 
