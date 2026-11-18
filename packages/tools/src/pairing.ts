@@ -59,7 +59,7 @@ export const claimScreen = defineTool({
     );
     // After the screen: the code references it. Fails the whole batch if another claim won the code.
     write(org.pairing.stage.claim(input.code, screen.id, now));
-    return { screen: await screenView(screen, blobs) };
+    return { screen: await screenView(org, screen, blobs, Date.now(), []) };
   },
   // The claim's guard failed the batch: another claim took the code (or it expired) since `open`.
   refuseFailedCommit: async ({ org, input }) => ((await org.pairing.open(input.code, Date.now())) ? undefined : notOpen(input.code)),

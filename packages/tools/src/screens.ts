@@ -25,7 +25,7 @@ export const screenOutput = z.object({
   locale: z.string().nullable(),
   orientation,
   displayHours: displayHours.nullable().describe('Null means always on'),
-  status: z.enum(['active', 'revoked']),
+  status: z.enum(['active', 'revoked']).describe('Revoked once every credential the screen had is revoked'),
   desiredManifestId: z.string().nullable().describe('The manifest the screen should play'),
   previousManifestId: z.string().nullable().describe('The one before it, kept while the screen switches'),
   reportedManifestId: z.string().nullable().describe('The manifest the screen last said it is playing'),
@@ -35,7 +35,10 @@ export const screenOutput = z.object({
   state: z
     .object({
       kind: z.enum(STATE_KINDS),
-      reason: z.enum(NEEDS_YOU_REASONS).nullable().describe('Why it needs a person: behind on a publish, revoked, nothing published, or fallen back from a manifest that played nothing'),
+      reason: z
+        .enum(NEEDS_YOU_REASONS)
+        .nullable()
+        .describe('Why it needs a person: behind on a publish, revoked, nothing published, or fallen back from a manifest that played nothing'),
       wakesAt: z.string().nullable().describe('Asleep: when it wakes'),
       filesMissing: z.number().nullable().describe('Updating: files still to fetch'),
     })
@@ -105,7 +108,14 @@ export function liveOverride(json: string | null, now: number): DisplayOverride 
   return Date.parse(o.until) > now ? o : null;
 }
 
-export async function screenView(s: Screen, blobs: R2Bucket, now = Date.now()): Promise<ScreenView> {
+/**
+ * A screen as tools return it. `credentials` are the screen's, when the caller has them already;
+ * a screen whose every credential is revoked is revoked, while one that never collected a
+ * credential is waiting to pair.
+ */
+export async function screenView(org: OrgScope, s: Screen, blobs: R2Bucket, now = Date.now(), credentials?: readonly ScreenCredential[]): Promise<ScreenView> {
+  const creds = credentials ?? (await org.screens.credentials.forScreen(s.id));
+  const revoked = s.status === 'revoked' || (creds.length > 0 && creds.every((c) => c.revokedAt != null));
   const hb = parseHeartbeat(s.heartbeatJson);
   const hours = hoursOf(s);
   const override = liveOverride(s.displayOverrideJson ?? null, now);
@@ -126,7 +136,7 @@ export async function screenView(s: Screen, blobs: R2Bucket, now = Date.now()): 
     locale: s.locale,
     orientation: s.orientation,
     displayHours: hours,
-    status: s.status,
+    status: revoked ? 'revoked' : 'active',
     desiredManifestId: s.desiredManifestId,
     previousManifestId: s.previousManifestId,
     reportedManifestId: s.reportedManifestId,
@@ -135,7 +145,7 @@ export async function screenView(s: Screen, blobs: R2Bucket, now = Date.now()): 
     displayOverride: override,
     state: screenState(
       {
-        status: s.status,
+        status: revoked ? 'revoked' : 'active',
         timezone: s.timezone,
         displayHours: hours,
         desiredManifestId: s.desiredManifestId,
@@ -185,9 +195,11 @@ export const listScreens = defineTool({
   output: z.object({ screens: z.array(screenOutput), next: nextOutput }),
   example: {},
   handler: async ({ org, input, blobs }) => {
-    const { rows, next } = page(await org.screens.list(), (s) => [s.id], input);
+    const [all, credentials] = await Promise.all([org.screens.list(), org.screens.credentials.list()]);
+    const { rows, next } = page(all, (s) => [s.id], input);
     const now = Date.now();
-    return { screens: await Promise.all(rows.map((s) => screenView(s, blobs, now))), next };
+    const of = (id: string) => credentials.filter((c) => c.screenId === id);
+    return { screens: await Promise.all(rows.map((s) => screenView(org, s, blobs, now, of(s.id)))), next };
   },
 });
 
@@ -203,7 +215,9 @@ export const getScreen = defineTool({
     screen: screenOutput,
     groupIds: z.array(z.string()),
     credentials: z.array(credentialOutput),
-    events: z.array(z.object({ at: z.number(), action: z.string().describe('The tool that made the change'), actor: z.object({ kind: z.string(), id: z.string() }) })),
+    events: z.array(
+      z.object({ at: z.number(), action: z.string().describe('The tool that made the change'), actor: z.object({ kind: z.string(), id: z.string() }) }),
+    ),
   }),
   example: { screenId: 'scr_example' },
   handler: async ({ org, input, blobs }) => {
@@ -212,7 +226,7 @@ export const getScreen = defineTool({
       org.screens.groupsOf(screen.id),
       org.screens.credentials.forScreen(screen.id),
       org.auditLog.list({ target: { kind: 'screen', id: screen.id }, limit: EVENTS }),
-      screenView(screen, blobs),
+      screenView(org, screen, blobs),
     ]);
     const events = audit.map((e) => ({ at: e.at, action: e.action, actor: { kind: e.actorKind, id: e.actorId } }));
     return { screen: view, groupIds, credentials: credentials.map(credentialView), events };
@@ -231,7 +245,7 @@ export const renameScreen = defineTool({
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, write, blobs }) => {
     const screen = await requireScreen(org, input.screenId);
-    return { screen: await screenView(write(org.screens.stage.update(screen, { name: input.name })), blobs) };
+    return { screen: await screenView(org, write(org.screens.stage.update(screen, { name: input.name })), blobs) };
   },
 });
 
@@ -267,7 +281,7 @@ export const updateScreenSettings = defineTool({
         displayHoursJson: input.displayHours === undefined ? undefined : input.displayHours === null ? null : JSON.stringify(input.displayHours),
       }),
     );
-    return { screen: await screenView(row, blobs) };
+    return { screen: await screenView(org, row, blobs) };
   },
 });
 
@@ -292,7 +306,7 @@ export const setDisplayOverride = defineTool({
     }
     const row = write(org.screens.stage.update(screen, { displayOverrideJson: override ? JSON.stringify(override) : null }));
     notify((screens) => screens.command(screen.id, { type: 'display', override }));
-    return { screen: await screenView(row, blobs, now) };
+    return { screen: await screenView(org, row, blobs, now) };
   },
 });
 
@@ -355,4 +369,13 @@ export const revokeScreenCredential = defineTool({
   },
 });
 
-export const screenTools = [listScreens, getScreen, renameScreen, updateScreenSettings, setDisplayOverride, identifyScreen, restartScreen, revokeScreenCredential];
+export const screenTools = [
+  listScreens,
+  getScreen,
+  renameScreen,
+  updateScreenSettings,
+  setDisplayOverride,
+  identifyScreen,
+  restartScreen,
+  revokeScreenCredential,
+];

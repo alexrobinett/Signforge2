@@ -95,7 +95,9 @@ export function shouldBeShowing(m: ScreenManifest, now: number, override?: Displ
     asleep: false,
     wakesAt: null,
     playlist: { id: playlist.id, name: playlist.name },
-    spot: first ? { id: first.id, name: first.name, kind: first.kind, template: first.kind === 'template' ? first.template : null, image: imageOf(first, m) } : null,
+    spot: first
+      ? { id: first.id, name: first.name, kind: first.kind, template: first.kind === 'template' ? first.template : null, image: imageOf(first, m) }
+      : null,
     spots: playlist.items.length,
   };
 }

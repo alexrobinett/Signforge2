@@ -15,9 +15,10 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppPlaylistsRouteImport } from './routes/_app/playlists'
 import { Route as AppScheduleRouteImport } from './routes/_app/schedule'
-import { Route as AppScreensRouteImport } from './routes/_app/screens'
 import { Route as AppSpotsRouteImport } from './routes/_app/spots'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as AppScreensIndexRouteImport } from './routes/_app/screens/index'
+import { Route as AppScreensScreenIdRouteImport } from './routes/_app/screens/$screenId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -48,11 +49,6 @@ const AppScheduleRoute = AppScheduleRouteImport.update({
   path: '/schedule',
   getParentRoute: () => AppRoute,
 } as any)
-const AppScreensRoute = AppScreensRouteImport.update({
-  id: '/screens',
-  path: '/screens',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppSpotsRoute = AppSpotsRouteImport.update({
   id: '/spots',
   path: '/spots',
@@ -63,6 +59,16 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppScreensIndexRoute = AppScreensIndexRouteImport.update({
+  id: '/screens/',
+  path: '/screens/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppScreensScreenIdRoute = AppScreensScreenIdRouteImport.update({
+  id: '/screens/$screenId',
+  path: '/screens/$screenId',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -70,19 +76,21 @@ export interface FileRoutesByFullPath {
   '/assets': typeof AppAssetsRoute
   '/playlists': typeof AppPlaylistsRoute
   '/schedule': typeof AppScheduleRoute
-  '/screens': typeof AppScreensRoute
   '/spots': typeof AppSpotsRoute
   '/api/$': typeof ApiSplatRoute
+  '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/screens/': typeof AppScreensIndexRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/assets': typeof AppAssetsRoute
   '/playlists': typeof AppPlaylistsRoute
   '/schedule': typeof AppScheduleRoute
-  '/screens': typeof AppScreensRoute
   '/spots': typeof AppSpotsRoute
   '/api/$': typeof ApiSplatRoute
   '/': typeof AppIndexRoute
+  '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/screens': typeof AppScreensIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -91,10 +99,11 @@ export interface FileRoutesById {
   '/_app/assets': typeof AppAssetsRoute
   '/_app/playlists': typeof AppPlaylistsRoute
   '/_app/schedule': typeof AppScheduleRoute
-  '/_app/screens': typeof AppScreensRoute
   '/_app/spots': typeof AppSpotsRoute
   '/api/$': typeof ApiSplatRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/_app/screens/': typeof AppScreensIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -104,19 +113,21 @@ export interface FileRouteTypes {
     | '/assets'
     | '/playlists'
     | '/schedule'
-    | '/screens'
     | '/spots'
     | '/api/$'
+    | '/screens/$screenId'
+    | '/screens/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/sign-in'
     | '/assets'
     | '/playlists'
     | '/schedule'
-    | '/screens'
     | '/spots'
     | '/api/$'
     | '/'
+    | '/screens/$screenId'
+    | '/screens'
   id:
     | '__root__'
     | '/_app'
@@ -124,10 +135,11 @@ export interface FileRouteTypes {
     | '/_app/assets'
     | '/_app/playlists'
     | '/_app/schedule'
-    | '/_app/screens'
     | '/_app/spots'
     | '/api/$'
     | '/_app/'
+    | '/_app/screens/$screenId'
+    | '/_app/screens/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -180,13 +192,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppScheduleRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/screens': {
-      id: '/_app/screens'
-      path: '/screens'
-      fullPath: '/screens'
-      preLoaderRoute: typeof AppScreensRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/spots': {
       id: '/_app/spots'
       path: '/spots'
@@ -201,6 +206,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/screens/': {
+      id: '/_app/screens/'
+      path: '/screens'
+      fullPath: '/screens/'
+      preLoaderRoute: typeof AppScreensIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/screens/$screenId': {
+      id: '/_app/screens/$screenId'
+      path: '/screens/$screenId'
+      fullPath: '/screens/$screenId'
+      preLoaderRoute: typeof AppScreensScreenIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -208,18 +227,20 @@ interface AppRouteChildren {
   AppAssetsRoute: typeof AppAssetsRoute
   AppPlaylistsRoute: typeof AppPlaylistsRoute
   AppScheduleRoute: typeof AppScheduleRoute
-  AppScreensRoute: typeof AppScreensRoute
   AppSpotsRoute: typeof AppSpotsRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppScreensScreenIdRoute: typeof AppScreensScreenIdRoute
+  AppScreensIndexRoute: typeof AppScreensIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAssetsRoute: AppAssetsRoute,
   AppPlaylistsRoute: AppPlaylistsRoute,
   AppScheduleRoute: AppScheduleRoute,
-  AppScreensRoute: AppScreensRoute,
   AppSpotsRoute: AppSpotsRoute,
   AppIndexRoute: AppIndexRoute,
+  AppScreensScreenIdRoute: AppScreensScreenIdRoute,
+  AppScreensIndexRoute: AppScreensIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

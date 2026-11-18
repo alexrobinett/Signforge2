@@ -37,7 +37,8 @@ async function changedSnapshots(env: Env, screen: DeviceScreen, desired: Manifes
     .map((r) => ({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), data: JSON.parse(r.dataJson) as unknown }));
 }
 
-const sameOverride = (a: DisplayOverride | null, b: DisplayOverride | null) => a?.state === b?.state && (a === null || Date.parse(a.until) === Date.parse(b!.until));
+const sameOverride = (a: DisplayOverride | null, b: DisplayOverride | null) =>
+  a?.state === b?.state && (a === null || Date.parse(a.until) === Date.parse(b!.until));
 
 /**
  * The CMS's display override (wake now, sleep now), while the screen reports another: one it

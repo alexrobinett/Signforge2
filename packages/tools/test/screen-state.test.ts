@@ -37,7 +37,10 @@ describe('screenState', () => {
   });
 
   it('is updating while it is not yet on the desired manifest, with the files still to fetch', () => {
-    expect(state({ desiredManifestId: M2, heartbeat: heartbeat({ manifest: { active: M1, filesMissing: 12 } }) })).toMatchObject({ kind: 'updating', filesMissing: 12 });
+    expect(state({ desiredManifestId: M2, heartbeat: heartbeat({ manifest: { active: M1, filesMissing: 12 } }) })).toMatchObject({
+      kind: 'updating',
+      filesMissing: 12,
+    });
   });
 
   it('is asleep on purpose with the panel off, and says when it wakes', () => {
@@ -68,7 +71,10 @@ describe('screenState', () => {
   it('needs you when revoked, when nothing is published to it, or when it fell back from a manifest that played nothing', () => {
     expect(state({ status: 'revoked' })).toMatchObject({ kind: 'needs_you', reason: 'revoked' });
     expect(state({ desiredManifestId: null, reportedManifestId: null })).toMatchObject({ kind: 'needs_you', reason: 'nothing_published' });
-    expect(state({ heartbeat: heartbeat({ manifest: { active: M1, filesMissing: 0, fallbackFrom: M2 } }) })).toMatchObject({ kind: 'needs_you', reason: 'fallback' });
+    expect(state({ heartbeat: heartbeat({ manifest: { active: M1, filesMissing: 0, fallbackFrom: M2 } }) })).toMatchObject({
+      kind: 'needs_you',
+      reason: 'fallback',
+    });
   });
 });
 
@@ -81,7 +87,15 @@ const manifest = (over: Partial<ScreenManifest> = {}): ScreenManifest =>
     files: { ['a'.repeat(64)]: { size: 10, type: 'image/jpeg' }, ['b'.repeat(64)]: { size: 10, type: 'text/html' } },
     templates: {},
     spots: {
-      promo: { id: 'promo', name: 'Energy 3 for $7', durationMs: 10_000, kind: 'template', template: 'cstore-promo', data: {}, assets: { photo: 'a'.repeat(64) } },
+      promo: {
+        id: 'promo',
+        name: 'Energy 3 for $7',
+        durationMs: 10_000,
+        kind: 'template',
+        template: 'cstore-promo',
+        data: {},
+        assets: { photo: 'a'.repeat(64) },
+      },
       clock: { id: 'clock', name: 'Clock', durationMs: 10_000, kind: 'template', template: 'clock', data: {}, assets: {} },
       menu: { id: 'menu', name: 'Breakfast', durationMs: 10_000, kind: 'image', file: 'a'.repeat(64), fit: 'cover' },
     },
@@ -108,7 +122,10 @@ describe('shouldBeShowing', () => {
 
   it('follows the schedule', () => {
     // 07:30 local.
-    expect(shouldBeShowing(manifest(), Date.parse('2026-11-18T12:30:00Z'))).toMatchObject({ playlist: { id: 'morning' }, spot: { id: 'menu', kind: 'image', template: null, image: 'a'.repeat(64) } });
+    expect(shouldBeShowing(manifest(), Date.parse('2026-11-18T12:30:00Z'))).toMatchObject({
+      playlist: { id: 'morning' },
+      spot: { id: 'menu', kind: 'image', template: null, image: 'a'.repeat(64) },
+    });
   });
 
   it('is asleep outside the display hours the screen was published with', () => {

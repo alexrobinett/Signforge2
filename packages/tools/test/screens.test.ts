@@ -132,6 +132,25 @@ describe('identify_screen and restart_screen', () => {
       { screenId: o.screen, command: { type: 'restart' } },
     ]);
     const { events } = await call('get_screen', { screenId: o.screen });
-    expect(events.slice(0, 2).map((e: { action: string }) => e.action)).toEqual(['restart_screen', 'identify_screen']);
+    // Both within a millisecond or two: their order may tie.
+    expect(
+      events
+        .slice(0, 2)
+        .map((e: { action: string }) => e.action)
+        .sort(),
+    ).toEqual(['identify_screen', 'restart_screen']);
+  });
+});
+
+describe('a revoked screen', () => {
+  it('needs you once every credential it had is revoked, though one never paired does not', async () => {
+    const org = scoped(env.DB, o.orgId);
+    const waiting = await org.screens.insert({ name: 'Waiting', timezone: 'UTC', orientation: 'landscape' });
+    expect((await call('get_screen', { screenId: waiting.id })).screen.state).toMatchObject({ kind: 'unreachable', reason: null });
+
+    await call('revoke_screen_credential', { screenId: o.screen, credentialId: o.credential });
+    expect((await call('get_screen', { screenId: o.screen })).screen.state).toMatchObject({ kind: 'needs_you', reason: 'revoked' });
+    const listed = (await call('list_screens', {})).screens.find((s: { id: string }) => s.id === o.screen);
+    expect(listed.state).toMatchObject({ kind: 'needs_you', reason: 'revoked' });
   });
 });

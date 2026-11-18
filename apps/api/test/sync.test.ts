@@ -193,7 +193,9 @@ describe('commands', () => {
     await s.seed.scope.screens.update(s.seed.screen, { displayOverrideJson: null });
     expect((await sync(s, body({ display: { on: true, override: { state: 'on', until } } }))).commands).toEqual([{ type: 'display', override: null }]);
     // An override that has ended is not sent.
-    await s.seed.scope.screens.update(s.seed.screen, { displayOverrideJson: JSON.stringify({ state: 'off', until: new Date(Date.now() - 1000).toISOString() }) });
+    await s.seed.scope.screens.update(s.seed.screen, {
+      displayOverrideJson: JSON.stringify({ state: 'off', until: new Date(Date.now() - 1000).toISOString() }),
+    });
     expect((await sync(s, body())).commands).toEqual([]);
   });
 });

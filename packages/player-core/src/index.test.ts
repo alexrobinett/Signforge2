@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
-import { Sequencer, displayOn, entryApplies, localTime, nextDisplayChange, planSync, resolvePlaylist, resolveSpotData, snapshotFit, spotFiles, validateManifest } from './index';
+import {
+  Sequencer,
+  displayOn,
+  entryApplies,
+  localTime,
+  nextDisplayChange,
+  planSync,
+  resolvePlaylist,
+  resolveSpotData,
+  snapshotFit,
+  spotFiles,
+  validateManifest,
+} from './index';
 
 const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${id}`, fit: 'cover', durationMs: 5000 });
 
@@ -330,7 +342,7 @@ describe('nextDisplayChange', () => {
     expect(next({ weekly: [{ days: [0, 1, 2, 3, 4, 5, 6], from: '00:00', to: '24:00' }] }, ny, '2026-11-18T15:00:00Z')).toBeUndefined();
   });
 
-  it('finds the end of the window it is in, in the screen\'s time zone', () => {
+  it("finds the end of the window it is in, in the screen's time zone", () => {
     // Wed 18 Nov 10:00 in New York (UTC-5) -> 19:00 local.
     expect(next(weekdays, ny, '2026-11-18T15:00:00Z')).toBe('2026-11-19T00:00:00.000Z');
   });

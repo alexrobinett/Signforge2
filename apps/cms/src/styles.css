@@ -1,65 +1,135 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
-@import '@fontsource-variable/inter';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* shadcn tokens. Colours meet WCAG AA (4.5:1) for text on their paired background in both themes. */
+/*
+ * The CMS's tokens (docs/proposals/cms-ui.md): neutral white chrome, blue only where you can act
+ * or what is selected, and a status set where each state has its own colour, word and shape.
+ * Hex, so test/tokens.test.ts can check every pair: text 4.5:1 on what it sits on, field edges,
+ * rings, status glyphs and chart marks 3:1, in both themes.
+ */
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.99 0.002 260);
-  --foreground: oklch(0.2 0.02 265);
-  --card: oklch(1 0 0);
+  --background: #f7f8fa;
+  --foreground: #101828;
+  --card: #ffffff;
   --card-foreground: var(--foreground);
-  --popover: oklch(1 0 0);
+  --popover: #ffffff;
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.47 0.2 270);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.96 0.006 265);
-  --secondary-foreground: oklch(0.25 0.02 265);
-  --muted: oklch(0.965 0.005 265);
-  --muted-foreground: oklch(0.47 0.02 265);
-  --accent: oklch(0.95 0.015 270);
-  --accent-foreground: oklch(0.25 0.04 270);
-  --destructive: oklch(0.53 0.2 25);
-  --destructive-foreground: oklch(0.99 0 0);
-  --success: oklch(0.5 0.12 155);
-  --border: oklch(0.91 0.008 265);
-  --input: oklch(0.86 0.01 265);
-  --ring: oklch(0.55 0.2 270);
-  --sidebar: oklch(0.975 0.004 265);
+  --primary: #1f3fbf;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f4f7;
+  --secondary-foreground: #101828;
+  --muted: #f2f4f7;
+  --muted-foreground: #475467;
+  --accent: #eef1fc;
+  --accent-foreground: #1f3fbf;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  /* Dividers and card edges: decorative, not controls. */
+  --border: #e4e7ec;
+  /* Outline buttons and chips: their words identify them, so their edge is decorative too. */
+  --border-strong: #d0d5dd;
+  /* Field edges: 3:1 against a card and the canvas (WCAG 1.4.11). */
+  --input: #858fa1;
+  --ring: #1f3fbf;
+  --sidebar: #ffffff;
   --sidebar-foreground: var(--foreground);
+  --sidebar-primary: #1f3fbf;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef1fc;
+  --sidebar-accent-foreground: #1f3fbf;
+  --sidebar-border: #e4e7ec;
+  --sidebar-ring: #1f3fbf;
+
+  /* Screen states. The glyph (X) is 3:1 on a card; the word (X-foreground) 4.5:1 on its pill (X-muted). */
+  --status-online: #16a34a;
+  --status-online-foreground: #14532d;
+  --status-online-muted: #dcfce7;
+  --status-updating: #d97706;
+  --status-updating-foreground: #78350f;
+  --status-updating-muted: #fef3c7;
+  --status-asleep: #4f46e5;
+  --status-asleep-foreground: #312e81;
+  --status-asleep-muted: #e0e7ff;
+  /* Unreachable but on the latest version: a calm fact, grey, never red. */
+  --status-offline: #667085;
+  --status-offline-foreground: #344054;
+  --status-offline-muted: #f2f4f7;
+  /* Needs a person: behind, revoked, nothing playable. The only red. */
+  --status-needs-you: #d92d20;
+  --status-needs-you-foreground: #7a271a;
+  --status-needs-you-muted: #fee4e2;
+
+  /* Rollout bars and play counts; every bar carries a text legend. */
+  --chart-1: #1f3fbf;
+  --chart-2: #d97706;
+  --chart-3: #6e82d6;
+  --chart-4: #858fa1;
+  --chart-5: #0e9384;
   color-scheme: light;
 }
 
 .dark {
-  --background: oklch(0.16 0.012 265);
-  --foreground: oklch(0.96 0.005 265);
-  --card: oklch(0.2 0.014 265);
+  --background: #0b0d12;
+  --foreground: #f2f4f7;
+  --card: #12151c;
   --card-foreground: var(--foreground);
-  --popover: oklch(0.21 0.015 265);
+  --popover: #12151c;
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.72 0.15 275);
-  --primary-foreground: oklch(0.17 0.03 270);
-  --secondary: oklch(0.26 0.015 265);
-  --secondary-foreground: oklch(0.95 0.005 265);
-  --muted: oklch(0.24 0.014 265);
-  --muted-foreground: oklch(0.73 0.015 265);
-  --accent: oklch(0.27 0.03 270);
-  --accent-foreground: oklch(0.96 0.01 270);
-  --destructive: oklch(0.68 0.19 25);
-  --destructive-foreground: oklch(0.16 0.02 25);
-  --success: oklch(0.75 0.13 155);
-  --border: oklch(0.3 0.015 265);
-  --input: oklch(0.36 0.015 265);
-  --ring: oklch(0.7 0.15 275);
-  --sidebar: oklch(0.18 0.013 265);
+  --primary: #7b93ff;
+  --primary-foreground: #0b0d12;
+  --secondary: #1a1e27;
+  --secondary-foreground: #f2f4f7;
+  --muted: #1a1e27;
+  --muted-foreground: #a3acbd;
+  --accent: #1c2340;
+  --accent-foreground: #b4c1ff;
+  --destructive: #f87171;
+  --destructive-foreground: #0b0d12;
+  --border: #262b36;
+  --border-strong: #363c4a;
+  --input: #6b7385;
+  --ring: #8fa3ff;
+  --sidebar: #12151c;
   --sidebar-foreground: var(--foreground);
+  --sidebar-primary: #7b93ff;
+  --sidebar-primary-foreground: #0b0d12;
+  --sidebar-accent: #1c2340;
+  --sidebar-accent-foreground: #b4c1ff;
+  --sidebar-border: #262b36;
+  --sidebar-ring: #8fa3ff;
+
+  --status-online: #22c55e;
+  --status-online-foreground: #86efac;
+  --status-online-muted: #052e16;
+  --status-updating: #f59e0b;
+  --status-updating-foreground: #fcd34d;
+  --status-updating-muted: #3b2405;
+  --status-asleep: #818cf8;
+  --status-asleep-foreground: #a5b4fc;
+  --status-asleep-muted: #1e1b4b;
+  --status-offline: #8a93a3;
+  --status-offline-foreground: #d0d5dd;
+  --status-offline-muted: #1f2430;
+  --status-needs-you: #f87171;
+  --status-needs-you-foreground: #fca5a5;
+  --status-needs-you-muted: #3f0d0d;
+
+  --chart-1: #7b93ff;
+  --chart-2: #f59e0b;
+  --chart-3: #818cf8;
+  --chart-4: #8a93a3;
+  --chart-5: #2dd4bf;
   color-scheme: dark;
 }
 
 @theme inline {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -76,12 +146,38 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  --color-success: var(--success);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-status-online: var(--status-online);
+  --color-status-online-foreground: var(--status-online-foreground);
+  --color-status-online-muted: var(--status-online-muted);
+  --color-status-updating: var(--status-updating);
+  --color-status-updating-foreground: var(--status-updating-foreground);
+  --color-status-updating-muted: var(--status-updating-muted);
+  --color-status-asleep: var(--status-asleep);
+  --color-status-asleep-foreground: var(--status-asleep-foreground);
+  --color-status-asleep-muted: var(--status-asleep-muted);
+  --color-status-offline: var(--status-offline);
+  --color-status-offline-foreground: var(--status-offline-foreground);
+  --color-status-offline-muted: var(--status-offline-muted);
+  --color-status-needs-you: var(--status-needs-you);
+  --color-status-needs-you-foreground: var(--status-needs-you-foreground);
+  --color-status-needs-you-muted: var(--status-needs-you-muted);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -97,7 +193,6 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: 'cv11', 'ss01';
   }
   @media (prefers-reduced-motion: reduce) {
     *,
