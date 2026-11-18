@@ -24,6 +24,7 @@ Move every template onto brand tokens (M3-38 and M3-39 build the kits and the pl
   - agenda: portrait leaves room for more rows than `rows` allows; fit as many as the space holds.
   - clock: a faint purple patch remains in the bottom-right corner.
 - Transition drops have drifted since the spike: 2–4.4% during fades on 2026-11-17, against 1.5% in `spike/pi-perf/RESULTS.md`, with the previous player as well (M3-05 notes). Find out why before the token migration's Pi measurement, so a regression is not hidden by the drift.
+- Prepare budget on the Pi (M3-39): news prepares in 455-517 ms with brand fonts against a 500 ms budget; bring it back under. video-pan prepares in about 900 ms in every build, fonts or not: find out why.
 - Portrait crops of landscape media are soft: a per-asset focal point (`object-position`) and portrait renditions, with M3-14's media library.
 
 ## Out of scope
