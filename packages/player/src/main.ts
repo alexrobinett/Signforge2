@@ -18,6 +18,9 @@
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
  *                 ?source=preview  the CMS editor's preview: play drafts the framing CMS page posts (src/preview.ts)
  *                 ?pairmove=<seconds> how often the pairing code moves (default 60; testing)
+ *                 ?kind=browser   a test screen in a browser tab (M3-41): content from the API even on the
+ *                                 player's own origin, the credential kept in IndexedDB, no supervisor, and
+ *                                 display power commands ignored
  *
  * Pairing (M3-08): from the API, a screen whose supervisor has no credential shows a pairing code
  * (src/pairing.ts) and plays once it is claimed. A credential the server refuses (a 401, or
@@ -30,6 +33,7 @@ import {
   parseSyncResponse,
   requiredFiles,
   type DeviceCommand,
+  type ScreenKind,
   type ScreenManifest,
   type Spot,
   type SyncRequest,
@@ -37,7 +41,8 @@ import {
 } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { clock, now, synced } from './clock';
-import { DeviceCredential } from './credential';
+import { BrowserCredential } from './browser-credential';
+import { DeviceCredential, type ScreenCredential } from './credential';
 import { identify } from './identify';
 import { pair } from './pairing';
 import { dataRejections, dataSettled, dataStatus, heldVersions, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
@@ -63,6 +68,7 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 /** The longest a spot waits for its data feeds' first load. */
 const DATA_WAIT_MS = 3000;
 const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
+const KIND: ScreenKind = query.get('kind') === 'browser' ? 'browser' : 'device';
 /** The supervisor's secret, collected from it at first use. Never in the URL: templates can read that. */
 let supervisorToken = '';
 
@@ -85,9 +91,15 @@ async function supervisorFetch(path: string, init: RequestInit, retry = true): P
 }
 /**
  * Content on another origin is the API, which needs the screen's credential. Static content served
- * beside the player (the default, the demo) gets no credential, so it never leaves the device.
+ * beside the player (the default, the demo) gets no credential, so it never leaves the device. A
+ * browser test screen is served on the CMS's hostname, where the API is on its own origin.
  */
-const credential = new URL(CONTENT, location.href).origin === location.origin ? undefined : new DeviceCredential(SUPERVISOR, supervisorFetch);
+const credential: ScreenCredential | undefined =
+  KIND === 'browser'
+    ? new BrowserCredential()
+    : new URL(CONTENT, location.href).origin === location.origin
+      ? undefined
+      : new DeviceCredential(SUPERVISOR, supervisorFetch);
 const deviceHeaders = async () => (credential ? credential.headers() : {});
 /** Static content: while nothing nudges, the manifest is polled this often. */
 const SOCKET_POLL_MS = 300_000;
@@ -498,6 +510,7 @@ let displayMethods: Record<string, string> | undefined;
 
 /** Ask the device supervisor to power the panel. Without one (a browser, the demo) the player just goes dark. */
 async function setPanel(on: boolean): Promise<void> {
+  if (KIND === 'browser') return void (state.display = 'browser: no panel');
   try {
     const res = await supervisorFetch(`/display/${on ? 'on' : 'off'}`, { method: 'POST' });
     if (res.ok) {
@@ -577,6 +590,7 @@ async function pairScreen(): Promise<void> {
   status('');
   const got = await pair({
     base: BASE,
+    kind: KIND,
     moveMs: query.get('pairmove') ? Number(query.get('pairmove')) * 1000 : undefined,
     stop: async () => (await credential.check()) === 'held',
     onCode: (code) => (state.pairing = code),
@@ -594,6 +608,8 @@ function command(c: DeviceCommand): void {
   if (c.type === 'reload') reload();
   else if (c.type === 'restart') location.reload();
   else if (c.type === 'identify') identify(c.name, c.seconds);
+  // A browser tab has no panel to power.
+  else if (c.type === 'display' && KIND === 'browser') console.info('[sf] display: ignored on a browser screen');
   else if (c.type === 'display') {
     setOverride(c.override);
     display.wake();
@@ -712,6 +728,8 @@ async function apiSync(): Promise<number> {
   const res = await fetch(`${BASE}/sync`, {
     method: 'POST',
     cache: 'no-store',
+    // Never the session cookie a test screen on the CMS's hostname has: the API refuses it.
+    credentials: 'omit',
     headers: { ...(await deviceHeaders()), 'content-type': 'application/json' },
     body: JSON.stringify(req),
     signal: AbortSignal.timeout(20_000),

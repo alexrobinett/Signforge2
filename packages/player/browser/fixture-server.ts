@@ -16,6 +16,10 @@
  * token, as device/pi/supervisor.py does). Requests to the API origin (`localUrl`) need a bearer
  * credential in `authorised`; `/content/pair/start` and `/content/pair/poll` hand out codes, which a
  * test `claim`s. `revoke` refuses a credential and tells the sockets.
+ *
+ * A browser test screen (M3-41) meets the API on its own origin, beside a user's session cookie:
+ * `sameOriginApi` makes the player's origin the API too, which, as /v1/device does, refuses any
+ * request but the socket's that carries `sf.session_token`.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -48,6 +52,8 @@ export const FIXTURE_CREDENTIAL = `sfd_scr_fixture.${'A'.repeat(43)}`;
 const SUPERVISOR_TOKEN = 'fixture-supervisor-token';
 
 interface Pairing {
+  /** What the screen said it is at start. */
+  kind?: string;
   code: string;
   pollToken: string;
   expiresAt: number;
@@ -89,6 +95,8 @@ export class FixtureServer {
   readonly pairings: Pairing[] = [];
   /** How long a new code lasts. */
   pairingTtlMs = 15 * 60_000;
+  /** The API on the player's own origin too, as on the CMS's hostname. */
+  sameOriginApi = false;
 
   private constructor(private readonly playerDir: string) {
     this.server.on('upgrade', (req, socket: Socket) => this.upgrade(req, socket));
@@ -230,14 +238,18 @@ export class FixtureServer {
     if (path.startsWith('/content/')) {
       const rest = path.slice('/content/'.length);
       const c = this.content;
+      if (req.headers.cookie?.includes('sf.session_token=')) return send(401, JSON.stringify({ error: 'session_not_accepted' }), 'application/json');
       if (rest === 'pair/start' && req.method === 'POST') {
-        const p: Pairing = {
-          code: `P${String(this.pairings.length).padStart(5, '0')}`,
-          pollToken: `poll-${this.pairings.length}`,
-          expiresAt: Date.now() + this.pairingTtlMs,
-        };
-        this.pairings.push(p);
-        return send(200, JSON.stringify({ code: p.code, pollToken: p.pollToken, expiresAt: new Date(p.expiresAt).toISOString() }), 'application/json');
+        return void readBody(req).then((body) => {
+          const p: Pairing = {
+            kind: body ? (JSON.parse(body) as { kind?: string }).kind : undefined,
+            code: `P${String(this.pairings.length).padStart(5, '0')}`,
+            pollToken: `poll-${this.pairings.length}`,
+            expiresAt: Date.now() + this.pairingTtlMs,
+          };
+          this.pairings.push(p);
+          send(200, JSON.stringify({ code: p.code, pollToken: p.pollToken, expiresAt: new Date(p.expiresAt).toISOString() }), 'application/json');
+        });
       }
       if (rest === 'pair/poll' && req.method === 'POST') {
         return void readBody(req).then((body) => {
@@ -254,7 +266,7 @@ export class FixtureServer {
       }
       // The API origin needs a live credential, as /v1/device does.
       const bearer = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
-      if (req.headers.host?.startsWith('localhost') && !(bearer && this.authorised.has(bearer))) return send(401, '');
+      if ((this.sameOriginApi || req.headers.host?.startsWith('localhost')) && !(bearer && this.authorised.has(bearer))) return send(401, '');
       if (rest === 'sync' && req.method === 'POST') {
         let body = '';
         req.on('data', (d: Buffer) => (body += d));
