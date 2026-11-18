@@ -18,3 +18,4 @@ export function normaliseFeed(format: 'rss', body: string, options?: NewsOptions
 export function normaliseFeed(format: FeedFormat, body: string, options: CalendarOptions | NewsOptions = {}) {
   return format === 'ical' ? parseCalendar(body, options as CalendarOptions) : parseNews(body, options);
 }
+// CI proof: a feeds-only change.
