@@ -1,6 +1,6 @@
 # M3-39 Brand in the player and SDK
 
-Status: done (branch m3-39-brand-in-player); slow prepares found and fixed (branch m3-39b-brand-font-cost), the Pi budget box waits on an owner call on its frame cost  ·  Size: M  ·  Depends on: M3-32, M3-28, M3-38
+Status: done (branch m3-39-brand-in-player); slow prepares found and fixed (branch m3-39b-brand-font-cost); frame trade accepted 2026-11-17  ·  Size: M  ·  Depends on: M3-32, M3-28, M3-38
 
 ## Goal
 
