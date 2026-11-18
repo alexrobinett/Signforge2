@@ -69,7 +69,10 @@ export interface OrgGraph {
 }
 
 export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
-  const [screens, members, versions, assets, renditions, dataSources, spots, playlists, items, entries, settings] = await Promise.all([
+  // The publish revision first, before any content: a publish that commits after this read moves
+  // it on, so whatever it changed cannot be in what is read below without failing the guard.
+  const settings = await org.settings.get();
+  const [screens, members, versions, assets, renditions, dataSources, spots, playlists, items, entries] = await Promise.all([
     org.screens.list(),
     org.screenGroups.allMembers(),
     org.templates.versions.list(),
@@ -80,7 +83,6 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     org.playlists.list(),
     org.playlists.allItems(),
     org.scheduleEntries.list(),
-    org.settings.get(),
   ]);
   const [brandKits, brandAssignments] = await Promise.all([org.brandKits.list(), org.brandKits.assignments.list()]);
   const groupsOf = new Map<string, string[]>();

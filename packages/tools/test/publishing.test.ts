@@ -274,6 +274,52 @@ describe('concurrent publishes (R09)', () => {
   const titleOn = (result: Publish, screenId: string) =>
     (result.screens.find((s) => s.screenId === screenId)!.manifest!.spots[x('deal')] as Extract<Spot, { kind: 'template' }>).data.title;
   const editDeal = (org: OrgScope, title: string) => org.spots.update(x('deal'), { dataJson: JSON.stringify({ title }) });
+  const desiredOn = async (org: OrgScope, screenId: string) => (await org.screens.get(screenId))!.desiredManifestId;
+  const manifestOn = (result: Publish, screenId: string) => result.screens.find((s) => s.screenId === screenId)!.manifest!.id;
+
+  /**
+   * A slow D1 read, as the review reproduced: `read` waits, when `first` is in flight beside it,
+   * until `first` has returned and `between` has run. Reads made one after the other are not held.
+   */
+  function interleave<A, B>(first: () => Promise<A>, read: () => Promise<B>, between: () => Promise<unknown>) {
+    let inFlight: Promise<unknown> | undefined;
+    return {
+      first: async () => {
+        const done = first().then(async (r) => {
+          await between();
+          return r;
+        });
+        inFlight = done;
+        try {
+          return await done;
+        } finally {
+          inFlight = undefined;
+        }
+      },
+      read: async () => {
+        // Let the calls beside it in the same Promise.all start first.
+        await null;
+        if (inFlight) await inFlight;
+        return read();
+      },
+    };
+  }
+
+  it('refuses an older publish whose revision was read after a newer publish committed (review 1)', async () => {
+    const { org, lobby } = await seedSmallOrg('pub-race-slow-rev');
+    await commitPublish(org, await publishOrg(org, opts));
+    let newer: Publish | undefined;
+    const slow = interleave(org.spots.list, org.settings.get, async () => {
+      await editDeal(org, 'Three for $5');
+      newer = await publishOrg(org, opts);
+      await commitPublish(org, newer);
+    });
+    const older = await publishOrg({ ...org, spots: { ...org.spots, list: slow.first }, settings: { ...org.settings, get: slow.read } }, opts);
+    expect(titleOn(older, lobby.id)).toBe('Two for $4');
+
+    await expect(commitPublish(org, older)).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await desiredOn(org, lobby.id)).toBe(manifestOn(newer!, lobby.id));
+  });
 
   it('refuses an older publish that commits after a newer one, so the newest content stays on screen', async () => {
     const { org, lobby } = await seedSmallOrg('pub-race-old');
