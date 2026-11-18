@@ -2,9 +2,8 @@
  * `AssetPicker` (docs/proposals/cms-ui.md): the library in a dialog, for a spot's image field.
  * The host route loads the assets (`getAssets`) and passes them; an upload here refreshes them
  * like the library page does. Only verified images are offered. A click picks.
- *
- * The spot editor (M3-16) is its first user, so knip.jsonc lists this file as an entry until then.
- * The focal point for portrait crops is M3-16's too (see docs/tickets/M3-16-spot-editor.md).
+ * The spot editor's image fields and the new-spot dialog use it. The focal point for portrait
+ * crops is still to come (docs/tickets/M3-16-spot-editor.md).
  */
 import { useId } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '~/components/ui/dialog';

@@ -1,0 +1,1 @@
+ALTER TABLE `spots` ADD `row_version` integer DEFAULT 1 NOT NULL;

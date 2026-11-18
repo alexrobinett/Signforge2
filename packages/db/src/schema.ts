@@ -416,6 +416,8 @@ export const spots = sqliteTable(
     fit: text('fit', { enum: ['cover', 'contain'] }),
     /** URL spots: an https page on another origin. */
     url: text('url'),
+    /** Moves on with every edit of the draft; publishing does not move it. */
+    rowVersion: rowVersion(),
     publishedJson: publishedJson(),
     publishedAt: publishedAt(),
     createdAt: created(),

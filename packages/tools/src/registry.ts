@@ -14,6 +14,7 @@ import { pairingTools } from './pairing';
 import { publishTools } from './publish';
 import { screenTools } from './screens';
 import { settingsTools } from './settings';
+import { spotTools } from './spots';
 import { platformTemplateTools, templateTools } from './templates';
 import type { AnyTool, DataScope } from './tool';
 import { videoTools } from './videos';
@@ -29,6 +30,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...brandTools,
   ...dataSourceTools,
   ...settingsTools,
+  ...spotTools,
 ];
 export const PLATFORM_TOOLS: readonly AnyTool<PlatformScope>[] = [...platformTemplateTools];
 

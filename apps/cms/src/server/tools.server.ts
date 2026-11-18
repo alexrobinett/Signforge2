@@ -4,6 +4,7 @@
  * loaders, not the pages.
  */
 import type { AssetView } from '~/lib/assets';
+import type { BrandKitView, SpotView, TemplateView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { callApi } from './api.server';
 
@@ -42,6 +43,9 @@ interface ListPage {
   screens?: ScreenView[];
   groups?: GroupView[];
   assets?: AssetView[];
+  spots?: SpotView[];
+  templates?: TemplateView[];
+  brandKits?: BrandKitView[];
 }
 
 /** Every page of a list tool, the rows `rows` picks from each. */

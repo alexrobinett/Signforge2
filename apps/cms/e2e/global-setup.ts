@@ -11,6 +11,7 @@ import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, RUN_DIR } from './se
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
 const cmsDir = fileURLToPath(new URL('../', import.meta.url));
+const rootDir = fileURLToPath(new URL('../../../', import.meta.url));
 
 async function waitFor(url: string, timeoutMs = 90_000) {
   const deadline = Date.now() + timeoutMs;
@@ -36,7 +37,8 @@ export default async function globalSetup() {
     encoding: 'utf8',
   });
   if (migrate.status !== 0) throw new Error(`migrations failed:\n${migrate.stdout}\n${migrate.stderr}`);
-  // The CMS serves the player build as its test screen (vite.config.ts). Built for this host: no CMS_ORIGIN.
+  // The CMS serves the player build as its test screen and the spot editor's stage (vite.config.ts).
+  // Built for this host: no CMS_ORIGIN.
   const player = spawnSync('pnpm', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' }, encoding: 'utf8' });
   if (player.status !== 0) throw new Error(`player build failed:\n${player.stdout}\n${player.stderr}`);
 
@@ -77,6 +79,13 @@ export default async function globalSetup() {
   ];
 
   await waitFor(`http://127.0.0.1:${API_PORT}/health`);
+  // The base templates and fonts, as a deploy seeds them, for the spot editor.
+  const seed = spawnSync('pnpm', ['seed:templates', '--api', `http://127.0.0.1:${API_PORT}`], {
+    cwd: rootDir,
+    env: { ...env, SF_ADMIN_TOKEN: ADMIN_TOKEN },
+    encoding: 'utf8',
+  });
+  if (seed.status !== 0) throw new Error(`template seed failed:\n${seed.stdout}\n${seed.stderr}`);
   await waitFor(`${CMS_URL}/sign-in`);
   // The CMS reaches the API through the registry; wait until the binding answers.
   await waitFor(`${CMS_URL}/api/sign-in-options`);

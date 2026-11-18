@@ -1,6 +1,6 @@
 # M3-16 Spot editor
 
-Status: open  ·  Size: L  ·  Depends on: M3-14, M3-15, M3-13, M3-34, M3-36, M3-38, M3-44
+Status: in progress, first PR (branch t3/m3-16-spot-editor)  ·  Size: L  ·  Depends on: M3-14, M3-15, M3-13, M3-34, M3-36, M3-38, M3-44
 
 ## Goal
 
@@ -45,6 +45,22 @@ Create and edit spots with a form generated from the template's fields and a liv
 
 ## Done when
 
-- [ ] Every template in `templates/` can be configured and previewed.
-- [ ] Server rejects data `validateSpotData` rejects.
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [x] Every template in `templates/` can be configured and previewed. `apps/cms/e2e/spots.spec.ts`, "every base template can be configured and previewed": for each seeded base template it makes a spot in the new-spot dialog, picks an image for each image field in the asset picker, waits for the player on the stage to say it plays, changes a text field and sees the change in the template's frame, and sees the draft saved. At a 1920x1200 window; see What is left for cstore-promo below half scale.
+- [x] Server rejects data `validateSpotData` rejects. `create_spot` and `update_spot` check template data with the compiler's `spotProblems` (`validateSpotData`, brand tokens, the duration range) and refuse with `invalid_input` naming the field (`packages/tools/test/spots.test.ts`, "refuses data the contract refuses"); URL spots with `safeUrl`.
+- [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated (packages/tools and packages/db READMEs, apps/cms README, docs/architecture.md, Content sources).
+
+## First PR (2026-11-18)
+
+Built:
+
+- Tools `list_spots`, `get_spot`, `create_spot` (idempotent), `update_spot` (`ifVersion`; spots got a `row_version`), `get_spot_preview` (the template, brand kit and data sources a draft compiles against, built by the publish's own code).
+- The Spots page and the editor (canvas board Spot editor A): a form made from the template's fields (text, number, boolean, colour as a brand colour or a custom one, select, image through the asset picker, list with `maxItems`), image and web-page spots (asset or https URL, fit, duration), and the stage: the real player build, served by the CMS at `/player/`, at the screen's true resolution with landscape/portrait, fit/100% and a brand-kit switcher, labelled "Draft. Not on any screen." The draft is compiled in the browser and posted 40 ms after a keystroke (measured in the e2e: the template's frame shows the new text about 60 ms after the fill, Playwright's polling included). While a field is invalid, the contract's message is under it, the stage keeps the last valid frame, and the draft is not saved. Drafts save a second after the last edit with `ifVersion`; a change made by someone else meanwhile shows "This changed since you opened it" with Reload.
+- TanStack Query for these pages (src/queries/spots.ts), as docs/research/cms-data-layer.md decides.
+
+What is left:
+
+- **Binding a field to a data source** and **the sample-data switch**: no data-source tools exist yet (list them, read a snapshot for the live value). `update_spot` keeps a spot's bindings as they are.
+- **Publish** in the editor (M3-18). The stage label and the disabled publish while a field is invalid come with it; the header says whether the spot is published.
+- **cstore-promo on a small stage.** Below about half scale (a 1280 px window: the stage is at 27%) the player misses its 2 s ready timeout for cstore-promo, every retry, in Chromium headless and headed; at 100%, or at 60% and more, it plays. The other six templates play at any scale. Not the slot's 1 px gap (an 8 and a 12 px gap changed nothing) nor CSS `zoom` instead of `transform`. Likely the throttle M3-39 found (undrawn frames under the scaled layer); it needs a trace (`m39b-scripts/ptrace*.py`).
+- **Focal point** for portrait crops (below).
+- From the design review: the stage could take the full width of wide windows (the app shell caps pages at 72rem), stay in view while a long form scrolls (sticky), and the duration could have -/+ buttons.

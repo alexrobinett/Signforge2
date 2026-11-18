@@ -54,6 +54,7 @@ describe('the registry', () => {
       'create_brand_kit',
       'create_data_source',
       'create_group',
+      'create_spot',
       'create_video_upload',
       'delete_asset',
       'delete_data_source',
@@ -65,6 +66,8 @@ describe('the registry', () => {
       'get_data_source',
       'get_org_settings',
       'get_screen',
+      'get_spot',
+      'get_spot_preview',
       'get_template',
       'identify_screen',
       'list_assets',
@@ -73,6 +76,7 @@ describe('the registry', () => {
       'list_fonts',
       'list_groups',
       'list_screens',
+      'list_spots',
       'list_templates',
       'publish_manifest_to_screen',
       'register_template_version',
@@ -90,6 +94,7 @@ describe('the registry', () => {
       'update_data_source',
       'update_org_settings',
       'update_screen_settings',
+      'update_spot',
     ]);
   });
 
@@ -97,7 +102,15 @@ describe('the registry', () => {
     const keyed = TOOLS.filter((t) => t.idempotent)
       .map((t) => t.name)
       .sort();
-    expect(keyed).toEqual(['claim_screen', 'create_asset_upload', 'create_brand_kit', 'create_data_source', 'create_group', 'create_video_upload']);
+    expect(keyed).toEqual([
+      'claim_screen',
+      'create_asset_upload',
+      'create_brand_kit',
+      'create_data_source',
+      'create_group',
+      'create_spot',
+      'create_video_upload',
+    ]);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
     for (const name of keyed) {
       const schema = describeTools(registry, { role: 'owner' }).find((t) => t.name === name)!.inputSchema as {
@@ -160,6 +173,8 @@ describe('roles and scopes', () => {
       'get_data_source',
       'get_org_settings',
       'get_screen',
+      'get_spot',
+      'get_spot_preview',
       'get_template',
       'list_assets',
       'list_brand_kits',
@@ -167,6 +182,7 @@ describe('roles and scopes', () => {
       'list_fonts',
       'list_groups',
       'list_screens',
+      'list_spots',
       'list_templates',
     ]);
     expect(names('editor')).not.toContain('revoke_screen_credential');

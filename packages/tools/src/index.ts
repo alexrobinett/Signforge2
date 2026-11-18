@@ -33,6 +33,7 @@ export { MAX_RENDITION_BYTES, UPLOAD_URL_SECONDS, type AssetView, type Rendition
 export { IDENTIFY_SECONDS, liveOverride, OVERRIDE_LIMIT_MS, type ScreenView, type CredentialView } from './screens';
 export { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from './pairing';
 export type { GroupView } from './groups';
+export type { SpotView } from './spots';
 export { kitColors, type BrandKitView, type StoredColors } from './brand';
 export type { StoredCheckReport, TemplateVersionView, TemplateView } from './templates';
 export {
@@ -40,10 +41,12 @@ export {
   loadCompileInput,
   loadOrg,
   promoteDrafts,
+  previewInput,
   publishOrg,
   type DraftKind,
   type DraftReport,
   type OrgGraph,
+  type PreviewInput,
   type ScreenPublish,
 } from './publishing';
 export { parseHeartbeat, type ScreenHeartbeat } from './heartbeat';

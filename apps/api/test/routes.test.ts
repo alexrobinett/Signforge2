@@ -81,10 +81,12 @@ describe('requests', () => {
   let screenId: string;
   let assetId: string;
   let brandKitId: string;
+  let spotId: string;
   let baseTemplate: string;
+  let baseVersion: string;
 
   beforeAll(async () => {
-    baseTemplate = (await seedBaseTemplate(env.DB)).template;
+    ({ template: baseTemplate, templateVersion: baseVersion } = await seedBaseTemplate(env.DB));
     const setup = new Client(t);
     await setup.signIn(email('guard'));
     const org = await setup.createOrg('Guard');
@@ -100,6 +102,7 @@ describe('requests', () => {
         shape: 'soft',
       })
     ).id;
+    spotId = (await scoped(env.DB, org.id).spots.insert({ name: 'Site', kind: 'url', durationMs: 10_000, url: 'https://example.com' })).id;
     // get_data_source's example names `weather`.
     await scoped(env.DB, org.id).dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
     // The same session, on a D1 binding that records writes.
@@ -130,16 +133,9 @@ describe('requests', () => {
       if (tool.mutates) continue;
       writes.length = 0;
       const example = tool.example as Record<string, unknown>;
-      const input =
-        'screenId' in example
-          ? { ...example, screenId }
-          : 'templateId' in example
-            ? { ...example, templateId: baseTemplate }
-            : 'assetId' in example
-              ? { ...example, assetId }
-              : 'brandKitId' in example
-                ? { ...example, brandKitId }
-                : example;
+      // Each id the example names, as one of this org's (or a base template's).
+      const orgIds: Record<string, string> = { screenId, templateId: baseTemplate, templateVersionId: baseVersion, assetId, brandKitId, spotId };
+      const input = Object.fromEntries(Object.entries(example).map(([k, v]) => [k, orgIds[k] ?? v]));
       expect((await owner.tool(tool.name, input)).status, tool.name).toBe(200);
       expect(ours(), tool.name).toEqual([]);
     }
@@ -228,6 +224,8 @@ describe('POST /api/tools/:name', () => {
       'get_data_source',
       'get_org_settings',
       'get_screen',
+      'get_spot',
+      'get_spot_preview',
       'get_template',
       'list_assets',
       'list_brand_kits',
@@ -235,6 +233,7 @@ describe('POST /api/tools/:name', () => {
       'list_fonts',
       'list_groups',
       'list_screens',
+      'list_spots',
       'list_templates',
     ]);
   });

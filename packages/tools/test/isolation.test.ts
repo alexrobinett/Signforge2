@@ -24,6 +24,7 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   manifest: (o) => files(o).manifest,
   template: (o) => o.template,
   templateVersion: (o) => o.templateVersion,
+  spot: (o) => o.templateSpot,
   bundle: (o) => files(o).bundle,
   sources: (o) => files(o).sources,
   asset: (o) => o.asset,
@@ -120,6 +121,17 @@ const REFUSED_BY_ANOTHER = new Set([
   'revoke_screen_credential.screenId',
 ]);
 
+/**
+ * Fields the tool's one example cannot reach with every other optional id filled, because the
+ * spot tools take a flat input whose fields belong to one kind of spot: the input that reaches
+ * each, naming org A's row there and org B's own rows elsewhere.
+ */
+const REACHED_BY: Record<string, (s: Seeded) => unknown> = {
+  'create_spot.templateVersionId': (s) => ({ name: 'Menu', kind: 'template', templateVersionId: s.a.templateVersion }),
+  'create_spot.assetId': (s) => ({ name: 'Logo', kind: 'image', assetId: s.a.asset }),
+  'update_spot.assetId': (s) => ({ spotId: s.b.imageSpot, assetId: s.a.asset }),
+};
+
 let s: Seeded;
 let callerB: Caller;
 let before: unknown;
@@ -141,6 +153,7 @@ async function orgAState() {
     brandAssignments: await a.brandKits.assignments.list(),
     dataSources: await a.dataSources.list(),
     snapshots: await a.dataSources.snapshots([s.a.dataSource]),
+    spots: await a.spots.list(),
   };
 }
 
@@ -190,8 +203,9 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
     }
     for (const field of fields) {
       it(`${tool.name}: finds nothing of org A in ${field.path.join('.')}`, async () => {
-        const result = await dispatch(registry, tool.name, oneForeignId(tool, fields, field, s), callerB);
         const name = `${tool.name}.${field.path.join('.')}`;
+        const input = REACHED_BY[name]?.(s) ?? oneForeignId(tool, fields, field, s);
+        const result = await dispatch(registry, tool.name, input, callerB);
         if (IGNORES_UNKNOWN.has(name)) {
           expect(result.ok, JSON.stringify(result)).toBe(true);
           expect(JSON.stringify(result)).not.toContain(ORG_IDS[field.kind]!(s.a));

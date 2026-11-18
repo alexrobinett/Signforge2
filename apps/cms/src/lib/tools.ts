@@ -3,6 +3,8 @@
  * (the API checks the session, the role and the input). A refusal throws `ToolCallError` with the
  * tool's own message, written to be shown as it is.
  */
+import type { SpotView } from './spots';
+
 class ToolCallError extends Error {
   constructor(
     readonly code: string,
@@ -52,3 +54,11 @@ export const isStale = (err: unknown) =>
 
 /** A tool's refusal as a sentence for the page. */
 export const toolMessage = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');
+
+/** The spot in a `{ spot }` output, such as `update_spot`'s, for the Query cache. */
+export function spotOf(output: unknown): SpotView {
+  if (isRecord(output) && isSpot(output.spot)) return output.spot;
+  throw new ToolCallError('error', 'SignForge answered without the spot. Reload the page to see it.');
+}
+
+const isSpot = (v: unknown): v is SpotView => isRecord(v) && typeof v.id === 'string' && typeof v.version === 'number' && typeof v.kind === 'string';

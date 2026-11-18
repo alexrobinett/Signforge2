@@ -306,6 +306,37 @@ export async function loadCompileInput(org: OrgScope, screenId: string): Promise
   return compileInputFor(await loadOrg(org), screenId);
 }
 
+// ------------------------------------------------------------------ preview
+
+/** What the spot editor's stage compiles a draft against: everything of a `CompileInput` but the screen and the content. */
+export type PreviewInput = Pick<CompileInput, 'templates' | 'files' | 'dataSources'> & { brand?: NonNullable<CompileInput['brand']> };
+
+/**
+ * A preview's template, brand kit and data sources for one orientation, built as a publish builds
+ * them, so the stage draws what a screen would. The kit is `brandKitId`, else the org's default;
+ * one that cannot be built (an unverified logo) is left out and its problems returned.
+ */
+export function previewInput(
+  graph: OrgGraph,
+  orientation: Orientation,
+  opts: { templateVersionId?: string; brandKitId?: string },
+): { input: PreviewInput; brandKitId: string | null; problems: string[] } {
+  const input: PreviewInput = { templates: {}, files: {}, dataSources: graph.dataSources };
+  const v = opts.templateVersionId ? graph.templateVersions.get(opts.templateVersionId) : undefined;
+  if (v) {
+    input.templates[v.key] = { manifest: v.manifest, html: v.html };
+    input.files[v.html] = { size: v.size, type: 'text/html' };
+  }
+  const kitId = opts.brandKitId ?? graph.brandAssignments.find((a) => a.target === 'org')?.brandKitId;
+  const row = kitId ? graph.brandKits.get(kitId) : undefined;
+  if (!row) return { input, brandKitId: null, problems: [] };
+  const own: CompileInput['files'] = {};
+  const { kit, problems } = toBrandKit(graph, row, orientation, own);
+  if (!kit) return { input, brandKitId: row.id, problems: problems.map((p) => `brand kit ${row.id}: ${p}`) };
+  Object.assign(input.files, own);
+  return { input: { ...input, brand: { kits: { [kit.id]: kit }, groups: {}, screen: kit.id } }, brandKitId: row.id, problems };
+}
+
 // ------------------------------------------------------------------ drafts
 
 export type DraftKind = 'spot' | 'playlist' | 'schedule_entry';
