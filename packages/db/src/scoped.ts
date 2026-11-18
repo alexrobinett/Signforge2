@@ -14,7 +14,7 @@ import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
-import { commit, fullRow, staged, strip, updateSet, type Staged, type Write } from './writes';
+import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
@@ -28,10 +28,11 @@ export class NotInOrgError extends Error {
 }
 
 /**
- * Fields a caller may never set: the org is the scope's, the id is fixed at insert, and a draft's
- * published version is written only by `stage.publish` (./drafts.ts).
+ * Fields a caller may never set: the org is the scope's, the id is fixed at insert, a row's
+ * version moves on by itself, and a draft's published version is written only by `stage.publish`
+ * (./drafts.ts).
  */
-type Guarded = 'orgId' | 'id' | 'createdAt' | 'publishedJson' | 'publishedAt';
+type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'publishedJson' | 'publishedAt';
 export type NewRow<T extends SQLiteTable> = Omit<T['$inferInsert'], Guarded> & { id?: string };
 export type RowPatch<T extends SQLiteTable> = Partial<Omit<T['$inferInsert'], Guarded>>;
 
@@ -63,6 +64,45 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
   // Drizzle's builders do not type-check over a generic table; the public signatures carry the types.
   const t = table as unknown as typeof s.screens;
   const mine = (id: string) => and(eq(t.orgId, orgId), eq(t.id, id));
+  // A table with a `row_version` (screens, groups, brand kits): every change moves it on.
+  const versioned = 'rowVersion' in table;
+  const bump = (set: Record<string, unknown>) => (versioned ? { ...set, rowVersion: sql`${t.rowVersion} + 1` } : set);
+  /**
+   * The statements of a change to `current`, the row as read, whose version moves on by one.
+   * With `ifVersion`, the change is refused (`StaleVersionError`) unless the row is still that
+   * version: now, if `current` is already another, and again inside the batch, by a first
+   * statement that fails it if another change landed between the read and the commit.
+   */
+  const change = (current: Row, set: Record<string, unknown>, ifVersion: number | undefined): Staged<Row> => {
+    const { id, rowVersion: version } = current as { id: string; rowVersion?: number };
+    if (ifVersion !== undefined) {
+      if (version === undefined) throw new Error(`${prefix} rows have no version to check`);
+      if (version !== ifVersion) throw new StaleVersionError(id, version);
+    }
+    if (!Object.keys(set).length) return { row: current, writes: [] };
+    const row = (version === undefined ? { ...current, ...set } : { ...current, ...set, rowVersion: version + 1 }) as Row;
+    const update = staged(
+      row,
+      db
+        .update(t)
+        .set(bump(set) as never)
+        .where(mine(id)),
+    );
+    if (ifVersion === undefined) return update;
+    const check = db
+      .select({
+        // json() of text that is not JSON raises an error, which aborts the batch.
+        ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE ${t.orgId} = ${orgId} AND ${t.id} = ${id} AND ${t.rowVersion} = ${ifVersion}) THEN '1' ELSE 'stale version' END)`,
+      })
+      .from(s.organization)
+      .where(eq(s.organization.id, orgId));
+    const now = async () => {
+      const r = await db.select({ version: t.rowVersion }).from(t).where(mine(id)).get();
+      if (!r) throw new NotInOrgError('row', id);
+      return r.version;
+    };
+    return { row, writes: [guard(check, { id, version: ifVersion, current: now }), ...update.writes] };
+  };
   return {
     get: async (id: string): Promise<Row | undefined> => (await db.select().from(t).where(mine(id)).get()) as Row | undefined,
     getMany: async (ids: readonly string[]): Promise<Row[]> =>
@@ -88,11 +128,11 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
     },
     /** Returns the updated row, or undefined if the org has no such row. An empty patch changes nothing. */
     update: async (id: string, patch: RowPatch<T>): Promise<Row | undefined> => {
-      const set = strip(patch as object);
+      const set = strip(patch as Record<string, unknown>);
       if (!Object.values(set).some((v) => v !== undefined)) return (await db.select().from(t).where(mine(id)).get()) as Row | undefined;
       return (await db
         .update(t)
-        .set(set as never)
+        .set(bump(set) as never)
         .where(mine(id))
         .returning()
         .get()) as Row | undefined;
@@ -105,18 +145,18 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
         const row = fullRow(t, { ...strip(values as object), id, orgId });
         return staged(row as Row, db.insert(t).values(row as never));
       },
-      /** `current` is the row as read; the staged row is it with the patch applied. An empty patch stages nothing. */
-      update: (current: Row, patch: RowPatch<T>): Staged<Row> => {
-        const set = updateSet(t, strip(patch as Record<string, unknown>));
-        if (!Object.keys(set).length) return { row: current, writes: [] };
-        return staged(
-          { ...current, ...set } as Row,
-          db
-            .update(t)
-            .set(set as never)
-            .where(mine((current as { id: string }).id)),
-        );
-      },
+      /**
+       * `current` is the row as read; the staged row is it with the patch applied (and its version
+       * moved on). An empty patch stages nothing. Pass `ifVersion`, the version the caller read,
+       * to refuse the change with `StaleVersionError` if the row has changed since.
+       */
+      update: (current: Row, patch: RowPatch<T>, ifVersion?: number): Staged<Row> =>
+        change(current, updateSet(t, strip(patch as Record<string, unknown>)), ifVersion),
+      /**
+       * Move a versioned row's version and `updatedAt` on without changing its fields: for a
+       * change to what belongs to it (a group's members). Guarded by `ifVersion` as `update` is.
+       */
+      touch: (current: Row, ifVersion?: number): Staged<Row> => change(current, { updatedAt: Date.now() }, ifVersion),
       delete: (id: string): Staged => staged(undefined, db.delete(t).where(mine(id))),
     },
   };
@@ -209,17 +249,41 @@ export function scoped(d1: D1Database, orgId: string) {
   const m = s.screenGroupMembers;
   const os = s.orgSettings;
 
-  /**
-   * A group's members replaced. The group may be one staged in the same batch (`knownGroup`).
-   * Throws `NotInOrgError` if the group or any screen is not the org's.
-   */
-  const stageMembers = async (groupId: string, screenIds: readonly string[], knownGroup = false): Promise<Staged> => {
-    if (!knownGroup && !(await screenGroups.get(groupId))) throw new NotInOrgError('group', groupId);
+  type Group = typeof s.screenGroups.$inferSelect;
+  /** The screens, once each. Throws `NotInOrgError` if any is not the org's. */
+  const orgScreens = async (screenIds: readonly string[]) => {
     const unique = [...new Set(screenIds)];
     const found = new Set((await screens.getMany(unique)).map((r) => r.id));
     for (const id of unique) if (!found.has(id)) throw new NotInOrgError('screen', id);
-    const rows = unique.map((screenId) => ({ orgId, groupId, screenId }));
-    return staged(undefined, db.delete(m).where(and(eq(m.orgId, orgId), eq(m.groupId, groupId))), ...chunk(rows, 3).map((part) => db.insert(m).values(part)));
+    return unique;
+  };
+  const inserts = (groupId: string, screenIds: string[]) =>
+    chunk(
+      screenIds.map((screenId) => ({ orgId, groupId, screenId })),
+      3,
+    ).map((part) => db.insert(m).values(part).onConflictDoNothing());
+  /**
+   * A change to a group's members, after the group's own statements (`touch`: its version moves
+   * on, guarded by `ifVersion`), so a guard that fails stops the membership change too.
+   */
+  const withTouch = (group: Group, ifVersion: number | undefined, ...queries: unknown[]): Staged<Group> => {
+    const touched = screenGroups.stage.touch(group, ifVersion);
+    return { row: touched.row, writes: [...touched.writes, ...staged(undefined, ...queries).writes] };
+  };
+  /**
+   * A group's members replaced, as read in `group`. A group staged in the same batch (`newGroup`)
+   * is not stored yet: its version stays as staged. Throws `NotInOrgError` if the group or any
+   * screen is not the org's.
+   */
+  const stageMembers = async (
+    group: Group,
+    screenIds: readonly string[],
+    { newGroup = false, ifVersion }: { newGroup?: boolean; ifVersion?: number } = {},
+  ): Promise<Staged<Group>> => {
+    if (!newGroup && !(await screenGroups.get(group.id))) throw new NotInOrgError('group', group.id);
+    const unique = await orgScreens(screenIds);
+    const queries = [db.delete(m).where(and(eq(m.orgId, orgId), eq(m.groupId, group.id))), ...inserts(group.id, unique)];
+    return newGroup ? staged(group, ...queries) : withTouch(group, ifVersion, ...queries);
   };
   /** A kit's logos must be the org's own assets. */
   const checkLogos = async (v: { logoOnDarkAssetId?: string | null; logoOnLightAssetId?: string | null }) => {
@@ -442,12 +506,34 @@ export function scoped(d1: D1Database, orgId: string) {
         ).length > 0,
       /** Replace a group's members. Throws `NotInOrgError`, changing nothing, if the group or any screen is not the org's. */
       setMembers: async (groupId: string, screenIds: readonly string[]) => {
-        await commit(db, (await stageMembers(groupId, screenIds)).writes);
+        const group = await screenGroups.get(groupId);
+        if (!group) throw new NotInOrgError('group', groupId);
+        await commit(db, (await stageMembers(group, screenIds)).writes);
       },
+      /**
+       * Group membership, staged. Each takes the group as read and returns it as it will be: its
+       * version moves on, and `ifVersion` refuses the change (`StaleVersionError`) if it moved
+       * since. Each throws `NotInOrgError` if the group or a screen is not the org's.
+       */
       stage: {
         ...screenGroups.stage,
-        /** As `setMembers`, staged. Pass `newGroup` for a group staged in the same batch, which is not stored yet. */
-        setMembers: (groupId: string, screenIds: readonly string[], { newGroup = false } = {}) => stageMembers(groupId, screenIds, newGroup),
+        /** Replace the members. Pass `newGroup` for a group staged in the same batch, which is not stored yet. */
+        setMembers: stageMembers,
+        /** Add screens; ones already in the group stay as they are. */
+        addMembers: async (group: Group, screenIds: readonly string[], ifVersion?: number): Promise<Staged<Group>> => {
+          if (!(await screenGroups.get(group.id))) throw new NotInOrgError('group', group.id);
+          return withTouch(group, ifVersion, ...inserts(group.id, await orgScreens(screenIds)));
+        },
+        /** Remove screens; ones not in the group are ignored. */
+        removeMembers: async (group: Group, screenIds: readonly string[], ifVersion?: number): Promise<Staged<Group>> => {
+          if (!(await screenGroups.get(group.id))) throw new NotInOrgError('group', group.id);
+          const ids = [...new Set(screenIds)];
+          return withTouch(
+            group,
+            ifVersion,
+            ...chunk(ids, 1).map((part) => db.delete(m).where(and(eq(m.orgId, orgId), eq(m.groupId, group.id), inArray(m.screenId, part)))),
+          );
+        },
       },
     },
 
@@ -656,9 +742,9 @@ export function scoped(d1: D1Database, orgId: string) {
           await checkLogos(values);
           return brandKitRows.stage.insert(values);
         },
-        update: async (current: typeof s.brandKits.$inferSelect, patch: RowPatch<typeof s.brandKits>) => {
+        update: async (current: typeof s.brandKits.$inferSelect, patch: RowPatch<typeof s.brandKits>, ifVersion?: number) => {
           await checkLogos(patch);
-          return brandKitRows.stage.update(current, patch);
+          return brandKitRows.stage.update(current, patch, ifVersion);
         },
       },
       /** Which kit applies where (`brand_assignments`): the org default, groups, screens. */
