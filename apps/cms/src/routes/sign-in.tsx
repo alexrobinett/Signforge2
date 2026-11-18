@@ -1,18 +1,17 @@
-import { createFileRoute, redirect, useNavigate, useRouter } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { ArrowLeftIcon, LoaderCircleIcon, MailIcon, TerminalIcon } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useId, type FormEvent } from 'react';
 import { GitHubMark, Logo } from '~/components/logo';
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { authClient, authErrorMessage } from '~/lib/auth-client';
 import { safeRedirect } from '~/lib/paths';
 import { getShell, getSignInOptions, type SignInOptions } from '~/server/shell.functions';
+import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/sign-in')({
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
-    typeof search.redirect === 'string' ? { redirect: search.redirect } : {},
+  validateSearch: (search: Record<string, unknown>): { redirect?: string } => (typeof search.redirect === 'string' ? { redirect: search.redirect } : {}),
   beforeLoad: async ({ search }) => {
     if (await getShell()) throw redirect({ href: safeRedirect(search.redirect) });
   },
@@ -42,60 +41,36 @@ function SignInPage() {
   );
 }
 
+/**
+ * Focuses an element once, when it mounts. A stable function, so React calls it only on mount and
+ * unmount; an inline ref callback would run, and steal focus, on every render.
+ */
+function focusOnMount(el: HTMLElement | null) {
+  el?.focus();
+}
+
+/** The two steps of signing in. Every change goes through the store's sign-in actions (src/state/sign-in.ts). */
 function SignInForm({ options, next }: { options: SignInOptions; next: string }) {
-  const router = useRouter();
-  const navigate = useNavigate();
-  const [step, setStep] = useState<'email' | 'code'>('email');
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [pending, setPending] = useState<'send' | 'verify' | 'github' | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const { step, email, code, pending, error, notice } = useAppStore((s) => s.signIn);
+  const editEmail = useAppStore((s) => s.editEmail);
+  const editCode = useAppStore((s) => s.editCode);
+  const startSignIn = useAppStore((s) => s.startSignIn);
+  const resendCode = useAppStore((s) => s.resendCode);
+  const submitCode = useAppStore((s) => s.submitCode);
+  const changeEmail = useAppStore((s) => s.changeEmail);
+  const signInWithGitHub = useAppStore((s) => s.signInWithGitHub);
   const emailId = useId();
   const codeId = useId();
   const errorId = useId();
-  const headingRef = useRef<HTMLHeadingElement>(null);
 
-  // Move focus to the new step's heading, so a screen reader announces the change.
-  useEffect(() => {
-    if (step === 'code') headingRef.current?.focus();
-  }, [step]);
-
-  async function sendCode(e?: FormEvent) {
-    e?.preventDefault();
-    setError(null);
-    setNotice(null);
-    setPending('send');
-    const { error } = await authClient.emailOtp.sendVerificationOtp({ email: email.trim(), type: 'sign-in' });
-    setPending(null);
-    if (error) return setError(authErrorMessage(error, 'We could not send a code. Check the address and try again.'));
-    if (step === 'code') setNotice('We sent a new code.');
-    setCode('');
-    setStep('code');
-  }
-
-  async function verify(e: FormEvent) {
+  function onEmailSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
-    setNotice(null);
-    setPending('verify');
-    const { error } = await authClient.signIn.emailOtp({ email: email.trim(), otp: code.trim() });
-    if (error) {
-      setPending(null);
-      return setError(authErrorMessage(error, 'That code did not work. Check it, or ask for a new one.'));
-    }
-    await router.invalidate();
-    await navigate({ href: next, replace: true });
+    void startSignIn();
   }
 
-  async function github() {
-    setError(null);
-    setPending('github');
-    const { error } = await authClient.signIn.social({ provider: 'github', callbackURL: next, errorCallbackURL: '/sign-in' });
-    if (error) {
-      setPending(null);
-      setError(authErrorMessage(error, 'GitHub sign-in is not available right now.'));
-    }
+  function onCodeSubmit(e: FormEvent) {
+    e.preventDefault();
+    void submitCode(next);
   }
 
   const describedBy = error ? errorId : undefined;
@@ -104,7 +79,8 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
     return (
       <div className="space-y-6">
         <div className="space-y-2">
-          <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none">
+          {/* Focused on arrival, so a screen reader announces the new step. */}
+          <h1 ref={focusOnMount} tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none">
             Check your email
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -112,20 +88,19 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
           </p>
         </div>
         {options.codesInTerminal && <DevCodeHint />}
-        <form onSubmit={verify} className="space-y-4" noValidate>
+        <form onSubmit={onCodeSubmit} className="space-y-4" noValidate>
           <div className="space-y-2">
             <Label htmlFor={codeId}>Sign-in code</Label>
             <Input
               id={codeId}
               name="code"
               value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onChange={(e) => editCode(e.target.value)}
               inputMode="numeric"
               autoComplete="one-time-code"
               pattern="[0-9]{6}"
               maxLength={6}
               required
-              autoFocus
               aria-invalid={error ? true : undefined}
               aria-describedby={describedBy}
               className="h-12 text-center font-mono text-xl tracking-[0.5em] md:text-xl"
@@ -138,18 +113,10 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
           </Button>
         </form>
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <Button
-            variant="link"
-            className="h-auto px-0"
-            onClick={() => {
-              setStep('email');
-              setError(null);
-              setNotice(null);
-            }}
-          >
+          <Button variant="link" className="h-auto px-0" onClick={changeEmail}>
             <ArrowLeftIcon aria-hidden /> Use a different email
           </Button>
-          <Button variant="link" className="h-auto px-0" onClick={() => void sendCode()} disabled={pending !== null}>
+          <Button variant="link" className="h-auto px-0" onClick={() => void resendCode()} disabled={pending !== null}>
             {pending === 'send' ? 'Sending…' : 'Send a new code'}
           </Button>
         </div>
@@ -165,7 +132,7 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
       </div>
       {options.github && (
         <>
-          <Button variant="outline" size="lg" className="w-full" onClick={github} disabled={pending !== null}>
+          <Button variant="outline" size="lg" className="w-full" onClick={() => void signInWithGitHub(next)} disabled={pending !== null}>
             {pending === 'github' ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <GitHubMark className="size-4" />}
             Continue with GitHub
           </Button>
@@ -176,7 +143,7 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
           </div>
         </>
       )}
-      <form onSubmit={sendCode} className="space-y-4" noValidate>
+      <form onSubmit={onEmailSubmit} className="space-y-4" noValidate>
         <div className="space-y-2">
           <Label htmlFor={emailId}>Email</Label>
           <Input
@@ -184,7 +151,7 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
             name="email"
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => editEmail(e.target.value)}
             autoComplete="email"
             placeholder="you@company.com"
             required
