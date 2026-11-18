@@ -41,6 +41,8 @@ export interface SettingsSlice {
   ) => Promise<void>;
   saveScreenDefaults: (values: { updateWindow: { from: string; to: string }; unreachableAfterMinutes: number }, ifVersion: number) => Promise<void>;
   saveAlerts: (alerts: Record<AlertKind, AlertRule>, ifVersion: number) => Promise<void>;
+  /** Whether editors publish, or only owners. */
+  saveEditorsPublish: (editorsPublish: boolean, ifVersion: number) => Promise<void>;
   /** After a stale save: reads the settings again, dropping what the form held. */
   reloadSettings: () => Promise<void>;
   /** True once every invite is sent, so the form can clear. */
@@ -111,6 +113,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
 
     saveScreenDefaults: async (values, ifVersion) => void (await run('screens', () => callTool('update_org_settings', { ...values, ifVersion }), 'Saved')),
     saveAlerts: async (alerts, ifVersion) => void (await run('notifications', () => callTool('update_org_settings', { alerts, ifVersion }), 'Saved')),
+    saveEditorsPublish: async (editorsPublish, ifVersion) =>
+      void (await run('publishing', () => callTool('update_org_settings', { editorsPublish, ifVersion }), 'Saved')),
     async reloadSettings() {
       await router.invalidate();
       patch((s) => ({ ...s, error: null, hours: null }));
