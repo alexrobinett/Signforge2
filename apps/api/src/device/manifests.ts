@@ -1,5 +1,6 @@
 /**
- * What a screen may fetch, read from its current and previous desired manifests in R2.
+ * What a screen may fetch, read from its current and previous desired manifests in R2, and from
+ * the last good one it reports: a screen that fell back past its previous manifest needs that one's files.
  *
  * A manifest's id is the hash of its body, so the object at a manifest key never changes and
  * its parsed summary can be kept for the life of the isolate.
@@ -59,9 +60,12 @@ async function load(bucket: R2Bucket, key: string, id: string): Promise<Manifest
   return summary;
 }
 
-/** Summaries of the screen's current and previous desired manifests, whichever exist. */
+/**
+ * Summaries of the screen's current and previous desired manifests and its last good one, whichever
+ * exist. The last good id comes from the screen, but is read only under this screen's own prefix.
+ */
 export async function screenManifests(bucket: R2Bucket, screen: DeviceScreen): Promise<ManifestSummary[]> {
-  const ids = [...new Set([screen.desiredManifestId, screen.previousManifestId])].filter((id): id is string => !!id);
+  const ids = [...new Set([screen.desiredManifestId, screen.previousManifestId, screen.lastGoodManifestId])].filter((id): id is string => !!id);
   const found = await Promise.all(ids.map((id) => load(bucket, manifestKey(screen.orgId, screen.screenId, id), id)));
   return found.filter((m): m is ManifestSummary => !!m);
 }

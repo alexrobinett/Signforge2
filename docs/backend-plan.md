@@ -133,7 +133,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | `POST /v1/device/pair/start` | `{ kind? }`: get a code and poll token (no credential; rate limited) |
 | `POST /v1/device/pair/poll` | `{ pollToken }`: waiting, expired, or the credential (a fresh one on a repeat poll until the first is used; no credential; rate limited) |
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
-| `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Only files the screen's desired or previous manifest lists, from its own org's prefix (or `sys/b/` for a base template). |
+| `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Only files the screen's desired or previous manifest lists, or the last good manifest its heartbeat reports, from its own org's prefix (or `sys/b/` for a base template). |
 | `GET /v1/device/data/:id.json` | Snapshot of one source. Only sources the screen's manifest lists. The player takes snapshots from the sync; this route is for debugging and tools. |
 | `POST /v1/device/sync` | Heartbeat, play counts, snapshot changes |
 | `GET /v1/device/ws?ticket=` | Nudge socket |

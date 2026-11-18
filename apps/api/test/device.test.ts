@@ -258,6 +258,42 @@ describe('GET /v1/device/blobs/:sha256', () => {
     expect((await get(`/blobs/${blobs[1]}`, o.credential)).status).toBe(200);
     expect((await get(`/blobs/${blobs[2]}`, o.credential)).status).toBe(200);
   });
+
+  it('serves the last good manifest the screen reports, however many publishes back, but only its own', async () => {
+    const o = await setUp('dev-last-good');
+    const ids = [sha('3'), sha('4'), sha('5')];
+    const blobs = [sha('6'), sha('7'), sha('8')];
+    for (let i = 0; i < 3; i++) {
+      await env.BLOBS.put(manifestKey(o.seed.orgId, o.seed.screen, ids[i]!), JSON.stringify(manifest(ids[i]!, [blobs[i]!])));
+      await env.BLOBS.put(orgBlobKey(o.seed.orgId, blobs[i]!), `v${i}`);
+      await o.seed.scope.screens.setDesiredManifest(o.seed.screen, ids[i]!);
+    }
+    const syncReporting = async (lastGood: string) => {
+      const res = await exports.default.fetch(`${BASE}/sync`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${o.credential}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          seq: 0,
+          epoch: 'ep1',
+          player: { version: '2.0.0', manifestSchemas: [2], protocols: [1, 2] },
+          manifest: { active: lastGood, filesMissing: 0, fallbackFrom: ids[2], lastGood },
+          display: { on: true },
+          deviceTime: new Date().toISOString(),
+          clock: { offsetMs: 0, trusted: true },
+          playCounts: [],
+          snapshots: {},
+        }),
+      });
+      expect(res.status).toBe(200);
+    };
+    // Published A, then B and C, which played nothing: the screen went back to A.
+    await syncReporting(ids[0]!);
+    expect(await (await get(`/blobs/${blobs[0]}`, o.credential)).text()).toBe('v0');
+    // Another screen's manifest, reported as last good, opens nothing: it is not under this screen.
+    await syncReporting(M1);
+    expect((await get(`/blobs/${BLOB1}`, o.credential)).status).toBe(404);
+    expect((await get(`/blobs/${blobs[0]}`, o.credential)).status).toBe(404);
+  });
 });
 
 describe('GET /v1/device/data/:id.json', () => {

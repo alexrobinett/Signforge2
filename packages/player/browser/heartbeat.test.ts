@@ -142,7 +142,7 @@ describe('the heartbeat', () => {
     const last = p.server.syncs.at(-1)!;
     expect(last.player.version).not.toBe('dev');
     expect(last.player.version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(last.manifest).toEqual({ active: content.manifest.id, filesMissing: 0 });
+    expect(last.manifest).toEqual({ active: content.manifest.id, filesMissing: 0, lastGood: content.manifest.id });
     expect(last.display.on).toBe(true);
     expect(last.clock.trusted).toBe(true);
     expect(last.snapshots).toEqual({ news: 5 });
@@ -153,6 +153,21 @@ describe('the heartbeat', () => {
     const before = p.server.syncs.length;
     await expect.poll(() => p.server.syncs.length, { timeout: 10_000 }).toBeGreaterThan(before);
     expect(p.server.syncs.at(-1)!.epoch).toBe(last.epoch);
+  });
+
+  it('reports the last good manifest, so the server serves its files, while falling back to it', async () => {
+    const good = h.content([{ id: 'a', durationMs: 500 }], { variant: 'good' });
+    const broken = h.content([{ id: 'x', mode: 'throw', durationMs: 500 }], { variant: 'broken' });
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(good);
+    }, api);
+    await p.until((s) => s.lastGood === good.manifest.id);
+    p.server.publish(broken);
+    await p.until((s) => s.fallback === broken.manifest.id);
+    await expect
+      .poll(() => p.server.syncs.at(-1)?.manifest, { timeout: 10_000 })
+      .toEqual({ active: good.manifest.id, filesMissing: 0, fallbackFrom: broken.manifest.id, lastGood: good.manifest.id });
   });
 });
 

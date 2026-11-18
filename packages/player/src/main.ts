@@ -723,7 +723,12 @@ async function apiSync(): Promise<number> {
     seq: batch.seq,
     epoch: batch.epoch,
     player: { version: __SF_PLAYER_VERSION__, manifestSchemas: SUPPORTED_MANIFEST_SCHEMAS, protocols: SUPPORTED_PROTOCOLS },
-    manifest: { ...(manifest ? { active: manifest.id } : {}), filesMissing: filesMissing(), ...(state.fallback ? { fallbackFrom: state.fallback } : {}) },
+    manifest: {
+      ...(manifest ? { active: manifest.id } : {}),
+      filesMissing: filesMissing(),
+      ...(state.fallback ? { fallbackFrom: state.fallback } : {}),
+      ...(state.lastGood ? { lastGood: state.lastGood } : {}),
+    },
     display: { on: state.displayOn, ...(displayMethods ? { methods: displayMethods } : {}), ...withOverride() },
     deviceTime: new Date().toISOString(),
     clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
