@@ -52,6 +52,8 @@ Wall time of each run, from creation to its last update, on GitHub's `ubuntu-24.
 | Baseline, any change (runs 44237204249, 44237196981) | 4 m 57 s, 6 m 18 s | Everything. Tests took 3 m 06 s–3 m 31 s; the slower run also spent 65 s uploading the pnpm store. |
 | This change, cold caches (44239478412) | 4 m 55 s | Everything: the change touches the workflow, a global dependency. 14 test and lint tasks, 20 typechecks, the e2e run. |
 | This change again (44240106272) | 4 m 11 s | Everything again: the commit changed the workflow, so no Turbo cache entry matched. |
+| This change merged with its base (44244442985) | 4 m 40 s | Everything; the merge brought new code into most packages. |
+| The same commit rerun, warm Turbo cache (44244442985, attempt 2) | 1 m 41 s | All 34 cacheable tasks replayed from the cache; only the e2e run (45 s, never cached) ran. |
 | Docs only (#9, 44240132884) | 52 s | No Turbo task, no browser: install and the repo-wide checks. |
 | `packages/feeds` only (#10, 44240134887) | 4 m 27 s | feeds and what depends on it: cli, player, tools, api, and the CMS through the API (8 test and lint tasks, 19 typechecks, the e2e run). |
 | Player only (#11, 44240138678) | 3 m 31 s | `player:test` (2 m 30 s) and the typechecks it depends on. |
