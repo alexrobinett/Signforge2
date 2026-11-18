@@ -1,32 +1,9 @@
-import { expect, request as playwrightRequest, test, type APIRequestContext, type Page } from '@playwright/test';
-import { fillUntilEnabled, hydrated, screenshot } from './helpers';
-import { API_PORT, CMS_URL, codeFor } from './servers';
+import { expect, test, type APIRequestContext } from '@playwright/test';
+import { fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
-const ADDRESS = { 'cf-connecting-ip': '192.0.2.11' };
-const API = `http://127.0.0.1:${API_PORT}/api`;
-
-/**
- * Sign in by email code straight against the API, under this spec's own address (through the dev
- * CMS every request comes from one address), and give the browser the session cookies.
- */
-async function signInAs(page: Page, email: string) {
-  // Its own request context, so the device calls below go without the session cookie.
-  const request = await playwrightRequest.newContext();
-  const sent = await request.post(`${API}/auth/email-otp/send-verification-otp`, { headers: ADDRESS, data: { email, type: 'sign-in' } });
-  expect(sent.status()).toBe(200);
-  const signedIn = await request.post(`${API}/auth/sign-in/email-otp`, { headers: ADDRESS, data: { email, otp: await codeFor(email) } });
-  expect(signedIn.status()).toBe(200);
-  const cookies = signedIn.headersArray().filter((h) => h.name.toLowerCase() === 'set-cookie');
-  await page.context().addCookies(
-    cookies.map((h) => {
-      const [pair = ''] = h.value.split(';');
-      const at = pair.indexOf('=');
-      return { name: pair.slice(0, at), value: pair.slice(at + 1), url: CMS_URL };
-    }),
-  );
-  await request.dispose();
-}
+const ADDRESS = '192.0.2.11';
 
 const DEVICE = `http://127.0.0.1:${API_PORT}/v1/device`;
 
@@ -66,20 +43,12 @@ async function sync(request: APIRequestContext, credential: string, display = { 
   return (await res.json()) as { commands: unknown[] };
 }
 
-async function shots(page: Page, name: string) {
-  await screenshot(page, `${name}-light`);
-  if (!process.env.E2E_SCREENSHOTS) return;
-  await page.evaluate(() => document.documentElement.classList.add('dark'));
-  await screenshot(page, `${name}-dark`);
-  await page.evaluate(() => document.documentElement.classList.remove('dark'));
-}
-
 test('pair a screen from the empty Screens page, watch it come online, wake, identify, set its hours and revoke it', async ({ page, request }) => {
   test.setTimeout(120_000);
   await page.goto('/sign-in');
   await hydrated(page);
   await shots(page, '10-sign-in');
-  await signInAs(page, `e2e-screens-${Date.now()}@example.com`);
+  await signInAs(page, `e2e-screens-${Date.now()}@example.com`, ADDRESS);
   await page.goto('/');
   await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
@@ -166,4 +135,52 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByText(/credential was revoked/)).toBeVisible();
   const refused = await request.post(`${DEVICE}/sync`, { headers: { authorization: `Bearer ${credential}` }, data: {} });
   expect(refused.status()).toBe(401);
+});
+
+test('an edit keeps a change someone else made while the form was open, and refuses one it would overwrite', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-versions-${Date.now()}@example.com`);
+  await page.goto('/');
+  await fillUntilEnabled(page, 'Organization name', 'Eastside Deli', 'Create organization');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page.getByRole('heading', { name: 'Eastside Deli', level: 1 })).toBeVisible();
+
+  // The page's own session stands in for an agent: what matters is that its changes land in between.
+  const tool = async (name: string, input: unknown) => {
+    const res = await page.request.post(`/api/tools/${name}`, { data: input });
+    expect(res.status(), `${name}: ${await res.text()}`).toBe(200);
+    return (await res.json()) as { screen?: { id: string }; group?: { id: string; screenIds: string[] } };
+  };
+  const pair = async (name: string) =>
+    (await tool('claim_screen', { code: (await startPairing(request)).code, name, timezone: 'UTC', orientation: 'landscape' })).screen!.id;
+  const lobby = await pair('Lobby');
+  const hall = await pair('Hall');
+  const group = (await tool('create_group', { name: 'Windows' })).group!;
+
+  await page.goto(`/screens/${lobby}`);
+  await hydrated(page);
+  await page.getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('menuitem', { name: 'Settings and groups…' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByLabel('Windows').check();
+
+  // An agent puts Hall in the group while the form is open; saving the form keeps it there.
+  await tool('add_group_members', { groupId: group.id, screenIds: [hall] });
+  await settings.getByRole('button', { name: 'Save' }).click();
+  await expect(settings).toBeHidden();
+  const { groups } = (await (await page.request.post('/api/tools/list_groups', { data: {} })).json()) as { groups: { id: string; screenIds: string[] }[] };
+  expect(groups.find((g) => g.id === group.id)?.screenIds).toEqual([hall, lobby].sort());
+
+  // An agent renames the screen while the form is open; the person's rename is refused, not written over it.
+  await page.getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('menuitem', { name: 'Settings and groups…' }).click();
+  await tool('rename_screen', { screenId: lobby, name: 'Front lobby' });
+  await settings.getByLabel('Name').fill('Main lobby');
+  await settings.getByRole('button', { name: 'Save' }).click();
+  await expect(settings.getByText('This changed since you opened it.')).toBeVisible();
+  await settings.getByRole('button', { name: 'Reload' }).click();
+  await expect(settings).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Front lobby', level: 1 })).toBeVisible();
 });

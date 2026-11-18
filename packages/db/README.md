@@ -35,15 +35,19 @@ Base templates are written by `platform(db)` (`src/platform.ts`), the one scope 
 
 `org.screens.sync(screenId, write)` is a screen's sync in one atomic batch: its heartbeat and last-seen time, and its hourly play counts added unless the batch's `seq` is already stored in its `epoch`. The repeat check is inside the SQL, so a retried or doubled request counts once. It returns the highest stored `seq` and the rows D1 wrote.
 
-`org.screenGroups.setMembers(groupId, screenIds)` replaces a group's members in one batch, after checking the group and every screen are the org's (`NotInOrgError` otherwise, changing nothing).
+`org.screenGroups.setMembers(groupId, screenIds)` replaces a group's members in one batch, after checking the group and every screen are the org's (`NotInOrgError` otherwise, changing nothing). Staged, `stage.setMembers(group, screenIds, { newGroup?, ifVersion? })`, `stage.addMembers(group, screenIds, ifVersion?)` and `stage.removeMembers(group, screenIds, ifVersion?)` take the group as read and move its version on.
 
 `org.assets.usage(assetIds?)` maps each asset to the ids of the spots that use it, through an image or video spot's `asset_id` or a template spot's asset map. Unused assets are absent. The asset tools use it for usage counts and to refuse deleting an asset in use.
 
 ### Staged writes
 
-D1 has no interactive transactions, but a `batch()` is atomic. So each repository also has a `stage` (`src/writes.ts`): `org.screens.stage.update(row, patch)`, `org.assets.stage.insert(values)`, `org.screenGroups.stage.setMembers(groupId, screenIds)` and so on build the statements of a change without running them. They return `{ row, writes }`: the row as it will be once written (ids, timestamps and column defaults are fixed when staged, so it is exact), and opaque `Write`s, stamped with the scope's org like every other write. `org.commit(writes)` runs them in one batch: all take effect, or none. `platform(db)` has the same `stage` on `templates` and `templates.versions`, and its own `commit`.
+D1 has no interactive transactions, but a `batch()` is atomic. So each repository also has a `stage` (`src/writes.ts`): `org.screens.stage.update(row, patch)`, `org.assets.stage.insert(values)`, `org.screenGroups.stage.setMembers(group, screenIds)` and so on build the statements of a change without running them. They return `{ row, writes }`: the row as it will be once written (ids, timestamps and column defaults are fixed when staged, so it is exact), and opaque `Write`s, stamped with the scope's org like every other write. `org.commit(writes)` runs them in one batch: all take effect, or none. `platform(db)` has the same `stage` on `templates` and `templates.versions`, and its own `commit`.
 
 The tool dispatcher (`packages/tools`) is what commits: a tool stages its change, and the dispatcher commits it with its audit row (`org.auditLog.stage(...)`) and, for a keyed creation, its idempotency record. `org.auditLog.append(...)` writes a row on its own and is for seeding tests only. Each audit row records the actor kind and id, the client id (`client_id`: `cms`, `sf-push`, an agent's OAuth client), the action, the target and a redacted detail.
+
+### Row versions
+
+Screens, screen groups and brand kits have a `row_version` (`rowVersion`): 1 when inserted, and one more with every `update`, `stage.update` and `stage.touch` (no caller sets it; heartbeats and `setDesiredManifest` leave it alone). `stage.update(row, patch, ifVersion)` and `stage.touch(row, ifVersion)` refuse a change made from an old read: they throw `StaleVersionError` (`{ id, version }`, the version now) at once if `row` is already another version, and otherwise stage a first statement that fails the batch if the row is no longer `ifVersion` when it runs. `commit` then throws `StaleVersionError` too (`NotInOrgError` if the row is gone), and nothing in the batch is written. `stage.touch` moves a row's version and `updatedAt` on without changing its fields, for a change to what belongs to it (a group's members). The column is not `version` because a template version already has one, its semver.
 
 ### Drafts and published versions
 

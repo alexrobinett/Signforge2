@@ -9,7 +9,7 @@ ssh "$PI" 'mkdir -p ~/signforge/www/content'
 rsync -az --delete --exclude data/ dist/content/ "$PI:signforge/www/content/"
 [ "$1" = "--content-only" ] && { echo "content deployed"; exit 0; }
 rsync -az --delete --exclude content dist/player/ "$PI:signforge/www/"
-rsync -az device/pi/kiosk.sh device/pi/*.py "$PI:signforge/"
+rsync -az device/pi/kiosk.sh device/pi/tune.sh device/pi/bench.sh device/pi/*.py "$PI:signforge/"
 rsync -az device/pi/*.service "$PI:signforge/"
 ssh "$PI" 'touch ~/signforge/kiosk.env
   sudo cp ~/signforge/*.service /etc/systemd/system/ && sudo systemctl daemon-reload

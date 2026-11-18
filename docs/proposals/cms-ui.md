@@ -43,7 +43,7 @@ These are SignForge's, so no registry has them:
 - **`PlayerStage`**: the real player in an iframe (M3-36 preview channel), scaled to fit at true resolution, with landscape/portrait and fit/100% toggles. The heart of the editor.
 - **`FieldForm`**: a form generated from a template's `fields` (text, number, boolean, color, select, image, list), with the contract's validators giving the errors (`validateSpotData`). Built on shadcn `form` patterns.
 - **`BrandColorField`**: "Brand accent" or a custom colour, with the contrast check beside it.
-- **`AssetPicker`**: the media library in a `dialog`, with focal point.
+- **`AssetPicker`**: the media library in a `dialog` (built with the library page in M3-14). The focal point for portrait crops comes with the spot editor (M3-16).
 - **`DataBindingField`**: bind a field to a data source and path, showing the live value and the fallback.
 - **`PairingCodeInput`**: shadcn `input-otp`, 6 characters in two groups.
 - **`DisplayHoursEditor`**: weekly windows plus dated exceptions (`DisplayHours` in the contract).

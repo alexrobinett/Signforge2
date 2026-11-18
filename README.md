@@ -53,8 +53,11 @@ Needs Node 26 and pnpm (the version is pinned in `package.json`).
 
 ```sh
 pnpm install
+sh scripts/stress-media.sh                  # the stress example's photos and video, from a GitHub release (needs gh)
 pnpm typecheck && pnpm lint && pnpm test
 ```
+
+Without the stress media the stress golden test skips, loudly; CI fetches it and fails without it ([`docs/ci.md`](docs/ci.md#stress-media)).
 
 Play the demo content in a browser, with no backend:
 
