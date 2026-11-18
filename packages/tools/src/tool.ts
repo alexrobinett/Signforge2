@@ -10,7 +10,7 @@ import type { z } from 'zod';
 import type { UploadSigner } from './upload';
 
 /** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
-export const SCOPES = ['content:read', 'content:draft', 'content:publish', 'screens:manage'] as const;
+export const SCOPES = ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage'] as const;
 export type Scope = (typeof SCOPES)[number];
 
 /** The org roles, lowest first. A tool's `minRole` admits that role and every one after it. */
@@ -19,11 +19,11 @@ export type Role = (typeof ROLES)[number];
 
 /**
  * The most each role may do, whatever its grant says. Owner decision Q7 is open; the default is
- * that owners and editors publish and viewers read.
+ * that owners and editors publish and viewers read. Only owners have `org:manage` (the org's settings).
  */
 export const ROLE_SCOPES: Record<Role, readonly Scope[]> = {
   owner: SCOPES,
-  editor: SCOPES,
+  editor: ['content:read', 'content:draft', 'content:publish', 'screens:manage'],
   viewer: ['content:read'],
 };
 

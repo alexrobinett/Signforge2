@@ -6,7 +6,7 @@ import { seedBaseTemplate } from '@signforge/db/testing';
 import { registry } from '@signforge/tools';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import app from '../src/index';
+import { app } from '../src/index';
 import { orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
 
@@ -223,6 +223,7 @@ describe('POST /api/tools/:name', () => {
     expect((await names(viewer)).sort()).toEqual([
       'get_asset',
       'get_brand_kit',
+      'get_org_settings',
       'get_screen',
       'get_template',
       'list_assets',

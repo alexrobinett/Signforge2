@@ -10,7 +10,7 @@ import { displayOn, localTime, nextDisplayChange, resolvePlaylist } from '@signf
 import type { ScreenHeartbeat } from './heartbeat';
 
 /**
- * A screen not heard from for this long is unreachable. It syncs every 5 minutes, every 2 while
+ * By default, a screen not heard from for this long is unreachable (the org can change it, M3-42). It syncs every 5 minutes, every 2 while
  * its socket is down, so this is three missed syncs; it matches the default alert threshold (M3-42).
  */
 export const UNREACHABLE_AFTER_MS = 15 * 60_000;
@@ -39,6 +39,8 @@ export interface StateInput {
   reportedManifestId: string | null;
   lastSeenAt: number | null;
   heartbeat: ScreenHeartbeat | undefined;
+  /** The org's threshold (`org_settings`), `UNREACHABLE_AFTER_MS` by default. */
+  unreachableAfterMs: number;
 }
 
 const fact = (kind: StateKind, extra: Partial<ScreenState> = {}): ScreenState => ({ kind, reason: null, wakesAt: null, filesMissing: null, ...extra });
@@ -49,7 +51,7 @@ export function screenState(s: StateInput, now: number): ScreenState {
   const hb = s.heartbeat;
   const playing = s.reportedManifestId ?? hb?.manifest.active ?? null;
   const behind = !!s.desiredManifestId && playing !== s.desiredManifestId;
-  if (s.lastSeenAt == null || now - s.lastSeenAt > UNREACHABLE_AFTER_MS) return behind ? needsYou('behind') : fact('unreachable');
+  if (s.lastSeenAt == null || now - s.lastSeenAt > s.unreachableAfterMs) return behind ? needsYou('behind') : fact('unreachable');
   if (!s.desiredManifestId) return needsYou('nothing_published');
   if (hb?.manifest.fallbackFrom) return needsYou('fallback');
   if (hb && !hb.display.on) {

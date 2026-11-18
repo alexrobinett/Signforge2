@@ -57,6 +57,7 @@ describe('the registry', () => {
       'finalize_asset',
       'get_asset',
       'get_brand_kit',
+      'get_org_settings',
       'get_screen',
       'get_template',
       'identify_screen',
@@ -77,6 +78,7 @@ describe('the registry', () => {
       'set_group_members',
       'set_template_version_status',
       'update_brand_kit',
+      'update_org_settings',
       'update_screen_settings',
     ]);
   });
@@ -145,6 +147,7 @@ describe('roles and scopes', () => {
     expect(names('viewer').sort()).toEqual([
       'get_asset',
       'get_brand_kit',
+      'get_org_settings',
       'get_screen',
       'get_template',
       'list_assets',
@@ -156,6 +159,7 @@ describe('roles and scopes', () => {
     ]);
     expect(names('editor')).not.toContain('revoke_screen_credential');
     expect(names('editor')).not.toContain('set_template_version_status');
+    expect(names('editor')).not.toContain('update_org_settings');
     expect(names('owner')).toHaveLength(TOOLS.length);
     const listed = describeTools(registry, { role: 'owner' }).find((t) => t.name === 'rename_screen')!;
     expect(listed).toMatchObject({ scope: 'screens:manage', minRole: 'editor', mutates: true });

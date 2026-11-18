@@ -208,6 +208,7 @@ export function scoped(d1: D1Database, orgId: string) {
 
   const m = s.screenGroupMembers;
   const os = s.orgSettings;
+  const inc = s.screenIncidents;
 
   /**
    * A group's members replaced. The group may be one staged in the same batch (`knownGroup`).
@@ -620,19 +621,62 @@ export function scoped(d1: D1Database, orgId: string) {
     settings: {
       get: () => db.select().from(os).where(eq(os.orgId, orgId)).get(),
       stage: {
-        /** Set the default playlist (null for none). Throws `NotInOrgError` for a playlist the org does not have. */
-        set: async (values: { defaultPlaylistId: string | null }): Promise<Staged<typeof os.$inferSelect>> => {
-          const id = values.defaultPlaylistId;
-          if (id !== null && !(await playlists.get(id))) throw new NotInOrgError('playlist', id);
-          const row = { orgId, defaultPlaylistId: id, updatedAt: Date.now() };
+        /**
+         * Set the fields given, leaving the rest as they are (null clears one). Throws
+         * `NotInOrgError` for a default playlist the org does not have.
+         */
+        set: async (values: RowPatch<typeof os>): Promise<Staged<typeof os.$inferSelect>> => {
+          const patch = strip(values);
+          const id = patch.defaultPlaylistId;
+          if (id != null && !(await playlists.get(id))) throw new NotInOrgError('playlist', id);
+          const current = await db.select().from(os).where(eq(os.orgId, orgId)).get();
+          const updatedAt = Date.now();
+          const row: typeof os.$inferSelect = {
+            orgId,
+            defaultPlaylistId: null,
+            timezone: null,
+            locale: null,
+            displayHoursJson: null,
+            updateWindowJson: null,
+            unreachableAfterMs: null,
+            alertsJson: null,
+            ...current,
+            ...patch,
+            updatedAt,
+          };
           return staged(
             row,
             db
               .insert(os)
               .values(row)
-              .onConflictDoUpdate({ target: os.orgId, set: { defaultPlaylistId: id, updatedAt: row.updatedAt } }),
+              .onConflictDoUpdate({ target: os.orgId, set: { ...patch, updatedAt } }),
           );
         },
+      },
+    },
+
+    /**
+     * A screen's incidents (M3-42), written by the alert check, not by tools. Each write says
+     * whether it was the one that made the change, so two overlapping checks alert once.
+     */
+    incidents: {
+      /** Open an offline incident; false if the screen already has one open. */
+      open: async (screenId: string, lastSeenAt: number, now: number): Promise<boolean> => {
+        const rows = await db
+          .insert(inc)
+          .values({ id: newId('inc'), orgId, screenId, kind: 'offline', lastSeenAt, openedAt: now })
+          .onConflictDoNothing()
+          .returning({ id: inc.id });
+        return rows.length === 1;
+      },
+      /** Close an open incident; false if it was closed already. */
+      clear: async (incidentId: string, now: number): Promise<boolean> => {
+        const rows = await db
+          .update(inc)
+          .set({ clearedAt: now })
+          .where(and(eq(inc.orgId, orgId), eq(inc.id, incidentId), isNull(inc.clearedAt)))
+          .returning({ id: inc.id });
+        return rows.length === 1;
       },
     },
 

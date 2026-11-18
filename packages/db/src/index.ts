@@ -13,7 +13,8 @@ export type { Staged, Write } from './writes';
 export { published, draftChanged, type DraftRow, type PublishedPlaylist } from './drafts';
 export { findDeviceScreen, type DeviceScreen } from './device';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
-export { findMembership, organizationExists } from './members';
+export { findMembership, organizationExists, orgMembers } from './members';
+export { findAlertWork, type AlertWork } from './alerts';
 
 // Row shapes, as types only.
 export type Screen = typeof s.screens.$inferSelect;

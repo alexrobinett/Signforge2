@@ -12,10 +12,11 @@ import { groupTools } from './groups';
 import { pairingTools } from './pairing';
 import { publishTools } from './publish';
 import { screenTools } from './screens';
+import { settingsTools } from './settings';
 import { platformTemplateTools, templateTools } from './templates';
 import type { AnyTool, DataScope } from './tool';
 
-export const TOOLS: readonly AnyTool[] = [...screenTools, ...pairingTools, ...groupTools, ...publishTools, ...templateTools, ...assetTools, ...brandTools];
+export const TOOLS: readonly AnyTool[] = [...screenTools, ...pairingTools, ...groupTools, ...publishTools, ...templateTools, ...assetTools, ...brandTools, ...settingsTools];
 export const PLATFORM_TOOLS: readonly AnyTool<PlatformScope>[] = [...platformTemplateTools];
 
 const NAME = /^[a-z][a-z0-9_]{0,63}$/;
