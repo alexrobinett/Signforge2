@@ -122,18 +122,15 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 /**
  * Run axe on the page as it is, in the light theme and the dark, and fail on any violation.
  * Transitions and animations are off while it runs: else it reads colours halfway through the
- * theme change, or a dialog's fade.
- *
- * Left out: the spot editor's preview, the real player showing a template. What it shows is the
- * screen's content in the template's and brand kit's own colours, judged by docs/template-spec.md,
- * not the CMS's controls (axe finds cstore-promo's badge, white on the default kit's amber, at 2.14:1).
+ * theme change, or a dialog's fade. The spot editor's preview is checked too: the real player
+ * showing a template, so every base template's text must read on its colours (#57).
  */
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
   const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
   for (const dark of [false, true]) {
     await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), dark);
-    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).exclude('iframe[title^="Preview"]').analyze();
+    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
     const found = violations.flatMap((v) =>
       v.nodes.map((n) => `${dark ? 'dark' : 'light'} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`),
     );
