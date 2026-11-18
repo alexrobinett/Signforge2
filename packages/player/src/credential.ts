@@ -11,8 +11,8 @@
  * screen does not pair with the other API either, which would replace it.
  *
  * Pairing (src/pairing.ts) gives the screen a new one, which is stored with the supervisor; a
- * revoked one is deleted there. Without a supervisor (a browser) a paired credential lasts until
- * the page reloads.
+ * revoked one is deleted there. Without a supervisor a paired credential lasts until the page
+ * reloads. A browser test screen keeps its own in the browser instead (src/browser-credential.ts).
  */
 
 /** A request to the supervisor that needs its token (the player's `supervisorFetch`). */
@@ -24,7 +24,20 @@ export type SupervisorSend = (path: string, init: RequestInit) => Promise<Respon
  */
 export type CredentialState = 'held' | 'none' | 'elsewhere' | 'unknown';
 
-export class DeviceCredential {
+/** What the player needs of a credential, wherever it is kept. */
+export interface ScreenCredential {
+  /** Collect the credential if none is held, and say what came of it. */
+  check(): Promise<CredentialState>;
+  /** Headers for a device request. Empty while there is no credential. */
+  headers(): Promise<Record<string, string>>;
+  /** A credential from pairing: used from now on, and kept. */
+  adopt(credential: string): Promise<void>;
+  /** The server refused the credential: drop it and delete what is kept. */
+  revoke(): Promise<void>;
+  readonly held: boolean;
+}
+
+export class DeviceCredential implements ScreenCredential {
   private value = '';
   /** Credentials the server refused: if the supervisor still has one, it is not used again. */
   private readonly refused = new Set<string>();

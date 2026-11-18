@@ -6,7 +6,8 @@ The web app people use to manage their screens: TanStack Start (React 19) with T
 
 The CMS and the API are two Workers on one hostname, so the session cookie is same-origin (docs/backend-plan.md#layout).
 
-- **The browser** calls `/api/...` on the page's own origin: Better Auth's client for sign-in and organizations. In a deployed environment, the API Worker's route takes `<host>/api/*` and the CMS takes the rest. If a request for `/api/*` reaches the CMS anyway, as it always does locally, `src/routes/api/$.ts` hands it to the API over the service binding unchanged.
+- **The browser** calls `/api/...` on the page's own origin: Better Auth's client for sign-in and organizations. In a deployed environment, the API Worker's route takes `<host>/api/*` and the CMS takes the rest. If a request for `/api/*` reaches the CMS anyway, as it always does locally, `src/routes/api/$.ts` hands it to the API over the service binding unchanged. `/v1/device/*` is the same (`src/routes/v1/device/$.ts`), for the test screen.
+- **The test screen** (M3-41) is the player build (`pnpm build:player`, in `dist/player`) at `/test-screen/`: `vite dev` serves it from there and `vite build` copies it into the site's assets (the `testScreen` plugin in `vite.config.ts`). It talks to the device API on this origin, never with the session cookie (docs/architecture.md, "Browser test screen").
 - **Server code** (loaders, server functions) calls the API over the `API` service binding with the browser's cookies (`src/server/api.server.ts`). Any cookie the API sets on the way, such as Better Auth's refreshed cache cookie, is passed back to the browser.
 
 The CMS changes data only through Better Auth's endpoints (sign-in, sign-out, create and switch organization) and the API's tool registry: pages call `POST /api/tools/:name` from the browser (`src/lib/tools.ts`), and loaders read through the same tools as the member (`src/server/screens.functions.ts`). Do not add data routes here.
@@ -57,6 +58,7 @@ src/lib/screen-status.ts  a screen's state in words (the state itself comes from
 src/server/screens.functions.ts  the Screens loaders: tools called as the member, through one helper
 public/sign-in/           spots the player rendered (scripts/spot-shots.ts), for the sign-in wall
 src/routes/api/$.ts       `/api/*` handed to the API Worker
+src/routes/v1/device/$.ts `/v1/device/*` handed to the API Worker, for the test screen
 src/server/               server-only: the API binding, the shell's server functions
 src/state/                the app store: one slice per area (see State below)
 src/components/ui/        shadcn/ui components (components.json is set up for the shadcn CLI)

@@ -10,6 +10,7 @@ import type {
   DeviceSocketMessage,
   DisplayHours,
   PairPollResponse,
+  PairStartRequest,
   PairStartResponse,
   PreviewHostMessage,
   ScreenManifest,
@@ -26,6 +27,7 @@ import {
   validateDeviceSocketMessage,
   validateManifest,
   validatePairPollResponse,
+  validatePairStartRequest,
   validatePairStartResponse,
   validatePreviewHostMessage,
   validateServerSocketMessage,
@@ -49,6 +51,7 @@ export const parseBrandKit = parser<BrandKit>(validateBrandKit);
 export const parseDisplayHours = parser<DisplayHours>(displayHoursProblems);
 export const parseManifest = parser<ScreenManifest>(validateManifest);
 export const parseDataSnapshot = parser<DataSnapshot>(validateDataSnapshot);
+export const parsePairStartRequest = parser<PairStartRequest>(validatePairStartRequest);
 export const parsePairStartResponse = parser<PairStartResponse>(validatePairStartResponse);
 export const parsePairPollResponse = parser<PairPollResponse>(validatePairPollResponse);
 export const parseDeviceCommand = parser<DeviceCommand>(validateDeviceCommand);

@@ -47,10 +47,12 @@ const claimScreen = defineTool({
     if (!(await rateLimit('pairing_claim'))) throw new ToolError('rate_limited', 'too many pairing claims; wait a minute and try again');
     const now = Date.now();
     // One answer for unknown, expired and already claimed: a claim learns nothing about other orgs' codes.
-    if (!(await org.pairing.open(input.code, now))) throw notOpen(input.code);
+    const kind = await org.pairing.open(input.code, now);
+    if (!kind) throw notOpen(input.code);
     const screen = write(
       org.screens.stage.insert({
         name: input.name,
+        kind,
         timezone: input.timezone,
         orientation: input.orientation,
         locale: input.locale ?? null,

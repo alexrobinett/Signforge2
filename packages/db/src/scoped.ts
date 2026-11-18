@@ -8,6 +8,7 @@
  * D1 has no row-level security and may not enforce foreign keys everywhere, so this filter is
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
+import type { ScreenKind } from '@signforge/contract';
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
@@ -428,16 +429,19 @@ export function scoped(d1: D1Database, orgId: string) {
 
     /**
      * Claiming a pairing code (M3-08). A code belongs to no org until claimed, so `open` reads it
-     * by code alone, and says only whether it can be claimed now: an unknown, expired or claimed
-     * code are all false, so a claim cannot tell another org's code from a wrong guess.
+     * by code alone, and says only whether it can be claimed now, with the kind of screen showing
+     * it: an unknown, expired or claimed code are all undefined, so a claim cannot tell another
+     * org's code from a wrong guess.
      */
     pairing: {
-      open: async (code: string, now: number): Promise<boolean> =>
-        (await db
-          .select({ id: pcodes.id })
-          .from(pcodes)
-          .where(and(eq(pcodes.code, code), isNull(pcodes.claimedOrgId), sql`${pcodes.expiresAt} > ${now}`))
-          .get()) !== undefined,
+      open: async (code: string, now: number): Promise<ScreenKind | undefined> =>
+        (
+          await db
+            .select({ kind: pcodes.kind })
+            .from(pcodes)
+            .where(and(eq(pcodes.code, code), isNull(pcodes.claimedOrgId), sql`${pcodes.expiresAt} > ${now}`))
+            .get()
+        )?.kind,
       stage: {
         /**
          * Bind an open code to `screenId`, staged after the screen's insert (the code references

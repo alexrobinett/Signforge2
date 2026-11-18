@@ -1,5 +1,5 @@
 /** Screen tools: read screens, rename them, change their settings, wake or sleep them, identify, restart, revoke a credential. */
-import type { DisplayHours, DisplayOverride, ScreenManifest } from '@signforge/contract';
+import { SCREEN_KINDS, type DisplayHours, type DisplayOverride, type ScreenManifest } from '@signforge/contract';
 import type { OrgScope, Screen, ScreenCredential } from '@signforge/db';
 import { nextDisplayChange } from '@signforge/player-core';
 import { z } from 'zod';
@@ -24,6 +24,7 @@ export const screenOutput = z.object({
   timezone: z.string(),
   locale: z.string().nullable(),
   orientation,
+  kind: z.enum(SCREEN_KINDS).describe('device, or browser: a test screen in a browser tab, which has no panel to power'),
   displayHours: displayHours.nullable().describe('Null means always on'),
   status: z.enum(['active', 'revoked']).describe('Revoked once every credential the screen had is revoked'),
   desiredManifestId: z.string().nullable().describe('The manifest the screen should play'),
@@ -136,6 +137,7 @@ export async function screenView(org: OrgScope, s: Screen, blobs: R2Bucket, now 
     timezone: s.timezone,
     locale: s.locale,
     orientation: s.orientation,
+    kind: s.kind,
     displayHours: hours,
     status: revoked ? 'revoked' : 'active',
     desiredManifestId: s.desiredManifestId,

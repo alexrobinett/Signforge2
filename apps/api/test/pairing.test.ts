@@ -45,6 +45,19 @@ beforeAll(async () => {
 });
 
 describe('pairing', () => {
+  it('makes a screen of the kind the screen says it is at start, a device by default', async () => {
+    const browser = await device('/pair/start', { kind: 'browser' }, nextIp());
+    const { code } = (await browser.json()) as PairStartResponse;
+    const claimed = (await (await owner.tool('claim_screen', claimInput(code))).json()) as { screen: { kind: string } };
+    expect(claimed.screen.kind).toBe('browser');
+    const plain = await start();
+    expect(((await (await owner.tool('claim_screen', claimInput(plain.code))).json()) as { screen: { kind: string } }).screen.kind).toBe('device');
+    // No body at all, as players before M3-41 send it, is a device too.
+    const empty = await exports.default.fetch(`${BASE}/pair/start`, { method: 'POST', headers: { 'cf-connecting-ip': nextIp() } });
+    expect(empty.status).toBe(200);
+    expect((await device('/pair/start', { kind: 'tv' }, nextIp())).status).toBe(400);
+  });
+
   it('a claimed code gives the screen its credential, and the credential works', async () => {
     const p = await start();
     expect(p.code).toMatch(CODE);
