@@ -1,5 +1,8 @@
+import { createHash } from 'node:crypto';
 import { expect, request as playwrightRequest, type Page } from '@playwright/test';
-import { API_PORT, CMS_URL, codeFor } from './servers';
+import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
+import { png } from '@signforge/media/testing';
+import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor } from './servers';
 
 /**
  * Fill the email step and ask for a code. Retried until the page has hydrated: before that the
@@ -82,4 +85,32 @@ export async function signInAs(page: Page, email: string, address: string) {
     }),
   );
   await request.dispose();
+}
+
+const sha256 = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
+
+/** Publish one image spot, called `spot`, to the screen, as `sf push` does until the CMS publishes (M3-18). */
+export async function publishImage(page: Page, screenId: string, spot = 'Welcome'): Promise<string> {
+  const admin = `http://127.0.0.1:${API_PORT}/admin/screens/${screenId}`;
+  const headers = { authorization: `Bearer ${ADMIN_TOKEN}` };
+  const image = await png(640, 360);
+  const file = sha256(image);
+  const body: Omit<ScreenManifest, 'id'> = {
+    schema: MANIFEST_SCHEMA,
+    generatedAt: new Date().toISOString(),
+    screen: { id: screenId, name: 'Test screen', timezone: 'UTC', orientation: 'landscape' },
+    files: { [file]: { size: image.byteLength, type: 'image/png' } },
+    templates: {},
+    spots: { welcome: { id: 'welcome', name: spot, kind: 'image', file, fit: 'cover', durationMs: 5000 } },
+    playlists: { main: { id: 'main', name: 'Main', transition: { type: 'cut' }, items: [{ spot: 'welcome' }] } },
+    dataSources: {},
+    schedule: [],
+    defaultPlaylist: 'main',
+  };
+  const manifest = { ...body, id: sha256(manifestIdInput(body)) };
+  const put = await page.request.put(`${admin}/blobs/${file}`, { headers: { ...headers, 'content-type': 'image/png' }, data: image });
+  expect(put.status(), await put.text()).toBe(200);
+  const published = await page.request.put(`${admin}/manifest`, { headers, data: JSON.stringify(manifest) });
+  expect(published.status(), await published.text()).toBe(200);
+  return manifest.id;
 }
