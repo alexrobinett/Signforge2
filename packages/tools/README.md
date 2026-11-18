@@ -147,7 +147,7 @@ Each tool's `description` is written for an agent choosing a tool, its `output` 
 | editor | all but `org:manage` |
 | viewer | `content:read` |
 
-Owner decision Q7 (can editors publish?) is still open. The table shows the default: owners and editors publish, and viewers only read. Changing the answer means editing `ROLE_SCOPES` in `src/tool.ts`. Separately, each tool sets a minimum role. Revoking a screen credential and changing the org's settings are for owners only. Members, roles and invitations are Better Auth's endpoints, not tools; its organization plugin lets only owners change them (`apps/api/src/auth/roles.ts`, tested in `apps/api/test/members.test.ts`).
+Q7 (can editors publish?) is decided: it becomes an org setting an owner chooses (not built yet). Until then the table holds: owners and editors publish, and viewers only read (`ROLE_SCOPES` in `src/tool.ts`). Separately, each tool sets a minimum role. Revoking a screen credential and changing the org's settings are for owners only. Members, roles and invitations are Better Auth's endpoints, not tools; its organization plugin lets only owners change them (`apps/api/src/auth/roles.ts`, tested in `apps/api/test/members.test.ts`).
 
 ## The dispatcher
 

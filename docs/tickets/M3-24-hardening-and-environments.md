@@ -34,4 +34,4 @@ Make Milestone 3 safe to leave running: quotas, cleanup, environments, and a pub
 
 ## Owner decision
 
-Q6: per-org limits, given no billing. Default if unanswered: 2 GB storage, 25 screens, 10 data sources.
+Q6: per-org limits, given no billing. **Decided (owner, 2026-11-18): 2 GB storage, 25 screens, 10 data sources.**
