@@ -122,19 +122,39 @@ export const TEMPLATE_BUDGET = {
 /**
  * The one video profile screens accept. Measured on a Raspberry Pi 4: 1080p30 H.264 plays on the
  * hardware decoder with about 1% of frames dropped; 1080p60 drops about 18% of its frames.
+ *
+ * Written in the terms of the H.264 sequence parameter set (SPS), which an MP4 header carries, so
+ * `packages/media-check` can check it without decoding. `sf build` checks the same rules from
+ * ffprobe's report. A value that cannot be read fails the check.
  */
 export const VIDEO_SPEC = {
+  /** H.264 in an MP4 (`avc1` sample entry, the SPS in the header). */
   codec: 'h264',
-  /** 8-bit 4:2:0. The Pi 4's hardware decoder cannot play 10-bit or 4:2:2 H.264. */
-  pixelFormats: ['yuv420p', 'yuvj420p'],
-  profiles: ['Constrained Baseline', 'Baseline', 'Main', 'High'],
-  /** H.264 level 4.2, written as ffprobe reports it. */
+  /**
+   * SPS profile_idc: Baseline (66, Constrained Baseline included), Main (77), High (100). The
+   * profiles for 10-bit, 4:2:2 and 4:4:4 (High 10 is 110) are left out: the Pi 4's decoder cannot play them.
+   */
+  profileIdcs: [66, 77, 100],
+  /** SPS level_idc: 42 is level 4.2. ffprobe reports `level` the same way. */
   maxLevel: 42,
+  /** SPS chroma_format_idc 1, 4:2:0. */
+  chromaFormat: 1,
+  /** Luma and chroma bit depth. */
+  bitDepth: 8,
+  /** SPS frame_mbs_only_flag 1: every picture is a whole frame, never interlaced fields. */
+  progressive: true,
   /** The long side and the short side, so portrait video fits too. */
   maxWidth: 1920,
   maxHeight: 1080,
+  /** Average frames per second. 29.97 counts as 30: up to half a frame over is allowed. */
   maxFps: 30,
+  /** The video stream's average bits per second. */
   maxBitrate: 10_000_000,
+  /**
+   * The whole file. About 6.5 minutes at the full bit rate. Every screen stores the file, and the
+   * browser hashes it in memory before upload.
+   */
+  maxBytes: 500_000_000,
 } as const;
 
 /** The largest frame a screen of each orientation draws. Images are never shipped bigger than this. */
