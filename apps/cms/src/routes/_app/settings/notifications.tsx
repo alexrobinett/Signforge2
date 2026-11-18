@@ -34,11 +34,11 @@ function NotificationSettings() {
       const who = form.get(`${kind}.who`);
       alerts[kind] = { who: isAudience(who) ? who : settings.alerts[kind].who, email: form.get(`${kind}.email`) === 'on' };
     }
-    void saveAlerts(alerts);
+    void saveAlerts(alerts, settings.version);
   }
 
   return (
-    <form key={settings.updatedAt ?? 0} onSubmit={submit} className="space-y-6" noValidate>
+    <form key={settings.version} onSubmit={submit} className="space-y-6" noValidate>
       <PageHeader title="Notifications" description="Who hears about what, by email." />
       <SettingsSection id={`${id}-where`} title="Where alerts go" description="Email, to each member's own address. Slack, Teams and webhooks come later.">
         <p className="text-sm">

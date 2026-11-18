@@ -61,6 +61,20 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByLabel('Alert after')).toHaveValue('30');
   await expect(page.getByLabel('From')).toHaveValue('03:00');
 
+  // An agent changes the threshold while the page is open; the person's save is refused, not
+  // written over it, and a reload shows the agent's value. The page's own session stands in for it.
+  await hydrated(page);
+  const agent = await page.request.post('/api/tools/update_org_settings', { data: { unreachableAfterMinutes: 45 } });
+  expect(agent.status(), await agent.text()).toBe(200);
+  await page.getByLabel('Alert after').fill('20');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText('This changed since you opened it.')).toBeVisible();
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByLabel('Alert after')).toHaveValue('45');
+  await page.getByLabel('Alert after').fill('30');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText('Saved')).toBeVisible();
+
   // Notifications: everyone hears when a screen goes offline.
   await settingsNav(page).getByRole('link', { name: 'Notifications' }).click();
   await hydrated(page);

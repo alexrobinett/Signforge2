@@ -3,7 +3,7 @@
  * the save row with its error. Brand kits is a slot until its page lands (M3-40).
  */
 import { Link } from '@tanstack/react-router';
-import { LoaderCircleIcon } from 'lucide-react';
+import { LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '~/components/ui/button';
 import { useAppStore } from '~/state/provider';
@@ -65,13 +65,19 @@ export function SettingsSection({ id, title, description, children }: { id: stri
   );
 }
 
-/** The error of the action `at`, if the last one to fail was it. */
+/** The error of the action `at`, if the last one to fail was it; a reload when the settings changed since the page read them. */
 export function ActionError({ at }: { at: string }) {
-  const error = useAppStore((s) => (s.settings.error?.at === at ? s.settings.error.text : null));
+  const error = useAppStore((s) => (s.settings.error?.at === at ? s.settings.error : null));
+  const reload = useAppStore((s) => s.reloadSettings);
   return (
-    <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
-      {error}
-    </p>
+    <div role="alert" className="flex flex-wrap items-center gap-2 text-sm font-medium text-destructive empty:hidden">
+      {error?.text}
+      {error?.stale && (
+        <Button type="button" variant="outline" size="sm" onClick={() => void reload()}>
+          <RotateCwIcon aria-hidden /> Reload
+        </Button>
+      )}
+    </div>
   );
 }
 

@@ -27,13 +27,14 @@ function ScreenSettings() {
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!settings) return;
     const form = new FormData(e.currentTarget);
     const text = (key: string) => String(form.get(key) ?? '');
-    void saveScreenDefaults({ updateWindow: { from: text('from'), to: text('to') }, unreachableAfterMinutes: Number(text('minutes')) });
+    void saveScreenDefaults({ updateWindow: { from: text('from'), to: text('to') }, unreachableAfterMinutes: Number(text('minutes')) }, settings.version);
   }
 
   return (
-    <form key={settings.updatedAt ?? 0} onSubmit={submit} className="space-y-6" noValidate>
+    <form key={settings.version} onSubmit={submit} className="space-y-6" noValidate>
       <PageHeader title="Screens & groups" description="When screens update, and how long one may be silent before it alerts." />
       <SettingsSection
         id={`${id}-window`}

@@ -8,15 +8,18 @@ import { toast } from 'sonner';
 import { authClient, authErrorMessage } from '~/lib/auth-client';
 import type { AlertKind, AlertRule, Member } from '~/lib/settings';
 import type { DisplayHours } from '~/lib/screen-types';
-import { callTool, toolMessage } from '~/lib/tools';
+import { callTool, isStale, toolMessage } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
 import type { SliceCreator } from './store';
 
 interface SettingsState {
   /** The action running (`general`, `invite`, `role:<memberId>`, ...), or null. */
   pending: string | null;
-  /** Why the last action failed, and which one it was, so the form it came from shows it. */
-  error: { at: string; text: string } | null;
+  /**
+   * Why the last action failed, and which one it was, so the form it came from shows it. `stale`:
+   * the settings changed since the page read them, and the form offers a reload.
+   */
+  error: { at: string; text: string; stale: boolean } | null;
   /** The General page's default hours as edited; null until edited (the saved value shows). */
   hours: { value: DisplayHours | null } | null;
   /** The member the remove dialog asks about. */
@@ -26,10 +29,20 @@ interface SettingsState {
 export interface SettingsSlice {
   settings: SettingsState;
   editDefaultHours: (hours: DisplayHours | null) => void;
-  /** Renames the org if the name changed, and saves its defaults for new screens. */
-  saveGeneral: (org: { id: string; name: string }, values: { name: string; timezone: string | null; locale: string | null }) => Promise<void>;
-  saveScreenDefaults: (values: { updateWindow: { from: string; to: string }; unreachableAfterMinutes: number }) => Promise<void>;
-  saveAlerts: (alerts: Record<AlertKind, AlertRule>) => Promise<void>;
+  /**
+   * Saves the org's defaults for new screens, and renames it if the name changed. This and the two
+   * below send `ifVersion`, the settings' version when the page read them, so a save cannot
+   * overwrite a change made since.
+   */
+  saveGeneral: (
+    org: { id: string; name: string },
+    values: { name: string; timezone: string | null; locale: string | null },
+    ifVersion: number,
+  ) => Promise<void>;
+  saveScreenDefaults: (values: { updateWindow: { from: string; to: string }; unreachableAfterMinutes: number }, ifVersion: number) => Promise<void>;
+  saveAlerts: (alerts: Record<AlertKind, AlertRule>, ifVersion: number) => Promise<void>;
+  /** After a stale save: reads the settings again, dropping what the form held. */
+  reloadSettings: () => Promise<void>;
   /** True once every invite is sent, so the form can clear. */
   inviteMembers: (emails: string[], role: Role) => Promise<boolean>;
   resendInvitation: (email: string, role: Role) => Promise<void>;
@@ -65,7 +78,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       await router.invalidate();
       return true;
     } catch (err) {
-      patch((s) => ({ ...s, pending: null, error: { at, text: toolMessage(err) } }));
+      const error = isStale(err) ? { at, text: 'This changed since you opened it.', stale: true } : { at, text: toolMessage(err), stale: false };
+      patch((s) => ({ ...s, pending: null, error }));
       return false;
     }
   }
@@ -74,23 +88,34 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     settings: { pending: null, error: null, hours: null, removing: null },
     editDefaultHours: (value) => patch((s) => ({ ...s, hours: { value } })),
 
-    async saveGeneral(org, values) {
+    async saveGeneral(org, values, ifVersion) {
       const hours = get().settings.hours;
       const saved = await run(
         'general',
         async () => {
           const name = values.name.trim();
           if (!name) throw new Error('The organization needs a name.');
+          // The versioned write first: a stale save changes nothing, the name included.
+          await callTool('update_org_settings', {
+            timezone: values.timezone,
+            locale: values.locale,
+            ...(hours ? { displayHours: hours.value } : {}),
+            ifVersion,
+          });
           if (name !== org.name) await auth(authClient.organization.update({ organizationId: org.id, data: { name } }), 'Could not rename the organization.');
-          await callTool('update_org_settings', { timezone: values.timezone, locale: values.locale, ...(hours ? { displayHours: hours.value } : {}) });
         },
         'Saved',
       );
       if (saved) patch((s) => ({ ...s, hours: null }));
     },
 
-    saveScreenDefaults: async (values) => void (await run('screens', () => callTool('update_org_settings', values), 'Saved')),
-    saveAlerts: async (alerts) => void (await run('notifications', () => callTool('update_org_settings', { alerts }), 'Saved')),
+    saveScreenDefaults: async (values, ifVersion) => void (await run('screens', () => callTool('update_org_settings', { ...values, ifVersion }), 'Saved')),
+    saveAlerts: async (alerts, ifVersion) => void (await run('notifications', () => callTool('update_org_settings', { alerts, ifVersion }), 'Saved')),
+    async reloadSettings() {
+      await router.invalidate();
+      patch((s) => ({ ...s, error: null, hours: null }));
+      toast('Reloaded. Make your change again on what is there now.');
+    },
 
     inviteMembers(emails, role) {
       return run(
@@ -147,7 +172,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       patch((s) => ({ ...s, pending: 'github', error: null }));
       // On success the browser leaves for GitHub and comes back to the account page.
       const res = await authClient.linkSocial({ provider: 'github', callbackURL: '/account' });
-      if (res.error) patch((s) => ({ ...s, pending: null, error: { at: 'github', text: authErrorMessage(res.error, 'Could not connect GitHub.') } }));
+      if (res.error)
+        patch((s) => ({ ...s, pending: null, error: { at: 'github', text: authErrorMessage(res.error, 'Could not connect GitHub.'), stale: false } }));
     },
 
     async acceptInvitation(invitationId) {

@@ -20,6 +20,8 @@ export interface OrgSettings {
   unreachableAfterMinutes: number;
   alerts: Record<AlertKind, AlertRule>;
   updatedAt: number | null;
+  /** Moves on with every change; each save sends it back as `ifVersion`, so it cannot overwrite a newer one. */
+  version: number;
 }
 
 export interface Member {

@@ -48,17 +48,17 @@ function GeneralSettings() {
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!org || hoursProblems(hours).length) return;
+    if (!org || !settings || hoursProblems(hours).length) return;
     const form = new FormData(e.currentTarget);
     const text = (key: string) => {
       const v = form.get(key);
       return typeof v === 'string' && v ? v : null;
     };
-    void saveGeneral(org, { name: text('name') ?? '', timezone: text('timezone'), locale: text('locale') });
+    void saveGeneral(org, { name: text('name') ?? '', timezone: text('timezone'), locale: text('locale') }, settings.version);
   }
 
   return (
-    <form key={`${settings.updatedAt ?? 0}-${org.name}`} onSubmit={submit} className="space-y-6" noValidate>
+    <form key={`${settings.version}-${org.name}`} onSubmit={submit} className="space-y-6" noValidate>
       <PageHeader title="General" description="The organization's name, and what new screens start with." />
       <SettingsSection id={`${id}-org`} title="Organization" description="Shown to members and in invite emails.">
         <div className="grid max-w-md gap-1.5">
