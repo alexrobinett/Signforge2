@@ -76,5 +76,6 @@ M3-00, M3-01 and M3-22 have no dependencies and can run in parallel. The first P
 | [M3-42](M3-42-org-settings-and-alerts.md) | Org settings, members and alerts | M | M3-11 |
 | [M3-43](M3-43-command-menu.md) | Command menu | S | M3-11 |
 | [M3-44](M3-44-conditional-updates.md) | Conditional updates (no lost writes) | S | — |
+| [M3-45](M3-45-prepare-under-a-playing-video.md) | Prepare under a playing video | S | M3-25 |
 
 Sizes: S is up to half a day of agent work, M about a day, L more than a day (split it if it grows).
