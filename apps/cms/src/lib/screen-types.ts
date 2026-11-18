@@ -58,6 +58,8 @@ export interface ScreenView {
     spot: { id: string; name: string; kind: 'template' | 'image' | 'video' | 'url'; template: string | null; image: string | null } | null;
     spots: number;
   } | null;
+  /** Moves on with every change to its name or settings; sent back as `ifVersion` so an edit cannot overwrite a newer one. */
+  version: number;
   createdAt: number;
   updatedAt: number;
 }

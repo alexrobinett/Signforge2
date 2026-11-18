@@ -97,7 +97,7 @@ To add a slice:
 
 1. Make `src/state/<area>.ts` with its state under one key (`ui`, `signIn`, `orgs`, `screens`) and its actions, typed as `SliceCreator<YourSlice>`.
 2. Name actions as verbs on the domain (`openDrawer`, `startSignIn`, `createOrg`) and write each transition inside them with `set((s) => ...)`. Do not add a generic `patch` or `setField` action: that is `useState` under another name.
-3. Actions that call the API use the helpers in `src/lib/` and the router from the store's deps (`router.invalidate()` after a change).
+3. Actions that call the API use the helpers in `src/lib/` and the router from the store's deps (`router.invalidate()` after a change). An edit of a row sends the version it opened with as `ifVersion` (`packages/tools` README, Conditional updates); when `isStale(err)`, the action says "This changed since you opened it" and offers a reload (`saveScreenSettings` in `state/screens.ts`). A change to a list uses the tool's add and remove forms, never a replace built from what the page loaded.
 4. Add the slice to `AppState` and `createAppStore` in `src/state/store.ts`. If it must start from browser state, set that in a browser-only hook like `connectUi`, which changes the current state but not the initial one, so hydration still matches the server.
 
 ## Deploying

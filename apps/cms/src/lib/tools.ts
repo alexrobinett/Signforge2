@@ -40,5 +40,15 @@ export function screenIdOf(output: unknown): string {
   throw new ToolCallError('error', 'SignForge answered without the screen. Reload the page to see it.');
 }
 
+/** The version of the screen in a `{ screen }` output, such as `rename_screen`'s: what the next edit sends as `ifVersion`. */
+export function screenVersionOf(output: unknown): number {
+  if (isRecord(output) && isRecord(output.screen) && typeof output.screen.version === 'number') return output.screen.version;
+  throw new ToolCallError('error', 'SignForge answered without the screen. Reload the page to see it.');
+}
+
+/** Whether a refusal is an `ifVersion` conflict: someone changed the thing since the page read it. */
+export const isStale = (err: unknown) =>
+  err instanceof ToolCallError && err.code === 'conflict' && isRecord(err.details) && typeof err.details.version === 'number';
+
 /** A tool's refusal as a sentence for the page. */
 export const toolMessage = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');
