@@ -232,6 +232,7 @@ describe('POST /api/tools/:name', () => {
       'list_data_sources',
       'list_fonts',
       'list_groups',
+      'list_screen_status',
       'list_screens',
       'list_spots',
       'list_templates',

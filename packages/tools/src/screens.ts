@@ -5,9 +5,9 @@ import { nextDisplayChange } from '@signforge/player-core';
 import { z } from 'zod';
 import { displayHours, id, ifVersion, locale, name, orientation, timezone, version } from './fields';
 import { parseHeartbeat } from './heartbeat';
-import { nextOutput, page, pageInput } from './paging';
+import { keysetPage, nextOutput, page, pageInput } from './paging';
 import { manifestKey } from './r2';
-import { NEEDS_YOU_REASONS, screenState, shouldBeShowing, STATE_KINDS } from './screen-state';
+import { NEEDS_YOU_REASONS, screenState, shouldBeShowing, STATE_KINDS, type StateInput } from './screen-state';
 import { unreachableAfterMs } from './settings';
 import { defineTool, notFound } from './tool';
 
@@ -83,6 +83,9 @@ export const screenOutput = z.object({
 });
 export type ScreenView = z.infer<typeof screenOutput>;
 
+/** What the fleet poll returns of a screen: what it is doing, without its settings or what it should be showing. */
+const screenStatusOutput = screenOutput.pick({ id: true, state: true, lastSeenAt: true, desiredManifestId: true, reportedManifestId: true });
+
 /** A credential, without its hash. */
 const credentialOutput = z.object({ id: z.string(), createdAt: z.number(), lastUsedAt: z.number().nullable(), revokedAt: z.number().nullable() });
 export type CredentialView = z.infer<typeof credentialOutput>;
@@ -102,7 +105,21 @@ async function loadManifest(blobs: R2Bucket, key: string): Promise<ScreenManifes
   return m;
 }
 
-const hoursOf = (s: Screen) => (s.displayHoursJson ? (JSON.parse(s.displayHoursJson) as DisplayHours) : null);
+const hoursOf = (s: Pick<Screen, 'displayHoursJson'>) => (s.displayHoursJson ? (JSON.parse(s.displayHoursJson) as DisplayHours) : null);
+
+type StateColumns = Pick<Screen, 'timezone' | 'displayHoursJson' | 'desiredManifestId' | 'reportedManifestId' | 'lastSeenAt'>;
+
+/** What a screen's state is worked out from, given its row and whether it is revoked. */
+const stateInput = (s: StateColumns, revoked: boolean, heartbeat: StateInput['heartbeat'], unreachableAfterMs: number): StateInput => ({
+  status: revoked ? 'revoked' : 'active',
+  timezone: s.timezone,
+  displayHours: hoursOf(s),
+  desiredManifestId: s.desiredManifestId,
+  reportedManifestId: s.reportedManifestId,
+  lastSeenAt: s.lastSeenAt,
+  heartbeat,
+  unreachableAfterMs,
+});
 
 /** The override in force at `now`, or null once it has ended. */
 export function liveOverride(json: string | null, now: number): DisplayOverride | null {
@@ -154,19 +171,7 @@ export async function screenView(
     lastSeenAt: s.lastSeenAt,
     playerVersion: s.playerVersion,
     displayOverride: override,
-    state: screenState(
-      {
-        status: revoked ? 'revoked' : 'active',
-        timezone: s.timezone,
-        displayHours: hours,
-        desiredManifestId: s.desiredManifestId,
-        reportedManifestId: s.reportedManifestId,
-        lastSeenAt: s.lastSeenAt,
-        heartbeat: hb,
-        unreachableAfterMs: afterMs,
-      },
-      now,
-    ),
+    state: screenState(stateInput(s, revoked, hb, afterMs), now),
     heartbeat: hb
       ? {
           at: hb.at,
@@ -223,6 +228,37 @@ const listScreens = defineTool({
     const now = Date.now();
     const of = (id: string) => credentials.filter((c) => c.screenId === id);
     return { screens: await Promise.all(rows.map((s) => screenView(org, s, blobs, now, of(s.id), afterMs))), next };
+  },
+});
+
+const listScreenStatus = defineTool({
+  name: 'list_screen_status',
+  description:
+    'List what each screen in the organization is doing, and only that: its state, when it was last heard from, the manifest it should play and the one it reports, ordered by id, a page at a time. For watching a fleet: it reads no settings or manifests, so it is cheaper than list_screens; use list_screens or get_screen for names, settings and what a screen should be showing. Returns { screens: ScreenStatus[], next }; pass next as cursor for the following page.',
+  scope: 'content:read',
+  minRole: 'viewer',
+  mutates: false,
+  input: z.object({ ...pageInput }),
+  output: z.object({ screens: z.array(screenStatusOutput), next: nextOutput }),
+  example: {},
+  handler: async ({ org, input }) => {
+    const [{ rows, next }, afterMs] = await Promise.all([
+      keysetPage(
+        input,
+        (after, take) => org.screens.statusPage({ afterId: after === undefined ? undefined : String(after[0]), limit: take }),
+        (s) => [s.id],
+      ),
+      unreachableAfterMs(org),
+    ]);
+    const now = Date.now();
+    const screens = rows.map((s) => ({
+      id: s.id,
+      state: screenState(stateInput(s, s.status === 'revoked' || s.credentialsRevoked, parseHeartbeat(s.heartbeatJson), afterMs), now),
+      lastSeenAt: s.lastSeenAt,
+      desiredManifestId: s.desiredManifestId,
+      reportedManifestId: s.reportedManifestId,
+    }));
+    return { screens, next };
   },
 });
 
@@ -407,6 +443,7 @@ const revokeScreenCredential = defineTool({
 
 export const screenTools = [
   listScreens,
+  listScreenStatus,
   getScreen,
   renameScreen,
   updateScreenSettings,
