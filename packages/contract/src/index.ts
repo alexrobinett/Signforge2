@@ -266,7 +266,8 @@ function blankCalls(text: string, name: RegExp): string {
  * The brand colour lint: colours in a template's CSS should come from `var(--sf-*)` or be built on
  * one (`color-mix()`, gradients), with a literal only as the fallback inside `var()`, so the
  * template follows the screen's brand kit and still renders without one. A literal elsewhere is a
- * warning, not a failure: shadows, scrims and weather's sky colours use literals on purpose.
+ * warning, not a failure. The shipped templates have none: shades are the kit's background mixed
+ * with `transparent`, and colours that are no brand role are mixes of tokens with literal fallbacks.
  * Reads `.css` sources and the `<style>` elements of `.html` sources.
  */
 export function brandColourWarnings(sources: Record<string, string>): string[] {
