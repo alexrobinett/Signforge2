@@ -334,12 +334,12 @@ function promote(spot: Spot, manifestId: string): void {
   rememberGood(source).catch((err: unknown) => console.warn('[sf] could not store the last good manifest', err));
 }
 
-function record(step: Step, manifestId: string): void {
+/** A spot shown at `at` (corrected time) has played: logged, and counted. */
+function record(step: Step, manifestId: string, at: number): void {
   preview?.played(manifestId, step.spot.id);
   state.spot = step.spot.id;
   state.playlist = step.playlist.id;
   state.played++;
-  const at = now();
   // On a clock it does not trust the screen cannot say which hour a play was in: not counted.
   if (SOURCE === 'device' && clock.trusted) recordPlay(at, step.spot.id, step.spot.durationMs);
   state.log.push({
@@ -503,6 +503,7 @@ async function playbackLoop(): Promise<never> {
     status('');
     startedAt = performance.now();
     spotStartedAt = startedAt;
+    const shownAt = now();
     phase = 'transition';
     const { started, done } = show(slot, current, step.playlist.transition);
     // A video keeps reading its file from the cache while it plays, and the outgoing spot is
@@ -525,16 +526,15 @@ async function playbackLoop(): Promise<never> {
         return false;
       },
     );
-    if (playedOk) {
-      failures = 0;
-      failedInManifest = 0;
-      record(step, m.id);
-      promote(step.spot, m.id);
-    }
     await done;
     pins.hold('playing', playing);
     phase = 'play';
-    if (!playedOk) await failed(step, m);
+    if (!playedOk) return failed(step, m);
+    // After the transition: storing the play and a new last good manifest costs frames on a Pi.
+    failures = 0;
+    failedInManifest = 0;
+    record(step, m.id, shownAt);
+    promote(step.spot, m.id);
   });
 }
 
