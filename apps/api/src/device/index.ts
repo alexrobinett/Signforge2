@@ -9,7 +9,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { baseBlobKey, blobHeaders, manifestKey, orgBlobKey } from '../r2';
 import { deviceAuth, type DeviceEnv } from './auth';
-import { screenManifests } from './manifests';
+import { fileManifests, screenManifests } from './manifests';
 import { pairPoll, pairStart } from './pairing';
 import { socketRoute } from './socket';
 import { syncRoute } from './sync';
@@ -67,7 +67,7 @@ device.get('/blobs/:sha256', async (c) => {
   const screen = c.get('screen');
   const sha = c.req.param('sha256');
   if (!SHA256.test(sha)) return notFound('file not found');
-  const manifests = await screenManifests(c.env.BLOBS, screen);
+  const manifests = await fileManifests(c.env.BLOBS, screen);
   const listed = manifests.find((m) => m.files.has(sha));
   if (!listed) return notFound('file not found');
 
