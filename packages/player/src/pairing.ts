@@ -6,13 +6,22 @@
  * The code is the only thing on a dark screen, possibly for days, and the panel may be OLED: it
  * moves to a new place every minute.
  */
-import { parsePairPollResponse, parsePairStartResponse, type PairStartResponse, type Parsed } from '@signforge/contract';
+import {
+  parsePairPollResponse,
+  parsePairStartResponse,
+  type PairStartRequest,
+  type PairStartResponse,
+  type Parsed,
+  type ScreenKind,
+} from '@signforge/contract';
 
 const POLL_MS = 5000;
 
 export interface PairingOptions {
   /** The API's device base, `https://<api>/v1/device`. */
   base: string;
+  /** What this screen is, so the claim makes a screen of that kind. */
+  kind: ScreenKind;
   /** How often the code moves (testing shortens it). */
   moveMs?: number;
   /** Checked before each poll: true stops pairing (a credential turned up another way). */
@@ -33,6 +42,8 @@ async function post<T>(url: string, body: unknown, parse: (r: unknown) => Parsed
   const res = await fetch(url, {
     method: 'POST',
     cache: 'no-store',
+    // Never a cookie: on the CMS's hostname the API sits beside a user's session, and refuses it.
+    credentials: 'omit',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
@@ -56,7 +67,7 @@ export async function pair(opts: PairingOptions): Promise<string | undefined> {
       if (await opts.stop()) return undefined;
       try {
         if (!start) {
-          start = await post(`${opts.base}/pair/start`, {}, parsePairStartResponse);
+          start = await post(`${opts.base}/pair/start`, { kind: opts.kind } satisfies PairStartRequest, parsePairStartResponse);
           view.show(start.code);
           opts.onCode(start.code);
         }

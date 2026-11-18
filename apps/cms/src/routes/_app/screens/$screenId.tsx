@@ -98,6 +98,11 @@ function ScreenPage() {
           <h1 className="text-[28px] leading-tight font-semibold tracking-tight">{screen.name}</h1>
           <span className="flex items-center gap-2">
             <ScreenStatus screen={screen} now={now} />
+            {screen.kind === 'browser' && (
+              <span className="rounded-md border px-1.5 py-0.5 text-xs font-medium text-muted-foreground" title="The player in a browser tab">
+                Test screen
+              </span>
+            )}
             {screen.lastSeenAt && <span className="text-[13px] text-muted-foreground">last heard {ago(now - screen.lastSeenAt)} ago</span>}
           </span>
           {canManage && !revoked && (
@@ -116,7 +121,8 @@ function ScreenPage() {
               >
                 {spinner('restart', <RotateCwIcon aria-hidden />)} Restart player
               </Button>
-              {override ? (
+              {/* A browser tab has no panel to power: it ignores wake and sleep. */}
+              {screen.kind === 'browser' ? null : override ? (
                 <Button
                   variant="outline"
                   disabled={!!busy}

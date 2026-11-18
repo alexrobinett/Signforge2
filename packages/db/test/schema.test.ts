@@ -48,6 +48,7 @@ describe('schema', () => {
       'screen_credentials',
       'screen_group_members',
       'screen_groups',
+      'screen_incidents',
       'screens',
       'spots',
       'template_versions',

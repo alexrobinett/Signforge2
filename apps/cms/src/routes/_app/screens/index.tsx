@@ -21,6 +21,7 @@ import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKi
 import { useCanManage, useNow } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { getScreens } from '~/server/screens.functions';
+import { getOrgSettings } from '~/server/settings.functions';
 
 type View = 'tiles' | 'table';
 interface Search {
@@ -37,7 +38,11 @@ export const Route = createFileRoute('/_app/screens/')({
     ...(typeof s.group === 'string' && s.group ? { group: s.group } : {}),
     ...(isStateKind(s.status) ? { status: s.status } : {}),
   }),
-  loader: () => getScreens(),
+  // The org's settings give the pairing form its defaults for new screens.
+  loader: async () => {
+    const [screens, settings] = await Promise.all([getScreens(), getOrgSettings()]);
+    return { ...screens, settings };
+  },
   head: () => ({ meta: [{ title: 'Screens · SignForge' }] }),
   component: ScreensPage,
 });
@@ -71,7 +76,8 @@ function ScreensPage() {
     return (
       <div className="space-y-6">
         <PageHeader title="Screens" description="No screens here yet." />
-        <EmptyFleet groups={groups} canManage={canManage} />
+        {/* The player build on this site (vite.config.ts), with the device API on this origin too. */}
+        <EmptyFleet groups={groups} canManage={canManage} testScreenHref="/test-screen/?kind=browser&content=/v1/device" />
       </div>
     );
   }
@@ -291,7 +297,7 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
                   </span>
                 )}
               </div>
-              <p className="text-[13px] text-muted-foreground">{[where, d.line].filter(Boolean).join(' · ')}</p>
+              <p className="text-[13px] text-muted-foreground">{[s.kind === 'browser' && 'Test screen', where, d.line].filter(Boolean).join(' · ')}</p>
             </div>
           </li>
         );
@@ -346,6 +352,7 @@ function ScreenTable({ screens, groupsOf, now }: { screens: ScreenView[]; groups
                     {s.name}
                   </Link>
                   <div className="text-[13px] font-normal text-muted-foreground">
+                    {s.kind === 'browser' && 'Test screen · '}
                     {groupsOf
                       .get(s.id)
                       ?.map((g) => g.name)

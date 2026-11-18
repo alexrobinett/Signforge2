@@ -26,6 +26,7 @@ const input = (over: Partial<StateInput> = {}): StateInput => ({
   reportedManifestId: M1,
   lastSeenAt: NOW - 30_000,
   heartbeat: heartbeat(),
+  unreachableAfterMs: UNREACHABLE_AFTER_MS,
   ...over,
 });
 

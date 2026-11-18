@@ -594,6 +594,19 @@ export interface ScreenManifest {
 // ------------------------------------------------------------------- device API
 // What a screen and the server say to each other, under /v1/device. See docs/backend-plan.md.
 
+/**
+ * What runs the player: a device with a supervisor (a Raspberry Pi), or a browser tab with none
+ * (a test screen, opened from the CMS). A browser screen keeps its credential in the browser and
+ * has no panel to power.
+ */
+export const SCREEN_KINDS = ['device', 'browser'] as const;
+export type ScreenKind = (typeof SCREEN_KINDS)[number];
+
+/** `POST /v1/device/pair/start`. The screen says what it is; the claim makes a screen of that kind. An empty body is a device. */
+export interface PairStartRequest {
+  kind?: ScreenKind;
+}
+
 /** `POST /v1/device/pair/start` */
 export interface PairStartResponse {
   /** Shown on screen; the user types it into the CMS. */

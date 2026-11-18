@@ -226,6 +226,7 @@ describe('POST /api/tools/:name', () => {
       'get_asset',
       'get_brand_kit',
       'get_data_source',
+      'get_org_settings',
       'get_screen',
       'get_template',
       'list_assets',

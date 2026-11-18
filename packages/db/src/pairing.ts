@@ -7,6 +7,7 @@
  * Collecting writes the screen's credential through `scoped(db, org)`, where the org is the one
  * the claim stored on the code, never one the screen names.
  */
+import type { ScreenKind } from '@signforge/contract';
 import { newId } from './ids';
 import { scoped } from './scoped';
 
@@ -21,13 +22,13 @@ export type PairingCollected = { status: 'waiting' } | { status: 'expired' } | {
  * Store a new code. Returns false if the code is already in use (pick another). Codes whose time is
  * up are swept first, in the same batch: an unclaimed one at expiry, a claimed one after a day.
  */
-export async function startPairing(d1: D1Database, v: { code: string; pollTokenHash: string; now: number }): Promise<boolean> {
+export async function startPairing(d1: D1Database, v: { code: string; pollTokenHash: string; kind?: ScreenKind; now: number }): Promise<boolean> {
   try {
     await d1.batch([
       d1.prepare('DELETE FROM pairing_codes WHERE (claimed_at IS NULL AND expires_at <= ?1) OR claimed_at <= ?2').bind(v.now, v.now - CLAIMED_KEEP_MS),
       d1
-        .prepare('INSERT INTO pairing_codes (id, code, poll_token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
-        .bind(newId('pair'), v.code, v.pollTokenHash, v.now + PAIRING_TTL_MS, v.now),
+        .prepare('INSERT INTO pairing_codes (id, code, poll_token_hash, kind, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(newId('pair'), v.code, v.pollTokenHash, v.kind ?? 'device', v.now + PAIRING_TTL_MS, v.now),
     ]);
     return true;
   } catch (err) {

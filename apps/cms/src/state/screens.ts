@@ -9,6 +9,13 @@ import type { SliceCreator } from './store';
 
 type Orientation = 'landscape' | 'portrait';
 
+/** What a new screen gets unless the pairing form chose otherwise: the org's defaults, else the browser's zone and always on. */
+interface NewScreenDefaults {
+  timezone: string;
+  locale: string | null;
+  hours: DisplayHours | null;
+}
+
 interface PairingDraft {
   code: string;
   name: string;
@@ -16,7 +23,8 @@ interface PairingDraft {
   timezone: string | null;
   orientation: Orientation;
   groupIds: string[];
-  hours: DisplayHours | null;
+  /** Undefined until chosen: the form shows the org's default (`get_org_settings`). */
+  hours: DisplayHours | null | undefined;
   pending: boolean;
   error: string | null;
   /** The claim's idempotency key, made on the first try and kept for retries, so a retry cannot pair twice. */
@@ -69,8 +77,8 @@ export interface ScreensSlice {
   chooseNewScreenOrientation: (orientation: Orientation) => void;
   toggleNewScreenGroup: (groupId: string, member: boolean) => void;
   setNewScreenHours: (hours: DisplayHours | null) => void;
-  /** Claims the code, puts the new screen in its groups, and opens its page. */
-  pairScreen: (fallbackZone: string) => Promise<void>;
+  /** Claims the code, puts the new screen in its groups, and opens its page. `defaults` fill what the form left unchosen. */
+  pairScreen: (defaults: NewScreenDefaults) => Promise<void>;
   /** Sends one action for a screen and says how it went. */
   actOnScreen: (screenId: string, action: ScreenAction) => Promise<void>;
   openScreenSettings: (screen: ScreenView, groupIds: string[]) => void;
@@ -97,7 +105,7 @@ const newPairing = (): PairingDraft => ({
   timezone: null,
   orientation: 'landscape',
   groupIds: [],
-  hours: null,
+  hours: undefined,
   pending: false,
   error: null,
   key: null,
@@ -141,18 +149,20 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
     toggleNewScreenGroup: (groupId, member) => pairing((p) => ({ ...p, groupIds: toggled(p.groupIds, groupId, member) })),
     setNewScreenHours: (hours) => pairing((p) => ({ ...p, hours })),
 
-    async pairScreen(fallbackZone) {
+    async pairScreen(defaults) {
       const key = get().screens.pairing.key ?? crypto.randomUUID();
       pairing((p) => ({ ...p, key, pending: true, error: null }));
       const d = get().screens.pairing;
+      const hours = d.hours === undefined ? defaults.hours : d.hours;
       try {
         const screenId = screenIdOf(
           await callTool('claim_screen', {
             code: d.code,
             name: d.name.trim(),
-            timezone: d.timezone ?? fallbackZone,
+            timezone: d.timezone ?? defaults.timezone,
             orientation: d.orientation,
-            ...(d.hours ? { displayHours: d.hours } : {}),
+            ...(defaults.locale ? { locale: defaults.locale } : {}),
+            ...(hours ? { displayHours: hours } : {}),
             idempotencyKey: key,
           }),
         );

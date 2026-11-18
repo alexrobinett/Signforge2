@@ -47,7 +47,8 @@ export async function download(blobs: Cache, { url, sha, type, headers, stallMs,
     timer = setTimeout(() => ctl.abort(new Error('download stalled')), stallMs);
   };
   try {
-    const r = await fetch(url, { cache: 'no-store', headers, signal: ctl.signal });
+    // No cookie, as in store.ts's sync.
+    const r = await fetch(url, { cache: 'no-store', credentials: 'omit', headers, signal: ctl.signal });
     if (r.status === 401) throw new UnauthorisedError();
     if (!r.ok || !r.body) throw new Error(`request failed: ${r.status}`);
     const hash = new Sha256();

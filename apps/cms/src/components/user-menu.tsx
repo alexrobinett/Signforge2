@@ -1,5 +1,5 @@
-import { useNavigate, useRouter } from '@tanstack/react-router';
-import { LogOutIcon, MonitorIcon, MoonIcon, SunIcon } from 'lucide-react';
+import { Link, useNavigate, useRouter } from '@tanstack/react-router';
+import { LogOutIcon, MonitorIcon, MoonIcon, SunIcon, UserIcon } from 'lucide-react';
 import { Button } from '~/components/ui/button';
 import {
   DropdownMenu,
@@ -71,6 +71,11 @@ export function UserMenu({ user, compact = false }: { user: Shell['user']; compa
           Signed in as <span className="font-medium text-foreground">{user.email}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link to="/account">
+            <UserIcon aria-hidden /> Your account
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             {theme === 'dark' ? <MoonIcon aria-hidden /> : theme === 'light' ? <SunIcon aria-hidden /> : <MonitorIcon aria-hidden />}
