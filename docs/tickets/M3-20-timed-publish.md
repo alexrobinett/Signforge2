@@ -27,4 +27,4 @@ Schedule a publish for later; it fires on time.
 
 ## Owner decision
 
-Q1: content as it was when scheduled, or as it is when the time comes. Default if unanswered: as it is when the time comes.
+Q1: content as it was when scheduled, or as it is when the time comes. **Decided (owner, 2026-11-18): as it is when the time comes.**
