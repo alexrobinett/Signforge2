@@ -250,6 +250,7 @@ describe('the heartbeat', () => {
       ['player', { ...base.player, extra: deep }],
       ['manifest', { ...base.manifest, extra: deep }],
       ['display', { ...base.display, extra: deep }],
+      ['display', { ...base.display, override: { state: 'on', until: '2026-11-18T23:00:00Z', extra: deep } }],
       ['clock', { ...base.clock, extra: deep }],
     ] as const) {
       const res = await exports.default.fetch(`${BASE}/sync`, {
