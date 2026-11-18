@@ -58,6 +58,8 @@ type Ids = 'content' | 'server';
  * A first statement for a batch that fails it unless the row is still `version` when it runs, so
  * a change made from an old read writes nothing (`commit` throws `StaleVersionError`). A draft
  * passes its `incarnation` too: a row deleted and made again with its id starts at version 1 again.
+ * A draft deleted since it was read is stale too, at version 0, not `NotInOrgError`: a publish
+ * targets the org, not the draft, so it is a conflict to load and compile again after.
  */
 function versionGuard(db: Db, orgId: string, t: typeof s.screens | typeof s.spots, id: string, version: number, incarnation?: string | null): Write {
   // Only drafts have the column; the others have no way to be made again with an id.
@@ -75,7 +77,10 @@ function versionGuard(db: Db, orgId: string, t: typeof s.screens | typeof s.spot
       .from(t)
       .where(and(eq(t.orgId, orgId), eq(t.id, id)))
       .get();
-    if (!r) throw new NotInOrgError('row', id);
+    if (!r) {
+      if (incarnation !== undefined) return 0;
+      throw new NotInOrgError('row', id);
+    }
     return r.version === version && r.same ? undefined : r.version;
   };
   return guard(check, { id, version, stale });

@@ -139,6 +139,20 @@ describe('promotion from an old read (R09)', () => {
     expect(await org.spots.get(read.id)).toEqual(again);
   });
 
+  it('reports a spot deleted since it was read as a conflict, not as missing, and writes nothing (re-check)', async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = await org.spots.insert({ id: 'drafts-race-gone', name: 'Gone', kind: 'image', durationMs: 5000, assetId: r.asset, fit: 'cover' });
+    const revision = (await org.settings.get())?.publishRevision ?? 0;
+    const writes = [...org.publishes.stage.advance(revision).writes, ...org.spots.stage.publish(read).writes];
+    await org.spots.delete(read.id);
+
+    const err = await org.commit(writes).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleVersionError);
+    expect(err).toMatchObject({ id: read.id, version: 0 });
+    expect(await org.spots.get(read.id)).toBeUndefined();
+    expect((await org.settings.get())?.publishRevision ?? 0).toBe(revision);
+  });
+
   it("keeps the draft's edit time as stored, not as it was read", async () => {
     const org = scoped(env.DB, r.orgId);
     const read = (await org.spots.get(r.templateSpot))!;
