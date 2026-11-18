@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FeedError, normaliseFeed, parseCalendar } from '../src/index';
+import { FeedError, LIMITS, normaliseFeed, parseCalendar } from '../src/index';
 import google from './fixtures/google-calendar.ics?raw';
 import outlook from './fixtures/outlook.ics?raw';
 import holidays from './fixtures/us-holidays.ics?raw';
@@ -138,11 +138,61 @@ describe('limits', () => {
     ]);
   });
 
-  it('gives up on a series with more than 50,000 occurrences before now', () => {
-    const minutely = ['UID:m@test', 'DTSTART:20260101T000000Z', 'DTEND:20260101T000100Z', 'RRULE:FREQ=MINUTELY', 'SUMMARY:Spam'];
-    const t = performance.now();
-    expect(parseCalendar(ics(minutely), { now }).events).toEqual([]);
-    expect(performance.now() - t).toBeLessThan(2000);
+  // ical.js steps a series from its first occurrence. Skipping ahead is what keeps an old series cheap:
+  // with 3,000 past occurrences allowed, each of these (which has 5,000 to 460,000 before now) must still
+  // reach the window. A sub-daily rule skips by whole days, so up to two days of it are still stepped.
+  describe('skips a series ahead to now instead of stepping through its past', () => {
+    const PAST = 3000;
+    const fast = (...lines: string[]) => parseCalendar(ics(lines), { now, maxPastIterations: PAST }).events.map((e) => e.start);
+
+    it('daily, every few days, and sub-daily, in step with the first occurrence', () => {
+      expect(fast(...daily('19261117T120000Z')).slice(0, 2)).toEqual(['2026-11-18T12:00:00+00:00', '2026-11-19T12:00:00+00:00']);
+      expect(fast('UID:d3@test', 'DTSTART:19600101T120000Z', 'DURATION:PT15M', 'RRULE:FREQ=DAILY;INTERVAL=3', 'SUMMARY:D3').slice(0, 2)).toEqual([
+        '2026-11-19T12:00:00+00:00',
+        '2026-11-22T12:00:00+00:00',
+      ]);
+      expect(fast('UID:h5@test', 'DTSTART:20200101T000000Z', 'DURATION:PT15M', 'RRULE:FREQ=HOURLY;INTERVAL=5', 'SUMMARY:H5').slice(0, 2)).toEqual([
+        '2026-11-17T17:00:00+00:00',
+        '2026-11-17T22:00:00+00:00',
+      ]);
+      expect(fast('UID:m@test', 'DTSTART:20260101T000000Z', 'DTEND:20260101T000100Z', 'RRULE:FREQ=MINUTELY', 'SUMMARY:Spam').slice(0, 2)).toEqual([
+        '2026-11-17T14:00:00+00:00',
+        '2026-11-17T14:01:00+00:00',
+      ]);
+    });
+
+    it('every other week on two days, in a zone with DST, keeping its weeks and its wall-clock time', () => {
+      const biweekly = fast(
+        'UID:bw@test',
+        'DTSTART;TZID=America/New_York:19300106T090000',
+        'DURATION:PT30M',
+        'RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE',
+        'SUMMARY:Biweekly',
+      );
+      expect(biweekly.slice(0, 3)).toEqual(['2026-11-18T09:00:00-05:00', '2026-11-30T09:00:00-05:00', '2026-12-02T09:00:00-05:00']);
+    });
+
+    it('still honours an excluded date and a moved instance', () => {
+      const lines = [...daily('19261117T120000Z').slice(0, -1), 'EXDATE:20261118T120000Z', 'SUMMARY:Daily'];
+      const moved = ['UID:daily@test', 'RECURRENCE-ID:20101117T120000Z', 'DTSTART:20261118T180000Z', 'DURATION:PT15M', 'SUMMARY:Moved from 2010'];
+      const events = parseCalendar(ics(lines, moved), { now, maxPastIterations: PAST }).events;
+      expect(events.slice(0, 2).map((e) => [e.title, e.start])).toEqual([
+        ['Moved from 2010', '2026-11-18T18:00:00+00:00'],
+        ['Daily', '2026-11-19T12:00:00+00:00'],
+      ]);
+    });
+  });
+
+  it(`gives up on a series it cannot skip ahead (a COUNT) with more than ${LIMITS.maxPastIterations} occurrences before now`, () => {
+    expect(LIMITS.maxPastIterations).toBe(5000);
+    const counted = ['UID:c@test', 'DTSTART:20260101T000000Z', 'DTEND:20260101T000100Z', 'RRULE:FREQ=MINUTELY;COUNT=10000000', 'SUMMARY:Spam'];
+    expect(parseCalendar(ics(counted), { now }).events).toEqual([]);
+    // A short COUNT series is stepped through as before.
+    expect(
+      parseCalendar(ics(['UID:c2@test', 'DTSTART:20261116T120000Z', 'DURATION:PT15M', 'RRULE:FREQ=DAILY;COUNT=4', 'SUMMARY:Four']), { now }).events.map(
+        (e) => e.start,
+      ),
+    ).toEqual(['2026-11-18T12:00:00+00:00', '2026-11-19T12:00:00+00:00']);
   });
 
   it('refuses a body over the size limit, counting UTF-8 bytes', () => {

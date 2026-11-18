@@ -21,8 +21,11 @@ export const LIMITS = {
   maxBytes: 1_000_000,
   /** Occurrences one recurring event may step through from `now` before it is cut off. */
   maxIterations: 500,
-  /** Occurrences before `now` one recurring event may step past to reach it: a daily event 130 years old. */
-  maxPastIterations: 50_000,
+  /**
+   * Occurrences before `now` one recurring event may step past to reach it. Most series skip
+   * straight to near `now`; this bounds the rest (COUNT, monthly and yearly rules).
+   */
+  maxPastIterations: 5000,
   /** Events in a CalendarFeed. */
   maxEvents: 25,
   /** Items in a NewsFeed. */

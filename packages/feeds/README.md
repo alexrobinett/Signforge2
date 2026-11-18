@@ -11,7 +11,7 @@ Failures throw `FeedError` with a `code` (`too-large`, `doctype`, `malformed`, `
 ## Calendars
 
 - Events that have ended by `now`, and events starting 30 days or more after it, are left out. The rest are sorted soonest first and capped at 25.
-- Recurring events (RRULE, RDATE) are expanded with ical.js, honouring EXDATE and RECURRENCE-ID: a cancelled instance is dropped, a moved one appears at its new time, including one moved into the window from beyond it. ical.js steps a series from its first occurrence, so the 500-occurrence cap counts from `now`; the occurrences before it are passed over on a budget of their own, 50,000 (a daily event 130 years old). A series with more past occurrences than that shows nothing.
+- Recurring events (RRULE, RDATE) are expanded with ical.js, honouring EXDATE and RECURRENCE-ID: a cancelled instance is dropped, a moved one appears at its new time, including one moved into the window from beyond it. ical.js steps a series from its first occurrence, so a series is started near `now` instead: its first occurrence moved on by whole periods of wall-clock days (daily and weekly rules, and sub-daily ones, without COUNT), which keeps every occurrence in step across DST. The 500-occurrence cap counts from `now`; what is left of the past (all of it for COUNT, monthly and yearly rules) is stepped through on a budget of 5,000. A series with more past occurrences than that shows nothing.
 - `STATUS:CANCELLED` drops an event, a series or one instance.
 - Times: a TZID that names an IANA zone is used directly; otherwise the file's VTIMEZONE for it (Outlook's Windows names); otherwise X-WR-TIMEZONE; otherwise UTC. Floating times use X-WR-TIMEZONE, then UTC. Timed events are written in their own offset (`2026-11-18T10:00:00-05:00`); all-day events as dates, with an exclusive end.
 - An all-day event stays until its end date has begun everywhere (UTC-12), because the feed does not know the screen's zone; the template trims it to the screen's day.
@@ -25,7 +25,7 @@ Failures throw `FeedError` with a `code` (`too-large`, `doctype`, `malformed`, `
 
 ## Limits
 
-`LIMITS` holds the defaults (1 MB body, 500 iterations from now and 50,000 before it, 25 events, 20 items, 30 days); each can be overridden per call.
+`LIMITS` holds the defaults (1 MB body, 500 iterations from now and 5,000 before it, 25 events, 20 items, 30 days); each can be overridden per call.
 
 ## Tests
 
