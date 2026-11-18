@@ -63,6 +63,8 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `get_asset` | content:read | viewer | `{ assetId }` | `{ asset, spotIds }` |
 | `create_asset_upload` | content:draft | editor | `{ name, renditions: { landscape, portrait }, idempotencyKey? }` | `{ asset, uploads }` |
 | `finalize_asset` | content:draft | editor | `{ assetId }` | `{ asset, changed }` |
+| `create_video_upload` | content:draft | editor | `{ name, sha256, type: 'video/mp4', size, idempotencyKey? }` | `{ asset, upload: { uploadId, partBytes, parts, expiresAt } \| null }` |
+| `finalize_video_upload` | content:draft | editor | `{ assetId, uploadId?, parts?: { partNumber, etag }[] }` | `{ asset, changed }` |
 | `delete_asset` | content:draft | editor | `{ assetId }` | `{ deleted }`, or 409 while a spot uses the asset or a brand kit uses it as its logo |
 | `list_fonts` | content:read | viewer | `{ limit?, cursor? }` | `{ fonts: Font[], next }`, by id |
 | `list_brand_kits` | content:read | viewer | `{ limit?, cursor? }` | `{ brandKits: BrandKit[], next }`, by id |
@@ -74,7 +76,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 
 Details:
 
-- **Idempotency keys.** The creating tools (`create_group`, `create_asset_upload`, `create_brand_kit`, `claim_screen`) take an optional `idempotencyKey`: 8 to 128 printable ASCII characters the caller picks for one creation, such as a UUID. The CMS should send one with every create. A retry with the same key and input returns the first call's output and writes nothing, even when two calls race. The same key with a different input is refused with `conflict`. Keys are per org and kept for now (expiry is M3-24). A retried `create_asset_upload` returns the first call's upload URLs, which expire at their `expiresAt`. `register_template_version` needs no key: a version is registered once, and registering it again returns `changed: false`.
+- **Idempotency keys.** The creating tools (`create_group`, `create_asset_upload`, `create_video_upload`, `create_brand_kit`, `claim_screen`) take an optional `idempotencyKey`: 8 to 128 printable ASCII characters the caller picks for one creation, such as a UUID. The CMS should send one with every create. A retry with the same key and input returns the first call's output and writes nothing, even when two calls race. The same key with a different input is refused with `conflict`. Keys are per org and kept for now (expiry is M3-24). A retried `create_asset_upload` or `create_video_upload` returns the first call's upload URLs, which expire at their `expiresAt`. `register_template_version` needs no key: a version is registered once, and registering it again returns `changed: false`.
 - **Lists page.** Every `list_*` tool takes `limit` (default 50, at most 200) and `cursor`, and returns `next`. Pass `next` back as `cursor`, with the same filters, for the following page; `next` is `null` on the last page. A cursor is opaque. It holds the sort key of the last row returned, so rows added or removed between calls are neither repeated nor skipped. A cursor the server did not make is `invalid_input`. The repositories still read the org's whole list and the tool cuts the page; paging in SQL can wait until lists are large.
 - **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by the contract's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
 - **A screen's view** (`Screen` in every screen tool's output) adds what the CMS shows (`src/screen-state.ts`): `state` (`online`, `updating`, `asleep` with `wakesAt`, `unreachable`, or `needs_you` with a `reason`: `behind`, `revoked`, `nothing_published`, `fallback`), the last `heartbeat`, `showing` (what it should be showing now, worked out from its desired manifest with `player-core`: the playlist, its first spot, and an image hash for a thumbnail), and `displayOverride`. `status` is `revoked` once every credential the screen had is revoked (one that has not collected a credential yet is waiting, not revoked). A screen not heard from for 15 minutes (`UNREACHABLE_AFTER_MS`) is unreachable; that is calm while it is on its desired manifest, because it keeps playing it, and `needs_you` / `behind` when it is not.
@@ -98,9 +100,17 @@ Details:
      - **Any fails.** Every upload for the asset is deleted, the asset becomes `rejected`, and the call is refused with `invalid_input`, one `details` entry per problem. That refusal is audited, because it changed the asset.
      - **A file not yet uploaded.** The call is refused and nothing changes.
      - **Called again on a verified asset.** It returns `changed: false`.
-- **Assets.** An asset's `sha256`, `type`, `size`, `width` and `height` are its landscape rendition's. `usageCount` and `spotIds` count spots that use the asset: image and video spots by `assetId`, template spots through their asset map. Only `verified` assets should be offered for spots.
-- **`delete_asset`.** It refuses with `conflict` while a spot uses the asset, and `details.spotIds` lists the spots. A pending asset's uploads are deleted with it. Files in `o/<org>/b/` stay, because other assets or published manifests may name the same bytes; blob cleanup is M3-24.
-- **Upload configuration.** The dispatcher passes `caller.uploads`, an `UploadSigner` (`r2Presigner` in `src/upload.ts`), to the handlers. `/api/tools` builds it from the Worker's settings (`apps/api/src/uploads.ts`). Without one, `create_asset_upload` fails with a 500.
+- **Uploading a video.** No transcoding: the file must already match the contract's `VIDEO_SPEC`. `uploadVideo` in `@signforge/media` checks it in the browser first (`@signforge/media-check`), then runs these steps:
+  1. **`create_video_upload`.** The input is the file's `sha256`, `type` (`video/mp4`) and `size` (at most 500 MB). It creates the asset as `pending`, kind `video`, with no renditions: a screen of either orientation plays the one file. It starts an R2 multipart upload at `up/<org>/<asset>/<sha256>` and returns `{ uploadId, partBytes, parts, expiresAt }`: a presigned UploadPart URL for each 16 MiB part (the last is shorter), signed for its exact length, lasting an hour. `upload` is `null` when the org already holds the file.
+  2. The browser PUTs each part and keeps the `ETag` header of each response. The bucket's CORS rule must expose `ETag`.
+  3. **`finalize_video_upload`.** It takes `uploadId` and every part's ETag, parts 1 to N in order (it refuses a subset without changing anything, because R2 would complete one into a shorter file). It completes the upload, then reads the MP4 header over range reads and checks it (`checkVideo`), and re-hashes the whole file.
+     - **All pass.** The file moves to `o/<org>/b/<sha256>` (R2 checks the hash again as it writes) and the asset becomes `verified`, with `width`, `height` and `durationMs` from the header.
+     - **Any fails.** The upload is deleted, the asset becomes `rejected`, and the call is refused with `invalid_input`: one `details` entry per problem, `path` naming the check (`fps`, `profile`, `sha256`, ...), and the message ending with how to export a file that passes (`EXPORT_ADVICE`). Audited, as for images.
+     - **Parts R2 cannot complete** (one missing, a wrong ETag), or nothing uploaded: refused, nothing changes; PUT again and retry.
+  - `finalize_asset` refuses a video, and `finalize_video_upload` an image, with `conflict`.
+- **Assets.** An image asset's `sha256`, `type`, `size`, `width` and `height` are its landscape rendition's; a video's are its file's, and `durationMs` is its length (`null` for an image). `usageCount` and `spotIds` count spots that use the asset: image and video spots by `assetId`, template spots through their asset map. Only `verified` assets should be offered for spots.
+- **`delete_asset`.** It refuses with `conflict` while a spot uses the asset, and `details.spotIds` lists the spots. A pending asset's uploads are deleted with it (a video's parts not yet completed are left to the bucket's lifecycle rule). Files in `o/<org>/b/` stay, because other assets or published manifests may name the same bytes; blob cleanup is M3-24.
+- **Upload configuration.** The dispatcher passes `caller.uploads`, an `UploadSigner` (`r2Presigner` in `src/upload.ts`), to the handlers. `/api/tools` builds it from the Worker's settings (`apps/api/src/uploads.ts`). Without one, `create_asset_upload` and `create_video_upload` fail with a 500.
 
 Each tool's `description` is written for an agent choosing a tool, its `output` is the zod schema of what it returns, and its `example` is a valid input.
 
@@ -183,7 +193,7 @@ Callers so far:
 - `test/conventions.test.ts`: fails on a tool without an output schema or a `list_*` tool without paging, and checks the output check and paging itself.
 - `test/write-guard.test.ts`: generated from the registry. It runs every tool that changes data on a D1 that records any write sent outside `batch()`, and fails if there is one. A tool whose example refuses before writing is set up to get further in `PREPARE`.
 - `test/dispatch.test.ts`: role and scope checks, validation, the audit log and redaction, a failing audit row rolling the change back, and idempotency keys.
-- `test/tools.test.ts`, `test/templates.test.ts`, `test/assets.test.ts`: what each tool does.
+- `test/tools.test.ts`, `test/templates.test.ts`, `test/assets.test.ts`, `test/videos.test.ts`: what each tool does. The video tests upload media-check's ffmpeg-made clips, passed in by `vitest.config.ts`.
 
 They run in workerd against local D1, with `packages/db`'s migrations applied, and local R2.
 
@@ -192,4 +202,5 @@ They run in workerd against local D1, with `packages/db`'s migrations applied, a
 - uploads a 4K photo with an EXIF rotation through `@signforge/media` and these tools;
 - forges an upload, which is refused and removed;
 - sends PUTs of the wrong size, type or key, which R2 refuses;
+- uploads a video in two presigned parts through `uploadVideo`, has a 60 fps video refused in the browser before any call, and has the same video, PUT past the browser check, rejected by `finalize_video_upload`;
 - tries to delete an asset in use, which is refused.

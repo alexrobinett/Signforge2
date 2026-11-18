@@ -1,6 +1,6 @@
 # @signforge/media
 
-Images for screens, prepared in the browser before upload. The CMS's asset library uses it; the server checks its output with `readImageInfo` from the same package.
+Images and videos for screens, prepared in the browser before upload. The CMS's asset library uses it; the server checks its output with `readImageInfo` from the same package.
 
 ## What it does
 
@@ -19,6 +19,12 @@ Images for screens, prepared in the browser before upload. The CMS's asset libra
   4. It calls `finalize_asset`.
 
   `callTool(name, input)` calls a tool and throws on a refusal. In the CMS that is a POST to `/api/tools/:name`.
+- **`uploadVideo(file, { callTool })`** uploads a video. Nothing is transcoded, so the file must already be one screens play:
+  1. It checks the file with `@signforge/media-check`. A file that fails throws `VideoRejectedError` before anything is sent. The error's `problems` say why, and its message adds how to export a file that passes.
+  2. It hashes the file. The whole file is read into memory; videos are capped at 500 MB.
+  3. It calls `create_video_upload`.
+  4. It PUTs each part to its presigned URL and keeps each response's `ETag`.
+  5. It calls `finalize_video_upload`, which checks the file again on the server.
 - **`readImageInfo(bytes)`** (also `@signforge/media/image-info`) returns the type and displayed size of a JPEG, PNG, WebP or SVG from its header, without decoding. For a JPEG, EXIF orientations 5 to 8 swap width and height, as a browser displays them. It is pure byte parsing and runs in a Worker; `finalize_asset` uses it.
 
 The server does not trust any of this. It re-hashes the uploads and checks their type, size and box (see `packages/tools/README.md`).
@@ -32,4 +38,4 @@ The browser is Playwright's Chromium, or the one at `SF_CHROMIUM`.
   - A 3840x2160 photo, stored rotated with EXIF orientation 6 and with a colour in each quadrant, becomes a 1920x1080 and a 3413x1920 JPEG. The colours are checked in the output bytes, so the pixels themselves are upright.
   - A transparent PNG is encoded as WebP with its alpha.
   - A small image and an SVG ship unchanged.
-- The whole upload is tested in `packages/tools/test/e2e/upload.test.ts`. It runs this library in Chromium, with presigned PUTs to Miniflare's S3 API and the tools checking what landed. It lives there because `tools` depends on this package.
+- The whole upload, images and video, is tested in `packages/tools/test/e2e/upload.test.ts`. It runs this library in Chromium, with presigned PUTs to Miniflare's S3 API and the tools checking what landed. It lives there because `tools` depends on this package.

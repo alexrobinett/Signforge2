@@ -15,6 +15,7 @@
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
     "@signforge/media": "workspace:*",
+    "@signforge/media-check": "workspace:*",
     "@signforge/player-core": "workspace:*",
     "zod": "^4.6.7"
   },

@@ -181,7 +181,7 @@ Uploaded video must match one strict profile (1080p H.264, capped bitrate). The 
 - **Auth**: Better Auth with its organization plugin.
 - **Environments**: dev, demo and prod, each deployed with one command. Dev is local only and must be named (`--env dev`); a bare `wrangler deploy` of the API fails rather than shipping dev settings.
 - **Images**: scaled down when they enter the system, to the smallest size that covers the screen: in the browser at upload (`packages/media`), into a landscape and a portrait rendition, and by `sf build` for local projects. The server checks the dimensions rather than resizing. A 4K photo is a quarter of the decoding work at 1080p.
-- **Video**: one accepted profile, H.264 at up to 1080p and 30 fps and 10 Mbit/s, checked at upload and by `sf build`. The Pi 4 decodes it in hardware with about 1% of video frames dropped; 60 fps drops about 18%.
+- **Video**: one accepted profile, H.264 (Baseline, Main or High, up to level 4.2, 8-bit 4:2:0, progressive) at up to 1080p and 30 fps and 10 Mbit/s, and at most 500 MB, checked at upload (in the browser and again on the server, `packages/media-check`) and by `sf build`. The Pi 4 decodes it in hardware with about 1% of video frames dropped; 60 fps drops about 18%.
 
 ## Agents
 

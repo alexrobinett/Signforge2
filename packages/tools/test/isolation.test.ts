@@ -26,6 +26,8 @@ const ORG_A_IDS: Record<string, (a: SeededOrg) => string> = {
   brandKit: (a) => a.brandKit,
   logoOnDarkAsset: (a) => a.asset,
   logoOnLightAsset: (a) => a.asset,
+  // An R2 multipart upload's id, not a row: finalize_video_upload finds the asset first.
+  upload: () => 'upload-id',
 };
 
 /** Ids that name a catalogue every org shares, not an org's row. */

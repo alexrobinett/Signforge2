@@ -10,7 +10,7 @@
  *     (`imageSizeProblem` in the contract; the cover rule is the one `sf build` follows).
  *
  * A file that passes moves to `o/<org>/b/<sha256>`, where manifests reference it. One that fails
- * is deleted, and the asset is marked rejected. Video is M3-21.
+ * is deleted, and the asset is marked rejected. Video is in ./videos.ts.
  */
 import { imageSizeProblem, SCREEN_BOX } from '@signforge/contract';
 import type { Asset, AssetRendition, OrgScope } from '@signforge/db';
@@ -39,7 +39,7 @@ const renditionOutput = z.object({
 });
 export type RenditionView = z.infer<typeof renditionOutput>;
 
-const assetOutput = z.object({
+export const assetOutput = z.object({
   id: z.string(),
   name: z.string(),
   kind: z.enum(['image', 'video']),
@@ -49,6 +49,7 @@ const assetOutput = z.object({
   size: z.number(),
   width: z.number().nullable(),
   height: z.number().nullable(),
+  durationMs: z.number().nullable().describe("A video's length; null for an image"),
   renditions: z.array(renditionOutput),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -65,7 +66,7 @@ const renditionView = (r: AssetRendition): RenditionView => ({
   height: r.height || null,
 });
 
-const assetView = (a: Asset, renditions: AssetRendition[]): AssetView => ({
+export const assetView = (a: Asset, renditions: AssetRendition[]): AssetView => ({
   id: a.id,
   name: a.name,
   kind: a.kind,
@@ -75,18 +76,19 @@ const assetView = (a: Asset, renditions: AssetRendition[]): AssetView => ({
   size: a.size,
   width: a.width || null,
   height: a.height || null,
+  durationMs: a.durationMs,
   renditions: renditions.map(renditionView).sort((x, y) => ORIENTATIONS.indexOf(x.orientation) - ORIENTATIONS.indexOf(y.orientation)),
   createdAt: a.createdAt,
   updatedAt: a.updatedAt,
 });
 
-async function requireAsset(org: OrgScope, assetId: string) {
+export async function requireAsset(org: OrgScope, assetId: string) {
   const row = await org.assets.get(assetId);
   if (!row) throw notFound('asset', assetId);
   return row;
 }
 
-const SHA256 = /^[0-9a-f]{64}$/;
+export const SHA256 = /^[0-9a-f]{64}$/;
 const pixels = z.number().int().positive().max(65_535);
 const renditionInput = z.object({
   sha256: z.string().regex(SHA256, 'not a SHA-256 (64 lowercase hex characters)'),
@@ -257,6 +259,7 @@ const finalizeAsset = defineTool({
   target: (input) => ({ kind: 'asset', id: input.assetId }),
   handler: async ({ org, blobs, input, write }) => {
     const asset = await requireAsset(org, input.assetId);
+    if (asset.kind === 'video') throw new ToolError('conflict', `asset ${asset.id} is a video; finish it with finalize_video_upload`);
     const renditions = await org.assets.renditions.forAsset(asset.id);
     if (asset.status === 'verified') return { asset: assetView(asset, renditions), changed: false };
     if (asset.status === 'rejected') throw new ToolError('conflict', `asset ${asset.id} was rejected; upload the image again`);
@@ -359,7 +362,9 @@ const deleteAsset = defineTool({
       });
     // Uploads never finalized. Stored files stay: other assets and published manifests may name the same bytes.
     const renditions = await org.assets.renditions.forAsset(asset.id);
-    const staged = [...new Set(renditions.map((r) => uploadKey(org.orgId, asset.id, r.sha256)))];
+    // A video has no renditions: its one file is the asset's own.
+    const files = asset.kind === 'video' ? [asset.sha256] : renditions.map((r) => r.sha256);
+    const staged = [...new Set(files.map((sha) => uploadKey(org.orgId, asset.id, sha)))];
     if (staged.length) await blobs.delete(staged);
     // Its renditions go with it (the foreign key cascades).
     write(org.assets.stage.delete(asset.id));

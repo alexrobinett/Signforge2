@@ -378,6 +378,9 @@ importers:
       '@signforge/feeds':
         specifier: workspace:*
         version: link:../feeds
+      '@signforge/media-check':
+        specifier: workspace:*
+        version: link:../media-check
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -463,6 +466,12 @@ importers:
       '@signforge/contract':
         specifier: workspace:*
         version: link:../contract
+      '@signforge/media-check':
+        specifier: workspace:*
+        version: link:../media-check
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: ^26.6.6
@@ -476,6 +485,19 @@ importers:
       sharp:
         specifier: ^0.35.5
         version: 0.35.5(@types/node@26.6.6)
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/media-check:
+    dependencies:
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../contract
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
       vitest:
         specifier: ^5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
@@ -566,6 +588,9 @@ importers:
       '@signforge/media':
         specifier: workspace:*
         version: link:../media
+      '@signforge/media-check':
+        specifier: workspace:*
+        version: link:../media-check
       '@signforge/player-core':
         specifier: workspace:*
         version: link:../player-core
@@ -7077,7 +7102,7 @@ snapshots:
       jiti: 2.7.0
       magic-string: 0.30.21
       prettier: 3.10.1
-      zod: 4.6.6
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
@@ -7091,7 +7116,7 @@ snapshots:
       '@tanstack/router-utils': 1.163.0(supports-color@10.2.2)
       chokidar: 5.0.0
       unplugin: 3.7.0(esbuild@0.28.2)(rolldown@1.2.19)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
-      zod: 4.6.6
+      zod: 4.6.7
     optionalDependencies:
       '@tanstack/react-router': 1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       vite: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
@@ -7149,7 +7174,7 @@ snapshots:
       ufo: 1.6.4
       vitefu: 1.1.3(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       xmlbuilder2: 4.0.3
-      zod: 4.6.6
+      zod: 4.6.7
     optionalDependencies:
       vite: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
     transitivePeerDependencies:

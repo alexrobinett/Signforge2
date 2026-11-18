@@ -12,8 +12,14 @@
  */
 
 export interface UploadSigner {
-  /** A URL that accepts one PUT of exactly this type and size to `key`, until it expires. */
-  presignPut(key: string, options: { contentType: string; contentLength: number; expiresInSeconds: number }): Promise<{ url: string; expiresAt: number }>;
+  /**
+   * A URL that accepts one PUT of exactly this type and size to `key`, until it expires. `query`
+   * is signed too: `{ partNumber, uploadId }` makes it a multipart upload's UploadPart.
+   */
+  presignPut(
+    key: string,
+    options: { contentType: string; contentLength: number; expiresInSeconds: number; query?: Record<string, string> },
+  ): Promise<{ url: string; expiresAt: number }>;
 }
 
 export interface R2PresignConfig {
@@ -42,9 +48,12 @@ export function r2Presigner(config: R2PresignConfig): UploadSigner {
   const base = new URL(config.endpoint);
   const basePath = base.pathname.replace(/\/+$/, '');
   return {
-    async presignPut(key, { contentType, contentLength, expiresInSeconds }) {
+    async presignPut(key, { contentType, contentLength, expiresInSeconds, query: extra = {} }) {
       const nowMs = config.now?.() ?? Date.now();
-      const amzDate = new Date(nowMs).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+      const amzDate = new Date(nowMs)
+        .toISOString()
+        .replace(/[-:]/g, '')
+        .replace(/\.\d{3}/, '');
       const date = amzDate.slice(0, 8);
       const scope = `${date}/${region}/s3/aws4_request`;
       const path = `${basePath}/${uriEncode(config.bucket)}/${key.split('/').map(uriEncode).join('/')}`;
@@ -55,9 +64,21 @@ export function r2Presigner(config: R2PresignConfig): UploadSigner {
         ['X-Amz-Date', amzDate],
         ['X-Amz-Expires', String(expiresInSeconds)],
         ['X-Amz-SignedHeaders', signedHeaders],
+        ...Object.entries(extra),
       ];
-      const query = params.map(([k, v]) => [uriEncode(k), uriEncode(v)]).sort(([a], [b]) => (a! < b! ? -1 : a! > b! ? 1 : 0)).map(([k, v]) => `${k}=${v}`).join('&');
-      const canonicalRequest = ['PUT', path, query, `content-length:${contentLength}\ncontent-type:${contentType.trim()}\nhost:${base.host}\n`, signedHeaders, 'UNSIGNED-PAYLOAD'].join('\n');
+      const query = params
+        .map(([k, v]) => [uriEncode(k), uriEncode(v)])
+        .sort(([a], [b]) => (a! < b! ? -1 : a! > b! ? 1 : 0))
+        .map(([k, v]) => `${k}=${v}`)
+        .join('&');
+      const canonicalRequest = [
+        'PUT',
+        path,
+        query,
+        `content-length:${contentLength}\ncontent-type:${contentType.trim()}\nhost:${base.host}\n`,
+        signedHeaders,
+        'UNSIGNED-PAYLOAD',
+      ].join('\n');
       const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, await sha256(canonicalRequest)].join('\n');
       let k = await hmac(enc.encode(`AWS4${config.secretAccessKey}`), date);
       k = await hmac(k, region);
