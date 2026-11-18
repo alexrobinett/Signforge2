@@ -10,6 +10,7 @@
  * ended, so each (hour, spot) row is written about once.
  */
 import {
+  MAX_SYNC_REQUEST_BYTES,
   MAX_SYNC_SOURCES,
   parseSyncRequest,
   type DataSnapshot,
@@ -79,10 +80,33 @@ function overrideCommand(screen: DeviceScreen, held: DisplayOverride | undefined
   return sameOverride(want, has) ? undefined : { type: 'display', override: want };
 }
 
+/**
+ * The body as text, or undefined once it is over MAX_SYNC_REQUEST_BYTES: a declared length is
+ * refused unread, and a body without one is read no further than the ceiling.
+ */
+async function boundedText(req: Request): Promise<string | undefined> {
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_SYNC_REQUEST_BYTES) return undefined;
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (let r = await reader.read(); !r.done; r = await reader.read()) {
+    size += r.value.byteLength;
+    if (size > MAX_SYNC_REQUEST_BYTES) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(r.value);
+  }
+  return new Blob(chunks).text();
+}
+
 export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
+  const text = await boundedText(c.req.raw);
+  if (text === undefined) return refuse(413, `the body is over ${MAX_SYNC_REQUEST_BYTES} bytes`);
   let body: unknown;
   try {
-    body = await c.req.json();
+    body = JSON.parse(text);
   } catch {
     return refuse(400, 'the body is not JSON');
   }

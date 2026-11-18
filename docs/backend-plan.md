@@ -135,7 +135,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | `GET /v1/device/manifest.json` | Desired manifest. Its ETag is the manifest ID. The player sends `If-None-Match` itself, since it fetches with `cache: 'no-store'`, so an unchanged manifest is a 304. |
 | `GET /v1/device/blobs/:sha256` | File from R2, cached forever but `private` (it needs the credential, so no shared cache keeps it). Only files the screen's desired or previous manifest lists, or the last good manifest its heartbeat reports, from its own org's prefix (or `sys/b/` for a base template). |
 | `GET /v1/device/data/:id.json` | Snapshot of one source. Only sources the screen's manifest lists. The player takes snapshots from the sync; this route is for debugging and tools. |
-| `POST /v1/device/sync` | Heartbeat, play counts, snapshot changes |
+| `POST /v1/device/sync` | Heartbeat, play counts, snapshot changes. A body over `MAX_SYNC_REQUEST_BYTES` (1 MiB) is a 413, refused before it is parsed. |
 | `GET /v1/device/ws?ticket=` | Nudge socket |
 
 The device API's request and response shapes are in `packages/contract` (device API section). Changes the player needs, beyond pointing its content base at `/v1/device`:

@@ -1,6 +1,6 @@
 // The sync (M3-07): one periodic call carries the heartbeat and play counts up, and the desired
 // manifest, changed snapshots, a socket ticket, the server time and commands down.
-import { MANIFEST_SCHEMA, MAX_SYNC_SOURCES, type SyncRequest, type SyncResponse } from '@signforge/contract';
+import { MANIFEST_SCHEMA, MAX_SYNC_REQUEST_BYTES, MAX_SYNC_SOURCES, type SyncRequest, type SyncResponse } from '@signforge/contract';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -190,6 +190,47 @@ describe('the heartbeat', () => {
     expect(first).toMatchObject({ ackSeq: 1, socketTicket: expect.any(String) });
     const beat = parseHeartbeat((await s.seed.scope.screens.get(s.seed.screen))!.heartbeatJson);
     expect(Object.keys(beat!.dataRejected)).toHaveLength(MAX_SYNC_SOURCES);
+  });
+
+  it('bounds the work a large heartbeat makes: a legacy one near the ceiling syncs, one over it is refused unread', async () => {
+    const s = await setUp('sync-heartbeat-ceiling');
+    const post = (payload: BodyInit, headers: Record<string, string> = {}) =>
+      exports.default.fetch(`${BASE}/sync`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${s.credential}`, 'content-type': 'application/json', ...headers },
+        body: payload,
+      });
+    // Some 5000 sources in each map, 64-character ids: a player before gh-45 after long source turnover.
+    const legacy = Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`s${String(i).padStart(63, '0')}`, 1_763_384_400_000]));
+    const near = JSON.stringify(body({ seq: 1, snapshots: legacy, dataRejected: legacy }));
+    expect(near.length).toBeGreaterThan(MAX_SYNC_REQUEST_BYTES * 0.7);
+    expect(near.length).toBeLessThan(MAX_SYNC_REQUEST_BYTES);
+    const ok = await post(near);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ ackSeq: 1 });
+    expect(Object.keys(parseHeartbeat((await s.seed.scope.screens.get(s.seed.screen))!.heartbeatJson)!.dataRejected)).toHaveLength(MAX_SYNC_SOURCES);
+
+    // Every entry bad: one problem per map, not one per entry.
+    const bad = Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`bad id ${i}`, -1]));
+    const refused = await post(JSON.stringify(body({ snapshots: bad, dataRejected: bad })));
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { problems: string[] }).problems).toHaveLength(2);
+
+    // Over the ceiling: refused before it is parsed, with a length or streamed without one.
+    const seenAt = (await s.seed.scope.screens.get(s.seed.screen))?.lastSeenAt;
+    const more = { ...legacy, ...Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`t${String(i).padStart(63, '0')}`, 1_763_384_400_000])) };
+    const over = JSON.stringify(body({ seq: 2, snapshots: more, dataRejected: more }));
+    expect(over.length).toBeGreaterThan(MAX_SYNC_REQUEST_BYTES);
+    expect((await post(over)).status).toBe(413);
+    const streamed = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(over));
+        c.close();
+      },
+    });
+    expect((await post(streamed)).status).toBe(413);
+    // Neither was read: the screen's row is as the last sync left it.
+    expect((await s.seed.scope.screens.get(s.seed.screen))?.lastSeenAt).toBe(seenAt);
   });
 
   it('refuses a manifest id that is not a sha256, and stores nothing', async () => {
