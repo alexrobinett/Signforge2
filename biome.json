@@ -21,7 +21,8 @@
       "suspicious": {
         "noAssignInExpressions": "off",
         "useIterableCallbackReturn": "off",
-        "noUndeclaredEnvVars": "off"
+        "noUndeclaredEnvVars": "off",
+        "noImportCycles": "error"
       }
     }
   },
