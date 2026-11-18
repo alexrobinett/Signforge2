@@ -41,15 +41,22 @@ A remote cache would share Turbo's cache with laptops and across pull requests. 
 - Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it. Otherwise a change there either skips the test on pull requests or, with a warm cache, replays a stale result.
 - Keep the repo-wide checks repo-wide only while they take seconds. Anything slower should become a Turbo task in the package it checks.
 - Don't add `paths:` filters to the workflow. A skipped workflow never reports, so a required check would wait forever; `--affected` already skips what a change does not touch.
-- The player's browser tests are the longest task (about 3 min next to the rest of a full run). Any change to the player, the SDK, the CLI or a template runs them.
+- The player's browser tests are the longest task: 2 m 30 s alone, about 3 min beside the rest of a full run. Any change to the player, the SDK, the CLI, the contract or a template runs them. Making them shorter, or splitting them across runners, is what would bring those pull requests down next.
 
 ## Measured
 
-Wall time of the `check` job, from the run's start to its end, on this repository's runners. The baseline is the single-job workflow before this change, which ran everything on every run.
+Wall time of each run, from creation to its last update, on GitHub's `ubuntu-24.04` runners, 2026-11-18. The baseline is the workflow before this change, which ran everything on every run. The docs, feeds and player rows are throwaway pull requests on top of this change (#9, #10, #11), each touching one place. They started with cold caches: a pull request reads only its own caches and `master`'s, and `master` has not run this workflow yet.
 
 | Change | Wall time | What ran |
 | --- | ---: | --- |
-| Baseline, any change (runs 44237204249, 44237196981) | 4 m 52 s, 6 m 10 s | everything; tests 3 m 06 s–3 m 31 s |
+| Baseline, any change (runs 44237204249, 44237196981) | 4 m 57 s, 6 m 18 s | Everything. Tests took 3 m 06 s–3 m 31 s; the slower run also spent 65 s uploading the pnpm store. |
+| This change, cold caches (44239478412) | 4 m 55 s | Everything: the change touches the workflow, a global dependency. 14 test and lint tasks, 20 typechecks, the e2e run. |
+| This change again (44240106272) | 4 m 11 s | Everything again: the commit changed the workflow, so no Turbo cache entry matched. |
+| Docs only (#9, 44240132884) | 52 s | No Turbo task, no browser: install and the repo-wide checks. |
+| `packages/feeds` only (#10, 44240134887) | 4 m 27 s | feeds and what depends on it: cli, player, tools, api, and the CMS through the API (8 test and lint tasks, 19 typechecks, the e2e run). |
+| Player only (#11, 44240138678) | 3 m 31 s | `player:test` (2 m 30 s) and the typechecks it depends on. |
+
+Where the time goes now: setup and the repo-wide checks take about 50 s, then whichever affected test is slowest. That is the player's browser tests (2 m 30 s alone) or the API's workerd tests. Once `master` has run this workflow, a pull request starts from `master`'s Turbo cache, so the typechecks of packages it did not change replay instead of running.
 
 ## Required status check
 
