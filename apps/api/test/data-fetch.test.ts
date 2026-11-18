@@ -1,7 +1,7 @@
 // The poller's fetch guards (docs/backend-plan.md, Data sources, Fetch safety). Feed URLs are
 // user-supplied: each guard here is shown refusing its own case. No network: fetch and DNS are stubbed.
 import { describe, expect, it } from 'vitest';
-import { FETCH_TIMEOUT_MS, guardedFetch, type FetchGuards } from '../src/data/fetch';
+import { dohResolver, FETCH_TIMEOUT_MS, guardedFetch, type FetchGuards } from '../src/data/fetch';
 
 type Route = (req: Request) => Response | Promise<Response>;
 
@@ -111,6 +111,24 @@ describe('guardedFetch', () => {
     expect(FETCH_TIMEOUT_MS).toBe(5000);
     const hang: Route = (req) => new Promise((_, reject) => req.signal.addEventListener('abort', () => reject(req.signal.reason)));
     expect(await refusal(guardedFetch('https://slow.test/', {}, { ...stub({ 'https://slow.test/': hang }).guards, timeoutMs: 20 }))).toBe('timeout');
+  });
+
+  it('counts the DNS lookups in the deadline, and reports one that runs it out as dns', async () => {
+    const timeoutMs = 50;
+    // A DNS-over-HTTPS server that answers after ten deadlines, unless the request is aborted first.
+    const slowDns: typeof fetch = (_input, init) =>
+      new Promise((answer, reject) => {
+        const late = setTimeout(() => answer(Response.json({ Answer: [{ type: 1, data: '93.184.216.34' }] })), 10 * timeoutMs);
+        init?.signal?.addEventListener('abort', () => {
+          clearTimeout(late);
+          reject(init.signal?.reason);
+        });
+      });
+    const guards = { ...stub({ 'https://feed.test/': ok('late') }).guards, resolve: dohResolver(slowDns), timeoutMs };
+    const start = Date.now();
+    const code = await refusal(guardedFetch('https://feed.test/', {}, guards));
+    // Well under the ~10 deadlines the old separate lookup timer took, with room for a slow runner.
+    expect({ code, inTime: Date.now() - start < 5 * timeoutMs }).toEqual({ code: 'dns', inTime: true });
   });
 
   it("reports Cloudflare's refusal to reach a private address as a blocked address, not the feed's answer", async () => {
