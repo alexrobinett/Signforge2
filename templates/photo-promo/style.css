@@ -24,6 +24,7 @@ body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--text)
   display: grid; place-items: center; background: var(--sf-primary, #c8102e); color: var(--sf-on-primary, #fff); font-size: calc(var(--u) * 8.4); font-weight: 900; letter-spacing: -.03em;
   box-shadow: 0 2vmin 6vmin color-mix(in srgb, var(--bg) 50%, transparent); will-change: transform, opacity;
   animation: tag-in .9s cubic-bezier(.2,1.5,.3,1) both, shrink-out .5s ease-in forwards; animation-delay: .9s, var(--out); }
+[data-orientation="portrait"] .shade { background: linear-gradient(0deg, color-mix(in srgb, var(--bg) 85%, transparent) 0%, color-mix(in srgb, var(--bg) 70%, transparent) 50%, transparent 78%); }
 [data-orientation="portrait"] .copy { right: calc(var(--u) * 8); bottom: 34vh; }
 @keyframes push { from { transform: scale(1) } to { transform: scale(1.12) } }
 @keyframes rise-in { from { transform: translateY(6vh); opacity: 0 } }

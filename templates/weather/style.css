@@ -44,10 +44,15 @@ body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--sf-te
 
 .stage { --cloud: color-mix(in srgb, var(--sf-text, #fff) 90%, var(--sf-surface, #fff)); }
 .rain, .storm, .night { --cloud: color-mix(in srgb, var(--sf-muted, #b9c3d1) 75%, var(--sf-text, #b9c3d1)); }
-/* A light kit: clouds in its background colour over a sky darkened with its muted colour. */
-.light-kit { --cloud: var(--sf-bg); }
+/* A light kit: clouds in its background colour over a sky darkened with its muted colour, and a
+   clear sky only tinted with its primary colour. */
+.light-kit { --cloud: var(--sf-bg); --sky-a: color-mix(in srgb, var(--sf-primary) 35%, var(--sf-bg)); --sky-b: color-mix(in srgb, var(--sf-primary) 12%, var(--sf-bg)); }
+.light-kit.night { --sky-a: color-mix(in srgb, var(--sf-muted) 45%, var(--sf-bg)); --sky-b: color-mix(in srgb, var(--sf-primary) 20%, var(--sf-muted)); }
 .light-kit.cloudy, .light-kit.fog, .light-kit.rain, .light-kit.storm, .light-kit.snow {
   --sky-a: color-mix(in srgb, var(--sf-muted) 75%, var(--sf-surface)); --sky-b: color-mix(in srgb, var(--sf-muted) 50%, var(--sf-surface)); }
+.light-kit .orb .disc { background: radial-gradient(circle at 35% 35%, var(--sf-bg), color-mix(in srgb, var(--sf-accent) 45%, var(--sf-bg)) 60%, color-mix(in srgb, var(--sf-accent) 70%, var(--sf-bg))); }
+.light-kit.night .orb .disc { background: radial-gradient(circle at 35% 35%, var(--sf-bg), color-mix(in srgb, var(--sf-bg) 80%, var(--sf-muted)) 60%, color-mix(in srgb, var(--sf-bg) 60%, var(--sf-muted)));
+  box-shadow: 0 0 8vmin color-mix(in srgb, var(--sf-bg) 60%, transparent); }
 .cloud { position: absolute; width: 46vmin; height: 15vmin; border-radius: 10vmin; background: var(--cloud); opacity: 0;
   will-change: transform; animation: drift 26s linear infinite; }
 .cloud::before, .cloud::after { content: ""; position: absolute; border-radius: 50%; background: inherit; }

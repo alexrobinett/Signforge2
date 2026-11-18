@@ -35,7 +35,8 @@ body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--text)
 .copy { margin-left: calc(var(--u) * 5); padding: calc(var(--u) * 5); justify-self: start; min-width: 0; max-width: calc(100% - var(--u) * 5);
   position: relative; z-index: 2; }
 .copy::before { content: ""; position: absolute; inset: 0; border-radius: min(var(--sf-radius, 4vmin), 4vmin); z-index: -1;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--text) 16%, transparent), color-mix(in srgb, var(--text) 4%, transparent));
+  /* The kit's surface, nearly opaque; with no kit, a faint white sheen. */
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sf-surface, rgba(255,255,255,.18)) 88%, transparent), color-mix(in srgb, var(--sf-surface, rgba(255,255,255,.045)) 88%, transparent));
   border: .15vmin solid color-mix(in srgb, var(--text) 18%, transparent);
   animation: fade-in .6s ease both, fade-out .5s ease-in forwards; animation-delay: 0s, var(--out); }
 .price { font-family: var(--sf-font-display, "Inter"), sans-serif; display: flex; align-items: flex-start; font-weight: 900; line-height: .82; letter-spacing: -.04em;
@@ -75,7 +76,7 @@ body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--text)
 .badge .ring { position: absolute; inset: 0; animation: spin 14s linear infinite; will-change: transform; }
 .badge .txt { position: relative; color: var(--sf-on-primary, #c8102e); font-weight: 900; line-height: 1; }
 .badge small { display: block; font-size: calc(var(--u) * 2.4); font-weight: 700; color: var(--sf-on-primary, #06122b); }
-.badge b { display: block; font-size: calc(var(--u) * 9); letter-spacing: -.03em; }
+.badge b { display: block; font-size: calc(var(--u) * 9); letter-spacing: -.01em; }
 
 .legal { position: absolute; left: calc(var(--u) * 8); right: calc(var(--u) * 8); bottom: calc(var(--u) * 3.5);
   font-size: calc(var(--u) * 2.4); z-index: 3; --rest: .75;

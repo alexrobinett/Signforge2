@@ -58,10 +58,6 @@
   "dataSources": {},
   "defaultPlaylist": "all-day",
   "files": {
-    "0478219a1d8a5829d0be2e854eec4d9191d5b4af1cc1da667aa3312276a16af6": {
-      "size": 76402,
-      "type": "text/html"
-    },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
@@ -73,6 +69,10 @@
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
+    },
+    "77bfca528b2b6030a30fbe94f3f7317f1e811534a6f3a0db38e968090374f9ad": {
+      "size": 76462,
+      "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
@@ -107,7 +107,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "85cfaf7d3b2f72098c64b15e498a6193a48562137a0c014642a07541f869eaf9",
+  "id": "8e8612361c6b996fd88f2a13f25f1338d3772507915e8c4f24655b2ba752e59f",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -253,7 +253,7 @@
   },
   "templates": {
     "base/cstore-promo@1.2.0": {
-      "html": "0478219a1d8a5829d0be2e854eec4d9191d5b4af1cc1da667aa3312276a16af6",
+      "html": "77bfca528b2b6030a30fbe94f3f7317f1e811534a6f3a0db38e968090374f9ad",
       "manifest": {
         "background": "#06122b",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",

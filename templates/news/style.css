@@ -5,7 +5,7 @@
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
-body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--text); font-feature-settings: "tnum" 1; }
+body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--text); }
 /* News. The crawl is one long strip of text holding every headline twice; it slides left by
    exactly one copy and repeats, so the loop is seamless and the GPU only moves a picture. */
 :root { --accent: var(--sf-accent, #ff4d5e); --on-accent: var(--sf-on-accent, #fff); --bg: var(--sf-bg, #0b0d12); --text: var(--sf-text, #fff); }
@@ -19,7 +19,8 @@ header { display: flex; justify-content: space-between; align-items: center; pad
   will-change: opacity; animation: fade-in .6s ease both, fade-out .5s ease-in forwards; animation-delay: 0s, var(--out); }
 .badge { background: var(--accent); color: var(--on-accent); font-size: calc(var(--u) * 2.8); font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
   padding: calc(var(--u) * .9) calc(var(--u) * 2); border-radius: var(--sf-radius, calc(var(--u) * .8)); }
-.clock { font-size: calc(var(--u) * 3.2); font-weight: 600; color: var(--sf-muted, color-mix(in srgb, var(--text) 70%, transparent)); }
+/* Tabular figures for the time only: on headlines they give hyphens a figure's width ("sign - in"). */
+.clock { font-feature-settings: "tnum" 1; font-size: calc(var(--u) * 3.2); font-weight: 600; color: var(--sf-muted, color-mix(in srgb, var(--text) 70%, transparent)); }
 /* The story block fills the space between header and crawl and centres in it; main.ts drops
    secondary headlines that would not fit. */
 main { padding: calc(var(--u) * 4) calc(var(--u) * 8) 0; min-width: 0; min-height: 0; overflow: hidden;
@@ -46,7 +47,7 @@ footer[hidden] { display: none; }
 .crawl span::after { content: "•"; color: var(--accent); padding-left: calc(var(--u) * 4); }
 /* Portrait is narrow and tall: a larger lead, and secondary headlines wrap to two lines
    before their ellipsis. */
-[data-orientation="portrait"] .lead { font-size: calc(var(--u) * 10); -webkit-line-clamp: 5; }
+[data-orientation="portrait"] .lead { font-size: calc(var(--u) * 10); -webkit-line-clamp: 6; }
 [data-orientation="portrait"] .label { max-width: 30vw; font-size: calc(var(--u) * 2.3); letter-spacing: .06em; padding: 0 calc(var(--u) * 2.4); }
 [data-orientation="portrait"] .age { font-size: calc(var(--u) * 3.6); }
 [data-orientation="portrait"] .more { margin-top: calc(var(--u) * 7); gap: calc(var(--u) * 3.6); }

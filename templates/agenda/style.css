@@ -23,7 +23,7 @@ h1 { font-family: var(--sf-font-display, "Inter"), sans-serif; font-size: calc(v
 .events { list-style: none; display: flex; flex-direction: column; gap: calc(var(--u) * 2.2); flex: 1; min-height: 0; overflow: hidden; }
 .event { flex: none; }
 .event { display: flex; align-items: center; gap: calc(var(--u) * 3.4); padding: calc(var(--u) * 1.6) calc(var(--u) * 2.4);
-  border-radius: var(--sf-radius, calc(var(--u) * 2)); background: color-mix(in srgb, var(--text) 4.5%, transparent);
+  border-radius: var(--sf-radius, calc(var(--u) * 2)); background: var(--sf-surface, rgba(255,255,255,.045));
   will-change: transform, opacity; animation: slide-in .7s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards;
   animation-delay: calc(.25s + var(--i) * .12s), var(--out); }
 .event.now { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset .5vmin 0 0 var(--accent); }
