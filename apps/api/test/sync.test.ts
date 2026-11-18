@@ -217,7 +217,7 @@ describe('the heartbeat', () => {
     expect(((await refused.json()) as { problems: string[] }).problems).toHaveLength(2);
 
     // A play-count list filling the ceiling: one problem, not one per entry (a 500 before).
-    const counts = JSON.stringify(body({ playCounts: Array.from({ length: 349_000 }, () => ({})) }));
+    const counts = JSON.stringify({ ...body({}), playCounts: Array.from({ length: 349_000 }, () => ({})) });
     expect(counts.length).toBeLessThan(MAX_SYNC_REQUEST_BYTES);
     const tooMany = await post(counts);
     expect(tooMany.status).toBe(400);
