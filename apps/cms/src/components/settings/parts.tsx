@@ -21,9 +21,9 @@ const ORG_PAGES = [
 
 export function SettingsNav() {
   return (
-    // A scrolling row of links on phones, a column beside the page on wide screens.
-    <nav aria-label="Settings" className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 lg:mx-0 lg:w-52 lg:shrink-0 lg:flex-col lg:gap-4 lg:overflow-visible lg:px-0">
-      <div className="flex gap-1 lg:flex-col lg:gap-0.5">
+    // Wrapping rows of links on phones, a column beside the page on wide screens.
+    <nav aria-label="Settings" className="flex flex-wrap gap-1 lg:w-52 lg:shrink-0 lg:flex-col lg:flex-nowrap lg:gap-4">
+      <div className="flex flex-wrap gap-1 lg:flex-col lg:gap-0.5">
         <span className="hidden px-3 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase lg:block">Organization</span>
         {ORG_PAGES.map(({ to, label }) =>
           to ? (
@@ -31,13 +31,17 @@ export function SettingsNav() {
               {label}
             </Link>
           ) : (
-            <span key={label} className="flex min-h-10 shrink-0 items-center justify-between gap-2 px-3 text-sm whitespace-nowrap text-muted-foreground" aria-disabled="true">
-              {label} <span className="text-xs">Coming soon</span>
+            <span
+              key={label}
+              className="flex min-h-10 shrink-0 items-center justify-between gap-2 px-3 text-sm whitespace-nowrap text-muted-foreground"
+              aria-disabled="true"
+            >
+              {label} <span className="sr-only text-xs lg:not-sr-only">Coming soon</span>
             </span>
           ),
         )}
       </div>
-      <div className="flex gap-1 border-l pl-1 lg:flex-col lg:gap-0.5 lg:border-t lg:border-l-0 lg:pt-3 lg:pl-0">
+      <div className="flex gap-1 lg:flex-col lg:gap-0.5 lg:border-t lg:pt-3">
         <Link to="/account" className={LINK}>
           Your account
         </Link>

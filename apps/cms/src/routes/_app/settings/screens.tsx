@@ -4,6 +4,7 @@
  */
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useId, type SubmitEvent } from 'react';
+import { PageHeader } from '~/components/page';
 import { SaveRow, SettingsSection } from '~/components/settings/parts';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -33,6 +34,7 @@ function ScreenSettings() {
 
   return (
     <form key={settings.updatedAt ?? 0} onSubmit={submit} className="space-y-6" noValidate>
+      <PageHeader title="Screens & groups" description="When screens update, and how long one may be silent before it alerts." />
       <SettingsSection
         id={`${id}-window`}
         title="Update window"

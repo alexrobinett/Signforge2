@@ -6,6 +6,7 @@ import { createFileRoute, getRouteApi } from '@tanstack/react-router';
 import { useId, type SubmitEvent } from 'react';
 import { describeHours, DisplayHoursEditor, hoursProblems } from '~/components/screens/display-hours-editor';
 import { zones } from '~/components/screens/pair-screen-form';
+import { PageHeader } from '~/components/page';
 import { SaveRow, SettingsSection } from '~/components/settings/parts';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -58,6 +59,7 @@ function GeneralSettings() {
 
   return (
     <form key={`${settings.updatedAt ?? 0}-${org.name}`} onSubmit={submit} className="space-y-6" noValidate>
+      <PageHeader title="General" description="The organization's name, and what new screens start with." />
       <SettingsSection id={`${id}-org`} title="Organization" description="Shown to members and in invite emails.">
         <div className="grid max-w-md gap-1.5">
           <Label htmlFor={`${id}-name`}>Name</Label>
@@ -71,7 +73,7 @@ function GeneralSettings() {
         description="New screens start with these; each screen can change them afterwards. Schedules run in each screen's own time zone."
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="grid gap-1.5">
+          <div className="grid content-start gap-1.5">
             <Label htmlFor={`${id}-tz`}>Time zone</Label>
             <NativeSelect id={`${id}-tz`} name="timezone" defaultValue={settings.timezone ?? ''} disabled={!canEdit}>
               <option value="">The browser's, when pairing</option>
@@ -82,7 +84,7 @@ function GeneralSettings() {
               ))}
             </NativeSelect>
           </div>
-          <div className="grid gap-1.5">
+          <div className="grid content-start gap-1.5">
             <Label htmlFor={`${id}-locale`}>Locale</Label>
             <NativeSelect id={`${id}-locale`} name="locale" defaultValue={settings.locale ?? ''} disabled={!canEdit} aria-describedby={`${id}-locale-help`}>
               <option value="">The player's default</option>
@@ -104,11 +106,7 @@ function GeneralSettings() {
         title="Default display hours"
         description="New screens start with these. Outside them a screen turns its panel off and keeps syncing."
       >
-        {canEdit ? (
-          <DisplayHoursEditor value={hours} onChange={editDefaultHours} />
-        ) : (
-          <p className="text-sm">{describeHours(settings.displayHours)}</p>
-        )}
+        {canEdit ? <DisplayHoursEditor value={hours} onChange={editDefaultHours} /> : <p className="text-sm">{describeHours(settings.displayHours)}</p>}
       </SettingsSection>
 
       <SaveRow at="general" canEdit={canEdit} />

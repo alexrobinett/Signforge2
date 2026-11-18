@@ -103,14 +103,30 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       );
     },
     resendInvitation: async (email, role) =>
-      void (await run(`resend:${email}`, () => auth(authClient.organization.inviteMember({ email, role, resend: true }), 'Could not resend it.'), 'Invite sent again')),
+      void (await run(
+        `resend:${email}`,
+        () => auth(authClient.organization.inviteMember({ email, role, resend: true }), 'Could not resend it.'),
+        'Invite sent again',
+      )),
     cancelInvitation: async (invitationId) =>
-      void (await run(`cancel:${invitationId}`, () => auth(authClient.organization.cancelInvitation({ invitationId }), 'Could not revoke it.'), 'Invite revoked')),
+      void (await run(
+        `cancel:${invitationId}`,
+        () => auth(authClient.organization.cancelInvitation({ invitationId }), 'Could not revoke it.'),
+        'Invite revoked',
+      )),
     changeMemberRole: async (memberId, role) =>
-      void (await run(`role:${memberId}`, () => auth(authClient.organization.updateMemberRole({ memberId, role }), 'Could not change the role.'), 'Role changed')),
+      void (await run(
+        `role:${memberId}`,
+        () => auth(authClient.organization.updateMemberRole({ memberId, role }), 'Could not change the role.'),
+        'Role changed',
+      )),
     askToRemoveMember: (member) => patch((s) => ({ ...s, removing: member, error: null })),
     async removeMember(memberId) {
-      const removed = await run(`remove:${memberId}`, () => auth(authClient.organization.removeMember({ memberIdOrEmail: memberId }), 'Could not remove them.'), 'Removed');
+      const removed = await run(
+        `remove:${memberId}`,
+        () => auth(authClient.organization.removeMember({ memberIdOrEmail: memberId }), 'Could not remove them.'),
+        'Removed',
+      );
       if (removed) patch((s) => ({ ...s, removing: null }));
     },
 
@@ -123,7 +139,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         },
         'Saved',
       )),
-    signOutSession: async (token) => void (await run(`session:${token}`, () => auth(authClient.revokeSession({ token }), 'Could not sign it out.'), 'Signed out')),
+    signOutSession: async (token) =>
+      void (await run(`session:${token}`, () => auth(authClient.revokeSession({ token }), 'Could not sign it out.'), 'Signed out')),
     signOutOtherSessions: async () =>
       void (await run('sessions', () => auth(authClient.revokeOtherSessions(), 'Could not sign them out.'), 'Signed out everywhere else')),
     async connectGithub() {

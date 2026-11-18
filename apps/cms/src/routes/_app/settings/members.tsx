@@ -7,6 +7,7 @@
 import { createFileRoute, getRouteApi } from '@tanstack/react-router';
 import { CheckIcon, MinusIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
+import { PageHeader } from '~/components/page';
 import { ActionError, SettingsSection } from '~/components/settings/parts';
 import {
   AlertDialog,
@@ -44,9 +45,10 @@ function MembersSettings() {
 
   return (
     <>
-      <p className="text-muted-foreground">
-        {plural(members.length, 'person', 'people')} · {plural(invitations.length, 'invite', 'invites')} waiting.
-      </p>
+      <PageHeader
+        title="Members & roles"
+        description={`${plural(members.length, 'person', 'people')} · ${plural(invitations.length, 'invite', 'invites')} waiting.`}
+      />
       {isOwner && <InviteForm />}
       <SettingsSection id={`${id}-people`} title="People">
         <ul className="divide-y">
@@ -128,39 +130,39 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
   return (
     <li className="space-y-2 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">
-          {display}
-          {self && <span className="ml-2 text-sm font-normal text-muted-foreground">(you)</span>}
-        </p>
-        {member.user.name && <p className="truncate text-sm text-muted-foreground">{member.user.email}</p>}
-      </div>
-      {canEdit ? (
-        <div className="flex items-center gap-2">
-          <NativeSelect
-            aria-label={`Role for ${display}`}
-            value={member.role}
-            disabled={pending}
-            onChange={(e) => {
-              if (isRole(e.target.value)) void changeMemberRole(member.id, e.target.value);
-            }}
-            className="w-36"
-          >
-            {ROLES.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-              </option>
-            ))}
-          </NativeSelect>
-          {!self && (
-            <Button variant="ghost" className="text-destructive" disabled={pending} onClick={() => askToRemoveMember(member)}>
-              Remove
-            </Button>
-          )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium">
+            {display}
+            {self && <span className="ml-2 text-sm font-normal text-muted-foreground">(you)</span>}
+          </p>
+          {member.user.name && <p className="truncate text-sm text-muted-foreground">{member.user.email}</p>}
         </div>
-      ) : (
-        <span className="text-sm">{roleLabel(member.role)}</span>
-      )}
+        {canEdit ? (
+          <div className="flex items-center gap-2">
+            <NativeSelect
+              aria-label={`Role for ${display}`}
+              value={member.role}
+              disabled={pending}
+              onChange={(e) => {
+                if (isRole(e.target.value)) void changeMemberRole(member.id, e.target.value);
+              }}
+              className="w-36"
+            >
+              {ROLES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </NativeSelect>
+            {!self && (
+              <Button variant="ghost" className="text-destructive" disabled={pending} onClick={() => askToRemoveMember(member)}>
+                Remove
+              </Button>
+            )}
+          </div>
+        ) : (
+          <span className="text-sm">{roleLabel(member.role)}</span>
+        )}
       </div>
       <ActionError at={`role:${member.id}`} />
     </li>
@@ -176,22 +178,22 @@ function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdi
   return (
     <li className="space-y-2 py-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{invitation.email}</p>
-        <p className="text-sm text-muted-foreground">
-          {roleLabel(invitation.role)} · link works until {expires}
-        </p>
-      </div>
-      {canEdit && (
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" disabled={pending} onClick={() => void resendInvitation(invitation.email, invitation.role)}>
-            Resend
-          </Button>
-          <Button variant="ghost" size="sm" className="text-destructive" disabled={pending} onClick={() => void cancelInvitation(invitation.id)}>
-            Revoke
-          </Button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium">{invitation.email}</p>
+          <p className="text-sm text-muted-foreground">
+            {roleLabel(invitation.role)} · link works until {expires}
+          </p>
         </div>
-      )}
+        {canEdit && (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={pending} onClick={() => void resendInvitation(invitation.email, invitation.role)}>
+              Resend
+            </Button>
+            <Button variant="ghost" size="sm" className="text-destructive" disabled={pending} onClick={() => void cancelInvitation(invitation.id)}>
+              Revoke
+            </Button>
+          </div>
+        )}
       </div>
       <ActionError at={`cancel:${invitation.id}`} />
       <ActionError at={`resend:${invitation.email}`} />
@@ -201,7 +203,8 @@ function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdi
 
 function RoleTable() {
   const id = useId();
-  const mark = (yes: boolean) => (yes ? <CheckIcon className="mx-auto size-4" aria-label="Yes" /> : <MinusIcon className="mx-auto size-4 text-muted-foreground" aria-label="No" />);
+  const mark = (yes: boolean) =>
+    yes ? <CheckIcon className="mx-auto size-4" aria-label="Yes" /> : <MinusIcon className="mx-auto size-4 text-muted-foreground" aria-label="No" />;
   return (
     <SettingsSection id={`${id}-roles`} title="What each role can do">
       <div className="overflow-x-auto">
