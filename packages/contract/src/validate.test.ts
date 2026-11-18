@@ -15,6 +15,7 @@ import {
   imageSizeProblem,
   validateDataSnapshot,
   validateDeviceCommand,
+  MAX_IDENTIFY_SECONDS,
   validateDeviceSocketMessage,
   validateManifest,
   validatePairPollResponse,
@@ -464,9 +465,19 @@ describe('snapshots and device bodies', () => {
     expect(validatePairPollResponse({ status: 'paired', screenId: 's1', credential: 'sfd_s2.secret' })).toEqual(['credential must be sfd_<screenId>.<secret>']);
   });
 
+  it('takes identify with the name to show for a few seconds, and restart', () => {
+    expect(validateDeviceCommand({ type: 'identify', name: 'Lobby', seconds: 10 })).toEqual([]);
+    expect(validateDeviceCommand({ type: 'restart' })).toEqual([]);
+    expect(validateDeviceCommand({ type: 'identify', name: '', seconds: 0 })).toEqual([
+      'identify needs the name to show, 1 to 100 characters',
+      `identify seconds must be a whole number from 1 to ${MAX_IDENTIFY_SECONDS}`,
+    ]);
+    expect(validateDeviceCommand({ type: 'identify', name: 'x'.repeat(101), seconds: MAX_IDENTIFY_SECONDS + 1 })).toHaveLength(2);
+  });
+
   it('rejects unknown commands and socket messages', () => {
     expect(validateSyncResponse({ ...validSyncResponse(), commands: [{ type: 'format' }] })).toEqual([
-      'command 1: command type must be reload, display or reboot',
+      'command 1: command type must be reload, restart, display, identify or reboot',
     ]);
     expect(validateServerSocketMessage({ type: 'manifest' })).toEqual(['manifest message needs an id']);
   });
