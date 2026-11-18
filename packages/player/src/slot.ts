@@ -113,7 +113,7 @@ async function loadTheme({ brand }: ScreenManifest): Promise<FrameTheme | undefi
 export class Slot {
   readonly el = document.createElement('div');
   spot?: Spot;
-  private startPlayback: () => void = () => {};
+  private startPlayback: () => Promise<void> = () => Promise.resolve();
   private urls: string[] = [];
   private abort?: AbortController;
   private video?: HTMLVideoElement;
@@ -149,8 +149,12 @@ export class Slot {
     }
   }
 
-  play(): void {
-    this.startPlayback();
+  /**
+   * Start the prepared spot. Resolves once it plays: at once for a template (it reported ready),
+   * an image or a URL spot, and when its `play()` does for a video. Rejects if the video's is refused.
+   */
+  play(): Promise<void> {
+    return this.startPlayback();
   }
 
   clear(): void {
@@ -170,7 +174,7 @@ export class Slot {
     this.urls = [];
     this.spot = undefined;
     this.live = undefined;
-    this.startPlayback = () => {};
+    this.startPlayback = () => Promise.resolve();
   }
 
   private objectUrl(blob: Blob): string {
@@ -299,7 +303,10 @@ export class Slot {
       },
       { signal },
     );
-    this.startPlayback = () => this.post({ sf: protocol, type: 'play' });
+    this.startPlayback = () => {
+      this.post({ sf: protocol, type: 'play' });
+      return Promise.resolve();
+    };
     const ready = this.nextReady(() => wrapper.document.body.appendChild(frame), signal);
     await ready;
     alive(signal);
@@ -316,7 +323,7 @@ export class Slot {
     const t = spot.kind === 'template' ? manifest.templates[spot.template] : undefined;
     if (!live || spot.kind !== 'template' || !t || t.html !== live.html || live.protocol < 2 || !this.abort || this.abort.signal.aborted) {
       await this.prepare(spot, manifest);
-      this.play();
+      await this.play();
       return;
     }
     const signal = this.abort.signal;
@@ -337,7 +344,7 @@ export class Slot {
       clearTimeout(timer);
     }
     alive(signal);
-    this.play();
+    await this.play();
   }
 
   private async image(spot: Extract<Spot, { kind: 'image' }>, signal: AbortSignal): Promise<void> {
@@ -369,7 +376,7 @@ export class Slot {
     alive(signal);
     // Ready at canplaythrough. A paused video that has never played presents no frame, so waiting
     // for a frame callback here only ever waited out a timer: 600 ms on every video prepare.
-    this.startPlayback = () => void v.play();
+    this.startPlayback = () => v.play();
   }
 
   /** Online-only. A page that fails to load in time is skipped like any other spot. */

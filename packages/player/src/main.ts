@@ -161,7 +161,7 @@ const state = {
     return pendingPlays();
   },
   persistent: false,
-  /** The id of the last manifest that played a spot: the one the player falls back to. */
+  /** The id of the last manifest that verifiably started a spot (`promote`): the one the player falls back to. */
   lastGood: '',
   /**
    * The id of the newest manifest while the player falls back from it, because nothing in it
@@ -255,8 +255,9 @@ let lastProgress = performance.now();
 /**
  * Swap to `next`. While it loaded, `next` sat fully drawn underneath `prev`, so the browser has
  * already painted it; revealing it costs nothing. A crossfade fades the old spot out on top of it.
+ * `started` is `next`'s `play()`; `done`, the end of the transition.
  */
-function show(next: Slot, prev: Slot | undefined, transition: Transition): Promise<void> {
+function show(next: Slot, prev: Slot | undefined, transition: Transition): { started: Promise<void>; done: Promise<void> } {
   if (prev && transition.type === 'fade') {
     // Out to black, then in. The next spot is hidden while the old one fades so only one is
     // ever drawn; it was fully drawn underneath until now, so it appears without a stall.
@@ -267,23 +268,22 @@ function show(next: Slot, prev: Slot | undefined, transition: Transition): Promi
     prev.el.style.zIndex = '3';
     prev.el.style.transition = `opacity ${half}ms ease-in`;
     prev.el.style.opacity = '0';
-    return sleep(half).then(() => {
+    const revealed = sleep(half).then(() => {
       prev.el.style.transition = 'none';
       prev.el.style.zIndex = '1';
       prev.clear();
       next.el.style.transition = `opacity ${half}ms ease-out`;
       next.el.style.opacity = '1';
-      next.play();
-      return sleep(half);
     });
+    return { started: revealed.then(() => next.play()), done: revealed.then(() => sleep(half)) };
   }
   const ms = prev && transition.type === 'crossfade' ? transition.ms : 0;
-  next.play();
+  const started = next.play();
   if (prev && ms) {
     prev.el.style.transition = `opacity ${ms}ms linear`;
     prev.el.style.opacity = '0';
   }
-  return sleep(ms).then(() => {
+  const done = sleep(ms).then(() => {
     next.el.style.zIndex = '2';
     if (prev) {
       prev.el.style.transition = 'none';
@@ -292,6 +292,7 @@ function show(next: Slot, prev: Slot | undefined, transition: Transition): Promi
       prev.clear();
     }
   });
+  return { started, done };
 }
 
 async function prepareStep(slot: Slot, step: Step, manifest: ScreenManifest): Promise<boolean> {
@@ -318,15 +319,21 @@ async function prepareStep(slot: Slot, step: Step, manifest: ScreenManifest): Pr
   }
 }
 
+/**
+ * A spot of `manifestId` started playing, as far as the player can check: its manifest becomes
+ * the last good one. A URL spot never counts: its frame loads even when the page failed, onto the
+ * browser's error page. A draft in the preview is never a screen's last good manifest.
+ */
+function promote(spot: Spot, manifestId: string): void {
+  if (SOURCE !== 'device' || spot.kind === 'url' || manifestId === state.lastGood || source?.id !== manifestId) return;
+  state.lastGood = manifestId;
+  lastGood = source;
+  pins.hold('last-good', requiredFiles(source));
+  rememberGood(source).catch((err: unknown) => console.warn('[sf] could not store the last good manifest', err));
+}
+
 function record(step: Step, manifestId: string): void {
   preview?.played(manifestId, step.spot.id);
-  // A draft in the preview is never a screen's last good manifest.
-  if (SOURCE === 'device' && manifestId !== state.lastGood && source?.id === manifestId) {
-    state.lastGood = manifestId;
-    lastGood = source;
-    pins.hold('last-good', requiredFiles(source));
-    rememberGood(source).catch((err: unknown) => console.warn('[sf] could not store the last good manifest', err));
-  }
   state.spot = step.spot.id;
   state.playlist = step.playlist.id;
   state.played++;
@@ -496,7 +503,14 @@ async function playbackLoop(): Promise<never> {
     spotStartedAt = startedAt;
     record(step, m.id);
     phase = 'transition';
-    const done = show(slot, current, step.playlist.transition);
+    const { started, done } = show(slot, current, step.playlist.transition);
+    void started.then(
+      () => promote(step.spot, m.id),
+      (err: unknown) => {
+        state.lastError = `${step.spot.id}: did not start: ${err instanceof Error ? err.message : String(err)}`;
+        console.warn('[sf]', state.lastError);
+      },
+    );
     // A video keeps reading its file from the cache while it plays, and the outgoing spot is
     // still on screen until the transition ends.
     const playing = spotFiles(step.spot, m);

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MANIFEST_SCHEMA } from '@signforge/contract';
 import type { Player } from './harness';
@@ -70,6 +72,43 @@ describe('last known good', () => {
     const s = await p.until((s) => s.lastGood === second.manifest.id && s.log.at(-1)?.spot === 'c');
     expect(s.fallback).toBe('');
     expect(s.manifestId).toBe(second.manifest.id);
+  });
+
+  it('keeps the last good manifest when a URL-only one shows a page that failed to load', async () => {
+    const good = h.content([{ id: 'a', durationMs: 600 }], { variant: 'good' });
+    const page = h.content([{ id: 'u', url: 'https://down.test/', durationMs: 600 }], { variant: 'url' });
+    const p = await h.openPlayer((s) => s.publish(good));
+    // The page's server refuses the connection: the frame shows the browser's error page, and loads.
+    await p.page.context().route(/^https:\/\/down\.test\//, (route) => route.abort('connectionrefused'));
+    await p.until((s) => s.lastGood === good.manifest.id);
+
+    p.server.publish(page);
+    const s = await p.until((s) => s.log.filter((l) => l.manifest === page.manifest.id).length >= 2);
+    expect(s.manifestId).toBe(page.manifest.id);
+    expect(s.lastGood).toBe(good.manifest.id);
+  });
+
+  it('takes a video manifest as the last good one only once a video has started playing', async () => {
+    const good = h.content([{ id: 'a', durationMs: 600 }], { variant: 'good' });
+    const clip = readFileSync(join(import.meta.dirname, 'fixtures/clip.webm'));
+    const video = h.content([{ id: 'v', video: clip, durationMs: 600 }], { variant: 'video' });
+    const p = await h.openPlayer((s) => s.publish(good));
+    await p.until((s) => s.lastGood === good.manifest.id);
+
+    // The browser refuses to play, as it may refuse autoplay or a decoder.
+    await p.page.evaluate(() => {
+      const w = window as unknown as { realPlay: typeof HTMLMediaElement.prototype.play };
+      w.realPlay = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = () => Promise.reject(new DOMException('refused', 'NotAllowedError'));
+    });
+    p.server.publish(video);
+    const s = await p.until((s) => s.log.filter((l) => l.manifest === video.manifest.id).length >= 2);
+    expect(s.lastGood).toBe(good.manifest.id);
+
+    await p.page.evaluate(() => {
+      HTMLMediaElement.prototype.play = (window as unknown as { realPlay: typeof HTMLMediaElement.prototype.play }).realPlay;
+    });
+    await p.until((s) => s.lastGood === video.manifest.id);
   });
 
   it('plays a cached schema N-1 manifest after a restart with no network', async () => {
