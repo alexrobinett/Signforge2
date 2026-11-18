@@ -43,7 +43,9 @@ export async function findAlertWork(d1: D1Database, now: number, defaultUnreacha
       .from(sc)
       .innerJoin(s.organization, eq(s.organization.id, sc.orgId))
       .leftJoin(s.orgSettings, eq(s.orgSettings.orgId, sc.orgId))
-      .where(and(eq(sc.status, 'active'), eq(sc.kind, 'device'), isNotNull(sc.lastSeenAt), lt(sc.lastSeenAt, sql`${now} - ${threshold}`), live, not(openIncident)))
+      .where(
+        and(eq(sc.status, 'active'), eq(sc.kind, 'device'), isNotNull(sc.lastSeenAt), lt(sc.lastSeenAt, sql`${now} - ${threshold}`), live, not(openIncident)),
+      )
       .all(),
     db
       .select({
