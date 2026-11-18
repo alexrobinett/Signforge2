@@ -38,34 +38,45 @@ jobs:
 
       # The pnpm store: restored on every run, saved only from master, so a pull request never
       # spends a minute uploading it. A lockfile change restores the nearest store and fetches the rest.
-      - id: pnpm-store
+      - name: pnpm store path
+        id: pnpm-store
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-      - id: pnpm-cache
+      - name: Restore pnpm store
+        id: pnpm-cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
-      - if: github.event_name == 'push' && steps.pnpm-cache.outputs.cache-hit != 'true'
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Save pnpm store
+        if: github.event_name == 'push' && steps.pnpm-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: ${{ steps.pnpm-cache.outputs.cache-primary-key }}
 
       # Repo-wide checks: a few seconds each, so they run whole on every change.
-      - run: pnpm exec biome lint --error-on-warnings .
+      - name: Biome lint
+        run: pnpm exec biome lint --error-on-warnings .
       # Only files the change touches: the repo is not formatted wholesale yet (see README).
-      - run: pnpm format:check --since=origin/${{ github.base_ref || 'master' }}
-      - run: pnpm knip # unused files, exports and dependencies; knip.jsonc lists what it cannot see
-      - run: pnpm dupes # copy-paste across apps/ and packages/ may not pass 1% (.jscpd.json)
-      - run: pnpm exec turbo boundaries # imports stay inside their package and name declared dependencies
+      - name: Format check
+        run: pnpm format:check --since=origin/${{ github.base_ref || 'master' }}
+      - name: knip
+        run: pnpm knip # unused files, exports and dependencies; knip.jsonc lists what it cannot see
+      - name: jscpd
+        run: pnpm dupes # copy-paste across apps/ and packages/ may not pass 1% (.jscpd.json)
+      - name: Turbo boundaries
+        run: pnpm exec turbo boundaries # imports stay inside their package and name declared dependencies
       # A commit that changes packages/contract changes nothing else (AGENTS.md, "The contract leads").
-      - run: sh scripts/check-contract-commits.sh ${{ github.event.pull_request.base.sha || github.event.before }}
+      - name: Contract commits
+        run: sh scripts/check-contract-commits.sh ${{ github.event.pull_request.base.sha || github.event.before }}
 
       # Which tasks run, and whether any of them needs Chromium: the tests of a package that declares
       # a Playwright dependency launch it.
-      - id: plan
+      - name: Plan
+        id: plan
         run: |
           affected=$([ "$GITHUB_EVENT_NAME" = pull_request ] && echo --affected || true)
           pnpm exec turbo run typecheck test test:e2e lint $affected --dry=json > "$RUNNER_TEMP/plan.json"
@@ -81,40 +92,47 @@ jobs:
 
       # Playwright's headless shell, which every browser test launches, cached per Playwright version.
       # System packages are installed only if the runner lacks a library the shell links against.
-      - id: browser-cache
+      - name: Restore Playwright
+        id: browser-cache
         if: steps.plan.outputs.browsers == 'true'
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.plan.outputs.playwright }}
-      - if: steps.plan.outputs.browsers == 'true'
+      - name: Install Playwright
+        if: steps.plan.outputs.browsers == 'true'
         run: |
           pnpm --filter @signforge/player exec playwright install --only-shell chromium
           if find ~/.cache/ms-playwright/chromium_headless_shell-* -type f \( -name chrome-headless-shell -o -name headless_shell -o -name '*.so*' \) -exec ldd {} + 2>/dev/null | grep -q 'not found'; then
             pnpm --filter @signforge/player exec playwright install-deps chromium
           fi
-      - if: steps.plan.outputs.browsers == 'true' && steps.browser-cache.outputs.cache-hit != 'true'
+      - name: Save Playwright
+        if: steps.plan.outputs.browsers == 'true' && steps.browser-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/ms-playwright
           key: ${{ steps.browser-cache.outputs.cache-primary-key }}
 
       # Turbo's local cache, carried between runs: the newest entry for this OS, saved under this sha.
-      - id: turbo-cache
+      - name: Restore Turbo cache
+        id: turbo-cache
         uses: actions/cache/restore@v4
         with:
           path: .turbo/cache
           key: turbo-${{ runner.os }}-${{ github.sha }}
           restore-keys: turbo-${{ runner.os }}-
-      - run: pnpm exec turbo run typecheck test test:e2e lint ${{ steps.plan.outputs.affected }} --summarize
+      - name: Typecheck, test, e2e, lint
+        run: pnpm exec turbo run typecheck test test:e2e lint ${{ steps.plan.outputs.affected }} --summarize
       # Also after a failure, so a rerun replays the tasks that passed.
-      - if: always() && steps.turbo-cache.outputs.cache-hit != 'true'
+      - name: Save Turbo cache
+        if: always() && steps.turbo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .turbo/cache
           key: ${{ steps.turbo-cache.outputs.cache-primary-key }}
 
-      - if: failure()
+      - name: Upload e2e results
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: cms-e2e
@@ -122,7 +140,8 @@ jobs:
             apps/cms/test-results
             apps/cms/.e2e
           if-no-files-found: ignore
-      - if: always()
+      - name: Timing summary
+        if: always()
         run: sh scripts/ci-summary.sh >> "$GITHUB_STEP_SUMMARY"
         env:
           GH_TOKEN: ${{ github.token }}
