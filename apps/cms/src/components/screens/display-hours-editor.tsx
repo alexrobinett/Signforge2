@@ -95,7 +95,6 @@ export function DisplayHoursEditor({ value, onChange }: { value: DisplayHours | 
                         key={d}
                         type="button"
                         aria-pressed={on}
-                        aria-label={long}
                         onClick={() =>
                           setWeekly(value.weekly.map((x, j) => (j === i ? { ...x, days: on ? x.days.filter((y) => y !== d) : [...x.days, d].sort() } : x)))
                         }
@@ -104,7 +103,9 @@ export function DisplayHoursEditor({ value, onChange }: { value: DisplayHours | 
                           on ? 'border-primary bg-primary text-primary-foreground' : 'border-border-strong bg-card text-foreground hover:bg-accent',
                         )}
                       >
-                        {short}
+                        {/* Named "Monday" by hidden text, not aria-label: axe counts a label that does not contain the "Mon" shown as a mismatch. */}
+                        <span aria-hidden>{short}</span>
+                        <span className="sr-only">{long}</span>
                       </button>
                     );
                   })}

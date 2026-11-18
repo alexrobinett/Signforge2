@@ -1,6 +1,6 @@
 // The sync (M3-07): one periodic call carries the heartbeat and play counts up, and the desired
 // manifest, changed snapshots, a socket ticket, the server time and commands down.
-import { MANIFEST_SCHEMA, type SyncRequest, type SyncResponse } from '@signforge/contract';
+import { MANIFEST_SCHEMA, MAX_SYNC_REQUEST_BYTES, MAX_SYNC_SOURCES, type SyncRequest, type SyncResponse } from '@signforge/contract';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -11,6 +11,8 @@ import { manifestKey } from '../src/r2';
 const BASE = 'https://api.test/v1/device';
 const HOUR = '2026-11-17T09:00Z';
 const HOUR_MS = Date.parse(HOUR);
+const OLD = 'a'.repeat(64);
+const NEW = 'b'.repeat(64);
 
 interface Screen {
   seed: SeededOrg;
@@ -157,7 +159,7 @@ describe('the heartbeat', () => {
       s,
       body({
         player: { version: '2.1.0', manifestSchemas: [MANIFEST_SCHEMA], protocols: [2] },
-        manifest: { active: 'm-old', filesMissing: 2, fallbackFrom: 'm-new' },
+        manifest: { active: OLD, filesMissing: 2, fallbackFrom: NEW },
         display: { on: false, methods: { cec: 'ok' } },
         deviceTime,
         clock: { offsetMs: 3_600_000, trusted: true },
@@ -169,7 +171,7 @@ describe('the heartbeat', () => {
     expect(row?.playerVersion).toBe('2.1.0');
     const beat = parseHeartbeat(row!.heartbeatJson);
     expect(beat).toMatchObject({
-      manifest: { active: 'm-old', filesMissing: 2, fallbackFrom: 'm-new' },
+      manifest: { active: OLD, filesMissing: 2, fallbackFrom: NEW },
       display: { on: false, methods: { cec: 'ok' } },
       clock: { offsetMs: 3_600_000, trusted: true },
       dataRejected: { weather: 4 },
@@ -178,6 +180,100 @@ describe('the heartbeat', () => {
     // The device clock is an hour slow: the drift the server saw is about an hour.
     expect(beat!.driftMs).toBeGreaterThan(3_590_000);
     expect(beat!.driftMs).toBeLessThan(3_610_000);
+  });
+
+  it('takes a heartbeat from a player that reports every source it has seen, and stores at most MAX_SYNC_SOURCES', async () => {
+    const s = await setUp('sync-heartbeat-sources');
+    // As a player before gh-45 sends after source turnover: every source since it started, kept across retries.
+    const seen = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 44 }, (_, i) => [`old-${i}`, i]));
+    const first = await sync(s, body({ seq: 1, snapshots: seen, dataRejected: seen, playCounts: [{ hour: HOUR, spot: 'menu', plays: 1, ms: 8000 }] }));
+    expect(first).toMatchObject({ ackSeq: 1, socketTicket: expect.any(String) });
+    const beat = parseHeartbeat((await s.seed.scope.screens.get(s.seed.screen))!.heartbeatJson);
+    expect(Object.keys(beat!.dataRejected)).toHaveLength(MAX_SYNC_SOURCES);
+  });
+
+  it('bounds the work a large heartbeat makes: a legacy one near the ceiling syncs, one over it is refused unread', async () => {
+    const s = await setUp('sync-heartbeat-ceiling');
+    const post = (payload: BodyInit, headers: Record<string, string> = {}) =>
+      exports.default.fetch(`${BASE}/sync`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${s.credential}`, 'content-type': 'application/json', ...headers },
+        body: payload,
+      });
+    // Some 5000 sources in each map, 64-character ids: a player before gh-45 after long source turnover.
+    const legacy = Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`s${String(i).padStart(63, '0')}`, 1_763_384_400_000]));
+    const near = JSON.stringify(body({ seq: 1, snapshots: legacy, dataRejected: legacy }));
+    expect(near.length).toBeGreaterThan(MAX_SYNC_REQUEST_BYTES * 0.7);
+    expect(near.length).toBeLessThan(MAX_SYNC_REQUEST_BYTES);
+    const ok = await post(near);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ ackSeq: 1 });
+    expect(Object.keys(parseHeartbeat((await s.seed.scope.screens.get(s.seed.screen))!.heartbeatJson)!.dataRejected)).toHaveLength(MAX_SYNC_SOURCES);
+
+    // Every entry bad: one problem per map, not one per entry.
+    const bad = Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`bad id ${i}`, -1]));
+    const refused = await post(JSON.stringify(body({ snapshots: bad, dataRejected: bad })));
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { problems: string[] }).problems).toHaveLength(2);
+
+    // A play-count list filling the ceiling: one problem, not one per entry (a 500 before).
+    const counts = JSON.stringify({ ...body({}), playCounts: Array.from({ length: 349_000 }, () => ({})) });
+    expect(counts.length).toBeLessThan(MAX_SYNC_REQUEST_BYTES);
+    const tooMany = await post(counts);
+    expect(tooMany.status).toBe(400);
+    expect(((await tooMany.json()) as { problems: string[] }).problems).toHaveLength(1);
+
+    // Over the ceiling: refused before it is parsed, with a length or streamed without one.
+    const seenAt = (await s.seed.scope.screens.get(s.seed.screen))?.lastSeenAt;
+    const more = { ...legacy, ...Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`t${String(i).padStart(63, '0')}`, 1_763_384_400_000])) };
+    const over = JSON.stringify(body({ seq: 2, snapshots: more, dataRejected: more }));
+    expect(over.length).toBeGreaterThan(MAX_SYNC_REQUEST_BYTES);
+    expect((await post(over)).status).toBe(413);
+    const streamed = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(over));
+        c.close();
+      },
+    });
+    expect((await post(streamed)).status).toBe(413);
+    // Neither was read: the screen's row is as the last sync left it.
+    expect((await s.seed.scope.screens.get(s.seed.screen))?.lastSeenAt).toBe(seenAt);
+  });
+
+  it('stores only the contract fields of a heartbeat, so an unknown nested key cannot lock the screen out', async () => {
+    const s = await setUp('sync-heartbeat-unknown-keys');
+    // SQLite's json_extract refuses JSON nested 1000 deep, and the device lookup reads the row with it.
+    let deep: unknown = 1;
+    for (let i = 0; i < 1000; i++) deep = { d: deep };
+    const base = body({ seq: 1 });
+    for (const [field, value] of [
+      ['player', { ...base.player, extra: deep }],
+      ['manifest', { ...base.manifest, extra: deep }],
+      ['display', { ...base.display, extra: deep }],
+      ['display', { ...base.display, override: { state: 'on', until: '2026-11-18T23:00:00Z', extra: deep } }],
+      ['clock', { ...base.clock, extra: deep }],
+    ] as const) {
+      const res = await exports.default.fetch(`${BASE}/sync`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${s.credential}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ ...base, [field]: value }),
+      });
+      expect(res.status, field).toBe(200);
+      // The next ordinary sync still finds the screen.
+      expect(await sync(s, body({ seq: 1 })), field).toMatchObject({ ackSeq: 1 });
+    }
+  });
+
+  it('refuses a manifest id that is not a sha256, and stores nothing', async () => {
+    const s = await setUp('sync-heartbeat-bounds');
+    const res = await exports.default.fetch(`${BASE}/sync`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${s.credential}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body({ manifest: { active: 'x'.repeat(10_000), filesMissing: 0 } })),
+    });
+    expect(res.status).toBe(400);
+    const row = await s.seed.scope.screens.get(s.seed.screen);
+    expect(row?.heartbeatJson).toBeNull();
   });
 });
 

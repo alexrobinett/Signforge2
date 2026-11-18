@@ -1,9 +1,13 @@
+import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { MANIFEST_SCHEMA } from '@signforge/contract';
+import { MANIFEST_SCHEMA, type Spot } from '@signforge/contract';
+import type { FixtureServer } from './fixture-server';
 import type { Player } from './harness';
 import { useHarness } from './harness';
 
 const h = useHarness();
+/** Content on another origin is the API: the player syncs, and checks files on the sync's word. */
+const api = (s: FixtureServer) => ({ content: `${s.localUrl}/content` });
 
 /** The content server stops answering, as when the screen's network goes. */
 const cutNetwork = (p: Player) => p.server.intercept(/^\/content\//, { status: 503 });
@@ -52,6 +56,67 @@ describe('last known good', () => {
     await restart(p);
     s = await p.until((s) => s.fallback === broken.manifest.id && s.log.length >= 2, 15_000);
     expect(s.log.map((l) => l.manifest)).toEqual([good.manifest.id, good.manifest.id]);
+  });
+
+  it('fetches back an evicted file of the last good manifest while falling back to it past two broken ones', async () => {
+    const good = h.content(
+      [
+        { id: 'a', asset: randomBytes(4096), durationMs: 600 },
+        { id: 'b', durationMs: 600 },
+      ],
+      { variant: 'good' },
+    );
+    const broken = (variant: string) => h.content([{ id: 'x', mode: 'throw', durationMs: 600 }], { variant });
+    const [b, c] = [broken('b'), broken('c')];
+    const asset = (good.manifest.spots.a as Extract<Spot, { kind: 'template' }>).assets.file!;
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(good);
+    }, api);
+    await p.until((s) => s.lastGood === good.manifest.id && s.log.some((l) => l.spot === 'a'));
+
+    p.server.publish(b);
+    await p.until((s) => s.fallback === b.manifest.id);
+    // The browser evicts A's own file; A stays on screen through its other spot.
+    const assetRequests = () => p.server.requestsTo(new RegExp(`^/content/blobs/${asset}$`)).length;
+    const before = assetRequests();
+    await p.page.evaluate(async (sha) => (await caches.open('sf-blobs-v1')).delete(`/_sf/blob/${sha}`), asset);
+    p.server.serveLastGood(good);
+    p.server.publish(c);
+    await p.until((s) => s.fallback === c.manifest.id);
+    const mark = (await p.state()).log.length;
+
+    await expect.poll(assetRequests, { timeout: 15_000 }).toBeGreaterThan(before);
+    const s = await p.until((s) => s.log.slice(mark).some((l) => l.spot === 'a' && l.manifest === good.manifest.id), 15_000);
+    expect(s.fallback).toBe(c.manifest.id);
+  });
+
+  it('takes a healthy publish at once while a file only the last good manifest uses cannot be fetched', async () => {
+    const good = h.content(
+      [
+        { id: 'a', asset: randomBytes(4096), durationMs: 600 },
+        { id: 'b', durationMs: 600 },
+      ],
+      { variant: 'good' },
+    );
+    const broken = h.content([{ id: 'x', mode: 'throw', durationMs: 600 }], { variant: 'broken' });
+    // Its one file, the template, is A's: already held.
+    const healthy = h.content([{ id: 'd', durationMs: 600 }], { variant: 'good' });
+    const asset = (good.manifest.spots.a as Extract<Spot, { kind: 'template' }>).assets.file!;
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(good);
+    }, api);
+    await p.until((s) => s.lastGood === good.manifest.id && s.log.some((l) => l.spot === 'a'));
+    p.server.publish(broken);
+    await p.until((s) => s.fallback === broken.manifest.id);
+    // A's own file is evicted, and the server no longer has it (a static deploy deleted it).
+    await p.page.evaluate(async (sha) => (await caches.open('sf-blobs-v1')).delete(`/_sf/blob/${sha}`), asset);
+    p.server.intercept(new RegExp(`^/content/blobs/${asset}$`), { status: 404 });
+
+    p.server.publish(healthy);
+    const s = await p.until((s) => s.manifestId === healthy.manifest.id && s.log.some((l) => l.spot === 'd'), 15_000);
+    expect(s.fallback).toBe('');
   });
 
   it('plays a new manifest once one of its spots plays, and adopts it as the last good one', async () => {

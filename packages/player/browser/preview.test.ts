@@ -32,6 +32,13 @@ interface Preview {
   onScreen(): Promise<{ label: string; items: string; marked: boolean } | undefined>;
   /** Tag the template frame on screen, to tell later whether it is still the same frame. */
   mark(): Promise<void>;
+  /** The player frame. */
+  player(): Frame;
+  /**
+   * Run `send`, which posts `{ probe: 1 }` to the player frame after the messages under test, and
+   * wait until the player frame has it: those messages have reached its listeners by then.
+   */
+  probe(send: () => Promise<unknown>): Promise<void>;
 }
 
 /** Requests to the CMS blob route, by hash. */
@@ -106,6 +113,18 @@ async function openPreview(origin: string, content?: Content, extra: Record<stri
   return {
     page,
     server,
+    player,
+    async probe(send) {
+      await player().evaluate(() => {
+        const w = window as unknown as { probes: number };
+        w.probes = 0;
+        addEventListener('message', (e: MessageEvent<unknown>) => {
+          if ((e.data as { probe?: unknown } | null)?.probe === 1) w.probes++;
+        });
+      });
+      await send();
+      await expect.poll(() => player().evaluate(() => (window as unknown as { probes: number }).probes)).toBe(1);
+    },
     messages: () => page.evaluate(() => (window as unknown as { previewMessages: Message[] }).previewMessages),
     state,
     until,
@@ -237,8 +256,12 @@ describe('preview content source', () => {
 
   it('ignores a page on any other origin that frames it', async () => {
     const p = await openPreview(EVIL);
+    // It saw who frames it, and does not listen.
+    await expect.poll(() => p.player().locator('#status').textContent()).toContain('Open this from the editor.');
     await p.post(draft({ label: 'Hijack' }));
-    await new Promise((r) => setTimeout(r, 1500));
+    await p.probe(() =>
+      p.page.evaluate(() => (document.querySelector('iframe[name=player]') as HTMLIFrameElement).contentWindow!.postMessage({ probe: 1 }, '*')),
+    );
     expect((await p.state()).played).toBe(0);
     // Replies go to the CMS origin only, so this page hears nothing.
     expect(await p.messages()).toEqual([]);
@@ -247,26 +270,24 @@ describe('preview content source', () => {
 
   it('ignores another origin posting to it while the CMS frames it', async () => {
     const hijack = draft({ label: 'Hijack' });
-    const attack = `<!doctype html><script>parent.frames.player.postMessage(${JSON.stringify({ sfPreview: 1, type: 'draft', manifest: hijack.manifest })}, '*'); document.title = 'sent';</script>`;
+    // The probe follows the draft from the same window, so it arrives after it.
+    const attack = `<!doctype html><script>parent.frames.player.postMessage(${JSON.stringify({ sfPreview: 1, type: 'draft', manifest: hijack.manifest })}, '*'); parent.frames.player.postMessage({ probe: 1 }, '*');</script>`;
     const p = await openPreview(CMS, hijack, { '/attack': attack });
     await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'listening' });
-    await p.page.evaluate(
-      (src) =>
-        new Promise<void>((resolve) => {
-          const f = document.createElement('iframe');
-          f.addEventListener('load', () => resolve(), { once: true });
-          f.src = src;
-          document.body.appendChild(f);
-        }),
-      `${EVIL}/attack`,
+    await p.probe(() =>
+      p.page.evaluate((src) => {
+        const f = document.createElement('iframe');
+        f.src = src;
+        document.body.appendChild(f);
+      }, `${EVIL}/attack`),
     );
-    await new Promise((r) => setTimeout(r, 1500));
-    expect((await p.state()).played).toBe(0);
-    expect(blobRequests).toEqual([]);
 
-    // Still listening to the CMS.
-    await p.post(draft({ label: 'Real draft' }));
-    await p.until((s) => s.played >= 1);
+    // Still listening to the CMS. The hijack lists files but sent none: had it been taken, the player would have fetched them.
+    const real = draft({ label: 'Real draft' });
+    await p.post(real);
+    const s = await p.until((s) => s.played >= 1);
     await expect.poll(p.onScreen).toMatchObject({ label: 'Real draft' });
+    expect(s.log.map((l) => l.manifest)).toEqual([real.manifest.id]);
+    expect(blobRequests).toEqual([]);
   });
 });

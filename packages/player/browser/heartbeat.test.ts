@@ -142,7 +142,7 @@ describe('the heartbeat', () => {
     const last = p.server.syncs.at(-1)!;
     expect(last.player.version).not.toBe('dev');
     expect(last.player.version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(last.manifest).toEqual({ active: content.manifest.id, filesMissing: 0 });
+    expect(last.manifest).toEqual({ active: content.manifest.id, filesMissing: 0, lastGood: content.manifest.id });
     expect(last.display.on).toBe(true);
     expect(last.clock.trusted).toBe(true);
     expect(last.snapshots).toEqual({ news: 5 });
@@ -153,6 +153,42 @@ describe('the heartbeat', () => {
     const before = p.server.syncs.length;
     await expect.poll(() => p.server.syncs.length, { timeout: 10_000 }).toBeGreaterThan(before);
     expect(p.server.syncs.at(-1)!.epoch).toBe(last.epoch);
+  });
+
+  it('reports only the sources of the manifests it holds, once a source is gone from them', async () => {
+    const news = h.content([{ id: 'news', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }]);
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(news);
+      s.setData('news', { id: 'news', version: 5, fetchedAt: new Date(5).toISOString(), checkedAt: new Date().toISOString(), data: { headline: 42 } });
+    }, api);
+    await expect.poll(() => p.server.syncs.at(-1)?.dataRejected?.news ?? 0, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+    expect(p.server.syncs.at(-1)!.snapshots).toEqual({ news: 5 });
+
+    const plain = h.content([{ id: 'a', durationMs: 500 }], { variant: 'plain' });
+    p.server.publish(plain);
+    await p.until((s) => s.lastGood === plain.manifest.id);
+    await expect.poll(() => p.server.syncs.at(-1)?.manifest.lastGood, { timeout: 10_000 }).toBe(plain.manifest.id);
+    const last = p.server.syncs.at(-1)!;
+    expect(last.snapshots).toEqual({});
+    expect(last.dataRejected).toEqual({});
+    // __sf still counts every refusal since the start.
+    expect((await p.state()).dataRejected.news).toBeGreaterThanOrEqual(1);
+  });
+
+  it('reports the last good manifest, so the server serves its files, while falling back to it', async () => {
+    const good = h.content([{ id: 'a', durationMs: 500 }], { variant: 'good' });
+    const broken = h.content([{ id: 'x', mode: 'throw', durationMs: 500 }], { variant: 'broken' });
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 1;
+      s.publish(good);
+    }, api);
+    await p.until((s) => s.lastGood === good.manifest.id);
+    p.server.publish(broken);
+    await p.until((s) => s.fallback === broken.manifest.id);
+    await expect
+      .poll(() => p.server.syncs.at(-1)?.manifest, { timeout: 10_000 })
+      .toEqual({ active: good.manifest.id, filesMissing: 0, fallbackFrom: broken.manifest.id, lastGood: good.manifest.id });
   });
 });
 

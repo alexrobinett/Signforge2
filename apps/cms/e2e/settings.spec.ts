@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
 import { API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -43,6 +43,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByLabel('Time zone').selectOption('Europe/London');
   await page.getByLabel('Locale').selectOption('en-GB');
   await page.getByText('Set hours').click();
+  await axe(page);
   await shots(page, '40-settings-general');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText('Saved')).toBeVisible();
@@ -56,6 +57,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await page.getByLabel('Alert after').fill('30');
   await page.getByLabel('From').fill('03:00');
+  await axe(page);
   await shots(page, '41-settings-screens');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText('Saved')).toBeVisible();
@@ -83,6 +85,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByText('After 30 minutes; one email each way')).toBeVisible();
   await page.getByLabel('Who hears: A screen goes offline, and when it is back').selectOption('everyone');
   await page.getByLabel('Email for: An agent is refused').uncheck();
+  await axe(page);
   await shots(page, '42-settings-notifications');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText('Saved')).toBeVisible();
@@ -103,14 +106,16 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByText('Invite sent')).toBeVisible();
   const waiting = page.getByRole('region', { name: 'Waiting for a reply' });
   await expect(waiting).toContainText(editorEmail);
+  await axe(page);
   await shots(page, '43-settings-members');
 
   // The invitee follows the link, signs in, and joins as an editor.
-  const invitee = await browser.newPage();
+  const invitee = await (await browser.newContext()).newPage();
   await signInAs(invitee, editorEmail, INVITEE_ADDRESS);
   await invitee.goto(await invitePathFor(editorEmail));
   await expect(invitee.getByRole('heading', { name: 'Join Northside Market Co' })).toBeVisible();
   await hydrated(invitee);
+  await axe(invitee);
   await shots(invitee, '44-accept-invitation');
   await invitee.getByRole('button', { name: 'Accept' }).click();
   await expect(invitee).toHaveURL(/\/$/);
@@ -128,6 +133,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(invitee.getByRole('button', { name: 'Remove' })).toHaveCount(0);
   await expect(invitee.getByLabel('Editors can publish')).toBeDisabled();
   await toTop(invitee.getByRole('region', { name: 'Who publishes' }));
+  await axe(invitee);
   await shots(invitee, '49-settings-who-publishes-editor');
 
   // Who publishes (Q7): the owner stops editors publishing, and the editor's publish control goes.
@@ -154,6 +160,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
       .getByLabel('No'),
   ).toBeVisible();
   await toTop(page.getByRole('region', { name: 'Who publishes' }));
+  await axe(page);
   await shots(page, '48-settings-who-publishes');
   await publishOption(0);
   const refused = await invitee.request.post('/api/tools/publish_manifest_to_screen', { data: { screenId: 'scr_none', manifestId: 'f'.repeat(64) } });
@@ -188,14 +195,18 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByText('Dark', { exact: true }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
   await page.getByText('Light', { exact: true }).click();
+  await axe(page);
   await shots(page, '45-account');
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/settings/members');
   await hydrated(page);
+  await axe(page);
   await shots(page, '46-settings-members-phone');
   await toTop(page.getByRole('region', { name: 'Who publishes' }));
+  await axe(page);
   await shots(page, '50-settings-who-publishes-phone');
   await page.goto('/settings/notifications');
+  await axe(page);
   await shots(page, '47-settings-notifications-phone');
 });

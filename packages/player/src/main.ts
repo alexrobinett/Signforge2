@@ -29,6 +29,7 @@
  * shows a code again (owner decision Q2, the default).
  */
 import {
+  MAX_SYNC_SOURCES,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
   parseSyncResponse,
@@ -374,6 +375,8 @@ function fallBack(): void {
   console.warn(`[sf] manifest ${from} played nothing in a full pass; falling back to ${lastGood.id}`);
   adopt(lastGood);
   state.fallback = from;
+  // Its files may have been evicted while another manifest played: the next sync checks them.
+  lastFileCheck = Number.NEGATIVE_INFINITY;
 }
 
 /**
@@ -679,6 +682,8 @@ async function fetchManifest(): Promise<void> {
     headers: await deviceHeaders(),
     ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
     pinned: pins,
+    // Falling back, the last good manifest plays: its files are put back too, since the synced one is not playing.
+    ...(state.fallback && manifest ? { fallback: manifest } : {}),
   });
   if (result.changed && result.manifest) {
     console.info(`[sf] manifest ${result.manifest.id} active (${result.downloaded} files downloaded)`);
@@ -718,6 +723,15 @@ function settleTickets(result: { ticket: string } | { error: unknown }): void {
 /** When the manifest was last fetched in full, to put back evicted files (`performance.now()`). */
 let lastFileCheck = Number.NEGATIVE_INFINITY;
 
+/**
+ * What a sync reports of a per-source map: only the sources of the manifests held (playing and last
+ * good, the playing one's first), and at most MAX_SYNC_SOURCES, so source turnover cannot grow it.
+ */
+function ofHeldSources(values: Record<string, number>): Record<string, number> {
+  const ids = new Set([...Object.keys(manifest?.dataSources ?? {}), ...Object.keys(lastGood?.dataSources ?? {})]);
+  return Object.fromEntries([...ids].flatMap((id) => (values[id] === undefined ? [] : [[id, values[id]] as const])).slice(0, MAX_SYNC_SOURCES));
+}
+
 /** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. Returns when to sync next, in seconds. */
 async function apiSync(): Promise<number> {
   const batch = playBatch(now());
@@ -725,13 +739,18 @@ async function apiSync(): Promise<number> {
     seq: batch.seq,
     epoch: batch.epoch,
     player: { version: __SF_PLAYER_VERSION__, manifestSchemas: SUPPORTED_MANIFEST_SCHEMAS, protocols: SUPPORTED_PROTOCOLS },
-    manifest: { ...(manifest ? { active: manifest.id } : {}), filesMissing: filesMissing(), ...(state.fallback ? { fallbackFrom: state.fallback } : {}) },
+    manifest: {
+      ...(manifest ? { active: manifest.id } : {}),
+      filesMissing: filesMissing(),
+      ...(state.fallback ? { fallbackFrom: state.fallback } : {}),
+      ...(state.lastGood ? { lastGood: state.lastGood } : {}),
+    },
     display: { on: state.displayOn, ...(displayMethods ? { methods: displayMethods } : {}), ...withOverride() },
     deviceTime: new Date().toISOString(),
     clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
     playCounts: batch.counts,
-    snapshots: heldVersions(),
-    dataRejected: dataRejections(),
+    snapshots: ofHeldSources(heldVersions()),
+    dataRejected: ofHeldSources(dataRejections()),
   };
   const sentAt = Date.now();
   const res = await fetch(`${BASE}/sync`, {

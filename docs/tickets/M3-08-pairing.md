@@ -36,7 +36,7 @@ An unpaired screen shows a code; claiming it gives the screen its credential.
 
 - Owner decision Q2 built with its default: a revoked screen wipes its cache and shows a code. A 401 counts as revoked only when the request carried a credential; with no supervisor to ask and content cached, the screen keeps playing rather than cover it with a code.
 - The claim (`claim_screen`) takes name, time zone, orientation, locale and display hours. Groups are not part of it: add the screen to groups afterwards with the group tools (M3-11's form can do both).
-- Two claims racing for one code: the loser's batch fails and writes nothing, but surfaces as a 500, not a refusal. Rare (two people typing the same code within milliseconds).
+- Two claims racing for one code: the loser's batch fails and writes nothing, and the loser gets `not_found`, as for a code that was never open (`refuseFailedCommit`, since 4f018c3; test: `claim_screen racing` in `packages/tools/test/dispatch.test.ts`).
 - Rate limits use Workers rate limiting bindings (`PAIR_START_LIMIT`, `PAIR_POLL_LIMIT`, `PAIR_CLAIM_LIMIT` in every wrangler env; namespace ids 801x/811x/821x). They count per Cloudflare location. M3-24 should confirm the ids are free on the account before deploying.
 
 ## Owner decision

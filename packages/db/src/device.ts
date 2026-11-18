@@ -6,7 +6,7 @@
  * alone, and nothing else. Everything after authentication goes through `scoped(db, orgId)`
  * with the org this returns.
  */
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { isId } from '@signforge/contract';
 import * as s from './schema';
@@ -16,6 +16,8 @@ export interface DeviceScreen {
   screenId: string;
   desiredManifestId: string | null;
   previousManifestId: string | null;
+  /** The last manifest that played a spot, as the screen's last sync reported it (`manifest.lastGood`). */
+  lastGoodManifestId: string | null;
   /** The contract's `DisplayOverride` set from the CMS, as stored; it may have ended. */
   displayOverrideJson: string | null;
   /** Each credential that is not revoked, with the hex SHA-256 of its secret. Empty if the screen is revoked. */
@@ -37,6 +39,7 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       status: sc.status,
       desiredManifestId: sc.desiredManifestId,
       previousManifestId: sc.previousManifestId,
+      lastGoodManifestId: sql<string | null>`json_extract(${sc.heartbeatJson}, '$.manifest.lastGood')`,
       displayOverrideJson: sc.displayOverrideJson,
       credentialId: cr.id,
       secretHash: cr.secretHash,
@@ -53,6 +56,7 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
     screenId,
     desiredManifestId: first.desiredManifestId,
     previousManifestId: first.previousManifestId,
+    lastGoodManifestId: first.lastGoodManifestId,
     displayOverrideJson: first.displayOverrideJson,
     credentials:
       first.status === 'active'
