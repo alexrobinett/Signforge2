@@ -100,6 +100,7 @@ describe("a call made for org B with org A's ids", () => {
     expect(await b.screens.update(a.screen, { name: 'hijacked' })).toBeUndefined();
     expect(await b.screens.credentials.update(a.credential, { revokedAt: 1 })).toBeUndefined();
     expect(await b.screens.setDesiredManifest(a.screen, 'f'.repeat(64))).toBe(false);
+    await b.screens.reportManifest(a.screen, 'f'.repeat(64));
     expect(
       await b.screens.sync(a.screen, {
         at: 1,
@@ -131,7 +132,13 @@ describe("a call made for org B with org A's ids", () => {
       expect(await del()).toBe(false);
 
     const ra = s.a.scope;
-    expect(await ra.screens.get(a.screen)).toMatchObject({ name: 'org-a lobby', desiredManifestId: null, lastSeenAt: null, syncEpoch: null });
+    expect(await ra.screens.get(a.screen)).toMatchObject({
+      name: 'org-a lobby',
+      desiredManifestId: null,
+      reportedManifestId: null,
+      lastSeenAt: null,
+      syncEpoch: null,
+    });
     expect((await ra.playCounts.list({ from: a.hour, to: a.hour + 3_600_000 })).map((c) => c.plays)).toEqual([3]);
     expect((await ra.screens.credentials.get(a.credential))?.revokedAt).toBeNull();
     expect(await ra.spots.get(a.imageSpot)).toMatchObject({ name: 'Logo' });
