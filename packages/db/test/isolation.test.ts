@@ -100,6 +100,7 @@ describe("a call made for org B with org A's ids", () => {
     expect(await b.screens.update(a.screen, { name: 'hijacked' })).toBeUndefined();
     expect(await b.screens.credentials.update(a.credential, { revokedAt: 1 })).toBeUndefined();
     expect(await b.screens.setDesiredManifest(a.screen, 'f'.repeat(64))).toBe(false);
+    await b.screens.reportManifest(a.screen, 'f'.repeat(64));
     expect(
       await b.screens.sync(a.screen, {
         at: 1,
@@ -131,7 +132,13 @@ describe("a call made for org B with org A's ids", () => {
       expect(await del()).toBe(false);
 
     const ra = s.a.scope;
-    expect(await ra.screens.get(a.screen)).toMatchObject({ name: 'org-a lobby', desiredManifestId: null, lastSeenAt: null, syncEpoch: null });
+    expect(await ra.screens.get(a.screen)).toMatchObject({
+      name: 'org-a lobby',
+      desiredManifestId: null,
+      reportedManifestId: null,
+      lastSeenAt: null,
+      syncEpoch: null,
+    });
     expect((await ra.playCounts.list({ from: a.hour, to: a.hour + 3_600_000 })).map((c) => c.plays)).toEqual([3]);
     expect((await ra.screens.credentials.get(a.credential))?.revokedAt).toBeNull();
     expect(await ra.spots.get(a.imageSpot)).toMatchObject({ name: 'Logo' });
@@ -151,7 +158,8 @@ describe("a call made for org B with org A's ids", () => {
       ['setItems: A spot', () => b.playlists.setItems(s.b.playlist, [a.imageSpot])],
       ['addScreens: A publish', () => b.publishes.addScreens(a.publish, [{ screenId: s.b.screen, manifestId: 'x' }])],
       ['addScreens: A screen', () => b.publishes.addScreens(s.b.publish, [{ screenId: a.screen, manifestId: 'x' }])],
-      ['putSnapshot', () => b.dataSources.putSnapshot(a.dataSource, { version: 'x', fetchedAt: 0, dataJson: '{}' })],
+      ['putSnapshot', () => b.dataSources.putSnapshot(a.dataSource, { version: 'x', fetchedAt: 0, checkedAt: 0, dataJson: '{}' })],
+      ['savePoll', () => b.dataSources.savePoll(a.dataSource, { source: { nextPollAt: 0, failures: 1 }, checkedAt: 0 })],
       ['playCounts.add', () => b.playCounts.add(a.screen, [{ hour: a.hour, spotId: a.templateSpot, plays: 1, ms: 1 }])],
       ['spot on A template version', () => b.spots.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })],
       ['spot moved to A template version', () => b.spots.update(s.b.templateSpot, { templateVersionId: a.templateVersion })],
@@ -235,7 +243,7 @@ describe('ids', () => {
       await o.playlists.setItems(same, [same]);
       await o.scheduleEntries.insert({ id: same, playlistId: same, target: 'org', priority: 0 });
       await o.dataSources.insert({ id: same, name: `${o.orgId} feed`, format: 'json', urlEncrypted: 'enc:x', refreshS: 60 });
-      await o.dataSources.putSnapshot(same, { version: o.orgId, fetchedAt: 1, dataJson: '{}' });
+      await o.dataSources.putSnapshot(same, { version: o.orgId, fetchedAt: 1, checkedAt: 1, dataJson: '{}' });
     }
     for (const o of [a, b]) {
       expect(await o.spots.get(same)).toMatchObject({ name: `${o.orgId} spot` });

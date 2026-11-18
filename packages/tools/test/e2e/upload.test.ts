@@ -276,3 +276,69 @@ describe('delete_asset', () => {
     expect(outcome.after).toBe('verified');
   }, 30_000);
 });
+
+describe('an upload tried again', () => {
+  it('makes one asset when the answer to its creation was lost', async () => {
+    const outcome = await page.evaluate(async () => {
+      const c = new OffscreenCanvas(640, 360);
+      const ctx = c.getContext('2d')!;
+      ctx.fillStyle = '#a40';
+      ctx.fillRect(0, 0, 640, 360);
+      const file = new File([await c.convertToBlob({ type: 'image/png' })], 'retried.png', { type: 'image/png' });
+      const call = (globalThis as any).callTool;
+      // The first creation commits, and its answer never arrives.
+      let lost = false;
+      const flaky = async (name: string, input: unknown) => {
+        const out = await call(name, input);
+        if (name === 'create_asset_upload' && !lost) {
+          lost = true;
+          throw new Error('the connection dropped');
+        }
+        return out;
+      };
+      const media = (globalThis as any).SFMedia;
+      const options = { callTool: flaky, idempotencyKey: 'retried-upload-1' };
+      const first = await media.uploadImage(file, options).then(
+        () => 'uploaded',
+        (err: Error) => err.message,
+      );
+      const { asset } = await media.uploadImage(file, options);
+      const listed = (await call('list_assets', { query: 'retried' })).assets.map((a: any) => a.id);
+      return { first, asset, listed };
+    });
+    expect(outcome.first).toBe('the connection dropped');
+    expect(outcome.asset.status).toBe('verified');
+    expect(outcome.listed).toEqual([outcome.asset.id]);
+  }, 30_000);
+});
+
+describe('an upload whose URLs expired', () => {
+  it('gets new ones for the same pending asset, and finishes it', async () => {
+    const outcome = await page.evaluate(async () => {
+      const c = new OffscreenCanvas(640, 360);
+      const ctx = c.getContext('2d')!;
+      ctx.fillStyle = '#05a';
+      ctx.fillRect(0, 0, 640, 360);
+      const file = new File([await c.convertToBlob({ type: 'image/png' })], 'late.png', { type: 'image/png' });
+      const call = (globalThis as any).callTool;
+      const calls: [string, unknown][] = [];
+      // As a retry with the same key replays them after the tab slept: URLs past their expiry.
+      const late = async (name: string, input: any) => {
+        calls.push([name, input.assetId]);
+        const out = await call(name, input);
+        if (name === 'create_asset_upload') for (const u of out.uploads) u.expiresAt = Date.now() - 1000;
+        return out;
+      };
+      const { asset } = await (globalThis as any).SFMedia.uploadImage(file, { callTool: late });
+      const listed = (await call('list_assets', { query: 'late' })).assets.map((a: any) => a.id);
+      return { asset, calls, listed };
+    });
+    expect(outcome.asset.status).toBe('verified');
+    expect(outcome.calls).toEqual([
+      ['create_asset_upload', undefined],
+      ['renew_asset_upload', outcome.asset.id],
+      ['finalize_asset', outcome.asset.id],
+    ]);
+    expect(outcome.listed).toEqual([outcome.asset.id]);
+  }, 30_000);
+});

@@ -279,7 +279,7 @@ export class Slot {
       (e: MessageEvent<TemplateMessage>) => {
         if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
         if (e.data.type === 'loaded') {
-          const { data, rejected } = resolveSpotData(live.spot, t.manifest.fields, liveData);
+          const { data, rejected } = resolveSpotData(live.spot, t.manifest.fields, liveData, now());
           reportRejected(rejected);
           this.post({
             sf: protocol,

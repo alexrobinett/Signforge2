@@ -108,6 +108,39 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByText('Display hours changed').first()).toBeVisible();
   await shots(page, '13-screen-detail');
 
+  // A date with morning and evening hours keeps both through a save, and through an edit of one.
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await hours.getByRole('button', { name: 'Add a date' }).click();
+  await hours.getByLabel('Date', { exact: true }).fill('2026-12-24');
+  await hours.getByLabel('Off all day').uncheck();
+  const eve = hours.getByRole('group', { name: 'Hours on 2026-12-24' });
+  await eve.getByLabel('On at').fill('08:00');
+  await eve.getByLabel('Off at').fill('12:00');
+  await eve.getByRole('button', { name: 'Add hours on this date' }).click();
+  await eve.getByLabel('On at').nth(1).fill('17:00');
+  await eve.getByLabel('Off at').nth(1).fill('21:00');
+  await hours.getByRole('button', { name: 'Save' }).click();
+  await expect(hours).toBeHidden();
+  const reopen = async () => {
+    await page.reload();
+    await hydrated(page);
+    await page.getByRole('button', { name: 'Edit' }).click();
+    const values = async (label: string) => Promise.all((await eve.getByLabel(label).all()).map((f) => f.inputValue()));
+    return [await values('On at'), await values('Off at')];
+  };
+  expect(await reopen()).toEqual([
+    ['08:00', '17:00'],
+    ['12:00', '21:00'],
+  ]);
+  await eve.getByLabel('Off at').first().fill('12:30');
+  await hours.getByRole('button', { name: 'Save' }).click();
+  await expect(hours).toBeHidden();
+  expect(await reopen()).toEqual([
+    ['08:00', '17:00'],
+    ['12:30', '21:00'],
+  ]);
+  await hours.getByRole('button', { name: 'Cancel' }).click();
+
   // The wall, and the table.
   await page.getByRole('link', { name: 'Screens', exact: true }).first().click();
   await expect(page.getByRole('link', { name: 'Lobby' })).toBeVisible();

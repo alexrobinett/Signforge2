@@ -330,8 +330,10 @@ async function readBrand(
 
 /**
  * Fetch every data source a project lists, convert it the way the server will, and write the
- * snapshots the player reads (`<out>/<id>.json`). For testing templates against live data until
- * the server's poller (M3-23) exists. Failures are reported per source; the others still write.
+ * snapshots the player reads (`<out>/<id>.json`), for static content and for testing templates
+ * against live data without the API's poller (apps/api/src/data). A screen falls back to static
+ * values a day after `checkedAt`, so static content needs this rerun. Failures are reported per
+ * source; the others still write.
  */
 async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
   const sources = readJson<Record<string, { url: string; format?: 'json' | 'ical' | 'rss'; horizonDays?: number }>>(join(projectDir, 'data-sources.json'));
@@ -349,7 +351,7 @@ async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
           : src.format === 'rss'
             ? normaliseFeed('rss', body)
             : JSON.parse(body);
-      const snapshot: DataSnapshot = { id, version: now.getTime(), fetchedAt: now.toISOString(), data };
+      const snapshot: DataSnapshot = { id, version: now.getTime(), fetchedAt: now.toISOString(), checkedAt: now.toISOString(), data };
       writeFileSync(join(outDir, `${id}.json`), JSON.stringify(snapshot));
       const count =
         src.format === 'ical' ? `${(data as CalendarFeed).events.length} events` : src.format === 'rss' ? `${(data as NewsFeed).items.length} items` : 'json';

@@ -59,6 +59,7 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   brandKit: (o) => o.brandKit,
   logoOnDarkAsset: (o) => o.asset,
   logoOnLightAsset: (o) => o.asset,
+  dataSource: (o) => o.dataSource,
   // An R2 multipart upload's id, not a row.
   upload: () => 'upload-id',
   // Catalogue ids, the same for every org.
@@ -93,6 +94,7 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     await o.scope.spots.delete(o.imageSpot);
     await o.scope.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
   },
+  renew_asset_upload: (o) => o.scope.assets.update(o.asset, { status: 'pending' }),
   // Pending, both renditions, and an upload whose bytes do not hash to the claim: finalize rejects it.
   finalize_asset: async (o) => {
     await o.scope.assets.update(o.asset, { status: 'pending' });
@@ -131,6 +133,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
     blobs: env.BLOBS,
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
     rateLimit: async () => true,
+    feedUrls: { seal: async (_source, url) => `sealed:${url}` },
   };
   const reg = new Map([[tool.name, tool]]);
   const result = await dispatch(reg, tool.name, input ?? withOwnIds(tool.example, o), caller);

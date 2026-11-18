@@ -161,9 +161,10 @@ describe('finalize_video_upload', () => {
     expect(await call('finalize_video_upload', { assetId: created.asset.id })).toMatchObject({ asset: { status: 'verified', width: 320 } });
   });
 
-  it('keeps images and videos to their own finalize tool', async () => {
+  it('keeps images and videos to their own finalize and renew tools', async () => {
     const { created } = await upload('Wrong tool', clip('main-moov-at-end.mp4'));
     expect(await run('finalize_asset', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await run('renew_asset_upload', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'conflict' });
   });
 
   it('deletes a pending video with its upload', async () => {

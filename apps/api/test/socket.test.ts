@@ -8,7 +8,8 @@ import { dispatch, registry, type Caller } from '@signforge/tools';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mintCredential } from '../src/device/credential';
-import { screenNotifier } from '../src/device/screens';
+import { HOLDER_HEADER, type SocketHolder } from '../src/device/screen-object';
+import { screenNotifier, screenObject } from '../src/device/screens';
 import { issueTicket, verifyTicket } from '../src/device/ticket';
 import { manifestKey } from '../src/r2';
 
@@ -79,6 +80,14 @@ async function until(check: () => boolean, ms = 3000) {
     if (Date.now() > end) throw new Error('timed out');
     await new Promise((r) => setTimeout(r, 20));
   }
+}
+
+/** Wait until the screen's row reports `manifest`. */
+async function reportedIs(s: Screen, manifest: string) {
+  const reported = async () => (await s.seed.scope.screens.get(s.seed.screen))?.reportedManifestId;
+  const end = Date.now() + 3000;
+  while ((await reported()) !== manifest && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+  expect(await reported()).toBe(manifest);
 }
 
 const caller = (s: Screen, role: Caller['role'] = 'owner'): Caller => ({
@@ -174,13 +183,40 @@ describe('GET /v1/device/ws', () => {
   it('writes what the screen applied through to D1', async () => {
     const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
     s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
-    const reported = async () => (await scoped(env.DB, a.seed.orgId).screens.get(a.seed.screen))?.reportedManifestId;
-    const end = Date.now() + 3000;
-    while ((await reported()) !== M2 && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
-    expect(await reported()).toBe(M2);
+    await reportedIs(a, M2);
     // Nothing of org B's changed.
     expect((await scoped(env.DB, b.seed.orgId).screens.get(b.seed.screen))?.reportedManifestId).toBeNull();
     s.ws.close(1000);
+  });
+
+  it("leaves the screen's version alone, so an editor opened before the rollout still saves", async () => {
+    const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
+    const before = (await a.seed.scope.screens.get(a.seed.screen))!;
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await reportedIs(a, M1);
+    await sync(a.credential, { ...syncBody(), manifest: { active: M1, filesMissing: 0 } });
+    expect(await a.seed.scope.screens.get(a.seed.screen)).toMatchObject({ rowVersion: before.rowVersion, updatedAt: before.updatedAt });
+    const r = await dispatch(registry, 'rename_screen', { screenId: a.seed.screen, name: 'Lobby', ifVersion: before.rowVersion }, caller(a, 'editor'));
+    expect(r.ok).toBe(true);
+    s.ws.close(1000);
+  });
+
+  it('shows the manifest the screen reported last, over either transport', async () => {
+    const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
+    await dispatch(registry, 'publish_manifest_to_screen', { screenId: a.seed.screen, manifestId: M2 }, caller(a));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await reportedIs(a, M1);
+    // The socket drops; the screen adopts M2 over HTTP and says so in its heartbeat.
+    s.ws.close(1000);
+    await sync(a.credential, { ...syncBody(), manifest: { active: M2, filesMissing: 0 } });
+    await reportedIs(a, M2);
+    const r = await dispatch(registry, 'get_screen', { screenId: a.seed.screen }, caller(a));
+    expect(r.ok && (r.output as { screen: { state: { kind: string } } }).screen.state.kind).toBe('online');
+    // It falls back to M1 and the reopened socket says so: this object last wrote M1 too, and still writes it.
+    const again = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
+    again.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await reportedIs(a, M1);
+    again.ws.close(1000);
   });
 
   it("does not reach another screen's socket", async () => {
@@ -202,5 +238,64 @@ describe('GET /v1/device/ws', () => {
     await until(() => s.closed() !== undefined);
     expect(s.messages).toContainEqual({ type: 'revoked' });
     expect((await upgrade(ticket)).status).toBe(401);
+  });
+});
+
+describe('revoking a credential whose socket is open', () => {
+  const ticketFor = async (credential: string) => ((await (await sync(credential)).json()) as SyncResponse).socketTicket;
+  const revoke = (s: Screen, as: Caller = caller(s)) =>
+    dispatch(registry, 'revoke_screen_credential', { screenId: s.seed.screen, credentialId: s.credentialId }, as);
+  /** The real notifier, except that the revocation's own notice never reaches the object. */
+  const unreachable = (s: Screen): Caller => ({
+    ...caller(s),
+    screens: { ...screenNotifier(env), revoked: () => Promise.reject(new Error('object unreachable')) },
+  });
+  const settle = () => new Promise((r) => setTimeout(r, 100));
+
+  it('closes the socket instead of sending it the next command when the first close never arrived', async () => {
+    const c = await setUp('ws-c');
+    const s = await connect(await ticketFor(c.credential));
+    expect((await revoke(c, unreachable(c))).ok).toBe(true);
+    await settle();
+    expect(s.closed()).toBeUndefined();
+
+    expect((await dispatch(registry, 'identify_screen', { screenId: c.seed.screen }, caller(c, 'editor'))).ok).toBe(true);
+    await until(() => s.closed() !== undefined);
+    expect(s.messages).toEqual([{ type: 'revoked' }]);
+  });
+
+  it('closes it when the revoke is retried', async () => {
+    const c = await setUp('ws-d');
+    const s = await connect(await ticketFor(c.credential));
+    await revoke(c, unreachable(c));
+    await settle();
+    expect(s.closed()).toBeUndefined();
+
+    expect((await revoke(c)).ok).toBe(true);
+    await until(() => s.closed() !== undefined);
+    expect(s.messages).toContainEqual({ type: 'revoked' });
+  });
+
+  it('does not write what such a socket says it applied', async () => {
+    const c = await setUp('ws-e');
+    const s = await connect(await ticketFor(c.credential));
+    await revoke(c, unreachable(c));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await until(() => s.closed() !== undefined);
+    expect((await scoped(env.DB, c.seed.orgId).screens.get(c.seed.screen))?.reportedManifestId).toBeNull();
+  });
+
+  it('refuses an upgrade that reaches the object after the revocation did', async () => {
+    const c = await setUp('ws-f');
+    // The route found the credential live, then the revocation committed and told the object
+    // before the route handed the upgrade over.
+    const holder: SocketHolder = { orgId: c.seed.orgId, screenId: c.seed.screen, credentialId: c.credentialId };
+    await ticketFor(c.credential);
+    expect((await revoke(c)).ok).toBe(true);
+    const res = await screenObject(env, c.seed.screen).fetch(
+      new Request(`${BASE}/ws`, { headers: { upgrade: 'websocket', [HOLDER_HEADER]: JSON.stringify(holder) } }),
+    );
+    expect(res.status).toBe(401);
+    expect(res.webSocket).toBeNull();
   });
 });

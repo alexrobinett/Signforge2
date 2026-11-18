@@ -20,6 +20,7 @@ import { id, idempotencyKey, name } from './fields';
 import { nextOutput, page, pageInput } from './paging';
 import { orgBlobKey, uploadKey } from './r2';
 import { defineTool, notFound, ToolError } from './tool';
+import type { UploadSigner } from './upload';
 
 /** The most one rendition may weigh. A 3413x1920 PNG, the largest a cover-scaled 4K image gets, is well under it. */
 export const MAX_RENDITION_BYTES = 20 * 1024 * 1024;
@@ -148,6 +149,13 @@ const getAsset = defineTool({
   },
 });
 
+const uploadOutput = z.object({
+  asset: assetOutput,
+  uploads: z
+    .array(z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() }))
+    .describe('One per file the server does not already hold'),
+});
+
 const createAssetUpload = defineTool({
   name: 'create_asset_upload',
   description:
@@ -181,12 +189,7 @@ const createAssetUpload = defineTool({
       if (l.sha256 === p.sha256 && (l.type !== p.type || l.size !== p.size))
         ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'the same file cannot have two types or sizes' });
     }),
-  output: z.object({
-    asset: assetOutput,
-    uploads: z
-      .array(z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() }))
-      .describe('One per file the server does not already hold'),
-  }),
+  output: uploadOutput,
   example: {
     name: 'Summer menu photo',
     renditions: {
@@ -225,19 +228,56 @@ const createAssetUpload = defineTool({
         }),
       );
     });
-    const files = new Map([landscape, portrait].map((r) => [r.sha256, r]));
-    const targets = [];
-    for (const r of files.values()) {
-      // Already stored and checked (an earlier upload, or `sf push`): finalize reads it from there.
-      if (await blobs.head(orgBlobKey(org.orgId, r.sha256))) continue;
-      const signed = await uploads.presignPut(uploadKey(org.orgId, asset.id, r.sha256), {
-        contentType: r.type,
-        contentLength: r.size,
-        expiresInSeconds: UPLOAD_URL_SECONDS,
-      });
-      targets.push({ sha256: r.sha256, method: 'PUT' as const, url: signed.url, headers: { 'content-type': r.type }, expiresAt: signed.expiresAt });
-    }
-    return { asset: assetView(asset, renditions), uploads: targets };
+    return { asset: assetView(asset, renditions), uploads: await uploadTargets(org.orgId, asset.id, [landscape, portrait], blobs, uploads, false) };
+  },
+});
+
+/**
+ * A presigned PUT for each distinct file the server does not hold: not stored and checked (an
+ * earlier upload, or `sf push`; finalize reads it from there), nor, with `skipUploaded`, already
+ * PUT for this asset.
+ */
+async function uploadTargets(
+  orgId: string,
+  assetId: string,
+  renditions: readonly { sha256: string; type: string; size: number }[],
+  blobs: R2Bucket,
+  uploads: UploadSigner,
+  skipUploaded: boolean,
+) {
+  const files = new Map(renditions.map((r) => [r.sha256, r]));
+  const targets = [];
+  for (const r of files.values()) {
+    if (await blobs.head(orgBlobKey(orgId, r.sha256))) continue;
+    if (skipUploaded && (await blobs.head(uploadKey(orgId, assetId, r.sha256)))) continue;
+    const signed = await uploads.presignPut(uploadKey(orgId, assetId, r.sha256), {
+      contentType: r.type,
+      contentLength: r.size,
+      expiresInSeconds: UPLOAD_URL_SECONDS,
+    });
+    targets.push({ sha256: r.sha256, method: 'PUT' as const, url: signed.url, headers: { 'content-type': r.type }, expiresAt: signed.expiresAt });
+  }
+  return targets;
+}
+
+const renewAssetUpload = defineTool({
+  name: 'renew_asset_upload',
+  description:
+    'Get new upload URLs for a pending asset whose URLs from create_asset_upload expired, instead of starting the image again as a new asset. Returns { asset, uploads }: a URL for each file not yet PUT, as create_asset_upload returns them. Then call finalize_asset. Refused for an asset that is verified or rejected, and for a video.',
+  scope: 'content:draft',
+  minRole: 'editor',
+  // It writes nothing, so nothing is audited, but it hands out the right to upload.
+  mutates: true,
+  input: z.object({ assetId: id('asset') }),
+  output: uploadOutput,
+  example: { assetId: 'ast_example' },
+  handler: async ({ org, blobs, uploads, input }) => {
+    if (!uploads) throw new Error('direct uploads are not configured on this server (R2 S3 credentials)');
+    const asset = await requireAsset(org, input.assetId);
+    if (asset.kind === 'video') throw new ToolError('conflict', `asset ${asset.id} is a video; it has no image renditions to renew`);
+    if (asset.status !== 'pending') throw new ToolError('conflict', `asset ${asset.id} is ${asset.status}, not waiting for its upload`);
+    const renditions = await org.assets.renditions.forAsset(asset.id);
+    return { asset: assetView(asset, renditions), uploads: await uploadTargets(org.orgId, asset.id, renditions, blobs, uploads, true) };
   },
 });
 
@@ -372,4 +412,4 @@ const deleteAsset = defineTool({
   },
 });
 
-export const assetTools = [listAssets, getAsset, createAssetUpload, finalizeAsset, deleteAsset];
+export const assetTools = [listAssets, getAsset, createAssetUpload, renewAssetUpload, finalizeAsset, deleteAsset];

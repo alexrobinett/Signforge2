@@ -12,10 +12,10 @@ Images and videos for screens, prepared in the browser before upload. The CMS's 
   - Files over 50 MB are refused before decoding (`maxSourceBytes`).
   - A very long strip keeps its size under the cover rule (a 65,535x1,080 PNG already has a side in the box), so its rendition can be over the contract's `MAX_IMAGE_PIXELS`. `create_asset_upload` refuses it, before anything is uploaded; crop it first.
 - **`sha256Hex(blob)`** returns the SHA-256 of the bytes, computed with Web Crypto. That needs a secure context (https or localhost), as the CMS is.
-- **`uploadImage(file, { callTool })`** runs the whole upload:
+- **`uploadImage(file, { callTool, idempotencyKey? })`** runs the whole upload:
   1. It makes the renditions.
-  2. It calls `create_asset_upload`.
-  3. It PUTs each file to the presigned URL it gets back.
+  2. It calls `create_asset_upload` with the key, so the same upload tried again makes one asset.
+  3. It PUTs each file to the presigned URL it gets back. URLs within a minute of expiring (a retry gets the first call's) are renewed first with `renew_asset_upload`, for the same asset.
   4. It calls `finalize_asset`.
 
   `callTool(name, input)` calls a tool and throws on a refusal. In the CMS that is a POST to `/api/tools/:name`.
