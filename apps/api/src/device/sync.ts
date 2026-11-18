@@ -101,6 +101,7 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
       at: now,
       playerVersion: req.player.version,
       heartbeatJson: JSON.stringify(heartbeat),
+      active: req.manifest.active,
       epoch: req.epoch,
       seq: req.seq,
       counts,

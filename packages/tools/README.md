@@ -64,6 +64,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `list_assets` | content:read | viewer | `{ query?, status?, limit?, cursor? }` | `{ assets: (Asset & { usageCount })[], next }`, newest first |
 | `get_asset` | content:read | viewer | `{ assetId }` | `{ asset, spotIds }` |
 | `create_asset_upload` | content:draft | editor | `{ name, renditions: { landscape, portrait }, idempotencyKey? }` | `{ asset, uploads }` |
+| `renew_asset_upload` | content:draft | editor | `{ assetId }` | `{ asset, uploads }` |
 | `finalize_asset` | content:draft | editor | `{ assetId }` | `{ asset, changed }` |
 | `delete_asset` | content:draft | editor | `{ assetId }` | `{ deleted }`, or 409 while a spot uses the asset or a brand kit uses it as its logo |
 | `list_fonts` | content:read | viewer | `{ limit?, cursor? }` | `{ fonts: Font[], next }`, by id |
@@ -104,7 +105,7 @@ Details:
   1. **`create_asset_upload`.** The input names each rendition (`landscape`, `portrait`) with its `sha256`, `type` (JPEG, PNG, WebP or SVG), `size` in bytes (at most 20 MB), and `width` and `height` as displayed (`null` for SVG).
      - A raster rendition must be no larger than the cover rule allows for its screen box (`imageSizeProblem` in the contract): at least one side within 1920x1080, or 1080x1920 for portrait. It must also decode to at most `MAX_IMAGE_PIXELS` (3840x2160, about 8.3 million pixels), so a 65,535x1,080 strip, which has a side in the box, is still refused.
      - It creates the asset as `pending`, with both renditions, in one write. For each file the org does not already hold, it returns `{ sha256, method: 'PUT', url, headers, expiresAt }`. The URL is an R2 presigned PUT to `up/<org>/<asset>/<sha256>` that lasts 15 minutes. It signs the content type and length, so R2 refuses any other.
-  2. **PUT** each file to its `url` with the `headers` given.
+  2. **PUT** each file to its `url` with the `headers` given. URLs that have expired (a retry with the same `idempotencyKey` returns the first call's) are renewed with **`renew_asset_upload`**, which signs new ones for the same pending asset's files not yet PUT.
   3. **`finalize_asset`.** It refuses with `conflict`, changing nothing, unless the asset has both renditions. It reads each file back from R2, re-hashes it, checks the size, reads the type and pixel size from the bytes (`readImageInfo`), and checks the screen box and pixel cap again.
      - **All pass.** The files move to `o/<org>/b/<sha256>` and the asset becomes `verified`.
      - **Any fails.** Every upload for the asset is deleted, the asset becomes `rejected`, and the call is refused with `invalid_input`, one `details` entry per problem. That refusal is audited, because it changed the asset.
@@ -194,7 +195,7 @@ Callers so far:
    - A tool that replaces a whole list also gets add and remove forms (`add_group_members`, `remove_group_members`), which need no version.
 5. Add it to `TOOLS` in `src/registry.ts`.
 
-`test/isolation.test.ts` then calls it as org B's owner, with org A's ids put into its example, and expects `not_found`. A tool with no id fields must succeed without returning anything of org A's. An id field of a new kind fails that test until you map it in `ORG_A_IDS`.
+`test/isolation.test.ts` then calls it as org B's owner once for each id field in its input schema, optional ones and those of one branch included: org A's id in that field, org B's own rows in the rest. It expects `not_found` naming A's id. A tool with no id fields must succeed without returning anything of org A's. An id field of a new kind fails that test until you map it in `ORG_IDS`; a field it cannot reach with a valid input fails until the tool's example reaches it.
 
 ## Tests
 

@@ -277,6 +277,22 @@ describe('files', () => {
     expect([...spotFiles({ id: 'u', name: 'u', kind: 'url', url: 'https://example.com', durationMs: 1000 } as Spot, m)]).toEqual([]);
   });
 
+  it("adds the brand kit's fonts and logo for a template that speaks protocol 2, which reads them as it prepares", () => {
+    const m = manifest();
+    m.brand = {
+      id: 'kit',
+      colors: {} as never,
+      shape: 'round',
+      fonts: { body: { id: 'base/inter', family: 'Inter', files: [{ weight: 400, style: 'normal', file: 'sha-font' }] } },
+      logo: { onDark: 'sha-dark', onLight: 'sha-light' },
+    };
+    const spot = (template: string): Spot => ({ id: 't', name: 't', kind: 'template', template, durationMs: 1000, data: {}, assets: {} });
+    m.templates['base/p2@1.0.0'] = { manifest: { protocol: 2 } as never, html: 'sha-p2' };
+    m.templates['base/p1@1.0.0'] = { manifest: {} as never, html: 'sha-p1' };
+    expect([...spotFiles(spot('base/p2@1.0.0'), m)].sort()).toEqual(['sha-dark', 'sha-font', 'sha-light', 'sha-p2']);
+    expect([...spotFiles(spot('base/p1@1.0.0'), m)]).toEqual(['sha-p1']);
+  });
+
   it('rejects a manifest that refers to things it does not carry', () => {
     expect(validateManifest(manifest())).toEqual([]);
     const bad = manifest({ defaultPlaylist: 'nope' });

@@ -5,7 +5,7 @@
  */
 import { SECTIONS, type Section } from './sections';
 
-/** One input of a tool's form. `key` is an idempotency key: never shown, a fresh one per form. */
+/** One input of a tool's form. `key` is an idempotency key: never shown, filled by `withKey`. */
 export type Field = { name: string; label: string; hint: string; required: boolean; nullable: boolean } & (
   | { type: 'text' | 'integer' | 'number' | 'boolean' | 'json' | 'key' }
   | { type: 'choice'; options: string[] }
@@ -95,8 +95,9 @@ export const needsInput = (tool: ToolListing) => tool.fields.some((f) => f.requi
 type InputResult = { ok: true; input: Record<string, unknown> } | { ok: false; field: string; message: string };
 
 /**
- * A submitted form as the tool's input. An empty field is left out, or sent as null when the tool
- * requires it and allows null. The API checks the rest and refuses with its own message.
+ * A submitted form as the tool's input, without its idempotency key (`withKey`). An empty field is
+ * left out, or sent as null when the tool requires it and allows null. The API checks the rest
+ * and refuses with its own message.
  */
 export function toolInput(fields: Field[], form: FormData): InputResult {
   const input: Record<string, unknown> = {};
@@ -111,7 +112,7 @@ export function toolInput(fields: Field[], form: FormData): InputResult {
     if (empty && !f.required) continue;
     switch (f.type) {
       case 'key':
-        input[f.name] = crypto.randomUUID();
+        // Filled by `withKey`, which knows whether this is a call already sent.
         break;
       case 'boolean':
         if (value || f.required) input[f.name] = value === 'on';
@@ -137,6 +138,30 @@ export function toolInput(fields: Field[], form: FormData): InputResult {
     }
   }
   return { ok: true, input };
+}
+
+/** A call sent and not yet answered with success: its tool, its input without the key, and the key. */
+export interface PendingCall {
+  tool: string;
+  input: string;
+  key: string;
+}
+
+/**
+ * The input with its idempotency key, if the tool takes one, and the call as now pending. The
+ * same input to the same tool as the pending call is that call again, after a lost answer or a
+ * refusal, and keeps its key, so the server does it once; anything else is a new call.
+ */
+export function withKey(
+  tool: ToolListing,
+  input: Record<string, unknown>,
+  pending: PendingCall | null,
+): { input: Record<string, unknown>; pending: PendingCall | null } {
+  const field = tool.fields.find((f) => f.type === 'key');
+  if (!field) return { input, pending: null };
+  const same = JSON.stringify(input);
+  const key = pending?.tool === tool.name && pending.input === same ? pending.key : crypto.randomUUID();
+  return { input: { ...input, [field.name]: key }, pending: { tool: tool.name, input: same, key } };
 }
 
 /** A tool's output in a few words, for its toast: lists counted, a changed thing by name. */

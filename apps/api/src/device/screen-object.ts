@@ -1,6 +1,6 @@
 /**
  * The screen's Durable Object (docs/backend-plan.md, Screens), one per screen, named by screen id.
- * It holds the screen's nudge socket and the desired and reported manifest ids.
+ * It holds the screen's nudge socket and the desired manifest id.
  *
  * The socket hibernates: between messages the object is evicted and costs nothing. The screen's
  * keepalive (`ping`) is answered by the runtime (`setWebSocketAutoResponse`) without waking it.
@@ -73,10 +73,9 @@ export class ScreenObject extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets(credentialId)) closeRevoked(ws);
   }
 
-  /** Desired and reported manifest ids, for tests and debugging. */
-  async manifests(): Promise<{ desired?: string; reported?: string }> {
-    const [desired, reported] = await Promise.all([this.ctx.storage.get<string>('desired'), this.ctx.storage.get<string>('reported')]);
-    return { desired, reported };
+  /** The desired manifest id, for tests and debugging. The reported one is in D1. */
+  async manifests(): Promise<{ desired?: string }> {
+    return { desired: await this.ctx.storage.get<string>('desired') };
   }
 
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
@@ -89,13 +88,11 @@ export class ScreenObject extends DurableObject<Env> {
     }
     const parsed = parseDeviceSocketMessage(msg);
     if (!parsed.ok) return;
-    const { manifest } = parsed.value;
-    if ((await this.ctx.storage.get<string>('reported')) === manifest) return;
     const holder = ws.deserializeAttachment() as SocketHolder;
     if (!(await liveCredentials(this.env.DB, holder.screenId)).has(holder.credentialId)) return closeRevoked(ws);
     // The screen reporting about itself, through its org's scope: the only write the socket makes.
-    await scoped(this.env.DB, holder.orgId).screens.update(holder.screenId, { reportedManifestId: manifest });
-    await this.ctx.storage.put('reported', manifest);
+    // Not skipped when this object saw the same id last: a sync may have reported another since.
+    await scoped(this.env.DB, holder.orgId).screens.reportManifest(holder.screenId, parsed.value.manifest);
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {

@@ -360,7 +360,7 @@ export const MIN_REFRESH_S = 60;
 // ---------------------------------------------------------------------- brand
 
 /** Every file a brand kit refers to. The kit must already be valid. */
-const brandFiles = (b: BrandKit): string[] => [
+export const brandFiles = (b: BrandKit): string[] => [
   ...[b.fonts.display, b.fonts.body].flatMap((f) => f?.files.map((x) => x.file) ?? []),
   ...(b.logo ? [b.logo.onDark, b.logo.onLight].filter(isText) : []),
 ];

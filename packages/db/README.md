@@ -35,7 +35,7 @@ Base templates are written by `platform(db)` (`src/platform.ts`), the one scope 
 
 `org.screens.setDesiredManifest(screenId, manifestId)` keeps the manifest it replaces as `previous_manifest_id`, whose files a screen mid-switch may still fetch.
 
-`org.screens.sync(screenId, write)` is a screen's sync in one atomic batch: its heartbeat and last-seen time, and its hourly play counts added unless the batch's `seq` is already stored in its `epoch`. The repeat check is inside the SQL, so a retried or doubled request counts once. It returns the highest stored `seq` and the rows D1 wrote.
+`org.screens.sync(screenId, write)` is a screen's sync in one atomic batch: its heartbeat, last-seen time and active manifest, and its hourly play counts added unless the batch's `seq` is already stored in its `epoch`. The repeat check is inside the SQL, so a retried or doubled request counts once. It returns the highest stored `seq` and the rows D1 wrote. `org.screens.reportManifest(screenId, id)` is the socket's report of the active manifest. Neither moves the screen's version.
 
 `org.dataSources.savePoll(id, { source, snapshot?, checkedAt? })` saves what one poll found in one batch: the source's patch (next poll, failures, error category, ETag), and either a changed snapshot or, for a feed that still says the same, only the snapshot's new `checked_at`. `org.dataSources.snapshots(ids)` returns each snapshot with its `checkedAt`, which sync sends a screen.
 

@@ -92,6 +92,7 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     await o.scope.spots.delete(o.imageSpot);
     await o.scope.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
   },
+  renew_asset_upload: (o) => o.scope.assets.update(o.asset, { status: 'pending' }),
   // Pending, both renditions, and an upload whose bytes do not hash to the claim: finalize rejects it.
   finalize_asset: async (o) => {
     await o.scope.assets.update(o.asset, { status: 'pending' });
