@@ -61,7 +61,7 @@ A template that has not reported `ready` within 2 seconds is skipped.
 - Look elements up inside the hooks, not once at the top of `main.ts`: a reset replaces them.
 - Clear any state kept outside the DOM (a timer, a module variable) in `stop`.
 
-`packages/player/browser/templates.test.ts` checks every template in `templates/`: new data after the first `init` must leave the same document as a fresh load. A protocol-1 bundle has no `reset`; the player reloads its frame instead.
+`packages/player/browser/templates.test.ts` checks every template in `templates/`: new data after the first `init` must leave the same document as a fresh load. A protocol-1 bundle has no `reset`; the player reloads its frame instead. A new template goes into the devDependencies of `packages/player` and `apps/api`, whose tests build every template, so CI reruns them when it changes ([`ci.md`](ci.md#what-affected-means)).
 
 ## What the SDK gives you
 
