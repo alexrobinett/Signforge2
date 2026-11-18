@@ -13,8 +13,8 @@ export function PageHeader({ title, description, children }: { title: string; de
   );
 }
 
-/** A section with nothing in it yet. */
-function EmptyState({ icon: Icon, title, children }: { icon: Section['icon']; title: string; children: ReactNode }) {
+/** A section with nothing in it yet, and what to do about it (`action`). */
+export function EmptyState({ icon: Icon, title, children, action }: { icon: Section['icon']; title: string; children: ReactNode; action?: ReactNode }) {
   return (
     <section
       aria-labelledby="empty-title"
@@ -27,6 +27,7 @@ function EmptyState({ icon: Icon, title, children }: { icon: Section['icon']; ti
         {title}
       </h2>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">{children}</p>
+      {action && <div className="mt-4">{action}</div>}
     </section>
   );
 }

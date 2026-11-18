@@ -47,7 +47,7 @@ export function UploadProgress() {
                 type="button"
                 onClick={() => dismiss(u.key)}
                 aria-label={`Dismiss ${u.name}`}
-                className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="grid size-10 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
               >
                 <XIcon className="size-4" aria-hidden />
               </button>

@@ -7,7 +7,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { ImagesIcon, Trash2Icon } from 'lucide-react';
 import { ASSET_GRID, AssetCard, AssetSearch } from '~/components/assets/asset-card';
 import { UploadButton, UploadProgress } from '~/components/assets/upload-images';
-import { PageHeader } from '~/components/page';
+import { EmptyState, PageHeader } from '~/components/page';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -43,12 +43,19 @@ function AssetsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Assets">{canManage && assets.length > 0 && <UploadButton id="asset-upload" />}</PageHeader>
-      {assets.length > 0 && <p className="-mt-4 text-[15px] text-muted-foreground">{librarySummary(assets)}</p>}
+      <PageHeader title="Assets" description={assets.length ? librarySummary(assets) : undefined}>
+        {canManage && assets.length > 0 && <UploadButton id="asset-upload" />}
+      </PageHeader>
       <UploadProgress />
 
       {!assets.length ? (
-        <EmptyLibrary canManage={canManage} />
+        <EmptyState
+          icon={ImagesIcon}
+          title="No images yet"
+          action={canManage ? <UploadButton id="asset-upload" /> : <p className="text-sm text-muted-foreground">Ask an editor or owner to upload images.</p>}
+        >
+          Photos and logos for your spots. Each one is scaled in your browser for landscape and portrait screens, and checked before a spot can use it.
+        </EmptyState>
       ) : (
         <>
           <AssetSearch id="asset-search" value={search.q} onChange={(q) => void navigate({ search: q ? { q } : {}, replace: true })} />
@@ -70,29 +77,10 @@ function AssetsPage() {
   );
 }
 
-function EmptyLibrary({ canManage }: { canManage: boolean }) {
-  return (
-    <section aria-labelledby="empty-library" className="flex flex-col items-center gap-4 rounded-xl border border-dashed bg-card/50 px-6 py-16 text-center">
-      <div className="grid size-12 place-items-center rounded-full bg-accent text-accent-foreground">
-        <ImagesIcon className="size-6" aria-hidden />
-      </div>
-      <div className="space-y-1">
-        <h2 id="empty-library" className="text-lg font-semibold">
-          No images yet
-        </h2>
-        <p className="max-w-md text-sm text-muted-foreground">
-          Photos and logos for your spots. Each one is scaled in your browser for landscape and portrait screens, and checked before a spot can use it.
-        </p>
-      </div>
-      {canManage ? <UploadButton id="asset-upload" /> : <p className="text-sm text-muted-foreground">Ask an editor or owner to upload images.</p>}
-    </section>
-  );
-}
-
 function DeleteButton({ asset }: { asset: AssetView }) {
   const ask = useAppStore((s) => s.askToDeleteAsset);
   return (
-    <Button variant="ghost" size="icon" className="size-8" aria-label={`Delete ${asset.name}`} onClick={() => ask({ id: asset.id, name: asset.name })}>
+    <Button variant="ghost" size="icon" aria-label={`Delete ${asset.name}`} onClick={() => ask({ id: asset.id, name: asset.name })}>
       <Trash2Icon aria-hidden />
     </Button>
   );
@@ -110,9 +98,7 @@ function ConfirmDelete() {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle className="break-words">Delete {deleting?.name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            No spot uses it. It leaves the library for good; to use it again, upload it again. This cannot be undone.
-          </AlertDialogDescription>
+          <AlertDialogDescription>No spot uses it. To use it again, upload it again. This cannot be undone.</AlertDialogDescription>
         </AlertDialogHeader>
         {error && (
           <p role="alert" className="text-sm text-status-needs-you-foreground">

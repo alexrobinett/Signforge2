@@ -30,14 +30,14 @@ export function AssetCard({ asset, children }: { asset: AssetView; children?: Re
   return (
     <>
       <AssetThumb asset={asset} />
-      <div className="flex flex-col gap-1 px-4 pt-3 pb-3.5 text-left">
+      <div className="flex flex-col gap-1.5 px-4 pt-3.5 pb-4 text-left">
         <div className="flex min-h-8 items-center justify-between gap-2">
-          <span className="truncate text-[15px] font-semibold" title={asset.name}>
+          <span className="truncate text-base font-semibold" title={asset.name}>
             {asset.name}
           </span>
           {children}
         </div>
-        <span className="font-mono text-xs text-muted-foreground tabular-nums">{assetFacts(asset)}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">{assetFacts(asset)}</span>
         <span className={cn('text-[13px]', asset.usageCount ? 'text-foreground/85' : 'text-muted-foreground')}>{usageText(asset.usageCount)}</span>
       </div>
     </>
