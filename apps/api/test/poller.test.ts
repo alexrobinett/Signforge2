@@ -6,7 +6,7 @@ import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { feedUrlSealer, openFeedUrl } from '../src/data/cipher';
 import type { FetchGuards } from '../src/data/fetch';
 import { BACKOFF_MAX_MS, pollDataSources } from '../src/data/poller';
@@ -215,6 +215,25 @@ describe('pollDataSources', () => {
     await poll(feed.guards);
     expect(feed.requests).toHaveLength(5);
     expect(feed.maxInFlight()).toBe(2);
+  });
+
+  it("calls the Worker's own fetch as workerd requires, unbound from any object", async () => {
+    for (const d of await o.scope.dataSources.list()) await o.scope.dataSources.update(d.id, { nextPollAt: Number.MAX_SAFE_INTEGER });
+    const id = await source('json', 'https://real.test/feed');
+    // workerd's fetch throws "Illegal invocation" when called as a method of another object.
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(function (this: unknown, input: RequestInfo | URL) {
+      if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.startsWith('https://cloudflare-dns.com/'))
+        return Promise.resolve(Response.json({ Answer: url.includes('type=A&') || url.endsWith('type=A') ? [{ type: 1, data: '93.184.216.34' }] : [] }));
+      return Promise.resolve(new Response('{"ok":1}'));
+    });
+    try {
+      await pollDataSources(env, { now: NOW + 3 * 365 * 24 * 60 * MIN });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await o.scope.dataSources.get(id)).toMatchObject({ failures: 0, lastError: null });
   });
 
   it('runs from the Cron Trigger, at the time it was scheduled for', async () => {

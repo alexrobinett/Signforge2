@@ -41,7 +41,9 @@ class PollFailure extends Error {
   }
 }
 
-const workerGuards = (): FetchGuards => ({ fetch, resolve: dohResolver(fetch) });
+/** workerd's `fetch` throws "Illegal invocation" when called as a method of another object, so the guards get a bare function. */
+const workerFetch: typeof fetch = (input, init) => fetch(input, init);
+const workerGuards = (): FetchGuards => ({ fetch: workerFetch, resolve: dohResolver(workerFetch) });
 
 /** Run one poll pass at `now`. */
 export async function pollDataSources(env: Env, { now = Date.now(), guards = workerGuards() }: { now?: number; guards?: FetchGuards } = {}): Promise<void> {
