@@ -12,7 +12,7 @@ import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Page } from 'playwright';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { PROTOCOL_VERSION, type FieldDef, type TemplateManifest } from '@signforge/contract';
+import { PROTOCOL_VERSION, type BrandColors, type FieldDef, type FrameTheme, type TemplateManifest } from '@signforge/contract';
 import { buildTemplate } from '@signforge/cli/template';
 import { useHarness } from './harness';
 
@@ -81,7 +81,7 @@ function spotData(manifest: TemplateManifest, over: Data): Data {
 interface Host {
   page: Page;
   open(frame: string, html: string): Promise<void>;
-  init(frame: string, data: Data, assets?: Record<string, string>, now?: number): Promise<void>;
+  init(frame: string, data: Data, assets?: Record<string, string>, now?: number, theme?: FrameTheme): Promise<void>;
   post(frame: string, type: 'play' | 'reset'): Promise<void>;
   /** Wait until the frame has sent `type` `count` times in all. */
   waitFor(frame: string, type: string, count: number): Promise<void>;
@@ -131,9 +131,9 @@ async function host(): Promise<Host> {
       );
       await waitFor(frame, 'loaded', 1);
     },
-    async init(frame, data, assets = {}, now = NOW) {
+    async init(frame, data, assets = {}, now = NOW, theme) {
       await page.evaluate(
-        async ({ frame, data, assets, sf, now }) => {
+        async ({ frame, data, assets, sf, now, theme }) => {
           const w = window as unknown as { frames_: Record<string, HTMLIFrameElement> };
           const blobs: Record<string, Blob> = {};
           for (const [field, colour] of Object.entries(assets)) {
@@ -155,10 +155,11 @@ async function host(): Promise<Host> {
             timezone: 'UTC',
             locale: 'en-US',
             clock: { now, offsetMs: now - Date.now() },
+            theme,
           };
           w.frames_[frame]!.contentWindow!.postMessage(init, '*');
         },
-        { frame, data, assets, sf, now },
+        { frame, data, assets, sf, now, theme },
       );
     },
     post: (frame, type) =>
@@ -252,4 +253,72 @@ describe('template update lifecycle', () => {
       expect(await hst.dom('again')).toBe(fresh);
     });
   }
+});
+
+/** WCAG 2 contrast of two computed `rgb(r, g, b)` colours. */
+function contrast(a: string, b: string): number {
+  const lum = (c: string) => {
+    const [r, g, bl] = c
+      .match(/\d+(\.\d+)?/g)!
+      .slice(0, 3)
+      .map((v) => {
+        const x = Number(v) / 255;
+        return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+      });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi! + 0.05) / (lo! + 0.05);
+}
+
+describe('text on a brand colour (#57)', () => {
+  /** examples/demo/brand.json, with the on-colours the brand tools derive for it. */
+  const demo: BrandColors = {
+    primary: '#1d4ed8',
+    onPrimary: '#ffffff',
+    accent: '#f97316',
+    onAccent: '#000000',
+    background: '#0b1020',
+    surface: '#18213a',
+    text: '#f8fafc',
+    muted: '#a5b4cb',
+  };
+  // A kit may set its on-colours by hand; the brand tools only warn when a pair fails.
+  const poor: BrandColors = { ...demo, onPrimary: '#2563eb', onAccent: '#ffffff' };
+  const kit = (colors: BrandColors): FrameTheme => ({ colors, shape: 'soft', fonts: {} });
+  // `$brand.accent` as the compiler resolves it: the kit's accent, else DEFAULT_BRAND_COLORS.accent.
+  const kits: [string, FrameTheme | undefined, string][] = [
+    ['no kit', undefined, '#f59e0b'],
+    ['the demo kit', kit(demo), demo.accent],
+    ['a kit with poor on-colours', kit(poor), poor.accent],
+  ];
+  // The badge's own text (axe, 4.5:1), and cstore-promo's large points figure (3:1).
+  const pairs: [template: string, text: string, fill: string, min: number][] = [
+    ['news', '.badge', '.badge', 4.5],
+    ['cstore-promo', '.badge small', '.badge .disc', 4.5],
+    ['cstore-promo', '.badge b', '.badge .disc', 3],
+  ];
+
+  for (const [label, theme, accent] of kits)
+    it(`news and cstore-promo badges read under ${label}`, async () => {
+      const hst = await host();
+      const found: string[] = [];
+      for (const [i, name] of ['news', 'cstore-promo'].entries()) {
+        const t = built.get(name)!;
+        const frame = ['fresh', 'reset'][i]!;
+        await hst.open(frame, t.html);
+        await hst.init(frame, spotData(t.manifest, name === 'news' ? { accent } : {}), {}, NOW, theme);
+        await hst.waitFor(frame, 'ready', 1);
+        const f = hst.page.mainFrame().childFrames()[i]!;
+        for (const [, text, fill, min] of pairs.filter(([n]) => n === name)) {
+          const [fg, bg] = await f.evaluate(
+            ({ text, fill }) => [getComputedStyle(document.querySelector(text)!).color, getComputedStyle(document.querySelector(fill)!).backgroundColor],
+            { text, fill },
+          );
+          const ratio = contrast(fg!, bg!);
+          if (ratio < min) found.push(`${name} ${text}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, below ${min}:1`);
+        }
+      }
+      expect(found).toEqual([]);
+    });
 });

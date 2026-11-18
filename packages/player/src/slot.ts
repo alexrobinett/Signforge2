@@ -236,6 +236,8 @@ export class Slot {
     // (`frame-src` falls back to `default-src 'none'`). A template that tries is replaced by an
     // error page, without a request. See "Template containment" in docs/architecture.md.
     const wrapperFrame = document.createElement('iframe');
+    // A frame needs a title for assistive technology (WCAG 4.1.2); the editor's preview is read by one.
+    wrapperFrame.title = spot.name;
     wrapperFrame.style.width = `${w}px`;
     wrapperFrame.style.height = `${h}px`;
     wrapperFrame.srcdoc = WRAPPER_HTML;
@@ -248,6 +250,7 @@ export class Slot {
     // Scripts only: an opaque origin, so no access to the player, the wrapper or their storage;
     // no popups, forms, or navigating any frame but its own.
     frame.setAttribute('sandbox', 'allow-scripts');
+    frame.title = spot.name;
     frame.srcdoc = html;
 
     const live: LiveFrame = (this.live = {
