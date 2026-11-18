@@ -30,10 +30,10 @@ export class NotInOrgError extends Error {
 
 /**
  * Fields a caller may never set: the org is the scope's, the id is fixed at insert, a row's
- * version moves on by itself, and a draft's published version is written only by `stage.publish`
- * (./drafts.ts).
+ * version and the org's publish revision move on by themselves, a draft's incarnation is fixed at
+ * insert, and a draft's published version is written only by `stage.publish` (./drafts.ts).
  */
-type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'publishedJson' | 'publishedAt';
+type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'incarnation' | 'publishRevision' | 'publishedJson' | 'publishedAt';
 export type NewRow<T extends SQLiteTable> = Omit<T['$inferInsert'], Guarded> & { id?: string };
 export type RowPatch<T extends SQLiteTable> = Partial<Omit<T['$inferInsert'], Guarded>>;
 
@@ -53,6 +53,38 @@ function chunk<T>(rows: T[], columns: number): T[][] {
  * its credential and its Durable Object name it by id alone).
  */
 type Ids = 'content' | 'server';
+
+/**
+ * A first statement for a batch that fails it unless the row is still `version` when it runs, so
+ * a change made from an old read writes nothing (`commit` throws `StaleVersionError`). A draft
+ * passes its `incarnation` too: a row deleted and made again with its id starts at version 1 again.
+ * A draft deleted since it was read is stale too, at version 0, not `NotInOrgError`: a publish
+ * targets the org, not the draft, so it is a conflict to load and compile again after.
+ */
+function versionGuard(db: Db, orgId: string, t: typeof s.screens | typeof s.spots, id: string, version: number, incarnation?: string | null): Write {
+  // Only drafts have the column; the others have no way to be made again with an id.
+  const sameRow = incarnation === undefined ? sql`1` : sql`${sql.identifier('incarnation')} IS ${incarnation}`;
+  const check = db
+    .select({
+      // json() of text that is not JSON raises an error, which aborts the batch.
+      ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE ${t.orgId} = ${orgId} AND ${t.id} = ${id} AND ${t.rowVersion} = ${version} AND ${sameRow}) THEN '1' ELSE 'stale version' END)`,
+    })
+    .from(s.organization)
+    .where(eq(s.organization.id, orgId));
+  const stale = async () => {
+    const r = await db
+      .select({ version: t.rowVersion, same: sql<number>`${sameRow}` })
+      .from(t)
+      .where(and(eq(t.orgId, orgId), eq(t.id, id)))
+      .get();
+    if (!r) {
+      if (incarnation !== undefined) return 0;
+      throw new NotInOrgError('row', id);
+    }
+    return r.version === version && r.same ? undefined : r.version;
+  };
+  return guard(check, { id, version, stale });
+}
 
 /** get / list / insert / update / delete over a table with an org and an id. */
 function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: string, ids: Ids = 'server') {
@@ -90,19 +122,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
         .where(mine(id)),
     );
     if (ifVersion === undefined) return update;
-    const check = db
-      .select({
-        // json() of text that is not JSON raises an error, which aborts the batch.
-        ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE ${t.orgId} = ${orgId} AND ${t.id} = ${id} AND ${t.rowVersion} = ${ifVersion}) THEN '1' ELSE 'stale version' END)`,
-      })
-      .from(s.organization)
-      .where(eq(s.organization.id, orgId));
-    const now = async () => {
-      const r = await db.select({ version: t.rowVersion }).from(t).where(mine(id)).get();
-      if (!r) throw new NotInOrgError('row', id);
-      return r.version;
-    };
-    return { row, writes: [guard(check, { id, version: ifVersion, current: now }), ...update.writes] };
+    return { row, writes: [versionGuard(db, orgId, t, id, ifVersion), ...update.writes] };
   };
   return {
     get: async (id: string): Promise<Row | undefined> => (await db.select().from(t).where(mine(id)).get()) as Row | undefined,
@@ -197,19 +217,23 @@ function shared<T extends SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn 
 
 /**
  * Stage making a draft row's content (as read, plus a playlist's items) its published version.
- * Not an edit: `updated_at` keeps the draft's last edit.
+ * Refused, writing nothing, if the draft was edited since it was read (its version moved on: a
+ * playlist's moves with its items too), so a publish never promotes content older than the draft.
+ * Not an edit: the version stays, and `updated_at` keeps the draft's last edit as stored.
  */
 function publisher<T extends typeof s.spots | typeof s.playlists | typeof s.scheduleEntries>(db: Db, orgId: string, table: T) {
   const t = table as unknown as typeof s.spots;
   return (row: T['$inferSelect'], items?: readonly string[]): Staged<T['$inferSelect']> => {
-    const set = { publishedJson: contentJson(row, items), publishedAt: Date.now(), updatedAt: row.updatedAt };
-    return staged(
+    const set = { publishedJson: contentJson(row, items), publishedAt: Date.now() };
+    const promoted = staged(
       { ...row, ...set },
       db
         .update(t)
-        .set(set)
+        // Set to itself, or Drizzle's `$onUpdateFn` would stamp it now.
+        .set({ ...set, updatedAt: sql`${t.updatedAt}` })
         .where(and(eq(t.orgId, orgId), eq(t.id, row.id))),
     );
+    return { row: promoted.row, writes: [versionGuard(db, orgId, t, row.id, row.rowVersion, row.incarnation), ...promoted.writes] };
   };
 }
 
@@ -761,13 +785,18 @@ export function scoped(d1: D1Database, orgId: string) {
             .orderBy(asc(pi.position))
             .all()
         ).map((r) => r.spotId),
-      /** Replace a playlist's items. */
+      /** Replace a playlist's items: an edit of its draft, so its version moves on. */
       setItems: async (playlistId: string, spotIds: readonly string[]) => {
         if (!(await playlists.get(playlistId))) throw new NotInOrgError('playlist', playlistId);
         const found = new Set((await spotRows.getMany([...new Set(spotIds)])).map((r) => r.id));
         for (const id of spotIds) if (!found.has(id)) throw new NotInOrgError('spot', id);
         const rows = spotIds.map((spotId, position) => ({ orgId, playlistId, position, spotId }));
+        const pl = s.playlists;
         await db.batch([
+          db
+            .update(pl)
+            .set({ rowVersion: sql`${pl.rowVersion} + 1` })
+            .where(and(eq(pl.orgId, orgId), eq(pl.id, playlistId))),
           db.delete(pi).where(and(eq(pi.orgId, orgId), eq(pi.playlistId, playlistId))),
           ...chunk(rows, 4).map((part) => db.insert(pi).values(part)),
         ]);
@@ -803,6 +832,7 @@ export function scoped(d1: D1Database, orgId: string) {
             updateWindowJson: null,
             unreachableAfterMs: null,
             alertsJson: null,
+            publishRevision: 0,
             editorsPublish: true,
             ...current,
             ...patch,
@@ -817,7 +847,10 @@ export function scoped(d1: D1Database, orgId: string) {
               .onConflictDoUpdate({ target: os.orgId, set: { ...patch, rowVersion: sql`${os.rowVersion} + 1`, updatedAt } }),
           );
           if (ifVersion === undefined) return upsert;
-          const now = async () => (await db.select({ v: os.rowVersion }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 1;
+          const stale = async () => {
+            const now = (await db.select({ v: os.rowVersion }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 1;
+            return now === ifVersion ? undefined : now;
+          };
           const check = db
             .select({
               // json() of text that is not JSON raises an error, which aborts the batch.
@@ -825,7 +858,7 @@ export function scoped(d1: D1Database, orgId: string) {
             })
             .from(s.organization)
             .where(eq(s.organization.id, orgId));
-          return { row, writes: [guard(check, { id: 'settings', version: ifVersion, current: now }), ...upsert.writes] };
+          return { row, writes: [guard(check, { id: 'settings', version: ifVersion, stale }), ...upsert.writes] };
         },
       },
     },
@@ -912,6 +945,48 @@ export function scoped(d1: D1Database, orgId: string) {
 
     publishes: {
       ...publishes,
+      stage: {
+        ...publishes.stage,
+        /**
+         * As `addScreens`, staged, so a publish's rollout rows commit in one batch with its row
+         * (`stage.insert`, staged before them), its order (`advance`) and its screens' switches.
+         * Throws `NotInOrgError` for a screen the org does not have. The publish may not be stored
+         * yet, so it is not read: the `(org_id, publish_id)` foreign key refuses another org's.
+         */
+        addScreens: async (publishId: string, rows: readonly { screenId: string; manifestId: string }[]): Promise<Staged> => {
+          await orgScreens(rows.map((r) => r.screenId));
+          const values = rows.map((r) => ({ orgId, publishId, screenId: r.screenId, manifestId: r.manifestId }));
+          return staged(undefined, ...chunk(values, 4).map((part) => db.insert(ps).values(part)));
+        },
+        /**
+         * Put a publish in order: stage moving the org's publish revision on from `revision`, the
+         * one read with the content it compiled (`org_settings.publish_revision`; 0 with no row).
+         * If another publish committed since, the batch fails (`StaleVersionError`, id
+         * `publish revision`) and writes nothing, so an older publish cannot switch screens back
+         * after a newer one. Commit the screens' switches in the same batch. An org with no
+         * settings row gets one, every setting at its default and at version 1, as with no row.
+         */
+        advance: (revision: number): Staged => {
+          const read = sql`COALESCE((SELECT ${os.publishRevision} FROM ${os} WHERE ${os.orgId} = ${orgId}), 0)`;
+          const check = db
+            .select({
+              // json() of text that is not JSON raises an error, which aborts the batch.
+              ok: sql`json(CASE WHEN ${read} = ${revision} THEN '1' ELSE 'stale version' END)`,
+            })
+            .from(s.organization)
+            .where(eq(s.organization.id, orgId));
+          const stale = async () => {
+            const now = (await db.select({ v: os.publishRevision }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 0;
+            return now === revision ? undefined : now;
+          };
+          // Not a setting: the version and `updatedAt` stay, so an open settings form does not conflict.
+          const move = db
+            .insert(os)
+            .values({ orgId, publishRevision: 1 })
+            .onConflictDoUpdate({ target: os.orgId, set: { publishRevision: sql`${os.publishRevision} + 1`, updatedAt: sql`${os.updatedAt}` } });
+          return { row: undefined, writes: [guard(check, { id: 'publish revision', version: revision, stale }), ...staged(undefined, move).writes] };
+        },
+      },
       screens: (publishId: string) =>
         db
           .select({ screenId: ps.screenId, manifestId: ps.manifestId })

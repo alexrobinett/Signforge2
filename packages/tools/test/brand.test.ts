@@ -67,11 +67,13 @@ async function setup(orgId: string) {
   return { org, lobby, hall, front, back, call, refusal, spot: `${orgId}-hello` };
 }
 
-/** Publish as M3-18's publish tool will: commit the writes, make each manifest desired. */
+/** Publish as M3-18's publish tool will: commit the writes and make each manifest desired, in one batch. */
 async function publish(org: OrgScope) {
   const result = await publishOrg(org, opts);
-  await org.commit(result.writes);
-  for (const s of result.screens) if (s.manifest) await org.screens.setDesiredManifest(s.screenId, s.manifest.id);
+  await org.commit([
+    ...result.writes,
+    ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id).writes : [])),
+  ]);
   return result;
 }
 const accentOf = (r: Awaited<ReturnType<typeof publishOrg>>, screenId: string, spot: string) =>
