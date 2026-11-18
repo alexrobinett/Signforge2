@@ -520,6 +520,8 @@ export const orgSettings = sqliteTable(
     unreachableAfterMs: integer('unreachable_after_ms'),
     /** Who gets which alert, by email (packages/tools `alerts`). Null for the defaults. */
     alertsJson: text('alerts_json'),
+    /** Whether editors may publish, or only owners (owner decision Q7). */
+    editorsPublish: integer('editors_publish', { mode: 'boolean' }).notNull().default(true),
     /** An org with no row has every default, at version 1; each `settings.stage.set` moves it on. */
     rowVersion: rowVersion(),
     updatedAt: updated(),

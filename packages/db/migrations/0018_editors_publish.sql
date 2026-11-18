@@ -1,0 +1,1 @@
+ALTER TABLE `org_settings` ADD `editors_publish` integer DEFAULT true NOT NULL;

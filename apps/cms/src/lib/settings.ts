@@ -18,6 +18,8 @@ export interface OrgSettings {
   displayHours: DisplayHours | null;
   updateWindow: { from: string; to: string };
   unreachableAfterMinutes: number;
+  /** Whether editors publish, or only owners (owner decision Q7). */
+  editorsPublish: boolean;
   alerts: Record<AlertKind, AlertRule>;
   updatedAt: number | null;
   /** Moves on with every change; each save sends it back as `ifVersion`, so it cannot overwrite a newer one. */
@@ -70,11 +72,11 @@ export const ALERTS: { kind: AlertKind; when: string; note: string }[] = [
   { kind: 'agent_refused', when: 'An agent is refused', note: 'Sent once agents can connect' },
 ];
 
-/** What each role may do: the table on the Members page, matching ROLE_SCOPES and the tools' minimum roles. */
-export const ROLE_TABLE: { what: string; owner: boolean; editor: boolean; viewer: boolean }[] = [
+/** What each role may do: the table on the Members page, matching ROLE_SCOPES, the org's choice of who publishes, and the tools' minimum roles. */
+export const roleTable = (editorsPublish: boolean): { what: string; owner: boolean; editor: boolean; viewer: boolean }[] => [
   { what: 'See screens, spots and assets', owner: true, editor: true, viewer: true },
   { what: 'Edit spots, playlists and assets', owner: true, editor: true, viewer: false },
-  { what: 'Publish to screens', owner: true, editor: true, viewer: false },
+  { what: 'Publish to screens', owner: true, editor: editorsPublish, viewer: false },
   { what: 'Pair, restart and rename screens', owner: true, editor: true, viewer: false },
   { what: 'Revoke a screen', owner: true, editor: false, viewer: false },
   { what: 'Members, roles and organization settings', owner: true, editor: false, viewer: false },

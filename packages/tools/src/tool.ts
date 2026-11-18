@@ -18,8 +18,9 @@ export const ROLES = ['viewer', 'editor', 'owner'] as const;
 export type Role = (typeof ROLES)[number];
 
 /**
- * The most each role may do, whatever its grant says. Owner decision Q7 is open; the default is
- * that owners and editors publish and viewers read. Only owners have `org:manage` (the org's settings).
+ * The most each role may do, whatever its grant says. Only owners have `org:manage` (the org's
+ * settings). Whether editors keep `content:publish` is the org's choice (owner decision Q7,
+ * `editorsPublish` in its settings; `effectiveScopes` in ./dispatch.ts applies it).
  */
 export const ROLE_SCOPES: Record<Role, readonly Scope[]> = {
   owner: SCOPES,
