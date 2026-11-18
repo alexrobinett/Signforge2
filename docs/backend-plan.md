@@ -160,7 +160,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
 - **Commands.** The socket adds `wake now` and `sleep now`, a temporary override for someone standing at a dark screen. They expire at the next scheduled change, at most 12 hours. `identify` (the screen shows its name for 10 seconds) and `restart` (the player reloads) are socket-only: a screen that is not connected misses them.
 - **Status.** The display's actual state and the power method that worked are reported on sync.
 
-**Offline alerts (M3-42).** A Cron Trigger every 5 minutes, the sync interval, looks for screens silent past their org's threshold (15 minutes by default, an org setting). Each opens an incident (`screen_incidents`, at most one open per screen) and emails the members the org's alert rule names; the screen's next sync clears it with one more email. The incident is written before the email, by one check only, so an alert goes out once per incident. Email is the only channel until the integrations proposal.
+**Offline alerts (M3-42).** A Cron Trigger every 5 minutes, the sync interval, looks for screens silent past their org's threshold (15 minutes by default, an org setting). Browser test screens (M3-41) are left out, since one goes quiet whenever its tab closes. Each opens an incident (`screen_incidents`, at most one open per screen) and emails the members the org's alert rule names; the screen's next sync clears it with one more email. The incident is written before the email, by one check only, so an alert goes out once per incident. Email is the only channel until the integrations proposal.
 
 ## Data sources
 

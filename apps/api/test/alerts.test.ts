@@ -25,9 +25,9 @@ async function orgWithTeam() {
   return { owner, org, addr };
 }
 
-async function pairedScreen(orgId: string, name: string, lastSeenAt: number) {
+async function pairedScreen(orgId: string, name: string, lastSeenAt: number, kind: 'device' | 'browser' = 'device') {
   const org = scoped(env.DB, orgId);
-  const screen = await org.screens.insert({ name, timezone: 'UTC', orientation: 'landscape', lastSeenAt });
+  const screen = await org.screens.insert({ name, timezone: 'UTC', orientation: 'landscape', lastSeenAt, kind });
   await org.screens.credentials.insert({ screenId: screen.id, secretHash: '0'.repeat(64) });
   return screen.id;
 }
@@ -88,6 +88,16 @@ describe('offline alerts', () => {
         .map((m) => m.to)
         .sort(),
     ).toEqual([addr.owner, addr.editor, addr.viewer].sort());
+  });
+
+  it('sends nothing for a browser test screen whose tab has closed', async () => {
+    const { org } = await orgWithTeam();
+    const start = Date.now();
+    await pairedScreen(org.id, 'Test tab', start, 'browser');
+    const outbox = new RecordingEmailSender();
+
+    await checkScreenAlerts(env, outbox, start + 60 * MIN);
+    expect(to(outbox, 'Test tab')).toEqual([]);
   });
 
   it('sends nothing with email off, and nothing for a revoked or never-seen screen', async () => {

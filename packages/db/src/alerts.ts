@@ -17,7 +17,8 @@ export interface AlertWork {
 
 /**
  * What the alert check has to do at `now`. A screen counts while it has an unrevoked credential;
- * `defaultUnreachableMs` applies to an org that has not set its own threshold.
+ * `defaultUnreachableMs` applies to an org that has not set its own threshold. A browser test screen
+ * (M3-41) never counts: it goes quiet whenever its tab closes.
  */
 export async function findAlertWork(d1: D1Database, now: number, defaultUnreachableMs: number): Promise<AlertWork> {
   const db = drizzle(d1);
@@ -42,7 +43,7 @@ export async function findAlertWork(d1: D1Database, now: number, defaultUnreacha
       .from(sc)
       .innerJoin(s.organization, eq(s.organization.id, sc.orgId))
       .leftJoin(s.orgSettings, eq(s.orgSettings.orgId, sc.orgId))
-      .where(and(eq(sc.status, 'active'), isNotNull(sc.lastSeenAt), lt(sc.lastSeenAt, sql`${now} - ${threshold}`), live, not(openIncident)))
+      .where(and(eq(sc.status, 'active'), eq(sc.kind, 'device'), isNotNull(sc.lastSeenAt), lt(sc.lastSeenAt, sql`${now} - ${threshold}`), live, not(openIncident)))
       .all(),
     db
       .select({
