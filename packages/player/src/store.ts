@@ -21,11 +21,13 @@ const blobKey = (sha: string) => `${BLOB_PREFIX}${sha}`;
  * hashing (about 2 ms per 64 KB on the Pi 4) never takes time from the spot on screen. Without
  * workers (unit tests in Node) it runs here.
  */
-async function fetchFile(req: DownloadRequest): Promise<void> {
+async function fetchFile(req: DownloadRequest, signal: AbortSignal): Promise<void> {
   if (typeof Worker === 'undefined') return download(await caches.open(BLOBS), req);
   const worker = new Worker(new URL('./download-worker.ts', import.meta.url), { type: 'module', name: 'sf-download' });
   try {
     await new Promise<void>((resolve, reject) => {
+      // Terminating the worker ends its transfer and anything it was about to store.
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
       worker.onmessage = (e: MessageEvent<DownloadResult>) => {
         if (e.data.ok) resolve();
         else reject(e.data.unauthorised ? new UnauthorisedError() : new Error(e.data.message));
@@ -173,13 +175,18 @@ export interface SyncOptions {
    * cleanup runs, after the downloads, so pins taken meanwhile count.
    */
   pinned?: Iterable<string>;
+  /** Stops the sync: no request continues, and nothing more is stored once it has aborted. */
+  signal?: AbortSignal;
 }
 
 /**
  * Fetch the manifest at `base`. If it is new, download and verify every missing file, then
  * make it active in one step. Any failure leaves the current manifest and files untouched.
  */
-export async function sync(base: string, { currentId, headers = {}, stallMs = STALL_MS, pinned = [] }: SyncOptions = {}): Promise<SyncResult> {
+export async function sync(
+  base: string,
+  { currentId, headers = {}, stallMs = STALL_MS, pinned = [], signal = new AbortController().signal }: SyncOptions = {},
+): Promise<SyncResult> {
   const get = (conditional: boolean) =>
     fetch(`${base}/manifest.json`, {
       // no-store keeps the browser's HTTP cache out of it, so the condition is ours to send.
@@ -187,7 +194,7 @@ export async function sync(base: string, { currentId, headers = {}, stallMs = ST
       // The device API refuses a session cookie, which a test screen on the CMS's hostname has.
       credentials: 'omit',
       headers: conditional && currentId ? { ...headers, 'if-none-match': `"${currentId}"` } : headers,
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
     });
   let res = await get(true);
   let text: string | undefined;
@@ -223,15 +230,16 @@ export async function sync(base: string, { currentId, headers = {}, stallMs = ST
   missingNow = missing.length;
   for (const sha of missing) {
     const type = next.files[sha]?.type ?? 'application/octet-stream';
-    await fetchFile({ url: `${base}/blobs/${sha}`, sha, type, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` }).catch(
+    await fetchFile({ url: `${base}/blobs/${sha}`, sha, type, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` }, signal).catch(
       (err: unknown) => {
-        if (err instanceof UnauthorisedError) throw err;
+        if (err instanceof UnauthorisedError || signal.aborted) throw err;
         throw new Error(`file ${sha.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`);
       },
     );
     missingNow--;
   }
 
+  signal.throwIfAborted();
   if (!same || rewrite) await (await caches.open(STATE)).put(ACTIVE, jsonResponse(text));
   // Every pass, not only on a change: a file pinned at the last change is dropped once released.
   await cleanup(blobs, next, pinned);

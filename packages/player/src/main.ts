@@ -600,6 +600,11 @@ function revoked(): Promise<void> {
     state.online = true;
     state.auth = 'revoked';
     const held = !!manifest || !!lastGood || pendingPlays() > 0;
+    // No content fetch may store or adopt anything after the wipe: stop the one in flight, and any retry.
+    contentDue = false;
+    contentAbort.abort(new Error('revoked'));
+    await contentFetch?.catch(() => undefined);
+    contentAbort = new AbortController();
     await credential?.revoke();
     setOverride(null);
     await wipeContent().catch((err: unknown) => console.warn('[sf] could not wipe the cache', err));
@@ -689,8 +694,8 @@ const socket = API
     })
   : undefined;
 
-/** Fetch the manifest; adopt it if new. Downloads every file it names that is missing. */
-async function fetchManifest(): Promise<void> {
+/** Fetch the manifest; adopt it if new. Downloads every file it names that is missing. `signal` stops it, adopting nothing. */
+async function fetchManifest(signal?: AbortSignal): Promise<void> {
   // While falling back, the manifest that failed counts as current: the server's answer is
   // 304 until it publishes something newer.
   const result = await sync(BASE, {
@@ -698,7 +703,9 @@ async function fetchManifest(): Promise<void> {
     headers: await deviceHeaders(),
     ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
     pinned: pins,
+    ...(signal ? { signal } : {}),
   });
+  if (signal?.aborted) return;
   if (result.changed && result.manifest) {
     console.info(`[sf] manifest ${result.manifest.id} active (${result.downloaded} files downloaded)`);
     adopt(result.manifest);
@@ -740,6 +747,9 @@ let lastFileCheck = Number.NEGATIVE_INFINITY;
 const content = wakeable();
 /** A sync asked for the content, and it has not been fetched since. */
 let contentDue = false;
+/** Stops the content worker's fetch in flight (a revoke), and the fetch itself while it runs. */
+let contentAbort = new AbortController();
+let contentFetch: Promise<void> | undefined;
 
 /**
  * The one worker that fetches content from the API: the manifest the server wants now, and its
@@ -752,11 +762,14 @@ async function contentLoop(): Promise<never> {
   return loopRestartingOnError('content', async () => {
     if (!contentDue) return content.wait(FILE_CHECK_MS);
     contentDue = false;
+    const { signal } = contentAbort;
     try {
-      await fetchManifest();
+      await (contentFetch = fetchManifest(signal));
       lastFileCheck = performance.now();
       failures = 0;
     } catch (err) {
+      // Stopped by a revoke, which also cancelled what was due.
+      if (signal.aborted) return;
       // Refused: the sync revokes.
       if (err instanceof UnauthorisedError) return poll.wake();
       contentDue = true;
@@ -765,6 +778,8 @@ async function contentLoop(): Promise<never> {
       console.warn('[sf] could not fetch the content', err);
       if (!manifest) status(`SignForge\nWaiting for content…\n${message}`);
       await content.wait(contentRetryMs(++failures, timing()));
+    } finally {
+      contentFetch = undefined;
     }
   });
 }

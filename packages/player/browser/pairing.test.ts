@@ -80,6 +80,37 @@ it('revoked: wipes what it holds and shows a code, then pairs again', async () =
   await p.until((s) => s.manifestId === content.manifest.id && s.played > 0, 15_000);
 });
 
+it('revoked while a first download retries: the transfer stops, and nothing of it is stored or played', async () => {
+  // A 2 MB file of the spot's own, sent slowly enough to be in flight when the revoke comes.
+  const content = h.content([{ id: 'a', durationMs: 800, asset: Buffer.alloc(2_000_000, 7) }]);
+  let fail = () => {};
+  const p = await h.openPlayer((server) => {
+    server.publish(content);
+    fail = server.intercept(/^\/content\/blobs\//, { status: 404 });
+  }, remote);
+  const blobs = () => p.server.requestsTo(/^\/content\/blobs\//).filter((r) => r.bearer);
+  await expect.poll(() => blobs().some((r) => r.status === 404), { timeout: 10_000 }).toBe(true);
+  fail();
+  p.server.intercept(/^\/content\/blobs\//, { bytesPerSecond: 200_000 });
+  const asset = content.manifest.spots.a!.kind === 'template' ? content.manifest.spots.a!.assets.file! : '';
+  await expect.poll(() => blobs().some((r) => r.path.endsWith(asset) && r.status === 200), { timeout: 10_000 }).toBe(true);
+  await p.until((s) => s.socket);
+
+  // Nothing played, nothing counted: the screen wipes and pairs where it is, without a reload.
+  p.server.revoke(FIXTURE_CREDENTIAL);
+  await p.until((s) => s.pairing !== '', 15_000);
+  const transfer = blobs().find((r) => r.path.endsWith(asset) && r.status === 200)!;
+  await expect.poll(() => transfer.abortedAt, { timeout: 5000 }).toBeDefined();
+  // Longer than the rest of the transfer would have taken.
+  await new Promise((r) => setTimeout(r, 11_000));
+  const s = await p.state();
+  expect(s.manifestId).toBe('');
+  expect(s.pairing).not.toBe('');
+  expect(await blobsHeld(p)).toBe(0);
+  expect(await p.page.evaluate(async () => !!(await (await caches.open('sf-state-v1')).match('/_sf/manifest/active')))).toBe(false);
+  expect(p.server.requestsTo(/^\/$/)).toHaveLength(1);
+});
+
 it('a 401 on sync with a credential is a revoke too', async () => {
   const content = h.content([{ id: 'a', durationMs: 800 }]);
   const p = await h.openPlayer((server) => server.publish(content), remote);
