@@ -180,3 +180,24 @@ describe('set_template_version_status', () => {
     expect((await call('set_template_version_status', { templateVersionId: draft, status: 'retired' })).version.status).toBe('retired');
   });
 });
+
+describe('list_templates', () => {
+  it('pages through names in any script', async () => {
+    const intl = await seedOrg(env.DB, 'tpl-intl');
+    const as: Caller = { ...owner, org: scoped(env.DB, intl.orgId) };
+    const ids = await upload((sha) => orgBlobKey(intl.orgId, sha), html(), sources());
+    const names = ['Zürich', '東京', 'القاهرة', '😀 Promo'];
+    for (const [i, name] of names.entries()) await call('register_template_version', { manifest: manifest({ id: `intl-${i}`, name }), ...ids }, as);
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const out = await call<{ templates: { owner: string; name: string }[]; next: string | null }>('list_templates', { limit: 1, cursor }, as);
+      seen.push(...out.templates.filter((t) => t.owner !== 'base').map((t) => t.name));
+      cursor = out.next ?? undefined;
+    } while (cursor);
+    // The seeded org has its own template too.
+    expect(seen.filter((n) => names.includes(n)).sort()).toEqual([...names].sort());
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+});

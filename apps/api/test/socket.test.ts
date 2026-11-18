@@ -83,6 +83,14 @@ async function until(check: () => boolean, ms = 3000) {
   }
 }
 
+/** Wait until the screen's row reports `manifest`. */
+async function reportedIs(s: Screen, manifest: string) {
+  const reported = async () => (await s.seed.scope.screens.get(s.seed.screen))?.reportedManifestId;
+  const end = Date.now() + 3000;
+  while ((await reported()) !== manifest && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+  expect(await reported()).toBe(manifest);
+}
+
 const caller = (s: Screen, role: Caller['role'] = 'owner'): Caller => ({
   org: scoped(env.DB, s.seed.orgId),
   role,
@@ -188,13 +196,40 @@ describe('GET /v1/device/ws', () => {
   it('writes what the screen applied through to D1', async () => {
     const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
     s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
-    const reported = async () => (await scoped(env.DB, a.seed.orgId).screens.get(a.seed.screen))?.reportedManifestId;
-    const end = Date.now() + 3000;
-    while ((await reported()) !== M2 && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
-    expect(await reported()).toBe(M2);
+    await reportedIs(a, M2);
     // Nothing of org B's changed.
     expect((await scoped(env.DB, b.seed.orgId).screens.get(b.seed.screen))?.reportedManifestId).toBeNull();
     s.ws.close(1000);
+  });
+
+  it("leaves the screen's version alone, so an editor opened before the rollout still saves", async () => {
+    const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
+    const before = (await a.seed.scope.screens.get(a.seed.screen))!;
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await reportedIs(a, M1);
+    await sync(a.credential, { ...syncBody(), manifest: { active: M1, filesMissing: 0 } });
+    expect(await a.seed.scope.screens.get(a.seed.screen)).toMatchObject({ rowVersion: before.rowVersion, updatedAt: before.updatedAt });
+    const r = await dispatch(registry, 'rename_screen', { screenId: a.seed.screen, name: 'Lobby', ifVersion: before.rowVersion }, caller(a, 'editor'));
+    expect(r.ok).toBe(true);
+    s.ws.close(1000);
+  });
+
+  it('shows the manifest the screen reported last, over either transport', async () => {
+    const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
+    await dispatch(registry, 'publish_manifest_to_screen', { screenId: a.seed.screen, manifestId: M2 }, caller(a));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await reportedIs(a, M1);
+    // The socket drops; the screen adopts M2 over HTTP and says so in its heartbeat.
+    s.ws.close(1000);
+    await sync(a.credential, { ...syncBody(), manifest: { active: M2, filesMissing: 0 } });
+    await reportedIs(a, M2);
+    const r = await dispatch(registry, 'get_screen', { screenId: a.seed.screen }, caller(a));
+    expect(r.ok && (r.output as { screen: { state: { kind: string } } }).screen.state.kind).toBe('online');
+    // It falls back to M1 and the reopened socket says so: this object last wrote M1 too, and still writes it.
+    const again = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
+    again.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await reportedIs(a, M1);
+    again.ws.close(1000);
   });
 
   it("does not reach another screen's socket", async () => {
