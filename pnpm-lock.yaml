@@ -272,6 +272,9 @@ importers:
       '@signforge/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+      '@signforge/media':
+        specifier: workspace:*
+        version: link:../../packages/media
       '@tanstack/react-router':
         specifier: ^1.170.46
         version: 1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1)

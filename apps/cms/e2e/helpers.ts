@@ -50,15 +50,24 @@ export async function hydrated(page: Page) {
   await expect(page.locator('body[data-hydrated]')).toBeAttached({ timeout: 30_000 });
 }
 
+/** Each with E2E_SCREENSHOTS: a screenshot in the light theme, then in the dark. */
+export async function shots(page: Page, name: string) {
+  await screenshot(page, `${name}-light`);
+  if (!process.env.E2E_SCREENSHOTS) return;
+  await page.evaluate(() => document.documentElement.classList.add('dark'));
+  await screenshot(page, `${name}-dark`);
+  await page.evaluate(() => document.documentElement.classList.remove('dark'));
+}
+
 /**
- * Sign in by email code straight against the API, under the spec's own client address (through
- * the dev CMS every request comes from one address, so the specs would share one sign-in rate
- * limit), and give the browser the session cookies.
+ * Sign in by email code straight against the API, as a client at `address` (through the dev CMS
+ * every request comes from one address, so a spec that signs in this way has its own rate limit),
+ * and give the browser the session cookies.
  */
 export async function signInAs(page: Page, email: string, address: string) {
   const api = `http://127.0.0.1:${API_PORT}/api`;
   const headers = { 'cf-connecting-ip': address };
-  // Its own request context, so the spec's other API calls go without the session cookie.
+  // Its own request context, so a spec's device calls go without the session cookie.
   const request = await playwrightRequest.newContext();
   const sent = await request.post(`${api}/auth/email-otp/send-verification-otp`, { headers, data: { email, type: 'sign-in' } });
   expect(sent.status()).toBe(200);

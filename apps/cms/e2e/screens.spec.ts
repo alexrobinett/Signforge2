@@ -1,5 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { fillUntilEnabled, hydrated, screenshot, signInAs } from './helpers';
+import { expect, test, type APIRequestContext } from '@playwright/test';
+import { fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -41,14 +41,6 @@ async function sync(request: APIRequestContext, credential: string, display = { 
   });
   expect(res.status()).toBe(200);
   return (await res.json()) as { commands: unknown[] };
-}
-
-async function shots(page: Page, name: string) {
-  await screenshot(page, `${name}-light`);
-  if (!process.env.E2E_SCREENSHOTS) return;
-  await page.evaluate(() => document.documentElement.classList.add('dark'));
-  await screenshot(page, `${name}-dark`);
-  await page.evaluate(() => document.documentElement.classList.remove('dark'));
 }
 
 test('pair a screen from the empty Screens page, watch it come online, wake, identify, set its hours and revoke it', async ({ page, request }) => {
