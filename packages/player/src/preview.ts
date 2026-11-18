@@ -9,13 +9,14 @@
  * player's own origin.
  *
  * A draft becomes the manifest playing once all its files are at hand: posted with it, or fetched
- * from `<cms>/api/blobs/<sha256>` with the user's session. If the spot on screen is in the new draft
+ * from the CMS (`sessionBlobPath`) with the user's session. If the spot on screen is in the new draft
  * it is updated in place at once (Slot.update); otherwise the draft shows at the next spot.
  */
 import {
   PREVIEW_PROTOCOL,
   parsePreviewHostMessage,
   requiredFiles,
+  sessionBlobPath,
   type PreviewDraftMessage,
   type PreviewPlayerMessage,
   type ScreenManifest,
@@ -73,7 +74,7 @@ export function startPreview(hooks: PreviewHooks): Preview {
       [...requiredFiles(msg.manifest)].map(async (sha) => {
         let blob = msg.files?.[sha] ?? files.get(sha) ?? previous.get(sha);
         if (!blob) {
-          const res = await fetch(`${CMS_ORIGIN}/api/blobs/${sha}`, { credentials: 'include', signal: AbortSignal.timeout(20_000) });
+          const res = await fetch(`${CMS_ORIGIN}${sessionBlobPath(sha)}`, { credentials: 'include', signal: AbortSignal.timeout(20_000) });
           if (!res.ok) throw new Error(`file ${sha.slice(0, 12)}: ${res.status}`);
           blob = await res.blob();
         }

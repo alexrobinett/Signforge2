@@ -45,7 +45,7 @@ interface Preview {
 const blobRequests: string[] = [];
 
 /**
- * Open a page at `origin` that frames the player in preview mode. `/api/blobs/<sha>` on cms.test
+ * Open a page at `origin` that frames the player in preview mode. `/api/blobs/v2/<sha>` on cms.test
  * serves the content's files with CORS for the player's origin, as a same-site deployment would
  * with the session cookie. `extra` routes more paths.
  */
@@ -57,7 +57,7 @@ async function openPreview(origin: string, content?: Content, extra: Record<stri
   blobRequests.length = 0;
   await page.context().route(/^http:\/\/(cms|evil)\.test\//, (route) => {
     const url = new URL(route.request().url());
-    const blob = /^\/api\/blobs\/([0-9a-f]{64})$/.exec(url.pathname);
+    const blob = /^\/api\/blobs\/v2\/([0-9a-f]{64})$/.exec(url.pathname);
     if (url.origin === CMS && blob) {
       blobRequests.push(blob[1]!);
       const body = content?.blobs.get(blob[1]!);

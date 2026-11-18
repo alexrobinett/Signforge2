@@ -7,7 +7,7 @@ import { isId, type DataSnapshot } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { baseBlobKey, blobHeaders, manifestKey, orgBlobKey } from '../r2';
+import { baseBlobKey, blobHeaders, manifestKey, matches, orgBlobKey } from '../r2';
 import { deviceAuth, type DeviceEnv } from './auth';
 import { fileManifests, screenManifests } from './manifests';
 import { pairPoll, pairStart } from './pairing';
@@ -18,15 +18,6 @@ const SHA256 = /^[0-9a-f]{64}$/;
 
 const notFound = (error: string) =>
   new Response(JSON.stringify({ error }), { status: 404, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-
-/** Whether an `If-None-Match` value names this ETag. */
-function matches(ifNoneMatch: string | undefined, etag: string): boolean {
-  if (!ifNoneMatch) return false;
-  return ifNoneMatch.split(',').some((t) => {
-    const tag = t.trim().replace(/^W\//, '');
-    return tag === '*' || tag === etag;
-  });
-}
 
 export const device = new Hono<DeviceEnv>();
 
@@ -77,7 +68,9 @@ device.get('/blobs/:sha256', async (c) => {
   if (!obj && (isCatalogueFontFile(sha) || manifests.some((m) => m.baseHtml.has(sha)))) obj = await c.env.BLOBS.get(baseBlobKey(sha));
   if (!obj) return notFound('file not found');
 
-  return new Response(obj.body, { headers: blobHeaders(sha, listed.files.get(sha) || obj.httpMetadata?.contentType || 'application/octet-stream', obj.size) });
+  // A screen keeps what it fetched in its own offline store, keyed by hash, so a file never changes under it.
+  const type = listed.files.get(sha) || obj.httpMetadata?.contentType || 'application/octet-stream';
+  return new Response(obj.body, { headers: blobHeaders(sha, type, obj.size, 'private, max-age=31536000, immutable') });
 });
 
 device.get('/data/:file', async (c) => {

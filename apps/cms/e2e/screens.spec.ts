@@ -1,6 +1,8 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
-import { API_PORT } from './servers';
+import { axe, fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
+import { API_PORT, RUN_DIR } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.11';
@@ -23,15 +25,15 @@ async function startPairing(request: APIRequestContext) {
   };
 }
 
-/** One sync, as a player with nothing to play would send it. */
-async function sync(request: APIRequestContext, credential: string, display = { on: true }) {
+/** One sync, as a player playing `active` (by default nothing) would send it. */
+async function sync(request: APIRequestContext, credential: string, display = { on: true }, active?: string) {
   const res = await request.post(`${DEVICE}/sync`, {
     headers: { authorization: `Bearer ${credential}` },
     data: {
       seq: 0,
       epoch: 'e2e',
       player: { version: '0.0.0-e2e', manifestSchemas: [2], protocols: [1, 2] },
-      manifest: { filesMissing: 0 },
+      manifest: { ...(active ? { active } : {}), filesMissing: 0 },
       display,
       deviceTime: new Date().toISOString(),
       clock: { offsetMs: 0, trusted: true },
@@ -41,6 +43,20 @@ async function sync(request: APIRequestContext, credential: string, display = { 
   });
   expect(res.status()).toBe(200);
   return (await res.json()) as { commands: unknown[] };
+}
+
+/**
+ * As if the screen stopped syncing `minutes` ago: its last sync moved back in the run's local D1,
+ * which the dev API reads (`e2e/global-setup.ts`). Waiting out the org's 5-minute minimum would do the same, slowly.
+ */
+function stopSyncing(screenId: string, minutes: number) {
+  const sql = `UPDATE screens SET last_seen_at = last_seen_at - ${minutes * 60_000} WHERE id = '${screenId}'`;
+  const run = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'dev', '--persist-to', `${RUN_DIR}state`, '--command', sql], {
+    cwd: fileURLToPath(new URL('../../api/', import.meta.url)),
+    env: { ...process.env, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' },
+    encoding: 'utf8',
+  });
+  expect(run.status, run.stderr).toBe(0);
 }
 
 test('pair a screen from the empty Screens page, watch it come online, wake, identify, set its hours and revoke it', async ({ page, request }) => {
@@ -224,4 +240,47 @@ test('an edit keeps a change someone else made while the form was open, and refu
   await settings.getByRole('button', { name: 'Reload' }).click();
   await expect(settings).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Front lobby', level: 1 })).toBeVisible();
+});
+
+test('a screen that stops syncing turns unreachable on the open Screens page, without a reload', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-fleet-${Date.now()}@example.com`, ADDRESS);
+  await page.goto('/');
+  await fillUntilEnabled(page, 'Organization name', 'Westside Bakery', 'Create organization');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page.getByRole('heading', { name: 'Westside Bakery', level: 1 })).toBeVisible();
+
+  // A screen paired, published to and playing it.
+  const pairing = await startPairing(request);
+  const claimed = await page.request.post('/api/tools/claim_screen', {
+    data: { code: pairing.code, name: 'Window', timezone: 'UTC', orientation: 'landscape' },
+  });
+  expect(claimed.status(), await claimed.text()).toBe(200);
+  const screenId = ((await claimed.json()) as { screen: { id: string } }).screen.id;
+  const credential = await pairing.credential();
+  await sync(request, credential, { on: true }, await publishImage(page, screenId));
+
+  await page.goto('/screens');
+  await hydrated(page);
+  const tile = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Window' }) });
+  await expect(tile.getByText('Online')).toBeVisible();
+  await expect(tile.getByText('Playing Welcome · as scheduled')).toBeVisible();
+  await page.evaluate(() => Object.assign(window, { sfStayed: true }));
+
+  // A publish to it, which it plays: the poll sees the new version and the page reads what it shows.
+  await sync(request, credential, { on: true }, await publishImage(page, screenId, 'Specials'));
+  await expect(tile.getByText('Playing Specials · as scheduled')).toBeVisible({ timeout: 30_000 });
+
+  // It stops syncing; the page, left open, says so within a poll.
+  stopSyncing(screenId, 20);
+  await expect(tile.getByText('Unreachable 20 min · still playing Specials')).toBeVisible({ timeout: 30_000 });
+  await expect(tile.getByText('Online')).toBeHidden();
+  expect(await page.evaluate(() => 'sfStayed' in window)).toBe(true);
+  await axe(page);
+  await shots(page, '18-screens-went-unreachable');
+  await page.setViewportSize({ width: 412, height: 915 });
+  await axe(page);
+  await shots(page, '19-phone-screens-went-unreachable');
 });

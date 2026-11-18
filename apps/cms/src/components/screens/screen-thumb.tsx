@@ -3,6 +3,7 @@
  * the spot's name on the template's dark frame. Not a render: live rendered thumbnails wait for
  * `PlayerStage` (M3-16).
  */
+import { sessionBlobPath } from '@signforge/contract';
 import { MoonIcon } from 'lucide-react';
 import type { ScreenView } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
@@ -30,7 +31,7 @@ export function ScreenThumb({
             <MoonIcon className={size === 'row' ? 'size-3' : 'size-4'} aria-hidden /> Asleep
           </span>
         ) : s.spot?.image ? (
-          <img src={`/api/blobs/${s.spot.image}`} alt="" className="size-full object-cover" loading="lazy" />
+          <img src={sessionBlobPath(s.spot.image)} alt="" className="size-full object-cover" loading="lazy" />
         ) : (
           <span className={cn('flex flex-col items-center gap-1 px-3 text-center', size === 'row' && 'gap-0')}>
             <span className={cn('font-semibold', size === 'row' ? 'line-clamp-2 text-[10px] leading-tight' : 'text-lg leading-snug')}>

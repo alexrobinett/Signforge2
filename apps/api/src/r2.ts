@@ -9,14 +9,16 @@ export { baseBlobKey, manifestKey, orgBlobKey } from '@signforge/tools';
  * keeps the stored type, the CSP sandbox gives any document an opaque origin and no script,
  * and markup types download instead of rendering. The player and the preview fetch the bytes
  * and never navigate to these URLs, so none of this changes what a screen shows.
+ *
+ * `cacheControl` is the route's: each must be `private`, since every response needs a session or
+ * a credential and no shared cache may keep it.
  */
-export function blobHeaders(sha: string, contentType: string, size: number): Record<string, string> {
+export function blobHeaders(sha: string, contentType: string, size: number, cacheControl: string): Record<string, string> {
   const headers: Record<string, string> = {
     'content-type': contentType,
     'content-length': String(size),
     etag: `"${sha}"`,
-    // private: the response needs a session or a credential, so no shared cache may keep it.
-    'cache-control': 'private, max-age=31536000, immutable',
+    'cache-control': cacheControl,
     'x-content-type-options': 'nosniff',
     'content-security-policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:",
   };
@@ -26,3 +28,12 @@ export function blobHeaders(sha: string, contentType: string, size: number): Rec
 
 /** Types a browser renders as a document that can carry script. */
 const MARKUP = /^\s*(text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml)\b/i;
+
+/** Whether an `If-None-Match` value names this ETag. */
+export function matches(ifNoneMatch: string | undefined, etag: string): boolean {
+  if (!ifNoneMatch) return false;
+  return ifNoneMatch.split(',').some((t) => {
+    const tag = t.trim().replace(/^W\//, '');
+    return tag === '*' || tag === etag;
+  });
+}

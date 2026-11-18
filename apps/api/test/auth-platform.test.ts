@@ -71,7 +71,10 @@ describe('email', () => {
 
 describe("packages/db's migrations", () => {
   it('hold every table and column Better Auth needs for our options', async () => {
-    const plan = await getMigrations({ ...authOptions({ email: new RecordingEmailSender(), appUrl: 'https://cms.test' }), database: env.DB });
+    const plan = await getMigrations({
+      ...authOptions({ email: new RecordingEmailSender(), appUrl: 'https://cms.test', audit: async () => {} }),
+      database: env.DB,
+    });
     expect(plan.toBeCreated.map((t) => t.table)).toEqual([]);
     expect(plan.toBeAdded.map((t) => `${t.table}: ${Object.keys(t.fields).join(', ')}`)).toEqual([]);
     expect(plan.toBeAddedIndexes.map((i) => i.name)).toEqual([]);

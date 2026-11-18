@@ -1,14 +1,8 @@
-import { createHash } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
-import { png } from '@signforge/media/testing';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
-import { ADMIN_TOKEN, API_PORT } from './servers';
+import { axe, fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.31';
-
-const sha256 = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
 
 /** What the player in the tab says about itself (`window.__sf`). */
 const player = (tab: Page) =>
@@ -34,32 +28,6 @@ const kept = (tab: Page) =>
     db.close();
     return { credential: credential !== undefined, files: (await (await caches.open('sf-blobs-v1')).keys()).length };
   });
-
-/** Publish one image spot to the screen, as `sf push` does until the CMS publishes (M3-18). */
-async function publishImage(page: Page, screenId: string): Promise<string> {
-  const admin = `http://127.0.0.1:${API_PORT}/admin/screens/${screenId}`;
-  const headers = { authorization: `Bearer ${ADMIN_TOKEN}` };
-  const image = await png(640, 360);
-  const file = sha256(image);
-  const body: Omit<ScreenManifest, 'id'> = {
-    schema: MANIFEST_SCHEMA,
-    generatedAt: new Date().toISOString(),
-    screen: { id: screenId, name: 'Test screen', timezone: 'UTC', orientation: 'landscape' },
-    files: { [file]: { size: image.byteLength, type: 'image/png' } },
-    templates: {},
-    spots: { welcome: { id: 'welcome', name: 'Welcome', kind: 'image', file, fit: 'cover', durationMs: 5000 } },
-    playlists: { main: { id: 'main', name: 'Main', transition: { type: 'cut' }, items: [{ spot: 'welcome' }] } },
-    dataSources: {},
-    schedule: [],
-    defaultPlaylist: 'main',
-  };
-  const manifest = { ...body, id: sha256(manifestIdInput(body)) };
-  const put = await page.request.put(`${admin}/blobs/${file}`, { headers: { ...headers, 'content-type': 'image/png' }, data: image });
-  expect(put.status(), await put.text()).toBe(200);
-  const published = await page.request.put(`${admin}/manifest`, { headers, data: JSON.stringify(manifest) });
-  expect(published.status(), await published.text()).toBe(200);
-  return manifest.id;
-}
 
 test('a new org opens a test screen, pairs it, publishes to it and sees it play in under a minute; a revoke wipes it', async ({ page }) => {
   test.setTimeout(120_000);

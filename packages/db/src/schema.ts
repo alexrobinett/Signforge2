@@ -734,7 +734,7 @@ export const auditLog = sqliteTable(
  * Idempotency keys: one row per creating tool call made with a key, written in the same batch as
  * the change and its audit row. A retry with the same key gets `output_json` back and writes
  * nothing; the same key with another action or input is refused. Keyed per org, so two orgs'
- * keys never meet. Kept indefinitely for now; expiring old keys is M3-24's.
+ * keys never meet. Deleted after about 7 days by a daily job (`expireIdempotencyKeys`, ./retention.ts).
  */
 export const idempotencyKeys = sqliteTable(
   'idempotency_keys',
