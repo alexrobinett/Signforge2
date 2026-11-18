@@ -11,6 +11,7 @@ export interface CalendarOptions {
   horizonDays?: number;
   maxBytes?: number;
   maxIterations?: number;
+  maxPastIterations?: number;
   maxEvents?: number;
 }
 
@@ -30,7 +31,7 @@ interface Occurrence extends CalendarEvent {
  * An iCalendar feed (Google Calendar, Outlook, ...) as a CalendarFeed: the events that have not
  * ended by `now` and start within the horizon, recurring ones expanded, soonest first.
  *
- * Times follow datad.py: a TZID that names an IANA zone is used directly; otherwise the file's
+ * Times: a TZID that names an IANA zone is used directly; otherwise the file's
  * VTIMEZONE definition for it (Outlook's "Eastern Standard Time"); otherwise, like floating
  * times, X-WR-TIMEZONE; otherwise UTC.
  */
@@ -49,7 +50,7 @@ export function parseCalendar(text: string, options: CalendarOptions): CalendarF
   if (!roots.some((r) => r.name === 'vcalendar')) throw new FeedError('malformed', 'no VCALENDAR in the feed');
 
   const nowMs = options.now.getTime();
-  const window = { nowMs, endMs: nowMs + o.horizonDays * DAY_MS, maxIterations: o.maxIterations };
+  const window = { nowMs, endMs: nowMs + o.horizonDays * DAY_MS, maxIterations: o.maxIterations, maxPastIterations: o.maxPastIterations };
   const out: Occurrence[] = [];
 
   for (const cal of roots) {
@@ -92,6 +93,7 @@ interface Window {
   nowMs: number;
   endMs: number;
   maxIterations: number;
+  maxPastIterations: number;
 }
 
 function expand(event: ICAL.Event, defaultTz: string, w: Window, out: Occurrence[]): void {
@@ -109,18 +111,27 @@ function expand(event: ICAL.Event, defaultTz: string, w: Window, out: Occurrence
 
   const startHint = tzidOf(event.component, 'dtstart');
   const seen = new Set<ICAL.Event>();
-  const it = event.iterator();
+  const from = skipAhead(event, startHint, defaultTz, w.nowMs);
+  const fromMs = sortMs(from, startHint, defaultTz);
+  const it = event.iterator(from);
   let reachedEnd = false;
-  for (let i = 0; i < w.maxIterations; i++) {
+  // What is left of the past after skipping ahead (all of it, for a series that cannot skip) is
+  // stepped through on a budget of its own; the cap that matters counts from now.
+  let past = 0;
+  let ahead = 0;
+  while (ahead < w.maxIterations && past < w.maxPastIterations) {
     const next = it.next();
     if (!next) {
       reachedEnd = true;
       break;
     }
-    if (sortMs(next, startHint, defaultTz) >= w.endMs) {
+    const startMs = sortMs(next, startHint, defaultTz);
+    if (startMs >= w.endMs) {
       reachedEnd = true;
       break;
     }
+    if (startMs < w.nowMs) past++;
+    else ahead++;
     const d = event.getOccurrenceDetails(next);
     if (d.item !== event) {
       seen.add(d.item);
@@ -129,13 +140,66 @@ function expand(event: ICAL.Event, defaultTz: string, w: Window, out: Occurrence
       push(event, d.startDate, d.endDate);
     }
   }
-  // A moved instance whose original slot lies beyond the horizon (or past the iteration cap) can
-  // still land inside it.
+  // A moved instance whose original slot lies before where the steps began, beyond the horizon,
+  // or past the iteration cap can still land inside it.
   for (const ex of Object.values(event.exceptions)) {
-    if (!seen.has(ex) && (!reachedEnd || sortMs(ex.recurrenceId, tzidOf(ex.component, 'recurrence-id') ?? startHint, defaultTz) >= w.endMs)) {
-      push(ex, ex.startDate, null);
-    }
+    if (seen.has(ex)) continue;
+    const slotMs = sortMs(ex.recurrenceId, tzidOf(ex.component, 'recurrence-id') ?? startHint, defaultTz);
+    if (!reachedEnd || slotMs < fromMs || slotMs >= w.endMs) push(ex, ex.startDate, null);
   }
+}
+
+const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+
+/**
+ * How many days a rule takes to repeat its pattern exactly, in wall-clock days, or undefined if it
+ * does not (monthly and yearly rules, whose months differ) or must be counted from its first
+ * occurrence (COUNT). A daily or weekly rule repeats every interval; a sub-daily one every day on
+ * which a whole number of its intervals ends.
+ */
+function periodDays(rule: ICAL.Recur): number | undefined {
+  if (rule.count) return undefined;
+  const k = rule.interval || 1;
+  switch (rule.freq) {
+    case 'DAILY':
+      return k;
+    case 'WEEKLY':
+      return 7 * k;
+    case 'HOURLY':
+      return k / gcd(k, 24);
+    case 'MINUTELY':
+      return k / gcd(k, 1440);
+    case 'SECONDLY':
+      return k / gcd(k, 86_400);
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Where to start stepping a series: its first occurrence moved on by whole periods to a little
+ * before `nowMs`, so a series begun years ago costs what a new one does. ical.js steps from the
+ * first occurrence and cannot skip itself. Moving by whole periods of wall-clock days keeps every
+ * later occurrence in step, across DST. The moved start may not itself match the rule (a weekday
+ * rule moved to a Saturday), so it is kept a day and an event's length before `nowMs` (and the
+ * 12 hours an all-day event lasts past its end, `LAST_ZONE_MS`), where anything it yields is over
+ * and dropped. A rule with more than one RRULE, or one that cannot be
+ * moved (`periodDays`), starts from its first occurrence.
+ */
+function skipAhead(event: ICAL.Event, startHint: string | undefined, defaultTz: string, nowMs: number): ICAL.Time {
+  const first = event.startDate;
+  const rules = event.component.getAllProperties('rrule');
+  if (rules.length !== 1) return first;
+  const rule = rules[0]?.getFirstValue();
+  const days = rule instanceof ICAL.Recur ? periodDays(rule) : undefined;
+  if (!days) return first;
+  const lengthMs = event.duration.toSeconds() * 1000;
+  const marginMs = DAY_MS + lengthMs + (first.isDate ? LAST_ZONE_MS : 0);
+  const n = Math.floor((nowMs - marginMs - sortMs(first, startHint, defaultTz)) / (days * DAY_MS));
+  if (n <= 0) return first;
+  const from = first.clone();
+  from.adjust(n * days, 0, 0, 0);
+  return from;
 }
 
 const isCancelled = (e: ICAL.Event) => String(e.component.getFirstPropertyValue('status') ?? '').toUpperCase() === 'CANCELLED';
@@ -184,7 +248,7 @@ function sortMs(t: ICAL.Time, tzid: string | undefined, defaultTz: string): numb
 /**
  * One occurrence of `item`. `end` is given for an expanded instance of a series; otherwise the
  * item's own DTEND or DURATION is used, and failing both, a day for an all-day event and an
- * hour for a timed one, as datad.py did.
+ * hour for a timed one.
  */
 function occurrence(item: ICAL.Event, start: ICAL.Time, end: ICAL.Time | null, defaultTz: string): Occurrence | null {
   const c = item.component;

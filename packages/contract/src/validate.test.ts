@@ -38,6 +38,7 @@ import {
   validateSpotData,
   validateSyncRequest,
   MAX_SYNC_PLAY_COUNTS,
+  MAX_SNAPSHOT_BYTES,
   validateSyncResponse,
   validateTemplateManifest,
   type BrandKit,
@@ -191,7 +192,8 @@ const validSyncResponse = (): SyncResponse => ({
   ackSeq: 3,
   desiredManifest: 'm1',
   socketTicket: 't',
-  snapshots: [{ id: 'feed', version: 1_763_384_400_000, fetchedAt: '2026-11-17T13:00:00Z', data: { headline: 'Hi' } }],
+  snapshots: [{ id: 'feed', version: 1_763_384_400_000, fetchedAt: '2026-11-17T13:00:00Z', checkedAt: '2026-11-17T13:05:00Z', data: { headline: 'Hi' } }],
+  checked: { other: { version: 1_763_384_000_000, checkedAt: '2026-11-17T13:04:00Z' } },
   commands: [{ type: 'reload' }, { type: 'display', override: null }],
 });
 
@@ -462,13 +464,32 @@ describe('takeovers', () => {
 });
 
 describe('snapshots and device bodies', () => {
-  it('rejects a snapshot without an id, version, time or data', () => {
+  it('rejects a snapshot without an id, version, times or data', () => {
     expect(validateDataSnapshot({ id: '../x', version: -1, fetchedAt: 'yesterday' })).toEqual([
       'snapshot id "../x" is not a valid id',
       'snapshot version must be a whole number, 0 or more',
       'snapshot fetchedAt must be an ISO 8601 time',
+      'snapshot checkedAt must be an ISO 8601 time',
       'snapshot has no data',
     ]);
+  });
+
+  it('caps a snapshot at 64 kB of data', () => {
+    const snap = validSyncResponse().snapshots[0]!;
+    const fill = (n: number) => ({ ...snap, data: { t: 'é'.repeat(n) } });
+    // {"t":"…"} is 8 bytes around the text, and é is 2 bytes in UTF-8.
+    expect(validateDataSnapshot(fill((MAX_SNAPSHOT_BYTES - 8) / 2))).toEqual([]);
+    expect(validateDataSnapshot(fill((MAX_SNAPSHOT_BYTES - 8) / 2 + 1))).toEqual([`snapshot data is over ${MAX_SNAPSHOT_BYTES} bytes as JSON`]);
+  });
+
+  it('tells a screen when a snapshot it holds was last checked', () => {
+    expect(validateSyncResponse({ ...validSyncResponse(), checked: undefined })).toEqual([]);
+    expect(
+      validateSyncResponse({
+        ...validSyncResponse(),
+        checked: { '../x': { version: 1, checkedAt: 'now' }, feed: { version: -1, checkedAt: '2026-11-17T13:04:00Z' } },
+      }),
+    ).toEqual(['checked: "../x" must be a source id with a version and checkedAt', 'checked: "feed" must be a source id with a version and checkedAt']);
   });
 
   it('carries the seq epoch and the clock both ways', () => {

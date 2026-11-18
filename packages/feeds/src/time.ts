@@ -58,7 +58,7 @@ const pad = (n: number, width = 2) => String(Math.abs(n)).padStart(width, '0');
 export const isoDate = (w: Pick<Wall, 'year' | 'month' | 'day'>) => `${pad(w.year, 4)}-${pad(w.month)}-${pad(w.day)}`;
 
 /**
- * An ISO 8601 instant written in the event's own offset, as datad.py wrote it:
+ * An ISO 8601 instant written in the event's own offset:
  * `2026-11-18T10:00:00-05:00`, and `+00:00` for UTC.
  */
 export function isoInstant(ms: number, offsetMs: number): string {

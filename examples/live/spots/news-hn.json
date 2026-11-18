@@ -11,6 +11,10 @@
     "items": {
       "source": "news-hn",
       "path": "items"
+    },
+    "language": {
+      "source": "news-hn",
+      "path": "language"
     }
   }
 }

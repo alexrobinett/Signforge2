@@ -4,6 +4,7 @@
  */
 import {
   readPath,
+  SNAPSHOT_STALE_MS,
   requiredFiles,
   validateBoundValue,
   type DataSnapshot,
@@ -228,21 +229,23 @@ export interface Rejected {
 }
 
 /**
- * The data a template spot plays with: its static values, with each bound field replaced by the
- * latest snapshot value when that value fits the field (`validateBoundValue`). A missing source
- * leaves the static fallback in place quietly; a value that is missing at its path or does not
- * fit also leaves the fallback, and is listed in `rejected` so a broken feed can be seen.
+ * The data a template spot plays with at `now`: its static values, with each bound field replaced
+ * by the latest snapshot value when that value fits the field (`validateBoundValue`). A missing
+ * source, or a snapshot the server last confirmed more than `SNAPSHOT_STALE_MS` before `now`,
+ * leaves the static fallback in place quietly; a value that is missing at its path or does not fit
+ * also leaves the fallback, and is listed in `rejected` so a broken feed can be seen.
  */
 export function resolveSpotData(
   spot: Extract<Spot, { kind: 'template' }>,
   fields: unknown,
   snapshots: ReadonlyMap<string, DataSnapshot>,
+  now: number,
 ): { data: Record<string, unknown>; rejected: Rejected[] } {
   const data = { ...spot.data };
   const rejected: Rejected[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    if (!snapshot) continue;
+    if (!snapshot || now - Date.parse(snapshot.checkedAt) > SNAPSHOT_STALE_MS) continue;
     const v = readPath(snapshot.data, b.path);
     const problems = validateBoundValue(fields, field, v);
     if (problems.length) rejected.push(...problems.map((problem) => ({ source: b.source, problem })));

@@ -8,6 +8,7 @@ import { parseCalendar, type CalendarOptions } from './ical';
 import { parseNews, type NewsOptions } from './news';
 
 export { FeedError, LIMITS, type FeedErrorCode } from './errors';
+export { FEED_URL_PROBLEMS, feedUrlProblem, type FeedUrlProblem } from './url';
 export { parseCalendar, parseNews, type CalendarOptions, type NewsOptions };
 
 export type FeedFormat = 'ical' | 'rss';

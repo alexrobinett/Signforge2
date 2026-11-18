@@ -85,7 +85,13 @@ describe('the clock', () => {
 
 describe('snapshots', () => {
   it('arrive on the sync, and a changed one reaches the screen on its next sync', async () => {
-    const snap = (headline: string, version: number) => ({ id: 'news', version, fetchedAt: new Date(version).toISOString(), data: { headline } });
+    const snap = (headline: string, version: number) => ({
+      id: 'news',
+      version,
+      fetchedAt: new Date(version).toISOString(),
+      checkedAt: new Date().toISOString(),
+      data: { headline },
+    });
     const p = await h.openPlayer((s) => {
       s.publish(h.content([{ id: 'news', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }]));
       s.setData('news', snap('First', 1000));
@@ -105,13 +111,31 @@ describe('snapshots', () => {
   });
 });
 
+describe('a stale snapshot', () => {
+  it('shows the fallback, until a sync says the server checked it again', async () => {
+    const dayAndMore = new Date(Date.now() - 25 * 3_600_000).toISOString();
+    const snap = (checkedAt: string) => ({ id: 'news', version: 1000, fetchedAt: dayAndMore, checkedAt, data: { headline: 'Old news' } });
+    const p = await h.openPlayer((s) => {
+      s.publish(h.content([{ id: 'news', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }]));
+      s.setData('news', snap(dayAndMore));
+    }, api);
+    await p.until((s) => s.socket);
+    await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Fallback' });
+    // The poller found the feed unchanged: the same version, checked now. Only the check is sent.
+    p.server.setData('news', snap(new Date().toISOString()));
+    p.server.push({ type: 'manifest', id: 'nudge' });
+    await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Old news' });
+    expect(p.server.syncs.at(-1)!.snapshots).toEqual({ news: 1000 });
+  });
+});
+
 describe('the heartbeat', () => {
   it('reports the player, manifest, display, clock and refused data, under one epoch kept across reloads', async () => {
     const content = h.content([{ id: 'news', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }]);
     const p = await h.openPlayer((s) => {
       s.nextSyncS = 1;
       s.publish(content);
-      s.setData('news', { id: 'news', version: 5, fetchedAt: new Date(5).toISOString(), data: { headline: 42 } });
+      s.setData('news', { id: 'news', version: 5, fetchedAt: new Date(5).toISOString(), checkedAt: new Date().toISOString(), data: { headline: 42 } });
     }, api);
     await p.until((s) => (s.dataRejected.news ?? 0) >= 1);
     await expect.poll(() => p.server.syncs.at(-1)?.dataRejected?.news ?? 0, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
