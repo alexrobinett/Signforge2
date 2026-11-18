@@ -40,6 +40,7 @@ import {
   validateSpotData,
   validateSyncRequest,
   MAX_SYNC_PLAY_COUNTS,
+  MAX_SYNC_SOURCES,
   MAX_SNAPSHOT_BYTES,
   validateSyncResponse,
   validateTemplateManifest,
@@ -174,11 +175,14 @@ const validManifest = (): ScreenManifest => ({
   defaultPlaylist: 'all',
 });
 
+const M1 = '1'.repeat(64);
+const M2 = '2'.repeat(64);
+
 const validSyncRequest = (): SyncRequest => ({
   seq: 3,
   epoch: 'e7Hq2',
   player: { version: '1.2.3', manifestSchemas: [2, 3], protocols: [1, 2] },
-  manifest: { active: 'm1', filesMissing: 0, fallbackFrom: 'm2' },
+  manifest: { active: M1, filesMissing: 0, fallbackFrom: M2 },
   display: { on: true, methods: { signal: 'ok' }, override: { state: 'off', until: '2026-11-17T18:00:00Z' } },
   deviceTime: '2026-11-17T13:05:00Z',
   clock: { offsetMs: -1200, trusted: true },
@@ -245,7 +249,7 @@ const validators: [string, (v: unknown) => string[], (() => unknown)?][] = [
   ['validateSyncResponse', validateSyncResponse, validSyncResponse],
   ['validateDeviceCommand', validateDeviceCommand, () => ({ type: 'display', override: { state: 'on', until: '2026-11-17T18:00:00Z' } })],
   ['validateServerSocketMessage', validateServerSocketMessage, () => ({ type: 'command', command: { type: 'reboot' } })],
-  ['validateDeviceSocketMessage', validateDeviceSocketMessage, () => ({ type: 'applied', manifest: 'm1' })],
+  ['validateDeviceSocketMessage', validateDeviceSocketMessage, () => ({ type: 'applied', manifest: M1 })],
   [
     'validatePreviewHostMessage',
     validatePreviewHostMessage,
@@ -526,12 +530,27 @@ describe('snapshots and device bodies', () => {
     r.manifest = { filesMissing: 0, fallbackFrom: '' };
     r.dataRejected = { feed: -1 };
     expect(validateSyncRequest(r)).toEqual([
-      'manifest needs filesMissing, and active and fallbackFrom when there are any',
+      'manifest needs filesMissing, and active and fallbackFrom when there are any, as sha256 ids',
       `playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`,
       'dataRejected: "feed" must be a source id with a count',
     ]);
     const { dataRejected: _, ...without } = validSyncRequest();
     expect(validateSyncRequest(without)).toEqual([]);
+  });
+
+  it('takes only sha256 manifest ids from a screen, and bounds its source maps', () => {
+    const r = validSyncRequest() as unknown as Record<string, unknown>;
+    r.manifest = { active: 'x'.repeat(10_000), filesMissing: 0, fallbackFrom: M2.toUpperCase() };
+    r.snapshots = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 1 }, (_, i) => [`s${i}`, 1]));
+    r.dataRejected = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 1 }, (_, i) => [`s${i}`, 1]));
+    expect(validateSyncRequest(r)).toEqual([
+      'manifest needs filesMissing, and active and fallbackFrom when there are any, as sha256 ids',
+      `snapshots holds at most ${MAX_SYNC_SOURCES} sources`,
+      `dataRejected holds at most ${MAX_SYNC_SOURCES} sources`,
+    ]);
+    r.snapshots = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES }, (_, i) => [`s${i}`, 1]));
+    expect(validateSyncRequest({ ...validSyncRequest(), snapshots: r.snapshots })).toEqual([]);
+    expect(validateDeviceSocketMessage({ type: 'applied', manifest: 'm1' })).toEqual(['applied message needs a sha256 manifest id']);
   });
 
   it('lets a screen with nothing published sync, for its socket ticket', () => {

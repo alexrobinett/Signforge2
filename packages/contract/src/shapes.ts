@@ -657,6 +657,12 @@ export interface PlayCount {
 /** The most play counts one sync carries; a screen with more sends the rest at the next. */
 export const MAX_SYNC_PLAY_COUNTS = 500;
 
+/**
+ * The most sources one sync reports in `snapshots` or in `dataRejected`. Far above what any screen
+ * holds; the server stores what a screen reports, so a misbehaving one must not write a huge row.
+ */
+export const MAX_SYNC_SOURCES = 256;
+
 /** `POST /v1/device/sync`, every few minutes and whenever the socket is down. */
 export interface SyncRequest {
   /**
@@ -675,7 +681,7 @@ export interface SyncRequest {
   /**
    * `active`: the manifest playing. `filesMissing`: files of the manifest being synced not yet held.
    * `fallbackFrom`: a newer manifest that played nothing in a full pass, so the screen went back to
-   * its last good one (`active`).
+   * its last good one (`active`). Manifest ids are lowercase hex sha256 (`canonicalJson`).
    */
   manifest: { active?: string; filesMissing: number; fallbackFrom?: string };
   display: DisplayStatus;

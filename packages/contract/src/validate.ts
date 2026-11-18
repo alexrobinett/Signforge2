@@ -20,6 +20,7 @@ import {
   MAX_IDENTIFY_SECONDS,
   MAX_SNAPSHOT_BYTES,
   MAX_SYNC_PLAY_COUNTS,
+  MAX_SYNC_SOURCES,
   PREVIEW_PROTOCOL,
   SCREEN_KINDS,
   SUPPORTED_MANIFEST_SCHEMAS,
@@ -46,6 +47,8 @@ const isText = (v: unknown): v is string => typeof v === 'string' && v.length > 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const isIdValue = (v: unknown): v is string => typeof v === 'string' && ID_PATTERN.test(v);
+/** A manifest id as a screen reports it: lowercase hex sha256, as `canonicalJson` describes. */
+const isManifestId = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 /** An ISO 8601 date and time, such as `2026-11-17T13:00:00Z`. */
 const isInstant = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) && !Number.isNaN(Date.parse(v));
 
@@ -688,19 +691,26 @@ export function validateSyncRequest(r: unknown): string[] {
     errors.push('player needs a version and the manifest schemas and protocols it supports');
   }
   const m = r.manifest;
-  if (!isObj(m) || (m.active !== undefined && !isText(m.active)) || (m.fallbackFrom !== undefined && !isText(m.fallbackFrom)) || !isCount(m.filesMissing))
-    errors.push('manifest needs filesMissing, and active and fallbackFrom when there are any');
+  if (
+    !isObj(m) ||
+    (m.active !== undefined && !isManifestId(m.active)) ||
+    (m.fallbackFrom !== undefined && !isManifestId(m.fallbackFrom)) ||
+    !isCount(m.filesMissing)
+  )
+    errors.push('manifest needs filesMissing, and active and fallbackFrom when there are any, as sha256 ids');
   errors.push(...displayStatusProblems(r.display));
   if (!isInstant(r.deviceTime)) errors.push('deviceTime must be an ISO 8601 time');
   if (!isObj(r.clock) || !isNum(r.clock.offsetMs) || typeof r.clock.trusted !== 'boolean') errors.push('clock needs offsetMs and whether the screen trusts it');
   errors.push(...list('play count', r.playCounts, playCountProblems));
   if (Array.isArray(r.playCounts) && r.playCounts.length > MAX_SYNC_PLAY_COUNTS) errors.push(`playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`);
   if (!isObj(r.snapshots)) errors.push('snapshots must map source ids to versions');
+  else if (Object.keys(r.snapshots).length > MAX_SYNC_SOURCES) errors.push(`snapshots holds at most ${MAX_SYNC_SOURCES} sources`);
   else
     for (const [k, v] of Object.entries(r.snapshots))
       if (!isIdValue(k) || !isCount(v)) errors.push(`snapshots: "${k}" must be a source id with a version number`);
   if (r.dataRejected !== undefined) {
     if (!isObj(r.dataRejected)) errors.push('dataRejected must map source ids to counts');
+    else if (Object.keys(r.dataRejected).length > MAX_SYNC_SOURCES) errors.push(`dataRejected holds at most ${MAX_SYNC_SOURCES} sources`);
     else
       for (const [k, v] of Object.entries(r.dataRejected))
         if (!isIdValue(k) || !isCount(v)) errors.push(`dataRejected: "${k}" must be a source id with a count`);
@@ -749,7 +759,7 @@ export function validateServerSocketMessage(msg: unknown): string[] {
 export function validateDeviceSocketMessage(msg: unknown): string[] {
   if (!isObj(msg)) return ['message is not an object'];
   if (msg.type !== 'applied') return ['message type must be applied'];
-  return isText(msg.manifest) ? [] : ['applied message needs a manifest id'];
+  return isManifestId(msg.manifest) ? [] : ['applied message needs a sha256 manifest id'];
 }
 
 // ------------------------------------------------------------- preview channel
