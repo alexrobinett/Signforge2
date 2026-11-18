@@ -57,6 +57,7 @@ const navigates = new Set(['navigate', 'navigate-data', 'navigate-top', 'refresh
 defineTemplate({
   async prepare(ctx) {
     document.body.dataset.prepared = '1';
+    document.body.dataset.visibleInPrepare = getComputedStyle(document.getElementById('label')!).visibility;
     document.body.dataset.asset = ctx.assets.file ? '1' : '';
     const mode = String(ctx.data.mode ?? 'ok');
     const target = String(ctx.data.target ?? '');

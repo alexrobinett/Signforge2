@@ -16,13 +16,15 @@ interface Host {
   /** Message types the template has sent, in order (`error:<message>` for errors). */
   messages(): Promise<string[]>;
   post(type: 'play' | 'stop'): Promise<void>;
+  /** Send the held `init` (only with `holdInit`). */
+  init(): Promise<void>;
 }
 
-async function host(data: Record<string, unknown>): Promise<Host> {
+async function host(data: Record<string, unknown>, { holdInit = false } = {}): Promise<Host> {
   const page = await h.blankPage();
   await page.evaluate(
-    ({ html, data, sf }) => {
-      const w = window as unknown as { msgs: string[] };
+    ({ html, data, sf, holdInit }) => {
+      const w = window as unknown as { msgs: string[]; sendInit?: () => void };
       w.msgs = [];
       const frame = document.createElement('iframe');
       frame.setAttribute('sandbox', 'allow-scripts');
@@ -41,13 +43,14 @@ async function host(data: Record<string, unknown>): Promise<Host> {
             timezone: 'UTC',
             locale: 'en-US',
           };
-          frame.contentWindow!.postMessage(init, '*');
+          w.sendInit = () => frame.contentWindow!.postMessage(init, '*');
+          if (!holdInit) w.sendInit();
         }
       });
       frame.srcdoc = html;
       document.body.appendChild(frame);
     },
-    { html: h.templateHtml, data, sf: PROTOCOL_VERSION },
+    { html: h.templateHtml, data, sf: PROTOCOL_VERSION, holdInit },
   );
   await expect.poll(() => page.frames().length).toBe(2);
   const frame = page.frames()[1]!;
@@ -57,6 +60,7 @@ async function host(data: Record<string, unknown>): Promise<Host> {
     messages: () => page.evaluate(() => (window as unknown as { msgs: string[] }).msgs),
     post: (type) =>
       page.evaluate(({ type, sf }) => document.querySelector('iframe')!.contentWindow!.postMessage({ sf, type }, '*'), { type, sf: PROTOCOL_VERSION }),
+    init: () => page.evaluate(() => (window as unknown as { sendInit: () => void }).sendInit()),
   };
 }
 
@@ -75,6 +79,21 @@ describe('template SDK lifecycle', () => {
     await t.post('play');
     await expect.poll(() => t.frame.evaluate(() => document.body.dataset.playing)).toBe('1');
     expect(await animationStates(t.frame)).toEqual(['running']);
+  });
+
+  // A new frame's compositor gets its size a moment after the frame starts drawing. Whatever it
+  // tiles before then keeps the smallest tiles, and on a Pi a full-screen layer then takes about a
+  // second to raster. So nothing is drawn until the first init has the frame's size.
+  it('draws nothing before the first init, and everything from prepare on', async () => {
+    const t = await host({ label: 'Hello', mode: 'ok' }, { holdInit: true });
+    await expect.poll(t.messages).toEqual(['loaded']);
+    const visibility = () => t.frame.evaluate(() => getComputedStyle(document.getElementById('label')!).visibility);
+    expect(await visibility()).toBe('hidden');
+
+    await t.init();
+    await expect.poll(t.messages).toEqual(['loaded', 'ready']);
+    expect(await t.frame.evaluate(() => document.body.dataset.visibleInPrepare)).toBe('visible');
+    expect(await visibility()).toBe('visible');
   });
 
   it('reports an error, not ready, when prepare throws', async () => {

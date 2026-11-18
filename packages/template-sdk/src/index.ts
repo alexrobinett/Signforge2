@@ -6,6 +6,7 @@
  *  - exposes `--sf-duration` (and `data-orientation`) so CSS can time an outro to the spot's length
  *  - holds every animation paused until the player says play
  *  - reports ready only after fonts and images have decoded, so the first frame is complete
+ *  - keeps the document hidden until the first `init`, and until the frame has its size (see `sized`)
  *
  * Text shown to people should use `ctx.timezone` and `ctx.locale` (the screen's), for example
  * through `formatter(ctx, { hour: 'numeric' })`, and the time from `now()`, never `new Date()`:
@@ -57,6 +58,10 @@ let offsetMs = 0;
 export const now = (): Date => new Date(Date.now() + offsetMs);
 
 export function defineTemplate(hooks: TemplateHooks = {}): void {
+  // Nothing is drawn until the first init has the frame's size: see `sized`.
+  let hidden: HTMLStyleElement | undefined = document.createElement('style');
+  hidden.textContent = 'html{visibility:hidden!important}';
+  document.head.appendChild(hidden);
   let ctx: TemplateContext | undefined;
   let urls: string[] = [];
   /** The brand font rules this init added to `<head>`. */
@@ -100,6 +105,12 @@ export function defineTemplate(hooks: TemplateHooks = {}): void {
         run = ++generation;
         const assets: Record<string, string> = {};
         for (const [k, blob] of Object.entries(m.assets)) urls.push((assets[k] = URL.createObjectURL(blob)));
+        if (hidden) {
+          await sized();
+          hidden?.remove();
+          hidden = undefined;
+          if (run !== generation) return;
+        }
         if (m.theme) {
           const added = await applyTheme(m.theme, root);
           // Superseded while the fonts decoded: the reset's restore ran before these were added.
@@ -224,6 +235,20 @@ function bind(ctx: TemplateContext): void {
     const url = ctx.assets[el.dataset.sfSrc!];
     if (url) el.src = url;
   }
+}
+
+/**
+ * Wait until the frame's compositor has the frame's size. A new frame starts drawing at 0x0 and
+ * gets its size a moment later, on the first commit after it; whatever the compositor tiles before
+ * that commit takes effect keeps the smallest tiles (32x256 px), and on a Pi 4 a full-screen layer
+ * then rasters as ~700 tiles, about a second of GPU time. So the document stays hidden, with nothing
+ * to raster, until the size is known and two frames have carried it to the compositor.
+ */
+async function sized(): Promise<void> {
+  const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+  while (!innerWidth || !innerHeight) await frame();
+  await frame();
+  await frame();
 }
 
 /** Wait until fonts are loaded, every image is decoded, and the browser has painted the result. */
