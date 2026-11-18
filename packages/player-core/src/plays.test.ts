@@ -37,7 +37,7 @@ describe('PlayLedger', () => {
   it('survives a round trip through storage, and caps a batch', () => {
     const l = PlayLedger.fresh('ep1');
     for (let i = 0; i < 5; i++) l.record(H, `s${i}`, 1000);
-    const back = PlayLedger.restore(JSON.parse(JSON.stringify(l.toJSON())), () => 'new')!;
+    const back = PlayLedger.restore(JSON.parse(JSON.stringify(l.toJSON())), () => 'new');
     const b = back.batch(H + 2 * 3_600_000, 3);
     expect(b.seq).toBe(1);
     expect(b.counts.map((c) => c.spot)).toEqual(['s0', 's1', 's2']);

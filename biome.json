@@ -16,6 +16,14 @@
         "noNonNullAssertion": "off",
         "useTemplate": "off"
       },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error",
+        "useExhaustiveSwitchCases": "error",
+        "useAwaitThenable": "error",
+        "noUselessAwait": "error",
+        "noUselessTypeAssertion": "error"
+      },
       "complexity": { "noCommaOperator": "off" },
       "correctness": { "noVoidTypeReturn": "off" },
       "suspicious": {
