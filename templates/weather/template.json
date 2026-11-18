@@ -1,6 +1,6 @@
 {
   "id": "weather",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "name": "Weather Now",
   "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source.",
   "fields": {
