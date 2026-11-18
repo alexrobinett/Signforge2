@@ -456,16 +456,17 @@ export function scoped(d1: D1Database, orgId: string) {
        * The manifest a screen says is on screen, from its socket's `applied`. A sync's heartbeat
        * writes the same column (`sync`), so it holds the latest observed over either transport
        * (`manifestReport`). Telemetry, not a setting: the row's version and `updatedAt` stay, so an
-       * editor open on the screen does not conflict with its own rollout. A repeat writes no row.
+       * editor open on the screen does not conflict with its own rollout. A repeat without a time
+       * writes no row; a newer timed repeat moves the time on, so a sync observed before it cannot win.
        */
       reportManifest: async (screenId: string, manifestId: string, when: { observedAt?: number; arrivedAt: number }) => {
         const r = manifestReport(when.observedAt, when.arrivedAt);
         await d1
           .prepare(
             `UPDATE screens SET reported_manifest_id = ?, reported_manifest_at = ?
-             WHERE org_id = ? AND id = ? AND reported_manifest_id IS NOT ? AND ${r.takes}`,
+             WHERE org_id = ? AND id = ? AND (reported_manifest_id IS NOT ? OR ? = 0) AND ${r.takes}`,
           )
-          .bind(manifestId, r.at, orgId, screenId, manifestId, ...r.takesArgs)
+          .bind(manifestId, r.at, orgId, screenId, manifestId, when.observedAt === undefined ? 1 : 0, ...r.takesArgs)
           .run();
       },
       /**

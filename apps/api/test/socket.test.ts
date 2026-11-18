@@ -363,6 +363,20 @@ describe('the order of reports (gh-44)', () => {
     s.ws.close(1000);
   });
 
+  it('moves the time on a newer repeat over the socket, so a sync observed before it cannot win', async () => {
+    const c = await setUp('ws-k');
+    const s = await connect(await ticketFor(c));
+    applied(s.ws, M2, t0 + 20_000);
+    await reportedIs(c, M2);
+    // The screen went M2, M1 (never reported on the socket), M2 again: the resend is newer.
+    applied(s.ws, M2, t0 + 60_000);
+    await settle();
+    // A sync built on M1 at t0 + 40 s lands after the resend.
+    await syncObserved(c, M1, t0 + 40_000);
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
   it('orders a report without a time, or from an untrusted clock, by when it arrived', async () => {
     const c = await setUp('ws-i');
     const s = await connect(await ticketFor(c));
