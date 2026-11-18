@@ -10,7 +10,7 @@ import type { SliceCreator } from './store';
 type Orientation = 'landscape' | 'portrait';
 
 /** What a new screen gets unless the pairing form chose otherwise: the org's defaults, else the browser's zone and always on. */
-export interface NewScreenDefaults {
+interface NewScreenDefaults {
   timezone: string;
   locale: string | null;
   hours: DisplayHours | null;

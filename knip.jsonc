@@ -15,12 +15,10 @@
     // so that Turbo reruns the tests when one changes (docs/ci.md).
     "apps/api": { "entry": ["src/index.ts", "auth.config.ts"], "ignoreDependencies": ["auth", "@signforge/template-.*"] },
     // shadcn/ui primitives are kept whole as generated, so an unused part (DialogFooter) stays.
-    // The e2e run starts the API from apps/api; declaring it makes Turbo rerun the e2e when the API changes.
     // AssetPicker waits for its first user, the spot editor's image field (M3-16): drop the entry then.
     "apps/cms": {
       "entry": ["src/components/assets/asset-picker.tsx"],
-      "ignoreIssues": { "src/components/ui/**": ["exports"] },
-      "ignoreDependencies": ["@signforge/api"]
+      "ignoreIssues": { "src/components/ui/**": ["exports"] }
     },
     // The fixture template is bundled by the browser tests' global setup; sw.js is served as is.
     // templates.test.ts plays every template from templates/: declared as for apps/api.
