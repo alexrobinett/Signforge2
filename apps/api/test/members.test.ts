@@ -95,6 +95,10 @@ describe('the audit log', () => {
     const owner = new Client(t);
     const { user: ownerUser } = await owner.signIn(email('owner'));
     const org = await owner.createOrg('Audited Co');
+    // Creating the org still makes it active at once (the cache cookie is reissued).
+    expect((await owner.session()).body.organization).toEqual({ id: org.id, role: 'owner' });
+    const listed = (await (await owner.get(`/api/auth/organization/list-members?organizationId=${org.id}`)).json()) as { members: { id: string }[] };
+    const ownerMemberId = listed.members[0]!.id;
     const addr = email('joiner');
     const invite = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: addr, role: 'viewer' });
     const joiner = new Client(t);
@@ -119,6 +123,7 @@ describe('the audit log', () => {
     ).toEqual(
       [
         { action: 'accept_invitation', ...by(joinerUser), targetKind: 'member', targetId: member.id },
+        { action: 'create_organization', ...by(ownerUser), targetKind: 'member', targetId: ownerMemberId },
         { action: 'cancel_invitation', ...by(ownerUser), targetKind: 'invitation', targetId: later.id },
         { action: 'invite_member', ...by(ownerUser), targetKind: 'invitation', targetId: invite.id },
         { action: 'invite_member', ...by(ownerUser), targetKind: 'invitation', targetId: later.id },
@@ -128,6 +133,7 @@ describe('the audit log', () => {
       ].sort(order),
     );
     const detail = (action: string) => JSON.parse(rows.find((r) => r.action === action)?.detailJson ?? 'null');
+    expect(detail('create_organization')).toEqual({ userId: ownerUser.id, role: 'owner', name: 'Audited Co', slug: org.slug });
     expect(detail('update_member_role')).toEqual({ userId: joinerUser.id, role: 'editor' });
     expect(detail('remove_member')).toEqual({ userId: joinerUser.id, role: 'editor' });
   });

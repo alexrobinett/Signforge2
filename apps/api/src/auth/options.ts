@@ -52,20 +52,38 @@ const isRecord = (v: unknown): v is Row => typeof v === 'object' && v !== null;
  */
 const MEMBERSHIP_CHANGES: Record<
   string,
-  { action: string; targetKind: 'invitation' | 'member' | 'organization'; in?: 'invitation' | 'member'; detail: (row: Row, body: unknown) => Row }
+  {
+    action: string;
+    targetKind: 'invitation' | 'member' | 'organization';
+    /** The changed row in the response, when it is not the response itself. */
+    row?: (returned: Row) => unknown;
+    detail: (row: Row, returned: Row, body: unknown) => Row;
+  }
 > = {
+  // The creator's owner membership, made with the org: its only member grant that goes through no invitation.
+  '/organization/create': {
+    action: 'create_organization',
+    targetKind: 'member',
+    row: (r) => (Array.isArray(r.members) ? r.members[0] : undefined),
+    detail: (m, org) => ({ userId: m.userId, role: m.role, name: org.name, slug: org.slug }),
+  },
   '/organization/invite-member': { action: 'invite_member', targetKind: 'invitation', detail: (r) => ({ email: r.email, role: r.role }) },
   '/organization/cancel-invitation': { action: 'cancel_invitation', targetKind: 'invitation', detail: (r) => ({ email: r.email }) },
-  '/organization/reject-invitation': { action: 'reject_invitation', targetKind: 'invitation', in: 'invitation', detail: (r) => ({ email: r.email }) },
-  '/organization/accept-invitation': { action: 'accept_invitation', targetKind: 'member', in: 'member', detail: (r) => ({ userId: r.userId, role: r.role }) },
+  '/organization/reject-invitation': { action: 'reject_invitation', targetKind: 'invitation', row: (r) => r.invitation, detail: (r) => ({ email: r.email }) },
+  '/organization/accept-invitation': {
+    action: 'accept_invitation',
+    targetKind: 'member',
+    row: (r) => r.member,
+    detail: (r) => ({ userId: r.userId, role: r.role }),
+  },
   '/organization/update-member-role': { action: 'update_member_role', targetKind: 'member', detail: (r) => ({ userId: r.userId, role: r.role }) },
-  '/organization/remove-member': { action: 'remove_member', targetKind: 'member', in: 'member', detail: (r) => ({ userId: r.userId, role: r.role }) },
+  '/organization/remove-member': { action: 'remove_member', targetKind: 'member', row: (r) => r.member, detail: (r) => ({ userId: r.userId, role: r.role }) },
   '/organization/leave': { action: 'leave_organization', targetKind: 'member', detail: (r) => ({ userId: r.userId, role: r.role }) },
   // Which fields changed, and the new name and slug; never the values of the others.
   '/organization/update': {
     action: 'update_organization',
     targetKind: 'organization',
-    detail: (r, body) => ({ name: r.name, slug: r.slug, changed: isRecord(body) && isRecord(body.data) ? Object.keys(body.data) : [] }),
+    detail: (r, _, body) => ({ name: r.name, slug: r.slug, changed: isRecord(body) && isRecord(body.data) ? Object.keys(body.data) : [] }),
   },
 };
 
@@ -85,10 +103,10 @@ function membershipAudit(audit: AuthDeps['audit']) {
             const returned = ctx.context.returned;
             if (!change || returned instanceof Error) return;
             // Better Auth's response, read once here: a changed shape after an upgrade fails loudly.
-            const row = change.in && isRecord(returned) ? returned[change.in] : returned;
+            const row = isRecord(returned) && change.row ? change.row(returned) : returned;
             const orgId = isRecord(row) && (change.targetKind === 'organization' ? row.id : row.organizationId);
             const actor = (await getSessionFromCtx(ctx))?.user.id;
-            if (!isRecord(row) || typeof row.id !== 'string' || typeof orgId !== 'string' || !actor) {
+            if (!isRecord(returned) || !isRecord(row) || typeof row.id !== 'string' || typeof orgId !== 'string' || !actor) {
               throw new Error(`${ctx.path} returned no ${change.targetKind} to audit`);
             }
             await audit(orgId, {
@@ -98,7 +116,7 @@ function membershipAudit(audit: AuthDeps['audit']) {
               action: change.action,
               targetKind: change.targetKind,
               targetId: row.id,
-              detailJson: JSON.stringify(change.detail(row, ctx.body)),
+              detailJson: JSON.stringify(change.detail(row, returned, ctx.body)),
             });
           }),
         },
