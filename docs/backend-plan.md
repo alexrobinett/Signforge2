@@ -18,7 +18,7 @@ packages/db          Drizzle schema and the only code allowed to query tenant ta
 packages/compiler    org data + screen -> ScreenManifest. Lifted from sf.ts, golden-tested against examples/
 packages/media       image renditions in the browser (createImageBitmap, OffscreenCanvas), hashing, and the image-header reader the server checks with
 packages/media-check MP4 header check against VIDEO_SPEC, shared by browser and Worker
-packages/feeds       iCal and RSS normalising, ported from datad.py with fixtures
+packages/feeds       iCal and RSS normalising, with fixtures from real feeds
 packages/tools       one registry of operations (zod input, scope, role, handler); the CMS, MCP and WebMCP all call it
 ```
 
@@ -42,7 +42,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 | `playlists`, `playlist_items` | transition; ordered spots; the published version, with its items |
 | `schedule_entries` | playlist, priority, target, dates, days, window; the published version |
 | `publishes`, `publish_screens` | status, publish at, actor; which manifest each screen got. Rollout status is a join against `screens.reported_manifest_id`. |
-| `data_sources`, `data_snapshots` | format, encrypted URL (a private calendar URL is a secret), refresh, next poll at, ETag, failures; latest snapshot, at most 64 kB |
+| `data_sources`, `data_snapshots` | format, encrypted URL (a private calendar URL is a secret), refresh, calendar look-ahead, next poll at, ETag, failures, last error category; latest snapshot, at most 64 kB, with its hash and when it was fetched and last checked |
 | `audit_log` | when, actor kind (user, agent, device, system), actor, action, target, detail |
 | `idempotency_keys` | key, action, input hash, the first result: a retried creation returns it and writes nothing |
 | `play_counts` | screen, hour, spot: plays and milliseconds |
@@ -113,17 +113,18 @@ For zero-touch installs, the CMS mints a credential that the image script pre-se
 
 Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 
-**The screen's Durable Object** holds the desired and reported manifest IDs and one hibernating WebSocket.
+**The screen's Durable Object** holds the desired manifest ID and one hibernating WebSocket.
 - Keepalive pings get an automatic reply (`setWebSocketAutoResponse`) without waking it or billing duration. Whether those pings count as billed requests (incoming messages bill at 20:1) is not documented: at a 60-second ping and 1,000 screens the worst case is 2.2M requests a month, about $0.18 over the allowance. The player pings every 50 seconds, under the usual 100-second proxy and NAT idle timeouts, and treats a ping without a pong in 10 seconds as a dead connection. The billed count is still to be read from analytics on a paid account (M3-06 could not deploy); lengthen the ping if it shows pings are billed and connections hold.
 - Server to screen: new manifest, command, revoked.
 - Screen to server: applied only, written through to D1. The CMS reads rollout from D1 and never calls 1,000 Durable Objects.
 - **Socket ticket.** `GET /v1/device/ws?ticket=` takes a ticket, not the credential, since a browser cannot put a header on a WebSocket and URLs end up in logs. Sync issues it: `<screenId>.<credentialId>.<expiresMs>.<HMAC-SHA256 under AUTH_SECRET>`, good for 60 seconds. The route checks it and that its credential is still live, then hands the socket to the object tagged with that credential, so revoking a credential closes exactly its sockets.
-- **Who tells the object.** The tool dispatcher, after a change commits: `publish_manifest_to_screen` sends `manifest`, `revoke_screen_credential` sends `revoked` and closes. The object writes `applied` to `screens.reported_manifest_id` through the org's scope.
+- **Who tells the object.** The tool dispatcher, after a change commits: `publish_manifest_to_screen` sends `manifest`, `revoke_screen_credential` sends `revoked` and closes. The object writes `applied` to `screens.reported_manifest_id` through the org's scope (`screens.reportManifest`), every time: a sync may have written another since. A sync writes the heartbeat's active manifest there too, so the column holds the latest report over either transport. Neither is a setting, so neither moves the screen's version, and an editor opened before a rollout still saves.
+- **Revocation does not depend on the notice.** The revoke commits in D1 before the object hears of it, and that call can fail. So the object reads the screen's live credentials from D1 before it sends a socket anything or writes what one applied, and closes a socket whose credential is revoked instead. Revoking an already revoked credential sends `revoked` again, so a retry closes the socket at once. The object remembers each revocation it is told of and refuses an upgrade with that credential, which the route may have checked just before the revocation committed. A socket whose notice was lost stays open but receives nothing until its next sync, at most 5 minutes later, is refused and the player wipes itself.
 
 **Sync.** `POST /v1/device/sync`, every 5 minutes with jitter, the interval set by the server; every 2 minutes while the screen's socket is down, so that with every socket down at once 1,000 screens write about 43M rows a month (a minute would be 65M).
 - **The screen sends:** player version and the manifest schemas and frame protocols it plays, the active manifest (and the one it fell back from), files missing, display state and power methods, its clock and offset, snapshot versions held, data refused per source, and hourly play counts.
 - **The server returns:** the desired manifest ID, any changed data snapshots, a short-lived socket ticket, the server time and commands. The server time is there because a Pi has no battery-backed clock. `reload` is sent while the screen's player cannot play the desired manifest's schema or a template's protocol; `display` while the screen's stored override (wake now, sleep now) differs from the one it reports.
-- **What it stores** (`apps/api/src/device/sync.ts`, `scoped(...).screens.sync`): on the screen row, the last-seen time, the player version, the heartbeat (`heartbeat_json`, with the drift between server and device clocks) and the play count `(epoch, seq)`; and the counts, added to `play_counts` in the same D1 batch unless the seq is already stored in its epoch. The repeat check is in the SQL, so two copies of one request racing count once. Play counts carry no manifest: which manifest a screen had when is in its publish history.
+- **What it stores** (`apps/api/src/device/sync.ts`, `scoped(...).screens.sync`): on the screen row, the last-seen time, the player version, the heartbeat (`heartbeat_json`, with the drift between server and device clocks), the active manifest (`reported_manifest_id`) and the play count `(epoch, seq)`; and the counts, added to `play_counts` in the same D1 batch unless the seq is already stored in its epoch. The repeat check is in the SQL, so two copies of one request racing count once. Play counts carry no manifest: which manifest a screen had when is in its publish history.
 - **D1 writes per sync**, measured in `packages/db/test/device.test.ts` from D1's `rows_written`: 1 for a sync with no counts (the screen row; none of its indexed columns change), plus 3 for each count of a new (hour, spot) row (the row, its key and the org-hour index) or 1 for one added to an existing row. The screen sends an hour's counts once the hour has ended, so each (hour, spot) row is written once: at 1,000 screens on a 5-minute sync, 8.6M writes a month for heartbeats plus about 3 per spot played per screen per hour (10 spots: 21.6M), about 30M in all against the 50M included. Sending the running hour on every sync would cost twelve times as much for counts.
 
 | Route | Purpose |
@@ -137,7 +138,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 | `GET /v1/device/ws?ticket=` | Nudge socket |
 
 The device API's request and response shapes are in `packages/contract` (device API section). Changes the player needs, beyond pointing its content base at `/v1/device`:
-- Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files. Done in M3-05: `?content=<api>/v1/device` in the kiosk URL, the credential from the supervisor's `GET /credential`.
+- Send the bearer credential, and `If-None-Match` on the manifest; on a 304, still check the cached manifest for missing files. Done in M3-05: `?content=<api>/v1/device` in the kiosk URL, the credential from the supervisor's `GET /credential`, sent only when the supervisor says it is bound to that same base.
 - Replace the per-source data poll with snapshots delivered on sync. Done in M3-07: from the API the player fetches no source itself.
 - Count plays per UTC hour, persist the counts, and send them with a batch number until acknowledged. Done in M3-07.
 - Treat a 401 as revoked, not offline: wipe what it holds and show a pairing code (open question 2, the default). Done in M3-08.
@@ -160,23 +161,27 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
 
 ## Data sources
 
-- **Polling.** A one-minute Cron Trigger selects the sources due by `next_poll_at`. Requests are conditional, back off up to 6 hours on failure, and write only when the data's hash changes.
-- **Delivery.** Snapshots ride the sync response, so a screen is at most 5 minutes stale. There is no per-snapshot fan-out.
-- **Recurring events.** iCal recurrence is expanded with ical.js over the next 30 days, including exceptions and moved instances. Limits: 1 MB body, 500 iterations per event, 25 events out (ical.js 2.2.1 bundles for workerd with no shims, and expands RRULE, EXDATE and moved instances across time zones there).
+Built in M3-23: the poller is `apps/api/src/data/poller.ts`, the fetch guards `apps/api/src/data/fetch.ts`, the tools `packages/tools/src/data-sources.ts`.
+
+- **Polling.** A one-minute Cron Trigger claims the sources due by `next_poll_at`, in every org, by moving it on by a 2-minute lease in one statement (`claimDueDataSources` in `packages/db`), so overlapping runs never fetch one twice; 12 per run, because each poll takes three external fetches (two DNS lookups and the feed) and the Free plan allows 50 per invocation. More need a higher number on Paid, or a Queue. Requests are conditional (ETag, Last-Modified), except for calendars, whose events depend on the time as well as the feed. Failures back off, doubling the refresh interval up to 6 hours, keep the last good snapshot, and record a category in `last_error`. A poll writes the source's row and either the snapshot, when the hash of its canonical JSON changed, or only its `checked_at`.
+- **Snapshots.** At most 64 kB of JSON (`MAX_SNAPSHOT_BYTES`). Before storing one, the poller runs the screen's rule (`snapshotFit` in packages/player-core): it must fill at least one field a published spot binds to its source, unless none does; one that fills none is refused as `unfit`. Sync runs the rule again against the screen's own manifest before sending one. `DataSnapshot.version` is the time the content changed; `checkedAt` is when a poll last found it unchanged, and a screen falls back to static values a day after it (`SNAPSHOT_STALE_MS`).
+- **Delivery.** Snapshots ride the sync response, so a screen is at most 5 minutes stale. There is no per-snapshot fan-out. For a snapshot the screen already holds, the response carries only its newer `checkedAt` (`SyncResponse.checked`).
+- **Feed URLs** are sealed with AES-256-GCM under the `DATA_SOURCE_KEY` secret, bound to the org and source id, and never shown again; the audit log redacts them.
+- **Recurring events.** iCal recurrence is expanded with ical.js over the next 30 days by default (`horizonDays` on the source, up to 366), including exceptions and moved instances. Limits: 1 MB body, 500 occurrences per event counted from now, with a series skipped ahead to near now where its rule allows and at most 5,000 stepped through before it, 25 events out (ical.js 2.2.1 bundles for workerd with no shims, and expands RRULE, EXDATE and moved instances across time zones there).
 - **Fetch safety.** Feed URLs are user-supplied, so fetching them is guarded:
   - HTTPS only, on default ports, and no IP addresses.
-  - Hostnames that are, or resolve to, private or reserved addresses are rejected. A Worker cannot pin the address it checked, so this is a first filter, not the defence against DNS rebinding; that rests on Workers' outbound requests not reaching private networks.
+  - Hostnames that are, or resolve to, private or reserved addresses are rejected (resolved through Cloudflare's DNS over HTTPS, A and AAAA). Local names (`localhost`, `.local`, `.internal`, a name without a dot) are refused without a lookup. A Worker cannot pin the address it checked, so this is a first filter, not the defence against DNS rebinding; that rests on Workers' outbound requests not reaching private networks.
   - Redirects are followed manually and re-checked, at most 3.
-  - 5-second timeout.
+  - 5-second timeout, and a 1 MB body.
   - Errors are reported by category, never by echoing the upstream body.
   
   Workers cannot reach private ranges (checked in M3-00). An IP-literal request to a loopback, private, link-local or CGNAT address returns Cloudflare's `403` with `error code: 1003`. A public name that resolves to one returns `530` with `error code: 1016`. Both come back as responses, not exceptions, so the fetcher reports them as a blocked address rather than the feed's answer.
-- **Limits.** 10 sources per org, refresh no faster than 5 minutes, 2 concurrent fetches per host.
+- **Limits.** 10 sources per org, refresh no faster than 5 minutes (the tools refuse more), 2 concurrent fetches per host within a run.
 
 ## Auth and tenancy
 
 - **Three kinds of caller, on separate route trees:** users with a cookie on `/api`, screens with a bearer token on `/v1/device`, agents with OAuth on `/mcp`. No credential works on another's tree.
-- **Org isolation.** D1 has no row-level security, so handlers never touch the database directly. Only a `scoped(db, orgId)` repository in `packages/db` queries tenant tables. A generated test replays every tool as org B against org A's IDs and expects not-found.
+- **Org isolation.** D1 has no row-level security, so handlers never touch the database directly. Only a `scoped(db, orgId)` repository in `packages/db` queries tenant tables. A generated test replays every tool as org B with org A's ID in one ID field at a time, every field in its input schema, and expects not-found.
 - **Better Auth on Workers:**
   - Build the instance per request from the environment. The CLI (the `auth` package) generates the schema from a separate static config with an in-memory `node:sqlite` database.
   - D1 has no interactive transactions. Better Auth 1.7 detects a D1 binding and turns transactions off. Sign-in by email code, creating an org, inviting and accepting all work on D1. A failure partway through a multi-step flow can leave a partial row: a failed org creation can leave an `organization` row with no member, which no one can make active or reach (tested in M3-09).
@@ -222,7 +227,7 @@ Each slice ends with something working on the real Pi.
 4. **Instant publish.** Assets, spots, playlists, the server compiler, browser image scaling, the tool registry. Demo: edit a price, publish, the Pi updates.
 5. **Scheduling and display hours.** Groups, schedule entries, takeovers, timed publish, Queue fan-out, the rollout view, display hours, and the wake/sleep override.
 6. **Video.** Multipart upload and the MP4 check.
-7. **Data sources.** The cron poller and `packages/feeds`; `datad.py` retires.
+7. **Data sources.** The cron poller and `packages/feeds`; `datad.py`, the device-side stand-in, is retired (M3-23).
 8. **Hardening.** Isolation tests, audit view, quotas, file cleanup, dev, demo and prod environments.
 
 ## Risks

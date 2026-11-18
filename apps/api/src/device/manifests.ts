@@ -6,6 +6,7 @@
  */
 import { baseTemplateHtml, type ScreenManifest } from '@signforge/contract';
 import type { DeviceScreen } from '@signforge/db';
+import type { BoundField } from '../data/fit';
 import { manifestKey } from '../r2';
 
 export interface ManifestSummary {
@@ -18,10 +19,22 @@ export interface ManifestSummary {
   /** Hashes of base templates' HTML, which may live under `sys/b/`. */
   baseHtml: Set<string>;
   dataSources: Set<string>;
+  /** By source: the fields its spots bind, which a snapshot must fill one of to be sent (../data/fit.ts). */
+  bound: Map<string, BoundField[]>;
 }
 
 const MAX_CACHED = 256;
 const cache = new Map<string, ManifestSummary>();
+
+function boundBySource(m: ScreenManifest): Map<string, BoundField[]> {
+  const out = new Map<string, BoundField[]>();
+  for (const spot of Object.values(m.spots ?? {})) {
+    if (spot.kind !== 'template') continue;
+    const fields = m.templates[spot.template]?.manifest.fields;
+    for (const [field, b] of Object.entries(spot.bindings ?? {})) out.set(b.source, [...(out.get(b.source) ?? []), { fields, field, path: b.path }]);
+  }
+  return out;
+}
 
 function summarise(id: string, m: ScreenManifest): ManifestSummary {
   return {
@@ -31,6 +44,7 @@ function summarise(id: string, m: ScreenManifest): ManifestSummary {
     files: new Map(Object.entries(m.files ?? {}).map(([sha, f]) => [sha, f.type])),
     baseHtml: baseTemplateHtml(m),
     dataSources: new Set(Object.keys(m.dataSources ?? {})),
+    bound: boundBySource(m),
   };
 }
 

@@ -6,7 +6,7 @@ import { seedBaseTemplate } from '@signforge/db/testing';
 import { registry } from '@signforge/tools';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import app from '../src/index';
+import { app } from '../src/index';
 import { orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
 
@@ -103,6 +103,8 @@ describe('requests', () => {
       })
     ).id;
     spotId = (await scoped(env.DB, org.id).spots.insert({ name: 'Site', kind: 'url', durationMs: 10_000, url: 'https://example.com' })).id;
+    // get_data_source's example names `weather`.
+    await scoped(env.DB, org.id).dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
     // The same session, on a D1 binding that records writes.
     owner = new Client(t, setup.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of setup.jar) owner.jar.set(k, v);
@@ -219,12 +221,14 @@ describe('POST /api/tools/:name', () => {
     expect((await names(viewer)).sort()).toEqual([
       'get_asset',
       'get_brand_kit',
+      'get_data_source',
       'get_screen',
       'get_spot',
       'get_spot_preview',
       'get_template',
       'list_assets',
       'list_brand_kits',
+      'list_data_sources',
       'list_fonts',
       'list_groups',
       'list_screens',

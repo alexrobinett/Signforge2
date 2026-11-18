@@ -205,6 +205,9 @@ importers:
       '@signforge/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@signforge/feeds':
+        specifier: workspace:*
+        version: link:../../packages/feeds
       '@signforge/tools':
         specifier: workspace:*
         version: link:../../packages/tools
@@ -611,6 +614,9 @@ importers:
       '@signforge/db':
         specifier: workspace:*
         version: link:../db
+      '@signforge/feeds':
+        specifier: workspace:*
+        version: link:../feeds
       '@signforge/media':
         specifier: workspace:*
         version: link:../media

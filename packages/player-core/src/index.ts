@@ -3,7 +3,9 @@
  * and which files a manifest still needs. Checking a manifest is the contract's job. The browser shell supplies time, storage and frames.
  */
 import {
+  brandFiles,
   readPath,
+  SNAPSHOT_STALE_MS,
   requiredFiles,
   validateBoundValue,
   type DataSnapshot,
@@ -228,21 +230,23 @@ export interface Rejected {
 }
 
 /**
- * The data a template spot plays with: its static values, with each bound field replaced by the
- * latest snapshot value when that value fits the field (`validateBoundValue`). A missing source
- * leaves the static fallback in place quietly; a value that is missing at its path or does not
- * fit also leaves the fallback, and is listed in `rejected` so a broken feed can be seen.
+ * The data a template spot plays with at `now`: its static values, with each bound field replaced
+ * by the latest snapshot value when that value fits the field (`validateBoundValue`). A missing
+ * source, or a snapshot the server last confirmed more than `SNAPSHOT_STALE_MS` before `now`,
+ * leaves the static fallback in place quietly; a value that is missing at its path or does not fit
+ * also leaves the fallback, and is listed in `rejected` so a broken feed can be seen.
  */
 export function resolveSpotData(
   spot: Extract<Spot, { kind: 'template' }>,
   fields: unknown,
   snapshots: ReadonlyMap<string, DataSnapshot>,
+  now: number,
 ): { data: Record<string, unknown>; rejected: Rejected[] } {
   const data = { ...spot.data };
   const rejected: Rejected[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    if (!snapshot) continue;
+    if (!snapshot || now - Date.parse(snapshot.checkedAt) > SNAPSHOT_STALE_MS) continue;
     const v = readPath(snapshot.data, b.path);
     const problems = validateBoundValue(fields, field, v);
     if (problems.length) rejected.push(...problems.map((problem) => ({ source: b.source, problem })));
@@ -274,13 +278,17 @@ export function snapshotFit(manifest: ScreenManifest, snapshot: DataSnapshot): {
 
 // --------------------------------------------------------------------- files
 
-/** The files one spot needs to play: a template spot its bundle and assets, an image or video its file. */
+/**
+ * The files one spot needs to play: a template spot its bundle and assets, and from frame protocol
+ * 2 the brand kit's fonts and logo, which it reads as it prepares; an image or video its file.
+ */
 export function spotFiles(spot: Spot, manifest: ScreenManifest): Set<string> {
   const out = new Set<string>();
   if (spot.kind === 'template') {
-    const html = manifest.templates[spot.template]?.html;
-    if (html) out.add(html);
+    const t = manifest.templates[spot.template];
+    if (t) out.add(t.html);
     Object.values(spot.assets).forEach((a) => out.add(a));
+    if (manifest.brand && (t?.manifest.protocol ?? 1) >= 2) brandFiles(manifest.brand).forEach((f) => out.add(f));
   } else if (spot.kind === 'image' || spot.kind === 'video') out.add(spot.file);
   return out;
 }

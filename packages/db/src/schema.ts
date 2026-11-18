@@ -628,13 +628,18 @@ export const dataSources = sqliteTable(
     format: text('format', { enum: ['json', 'ical', 'rss'] }).notNull(),
     /** The feed URL, encrypted: a private calendar URL is a secret. */
     urlEncrypted: text('url_encrypted').notNull(),
+    /** How often the poller fetches it, at least 300 (docs/backend-plan.md, Data sources). */
     refreshS: integer('refresh_s').notNull(),
+    /** Calendars: how many days ahead their events reach. Null: `@signforge/feeds`' default. */
+    horizonDays: integer('horizon_days'),
     nextPollAt: integer('next_poll_at').notNull().default(0),
     etag: text('etag'),
     lastModified: text('last_modified'),
     failures: integer('failures').notNull().default(0),
     /** An error category, never the upstream body. */
     lastError: text('last_error'),
+    /** Moves on when someone changes the source, not with polls. */
+    rowVersion: rowVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -647,9 +652,11 @@ export const dataSnapshots = sqliteTable(
   {
     orgId: orgId(),
     dataSourceId: text('data_source_id').notNull(),
-    /** Hash of the data; what a screen reports holding. */
+    /** Hash of the data, to tell a change. A screen orders snapshots by `fetched_at`, not by this. */
     version: text('version').notNull(),
     fetchedAt: integer('fetched_at').notNull(),
+    /** When a poll last found the feed still saying this; a screen's staleness counts from it. */
+    checkedAt: integer('checked_at').notNull(),
     dataJson: text('data_json').notNull(),
   },
   (t) => [

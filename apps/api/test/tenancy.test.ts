@@ -39,7 +39,11 @@ describe('a session for org A', () => {
 
   it('cannot pick org B from the request', async () => {
     // The org comes from the session alone; nothing in the request selects it.
-    const res = await alice.post(`/api/tools/list_screens?organizationId=${orgB}&orgId=${orgB}`, { organizationId: orgB, orgId: orgB }, { 'x-organization-id': orgB });
+    const res = await alice.post(
+      `/api/tools/list_screens?organizationId=${orgB}&orgId=${orgB}`,
+      { organizationId: orgB, orgId: orgB },
+      { 'x-organization-id': orgB },
+    );
     expect(((await res.json()) as { screens: { id: string }[] }).screens.map((s) => s.id)).toEqual([screenA]);
   });
 
@@ -50,7 +54,11 @@ describe('a session for org A', () => {
 
   it('loses org B as soon as it is removed, though its cache cookie still names org B', async () => {
     // Bob invites Alice into org B; she accepts and switches to it.
-    const invite = await bob.ok<{ id: string }>('/api/auth/organization/invite-member', { email: (await alice.session()).body.user.email, role: 'viewer', organizationId: orgB });
+    const invite = await bob.ok<{ id: string }>('/api/auth/organization/invite-member', {
+      email: (await alice.session()).body.user.email,
+      role: 'viewer',
+      organizationId: orgB,
+    });
     await alice.ok('/api/auth/organization/accept-invitation', { invitationId: invite.id });
     expect((await alice.setActive(orgB)).status).toBe(200);
     expect((await alice.tool('get_screen', { screenId: screenB })).status).toBe(200);

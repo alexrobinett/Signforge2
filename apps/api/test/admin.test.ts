@@ -7,7 +7,7 @@ import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import app from '../src/index';
+import { app } from '../src/index';
 import { mintCredential } from '../src/device/credential';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
 

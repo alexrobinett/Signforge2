@@ -25,7 +25,11 @@ async function setUp(orgId: string): Promise<Screen> {
 }
 
 /** Put a manifest in R2 and make it the screen's desired one. */
-async function publish(s: Screen, id: string, manifest: { schema: number; dataSources?: Record<string, unknown>; templates?: Record<string, unknown> }) {
+async function publish(
+  s: Screen,
+  id: string,
+  manifest: { schema: number; dataSources?: Record<string, unknown>; templates?: Record<string, unknown>; spots?: Record<string, unknown> },
+) {
   await env.BLOBS.put(manifestKey(s.seed.orgId, s.seed.screen, id), JSON.stringify({ id, files: {}, templates: {}, dataSources: {}, ...manifest }));
   await s.seed.scope.screens.setDesiredManifest(s.seed.screen, id);
 }
@@ -152,19 +156,53 @@ describe('snapshots', () => {
     const src = s.seed.dataSource;
     // A second source, not in the manifest: never sent.
     const other = await s.seed.scope.dataSources.insert({ name: 'Other', format: 'json', urlEncrypted: 'enc:o', refreshS: 300 });
-    await s.seed.scope.dataSources.putSnapshot(other.id, { version: 'o1', fetchedAt: 1000, dataJson: '{"o":1}' });
+    await s.seed.scope.dataSources.putSnapshot(other.id, { version: 'o1', fetchedAt: 1000, checkedAt: 1000, dataJson: '{"o":1}' });
 
     expect((await sync(s, body())).snapshots).toEqual([]);
     await publish(s, 'm-data', { schema: MANIFEST_SCHEMA, dataSources: { [src]: { id: src, refreshS: 300 } } });
 
     const seededAt = (await s.seed.scope.dataSources.snapshot(src))!.fetchedAt;
+    const at = (ms: number) => new Date(ms).toISOString();
     const first = await sync(s, body());
-    expect(first.snapshots).toEqual([{ id: src, version: seededAt, fetchedAt: new Date(seededAt).toISOString(), data: { t: 12 } }]);
-    expect((await sync(s, body({ snapshots: { [src]: seededAt } }))).snapshots).toEqual([]);
+    expect(first.snapshots).toEqual([{ id: src, version: seededAt, fetchedAt: at(seededAt), checkedAt: at(seededAt), data: { t: 12 } }]);
+    expect(first.checked).toEqual({});
+    const held = await sync(s, body({ snapshots: { [src]: seededAt } }));
+    expect(held.snapshots).toEqual([]);
+    expect(held.checked).toEqual({ [src]: { version: seededAt, checkedAt: at(seededAt) } });
 
-    await s.seed.scope.dataSources.putSnapshot(src, { version: 'v2', fetchedAt: seededAt + 60_000, dataJson: '{"t":13}' });
+    // The poller found the feed unchanged: the data is not sent again, only when it was checked.
+    await s.seed.scope.dataSources.savePoll(src, { source: { nextPollAt: seededAt + 330_000 }, checkedAt: seededAt + 30_000 });
+    const rechecked = await sync(s, body({ snapshots: { [src]: seededAt } }));
+    expect(rechecked.snapshots).toEqual([]);
+    expect(rechecked.checked).toEqual({ [src]: { version: seededAt, checkedAt: at(seededAt + 30_000) } });
+
+    await s.seed.scope.dataSources.putSnapshot(src, { version: 'v2', fetchedAt: seededAt + 60_000, checkedAt: seededAt + 60_000, dataJson: '{"t":13}' });
     const changed = await sync(s, body({ snapshots: { [src]: seededAt } }));
-    expect(changed.snapshots).toEqual([{ id: src, version: seededAt + 60_000, fetchedAt: new Date(seededAt + 60_000).toISOString(), data: { t: 13 } }]);
+    expect(changed.snapshots).toEqual([
+      { id: src, version: seededAt + 60_000, fetchedAt: at(seededAt + 60_000), checkedAt: at(seededAt + 60_000), data: { t: 13 } },
+    ]);
+    expect(changed.checked).toEqual({});
+  });
+});
+
+describe('a snapshot that fits none of the fields the screen binds to it', () => {
+  it('is not sent, while one that fills a bound field is', async () => {
+    const s = await setUp('sync-fit');
+    const src = s.seed.dataSource;
+    const template = { manifest: { fields: { temp: { type: 'number', label: 'Temperature' } } }, html: 'a'.repeat(64) };
+    const spot = { id: 'w', kind: 'template', template: 'base/w@1.0.0', data: {}, bindings: { temp: { source: src, path: 'now.temp' } } };
+    await publish(s, 'm-fit', {
+      schema: MANIFEST_SCHEMA,
+      dataSources: { [src]: { id: src, refreshS: 300 } },
+      templates: { 'base/w@1.0.0': template },
+      spots: { w: spot },
+    });
+    // The seeded snapshot is {"t":12}: nothing at now.temp.
+    expect((await sync(s, body())).snapshots).toEqual([]);
+    await s.seed.scope.dataSources.putSnapshot(src, { version: 'v2', fetchedAt: 2000, checkedAt: 2000, dataJson: '{"now":{"temp":"warm"}}' });
+    expect((await sync(s, body())).snapshots).toEqual([]);
+    await s.seed.scope.dataSources.putSnapshot(src, { version: 'v3', fetchedAt: 3000, checkedAt: 3000, dataJson: '{"now":{"temp":21}}' });
+    expect((await sync(s, body())).snapshots).toMatchObject([{ id: src, version: 3000, data: { now: { temp: 21 } } }]);
   });
 });
 

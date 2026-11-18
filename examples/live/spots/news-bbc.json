@@ -11,6 +11,10 @@
     "items": {
       "source": "news-bbc",
       "path": "items"
+    },
+    "language": {
+      "source": "news-bbc",
+      "path": "language"
     }
   }
 }

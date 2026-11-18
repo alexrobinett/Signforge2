@@ -34,11 +34,17 @@ export const nextOutput = z.string().nullable().describe('Pass as cursor to get 
 /** A sort key: compared element by element. */
 export type SortKey = readonly (string | number)[];
 
-const encode = (key: SortKey) => btoa(JSON.stringify(key)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+// base64url of the key's JSON as UTF-8: `btoa` takes only Latin-1, and a key holds names in any script.
+const encode = (key: SortKey) =>
+  btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(key))))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 
 function decode(cursor: string): SortKey {
   try {
-    const key: unknown = JSON.parse(atob(cursor.replace(/-/g, '+').replace(/_/g, '/')));
+    const bytes = Uint8Array.from(atob(cursor.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    const key: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
     if (Array.isArray(key) && key.length && key.every((k) => typeof k === 'string' || typeof k === 'number')) return key;
   } catch {
     // fall through

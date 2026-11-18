@@ -12,7 +12,13 @@ const news: FixtureSpot = {
   items: [{ title: 'Fallback item' }],
   bindings: { label: { source: 'news', path: 'headline' }, items: { source: 'news', path: 'stories' } },
 };
-const snapshot = (data: unknown, fetchedAt = '2026-11-17T12:00:00.000Z') => ({ id: 'news', version: Date.parse(fetchedAt), fetchedAt, data });
+const snapshot = (data: unknown, fetchedAt = '2026-11-17T12:00:00.000Z') => ({
+  id: 'news',
+  version: Date.parse(fetchedAt),
+  fetchedAt,
+  checkedAt: new Date().toISOString(),
+  data,
+});
 const live = { headline: 'Live headline', stories: [{ title: 'Live 1' }, { title: 'Live 2' }] };
 
 /** Open the player on the news spot with `data` as the source's snapshot, and wait for it to play. */

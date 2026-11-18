@@ -11,6 +11,10 @@
     "items": {
       "source": "news-verge",
       "path": "items"
+    },
+    "language": {
+      "source": "news-verge",
+      "path": "language"
     }
   }
 }

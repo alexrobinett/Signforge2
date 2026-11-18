@@ -217,10 +217,14 @@ export interface SyncWrite {
   at: number;
   playerVersion: string;
   heartbeatJson: string;
+  /** The manifest the heartbeat says is playing, if any. */
+  active?: string;
   epoch: string;
   seq: number;
   counts: readonly { hour: number; spotId: string; plays: number; ms: number }[];
 }
+
+type Snapshot = Omit<typeof s.dataSnapshots.$inferInsert, 'orgId' | 'dataSourceId'>;
 
 export function scoped(d1: D1Database, orgId: string) {
   assertId(orgId, 'orgId');
@@ -380,8 +384,20 @@ export function scoped(d1: D1Database, orgId: string) {
         },
       },
       /**
-       * A screen's sync (`POST /v1/device/sync`), in one atomic batch: its heartbeat and last-seen
-       * time, and its play counts added to the hourly totals unless the batch's `seq` is already
+       * The manifest a screen says is on screen, from its socket's `applied`. A sync's heartbeat
+       * writes the same column (`sync`), so it holds the latest report over either transport.
+       * Telemetry, not a setting: the row's version and `updatedAt` stay, so an editor open on the
+       * screen does not conflict with its own rollout. A repeat writes no row.
+       */
+      reportManifest: async (screenId: string, manifestId: string) => {
+        await d1
+          .prepare('UPDATE screens SET reported_manifest_id = ? WHERE org_id = ? AND id = ? AND reported_manifest_id IS NOT ?')
+          .bind(manifestId, orgId, screenId, manifestId)
+          .run();
+      },
+      /**
+       * A screen's sync (`POST /v1/device/sync`), in one atomic batch: its heartbeat, last-seen
+       * time and the manifest it reports playing (`reportManifest`), and its play counts added to the hourly totals unless the batch's `seq` is already
        * stored in its `epoch` (a retry). The check is in the statements, so two copies of one
        * request racing still count once. Leaves `updatedAt`, the settings' change time, alone.
        * Returns the highest seq stored in the epoch, and the rows D1 wrote (the budget's unit), or
@@ -402,10 +418,11 @@ export function scoped(d1: D1Database, orgId: string) {
         const update = d1
           .prepare(
             `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?,
+               reported_manifest_id = coalesce(?, reported_manifest_id),
                sync_ack_seq = CASE WHEN sync_epoch IS ? THEN max(sync_ack_seq, ?) ELSE ? END, sync_epoch = ?
              WHERE org_id = ? AND id = ? RETURNING sync_ack_seq`,
           )
-          .bind(v.at, v.playerVersion, v.heartbeatJson, v.epoch, v.seq, v.seq, v.epoch, orgId, screenId);
+          .bind(v.at, v.playerVersion, v.heartbeatJson, v.active ?? null, v.epoch, v.seq, v.seq, v.epoch, orgId, screenId);
         const results = await d1.batch([...inserts, update]);
         const row = results.at(-1)!.results[0] as { sync_ack_seq: number } | undefined;
         if (!row) return undefined;
@@ -821,18 +838,52 @@ export function scoped(d1: D1Database, orgId: string) {
       snapshots: async (dataSourceIds: readonly string[]) =>
         dataSourceIds.length
           ? db
-              .select()
+              .select({ dataSourceId: snap.dataSourceId, version: snap.version, fetchedAt: snap.fetchedAt, checkedAt: snap.checkedAt, dataJson: snap.dataJson })
               .from(snap)
               .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
               .all()
           : [],
-      putSnapshot: async (dataSourceId: string, v: { version: string; fetchedAt: number; dataJson: string }) => {
+      putSnapshot: async (dataSourceId: string, v: Snapshot) => {
         if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId);
         await db
           .insert(snap)
           .values({ orgId, dataSourceId, ...v })
           .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: { ...v } })
           .run();
+      },
+      /**
+       * What one poll found, in one batch: the source's patch (next poll, failures, validators),
+       * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
+       */
+      savePoll: async (
+        dataSourceId: string,
+        poll: { source: RowPatch<typeof s.dataSources> & { nextPollAt: number }; snapshot?: Snapshot; checkedAt?: number },
+      ) => {
+        if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId);
+        const ds = s.dataSources;
+        const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
+        // Not `stage.update`: a poll leaves the row's version alone, so it never makes a person's edit stale.
+        const writes: Write[] = [
+          ...staged(
+            undefined,
+            db
+              .update(ds)
+              .set(updateSet(ds, strip(poll.source)))
+              .where(and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId))),
+          ).writes,
+        ];
+        if (poll.snapshot)
+          writes.push(
+            ...staged(
+              undefined,
+              db
+                .insert(snap)
+                .values({ orgId, dataSourceId, ...poll.snapshot })
+                .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: { ...poll.snapshot } }),
+            ).writes,
+          );
+        else if (poll.checkedAt !== undefined) writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(mineSnap)).writes);
+        await commit(db, writes);
       },
     },
 

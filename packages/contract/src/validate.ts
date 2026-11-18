@@ -18,6 +18,7 @@ import {
   FORBIDDEN_TEMPLATE_CODE,
   ID_PATTERN,
   MAX_IDENTIFY_SECONDS,
+  MAX_SNAPSHOT_BYTES,
   MAX_SYNC_PLAY_COUNTS,
   PREVIEW_PROTOCOL,
   SUPPORTED_MANIFEST_SCHEMAS,
@@ -353,13 +354,13 @@ export function displayHoursProblems(hours: unknown): string[] {
   return errors;
 }
 
-/** A screen checks a data source no more often than this. */
+/** The least `DataSource.refreshS` a manifest may carry. */
 export const MIN_REFRESH_S = 60;
 
 // ---------------------------------------------------------------------- brand
 
 /** Every file a brand kit refers to. The kit must already be valid. */
-const brandFiles = (b: BrandKit): string[] => [
+export const brandFiles = (b: BrandKit): string[] => [
   ...[b.fonts.display, b.fonts.body].flatMap((f) => f?.files.map((x) => x.file) ?? []),
   ...(b.logo ? [b.logo.onDark, b.logo.onLight].filter(isText) : []),
 ];
@@ -578,6 +579,11 @@ export function validateManifest(m: unknown): string[] {
 
 // ------------------------------------------------------------------ live data
 
+/** The size `MAX_SNAPSHOT_BYTES` caps: `data` as JSON, in UTF-8. Undefined (not JSON) counts as 0. */
+export function snapshotBytes(data: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(data) ?? '').length;
+}
+
 /** Check a data snapshot, as `data/<id>.json` and a sync response carry it. */
 export function validateDataSnapshot(s: unknown): string[] {
   if (!isObj(s)) return ['snapshot is not an object'];
@@ -585,7 +591,9 @@ export function validateDataSnapshot(s: unknown): string[] {
   if (!isIdValue(s.id)) errors.push(`snapshot id "${show(s.id)}" is not a valid id`);
   if (!isCount(s.version)) errors.push('snapshot version must be a whole number, 0 or more');
   if (!isInstant(s.fetchedAt)) errors.push('snapshot fetchedAt must be an ISO 8601 time');
+  if (!isInstant(s.checkedAt)) errors.push('snapshot checkedAt must be an ISO 8601 time');
   if (!Object.hasOwn(s, 'data')) errors.push('snapshot has no data');
+  else if (snapshotBytes(s.data) > MAX_SNAPSHOT_BYTES) errors.push(`snapshot data is over ${MAX_SNAPSHOT_BYTES} bytes as JSON`);
   return errors;
 }
 
@@ -702,6 +710,13 @@ export function validateSyncResponse(r: unknown): string[] {
   if (!isCount(r.ackSeq)) errors.push('ackSeq must be a whole number, 0 or more');
   if (r.desiredManifest !== undefined && !isText(r.desiredManifest)) errors.push('desiredManifest must be a manifest id when present');
   errors.push(...list('snapshot', r.snapshots, validateDataSnapshot));
+  if (r.checked !== undefined) {
+    if (!isObj(r.checked)) errors.push('checked must map source ids to a version and checkedAt');
+    else
+      for (const [k, v] of Object.entries(r.checked))
+        if (!isIdValue(k) || !isCount(own(v, 'version')) || !isInstant(own(v, 'checkedAt')))
+          errors.push(`checked: "${k}" must be a source id with a version and checkedAt`);
+  }
   if (!isText(r.socketTicket)) errors.push('socketTicket is missing');
   errors.push(...list('command', r.commands, validateDeviceCommand));
   return errors;
