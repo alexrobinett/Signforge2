@@ -8,6 +8,7 @@ import { parseHeartbeat } from './heartbeat';
 import { nextOutput, page, pageInput } from './paging';
 import { manifestKey } from './r2';
 import { NEEDS_YOU_REASONS, screenState, shouldBeShowing, STATE_KINDS } from './screen-state';
+import { unreachableAfterMs } from './settings';
 import { defineTool, notFound } from './tool';
 
 /** How long a display override lasts at most: on a screen without display hours, and over a closed weekend. */
@@ -111,12 +112,19 @@ export function liveOverride(json: string | null, now: number): DisplayOverride 
 }
 
 /**
- * A screen as tools return it. `credentials` are the screen's, when the caller has them already;
- * a screen whose every credential is revoked is revoked, while one that never collected a
- * credential is waiting to pair.
+ * A screen as tools return it. `credentials` are the screen's, and `unreachableMs` the org's
+ * threshold, when the caller has them already (a list reads each once); a screen whose every
+ * credential is revoked is revoked, while one that never collected a credential is waiting to pair.
  */
-export async function screenView(org: OrgScope, s: Screen, blobs: R2Bucket, now = Date.now(), credentials?: readonly ScreenCredential[]): Promise<ScreenView> {
-  const creds = credentials ?? (await org.screens.credentials.forScreen(s.id));
+export async function screenView(
+  org: OrgScope,
+  s: Screen,
+  blobs: R2Bucket,
+  now = Date.now(),
+  credentials?: readonly ScreenCredential[],
+  unreachableMs?: number,
+): Promise<ScreenView> {
+  const [creds, afterMs] = await Promise.all([credentials ?? org.screens.credentials.forScreen(s.id), unreachableMs ?? unreachableAfterMs(org)]);
   const revoked = s.status === 'revoked' || (creds.length > 0 && creds.every((c) => c.revokedAt != null));
   const hb = parseHeartbeat(s.heartbeatJson);
   const hours = hoursOf(s);
@@ -155,6 +163,7 @@ export async function screenView(org: OrgScope, s: Screen, blobs: R2Bucket, now 
         reportedManifestId: s.reportedManifestId,
         lastSeenAt: s.lastSeenAt,
         heartbeat: hb,
+        unreachableAfterMs: afterMs,
       },
       now,
     ),
@@ -209,11 +218,11 @@ const listScreens = defineTool({
   output: z.object({ screens: z.array(screenOutput), next: nextOutput }),
   example: {},
   handler: async ({ org, input, blobs }) => {
-    const [all, credentials] = await Promise.all([org.screens.list(), org.screens.credentials.list()]);
+    const [all, credentials, afterMs] = await Promise.all([org.screens.list(), org.screens.credentials.list(), unreachableAfterMs(org)]);
     const { rows, next } = page(all, (s) => [s.id], input);
     const now = Date.now();
     const of = (id: string) => credentials.filter((c) => c.screenId === id);
-    return { screens: await Promise.all(rows.map((s) => screenView(org, s, blobs, now, of(s.id)))), next };
+    return { screens: await Promise.all(rows.map((s) => screenView(org, s, blobs, now, of(s.id), afterMs))), next };
   },
 });
 

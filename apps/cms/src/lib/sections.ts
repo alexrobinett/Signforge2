@@ -1,7 +1,7 @@
-import { CalendarClockIcon, ImagesIcon, LayersIcon, LayoutDashboardIcon, ListVideoIcon, MonitorIcon, type LucideIcon } from 'lucide-react';
+import { CalendarClockIcon, ImagesIcon, LayersIcon, LayoutDashboardIcon, ListVideoIcon, MonitorIcon, SettingsIcon, type LucideIcon } from 'lucide-react';
 
 export interface Section {
-  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/assets';
+  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/assets' | '/settings';
   label: string;
   icon: LucideIcon;
   description: string;
@@ -51,6 +51,13 @@ export const SECTIONS: Section[] = [
     icon: ImagesIcon,
     description: 'Images and video uploaded for your spots.',
     empty: { title: 'No assets yet', body: 'Uploaded images and video, checked for the screens they will play on, will be kept here.' },
+  },
+  {
+    to: '/settings',
+    label: 'Settings',
+    icon: SettingsIcon,
+    description: "Your organization's defaults, members and alerts.",
+    empty: { title: '', body: '' },
   },
 ];
 

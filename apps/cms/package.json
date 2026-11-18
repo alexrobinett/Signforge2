@@ -16,6 +16,7 @@
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
+    "@signforge/api": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/media": "workspace:*",
     "@tanstack/react-router": "^1.170.46",
@@ -38,7 +39,6 @@
     "@cloudflare/workers-types": "^5.20261117.1",
     "@eslint-community/eslint-plugin-eslint-comments": "^4.8.1",
     "@playwright/test": "^1.65.1",
-    "@signforge/api": "workspace:*",
     "@signforge/compiler": "workspace:*",
     "@signforge/player": "workspace:*",
     "@signforge/tools": "workspace:*",

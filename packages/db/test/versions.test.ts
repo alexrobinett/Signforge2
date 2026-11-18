@@ -85,4 +85,20 @@ describe('row versions', () => {
     await org.commit(removed.writes);
     expect(await org.screenGroups.members(o.group)).toEqual([extra.id]);
   });
+
+  it('guard org settings too, counting an org with no settings row as version 1', async () => {
+    const o = await seedOrg(env.DB, 'ver-settings');
+    const org = scoped(env.DB, o.orgId);
+    // Two first saves made from the same read: the one that commits second is refused in the batch.
+    const mine = await org.settings.stage.set({ locale: 'en-GB' }, 1);
+    await org.commit((await org.settings.stage.set({ timezone: 'Asia/Tokyo' }, 1)).writes);
+    const err = await org.commit(mine.writes).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleVersionError);
+    expect(err).toMatchObject({ id: 'settings', version: 2 });
+    expect(await org.settings.get()).toMatchObject({ timezone: 'Asia/Tokyo', locale: null, rowVersion: 2 });
+
+    await expect(org.settings.stage.set({ locale: 'en-GB' }, 1)).rejects.toBeInstanceOf(StaleVersionError);
+    await org.commit((await org.settings.stage.set({ locale: 'en-GB' })).writes);
+    expect(await org.settings.get()).toMatchObject({ locale: 'en-GB', rowVersion: 3 });
+  });
 });

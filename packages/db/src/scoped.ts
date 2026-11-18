@@ -253,6 +253,7 @@ export function scoped(d1: D1Database, orgId: string) {
 
   const m = s.screenGroupMembers;
   const os = s.orgSettings;
+  const inc = s.screenIncidents;
 
   type Group = typeof s.screenGroups.$inferSelect;
   /** The screens, once each. Throws `NotInOrgError` if any is not the org's. */
@@ -727,19 +728,77 @@ export function scoped(d1: D1Database, orgId: string) {
     settings: {
       get: () => db.select().from(os).where(eq(os.orgId, orgId)).get(),
       stage: {
-        /** Set the default playlist (null for none). Throws `NotInOrgError` for a playlist the org does not have. */
-        set: async (values: { defaultPlaylistId: string | null }): Promise<Staged<typeof os.$inferSelect>> => {
-          const id = values.defaultPlaylistId;
-          if (id !== null && !(await playlists.get(id))) throw new NotInOrgError('playlist', id);
-          const row = { orgId, defaultPlaylistId: id, updatedAt: Date.now() };
-          return staged(
+        /**
+         * Set the fields given, leaving the rest as they are (null clears one), and move the
+         * version on. Throws `NotInOrgError` for a default playlist the org does not have. With
+         * `ifVersion`, refused (`StaleVersionError`) unless the settings are still that version,
+         * checked now and again in the batch, as `stage.update` is; an org with no row is at 1.
+         */
+        set: async (values: RowPatch<typeof os>, ifVersion?: number): Promise<Staged<typeof os.$inferSelect>> => {
+          const patch = strip(values);
+          const id = patch.defaultPlaylistId;
+          if (id != null && !(await playlists.get(id))) throw new NotInOrgError('playlist', id);
+          const current = await db.select().from(os).where(eq(os.orgId, orgId)).get();
+          const version = current?.rowVersion ?? 1;
+          if (ifVersion !== undefined && version !== ifVersion) throw new StaleVersionError('settings', version);
+          const updatedAt = Date.now();
+          const row: typeof os.$inferSelect = {
+            orgId,
+            defaultPlaylistId: null,
+            timezone: null,
+            locale: null,
+            displayHoursJson: null,
+            updateWindowJson: null,
+            unreachableAfterMs: null,
+            alertsJson: null,
+            ...current,
+            ...patch,
+            rowVersion: version + 1,
+            updatedAt,
+          };
+          const upsert = staged(
             row,
             db
               .insert(os)
               .values(row)
-              .onConflictDoUpdate({ target: os.orgId, set: { defaultPlaylistId: id, updatedAt: row.updatedAt } }),
+              .onConflictDoUpdate({ target: os.orgId, set: { ...patch, rowVersion: sql`${os.rowVersion} + 1`, updatedAt } }),
           );
+          if (ifVersion === undefined) return upsert;
+          const now = async () => (await db.select({ v: os.rowVersion }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 1;
+          const check = db
+            .select({
+              // json() of text that is not JSON raises an error, which aborts the batch.
+              ok: sql`json(CASE WHEN COALESCE((SELECT ${os.rowVersion} FROM ${os} WHERE ${os.orgId} = ${orgId}), 1) = ${ifVersion} THEN '1' ELSE 'stale version' END)`,
+            })
+            .from(s.organization)
+            .where(eq(s.organization.id, orgId));
+          return { row, writes: [guard(check, { id: 'settings', version: ifVersion, current: now }), ...upsert.writes] };
         },
+      },
+    },
+
+    /**
+     * A screen's incidents (M3-42), written by the alert check, not by tools. Each write says
+     * whether it was the one that made the change, so two overlapping checks alert once.
+     */
+    incidents: {
+      /** Open an offline incident; false if the screen already has one open. */
+      open: async (screenId: string, lastSeenAt: number, now: number): Promise<boolean> => {
+        const rows = await db
+          .insert(inc)
+          .values({ id: newId('inc'), orgId, screenId, kind: 'offline', lastSeenAt, openedAt: now })
+          .onConflictDoNothing()
+          .returning({ id: inc.id });
+        return rows.length === 1;
+      },
+      /** Close an open incident; false if it was closed already. */
+      clear: async (incidentId: string, now: number): Promise<boolean> => {
+        const rows = await db
+          .update(inc)
+          .set({ clearedAt: now })
+          .where(and(eq(inc.orgId, orgId), eq(inc.id, incidentId), isNull(inc.clearedAt)))
+          .returning({ id: inc.id });
+        return rows.length === 1;
       },
     },
 
