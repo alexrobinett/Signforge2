@@ -176,7 +176,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
 ## Auth and tenancy
 
 - **Three kinds of caller, on separate route trees:** users with a cookie on `/api`, screens with a bearer token on `/v1/device`, agents with OAuth on `/mcp`. No credential works on another's tree.
-- **Org isolation.** D1 has no row-level security, so handlers never touch the database directly. Only a `scoped(db, orgId)` repository in `packages/db` queries tenant tables. A generated test replays every tool as org B against org A's IDs and expects not-found.
+- **Org isolation.** D1 has no row-level security, so handlers never touch the database directly. Only a `scoped(db, orgId)` repository in `packages/db` queries tenant tables. A generated test replays every tool as org B with org A's ID in one ID field at a time, every field in its input schema, and expects not-found.
 - **Better Auth on Workers:**
   - Build the instance per request from the environment. The CLI (the `auth` package) generates the schema from a separate static config with an in-memory `node:sqlite` database.
   - D1 has no interactive transactions. Better Auth 1.7 detects a D1 binding and turns transactions off. Sign-in by email code, creating an org, inviting and accepting all work on D1. A failure partway through a multi-step flow can leave a partial row: a failed org creation can leave an `organization` row with no member, which no one can make active or reach (tested in M3-09).

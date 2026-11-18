@@ -186,7 +186,7 @@ Callers so far:
    - A tool that replaces a whole list also gets add and remove forms (`add_group_members`, `remove_group_members`), which need no version.
 5. Add it to `TOOLS` in `src/registry.ts`.
 
-`test/isolation.test.ts` then calls it as org B's owner, with org A's ids put into its example, and expects `not_found`. A tool with no id fields must succeed without returning anything of org A's. An id field of a new kind fails that test until you map it in `ORG_A_IDS`.
+`test/isolation.test.ts` then calls it as org B's owner once for each id field in its input schema, optional ones and those of one branch included: org A's id in that field, org B's own rows in the rest. It expects `not_found` naming A's id. A tool with no id fields must succeed without returning anything of org A's. An id field of a new kind fails that test until you map it in `ORG_IDS`; a field it cannot reach with a valid input fails until the tool's example reaches it.
 
 ## Tests
 
