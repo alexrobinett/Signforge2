@@ -2,7 +2,7 @@
 // published version. See docs/backend-plan.md#publishing.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { draftChanged, published, scoped, StaleVersionError } from '../src/index';
+import { draftChanged, NotInOrgError, published, scoped, StaleVersionError } from '../src/index';
 import { seedOrg, type SeededOrg } from '../src/testing';
 
 let o: SeededOrg;
@@ -186,5 +186,44 @@ describe('publish order (R09)', () => {
     expect(err).toMatchObject({ id: 'publish revision', version: 1 });
     // Not a setting: an open settings form still saves.
     expect(await org.settings.get()).toEqual({ ...before, publishRevision: 1 });
+  });
+});
+
+describe('rollout history in the publish batch (review 5)', () => {
+  it("stages a publish's row and its screens' rollout rows, which a failed guard rolls back with the switches", async () => {
+    const p = await seedOrg(env.DB, 'drafts-rollout');
+    const org = scoped(env.DB, p.orgId);
+    const manifestId = 'a'.repeat(64);
+    const stage = async (revision: number) => {
+      const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1' });
+      const rollout = await org.publishes.stage.addScreens(publish.row.id, [{ screenId: p.screen, manifestId }]);
+      return {
+        id: publish.row.id,
+        writes: [
+          ...org.publishes.stage.advance(revision).writes,
+          ...publish.writes,
+          ...rollout.writes,
+          ...org.screens.stage.setDesiredManifest(p.screen, manifestId).writes,
+        ],
+      };
+    };
+    const before = (await org.screens.get(p.screen))!.desiredManifestId;
+
+    const stale = await stage(1);
+    await expect(org.commit(stale.writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await org.publishes.get(stale.id)).toBeUndefined();
+    expect(await org.publishes.screens(stale.id)).toEqual([]);
+    expect((await org.screens.get(p.screen))!.desiredManifestId).toBe(before);
+
+    const fresh = await stage(0);
+    await org.commit(fresh.writes);
+    expect(await org.publishes.screens(fresh.id)).toEqual([{ screenId: p.screen, manifestId }]);
+    expect((await org.screens.get(p.screen))!.desiredManifestId).toBe(manifestId);
+  });
+
+  it('refuses a rollout row for a screen the org does not have', async () => {
+    const p = await seedOrg(env.DB, 'drafts-rollout-foreign');
+    const org = scoped(env.DB, p.orgId);
+    await expect(org.publishes.stage.addScreens(p.publish, [{ screenId: 'scr_not_mine', manifestId: 'a'.repeat(64) }])).rejects.toBeInstanceOf(NotInOrgError);
   });
 });

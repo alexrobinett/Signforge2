@@ -904,6 +904,17 @@ export function scoped(d1: D1Database, orgId: string) {
       stage: {
         ...publishes.stage,
         /**
+         * As `addScreens`, staged, so a publish's rollout rows commit in one batch with its row
+         * (`stage.insert`, staged before them), its order (`advance`) and its screens' switches.
+         * Throws `NotInOrgError` for a screen the org does not have. The publish may not be stored
+         * yet, so it is not read: the `(org_id, publish_id)` foreign key refuses another org's.
+         */
+        addScreens: async (publishId: string, rows: readonly { screenId: string; manifestId: string }[]): Promise<Staged> => {
+          await orgScreens(rows.map((r) => r.screenId));
+          const values = rows.map((r) => ({ orgId, publishId, screenId: r.screenId, manifestId: r.manifestId }));
+          return staged(undefined, ...chunk(values, 4).map((part) => db.insert(ps).values(part)));
+        },
+        /**
          * Put a publish in order: stage moving the org's publish revision on from `revision`, the
          * one read with the content it compiled (`org_settings.publish_revision`; 0 with no row).
          * If another publish committed since, the batch fails (`StaleVersionError`, id
