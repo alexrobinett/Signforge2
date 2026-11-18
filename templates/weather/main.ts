@@ -81,7 +81,9 @@ async function precipitation(condition: Condition, viewport: { width: number; he
           { count: heavy ? 26 : 16, size: 1.0, alpha: 0.55, secs: 0.3 },
         ];
 
-  await Promise.all(
+  // Built in parallel, appended in order: the slow far layer must stay behind the near one, and
+  // appending as each tile finishes encoding would swap them at random (PR #5, weather 1.1.1).
+  const built = await Promise.all(
     layers.map(async (l, li) => {
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = tile;
@@ -129,9 +131,10 @@ async function precipitation(condition: Condition, viewport: { width: number; he
       layer.style.setProperty('--tile', `${tile}px`);
       layer.style.backgroundImage = `url(${url})`;
       layer.style.animationDuration = kind === 'snow' ? `${l.secs}s, 6s` : `${l.secs}s`;
-      host.appendChild(layer);
+      return layer;
     }),
   );
+  host.append(...built);
 }
 
 /** A token's colour as RGB, or undefined with no kit. Any CSS colour: the canvas parses it. */
