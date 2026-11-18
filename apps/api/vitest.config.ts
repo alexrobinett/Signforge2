@@ -44,5 +44,7 @@ export default defineConfig({
       },
     })),
   ],
-  test: { setupFiles: ['test/setup.ts'] },
+  // No module cache on disk: with it, a worker that starts after another gets every cached module inlined
+  // into one message, over workerd's 32 MiB limit, and dies (docs/ci.md, "The API's workerd tests").
+  test: { setupFiles: ['test/setup.ts'], fsModuleCache: false },
 });
