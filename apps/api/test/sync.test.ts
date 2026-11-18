@@ -11,6 +11,8 @@ import { manifestKey } from '../src/r2';
 const BASE = 'https://api.test/v1/device';
 const HOUR = '2026-11-17T09:00Z';
 const HOUR_MS = Date.parse(HOUR);
+const OLD = 'a'.repeat(64);
+const NEW = 'b'.repeat(64);
 
 interface Screen {
   seed: SeededOrg;
@@ -126,7 +128,7 @@ describe('the heartbeat', () => {
       s,
       body({
         player: { version: '2.1.0', manifestSchemas: [MANIFEST_SCHEMA], protocols: [2] },
-        manifest: { active: 'm-old', filesMissing: 2, fallbackFrom: 'm-new' },
+        manifest: { active: OLD, filesMissing: 2, fallbackFrom: NEW },
         display: { on: false, methods: { cec: 'ok' } },
         deviceTime,
         clock: { offsetMs: 3_600_000, trusted: true },
@@ -138,7 +140,7 @@ describe('the heartbeat', () => {
     expect(row?.playerVersion).toBe('2.1.0');
     const beat = parseHeartbeat(row!.heartbeatJson);
     expect(beat).toMatchObject({
-      manifest: { active: 'm-old', filesMissing: 2, fallbackFrom: 'm-new' },
+      manifest: { active: OLD, filesMissing: 2, fallbackFrom: NEW },
       display: { on: false, methods: { cec: 'ok' } },
       clock: { offsetMs: 3_600_000, trusted: true },
       dataRejected: { weather: 4 },
@@ -147,6 +149,18 @@ describe('the heartbeat', () => {
     // The device clock is an hour slow: the drift the server saw is about an hour.
     expect(beat!.driftMs).toBeGreaterThan(3_590_000);
     expect(beat!.driftMs).toBeLessThan(3_610_000);
+  });
+
+  it('refuses a manifest id that is not a sha256, and stores nothing', async () => {
+    const s = await setUp('sync-heartbeat-bounds');
+    const res = await exports.default.fetch(`${BASE}/sync`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${s.credential}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body({ manifest: { active: 'x'.repeat(10_000), filesMissing: 0 } })),
+    });
+    expect(res.status).toBe(400);
+    const row = await s.seed.scope.screens.get(s.seed.screen);
+    expect(row?.heartbeatJson).toBeNull();
   });
 });
 
