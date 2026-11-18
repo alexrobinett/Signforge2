@@ -74,27 +74,40 @@ function buildRaw(project: string): Manifest {
 }
 const storedGolden = (project: string) => JSON.parse(readFileSync(join(import.meta.dirname, 'golden', `${project}.json`), 'utf8')) as Manifest;
 
+/** Why examples/stress/media is not the set listed in examples/stress/media.sha256, if it is not. */
+function stressMediaMismatch(): string | undefined {
+  const dir = join(root, 'examples/stress');
+  for (const line of readFileSync(join(dir, 'media.sha256'), 'utf8').trim().split('\n')) {
+    const [sha, name] = line.split(/ +/);
+    const file = join(dir, 'media', name!);
+    if (!existsSync(file)) return `examples/stress/media/${name} is missing`;
+    if (createHash('sha256').update(readFileSync(file)).digest('hex') !== sha) return `examples/stress/media/${name} is not the canonical file`;
+  }
+  return undefined;
+}
+
 describe('sf build', () => {
   it('builds the demo project exactly as before', () => {
     const { built, expected } = check('demo');
     expect(built).toEqual(expected);
   }, 60_000);
 
-  // The stress project's photos and videos are generated (scripts/stress-media.sh), not committed.
-  // Without them the test skips, and says so in the test name and on stderr, so a green run
-  // never hides that the stress golden went unchecked.
-  const stressMedia = existsSync(join(root, 'examples/stress/media/pan-1080p30.mp4'));
-  if (!stressMedia) {
-    process.stderr.write(
-      '\n*** golden.test.ts: SKIPPING the stress golden: examples/stress/media is missing. Run `sh scripts/stress-media.sh` to check it. ***\n\n',
-    );
+  // The stress project's photos and video are not in git: scripts/stress-media.sh fetches the
+  // canonical set, which the golden was built from. Without exactly that set the stress golden
+  // cannot be checked. In CI that fails; elsewhere the test skips, and says so in the test name and
+  // on stderr, so a green run never hides that the stress golden went unchecked.
+  const stressMediaProblem = stressMediaMismatch();
+  const skipStress = stressMediaProblem !== undefined && !process.env.CI;
+  if (skipStress) {
+    process.stderr.write(`\n*** golden.test.ts: SKIPPING the stress golden: ${stressMediaProblem}. Run \`sh scripts/stress-media.sh\` to check it. ***\n\n`);
   }
-  const stressName = stressMedia
-    ? 'builds the stress project exactly as before'
-    : 'builds the stress project exactly as before (SKIPPED: no stress media, run scripts/stress-media.sh)';
-  it.skipIf(!stressMedia)(
+  const stressName = skipStress
+    ? 'builds the stress project exactly as before (SKIPPED: not the canonical stress media, run scripts/stress-media.sh)'
+    : 'builds the stress project exactly as before';
+  it.skipIf(skipStress)(
     stressName,
     () => {
+      expect(stressMediaProblem, 'run `sh scripts/stress-media.sh`').toBeUndefined();
       const { built, expected } = check('stress');
       expect(built).toEqual(expected);
     },
