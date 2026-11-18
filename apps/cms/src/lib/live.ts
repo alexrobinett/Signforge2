@@ -1,7 +1,7 @@
 /**
  * A ticking clock for relative times, and what the member may do. Pages re-read their data on
- * navigation and after an action; live fleet status (polling or the screen sockets) waits for the
- * data-layer decision (docs/research/cms-data-layer.md).
+ * navigation and after an action; the Screens page also polls what each screen is doing
+ * (src/queries/screens.ts).
  */
 import { getRouteApi } from '@tanstack/react-router';
 import { useSyncExternalStore } from 'react';

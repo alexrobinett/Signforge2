@@ -1,8 +1,10 @@
 /**
  * Screens: the live tile wall by default (canvas board Screens A), or the dense table (board B, on
- * the light kit). Each screen says what it should be showing and what it is doing, as a fact.
+ * the light kit). Each screen says what it should be showing and what it is doing, as a fact, and
+ * what it is doing stays current while the page is open (src/queries/screens.ts).
  * Groups are locations: each rolls up to its most urgent screen.
  */
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { LayoutGridIcon, PlusIcon, SearchIcon, TableIcon } from 'lucide-react';
 import { useMemo } from 'react';
@@ -18,9 +20,9 @@ import { NativeSelect } from '~/components/ui/select';
 import { describeHours } from '~/components/screens/display-hours-editor';
 import { ago, describeScreen, rollup, summarise } from '~/lib/screen-status';
 import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
-import { useCanManage, useNow } from '~/lib/live';
+import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
-import { getScreens } from '~/server/screens.functions';
+import { screensQuery, screenStatusQuery, withStatus } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
 
 type View = 'tiles' | 'table';
@@ -38,21 +40,27 @@ export const Route = createFileRoute('/_app/screens/')({
     ...(typeof s.group === 'string' && s.group ? { group: s.group } : {}),
     ...(isStateKind(s.status) ? { status: s.status } : {}),
   }),
-  // The org's settings give the pairing form its defaults for new screens.
-  loader: async () => {
-    const [screens, settings] = await Promise.all([getScreens(), getOrgSettings()]);
-    return { ...screens, settings };
+  // The org's settings give the pairing form its defaults for new screens. The list is read again
+  // on every load, as after a change (`router.invalidate()` in the store's actions), never from the cache.
+  loader: async ({ context: { queryClient }, parentMatchPromise }) => {
+    const orgId = (await parentMatchPromise).loaderData?.organization?.id;
+    const [settings] = await Promise.all([getOrgSettings(), orgId && queryClient.query({ ...screensQuery(orgId), staleTime: 0 })]);
+    return { settings };
   },
   head: () => ({ meta: [{ title: 'Screens · SignForge' }] }),
   component: ScreensPage,
 });
 
 function ScreensPage() {
-  const { screens, groups, at } = Route.useLoaderData();
+  const orgId = useOrgId();
+  const { data } = useSuspenseQuery(screensQuery(orgId));
+  const { data: live } = useQuery(screenStatusQuery(orgId));
+  const { groups } = data;
+  const screens = withStatus(data.screens, data.at, live);
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
-  const now = useNow(at);
+  const now = useNow(Math.max(data.at, live?.at ?? 0));
 
   const view: View = search.view ?? 'tiles';
   const groupsOf = useMemo(() => {
