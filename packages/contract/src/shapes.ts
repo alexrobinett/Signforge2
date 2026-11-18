@@ -681,9 +681,11 @@ export interface SyncRequest {
   /**
    * `active`: the manifest playing. `filesMissing`: files of the manifest being synced not yet held.
    * `fallbackFrom`: a newer manifest that played nothing in a full pass, so the screen went back to
-   * its last good one (`active`). Manifest ids are lowercase hex sha256 (`canonicalJson`).
+   * its last good one (`active`). `lastGood`: the last manifest that played a spot, which the
+   * screen may go back to, so the server lets it fetch that manifest's files. Manifest ids are
+   * lowercase hex sha256 (`canonicalJson`).
    */
-  manifest: { active?: string; filesMissing: number; fallbackFrom?: string };
+  manifest: { active?: string; filesMissing: number; fallbackFrom?: string; lastGood?: string };
   display: DisplayStatus;
   /** The screen's own clock when it sent this, uncorrected; the server measures drift from it. */
   deviceTime: string;

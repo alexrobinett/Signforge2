@@ -182,7 +182,7 @@ const validSyncRequest = (): SyncRequest => ({
   seq: 3,
   epoch: 'e7Hq2',
   player: { version: '1.2.3', manifestSchemas: [2, 3], protocols: [1, 2] },
-  manifest: { active: M1, filesMissing: 0, fallbackFrom: M2 },
+  manifest: { active: M1, filesMissing: 0, fallbackFrom: M2, lastGood: M1 },
   display: { on: true, methods: { signal: 'ok' }, override: { state: 'off', until: '2026-11-17T18:00:00Z' } },
   deviceTime: '2026-11-17T13:05:00Z',
   clock: { offsetMs: -1200, trusted: true },
@@ -530,7 +530,7 @@ describe('snapshots and device bodies', () => {
     r.manifest = { filesMissing: 0, fallbackFrom: '' };
     r.dataRejected = { feed: -1 };
     expect(validateSyncRequest(r)).toEqual([
-      'manifest needs filesMissing, and active and fallbackFrom when there are any, as sha256 ids',
+      'manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids',
       `playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`,
       'dataRejected: "feed" must be a source id with a count',
     ]);
@@ -540,11 +540,11 @@ describe('snapshots and device bodies', () => {
 
   it('takes only sha256 manifest ids from a screen, and bounds its source maps', () => {
     const r = validSyncRequest() as unknown as Record<string, unknown>;
-    r.manifest = { active: 'x'.repeat(10_000), filesMissing: 0, fallbackFrom: M2.toUpperCase() };
+    r.manifest = { active: 'x'.repeat(10_000), filesMissing: 0, fallbackFrom: M2.toUpperCase(), lastGood: 'm1' };
     r.snapshots = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 1 }, (_, i) => [`s${i}`, 1]));
     r.dataRejected = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 1 }, (_, i) => [`s${i}`, 1]));
     expect(validateSyncRequest(r)).toEqual([
-      'manifest needs filesMissing, and active and fallbackFrom when there are any, as sha256 ids',
+      'manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids',
       `snapshots holds at most ${MAX_SYNC_SOURCES} sources`,
       `dataRejected holds at most ${MAX_SYNC_SOURCES} sources`,
     ]);

@@ -691,13 +691,9 @@ export function validateSyncRequest(r: unknown): string[] {
     errors.push('player needs a version and the manifest schemas and protocols it supports');
   }
   const m = r.manifest;
-  if (
-    !isObj(m) ||
-    (m.active !== undefined && !isManifestId(m.active)) ||
-    (m.fallbackFrom !== undefined && !isManifestId(m.fallbackFrom)) ||
-    !isCount(m.filesMissing)
-  )
-    errors.push('manifest needs filesMissing, and active and fallbackFrom when there are any, as sha256 ids');
+  const optionalId = (k: string) => own(m, k) === undefined || isManifestId(own(m, k));
+  if (!isObj(m) || !optionalId('active') || !optionalId('fallbackFrom') || !optionalId('lastGood') || !isCount(m.filesMissing))
+    errors.push('manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids');
   errors.push(...displayStatusProblems(r.display));
   if (!isInstant(r.deviceTime)) errors.push('deviceTime must be an ISO 8601 time');
   if (!isObj(r.clock) || !isNum(r.clock.offsetMs) || typeof r.clock.trusted !== 'boolean') errors.push('clock needs offsetMs and whether the screen trusts it');
