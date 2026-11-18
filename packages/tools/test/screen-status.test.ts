@@ -3,6 +3,7 @@ import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { dispatch, registry, type Caller, type ScreenHeartbeat } from '../src';
 
 let o: SeededOrg;
@@ -117,10 +118,12 @@ describe('list_screen_status', () => {
       }
     };
     const { d1, read } = counting(env.DB);
-    const rowsRead = async (name: string, limit: number) => {
+    let next = '';
+    const rowsRead = async (name: string, limit: number, cursor?: string) => {
       read.rows = 0;
-      const out = await dispatch(registry, name, { limit }, { ...callerOn(d1), org: scoped(d1, p.orgId) });
-      expect(out).toMatchObject({ ok: true, output: { next: expect.any(String) } });
+      const out = await dispatch(registry, name, { limit, cursor }, { ...callerOn(d1), org: scoped(d1, p.orgId) });
+      if (!out.ok) throw new Error(out.message);
+      ({ next } = z.object({ next: z.string() }).parse(out.output));
       return read.rows;
     };
     await paired(9);
@@ -129,6 +132,8 @@ describe('list_screen_status', () => {
     await paired(30);
     expect(await rowsRead('list_screen_status', 2)).toBe(3 * (2 + 1) + 1);
     expect(await rowsRead('list_screen_status', 20)).toBe(3 * (20 + 1) + 1);
+    // A page after a cursor starts at it in the index (id > ?), past another org's screens between this org's.
+    expect(await rowsRead('list_screen_status', 2, next)).toBe(3 * (2 + 1) + 1);
     // list_screens reads every screen and credential of the org (40 of each) and the settings, whatever the page.
     expect(await rowsRead('list_screens', 2)).toBe(81);
   });
