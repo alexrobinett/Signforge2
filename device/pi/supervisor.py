@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Device supervisor: the part of the Pi the browser cannot reach. It powers the panel and holds
-the screen's credential.
+"""Device supervisor: the part of the Pi the browser cannot reach. It powers the panel, holds
+the screen's credential and restarts a hung kiosk.
 
 The player decides *when* (it owns the schedule, display hours included, and works offline);
 the supervisor only does *how*, over a local HTTP API:
@@ -11,6 +11,7 @@ the supervisor only does *how*, over a local HTTP API:
   GET  /credential    the screen's API credential and the API it is for, for the player's own origin (see below)
   POST /credential    {"credential": "sfd_...", "api": "https://<api>/v1/device"}: store what pairing gave the player
   DELETE /credential  forget it: the server revoked it
+  POST /alive         the player's beat, every 5 s (see below)
 
 Two methods, because panels differ:
   CEC     TVs and commercial displays. Ignored by most monitors.
@@ -38,8 +39,14 @@ The API base is what keeps the credential at home: the kiosk URL names the API t
 so the player sends the credential only to the API it is bound to (`"api": null` for a file with no
 second line, which the player does not use). It must be https, or http to this LAN or this machine
 for a development API, with no user, query or fragment.
+
+The player's own watchdog runs in the renderer it watches, so a wedged renderer would leave a
+frozen panel. The player beats POST /alive with the token instead; with no beat for STALE_S the
+supervisor restarts the kiosk unit (allowed by signforge-supervisor.rules, a polkit rule for that
+one unit and verb). Only a beat arms the check, and a restart disarms it until the next beat, so a
+player that never beats (an older build, a kiosk URL without the player) is never restarted in a loop.
 """
-import hmac, ipaddress, json, os, re, secrets, subprocess, threading
+import hmac, ipaddress, json, os, re, secrets, subprocess, threading, time
 from urllib.parse import urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -48,6 +55,9 @@ MODE = "1920x1080@60"
 CEC_DEV = "/dev/cec0"  # HDMI 0, the port next to the power socket
 PLAYER_ORIGINS = set(os.environ.get("SF_PLAYER_ORIGINS", "http://127.0.0.1:8090").split())
 TOKEN_FILE = os.path.expanduser("~/signforge/supervisor.token")
+KIOSK_UNIT = "signforge-kiosk.service"
+# Six missed beats: a page reload, or a busy moment in a slow prepare, is not a hang.
+STALE_S = 30
 CREDENTIAL_FILE = os.path.expanduser("~/signforge/device.credential")
 
 
@@ -179,6 +189,20 @@ def set_display(on):
         return dict(state)
 
 
+# time.monotonic() of the player's last beat; None until a beat after a start or a restart.
+last_beat = None
+
+
+def watch_player():
+    global last_beat
+    while True:
+        time.sleep(5)
+        if last_beat is not None and time.monotonic() - last_beat > STALE_S:
+            last_beat = None
+            rc, out = run("systemctl", "restart", "--no-block", KIOSK_UNIT)
+            print(f"no beat from the player for {STALE_S} s: kiosk restart {'queued' if rc == 0 else 'failed: ' + out.strip()[:120]}", flush=True)
+
+
 class Handler(BaseHTTPRequestHandler):
     def origin_ok(self):
         return self.headers.get("Origin") in PLAYER_ORIGINS
@@ -229,9 +253,13 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, state) if self.path == "/display" else self.reply(404, {"error": "not found"})
 
     def do_POST(self):
+        global last_beat
         if not self.authorised():
             return self.reply(403, {"error": "forbidden"})
-        if self.path in ("/display/on", "/display/off"):
+        if self.path == "/alive":
+            last_beat = time.monotonic()
+            self.reply(200, {})
+        elif self.path in ("/display/on", "/display/off"):
             self.reply(200, set_display(self.path.endswith("/on")))
         elif self.path == "/credential":
             try:
@@ -262,4 +290,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    threading.Thread(target=watch_player, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

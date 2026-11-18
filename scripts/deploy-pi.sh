@@ -10,12 +10,14 @@ rsync -az --delete dist/content/ "$PI:signforge/www/content/"
 [ "$1" = "--content-only" ] && { echo "content deployed"; exit 0; }
 rsync -az --delete --exclude content dist/player/ "$PI:signforge/www/"
 rsync -az device/pi/kiosk.sh device/pi/tune.sh device/pi/bench.sh device/pi/*.py "$PI:signforge/"
-rsync -az device/pi/*.service "$PI:signforge/"
+rsync -az device/pi/*.service device/pi/*.rules "$PI:signforge/"
 ssh "$PI" 'touch ~/signforge/kiosk.env
   # datad, the feed stand-in, retired with the API poller (M3-23).
   sudo systemctl disable -q --now signforge-datad 2>/dev/null || true
   sudo rm -f /etc/systemd/system/signforge-datad.service ~/signforge/signforge-datad.service ~/signforge/datad.py
   sudo cp ~/signforge/*.service /etc/systemd/system/ && sudo systemctl daemon-reload
+  # Lets the supervisor restart a hung kiosk; polkit reloads rules on its own.
+  sudo install -m 644 ~/signforge/signforge-supervisor.rules /etc/polkit-1/rules.d/50-signforge-supervisor.rules
   sudo systemctl enable -q signforge-player-web signforge-kiosk signforge-supervisor
   sudo systemctl restart signforge-player-web signforge-kiosk signforge-supervisor
   systemctl is-active signforge-player-web signforge-kiosk'
