@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ba5ba458-6608-4047-9c12-5b84c3fa242d",
+  "id": "1f077e9a-e5f6-4d1b-a30e-b8c9e2d68c22",
   "prevId": "471c3ad5-98fd-4369-9a65-1e194595a2b0",
   "tables": {
     "account": {
@@ -644,6 +644,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -724,13 +732,6 @@
         },
         "fetched_at": {
           "name": "fetched_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "checked_at": {
-          "name": "checked_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -817,13 +818,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "horizon_days": {
-          "name": "horizon_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "next_poll_at": {
@@ -2241,6 +2235,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -2401,6 +2403,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'active'"
+        },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
         },
         "created_at": {
           "name": "created_at",

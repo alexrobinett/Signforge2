@@ -12,12 +12,14 @@
  *      changed nothing and is not audited, nor is a read, unless the tool is `alwaysAudited`
  *      (a command to a screen). A refusal (`ToolError`) commits nothing,
  *      unless it says it `changed` something: then what was staged is committed, audited with
- *      the refusal. Any other error commits nothing.
+ *      the refusal. Any other error commits nothing. An update given `ifVersion` whose row has
+ *      changed since (checked when staged, and again inside the batch) is refused with
+ *      `conflict` and `{ id, version }`, the version now.
  *
  * A platform tool (`platformRegistry`, run by `/admin` with `platform(db)`) is audited the same way
  * in `platform_audit_log`, since what it changes belongs to no org.
  */
-import { NotInOrgError, type OrgScope, type Staged, type Write } from '@signforge/db';
+import { NotInOrgError, StaleVersionError, type OrgScope, type Staged, type Write } from '@signforge/db';
 import { canonicalJson } from '@signforge/contract';
 import { z } from 'zod';
 import { checkOutput } from './output';
@@ -96,6 +98,9 @@ const fail = (error: ToolErrorCode, message: string, details?: unknown): Dispatc
   message,
   ...(details === undefined ? {} : { details }),
 });
+
+/** An update refused because its row moved on since the caller read it (`ifVersion`, ./fields.ts). */
+const stale = (err: StaleVersionError) => fail('conflict', err.message, { id: err.id, version: err.version });
 
 /** Run a tool for a caller. Refusals come back as `{ ok: false }`; anything unexpected throws. */
 export async function dispatch<D extends DataScope>(
@@ -184,6 +189,7 @@ export async function dispatch<D extends DataScope>(
       return fail(err.code, err.message, err.details);
     }
     if (err instanceof NotInOrgError) return fail('not_found', err.message);
+    if (err instanceof StaleVersionError) return stale(err);
     throw err;
   }
 
@@ -195,6 +201,9 @@ export async function dispatch<D extends DataScope>(
     // A concurrent call with the same key committed first, and this batch failed on its record.
     const prior = await keyed?.find();
     if (prior) return prior;
+    // An `ifVersion` guard: the row changed between the handler's read and the commit.
+    if (err instanceof StaleVersionError) return stale(err);
+    if (err instanceof NotInOrgError) return fail('not_found', err.message);
     const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data });
     if (refusal) return fail(refusal.code, refusal.message, refusal.details);
     throw err;

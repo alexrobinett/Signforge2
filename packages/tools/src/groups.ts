@@ -1,7 +1,7 @@
 /** Screen group tools. A group is a named set of screens that schedules can target. */
 import type { OrgScope, ScreenGroup } from '@signforge/db';
 import { z } from 'zod';
-import { id, idempotencyKey, name } from './fields';
+import { id, idempotencyKey, ifVersion, name, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
 
@@ -9,6 +9,7 @@ const groupOutput = z.object({
   id: z.string(),
   name: z.string(),
   screenIds: z.array(z.string()).describe('The screens in the group, ordered by id'),
+  version: version.describe('Moves on when the name or the screens change; pass it as ifVersion to update only what you read'),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -19,6 +20,7 @@ const viewOf = (g: ScreenGroup, screenIds: string[]): GroupView => ({
   id: g.id,
   name: g.name,
   screenIds: screenIds.toSorted(),
+  version: g.rowVersion,
   createdAt: g.createdAt,
   updatedAt: g.updatedAt,
 });
@@ -65,24 +67,24 @@ const createGroup = defineTool({
     // The group and its members are written together, so a bad screen id leaves no empty group behind.
     const screenIds = [...new Set(input.screenIds ?? [])];
     const group = write(org.screenGroups.stage.insert({ name: input.name }));
-    if (screenIds.length) write(await org.screenGroups.stage.setMembers(group.id, screenIds, { newGroup: true }));
+    if (screenIds.length) write(await org.screenGroups.stage.setMembers(group, screenIds, { newGroup: true }));
     return { group: viewOf(group, screenIds) };
   },
 });
 
 const renameGroup = defineTool({
   name: 'rename_group',
-  description: 'Rename a screen group. Returns { group }.',
+  description: 'Rename a screen group. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { group }.',
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
-  input: z.object({ groupId: id('group'), name: name('group') }),
+  input: z.object({ groupId: id('group'), name: name('group'), ifVersion }),
   output: groupResult,
   example: { groupId: 'grp_example', name: 'Drive-through' },
   target,
   handler: async ({ org, input, write }) => {
     const group = await requireGroup(org, input.groupId);
-    return { group: await groupView(org, write(org.screenGroups.stage.update(group, { name: input.name }))) };
+    return { group: await groupView(org, write(org.screenGroups.stage.update(group, { name: input.name }, input.ifVersion))) };
   },
 });
 
@@ -111,19 +113,64 @@ const deleteGroup = defineTool({
 const setGroupMembers = defineTool({
   name: 'set_group_members',
   description:
-    "Replace a group's screens with exactly the given list. An empty list empties the group. Every screen must be in this organization, or nothing changes. Returns { group }.",
+    "Replace a group's screens with exactly the given list. An empty list empties the group. Every screen must be in this organization, or nothing changes. To add or remove a few screens, use add_group_members or remove_group_members, which cannot drop a screen someone else added. A replace should pass the version it read as ifVersion. Returns { group }.",
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
-  input: z.object({ groupId: id('group'), screenIds: z.array(id('screen')).max(1000) }),
+  input: z.object({ groupId: id('group'), screenIds: z.array(id('screen')).max(1000), ifVersion }),
   output: groupResult,
   example: { groupId: 'grp_example', screenIds: ['scr_example'] },
   target,
   handler: async ({ org, input, write }) => {
     const group = await requireGroup(org, input.groupId);
-    write(await org.screenGroups.stage.setMembers(group.id, input.screenIds));
-    return { group: viewOf(group, [...new Set(input.screenIds)]) };
+    const row = write(await org.screenGroups.stage.setMembers(group, input.screenIds, { ifVersion: input.ifVersion }));
+    return { group: viewOf(row, [...new Set(input.screenIds)]) };
   },
 });
 
-export const groupTools = [listGroups, createGroup, renameGroup, deleteGroup, setGroupMembers];
+const memberIds = z.array(id('screen')).min(1).max(1000);
+
+const addGroupMembers = defineTool({
+  name: 'add_group_members',
+  description:
+    'Add screens to a group. Screens already in it stay; every screen must be in this organization, or nothing changes. Safe alongside other changes to the group: nothing is dropped. Returns { group }.',
+  scope: 'screens:manage',
+  minRole: 'editor',
+  mutates: true,
+  input: z.object({ groupId: id('group'), screenIds: memberIds.describe('Screens to add') }),
+  output: groupResult,
+  example: { groupId: 'grp_example', screenIds: ['scr_example'] },
+  target,
+  handler: async ({ org, input, write }) => {
+    const group = await requireGroup(org, input.groupId);
+    const before = await org.screenGroups.members(group.id);
+    const row = write(await org.screenGroups.stage.addMembers(group, input.screenIds));
+    return { group: viewOf(row, [...new Set([...before, ...input.screenIds])]) };
+  },
+});
+
+const removeGroupMembers = defineTool({
+  name: 'remove_group_members',
+  description:
+    'Remove screens from a group. Screens not in it are ignored, and the screens themselves are not deleted. Safe alongside other changes to the group: nothing else is dropped. Returns { group }.',
+  scope: 'screens:manage',
+  minRole: 'editor',
+  mutates: true,
+  input: z.object({ groupId: id('group'), screenIds: memberIds.describe('Screens to remove') }),
+  output: groupResult,
+  example: { groupId: 'grp_example', screenIds: ['scr_example'] },
+  target,
+  handler: async ({ org, input, write }) => {
+    const group = await requireGroup(org, input.groupId);
+    const before = await org.screenGroups.members(group.id);
+    const row = write(await org.screenGroups.stage.removeMembers(group, input.screenIds));
+    return {
+      group: viewOf(
+        row,
+        before.filter((s) => !input.screenIds.includes(s)),
+      ),
+    };
+  },
+});
+
+export const groupTools = [listGroups, createGroup, renameGroup, deleteGroup, setGroupMembers, addGroupMembers, removeGroupMembers];

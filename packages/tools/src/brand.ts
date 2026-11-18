@@ -8,7 +8,7 @@ import { brandWarnings, chooseBrandKit, FONTS, fontById, HEX_COLOR, onColor } fr
 import { BRAND_SHAPES, type BrandColors } from '@signforge/contract';
 import type { BrandAssignment, BrandKitRow, OrgScope } from '@signforge/db';
 import { z } from 'zod';
-import { id, idempotencyKey, name } from './fields';
+import { id, idempotencyKey, ifVersion, name, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
 
@@ -107,6 +107,7 @@ const brandKitOutput = z.object({
     .array(z.object({ screenId: z.string(), problem: z.string() }))
     .describe('Screens whose groups choose this kit and another, with no choice of their own: they cannot publish until one is chosen'),
   warnings: z.array(z.string()).describe('Colour pairs below 4.5:1 contrast. Warnings only'),
+  version,
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -168,6 +169,7 @@ function kitView(row: BrandKitRow, ctx: BrandContext): BrandKitView {
       .sort(),
     conflicts: ctx.choices.filter((c) => c.problem && Object.values(c.groups).includes(row.id)).map((c) => ({ screenId: c.screenId, problem: c.problem! })),
     warnings: brandWarnings(colors),
+    version: row.rowVersion,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -310,7 +312,7 @@ const createBrandKit = defineTool({
 const updateBrandKit = defineTool({
   name: 'update_brand_kit',
   description:
-    'Change a brand kit. Give only what changes: colours (null for onPrimary or onAccent derives it again), shape, name, fonts (null for the template font), logos (null removes). Screens keep the kit as it was until the next publish; the result says which screens it will reach. Returns { brandKit }.',
+    'Change a brand kit. Give only what changes: colours (null for onPrimary or onAccent derives it again), shape, name, fonts (null for the template font), logos (null removes). Screens keep the kit as it was until the next publish; the result says which screens it will reach. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { brandKit }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -323,6 +325,7 @@ const updateBrandKit = defineTool({
     bodyFontId: fontId('body').nullable().optional(),
     logoOnDarkAssetId: logoFields.logoOnDarkAssetId.nullable().optional(),
     logoOnLightAssetId: logoFields.logoOnLightAssetId.nullable().optional(),
+    ifVersion,
   }),
   output: kitResult,
   example: { brandKitId: 'bk_example', colors: { accent: '#e11d48' }, shape: 'round' },
@@ -342,15 +345,19 @@ const updateBrandKit = defineTool({
     if (light && !dark)
       throw new ToolError('invalid_input', 'a light logo needs a dark one', [{ path: 'logoOnDarkAssetId', message: 'a light logo needs a dark one' }]);
     const row = write(
-      await org.brandKits.stage.update(kit, {
-        name: input.name,
-        colorsJson: colorsJson !== kit.colorsJson ? colorsJson : undefined,
-        shape: input.shape,
-        displayFontId: input.displayFontId,
-        bodyFontId: input.bodyFontId,
-        logoOnDarkAssetId: input.logoOnDarkAssetId,
-        logoOnLightAssetId: input.logoOnLightAssetId,
-      }),
+      await org.brandKits.stage.update(
+        kit,
+        {
+          name: input.name,
+          colorsJson: colorsJson !== kit.colorsJson ? colorsJson : undefined,
+          shape: input.shape,
+          displayFontId: input.displayFontId,
+          bodyFontId: input.bodyFontId,
+          logoOnDarkAssetId: input.logoOnDarkAssetId,
+          logoOnLightAssetId: input.logoOnLightAssetId,
+        },
+        input.ifVersion,
+      ),
     );
     return { brandKit: kitView(row, await brandContext(org)) };
   },

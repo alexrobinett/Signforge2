@@ -54,4 +54,11 @@ describe('a poll saved', () => {
       { dataSourceId: a.dataSource, version: 'h2', fetchedAt: NOW, checkedAt: NOW + 300_000, dataJson: '{"t":13}' },
     ]);
   });
+
+  it("leaves the source's version alone, so a person's edit made meanwhile is not stale", async () => {
+    const o = a.scope;
+    const before = (await o.dataSources.get(a.dataSource))!;
+    await o.dataSources.savePoll(a.dataSource, { source: { nextPollAt: NOW + 900_000, failures: 1, lastError: 'timeout' } });
+    expect(await o.dataSources.get(a.dataSource)).toMatchObject({ nextPollAt: NOW + 900_000, failures: 1, rowVersion: before.rowVersion });
+  });
 });

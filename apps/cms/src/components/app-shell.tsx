@@ -1,22 +1,32 @@
 import { Link } from '@tanstack/react-router';
-import { MenuIcon } from 'lucide-react';
+import { MenuIcon, SearchIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { CommandMenu } from '~/components/command-menu';
 import { Logo } from '~/components/logo';
 import { OrgSwitcher } from '~/components/org-switcher';
 import { Button } from '~/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '~/components/ui/sheet';
+import { Toaster } from '~/components/ui/sonner';
 import { UserMenu } from '~/components/user-menu';
 import { SECTIONS } from '~/lib/sections';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
 function Sidebar({ shell }: { shell: Shell }) {
+  const openCommandMenu = useAppStore((s) => s.openCommandMenu);
   return (
     <div className="flex h-full flex-col gap-6 p-4">
       <Link to="/" className="rounded-md px-1.5 py-1 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" aria-label="SignForge home">
         <Logo />
       </Link>
       <OrgSwitcher shell={shell} />
+      <Button variant="outline" className="justify-start gap-2.5 text-muted-foreground" onClick={openCommandMenu}>
+        <SearchIcon className="size-4" aria-hidden />
+        <span className="flex-1 text-left">Search and actions</span>
+        <kbd className="font-mono text-xs" aria-label="Command K, or Control K">
+          ⌘K
+        </kbd>
+      </Button>
       <nav aria-label="Main" className="flex-1">
         <ul className="space-y-1">
           {SECTIONS.map(({ to, label, icon: Icon }) => (
@@ -80,6 +90,8 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
           {children}
         </main>
       </div>
+      <CommandMenu tools={shell.tools} />
+      <Toaster />
     </div>
   );
 }

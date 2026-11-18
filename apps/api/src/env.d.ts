@@ -20,6 +20,8 @@ interface UploadSettings {
   /** An R2 API token's S3 credentials, with write access to that bucket only. Secrets. */
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;
+  /** Dev only: the origin the browser reaches this Worker's `wrangler dev` on, for the local bucket's S3 API. Default: the request's. */
+  LOCAL_S3_ORIGIN?: string;
 }
 /** The data-source poller (src/data). */
 interface DataSourceSettings {

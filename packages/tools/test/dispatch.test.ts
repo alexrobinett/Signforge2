@@ -47,6 +47,7 @@ describe('the registry', () => {
 
   it('lists the first tools', () => {
     expect([...registry.keys()].sort()).toEqual([
+      'add_group_members',
       'assign_brand_kit',
       'claim_screen',
       'create_asset_upload',
@@ -72,6 +73,7 @@ describe('the registry', () => {
       'list_templates',
       'publish_manifest_to_screen',
       'register_template_version',
+      'remove_group_members',
       'rename_group',
       'rename_screen',
       'restart_screen',

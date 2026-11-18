@@ -49,6 +49,18 @@ describe('every registered tool', () => {
     }
   });
 
+  it('accepts ifVersion if it updates a row, and returns the version to pass', () => {
+    // An update tool is named for the change (update_*, rename_*) or replaces a list (set_*_members).
+    const updates = all.filter((t) => /^(update|rename)_|^set_\w+_members$/.test(t.name));
+    expect(updates.map((t) => t.name)).toEqual(expect.arrayContaining(['rename_screen', 'update_screen_settings', 'set_group_members']));
+    for (const t of updates) {
+      expect(t.mutates, t.name).toBe(true);
+      expect(shapeOf(t.input)?.ifVersion, `${t.name} input needs ifVersion (fields.ts)`).toBeDefined();
+      const result = Object.values(shapeOf(t.output) ?? {})[0];
+      expect(result && shapeOf(result)?.version, `${t.name} output needs the row's version`).toBeDefined();
+    }
+  });
+
   it('is listed with its output schema', () => {
     const listed = describeTools(registry, owner);
     expect(listed.every((t) => t.outputSchema && typeof t.outputSchema === 'object')).toBe(true);

@@ -152,7 +152,7 @@ describe("a call made for org B with org A's ids", () => {
       ['addScreens: A publish', () => b.publishes.addScreens(a.publish, [{ screenId: s.b.screen, manifestId: 'x' }])],
       ['addScreens: A screen', () => b.publishes.addScreens(s.b.publish, [{ screenId: a.screen, manifestId: 'x' }])],
       ['putSnapshot', () => b.dataSources.putSnapshot(a.dataSource, { version: 'x', fetchedAt: 0, checkedAt: 0, dataJson: '{}' })],
-      ['savePoll', () => b.dataSources.savePoll(a.dataSource, { source: { failures: 1 }, checkedAt: 0 })],
+      ['savePoll', () => b.dataSources.savePoll(a.dataSource, { source: { nextPollAt: 0, failures: 1 }, checkedAt: 0 })],
       ['playCounts.add', () => b.playCounts.add(a.screen, [{ hour: a.hour, spotId: a.templateSpot, plays: 1, ms: 1 }])],
       ['spot on A template version', () => b.spots.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })],
       ['spot moved to A template version', () => b.spots.update(s.b.templateSpot, { templateVersionId: a.templateVersion })],
@@ -196,8 +196,12 @@ describe('rows a scope writes', () => {
     expect(await b.screenGroups.get(smuggled.row.id)).toEqual(smuggled.row);
     expect(await s.a.scope.idempotency.get('k-iso')).toBeUndefined();
     expect(await b.idempotency.get('k-iso')).toMatchObject({ orgId: 'org-b', action: 'x' });
-    await expect(b.screenGroups.stage.setMembers(a.group, [s.b.screen]), 'stage.setMembers: A group').rejects.toBeInstanceOf(NotInOrgError);
-    await expect(b.screenGroups.stage.setMembers(s.b.group, [a.screen]), 'stage.setMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
+    const bGroup = (await b.screenGroups.get(s.b.group))!;
+    for (const op of ['setMembers', 'addMembers', 'removeMembers'] as const) {
+      await expect(b.screenGroups.stage[op](aGroup, [s.b.screen]), `stage.${op}: A group`).rejects.toBeInstanceOf(NotInOrgError);
+    }
+    await expect(b.screenGroups.stage.setMembers(bGroup, [a.screen]), 'stage.setMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
+    await expect(b.screenGroups.stage.addMembers(bGroup, [a.screen]), 'stage.addMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
     await expect(b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })).rejects.toBeInstanceOf(
       NotInOrgError,
     );

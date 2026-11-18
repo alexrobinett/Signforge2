@@ -1,7 +1,12 @@
 [Unit]
 Description=SignForge kiosk (cage + Chromium)
-After=systemd-user-sessions.service network-online.target signforge-player-web.service
-Wants=signforge-player-web.service
+# Not after the network: the player is offline-first and plays its cached manifest without one.
+# Nor after systemd-user-sessions, which waits for NetworkManager (network.target) only so that
+# pam_nologin lets users in; a service's PAM session runs no auth stack, so pam_nologin never
+# applies here. It needs logind (pam_systemd) and seatd (cage). Measured in
+# spike/pi-perf/RESULTS.md, "Linux tuning".
+After=systemd-logind.service seatd.service signforge-player-web.service signforge-supervisor.service
+Wants=signforge-player-web.service signforge-supervisor.service
 Conflicts=getty@tty1.service
 
 [Service]

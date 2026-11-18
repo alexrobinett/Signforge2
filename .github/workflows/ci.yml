@@ -73,20 +73,24 @@ jobs:
       - name: Contract commits
         run: sh scripts/check-contract-commits.sh ${{ github.event.pull_request.base.sha || github.event.before }}
 
-      # Which tasks run, and whether any of them needs Chromium: the tests of a package that declares
-      # a Playwright dependency launch it.
+      # Which tasks run, whether any of them needs Chromium (the tests of a package that declares a
+      # Playwright dependency launch it), and whether any needs the stress media (the cli's golden
+      # test builds examples/stress; the tools' publishing test compares against that golden).
       - name: Plan
         id: plan
         run: |
           affected=$([ "$GITHUB_EVENT_NAME" = pull_request ] && echo --affected || true)
           pnpm exec turbo run typecheck test test:e2e lint $affected --dry=json > "$RUNNER_TEMP/plan.json"
           browsers=false
+          stress_media=false
           for dir in $(jq -r '.tasks[] | select(.command != "<NONEXISTENT>" and (.task == "test" or .task == "test:e2e")) | .directory' "$RUNNER_TEMP/plan.json" | sort -u); do
             grep -q playwright "$dir/package.json" && browsers=true
+            case $dir in packages/cli | packages/tools) stress_media=true ;; esac
           done
           {
             echo "affected=$affected"
             echo "browsers=$browsers"
+            echo "stress_media=$stress_media"
             echo "playwright=$(sed -n 's/^  playwright-core@\([^:(]*\):.*/\1/p' pnpm-lock.yaml | sort -u | paste -sd- -)"
           } >> "$GITHUB_OUTPUT"
 
@@ -112,6 +116,27 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ steps.browser-cache.outputs.cache-primary-key }}
+
+      # The stress media (docs/ci.md, "Stress media"): the release tarball, cached per version.
+      # The script checks every file against examples/stress/media.sha256, cached or not.
+      - name: Restore stress media
+        id: stress-media-cache
+        if: steps.plan.outputs.stress_media == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: examples/stress/media
+          key: stress-media-${{ hashFiles('examples/stress/media.sha256') }}
+      - name: Fetch stress media
+        if: steps.plan.outputs.stress_media == 'true'
+        run: sh scripts/stress-media.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Save stress media
+        if: steps.plan.outputs.stress_media == 'true' && steps.stress-media-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: examples/stress/media
+          key: ${{ steps.stress-media-cache.outputs.cache-primary-key }}
 
       # Turbo's local cache, carried between runs: the newest entry for this OS, saved under this sha.
       - name: Restore Turbo cache

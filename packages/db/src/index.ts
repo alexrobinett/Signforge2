@@ -9,7 +9,7 @@ import type * as s from './schema';
 export { scoped, NotInOrgError, type OrgScope, type NewRow, type RowPatch } from './scoped';
 export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
-export type { Staged, Write } from './writes';
+export { StaleVersionError, type Staged, type Write } from './writes';
 export { published, draftChanged, type DraftRow, type PublishedPlaylist } from './drafts';
 export { findDeviceScreen, type DeviceScreen } from './device';
 export { claimDueDataSources } from './poller';

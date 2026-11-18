@@ -32,6 +32,17 @@ Create and edit spots with a form generated from the template's fields and a liv
 - Later, not v1: the time scrubber ("what will this screen show on Friday at 6 pm?") needs a clock override in the preview channel, a contract change; an agent's draft shown before and after on two stages (Milestone 4).
 
 
+## Notes from M3-14 (asset library)
+
+- **`AssetPicker`** (`apps/cms/src/components/assets/asset-picker.tsx`) is ready for the image field: pass the assets from the route's loader (`getAssets` in `src/server/assets.functions.ts`), `open`, `onOpenChange` and `onPick`. Then drop its entry from knip.jsonc.
+- **Per-asset focal point for portrait crops** (deferred by M3-25 and M3-14). A portrait screen shows a landscape photo's portrait rendition, which is cover-scaled (3413x1920 for 4K) and cropped at the centre today. What it needs:
+  - Contract, in its own commit: a spot's image references carry an optional focus, `{ x, y }` from 0 to 1 (image spots beside `file` and `fit`; template image fields beside `assets[field]`). Optional, so older manifests and players still work.
+  - `packages/db`: a nullable `assets.focus_json` column (a migration), through the scoped repository.
+  - A tool, `set_asset_focus { assetId, focus | null }`, and `focus` in the asset views.
+  - The compiler (`packages/tools/src/publishing.ts`, `assetFile`) writes it into the manifest for both orientations.
+  - The player (image spots) and the template SDK (image fields) set `object-position` from it; each template that shows an image uses the SDK's value. A Pi measurement, as for any rendering change.
+  - The UI: a point set over the image in the picker or the field, judged on the editor's portrait stage.
+
 ## Done when
 
 - [ ] Every template in `templates/` can be configured and previewed.

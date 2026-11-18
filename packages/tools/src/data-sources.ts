@@ -7,7 +7,7 @@ import type { DataSnapshot } from '@signforge/contract';
 import { type DataSourceRow, newId, type OrgScope, published } from '@signforge/db';
 import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
-import { id, idempotencyKey, name } from './fields';
+import { id, idempotencyKey, ifVersion, name, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
 import { defineTool, type FeedUrlSealer, notFound, ToolError } from './tool';
 
@@ -47,6 +47,7 @@ const dataSourceOutput = z.object({
   nextPollAt: z.number(),
   failures: z.number().describe('Polls in a row that failed; the poller backs off, up to 6 hours'),
   lastError: z.string().nullable().describe('Why the last poll failed, as a category (timeout, http-status, private-address, ...)'),
+  version: version.describe('Moves on when the source is changed (not with polls); pass it as ifVersion to update only what you read'),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -61,6 +62,7 @@ const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   nextPollAt: d.nextPollAt,
   failures: d.failures,
   lastError: d.lastError,
+  version: d.rowVersion,
   createdAt: d.createdAt,
   updatedAt: d.updatedAt,
 });
@@ -178,7 +180,7 @@ const createDataSource = defineTool({
 const updateDataSource = defineTool({
   name: 'update_data_source',
   description:
-    'Change a data source: its name, feed URL, refresh or calendar look-ahead (null clears it). A new URL is polled afresh within a minute. Only what is given changes. Returns { dataSource }.',
+    'Change a data source: its name, feed URL, refresh or calendar look-ahead (null clears it). A new URL is polled afresh within a minute. Only what is given changes. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { dataSource }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -188,6 +190,7 @@ const updateDataSource = defineTool({
     feedUrl: feedUrl.optional(),
     refreshS: refreshS.optional(),
     horizonDays: horizonDays.nullable().optional(),
+    ifVersion,
   }),
   output: dataSourceResult,
   example: { dataSourceId: 'weather', refreshS: 600 },
@@ -206,7 +209,9 @@ const updateDataSource = defineTool({
           nextPollAt: 0,
         }
       : {};
-    const updated = write(org.dataSources.stage.update(row, { name: input.name, refreshS: input.refreshS, horizonDays: input.horizonDays, ...fresh }));
+    const updated = write(
+      org.dataSources.stage.update(row, { name: input.name, refreshS: input.refreshS, horizonDays: input.horizonDays, ...fresh }, input.ifVersion),
+    );
     return { dataSource: viewOf(updated) };
   },
 });

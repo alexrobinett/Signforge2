@@ -171,7 +171,7 @@ describe('snapshots', () => {
     expect(held.checked).toEqual({ [src]: { version: seededAt, checkedAt: at(seededAt) } });
 
     // The poller found the feed unchanged: the data is not sent again, only when it was checked.
-    await s.seed.scope.dataSources.savePoll(src, { source: {}, checkedAt: seededAt + 30_000 });
+    await s.seed.scope.dataSources.savePoll(src, { source: { nextPollAt: seededAt + 330_000 }, checkedAt: seededAt + 30_000 });
     const rechecked = await sync(s, body({ snapshots: { [src]: seededAt } }));
     expect(rechecked.snapshots).toEqual([]);
     expect(rechecked.checked).toEqual({ [src]: { version: seededAt, checkedAt: at(seededAt + 30_000) } });
