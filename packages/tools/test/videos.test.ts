@@ -105,7 +105,8 @@ describe('finalize_video_upload', () => {
     expect(await env.BLOBS.head(uploadKey(o.orgId, created.asset.id, sha))).toBeNull();
     // Again: nothing changes.
     expect(await call('finalize_video_upload', { assetId: created.asset.id })).toMatchObject({ changed: false });
-  });
+    // Uploads and re-hashes 20 MB in workerd: about 6 s on a CI runner, past the 5 s default.
+  }, 30_000);
 
   it('reads a moov at the end of the file', async () => {
     const { created, parts, uploadId } = await upload('Moov last', clip('main-moov-at-end.mp4'));
