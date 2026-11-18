@@ -765,6 +765,7 @@ export function scoped(d1: D1Database, orgId: string) {
             updateWindowJson: null,
             unreachableAfterMs: null,
             alertsJson: null,
+            editorsPublish: true,
             ...current,
             ...patch,
             rowVersion: version + 1,

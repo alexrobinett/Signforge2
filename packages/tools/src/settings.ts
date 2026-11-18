@@ -1,6 +1,6 @@
 /**
  * Org settings (M3-42): defaults for new screens, the update window, how long a screen may go
- * unheard from before it alerts, and who gets which alert. One row per org (`org_settings`),
+ * unheard from before it alerts, who gets which alert, and whether editors publish (Q7). One row per org (`org_settings`),
  * absent until an owner first sets something; every field reads as its default until then.
  */
 import type { DisplayHours } from '@signforge/contract';
@@ -38,12 +38,15 @@ const updateWindow = z
 /** A screen syncs every 5 minutes, so less than that would alert on a sync that is merely due. */
 const unreachableAfterMinutes = z.number().int().min(5).max(1440).describe('Minutes without a heartbeat before a screen alerts, 5 to 1440');
 
+const editorsPublish = z.boolean().describe('Whether editors may publish to screens; when false, only owners publish');
+
 const settingsView = z.object({
   timezone: z.string().nullable().describe('Default time zone for new screens; null for none set'),
   locale: z.string().nullable().describe('Default locale for new screens; null for the player default'),
   displayHours: z.custom<DisplayHours>().nullable().describe('Default display hours for new screens; null for always on'),
   updateWindow: z.object({ from: z.string(), to: z.string() }),
   unreachableAfterMinutes: z.number(),
+  editorsPublish,
   alerts: z.object({ screen_offline: rule, publish_finished: rule, agent_refused: rule }),
   version: version.describe('1 until first set, then moves on with every change; pass it as ifVersion to update only what you read'),
   updatedAt: z.number().nullable(),
@@ -68,6 +71,7 @@ function settingsOf(row: OrgSettings | undefined): SettingsView {
     displayHours: row?.displayHoursJson ? JSON.parse(row.displayHoursJson) : null,
     updateWindow: row?.updateWindowJson ? JSON.parse(row.updateWindowJson) : DEFAULT_UPDATE_WINDOW,
     unreachableAfterMinutes: (row?.unreachableAfterMs ?? UNREACHABLE_AFTER_MS) / 60_000,
+    editorsPublish: row?.editorsPublish ?? true,
     alerts: { ...DEFAULT_ALERTS, ...stored },
     version: row?.rowVersion ?? 1,
     updatedAt: row?.updatedAt ?? null,
@@ -77,7 +81,7 @@ function settingsOf(row: OrgSettings | undefined): SettingsView {
 const getOrgSettings = defineTool({
   name: 'get_org_settings',
   description:
-    "Read the organization's settings: defaults for new screens (time zone, locale, display hours), the update window, how many minutes a screen may go without a heartbeat before it alerts, and who gets each alert. Returns { settings }.",
+    "Read the organization's settings: defaults for new screens (time zone, locale, display hours), the update window, how many minutes a screen may go without a heartbeat before it alerts, who gets each alert, and whether editors may publish. Returns { settings }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -90,7 +94,7 @@ const getOrgSettings = defineTool({
 const updateOrgSettings = defineTool({
   name: 'update_org_settings',
   description:
-    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts sets the rule for each alert kind given. Settings for new screens apply to screens paired afterwards. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { settings }.",
+    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts sets the rule for each alert kind given. editorsPublish false lets only owners publish. Settings for new screens apply to screens paired afterwards. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { settings }.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
@@ -101,6 +105,7 @@ const updateOrgSettings = defineTool({
       displayHours: displayHours.nullable().optional(),
       updateWindow: updateWindow.optional(),
       unreachableAfterMinutes: unreachableAfterMinutes.optional(),
+      editorsPublish: editorsPublish.optional(),
       alerts: z.object({ screen_offline: rule.optional(), publish_finished: rule.optional(), agent_refused: rule.optional() }).optional(),
       ifVersion,
     })
@@ -118,6 +123,7 @@ const updateOrgSettings = defineTool({
           ...(input.displayHours !== undefined ? { displayHoursJson: input.displayHours && JSON.stringify(input.displayHours) } : {}),
           ...(input.updateWindow ? { updateWindowJson: JSON.stringify(input.updateWindow) } : {}),
           ...(input.unreachableAfterMinutes ? { unreachableAfterMs: input.unreachableAfterMinutes * 60_000 } : {}),
+          ...(input.editorsPublish !== undefined ? { editorsPublish: input.editorsPublish } : {}),
           ...(input.alerts ? { alertsJson: JSON.stringify({ ...settingsOf(current).alerts, ...input.alerts }) } : {}),
         },
         input.ifVersion,
