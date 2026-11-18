@@ -16,8 +16,14 @@ export const COOKIE_PREFIX = 'sf';
 
 /** Id prefixes for Better Auth's rows, so their ids look like ours (`newId`). */
 const ID_PREFIX: Record<string, string> = {
-  user: 'usr', session: 'ses', account: 'acc', verification: 'ver',
-  organization: 'org', member: 'mem', invitation: 'inv', rateLimit: 'rl',
+  user: 'usr',
+  session: 'ses',
+  account: 'acc',
+  verification: 'ver',
+  organization: 'org',
+  member: 'mem',
+  invitation: 'inv',
+  rateLimit: 'rl',
 };
 
 /**

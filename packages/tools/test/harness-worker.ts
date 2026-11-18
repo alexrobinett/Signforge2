@@ -37,7 +37,10 @@ export default {
     if (request.method === 'POST' && tool) {
       const s3 = JSON.parse(env.S3) as { bucket: string; accessKeyId: string; secretAccessKey: string };
       const caller: Caller = {
-        org: scoped(env.DB, ORG), role: 'owner', actor: { kind: 'user', id: 'user-e2e', clientId: 'cms' }, blobs: env.BLOBS,
+        org: scoped(env.DB, ORG),
+        role: 'owner',
+        actor: { kind: 'user', id: 'user-e2e', clientId: 'cms' },
+        blobs: env.BLOBS,
         uploads: r2Presigner({ endpoint: `${url.origin}/cdn-cgi/local/r2/s3`, ...s3 }),
       };
       const result = await dispatch(registry, tool[1]!, await request.json(), caller);

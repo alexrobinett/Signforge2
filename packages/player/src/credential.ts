@@ -5,6 +5,11 @@
  * own origin, the same way it hands over its token. It never goes in the URL: a template frame can
  * read its parent's address. It is sent as a bearer header on every device request.
  *
+ * It is bound to the device API base it was paired with, which the supervisor keeps beside it. The
+ * player's address names the API (`?content=`), and anyone can open the player with another one,
+ * so the credential is used only when the two are the same; otherwise it is never sent, and the
+ * screen does not pair with the other API either, which would replace it.
+ *
  * Pairing (src/pairing.ts) gives the screen a new one, which is stored with the supervisor; a
  * revoked one is deleted there. Without a supervisor a paired credential lasts until the page
  * reloads. A browser test screen keeps its own in the browser instead (src/browser-credential.ts).
@@ -13,8 +18,11 @@
 /** A request to the supervisor that needs its token (the player's `supervisorFetch`). */
 export type SupervisorSend = (path: string, init: RequestInit) => Promise<Response>;
 
-/** What the player knows of its credential: one to send, none (the supervisor said so), or no word from a supervisor. */
-export type CredentialState = 'held' | 'none' | 'unknown';
+/**
+ * What the player knows of its credential: one to send, none (the supervisor said so), one bound
+ * to another API (or to none, stored before credentials were bound), or no word from a supervisor.
+ */
+export type CredentialState = 'held' | 'none' | 'elsewhere' | 'unknown';
 
 /** What the player needs of a credential, wherever it is kept. */
 export interface ScreenCredential {
@@ -39,6 +47,8 @@ export class DeviceCredential implements ScreenCredential {
   private triedSaveAt = 0;
 
   constructor(
+    /** The device API base the player was opened with: the credential is sent only if it is bound to this one. */
+    private readonly api: string,
     private readonly supervisor: string,
     private readonly send: SupervisorSend,
     private readonly fetchImpl: typeof fetch = (...a) => fetch(...a),
@@ -54,8 +64,9 @@ export class DeviceCredential implements ScreenCredential {
       const res = await this.fetchImpl(`${this.supervisor}/credential`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
       if (res.status === 404) return 'none';
       if (!res.ok) return 'unknown';
-      const got = ((await res.json()) as { credential?: string }).credential ?? '';
+      const { credential: got = '', api } = (await res.json()) as { credential?: string; api?: string | null };
       if (!got || this.refused.has(got)) return 'none';
+      if (api !== this.api) return 'elsewhere';
       this.value = got;
       return 'held';
     } catch {
@@ -70,7 +81,7 @@ export class DeviceCredential implements ScreenCredential {
     return this.value ? { authorization: `Bearer ${this.value}` } : {};
   }
 
-  /** A credential from pairing: used from now on, and handed to the supervisor to keep (retried a minute later until it takes it). */
+  /** A credential from pairing with this API: used from now on, and handed to the supervisor to keep with it (retried a minute later until it takes it). */
   async adopt(credential: string): Promise<void> {
     this.value = credential;
     this.unsaved = true;
@@ -99,7 +110,7 @@ export class DeviceCredential implements ScreenCredential {
       const res = await this.send('/credential', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ credential: this.value }),
+        body: JSON.stringify({ credential: this.value, api: this.api }),
       });
       if (res.ok) this.unsaved = false;
     } catch {

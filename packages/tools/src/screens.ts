@@ -375,10 +375,12 @@ const restartScreen = defineTool({
 const revokeScreenCredential = defineTool({
   name: 'revoke_screen_credential',
   description:
-    "Revoke one of a screen's credentials, so a device holding it can no longer fetch anything; its open socket is closed. Use get_screen to see the credentials. Revoking an already revoked credential changes nothing. Owners only. Returns { credential }.",
+    "Revoke one of a screen's credentials, so a device holding it can no longer fetch anything; its open socket is closed. Use get_screen to see the credentials. Revoking an already revoked credential changes nothing in the database but closes any socket still open with it. Owners only. Returns { credential }.",
   scope: 'screens:manage',
   minRole: 'owner',
   mutates: true,
+  // A repeat stages nothing but still closes the socket, in case the first notice never arrived.
+  alwaysAudited: true,
   input: z.object({ screenId: id('screen'), credentialId: id('credential') }),
   output: z.object({ credential: credentialOutput }),
   example: { screenId: 'scr_example', credentialId: 'crd_example' },
@@ -386,10 +388,10 @@ const revokeScreenCredential = defineTool({
   handler: async ({ org, input, write, notify }) => {
     const cred = await org.screens.credentials.get(input.credentialId);
     if (!cred || cred.screenId !== input.screenId) throw notFound('credential', input.credentialId);
-    if (cred.revokedAt != null) return { credential: credentialView(cred) };
-    const row = write(org.screens.credentials.stage.update(cred, { revokedAt: Date.now() }));
     // A socket the device opened with it closes now, not when it next reconnects.
     notify((screens) => screens.revoked(cred.screenId, cred.id));
+    if (cred.revokedAt != null) return { credential: credentialView(cred) };
+    const row = write(org.screens.credentials.stage.update(cred, { revokedAt: Date.now() }));
     return { credential: credentialView(row) };
   },
 });
