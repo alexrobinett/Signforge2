@@ -928,3 +928,4 @@ async function boot(): Promise<void> {
 }
 
 void boot();
+// CI proof: a player-only change.
