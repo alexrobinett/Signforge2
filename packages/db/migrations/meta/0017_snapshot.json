@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "12dc4a91-5ca3-4ab7-b2e2-97fd525f2a2f",
+  "id": "8dbda4c5-c1b5-4709-89f1-f86a6e6cf430",
   "prevId": "ad8f24e4-ac77-4a7a-a808-98b832e9c30b",
   "tables": {
     "account": {
@@ -1220,14 +1220,6 @@
           "autoincrement": false,
           "default": 1
         },
-        "publish_revision": {
-          "name": "publish_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
         "updated_at": {
           "name": "updated_at",
           "type": "integer",
@@ -1699,21 +1691,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "row_version": {
-          "name": "row_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "incarnation": {
-          "name": "incarnation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "published_json": {
           "name": "published_json",
           "type": "text",
@@ -2055,21 +2032,6 @@
         },
         "to_time": {
           "name": "to_time",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "row_version": {
-          "name": "row_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "incarnation": {
-          "name": "incarnation",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -2597,21 +2559,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "sync_epoch": {
-          "name": "sync_epoch",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sync_ack_seq": {
-          "name": "sync_ack_seq",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
         "status": {
           "name": "status",
           "type": "text",
@@ -2859,13 +2806,6 @@
           "autoincrement": false,
           "default": 1
         },
-        "incarnation": {
-          "name": "incarnation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "published_json": {
           "name": "published_json",
           "type": "text",
@@ -2935,6 +2875,68 @@
         "spots_org_id_id_pk": {
           "columns": ["org_id", "id"],
           "name": "spots_org_id_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sync_epochs": {
+      "name": "sync_epochs",
+      "columns": {
+        "org_id": {
+          "name": "org_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "screen_id": {
+          "name": "screen_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "epoch": {
+          "name": "epoch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ack_seq": {
+          "name": "ack_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sync_epochs_org_id_organization_id_fk": {
+          "name": "sync_epochs_org_id_organization_id_fk",
+          "tableFrom": "sync_epochs",
+          "tableTo": "organization",
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sync_epochs_org_id_screen_id_screens_org_id_id_fk": {
+          "name": "sync_epochs_org_id_screen_id_screens_org_id_id_fk",
+          "tableFrom": "sync_epochs",
+          "tableTo": "screens",
+          "columnsFrom": ["org_id", "screen_id"],
+          "columnsTo": ["org_id", "id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sync_epochs_org_id_screen_id_epoch_pk": {
+          "columns": ["org_id", "screen_id", "epoch"],
+          "name": "sync_epochs_org_id_screen_id_epoch_pk"
         }
       },
       "uniqueConstraints": {},

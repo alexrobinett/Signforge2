@@ -59,7 +59,7 @@ const publishedAt = () => integer('published_at');
  * Which row a draft is across delete and make-again: a content id may be chosen again once its
  * row is deleted, and the new row starts at version 1, so `stage.publish` checks this with the
  * version. Random, fixed at insert (no SQL default: Drizzle would use it instead). Null on rows
- * made before migration 0017: a row made again with such an id gets a random one, so it still differs.
+ * made before migration 0018: a row made again with such an id gets a random one, so it still differs.
  */
 const incarnation = () => text('incarnation').$defaultFn(() => newId('inc'));
 
@@ -220,9 +220,6 @@ export const screens = sqliteTable(
      * Ends by itself at its `until`.
      */
     displayOverrideJson: text('display_override_json'),
-    /** The `epoch` of the screen's play count batches, and the highest `seq` stored in it (contract `SyncRequest`). */
-    syncEpoch: text('sync_epoch'),
-    syncAckSeq: integer('sync_ack_seq').notNull().default(0),
     status: text('status', { enum: ['active', 'revoked'] })
       .notNull()
       .default('active'),
@@ -814,6 +811,25 @@ export const playCounts = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.orgId, t.screenId, t.hour, t.spotId] }),
     index('play_counts_org_hour_idx').on(t.orgId, t.hour),
+    foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
+  ],
+);
+
+/**
+ * The highest play-count `seq` stored for each `epoch` a screen has synced in (contract
+ * `SyncRequest`). One row per epoch, not one per screen: after a re-image, retries from the old
+ * epoch and the new one can arrive in any order, and each is checked against its own epoch's mark.
+ */
+export const syncEpochs = sqliteTable(
+  'sync_epochs',
+  {
+    orgId: orgId(),
+    screenId: text('screen_id').notNull(),
+    epoch: text('epoch').notNull(),
+    ackSeq: integer('ack_seq').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.screenId, t.epoch] }),
     foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
   ],
 );

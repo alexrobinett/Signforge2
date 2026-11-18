@@ -51,6 +51,7 @@ describe('schema', () => {
       'screen_incidents',
       'screens',
       'spots',
+      'sync_epochs',
       'template_versions',
       'templates',
     ]);
