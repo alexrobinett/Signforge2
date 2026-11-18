@@ -161,6 +161,27 @@ describe('brand in the player', () => {
     const p = await h.openPlayer((server) => server.publish(content));
     expect((await drawn(await playing(p))).logo).toEqual({ blob: true, width: 1 });
   });
+
+  it("keeps the kit's files for a spot preparing under a replaced manifest", async () => {
+    // `a` waits on a feed that never answers, its step chosen under `first`, while `second`, with
+    // another kit, replaces `first` and its files are cleaned up. `a` reads its theme after the wait.
+    const first = buildContent(h.brandTemplateHtml, [{ id: 'a', bindings: { label: { source: 'feed', path: 'label' } }, durationMs: 800 }], { brand });
+    const p = await h.openPlayer((s) => {
+      s.publish(first);
+      s.setData('feed', { id: 'feed', version: 1, fetchedAt: '2026-11-17T00:00:00Z', data: { label: 'a' } });
+      s.intercept(/^\/content\/data\//, 'stall');
+    });
+    await p.until((s) => s.manifestId === first.manifest.id);
+    const second = buildContent(h.brandTemplateHtml, [{ id: 'b', durationMs: 800 }], {
+      brand: { colors, shape: 'square', fonts: {}, logo: { onDark: png(8, 1) } },
+    });
+    p.server.publish(second);
+    await p.until((s) => s.manifestId === second.manifest.id);
+
+    const s = await p.until((s) => s.log.some((l) => l.spot === 'b'));
+    expect(s.log[0]).toMatchObject({ spot: 'a', manifest: first.manifest.id });
+    expect(s.skipped).toBe(0);
+  });
 });
 
 describe('brand in the SDK', () => {

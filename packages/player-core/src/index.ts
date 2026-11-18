@@ -3,6 +3,7 @@
  * and which files a manifest still needs. Checking a manifest is the contract's job. The browser shell supplies time, storage and frames.
  */
 import {
+  brandFiles,
   readPath,
   requiredFiles,
   validateBoundValue,
@@ -274,13 +275,17 @@ export function snapshotFit(manifest: ScreenManifest, snapshot: DataSnapshot): {
 
 // --------------------------------------------------------------------- files
 
-/** The files one spot needs to play: a template spot its bundle and assets, an image or video its file. */
+/**
+ * The files one spot needs to play: a template spot its bundle and assets, and from frame protocol
+ * 2 the brand kit's fonts and logo, which it reads as it prepares; an image or video its file.
+ */
 export function spotFiles(spot: Spot, manifest: ScreenManifest): Set<string> {
   const out = new Set<string>();
   if (spot.kind === 'template') {
-    const html = manifest.templates[spot.template]?.html;
-    if (html) out.add(html);
+    const t = manifest.templates[spot.template];
+    if (t) out.add(t.html);
     Object.values(spot.assets).forEach((a) => out.add(a));
+    if (manifest.brand && (t?.manifest.protocol ?? 1) >= 2) brandFiles(manifest.brand).forEach((f) => out.add(f));
   } else if (spot.kind === 'image' || spot.kind === 'video') out.add(spot.file);
   return out;
 }
