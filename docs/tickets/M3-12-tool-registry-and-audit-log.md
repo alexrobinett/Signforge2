@@ -32,7 +32,7 @@ One registry of operations that the CMS, the MCP server and WebMCP all call.
 
 Q7: can editors publish, or only owners. Default if unanswered: owners and editors publish; viewers read.
 
-**Built with the default:** owners and editors publish, viewers read (`ROLE_SCOPES` in `packages/tools/src/tool.ts`). **Q7 decided (owner, 2026-11-18):** whether editors publish is an org setting an owner chooses; see the GitHub issue "Org setting: can editors publish (Q7)".
+**Built with the default:** owners and editors publish, viewers read (`ROLE_SCOPES` in `packages/tools/src/tool.ts`). **Q7 decided (owner, 2026-11-18):** whether editors publish is an org setting an owner chooses. Built in GitHub issue #48: `editorsPublish` in the org's settings (on by default), read by the dispatcher on every call; see `packages/tools/README.md`, Roles and scopes.
 
 ## What was built
 

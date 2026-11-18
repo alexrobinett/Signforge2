@@ -13,7 +13,7 @@ Publish compiles every affected screen, stores manifests, nudges screens, and sh
 
 ## Scope
 
-- Publish tool: load the org graph, compile per screen, skip unchanged, write manifest to R2 and `publish_screens`, update desired id, call each `ScreenDO`.
+- Publish tool: load the org graph, compile per screen, skip unchanged, write manifest to R2 and `publish_screens`, update desired id, call each `ScreenDO`. Commit in one batch: `publishOrg`'s writes (publish order and guarded promotions), `publishes.stage.insert`, `publishes.stage.addScreens` and `screens.stage.setDesiredManifest` (R09, #33). A `StaleVersionError` means another publish or an edit got there first: load and compile again. A screen deleted during the publish fails the batch with D1's foreign-key error from `publish_screens`, not a conflict: treat it as one too (load and compile again), or guard the screen rows.
 - Fan-out through a Queue in batches of 50.
 - Rollout view: per publish, screens pending, applied, offline.
 - Per-org publish serialised (an org Durable Object or a D1 lock).

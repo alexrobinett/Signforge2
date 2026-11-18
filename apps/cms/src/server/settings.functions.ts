@@ -6,12 +6,13 @@
 import { createServerFn } from '@tanstack/react-start';
 import type { Invitation, Member, OrgSettings, SessionRow } from '~/lib/settings';
 import { callApi } from './api.server';
+import type { Role } from './shell.functions';
 import { inOrg, tool } from './tools.server';
 
 async function read<T>(path: `/api/${string}`): Promise<T> {
   const res = await callApi(path);
   if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
-  // Better Auth's response for that endpoint (better-auth 1.7.25, pinned).
+  // The endpoint's response: Better Auth's (better-auth 1.7.25, pinned) or the API's own /api/session.
   const body: T = await res.json();
   return body;
 }
@@ -20,11 +21,13 @@ export const getOrgSettings = createServerFn({ method: 'GET' }).handler(() =>
   inOrg(async () => (await tool<{ settings: OrgSettings }>('get_org_settings', {})).settings, null),
 );
 
+/** The members, and for an owner the invitations waiting: Better Auth lets only owners list them. */
 export const getMembers = createServerFn({ method: 'GET' }).handler(async () => {
-  const [{ members }, invitations] = await Promise.all([
+  const [{ members }, session] = await Promise.all([
     read<{ members: Member[] }>('/api/auth/organization/list-members?limit=200'),
-    read<Invitation[]>('/api/auth/organization/list-invitations'),
+    read<{ organization: { role: Role } | null }>('/api/session'),
   ]);
+  const invitations = session.organization?.role === 'owner' ? await read<Invitation[]>('/api/auth/organization/list-invitations') : [];
   return { members, invitations: invitations.filter((i) => i.status === 'pending'), at: Date.now() };
 });
 

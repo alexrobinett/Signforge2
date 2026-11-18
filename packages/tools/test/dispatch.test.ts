@@ -9,6 +9,7 @@ import {
   describeTools,
   dispatch,
   effectiveScopes,
+  grantOf,
   platformRegistry,
   redact,
   registry,
@@ -75,6 +76,7 @@ describe('the registry', () => {
       'list_data_sources',
       'list_fonts',
       'list_groups',
+      'list_screen_status',
       'list_screens',
       'list_spots',
       'list_templates',
@@ -113,7 +115,7 @@ describe('the registry', () => {
     ]);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
     for (const name of keyed) {
-      const schema = describeTools(registry, { role: 'owner' }).find((t) => t.name === name)!.inputSchema as {
+      const schema = describeTools(registry, { role: 'owner', editorsPublish: true }).find((t) => t.name === name)!.inputSchema as {
         properties: Record<string, unknown>;
         required?: string[];
       };
@@ -129,11 +131,14 @@ describe('the registry', () => {
 });
 
 describe('roles and scopes', () => {
-  it('cap a grant at what the role allows (Q7 default: editors publish)', () => {
-    expect(effectiveScopes({ role: 'viewer' })).toEqual(['content:read']);
-    expect(effectiveScopes({ role: 'editor' })).toContain('content:publish');
-    expect(effectiveScopes({ role: 'viewer', scopes: ['content:read', 'content:publish'] })).toEqual(['content:read']);
-    expect(effectiveScopes({ role: 'owner', scopes: ['content:draft'] })).toEqual(['content:draft']);
+  it('cap a grant at what the role allows, as the org has it', () => {
+    const on = { editorsPublish: true };
+    expect(effectiveScopes({ role: 'viewer', ...on })).toEqual(['content:read']);
+    expect(effectiveScopes({ role: 'editor', ...on })).toContain('content:publish');
+    expect(effectiveScopes({ role: 'editor', editorsPublish: false })).toEqual(['content:read', 'content:draft', 'screens:manage']);
+    expect(effectiveScopes({ role: 'owner', editorsPublish: false })).toContain('content:publish');
+    expect(effectiveScopes({ role: 'viewer', scopes: ['content:read', 'content:publish'], ...on })).toEqual(['content:read']);
+    expect(effectiveScopes({ role: 'owner', scopes: ['content:draft'], ...on })).toEqual(['content:draft']);
   });
 
   it('let viewers read and nothing else', async () => {
@@ -166,7 +171,7 @@ describe('roles and scopes', () => {
   });
 
   it('decide what GET /api/tools lists', () => {
-    const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes }).map((t) => t.name);
+    const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes, editorsPublish: true }).map((t) => t.name);
     expect(names('viewer').sort()).toEqual([
       'get_asset',
       'get_brand_kit',
@@ -181,6 +186,7 @@ describe('roles and scopes', () => {
       'list_data_sources',
       'list_fonts',
       'list_groups',
+      'list_screen_status',
       'list_screens',
       'list_spots',
       'list_templates',
@@ -189,10 +195,57 @@ describe('roles and scopes', () => {
     expect(names('editor')).not.toContain('set_template_version_status');
     expect(names('editor')).not.toContain('update_org_settings');
     expect(names('owner')).toHaveLength(TOOLS.length);
-    const listed = describeTools(registry, { role: 'owner' }).find((t) => t.name === 'rename_screen')!;
+    const listed = describeTools(registry, { role: 'owner', editorsPublish: true }).find((t) => t.name === 'rename_screen')!;
     expect(listed).toMatchObject({ scope: 'screens:manage', minRole: 'editor', mutates: true });
     expect(listed.inputSchema).toMatchObject({ type: 'object', required: ['screenId', 'name'] });
     expect(ROLES).toEqual(['viewer', 'editor', 'owner']);
+  });
+});
+
+describe('whether editors publish (Q7, an org setting)', () => {
+  let q: SeededOrg;
+  const as = (role: Role, scopes?: Scope[], actor: Caller['actor'] = { kind: 'user', id: `q7-${role}`, clientId: 'cms' }): Caller => ({
+    org: scoped(env.DB, q.orgId),
+    role,
+    scopes,
+    actor,
+    blobs: env.BLOBS,
+  });
+  const editorsAgent = () => as('editor', ['content:read', 'content:draft', 'content:publish'], { kind: 'agent', id: 'grant-q7', clientId: 'agent-app' });
+  // Past the role and scope check, the manifest was never uploaded: not_found means the call was allowed.
+  const publish = (c: Caller) => dispatch(registry, 'publish_manifest_to_screen', { screenId: q.screen, manifestId: 'f'.repeat(64) }, c);
+  const setEditorsPublish = async (on: boolean) =>
+    expect(await dispatch(registry, 'update_org_settings', { editorsPublish: on }, as('owner'))).toMatchObject({ ok: true });
+
+  beforeAll(async () => {
+    q = await seedOrg(env.DB, 'q7-org');
+  });
+
+  it('lets editors and their agents publish while it is on, the default', async () => {
+    expect(await publish(as('editor'))).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await publish(editorsAgent())).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('keeps publishing for owners when it is off, and says why an editor and their agent are refused', async () => {
+    await setEditorsPublish(false);
+    const refused = { ok: false, error: 'forbidden', message: 'Only owners publish in this organization' };
+    expect(await publish(as('editor'))).toMatchObject(refused);
+    expect(await publish(editorsAgent())).toMatchObject(refused);
+    expect(await publish(as('owner'))).toMatchObject({ ok: false, error: 'not_found' });
+    // The editor keeps the rest of the role.
+    expect(await dispatch(registry, 'rename_screen', { screenId: q.screen, name: 'Still mine' }, as('editor'))).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'list_screens', {}, editorsAgent())).toMatchObject({ ok: true });
+    await setEditorsPublish(true);
+    expect(await publish(as('editor'))).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('decides what an editor is offered', async () => {
+    const offered = async () => describeTools(registry, await grantOf(as('editor'))).map((t) => t.name);
+    expect(await offered()).toContain('publish_manifest_to_screen');
+    await setEditorsPublish(false);
+    expect(await offered()).not.toContain('publish_manifest_to_screen');
+    expect(await offered()).toContain('rename_screen');
+    await setEditorsPublish(true);
   });
 });
 

@@ -3,7 +3,8 @@
  * on another's tree: `/api` for CMS users (session cookie), `/v1/device` for screens (bearer
  * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. `/admin` takes
  * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
- * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts).
+ * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts),
+ * whose first run each UTC day also expires old idempotency keys.
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.
@@ -13,6 +14,7 @@ import { MANIFEST_SCHEMA } from '@signforge/contract';
 import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
+import { expireIdempotencyKeys } from '@signforge/db';
 import { checkScreenAlerts } from './alerts';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
@@ -33,12 +35,18 @@ app.route('/v1/device', device);
 app.route('/api', createApi());
 app.route('/admin', admin);
 
+const FIVE_MIN_MS = 5 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+
 /** Each Cron Trigger's job, by its schedule as written in wrangler.jsonc `triggers`. */
 const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // The data-source poller, every minute.
   '* * * * *': (env, now) => pollDataSources(env, { now }),
   // The offline alert check, every 5 minutes: screens sync that often, so a shorter period finds nothing new.
-  '*/5 * * * *': (env, now) => checkScreenAlerts(env, emailSenderFor(env), now),
+  // The 00:00 UTC run also expires idempotency keys: a daily job with no trigger of its own, since the
+  // Free plan allows five Cron Triggers per account and demo and prod use four.
+  '*/5 * * * *': (env, now) =>
+    Promise.all([checkScreenAlerts(env, emailSenderFor(env), now), now % DAY_MS < FIVE_MIN_MS ? expireIdempotencyKeys(env.DB, now) : null]),
 };
 
 export default {

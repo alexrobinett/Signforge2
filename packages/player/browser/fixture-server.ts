@@ -13,7 +13,8 @@
  * player meets the API.
  *
  * Pairing (M3-08): the supervisor holds `supervisorCredential` and the device API base it is bound
- * to, `supervisorApi` (GET, and POST or DELETE with its token, as device/pi/supervisor.py does). At
+ * to, `supervisorApi` (GET, and POST or DELETE with its token, as device/pi/supervisor.py does), and
+ * takes the player's liveness beat (`POST /supervisor/alive` with its token). At
  * first they are `FIXTURE_CREDENTIAL` and this server's own API, `deviceApi`. Requests to the API origin (`localUrl`) need a bearer
  * credential in `authorised`; `/content/pair/start` and `/content/pair/poll` hand out codes, which a
  * test `claim`s. `revoke` refuses a credential and tells the sockets.
@@ -338,10 +339,13 @@ export class FixtureServer {
     }
   }
 
-  /** The supervisor's credential, token and display power routes; everything else it has nothing for. */
+  /** The supervisor's credential, token, liveness and display power routes; everything else it has nothing for. */
   private supervisor(req: IncomingMessage, rest: string, send: (status: number, body?: string, type?: string) => void): void {
     const json = (status: number, body: unknown) => send(status, JSON.stringify(body), 'application/json');
     if (rest === 'token' && req.method === 'GET') return json(200, { token: SUPERVISOR_TOKEN });
+    if (rest === 'alive' && req.method === 'POST') {
+      return req.headers['x-sf-token'] === SUPERVISOR_TOKEN ? json(200, {}) : json(403, { error: 'forbidden' });
+    }
     // As device/pi/supervisor.py answers a switch: its state, and how each method went.
     if ((rest === 'display/on' || rest === 'display/off') && req.method === 'POST') {
       if (req.headers['x-sf-token'] !== SUPERVISOR_TOKEN) return json(403, { error: 'forbidden' });

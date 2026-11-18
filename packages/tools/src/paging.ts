@@ -7,8 +7,8 @@
  * rest. A cursor is only meaningful with the filters it was made with.
  *
  * Paging bounds what a call returns and the per-row work a tool does (groups' members, assets'
- * renditions). The repositories still read the org's whole list; SQL keyset paging is for when
- * an org's lists grow large enough to matter.
+ * renditions). Most repositories still read the org's whole list and `page()` cuts it; a tool
+ * that is polled (`list_screen_status`) reads one page in SQL with `keysetPage()`.
  */
 import { z } from 'zod';
 import { ToolError } from './tool';
@@ -83,4 +83,19 @@ export function page<T>(
   const rest = after ? sorted.filter((r) => compare(r.key, after) > 0) : sorted;
   const taken = rest.slice(0, limit);
   return { rows: taken.map((r) => r.row), next: rest.length > limit ? encode(taken.at(-1)!.key) : null };
+}
+
+/**
+ * One page read in SQL: `read(after, take)` returns up to `take` rows after the key `after` (none:
+ * from the start), in key order, so a page reads its own rows and not the whole list. One row past
+ * the page says whether there is a next.
+ */
+export async function keysetPage<T>(
+  { limit, cursor }: { limit: number; cursor?: string },
+  read: (after: SortKey | undefined, take: number) => Promise<T[]>,
+  keyOf: (row: T) => SortKey,
+): Promise<{ rows: T[]; next: string | null }> {
+  const rows = await read(cursor === undefined ? undefined : decode(cursor), limit + 1);
+  const taken = rows.slice(0, limit);
+  return { rows: taken, next: rows.length > limit ? encode(keyOf(taken.at(-1)!)) : null };
 }

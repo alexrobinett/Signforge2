@@ -48,12 +48,12 @@ interface ListPage {
   brandKits?: BrandKitView[];
 }
 
-/** Every page of a list tool, the rows `rows` picks from each. */
-export async function all<T>(name: string, rows: (page: ListPage) => T[] | undefined): Promise<T[]> {
+/** Every page of a list tool, the rows `rows` picks from each. A list whose rows are not `ListPage`'s names its page in `rows`. */
+export async function all<T, Page extends { next: string | null } = ListPage>(name: string, rows: (page: Page) => T[] | undefined): Promise<T[]> {
   const out: T[] = [];
   let cursor: string | undefined;
   do {
-    const page = await tool<ListPage>(name, { limit: 200, ...(cursor ? { cursor } : {}) });
+    const page = await tool<Page>(name, { limit: 200, ...(cursor ? { cursor } : {}) });
     out.push(...(rows(page) ?? []));
     cursor = page.next ?? undefined;
   } while (cursor);

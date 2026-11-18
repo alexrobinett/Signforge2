@@ -17,7 +17,7 @@ export type DraftRow = SpotRow | PlaylistRow | ScheduleEntryRow;
 export type PublishedPlaylist = PlaylistRow & { items: string[] };
 
 /** Columns that are not content: who it is, when and how often it changed, and the published copy itself. */
-const NOT_CONTENT = new Set(['id', 'orgId', 'createdAt', 'updatedAt', 'rowVersion', 'publishedJson', 'publishedAt']);
+const NOT_CONTENT = new Set(['id', 'orgId', 'createdAt', 'updatedAt', 'rowVersion', 'incarnation', 'publishedJson', 'publishedAt']);
 
 /** The draft's content as stored in `published_json`. Keys sorted, so equal content is equal text. */
 export function contentJson(row: DraftRow, items?: readonly string[]): string {

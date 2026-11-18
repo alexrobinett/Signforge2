@@ -8,7 +8,7 @@
  * Every route that changes data on `/api`, other than Better Auth's, is this one;
  * test/routes.test.ts fails if another appears. See packages/tools/README.md for the contract.
  */
-import { describeTools, dispatch, registry, type Caller, type ToolErrorCode } from '@signforge/tools';
+import { describeTools, dispatch, grantOf, registry, type Caller, type ToolErrorCode } from '@signforge/tools';
 import type { Hono } from 'hono';
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
@@ -29,7 +29,7 @@ const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429> = {
 const CMS_CLIENT_ID = 'cms';
 
 export function mountTools(api: Hono<ApiEnv>) {
-  api.get('/tools', (c) => c.json({ tools: describeTools(registry, { role: c.var.role }) }));
+  api.get('/tools', async (c) => c.json({ tools: describeTools(registry, await grantOf({ org: c.var.org, role: c.var.role })) }));
 
   api.post('/tools/:name', async (c) => {
     // JSON only: a cross-site form cannot send it without a CORS preflight, which this API never grants.

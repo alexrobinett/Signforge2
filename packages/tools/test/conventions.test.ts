@@ -62,7 +62,7 @@ describe('every registered tool', () => {
   });
 
   it('is listed with its output schema', () => {
-    const listed = describeTools(registry, owner);
+    const listed = describeTools(registry, { role: 'owner', editorsPublish: true });
     expect(listed.every((t) => t.outputSchema && typeof t.outputSchema === 'object')).toBe(true);
   });
 });

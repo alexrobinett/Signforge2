@@ -356,6 +356,19 @@ Video-pan's prepare, loading-next drops and the first prepare after a restart di
 - **A 300–383 ms frame on the first weather-rain prepare after Chromium starts** (footnote ¹). It was not traced; the template's rain-tile setup is the first suspect.
 - **Boot to first spot is 21.3–22.0 s** (from kernel start; the firmware's time before that was not measured). NetworkManager's netplan rewrites are the next 5 s.
 
+## The supervisor restarts a hung player (issue #36, 2026-11-18)
+
+The player beats the supervisor (`POST /alive`) every 5 s; with no beat for 30 s the supervisor restarts `signforge-kiosk`. Branch `gh-36-supervisor-liveness` against master (`f50e79f` player and supervisor; the first master run was the `84d704a` build then on the rig), each run on a freshly restarted kiosk with the HTTP cache cleared, the soak logger stopped. Frames: the full 16-spot `examples/stress` playlist, fade 600 ms, 150 s per run, `device/pi/isolate.py`, alternating master, branch, branch, master.
+
+| Build | Overall | Playing | Loading next | During transition | Worst frame |
+| --- | --- | --- | --- | --- | --- |
+| Master (2 runs) | 0.66, 0.72% | 0.28, 0.16% | 10.5, 16.5% | 1.5, 1.2% | 217, 317 ms |
+| With the beat (2 runs) | 0.74, 0.53% | 0.17, 0.16% | 17.1, 9.7% | 2.6, 1.7% | 333, 100 ms |
+
+No spot was skipped. The beat costs nothing beyond run-to-run noise. The 317 and 333 ms frames are single prepares, in both builds.
+
+Hang: `kill -STOP` of every Chromium renderer (the player's and the templates') while the cloud config played. Twice, the supervisor restarted the kiosk 27.5 s and 31.7 s after the stop (30 s after the last beat, checked every 5 s); the first spot played again 36.1 s after the stop. systemd's stop took 0.3 s, as it sends SIGCONT with SIGTERM. With the signal turned off (`/display/off`) for 75 s the page stayed `visible`, the beat went on and nothing was restarted. The polkit rule lets the supervisor's user restart `signforge-kiosk` and nothing else (stopping `signforge-player-web` was refused).
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.

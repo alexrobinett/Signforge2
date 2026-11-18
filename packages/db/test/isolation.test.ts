@@ -68,6 +68,12 @@ describe("a call made for org B with org A's ids", () => {
     }
   });
 
+  it("pages only org B's screens for the fleet poll", async () => {
+    // Its rows carry no org, so compare ids.
+    const ids = (await s.b.scope.screens.statusPage({ limit: 200 })).map((r) => r.id);
+    expect(ids).toEqual([s.b.screen]);
+  });
+
   it('lists nothing of org A', async () => {
     const b = s.b.scope;
     const lists = {
@@ -137,7 +143,6 @@ describe("a call made for org B with org A's ids", () => {
       desiredManifestId: null,
       reportedManifestId: null,
       lastSeenAt: null,
-      syncEpoch: null,
     });
     expect((await ra.playCounts.list({ from: a.hour, to: a.hour + 3_600_000 })).map((c) => c.plays)).toEqual([3]);
     expect((await ra.screens.credentials.get(a.credential))?.revokedAt).toBeNull();
@@ -357,5 +362,20 @@ describe('findMembership', () => {
     ]);
     expect(await findMembership(env.DB, 'org-a', 'usr-1')).toEqual({ role: 'editor' });
     expect(await findMembership(env.DB, 'org-b', 'usr-1')).toBeUndefined();
+  });
+});
+
+describe('the audit log', () => {
+  it('lists rows written in the same millisecond newest first', async () => {
+    const at = Date.UTC(2100, 0, 1);
+    const actions = Array.from({ length: 10 }, (_, i) => `same-ms-${i}`);
+    const target = { kind: 'screen', id: s.a.screen };
+    for (const action of actions) {
+      await s.a.scope.auditLog.append({ actorKind: 'system', actorId: 'test', action, at, targetKind: target.kind, targetId: target.id });
+      await platform(env.DB).auditLog.append({ actorKind: 'system', actorId: 'test', action, at });
+    }
+    const newestFirst = actions.toReversed();
+    expect((await s.a.scope.auditLog.list({ target })).map((a) => a.action)).toEqual(newestFirst);
+    expect((await platform(env.DB).auditLog.list({ limit: 10 })).map((a) => a.action)).toEqual(newestFirst);
   });
 });

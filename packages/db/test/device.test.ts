@@ -78,7 +78,7 @@ describe('screens.sync', () => {
       ['news', 2, 20_000],
     ]);
     const row = await r.screens.get(o.screen);
-    expect(row).toMatchObject({ lastSeenAt: HOUR + 60_000, playerVersion: '1.0.0', heartbeatJson: '{"display":{"on":true}}', syncEpoch: 'ep1', syncAckSeq: 1 });
+    expect(row).toMatchObject({ lastSeenAt: HOUR + 60_000, playerVersion: '1.0.0', heartbeatJson: '{"display":{"on":true}}' });
 
     // A retry of the same seq, or an older one, adds nothing.
     expect(await r.screens.sync(o.screen, beat())).toMatchObject({ ackSeq: 1 });
@@ -107,6 +107,27 @@ describe('screens.sync', () => {
     expect(await r.screens.sync(o.screen, beat({ epoch: 'ep2', seq: 1, counts: [] }))).toMatchObject({ ackSeq: 1 });
   });
 
+  it('counts each batch once when retries from an old and a new epoch interleave (a re-image)', async () => {
+    const seeded = await seedOrg(env.DB, 'org-sync-epochs');
+    const r = seeded.scope;
+    const menu = async () => (await r.playCounts.list({ from: HOUR, to: HOUR + 3_600_000, screenId: seeded.screen }))[0]?.plays;
+    const batch = (epoch: string, seq: number, plays: number) => beat({ epoch, seq, counts: [{ hour: HOUR, spotId: 'menu', plays, ms: plays * 1000 }] });
+
+    expect(await r.screens.sync(seeded.screen, batch('old', 1, 1))).toMatchObject({ ackSeq: 1 });
+    expect(await r.screens.sync(seeded.screen, batch('old', 2, 2))).toMatchObject({ ackSeq: 2 });
+    expect(await r.screens.sync(seeded.screen, batch('new', 1, 10))).toMatchObject({ ackSeq: 1 });
+    // A delayed retry from before the re-image, then one from after it: both already stored.
+    expect(await r.screens.sync(seeded.screen, batch('old', 2, 2))).toMatchObject({ ackSeq: 2 });
+    expect(await r.screens.sync(seeded.screen, batch('new', 1, 10))).toMatchObject({ ackSeq: 1 });
+    expect(await r.screens.sync(seeded.screen, batch('old', 1, 1))).toMatchObject({ ackSeq: 2 });
+    expect(await menu()).toBe(13);
+    // Each epoch goes on from its own mark.
+    expect(await r.screens.sync(seeded.screen, batch('new', 2, 20))).toMatchObject({ ackSeq: 2 });
+    expect(await r.screens.sync(seeded.screen, batch('old', 3, 100))).toMatchObject({ ackSeq: 3 });
+    expect(await r.screens.sync(seeded.screen, batch('new', 2, 20))).toMatchObject({ ackSeq: 2 });
+    expect(await menu()).toBe(133);
+  });
+
   it('writes one row for a heartbeat with no counts, and leaves the screen settings untouched', async () => {
     const seeded = await seedOrg(env.DB, 'org-sync-writes');
     const r = seeded.scope;
@@ -115,9 +136,12 @@ describe('screens.sync', () => {
     expect(result?.rowsWritten).toBe(1);
     expect((await r.screens.get(seeded.screen))?.updatedAt).toBe(before?.updatedAt);
     // A new hourly row costs the row and its two index entries (the key and the org's hours);
-    // adding to an existing one, only the row.
-    expect((await r.screens.sync(seeded.screen, beat()))?.rowsWritten).toBe(1 + 2 * 3);
-    expect((await r.screens.sync(seeded.screen, beat({ seq: 2 })))?.rowsWritten).toBe(1 + 2);
+    // adding to an existing one, only the row. The epoch's mark costs the row and its key when the
+    // epoch is new, then the row.
+    expect((await r.screens.sync(seeded.screen, beat()))?.rowsWritten).toBe(1 + 2 * 3 + 2);
+    expect((await r.screens.sync(seeded.screen, beat({ seq: 2 })))?.rowsWritten).toBe(1 + 2 + 1);
+    // An idle heartbeat repeats the acknowledged seq, and writes only the screen.
+    expect((await r.screens.sync(seeded.screen, beat({ seq: 2, counts: [] })))?.rowsWritten).toBe(1);
   });
 
   it('returns nothing for a screen the org does not have', async () => {
