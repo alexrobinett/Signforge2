@@ -2,7 +2,7 @@
 // published version. See docs/backend-plan.md#publishing.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { draftChanged, published, scoped } from '../src/index';
+import { draftChanged, NotInOrgError, published, scoped, StaleVersionError } from '../src/index';
 import { seedOrg, type SeededOrg } from '../src/testing';
 
 let o: SeededOrg;
@@ -94,5 +94,150 @@ describe('org settings', () => {
   it('lists every group membership at once', async () => {
     const org = scoped(env.DB, o.orgId);
     expect(await org.screenGroups.allMembers()).toEqual([{ groupId: o.group, screenId: o.screen }]);
+  });
+});
+
+describe('promotion from an old read (R09)', () => {
+  let r: SeededOrg;
+  beforeAll(async () => {
+    r = await seedOrg(env.DB, 'drafts-race');
+  });
+
+  it('refuses to publish a spot edited since it was read, and writes nothing', async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = (await org.spots.get(r.imageSpot))!;
+    const edited = (await org.spots.update(r.imageSpot, { name: 'Edited meanwhile' }))!;
+
+    const err = await org.commit(org.spots.stage.publish(read).writes).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleVersionError);
+    expect(err).toMatchObject({ id: r.imageSpot, version: edited.rowVersion });
+    expect(await org.spots.get(r.imageSpot)).toEqual(edited);
+  });
+
+  it("refuses to publish a playlist whose items changed since it was read, and moves the playlist's version with them", async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = (await org.playlists.get(r.playlist))!;
+    const items = await org.playlists.items(r.playlist);
+    await org.playlists.setItems(r.playlist, [r.imageSpot]);
+    const now = (await org.playlists.get(r.playlist))!;
+    expect(now.rowVersion).toBe(read.rowVersion + 1);
+
+    await expect(org.commit(org.playlists.stage.publish(read, items).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect((await org.playlists.get(r.playlist))!.publishedJson).toBeNull();
+  });
+
+  it('refuses to publish a deleted spot into one made again with its id (review 4)', async () => {
+    const org = scoped(env.DB, r.orgId);
+    const values = { id: 'drafts-race-again', kind: 'image', durationMs: 5000, assetId: r.asset, fit: 'cover' } as const;
+    const read = await org.spots.insert({ ...values, name: 'Deleted' });
+    const promotion = org.spots.stage.publish(read);
+    await org.spots.delete(read.id);
+    const again = await org.spots.insert({ ...values, name: 'Made again' });
+    expect(again.rowVersion).toBe(read.rowVersion);
+
+    await expect(org.commit(promotion.writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await org.spots.get(read.id)).toEqual(again);
+  });
+
+  it('reports a spot deleted since it was read as a conflict, not as missing, and writes nothing (re-check)', async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = await org.spots.insert({ id: 'drafts-race-gone', name: 'Gone', kind: 'image', durationMs: 5000, assetId: r.asset, fit: 'cover' });
+    const revision = (await org.settings.get())?.publishRevision ?? 0;
+    const writes = [...org.publishes.stage.advance(revision).writes, ...org.spots.stage.publish(read).writes];
+    await org.spots.delete(read.id);
+
+    const err = await org.commit(writes).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleVersionError);
+    expect(err).toMatchObject({ id: read.id, version: 0 });
+    expect(await org.spots.get(read.id)).toBeUndefined();
+    expect((await org.settings.get())?.publishRevision ?? 0).toBe(revision);
+  });
+
+  it("keeps the draft's edit time as stored, not as it was read", async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = (await org.spots.get(r.templateSpot))!;
+    // Stands in for a write that leaves the version alone: the stored time is the one to keep.
+    await env.DB.prepare('UPDATE spots SET updated_at = ? WHERE org_id = ? AND id = ?')
+      .bind(read.updatedAt + 1000, r.orgId, r.templateSpot)
+      .run();
+    await org.commit(org.spots.stage.publish(read).writes);
+    const stored = (await org.spots.get(r.templateSpot))!;
+    expect(published(stored)).toBeDefined();
+    expect(stored.updatedAt).toBe(read.updatedAt + 1000);
+  });
+
+  it('refuses to publish a schedule entry edited since it was read', async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = (await org.scheduleEntries.get(r.scheduleEntry))!;
+    await org.scheduleEntries.update(r.scheduleEntry, { priority: 3 });
+    await expect(org.commit(org.scheduleEntries.stage.publish(read).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect((await org.scheduleEntries.get(r.scheduleEntry))!.publishedJson).toBeNull();
+  });
+});
+
+describe('publish order (R09)', () => {
+  it('orders the publishes of an org with no settings row: the first makes it, at revision 1 (review 3)', async () => {
+    const p = await seedOrg(env.DB, 'drafts-order-new');
+    const org = scoped(env.DB, p.orgId);
+    expect(await org.settings.get()).toBeUndefined();
+
+    await org.commit(org.publishes.stage.advance(0).writes);
+    await expect(org.commit(org.publishes.stage.advance(0).writes)).rejects.toMatchObject({ name: 'StaleVersionError', id: 'publish revision', version: 1 });
+    // Every setting at its default, at version 1, as with no row.
+    expect(await org.settings.get()).toMatchObject({ publishRevision: 1, rowVersion: 1, defaultPlaylistId: null, locale: null, alertsJson: null });
+  });
+
+  it('moves the publish revision on from the one read, and refuses a publish read before another committed', async () => {
+    const p = await seedOrg(env.DB, 'drafts-order');
+    const org = scoped(env.DB, p.orgId);
+    await org.commit((await org.settings.stage.set({ locale: 'en-GB' })).writes);
+    const before = (await org.settings.get())!;
+    expect(before.publishRevision).toBe(0);
+
+    await org.commit(org.publishes.stage.advance(0).writes);
+    const err = await org.commit(org.publishes.stage.advance(0).writes).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleVersionError);
+    expect(err).toMatchObject({ id: 'publish revision', version: 1 });
+    // Not a setting: an open settings form still saves.
+    expect(await org.settings.get()).toEqual({ ...before, publishRevision: 1 });
+  });
+});
+
+describe('rollout history in the publish batch (review 5)', () => {
+  it("stages a publish's row and its screens' rollout rows, which a failed guard rolls back with the switches", async () => {
+    const p = await seedOrg(env.DB, 'drafts-rollout');
+    const org = scoped(env.DB, p.orgId);
+    const manifestId = 'a'.repeat(64);
+    const stage = async (revision: number) => {
+      const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1' });
+      const rollout = await org.publishes.stage.addScreens(publish.row.id, [{ screenId: p.screen, manifestId }]);
+      return {
+        id: publish.row.id,
+        writes: [
+          ...org.publishes.stage.advance(revision).writes,
+          ...publish.writes,
+          ...rollout.writes,
+          ...org.screens.stage.setDesiredManifest(p.screen, manifestId).writes,
+        ],
+      };
+    };
+    const before = (await org.screens.get(p.screen))!.desiredManifestId;
+
+    const stale = await stage(1);
+    await expect(org.commit(stale.writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await org.publishes.get(stale.id)).toBeUndefined();
+    expect(await org.publishes.screens(stale.id)).toEqual([]);
+    expect((await org.screens.get(p.screen))!.desiredManifestId).toBe(before);
+
+    const fresh = await stage(0);
+    await org.commit(fresh.writes);
+    expect(await org.publishes.screens(fresh.id)).toEqual([{ screenId: p.screen, manifestId }]);
+    expect((await org.screens.get(p.screen))!.desiredManifestId).toBe(manifestId);
+  });
+
+  it('refuses a rollout row for a screen the org does not have', async () => {
+    const p = await seedOrg(env.DB, 'drafts-rollout-foreign');
+    const org = scoped(env.DB, p.orgId);
+    await expect(org.publishes.stage.addScreens(p.publish, [{ screenId: 'scr_not_mine', manifestId: 'a'.repeat(64) }])).rejects.toBeInstanceOf(NotInOrgError);
   });
 });

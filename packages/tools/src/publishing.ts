@@ -8,7 +8,8 @@
  *     and is reported; it never blocks the rest.
  *   - `compileInputFor(graph, screenId)` is a screen's published graph as `compileScreen` takes it.
  *   - `publishOrg(org, opts)` does all three and compiles every screen. It stages its writes and
- *     never commits; the caller (M3-18's publish tool) does, through the dispatcher.
+ *     never commits; the caller (M3-18's publish tool) does, through the dispatcher, in one batch
+ *     with the screens' desired-manifest switches, which the writes put in order.
  *
  * Brand: `screenInput` gives the compiler the kits this screen may get (its own, its groups',
  * the default) and its choices; the compiler picks one (`chooseBrandKit`) and freezes it into the
@@ -63,10 +64,15 @@ export interface OrgGraph {
   defaultPlaylist: string | null;
   brandKits: Map<string, BrandKitRow>;
   brandAssignments: BrandAssignment[];
+  /** The org's publish revision as read with the rest: a publish commits only if it is still this. */
+  publishRevision: number;
 }
 
 export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
-  const [screens, members, versions, assets, renditions, dataSources, spots, playlists, items, entries, settings] = await Promise.all([
+  // The publish revision first, before any content: a publish that commits after this read moves
+  // it on, so whatever it changed cannot be in what is read below without failing the guard.
+  const settings = await org.settings.get();
+  const [screens, members, versions, assets, renditions, dataSources, spots, [playlists, items], entries] = await Promise.all([
     org.screens.list(),
     org.screenGroups.allMembers(),
     org.templates.versions.list(),
@@ -74,10 +80,10 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     org.assets.renditions.list(),
     org.dataSources.list(),
     org.spots.list(),
-    org.playlists.list(),
-    org.playlists.allItems(),
+    // Versions before items: an items edit moves its playlist's version on, so items newer than
+    // the version read fail that playlist's promotion guard instead of publishing unseen.
+    org.playlists.list().then(async (p) => [p, await org.playlists.allItems()] as const),
     org.scheduleEntries.list(),
-    org.settings.get(),
   ]);
   const [brandKits, brandAssignments] = await Promise.all([org.brandKits.list(), org.brandKits.assignments.list()]);
   const groupsOf = new Map<string, string[]>();
@@ -104,6 +110,7 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     defaultPlaylist: settings?.defaultPlaylistId ?? null,
     brandKits: new Map(brandKits.map((k) => [k.id, k])),
     brandAssignments,
+    publishRevision: settings?.publishRevision ?? 0,
   };
 }
 
@@ -500,10 +507,15 @@ export interface ScreenPublish {
 
 /**
  * Promote drafts, then compile every screen from the published graph. A screen that cannot be
- * compiled is reported and the others still publish. Stages writes; the caller commits them.
+ * compiled is reported and the others still publish. Stages writes; the caller commits them with
+ * its switch of each screen's desired manifest, in one batch. The writes put the publish in order
+ * (`publishes.stage.advance`) and each promotion is guarded by its draft's version, so a batch
+ * that lost to another publish or to an edit fails with `StaleVersionError` and writes nothing.
  */
 export async function publishOrg(org: OrgScope, opts: CompileOptions): Promise<{ writes: Write[]; drafts: DraftReport; screens: ScreenPublish[] }> {
-  const { graph, writes, drafts } = await promoteDrafts(org, await loadOrg(org), opts);
+  const read = await loadOrg(org);
+  const { graph, writes: promotions, drafts } = await promoteDrafts(org, read, opts);
+  const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
   const screens: ScreenPublish[] = [];
   for (const screen of [...graph.screens].sort((a, b) => (a.id < b.id ? -1 : 1))) {
     if (!graph.defaultPlaylist) {
