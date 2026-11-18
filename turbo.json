@@ -1,5 +1,9 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  // A change to any of these reruns every task and, on a pull request, marks every package affected
+  // (docs/ci.md). Tests read fonts/ and examples/, which belong to no package; --affected goes by
+  // the package graph, so a file outside every package counts only when it is listed here.
+  "globalDependencies": ["tsconfig.base.json", "biome.jsonc", "pnpm-workspace.yaml", ".github/workflows/ci.yml", "fonts/**", "examples/**"],
   "boundaries": {
     "tags": {
       "contract": {
@@ -16,6 +20,7 @@
     "test": {
       "dependsOn": ["^typecheck"]
     },
+    "lint": {},
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]

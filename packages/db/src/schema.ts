@@ -197,6 +197,12 @@ export const screens = sqliteTable(
      * refused data, as its last sync reported them. Null until it first syncs.
      */
     heartbeatJson: text('heartbeat_json'),
+    /**
+     * The contract's `DisplayOverride` set from the CMS (wake now, sleep now), or null. Sent to the
+     * screen over its socket when set, and in each sync while the screen reports something else.
+     * Ends by itself at its `until`.
+     */
+    displayOverrideJson: text('display_override_json'),
     /** The `epoch` of the screen's play count batches, and the highest `seq` stored in it (contract `SyncRequest`). */
     syncEpoch: text('sync_epoch'),
     syncAckSeq: integer('sync_ack_seq').notNull().default(0),
@@ -659,7 +665,12 @@ export const auditLog = sqliteTable(
     targetId: text('target_id'),
     detailJson: text('detail_json'),
   },
-  (t) => [uniqueIndex('audit_log_org_id_uq').on(t.orgId, t.id), index('audit_log_org_at_idx').on(t.orgId, t.at)],
+  (t) => [
+    uniqueIndex('audit_log_org_id_uq').on(t.orgId, t.id),
+    index('audit_log_org_at_idx').on(t.orgId, t.at),
+    // A screen's recent events in the CMS: what was done to it, newest first.
+    index('audit_log_org_target_idx').on(t.orgId, t.targetKind, t.targetId, t.at),
+  ],
 );
 
 /**

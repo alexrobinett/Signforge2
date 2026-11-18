@@ -59,6 +59,7 @@ describe('the registry', () => {
       'get_brand_kit',
       'get_screen',
       'get_template',
+      'identify_screen',
       'list_assets',
       'list_brand_kits',
       'list_fonts',
@@ -69,8 +70,10 @@ describe('the registry', () => {
       'register_template_version',
       'rename_group',
       'rename_screen',
+      'restart_screen',
       'revoke_screen_credential',
       'set_default_brand_kit',
+      'set_display_override',
       'set_group_members',
       'set_template_version_status',
       'update_brand_kit',
@@ -295,6 +298,7 @@ describe('screen notices', () => {
     const screens: ScreenNotifier = {
       manifest: async (screenId, manifestId) => void told.push({ manifest: { screenId, manifestId } }),
       revoked: async (screenId, credentialId) => void told.push({ revoked: { screenId, credentialId } }),
+      command: async (screenId, command) => void told.push({ command: { screenId, command } }),
     };
     return { told, screens };
   };
@@ -325,7 +329,7 @@ describe('screen notices', () => {
   });
 
   it('do not fail a committed change when the screen cannot be told', async () => {
-    const screens: ScreenNotifier = { manifest: async () => {}, revoked: async () => Promise.reject(new Error('object unreachable')) };
+    const screens: ScreenNotifier = { manifest: async () => {}, command: async () => {}, revoked: async () => Promise.reject(new Error('object unreachable')) };
     const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '7'.repeat(64) });
     const r = await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
     expect(r.ok).toBe(true);

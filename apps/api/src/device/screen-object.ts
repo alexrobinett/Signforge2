@@ -11,7 +11,7 @@
  * Only the Worker reaches it: `/v1/device/ws` after checking the socket ticket, and the tool
  * dispatcher's `ScreenNotifier` (./screens.ts) after a change is committed.
  */
-import { validateDeviceSocketMessage, type DeviceCommand, type DeviceSocketMessage, type ServerSocketMessage } from '@signforge/contract';
+import { parseDeviceSocketMessage, type DeviceCommand, type ServerSocketMessage } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { DurableObject } from 'cloudflare:workers';
 
@@ -86,8 +86,9 @@ export class ScreenObject extends DurableObject<Env> {
     } catch {
       return;
     }
-    if (validateDeviceSocketMessage(msg).length) return;
-    const { manifest } = msg as DeviceSocketMessage;
+    const parsed = parseDeviceSocketMessage(msg);
+    if (!parsed.ok) return;
+    const { manifest } = parsed.value;
     if ((await this.ctx.storage.get<string>('reported')) === manifest) return;
     const holder = ws.deserializeAttachment() as SocketHolder;
     // The screen reporting about itself, through its org's scope: the only write the socket makes.

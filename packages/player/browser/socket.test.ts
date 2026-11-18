@@ -63,3 +63,26 @@ it('acts on a display override at once, not at the next display-hours check', as
 });
 
 // `revoked` on the socket: browser/pairing.test.ts (the screen wipes itself and shows a code).
+
+it('shows its name over the content when identified, then takes it away', async () => {
+  const content = h.content([{ id: 'a', durationMs: 800 }]);
+  const p = await h.openPlayer((server) => server.publish(content), remote('60'));
+  await p.until((s) => s.played > 0 && s.socket);
+  p.server.push({ type: 'command', command: { type: 'identify', name: 'Front lobby', seconds: 2 } });
+  const card = p.page.locator('#identify');
+  await expect.poll(() => card.textContent(), { timeout: 3000 }).toContain('Front lobby');
+  await expect.poll(() => card.isVisible(), { timeout: 5000 }).toBe(false);
+});
+
+it('restarts when a person asks, every time, unlike reload', async () => {
+  const content = h.content([{ id: 'a', durationMs: 800 }]);
+  const p = await h.openPlayer((server) => server.publish(content), remote('60'));
+  await p.until((s) => s.played > 0 && s.socket);
+  const loads = () => p.server.requestsTo(/^\/$/).length;
+  const first = loads();
+  p.server.push({ type: 'command', command: { type: 'restart' } });
+  await expect.poll(loads, { timeout: 10_000 }).toBe(first + 1);
+  await p.until((s) => s.played > 0 && s.socket, 15_000);
+  p.server.push({ type: 'command', command: { type: 'restart' } });
+  await expect.poll(loads, { timeout: 10_000 }).toBe(first + 2);
+});

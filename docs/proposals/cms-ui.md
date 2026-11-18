@@ -1,6 +1,6 @@
 # Proposal: the CMS interface on shadcn/ui
 
-Status: proposal, 2026-11-17. Direction from the owner: Landing A (navy, product-led) for the marketing page; the app itself neutral white, not paper; shadcn as the base, with our own components where the product needs them.
+Status: proposal, 2026-11-17. Decided the same day: Geist, and the token change with M3-11, which landed it (`apps/cms/src/styles.css`, checked by `apps/cms/test/tokens.test.ts`). M3-11 also added `--status-needs-you` (red, the triangle) beside the four states, made `--status-offline` grey, and added `--border-strong` for outline buttons and `--primary-disabled`. Direction from the owner: Landing A (navy, product-led) for the marketing page; the app itself neutral white, not paper; shadcn as the base, with our own components where the product needs them.
 
 ## Where we are
 
@@ -43,7 +43,7 @@ These are SignForge's, so no registry has them:
 - **`PlayerStage`**: the real player in an iframe (M3-36 preview channel), scaled to fit at true resolution, with landscape/portrait and fit/100% toggles. The heart of the editor.
 - **`FieldForm`**: a form generated from a template's `fields` (text, number, boolean, color, select, image, list), with the contract's validators giving the errors (`validateSpotData`). Built on shadcn `form` patterns.
 - **`BrandColorField`**: "Brand accent" or a custom colour, with the contrast check beside it.
-- **`AssetPicker`**: the media library in a `dialog`, with focal point.
+- **`AssetPicker`**: the media library in a `dialog` (built with the library page in M3-14). The focal point for portrait crops comes with the spot editor (M3-16).
 - **`DataBindingField`**: bind a field to a data source and path, showing the live value and the fallback.
 - **`PairingCodeInput`**: shadcn `input-otp`, 6 characters in two groups.
 - **`DisplayHoursEditor`**: weekly windows plus dated exceptions (`DisplayHours` in the contract).

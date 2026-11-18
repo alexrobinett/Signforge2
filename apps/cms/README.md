@@ -9,7 +9,11 @@ The CMS and the API are two Workers on one hostname, so the session cookie is sa
 - **The browser** calls `/api/...` on the page's own origin: Better Auth's client for sign-in and organizations. In a deployed environment, the API Worker's route takes `<host>/api/*` and the CMS takes the rest. If a request for `/api/*` reaches the CMS anyway, as it always does locally, `src/routes/api/$.ts` hands it to the API over the service binding unchanged.
 - **Server code** (loaders, server functions) calls the API over the `API` service binding with the browser's cookies (`src/server/api.server.ts`). Any cookie the API sets on the way, such as Better Auth's refreshed cache cookie, is passed back to the browser.
 
-The CMS changes data only through Better Auth's endpoints (sign-in, sign-out, create and switch organization). Every other change will go through the API's tool registry (M3-12); do not add data routes here.
+The CMS changes data only through Better Auth's endpoints (sign-in, sign-out, create and switch organization) and the API's tool registry: pages call `POST /api/tools/:name` from the browser (`src/lib/tools.ts`), and loaders read through the same tools as the member (`src/server/screens.functions.ts`). Do not add data routes here.
+
+## Look
+
+The tokens in `src/styles.css` follow `docs/proposals/cms-ui.md`: neutral white, Geist and Geist Mono, field edges at 3:1, and screen states that each have a colour, a word and a shape (online filled, updating an arc, asleep a half circle, offline hollow and grey, needs-you a triangle and the only red). `test/tokens.test.ts` checks every text pair at 4.5:1 and every edge, ring, status glyph and chart mark at 3:1, in both themes; change a colour and run it.
 
 ## Run it locally
 
@@ -33,9 +37,9 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 | Command | What it runs |
 | --- | --- |
 | `pnpm --filter @signforge/cms typecheck` | `wrangler types --env dev`, then `tsc` |
-| `pnpm --filter @signforge/cms lint` | ESLint with the React rules below. Root `pnpm lint` runs Biome, then this |
-| `pnpm --filter @signforge/cms test` | Unit tests (Vitest) |
-| `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer. It starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
+| `pnpm --filter @signforge/cms lint` | ESLint with the React rules below. Root `pnpm lint` runs Biome, then this through Turbo (task `lint`, cached) |
+| `pnpm --filter @signforge/cms test` | Unit tests (Vitest). `test/registry/` checks the command menu against the tool registry, under its own tsconfig: the tools package needs Workers types, which the CMS's DOM types do not load |
+| `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer; and on Screens, pair a screen (a pairing started on the API as a player would), see it sync, sleep and wake it, identify it, set its display hours, the tile and table views at desktop and phone width, and revoke it; and on Assets, upload images (scaled in the browser, PUT to the API's local bucket, checked by the server), search them, see which a spot uses, and delete one no spot uses; and the command menu by keyboard alone (open, filter, pair a screen from a tool's form, run a tool at once, a refusal, go to a page, close). The screens, assets and command-menu specs sign in straight against the API, each under its own `cf-connecting-ip` (`signInAs` in `e2e/helpers.ts`), so each sign-in has its own rate limit (through the dev CMS every request has one address, and the other specs use that budget). It starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
 | `CLOUDFLARE_ENV=demo pnpm --filter @signforge/cms build` | Production build into `dist/` for that environment. Without `CLOUDFLARE_ENV` it fails: there is no default environment |
 
 ## Layout
@@ -44,12 +48,28 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 src/routes/__root.tsx     document, theme script, fonts
 src/routes/sign-in.tsx    email code, and GitHub when the API offers it
 src/routes/_app.tsx       signed-in layout: redirects signed-out visitors, picks or creates an org
-src/routes/_app/*.tsx     Overview, Screens, Spots, Playlists, Schedule, Assets (placeholders)
+src/routes/_app/*.tsx     Overview, Spots, Playlists, Schedule (placeholders); Assets, the image library
+src/routes/_app/screens/  Screens: tile wall or table (?view=table), and one screen's page
+src/components/screens/   status shapes and pills, thumbnails, pairing, display hours
+src/components/assets/    asset tiles, search, uploading images, and AssetPicker (the library in a dialog)
+src/components/command-menu.tsx  ⌘K: go to a section, or run a tool (entries from src/lib/command-menu.ts)
+src/lib/screen-status.ts  a screen's state in words (the state itself comes from the screen tools)
+src/server/screens.functions.ts  the Screens loaders: tools called as the member, through one helper
+public/sign-in/           spots the player rendered (scripts/spot-shots.ts), for the sign-in wall
 src/routes/api/$.ts       `/api/*` handed to the API Worker
 src/server/               server-only: the API binding, the shell's server functions
 src/state/                the app store: one slice per area (see State below)
 src/components/ui/        shadcn/ui components (components.json is set up for the shadcn CLI)
 ```
+
+## Command menu
+
+⌘K or Ctrl+K on any signed-in page, or "Search and actions" in the sidebar, opens it. It lists:
+
+- **Every section of the sidebar** (`SECTIONS` in `src/lib/sections.ts`). A new page gets its "Go to" entry by being added there, with nothing to change in the menu.
+- **Every tool the member's role allows**, read with the shell from `GET /api/tools` (the registry's `describeTools`, the list an agent gets), named from the first sentence of the tool's description. A tool with a required input opens a form built from its input's JSON Schema (text, number, choice, checkbox, or JSON for lists and objects; an idempotency key is filled in); one without runs at once. A field named like a route param (`screenId` on a screen's page) starts with the page's value. Results and refusals are toasts (`sonner`); a refusal keeps the form open.
+
+It opens with no motion (docs/research/cms-ux.md). State is the `commandMenu` slice (`src/state/command-menu.ts`).
 
 ## React rules
 
@@ -86,7 +106,7 @@ Keeping it in one place means every change to the UI's state is in `src/state/`,
 
 To add a slice:
 
-1. Make `src/state/<area>.ts` with its state under one key (`ui`, `signIn`, `orgs`) and its actions, typed as `SliceCreator<YourSlice>`.
+1. Make `src/state/<area>.ts` with its state under one key (`ui`, `signIn`, `orgs`, `screens`) and its actions, typed as `SliceCreator<YourSlice>`.
 2. Name actions as verbs on the domain (`openDrawer`, `startSignIn`, `createOrg`) and write each transition inside them with `set((s) => ...)`. Do not add a generic `patch` or `setField` action: that is `useState` under another name.
 3. Actions that call the API use the helpers in `src/lib/` and the router from the store's deps (`router.invalidate()` after a change).
 4. Add the slice to `AppState` and `createAppStore` in `src/state/store.ts`. If it must start from browser state, set that in a browser-only hook like `connectUi`, which changes the current state but not the initial one, so hydration still matches the server.
