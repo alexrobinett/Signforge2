@@ -318,9 +318,9 @@ describe('screen notices', () => {
     const r = await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
     expect(r.ok).toBe(true);
     expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }]);
-    // Already revoked: nothing changed, nothing to tell.
+    // Already revoked: nothing changes, but the screen is told again, in case the first notice never arrived.
     await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
-    expect(told).toHaveLength(1);
+    expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }, { revoked: { screenId: o.screen, credentialId: cred.id } }]);
   });
 
   it('are not sent when the change is rolled back', async () => {

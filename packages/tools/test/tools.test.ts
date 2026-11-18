@@ -36,7 +36,13 @@ describe('screens', () => {
 
   it('updates settings, validating display hours as the player does', async () => {
     const hours = { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }], exceptions: [{ date: '2026-12-25', on: [] }] };
-    const { screen } = await call('update_screen_settings', { screenId: o.screen, timezone: 'America/New_York', locale: 'en-US', orientation: 'portrait', displayHours: hours });
+    const { screen } = await call('update_screen_settings', {
+      screenId: o.screen,
+      timezone: 'America/New_York',
+      locale: 'en-US',
+      orientation: 'portrait',
+      displayHours: hours,
+    });
     expect(screen).toMatchObject({ timezone: 'America/New_York', locale: 'en-US', orientation: 'portrait', displayHours: hours });
 
     // Only what is given changes; null clears.
@@ -46,8 +52,12 @@ describe('screens', () => {
     const bad = await refusal('update_screen_settings', { screenId: o.screen, displayHours: { weekly: [{ days: [9], from: '25:00', to: '22:00' }] } });
     expect(bad).toMatchObject({ ok: false, error: 'invalid_input' });
     expect((bad as { message: string }).message).toMatch(/days must be 0-6/);
-    expect(await refusal('update_screen_settings', { screenId: o.screen, displayHours: { weekly: [], exceptions: [{ date: '2026-12-24', on: [{ from: '18:00', to: '09:00' }] }] } }))
-      .toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(
+      await refusal('update_screen_settings', {
+        screenId: o.screen,
+        displayHours: { weekly: [], exceptions: [{ date: '2026-12-24', on: [{ from: '18:00', to: '09:00' }] }] },
+      }),
+    ).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await refusal('update_screen_settings', { screenId: o.screen, timezone: 'Mars/Olympus' })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await refusal('update_screen_settings', { screenId: o.screen, locale: 'not a locale!' })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await refusal('update_screen_settings', { screenId: o.screen })).toMatchObject({ ok: false, error: 'invalid_input' });
@@ -106,7 +116,7 @@ describe('publish_manifest_to_screen', () => {
     expect((await call('get_screen', { screenId: o.screen })).screen).toMatchObject({ desiredManifestId: m2, previousManifestId: m1 });
   });
 
-  it("will not publish a manifest uploaded for another screen", async () => {
+  it('will not publish a manifest uploaded for another screen', async () => {
     const other = await scoped(env.DB, o.orgId).screens.insert({ name: 'Elsewhere', timezone: 'UTC', orientation: 'landscape' });
     expect(await refusal('publish_manifest_to_screen', { screenId: other.id, manifestId: '1'.repeat(64) })).toMatchObject({ ok: false, error: 'not_found' });
   });

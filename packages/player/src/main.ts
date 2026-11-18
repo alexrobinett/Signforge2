@@ -4,7 +4,8 @@
  *
  * Query options:  ?content=<url>  where manifest.json and blobs/ live (default ./content). On another
  *                                 origin it is the API's device base (`https://<api>/v1/device`) and every
- *                                 request carries the screen's credential, collected from the supervisor
+ *                                 request carries the screen's credential, collected from the supervisor,
+ *                                 if the credential is bound to this exact base (src/credential.ts)
  *                 ?poll=<seconds> static content: how often to look for a new manifest (default 30). With the
  *                                 API each look is a sync, every `nextSyncS` (5 minutes) with jitter, every
  *                                 2 minutes while the socket is down (src/sync-interval.ts), and this often
@@ -83,11 +84,13 @@ async function supervisorFetch(path: string, init: RequestInit, retry = true): P
   }
   return res;
 }
+/** The content base, absolute: every request for content goes under it. */
+const BASE = new URL(CONTENT, location.href).href.replace(/\/$/, '');
 /**
  * Content on another origin is the API, which needs the screen's credential. Static content served
  * beside the player (the default, the demo) gets no credential, so it never leaves the device.
  */
-const credential = new URL(CONTENT, location.href).origin === location.origin ? undefined : new DeviceCredential(SUPERVISOR, supervisorFetch);
+const credential = new URL(BASE).origin === location.origin ? undefined : new DeviceCredential(BASE, SUPERVISOR, supervisorFetch);
 const deviceHeaders = async () => (credential ? credential.headers() : {});
 /** Static content: while nothing nudges, the manifest is polled this often. */
 const SOCKET_POLL_MS = 300_000;
@@ -122,7 +125,11 @@ const state = {
   lastError: '',
   lastSync: '',
   online: navigator.onLine,
-  /** 'pairing' while a code is shown, 'revoked' while the screen wipes itself, 'no credential' while the supervisor cannot be asked; '' once the API accepts it. */
+  /**
+   * 'pairing' while a code is shown, 'revoked' while the screen wipes itself, 'no credential' while
+   * the supervisor cannot be asked, 'paired with another API' while its credential is bound to an
+   * API other than `content`; '' once the API accepts it.
+   */
   auth: '',
   /** The pairing code on screen, or ''. */
   pairing: '',
@@ -578,7 +585,8 @@ async function pairScreen(): Promise<void> {
   const got = await pair({
     base: BASE,
     moveMs: query.get('pairmove') ? Number(query.get('pairmove')) * 1000 : undefined,
-    stop: async () => (await credential.check()) === 'held',
+    // A credential for another API turning up stops it too: pairing here would replace it.
+    stop: async () => ['held', 'elsewhere'].includes(await credential.check()),
     onCode: (code) => (state.pairing = code),
   });
   if (got) {
@@ -624,7 +632,6 @@ function reload(): void {
 
 /** Content from the API (on another origin, with a credential): the sync carries everything. */
 const API = !!credential && SOURCE === 'device';
-const BASE = new URL(CONTENT, location.href).href.replace(/\/$/, '');
 
 /** The nudge socket, when a screen's content comes from the API (never in the preview). */
 const socket = API
@@ -649,7 +656,7 @@ const socket = API
 async function fetchManifest(): Promise<void> {
   // While falling back, the manifest that failed counts as current: the server's answer is
   // 304 until it publishes something newer.
-  const result = await sync(CONTENT, {
+  const result = await sync(BASE, {
     currentId: state.fallback || manifest?.id,
     headers: await deviceHeaders(),
     ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
@@ -782,6 +789,11 @@ async function syncLoop(): Promise<never> {
         // No supervisor to ask, with content playing: keep playing it rather than cover it with a code.
         if (has === 'none' || (has === 'unknown' && !manifest)) await pairScreen();
         else if (has === 'unknown') state.auth = 'no credential';
+        else if (has === 'elsewhere') {
+          // Neither sent nor replaced. What is cached keeps playing.
+          state.auth = 'paired with another API';
+          if (!manifest) status('SignForge\nThis screen is paired with another API than its address names.');
+        }
         if (credential.held) {
           syncTiming.nextSyncS = await apiSync();
           syncTiming.ok = true;
@@ -924,7 +936,8 @@ async function boot(): Promise<void> {
   void syncLoop();
   socket?.start();
   // From the API, snapshots come on the sync; static content has no sync, so each source is fetched.
-  if (!API) wakeData = startDataLoop(CONTENT, () => manifest, deviceHeaders);
+  // Never with the credential: from the API, data comes on the sync.
+  if (!API) wakeData = startDataLoop(BASE, () => manifest);
   void playbackLoop();
   void displayLoop();
 }
