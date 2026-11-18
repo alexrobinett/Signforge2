@@ -12,6 +12,7 @@ export { newId } from './ids';
 export type { Staged, Write } from './writes';
 export { published, draftChanged, type DraftRow, type PublishedPlaylist } from './drafts';
 export { findDeviceScreen, type DeviceScreen } from './device';
+export { claimDueDataSources } from './poller';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
 export { findMembership, organizationExists } from './members';
 

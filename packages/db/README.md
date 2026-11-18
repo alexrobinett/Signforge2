@@ -24,6 +24,7 @@ Code that has to find a row before it knows the org (device auth by screen id, p
 - `findDeviceScreen(db, screenId)` (`src/device.ts`): a screen's org, desired and previous manifest ids, and the hashes of its unrevoked credentials (each with whether it was used yet) (none if the screen is revoked). The device API checks the secret against them, then uses `scoped(db, orgId)`.
   The temporary `/admin` upload routes (M3-04) also use it to find a screen's org, behind the deploy secret. The publish they end with goes through the tool registry with `scoped(db, orgId)`.
 
+- `claimDueDataSources(db, now, { limit, leaseMs })` (`src/poller.ts`): the poller's (`apps/api/src/data`). It claims the sources whose `next_poll_at` has come, in every org, by moving it on by the lease in one statement, so overlapping runs never fetch a source twice, and returns only each one's org and id. The poll then reads and saves through `scoped(db, orgId)`.
 - `organizationExists(db, orgId)`: the `/admin` template routes check the org they are told to write to.
 - `startPairing(db, { code, pollTokenHash, now })` and `collectPairing(db, pollTokenHash, now, mint)` (`src/pairing.ts`): the screen's half of pairing. `startPairing` stores a code for 15 minutes (`PAIRING_TTL_MS`), sweeping codes past their time in the same batch, and returns false if the code is in use. `collectPairing` answers `waiting` or `expired` until the code is claimed; then it mints the credential and stores it with `scoped(db, claimedOrg).pairing.collect(...)`, the org being the one the claim stored on the code, never one the screen names. A repeat poll (a lost reply) replaces that credential with a fresh one while it is unused and the first collect was under `PAIRING_TTL_MS` ago; each step of the batch is guarded on the code still naming the credential it replaces, so of two racing polls one writes. `org.screens.credentials.markUsed(id, now)` records a credential's first use (device auth, once per credential): a used credential is never replaced.
 
@@ -34,6 +35,8 @@ Base templates are written by `platform(db)` (`src/platform.ts`), the one scope 
 `org.screens.setDesiredManifest(screenId, manifestId)` keeps the manifest it replaces as `previous_manifest_id`, whose files a screen mid-switch may still fetch.
 
 `org.screens.sync(screenId, write)` is a screen's sync in one atomic batch: its heartbeat and last-seen time, and its hourly play counts added unless the batch's `seq` is already stored in its `epoch`. The repeat check is inside the SQL, so a retried or doubled request counts once. It returns the highest stored `seq` and the rows D1 wrote.
+
+`org.dataSources.savePoll(id, { source, snapshot?, checkedAt? })` saves what one poll found in one batch: the source's patch (next poll, failures, error category, ETag), and either a changed snapshot or, for a feed that still says the same, only the snapshot's new `checked_at`. `org.dataSources.snapshots(ids)` returns each snapshot with its `checkedAt`, which sync sends a screen.
 
 `org.screenGroups.setMembers(groupId, screenIds)` replaces a group's members in one batch, after checking the group and every screen are the org's (`NotInOrgError` otherwise, changing nothing).
 

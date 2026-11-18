@@ -152,7 +152,7 @@ describe('snapshots', () => {
     const src = s.seed.dataSource;
     // A second source, not in the manifest: never sent.
     const other = await s.seed.scope.dataSources.insert({ name: 'Other', format: 'json', urlEncrypted: 'enc:o', refreshS: 300 });
-    await s.seed.scope.dataSources.putSnapshot(other.id, { version: 'o1', fetchedAt: 1000, dataJson: '{"o":1}' });
+    await s.seed.scope.dataSources.putSnapshot(other.id, { version: 'o1', fetchedAt: 1000, checkedAt: 1000, dataJson: '{"o":1}' });
 
     expect((await sync(s, body())).snapshots).toEqual([]);
     await publish(s, 'm-data', { schema: MANIFEST_SCHEMA, dataSources: { [src]: { id: src, refreshS: 300 } } });
@@ -162,7 +162,7 @@ describe('snapshots', () => {
     expect(first.snapshots).toEqual([{ id: src, version: seededAt, fetchedAt: new Date(seededAt).toISOString(), data: { t: 12 } }]);
     expect((await sync(s, body({ snapshots: { [src]: seededAt } }))).snapshots).toEqual([]);
 
-    await s.seed.scope.dataSources.putSnapshot(src, { version: 'v2', fetchedAt: seededAt + 60_000, dataJson: '{"t":13}' });
+    await s.seed.scope.dataSources.putSnapshot(src, { version: 'v2', fetchedAt: seededAt + 60_000, checkedAt: seededAt + 60_000, dataJson: '{"t":13}' });
     const changed = await sync(s, body({ snapshots: { [src]: seededAt } }));
     expect(changed.snapshots).toEqual([{ id: src, version: seededAt + 60_000, fetchedAt: new Date(seededAt + 60_000).toISOString(), data: { t: 13 } }]);
   });

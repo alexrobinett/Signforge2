@@ -182,6 +182,8 @@ export interface SyncWrite {
   counts: readonly { hour: number; spotId: string; plays: number; ms: number }[];
 }
 
+type Snapshot = Omit<typeof s.dataSnapshots.$inferInsert, 'orgId' | 'dataSourceId'>;
+
 export function scoped(d1: D1Database, orgId: string) {
   assertId(orgId, 'orgId');
   const db: Db = drizzle(d1);
@@ -721,18 +723,40 @@ export function scoped(d1: D1Database, orgId: string) {
       snapshots: async (dataSourceIds: readonly string[]) =>
         dataSourceIds.length
           ? db
-              .select()
+              .select({ dataSourceId: snap.dataSourceId, version: snap.version, fetchedAt: snap.fetchedAt, checkedAt: snap.checkedAt, dataJson: snap.dataJson })
               .from(snap)
               .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
               .all()
           : [],
-      putSnapshot: async (dataSourceId: string, v: { version: string; fetchedAt: number; dataJson: string }) => {
+      putSnapshot: async (dataSourceId: string, v: Snapshot) => {
         if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId);
         await db
           .insert(snap)
           .values({ orgId, dataSourceId, ...v })
           .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: { ...v } })
           .run();
+      },
+      /**
+       * What one poll found, in one batch: the source's patch (next poll, failures, validators),
+       * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
+       */
+      savePoll: async (dataSourceId: string, poll: { source: RowPatch<typeof s.dataSources>; snapshot?: Snapshot; checkedAt?: number }) => {
+        const current = await dataSources.get(dataSourceId);
+        if (!current) throw new NotInOrgError('data source', dataSourceId);
+        const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
+        const writes: Write[] = [...dataSources.stage.update(current, poll.source).writes];
+        if (poll.snapshot)
+          writes.push(
+            ...staged(
+              undefined,
+              db
+                .insert(snap)
+                .values({ orgId, dataSourceId, ...poll.snapshot })
+                .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: { ...poll.snapshot } }),
+            ).writes,
+          );
+        else if (poll.checkedAt !== undefined) writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(mineSnap)).writes);
+        await commit(db, writes);
       },
     },
 

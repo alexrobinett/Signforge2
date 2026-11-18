@@ -151,7 +151,8 @@ describe("a call made for org B with org A's ids", () => {
       ['setItems: A spot', () => b.playlists.setItems(s.b.playlist, [a.imageSpot])],
       ['addScreens: A publish', () => b.publishes.addScreens(a.publish, [{ screenId: s.b.screen, manifestId: 'x' }])],
       ['addScreens: A screen', () => b.publishes.addScreens(s.b.publish, [{ screenId: a.screen, manifestId: 'x' }])],
-      ['putSnapshot', () => b.dataSources.putSnapshot(a.dataSource, { version: 'x', fetchedAt: 0, dataJson: '{}' })],
+      ['putSnapshot', () => b.dataSources.putSnapshot(a.dataSource, { version: 'x', fetchedAt: 0, checkedAt: 0, dataJson: '{}' })],
+      ['savePoll', () => b.dataSources.savePoll(a.dataSource, { source: { failures: 1 }, checkedAt: 0 })],
       ['playCounts.add', () => b.playCounts.add(a.screen, [{ hour: a.hour, spotId: a.templateSpot, plays: 1, ms: 1 }])],
       ['spot on A template version', () => b.spots.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })],
       ['spot moved to A template version', () => b.spots.update(s.b.templateSpot, { templateVersionId: a.templateVersion })],
@@ -231,7 +232,7 @@ describe('ids', () => {
       await o.playlists.setItems(same, [same]);
       await o.scheduleEntries.insert({ id: same, playlistId: same, target: 'org', priority: 0 });
       await o.dataSources.insert({ id: same, name: `${o.orgId} feed`, format: 'json', urlEncrypted: 'enc:x', refreshS: 60 });
-      await o.dataSources.putSnapshot(same, { version: o.orgId, fetchedAt: 1, dataJson: '{}' });
+      await o.dataSources.putSnapshot(same, { version: o.orgId, fetchedAt: 1, checkedAt: 1, dataJson: '{}' });
     }
     for (const o of [a, b]) {
       expect(await o.spots.get(same)).toMatchObject({ name: `${o.orgId} spot` });
