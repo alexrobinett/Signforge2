@@ -127,12 +127,32 @@ The full 16-spot stress playlist (fade 600 ms), 290 s per run, two runs per vari
 | Kit only | 0.35, 0.46% | 2.9, 3.7% | 4/33, 2/33 | 256, 259 ms | 900 ms |
 | Fonts used | 0.32, 0.32% | 1.7, 2.3% | 10/33, 9/33 | 362, 384 ms | 1618 ms |
 
-Nothing was skipped, and no frame took 150 ms or more. Frames do not regress. Prepare time, median per spot, plain against fonts used: clock 203 to 252, menu 201 to 246, weather-live 204 to 255, sport-drinks 288 to 386 ms: a brand font adds 30 to 100 ms on most templates. Over the budget: energy (cstore-promo) 235 to 1138 ms, news 467 to 1076 ms, photo-promo over a 4K photo 260-323 to 515-690 ms. Why those three cost more is not found yet; it must be before M3-25 moves templates onto the brand fonts.
+Nothing was skipped, and no frame took 150 ms or more. Frames do not regress. Prepare time, median per spot, plain against fonts used: clock 203 to 252, menu 201 to 246, weather-live 204 to 255, sport-drinks 288 to 386 ms: a brand font adds 30 to 100 ms on most templates. Over the budget: energy (cstore-promo) 235 to 1138 ms, news 467 to 1076 ms, photo-promo over a 4K photo 260-323 to 515-690 ms. Why is in the next section.
 
 Decoding is not the cost: the 6 files decode in 14 ms (`new FontFace(...).load()` in the player page, median of 5). Two things were measured and fixed on the way:
 
 - Faces built from bytes in the frame (`new FontFace(name, buffer)`) are a new typeface in every document, and about one prepare in three of photo-river (photo-promo, 4K photo) then took about 1.1 s to paint, whether or not text used the face. As `@font-face` with `data:` URLs (how templates already ship their own fonts), one in fifteen did. The SDK uses `data:` URLs.
 - A family the template's styles never reference is not loaded at all, so a kit costs today's templates nothing (the kit-only row).
+
+## Slow prepares: the cause and the fix (M3-39, 2026-11-17)
+
+Traced on the Pi (Chromium tracing over CDP, the prepare split into phases inside the SDK). Two mechanisms, neither specific to fonts; brand fonts made both more frequent because they make a prepare take more frames.
+
+1. **Tiles sized for a 0x0 frame.** A new template frame starts at 0x0 and gets its size a moment later, when the compositor tree that carries the size activates. When that tree already held the template's own markup, cc tiled its layers with the smallest tile (32x256 px), and the layers kept those tiles: a full-screen photo then rasterized as about 700 tiles, a second of GPU time (in the trace, `SharedImageStub::OnCreateSharedImage` 32x256 x680 against 15 to 30 tiles of 992x288 normally). Plain templates hit it too, but only on a cheap layer (the shade); with brand fonts the photo was bound later, inside the window. **Fix (SDK):** the document is hidden from load until the first `init` and until the frame has its size (two frames after `innerWidth` is set), so the first trees have nothing to tile. Afterwards no 32x256 tile was seen in any run.
+2. **Undrawn frames are throttled to 1 Hz.** viz sends one BeginFrame a second to a client that has submitted more than `kUndrawnFrameLimit` (3) frames without being drawn (`components/viz/service/frame_sinks/compositor_frame_sink_support.cc`). The next spot loads underneath the one on screen, whose black background covered it completely, so cc culled it and it was never drawn: any template that needed more than three frames to reach ready waited about a second for each of its last ones (the trace shows nothing busy for that second). **Fix (player):** the black behind a spot is two layers with a 1 px gap at the centre, which the spot itself covers; the slot underneath is drawn through that column, out of sight, and is never throttled. Tried first and dropped: the spot on screen at opacity 0.999 (a full-screen render pass, 27% of frames dropped while loading), a 99% black background (11%), and transparent slots (10%, and news still stalled).
+
+The full 16-spot stress playlist, as above (290 s, fade 600 ms), this fix against the M3-39 build, alternating:
+
+| Variant | Build | Overall dropped | Dropped while loading | Prepares over 500 ms | Prepare median | Slowest | Skipped |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Fonts used | M3-39 | 0.52, 0.42% | 42, 37 frames (3.7, 3.3%) | 7/34, 10/34 | 326, 312 ms | 1463, 1513 ms | 2, 2 |
+| Fonts used | fix | 0.82, 0.64% | 73, 74 frames (10.7, 11.0%) | 2/35, 3/35 | 329, 314 ms | 896, 908 ms | 0, 0 |
+| Plain | M3-39 | 0.29% | 26 frames (3.8%) | 3/35 | 273 ms | 1243 ms | 0 |
+| Plain | fix | 0.40% | 55 frames (9.1%) | 3/35 | 260 ms | 943 ms | 0 |
+
+- With the fix and brand fonts, prepares per spot: energy (cstore-promo) 253 to 268 ms, news 455 to 517, photo-river (photo-promo, 4K) 316 to 352, photo-kitchen 319 to 362, weather-rain 384 to 455, sport-drinks 352 to 497. Over 500 ms: video-pan (870 to 940 ms in every build, fonts or not; a video spot, not a font cost) and one news at 517 ms.
+- No frame of 150 ms or more in any run; the worst frame is 67 ms in both builds (83 ms once in the old one), always while the next spot loads.
+- **The cost:** a load now runs at full rate instead of being throttled, so the spot on screen drops about 2 frames per load instead of about 1 (73/35 against 42/34 with fonts). Overall drops stay under the 1% budget, transitions drop fewer frames than before (15 to 19 against 20 to 33), and nothing is skipped (the throttled build skipped spots whose throttled frames ran past the 2 s ready timeout).
 
 ## Baseline: the same player on a Mac (2026-11-17)
 
