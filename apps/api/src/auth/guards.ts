@@ -16,5 +16,5 @@ function hasSessionCookie(req: Request): boolean {
  */
 export const refuseSession: MiddlewareHandler = async (c, next) => {
   if (hasSessionCookie(c.req.raw)) return c.json({ error: 'session_not_accepted' }, 401);
-  await next();
+  return next();
 };

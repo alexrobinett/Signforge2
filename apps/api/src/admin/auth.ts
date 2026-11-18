@@ -29,5 +29,5 @@ export const adminAuth = createMiddleware<AdminEnv>(async (c, next) => {
   if (!expected) return json(404, 'not found');
   const match = /^Bearer[ ]+(\S+)$/i.exec(c.req.header('authorization') ?? '');
   if (!match || !(await sameSecret(match[1]!, expected))) return json(401, 'unauthorized', { 'www-authenticate': 'Bearer realm="admin"' });
-  await next();
+  return next();
 });

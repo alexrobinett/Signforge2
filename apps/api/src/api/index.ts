@@ -37,7 +37,7 @@ const error = (code: string) => ({ error: code });
 /** Refuse a device credential on the CMS tree. */
 const refuseDeviceCredential: MiddlewareHandler<ApiEnv> = async (c, next) => {
   if (c.req.header('authorization')) return c.json(error('device_credential_not_accepted'), 401);
-  await next();
+  return next();
 };
 
 /** A signed-in user, from the session cookie (or its cache cookie). */
@@ -45,7 +45,7 @@ const requireSession: MiddlewareHandler<ApiEnv> = async (c, next) => {
   const session = await c.var.auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) return c.json(error('unauthenticated'), 401);
   c.set('session', session);
-  await next();
+  return next();
 };
 
 /**
@@ -62,7 +62,7 @@ const requireOrg: MiddlewareHandler<ApiEnv> = async (c, next) => {
   c.set('orgId', orgId);
   c.set('role', membership.role as Role);
   c.set('org', scoped(c.env.DB, orgId));
-  await next();
+  return next();
 };
 
 /** The `/api` sub-app, with the tool routes. Routes added to it after this call run behind `requireOrg`. */
