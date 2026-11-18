@@ -211,7 +211,7 @@ function shared<T extends SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn 
  * Stage making a draft row's content (as read, plus a playlist's items) its published version.
  * Refused, writing nothing, if the draft was edited since it was read (its version moved on: a
  * playlist's moves with its items too), so a publish never promotes content older than the draft.
- * Not an edit: the version stays, and `updated_at` keeps the draft's last edit.
+ * Not an edit: the version stays, and `updated_at` keeps the draft's last edit as stored.
  */
 function publisher<T extends typeof s.spots | typeof s.playlists | typeof s.scheduleEntries>(db: Db, orgId: string, table: T) {
   const t = table as unknown as typeof s.spots;
@@ -221,7 +221,8 @@ function publisher<T extends typeof s.spots | typeof s.playlists | typeof s.sche
       { ...row, ...set },
       db
         .update(t)
-        .set({ ...set, updatedAt: row.updatedAt })
+        // Set to itself, or Drizzle's `$onUpdateFn` would stamp it now.
+        .set({ ...set, updatedAt: sql`${t.updatedAt}` })
         .where(and(eq(t.orgId, orgId), eq(t.id, row.id))),
     );
     return { row: promoted.row, writes: [versionGuard(db, orgId, t, row.id, row.rowVersion), ...promoted.writes] };

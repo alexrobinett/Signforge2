@@ -126,6 +126,19 @@ describe('promotion from an old read (R09)', () => {
     expect((await org.playlists.get(r.playlist))!.publishedJson).toBeNull();
   });
 
+  it("keeps the draft's edit time as stored, not as it was read", async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = (await org.spots.get(r.templateSpot))!;
+    // Stands in for a write that leaves the version alone: the stored time is the one to keep.
+    await env.DB.prepare('UPDATE spots SET updated_at = ? WHERE org_id = ? AND id = ?')
+      .bind(read.updatedAt + 1000, r.orgId, r.templateSpot)
+      .run();
+    await org.commit(org.spots.stage.publish(read).writes);
+    const stored = (await org.spots.get(r.templateSpot))!;
+    expect(published(stored)).toBeDefined();
+    expect(stored.updatedAt).toBe(read.updatedAt + 1000);
+  });
+
   it('refuses to publish a schedule entry edited since it was read', async () => {
     const org = scoped(env.DB, r.orgId);
     const read = (await org.scheduleEntries.get(r.scheduleEntry))!;
