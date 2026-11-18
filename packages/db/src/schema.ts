@@ -438,6 +438,8 @@ export const playlists = sqliteTable(
     name: text('name').notNull(),
     /** The contract's `Transition`. */
     transitionJson: text('transition_json').notNull(),
+    /** Moves on with every edit of the draft, its items too; publishing does not move it. */
+    rowVersion: rowVersion(),
     publishedJson: publishedJson(),
     publishedAt: publishedAt(),
     createdAt: created(),
@@ -482,6 +484,8 @@ export const scheduleEntries = sqliteTable(
     /** Local `HH:MM`. */
     fromTime: text('from_time'),
     toTime: text('to_time'),
+    /** Moves on with every edit of the draft; publishing does not move it. */
+    rowVersion: rowVersion(),
     publishedJson: publishedJson(),
     publishedAt: publishedAt(),
     createdAt: created(),
@@ -525,6 +529,11 @@ export const orgSettings = sqliteTable(
     alertsJson: text('alerts_json'),
     /** An org with no row has every default, at version 1; each `settings.stage.set` moves it on. */
     rowVersion: rowVersion(),
+    /**
+     * Moves on with every publish (`publishes.stage.advance`), so publishes commit in the order
+     * they read: not a setting, so it leaves the version and `updatedAt` alone.
+     */
+    publishRevision: integer('publish_revision').notNull().default(0),
     updatedAt: updated(),
   },
   (t) => [foreignKey({ columns: [t.orgId, t.defaultPlaylistId], foreignColumns: [playlists.orgId, playlists.id] })],

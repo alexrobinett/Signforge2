@@ -30,10 +30,10 @@ export class NotInOrgError extends Error {
 
 /**
  * Fields a caller may never set: the org is the scope's, the id is fixed at insert, a row's
- * version moves on by itself, and a draft's published version is written only by `stage.publish`
- * (./drafts.ts).
+ * version and the org's publish revision move on by themselves, and a draft's published version
+ * is written only by `stage.publish` (./drafts.ts).
  */
-type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'publishedJson' | 'publishedAt';
+type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'publishRevision' | 'publishedJson' | 'publishedAt';
 export type NewRow<T extends SQLiteTable> = Omit<T['$inferInsert'], Guarded> & { id?: string };
 export type RowPatch<T extends SQLiteTable> = Partial<Omit<T['$inferInsert'], Guarded>>;
 
@@ -765,6 +765,7 @@ export function scoped(d1: D1Database, orgId: string) {
             updateWindowJson: null,
             unreachableAfterMs: null,
             alertsJson: null,
+            publishRevision: 0,
             ...current,
             ...patch,
             rowVersion: version + 1,

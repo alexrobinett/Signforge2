@@ -89,10 +89,11 @@ interface ColumnInfo {
 
 /**
  * A caller's values without the fields it may never set (`Guarded` in ./scoped.ts): the org, the
- * id, the creation time, the row's version and a draft's published version. `scoped` and `platform` both use it.
+ * id, the creation time, the row's version, the org's publish revision and a draft's published
+ * version. `scoped` and `platform` both use it.
  */
 export function strip<T extends object>(v: T): T {
-  const { orgId: _o, id: _i, createdAt: _c, rowVersion: _v, publishedJson: _pj, publishedAt: _pa, ...rest } = v as Record<string, unknown>;
+  const { orgId: _o, id: _i, createdAt: _c, rowVersion: _v, publishRevision: _r, publishedJson: _pj, publishedAt: _pa, ...rest } = v as Record<string, unknown>;
   return rest as T;
 }
 

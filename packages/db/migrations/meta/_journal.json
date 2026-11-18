@@ -120,6 +120,13 @@
       "when": 1795025850184,
       "tag": "0016_spot_row_version",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1795029276056,
+      "tag": "0017_publish_guards",
+      "breakpoints": true
     }
   ]
 }
