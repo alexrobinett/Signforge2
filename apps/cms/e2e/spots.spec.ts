@@ -53,7 +53,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   const stage = page.getByRole('region', { name: 'Live preview' });
   await expect(stage.getByRole('status')).toHaveText('Draft. Not on any screen.');
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
-  await expect(stage.getByText('1920 × 1080 · shown at', { exact: false })).toBeVisible();
+  await expect(stage.getByText('1920 × 1080 ·', { exact: false })).toBeVisible();
 
   // A keystroke reaches the player's frame without a round trip: measured from the fill.
   const greeting = page.getByLabel('Greeting (empty for good morning/afternoon/evening)');
@@ -63,7 +63,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   const latency = Date.now() - typedAt;
   console.log(`stage updated ${latency} ms after the keystroke (Playwright's own polling included)`);
   expect(latency).toBeLessThan(1_000);
-  await expect(page.getByText('Draft, saved', { exact: false })).toBeVisible();
+  await expect(page.getByText(/Saved \d/)).toBeVisible();
   await shots(page, '30-spot-editor');
 
   // Invalid: the contract's message by the field, the stage keeps the last frame, nothing is saved.
@@ -76,12 +76,12 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await shots(page, '31-spot-editor-invalid');
   await greeting.fill('Good to see you');
   await expect.poll(() => stageShows(page, 'Good to see you'), { timeout: 5_000 }).toBe(true);
-  await expect(page.getByText('Draft, saved', { exact: false })).toBeVisible();
+  await expect(page.getByText(/Saved \d/)).toBeVisible();
 
   // Portrait, carried in the URL.
   await stage.getByRole('button', { name: 'Portrait' }).click();
   await expect(page).toHaveURL(/[?&]o=portrait/);
-  await expect(stage.getByText('1080 × 1920 · shown at', { exact: false })).toBeVisible();
+  await expect(stage.getByText('1080 × 1920 ·', { exact: false })).toBeVisible();
   await expect.poll(() => stageShows(page, 'Good to see you'), { timeout: 30_000 }).toBe(true);
   await shots(page, '32-spot-editor-portrait');
 
@@ -143,8 +143,12 @@ test('every base template can be configured and previewed', async () => {
     if (text) {
       await page.locator(`#field-${text[0]}`).fill('Edited');
       await expect.poll(() => stageShows(page, 'Edited'), { message: t.key, timeout: 10_000 }).toBe(true);
-      await expect(page.getByText('Draft, saved', { exact: false }), t.key).toBeVisible();
+      await expect(page.getByText(/Saved \d/), t.key).toBeVisible();
     }
     await shots(page, `33-template-${t.key}`);
   }
+  // At phone width the form and the stage stack.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('region', { name: 'Live preview' })).toBeVisible();
+  await shots(page, '34-spot-editor-phone');
 });

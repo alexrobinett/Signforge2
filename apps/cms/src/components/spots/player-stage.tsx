@@ -137,7 +137,7 @@ export function PlayerStage({
           </span>
         )}
         <span className="ml-auto font-mono text-[13px] text-[#b8b8b8]">
-          {size.w} × {size.h} · shown at {Math.round(shown * 100)}%
+          {size.w} × {size.h} · {Math.round(shown * 100)}%
         </span>
       </div>
       <p role="status" className="inline-flex items-center gap-2 text-sm font-semibold text-[#f2f4f7]">
@@ -146,24 +146,24 @@ export function PlayerStage({
         </svg>
         Draft. Not on any screen.
       </p>
+      {/* The room is sized by the page, never by the frame in it, so Fit can measure it. */}
       <div ref={roomRef} className={cn('relative min-h-[420px] flex-1', scale === 'actual' ? 'overflow-auto' : 'overflow-hidden')}>
-        <div
-          className="mx-auto overflow-hidden rounded-sm bg-black shadow-[0_0_0_1px_#3a3a3d,0_30px_70px_rgba(0,0,0,0.5)]"
-          style={{ width: size.w * shown, height: size.h * shown }}
-        >
-          {/* A new frame per orientation: the player sizes itself to its window when it starts. */}
-          {hydrated && (
-            <iframe
-              key={orientation}
-              ref={frameRef}
-              title={`Preview, ${orientation}, as screens show it`}
-              src={PLAYER_URL}
-              width={size.w}
-              height={size.h}
-              className="origin-top-left border-0"
-              style={{ transform: `scale(${shown})`, visibility: box ? 'visible' : 'hidden' }}
-            />
-          )}
+        <div className={scale === 'actual' ? undefined : 'absolute inset-0 flex items-center justify-center'}>
+          <div className="shrink-0 overflow-hidden rounded-sm bg-black ring-1 ring-[#3a3a3d]" style={{ width: size.w * shown, height: size.h * shown }}>
+            {/* A new frame per orientation: the player sizes itself to its window when it starts. */}
+            {hydrated && (
+              <iframe
+                key={orientation}
+                ref={frameRef}
+                title={`Preview, ${orientation}, as screens show it`}
+                src={PLAYER_URL}
+                width={size.w}
+                height={size.h}
+                className="origin-top-left border-0"
+                style={{ transform: `scale(${shown})`, visibility: box ? 'visible' : 'hidden' }}
+              />
+            )}
+          </div>
         </div>
       </div>
       <p className="flex flex-wrap justify-between gap-3 text-[13px] text-[#c8c8c8]">

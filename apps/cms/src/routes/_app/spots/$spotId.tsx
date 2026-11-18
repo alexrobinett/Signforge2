@@ -57,7 +57,7 @@ function saveWord(status: string, savedAt: number | null) {
   if (status === 'saving') return 'Saving…';
   if (status === 'invalid') return 'Not saved: fix the marked field';
   if (status === 'unsaved') return 'Unsaved changes';
-  return savedAt ? `Draft, saved ${new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Draft';
+  return savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'No changes yet';
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
