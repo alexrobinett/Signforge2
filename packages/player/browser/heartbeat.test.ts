@@ -199,6 +199,26 @@ describe('the first trusted sync', () => {
 });
 
 describe('snapshots', () => {
+  it('of a source a new manifest binds hold up none of its spots: it is loaded once the manifest is adopted', async () => {
+    const first = h.content([{ id: 'a', durationMs: 500 }], { variant: 'first' });
+    const bound = h.content([{ id: 'n', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }], {
+      variant: 'bound',
+    });
+    const p = await h.openPlayer((s) => s.publish(first), api);
+    await p.until((s) => s.manifestId === first.manifest.id && s.socket);
+    // Published with its feed's first snapshot; the socket nudges, and no other sync comes (every 5 minutes).
+    p.server.publish(bound);
+    p.server.setData('news', { id: 'news', version: 1, fetchedAt: new Date(1).toISOString(), checkedAt: new Date().toISOString(), data: { headline: 'Live' } });
+    p.server.push({ type: 'manifest', id: bound.manifest.id });
+    await p.until((s) => s.log.some((l) => l.manifest === bound.manifest.id));
+    await expect.poll(() => p.onScreen(), { timeout: 3000 }).toMatchObject({ label: 'Live' });
+    // 0.5 s spots: about 12 in 6 s, not one every 3 s (the data wait) as when the source never counts as loaded.
+    const before = (await p.state()).log.filter((l) => l.manifest === bound.manifest.id).length;
+    await new Promise((r) => setTimeout(r, 6000));
+    const after = (await p.state()).log.filter((l) => l.manifest === bound.manifest.id).length;
+    expect(after - before).toBeGreaterThanOrEqual(8);
+  });
+
   it('arrive on the sync, and a changed one reaches the screen on its next sync', async () => {
     const snap = (headline: string, version: number) => ({
       id: 'news',

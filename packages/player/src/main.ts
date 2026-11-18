@@ -739,6 +739,10 @@ async function fetchManifest(signal?: AbortSignal): Promise<void> {
   if (result.changed && result.manifest) {
     console.info(`[sf] manifest ${result.manifest.id} active (${result.downloaded} files downloaded)`);
     adopt(result.manifest);
+    // The sync that named it has kept its snapshots (apiSync offers them before it asks for content):
+    // once the stored copies are read, its sources have had their first load, and spots waiting on
+    // them start now rather than at the data wait's end.
+    if (API) await restoreSources(result.manifest).then(() => settleSources(result.manifest));
   }
 }
 
@@ -873,13 +877,14 @@ async function apiSync(): Promise<void> {
   // Display hours and any saved override were set aside while the clock was untrusted.
   if (!wasTrusted) display.wake();
 
+  await offerSnapshots(r.snapshots, manifest);
+  await offerChecked(r.checked ?? {});
+  // After the snapshots are kept, so a manifest the content worker adopts has its data.
   const current = state.fallback || manifest?.id;
   if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
     contentDue = true;
     content.wake();
   }
-  await offerSnapshots(r.snapshots, manifest);
-  await offerChecked(r.checked ?? {});
 }
 
 // Untrusted, the player applies no override (displayLoop), so it reports none: reading one would
