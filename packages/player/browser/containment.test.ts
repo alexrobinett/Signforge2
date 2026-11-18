@@ -31,10 +31,14 @@ async function hostile(mode: FixtureMode) {
   return { p, leaks: () => [...popups, ...p.server.requestsTo(/^\/leak\//).map((r) => r.path)] };
 }
 
-/** Wait until `b` has played after the hostile spot, then give a late request time to land. */
+/**
+ * Wait until `b` has played after the hostile spot, then until a request the page sends after that
+ * has reached the server: a late request the hostile frame sent before it went has had its chance to land.
+ */
 async function afterEvil(p: Player) {
   const s = await p.until((s) => spotsPlayed(s).includes('b'));
-  await new Promise((r) => setTimeout(r, 300));
+  await p.page.evaluate(() => fetch('/probe', { cache: 'no-store' }).then(() => undefined));
+  expect(p.server.requestsTo(/^\/probe$/)).toHaveLength(1);
   return s;
 }
 

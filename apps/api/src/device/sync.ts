@@ -9,7 +9,16 @@
  * epoch's mark (two for an epoch's first). The player sends an hour's counts once the hour has
  * ended, so each (hour, spot) row is written about once.
  */
-import { parseSyncRequest, type DataSnapshot, type DeviceCommand, type DisplayOverride, type SyncRequest, type SyncResponse } from '@signforge/contract';
+import {
+  MAX_SYNC_REQUEST_BYTES,
+  MAX_SYNC_SOURCES,
+  parseSyncRequest,
+  type DataSnapshot,
+  type DeviceCommand,
+  type DisplayOverride,
+  type SyncRequest,
+  type SyncResponse,
+} from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
 import { liveOverride, type ScreenHeartbeat } from '@signforge/tools';
 import type { Context } from 'hono';
@@ -71,10 +80,33 @@ function overrideCommand(screen: DeviceScreen, held: DisplayOverride | undefined
   return sameOverride(want, has) ? undefined : { type: 'display', override: want };
 }
 
+/**
+ * The body as text, or undefined once it is over MAX_SYNC_REQUEST_BYTES: a declared length is
+ * refused unread, and a body without one is read no further than the ceiling.
+ */
+async function boundedText(req: Request): Promise<string | undefined> {
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_SYNC_REQUEST_BYTES) return undefined;
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (let r = await reader.read(); !r.done; r = await reader.read()) {
+    size += r.value.byteLength;
+    if (size > MAX_SYNC_REQUEST_BYTES) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(r.value);
+  }
+  return new Blob(chunks).text();
+}
+
 export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
+  const text = await boundedText(c.req.raw);
+  if (text === undefined) return refuse(413, `the body is over ${MAX_SYNC_REQUEST_BYTES} bytes`);
   let body: unknown;
   try {
-    body = await c.req.json();
+    body = JSON.parse(text);
   } catch {
     return refuse(400, 'the body is not JSON');
   }
@@ -84,14 +116,27 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   const screen = c.get('screen');
   const now = Date.now();
 
+  const { player, manifest: m, display: d, clock } = req;
+  // Only the contract's fields, copied one by one: the parser lets unknown keys through, and the
+  // device lookup reads this row with json_extract, which a deeply nested unknown key would break.
   const heartbeat: ScreenHeartbeat = {
     at: now,
-    player: req.player,
-    manifest: req.manifest,
-    display: req.display,
-    clock: req.clock,
+    player: { version: player.version, manifestSchemas: [...player.manifestSchemas], protocols: [...player.protocols] },
+    manifest: {
+      filesMissing: m.filesMissing,
+      ...(m.active !== undefined && { active: m.active }),
+      ...(m.fallbackFrom !== undefined && { fallbackFrom: m.fallbackFrom }),
+      ...(m.lastGood !== undefined && { lastGood: m.lastGood }),
+    },
+    display: {
+      on: d.on,
+      ...(d.methods !== undefined && { methods: { ...d.methods } }),
+      ...(d.override !== undefined && { override: { state: d.override.state, until: d.override.until } }),
+    },
+    clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
     driftMs: now - Date.parse(req.deviceTime),
-    dataRejected: req.dataRejected ?? {},
+    // A player before gh-45 reports every source seen since it started: kept to a bounded row.
+    dataRejected: Object.fromEntries(Object.entries(req.dataRejected ?? {}).slice(0, MAX_SYNC_SOURCES)),
   };
   const counts = req.playCounts
     .map((p) => ({ hour: Date.parse(p.hour), spotId: p.spot, plays: p.plays, ms: Math.round(p.ms) }))

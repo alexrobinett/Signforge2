@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.31';
@@ -40,9 +40,11 @@ test('a new org opens a test screen, pairs it, publishes to it and sees it play 
   await expect(page.getByRole('heading', { name: 'Test Kitchen', level: 1 })).toBeVisible();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
   await hydrated(page);
+  await axe(page);
   await shots(page, '41-empty-fleet-test-screen');
   await page.setViewportSize({ width: 412, height: 915 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
   await shots(page, '44-phone-empty-fleet-test-screen');
   await page.setViewportSize({ width: 1280, height: 720 });
 
@@ -87,9 +89,11 @@ test('a new org opens a test screen, pairs it, publishes to it and sees it play 
   await hydrated(page);
   await expect(page.getByRole('button', { name: 'Identify (10 s)' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Sleep now|Wake now/ })).toHaveCount(0);
+  await axe(page);
   await shots(page, '42-test-screen-detail');
   await page.getByRole('link', { name: 'Screens', exact: true }).first().click();
   await expect(page.getByText(/^Test screen · /)).toBeVisible();
+  await axe(page);
   await shots(page, '43-test-screen-tile');
   await page.getByRole('link', { name: 'Test screen' }).click();
 

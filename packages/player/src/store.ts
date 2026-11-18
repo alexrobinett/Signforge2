@@ -152,7 +152,7 @@ export class PinSet implements Iterable<string> {
   }
 }
 
-/** Files of the manifest last synced that were missing and are not yet downloaded. */
+/** Files of the manifest last synced, and of the one playing while falling back, that were missing and are not yet downloaded. */
 let missingNow = 0;
 export const filesMissing = (): number => missingNow;
 
@@ -177,6 +177,11 @@ export interface SyncOptions {
   pinned?: Iterable<string>;
   /** Stops the sync: no request continues, and nothing more is stored once it has aborted. */
   signal?: AbortSignal;
+  /**
+   * The manifest playing instead of the synced one, which played nothing: while the synced one is
+   * unchanged, its missing files are fetched back too, after, and a failure there fails nothing.
+   */
+  fallback?: ScreenManifest;
 }
 
 /**
@@ -185,7 +190,7 @@ export interface SyncOptions {
  */
 export async function sync(
   base: string,
-  { currentId, headers = {}, stallMs = STALL_MS, pinned = [], signal = new AbortController().signal }: SyncOptions = {},
+  { currentId, headers = {}, stallMs = STALL_MS, pinned = [], fallback, signal = new AbortController().signal }: SyncOptions = {},
 ): Promise<SyncResult> {
   const get = (conditional: boolean) =>
     fetch(`${base}/manifest.json`, {
@@ -226,24 +231,42 @@ export async function sync(
   // Even when the manifest is unchanged, files may have gone: the browser can evict the cache
   // under storage pressure if persistence was refused. Fetch back whatever is missing.
   const blobs = await caches.open(BLOBS);
-  const { missing } = planSync(next, (await heldKeys(blobs)).hashes);
-  missingNow = missing.length;
-  for (const sha of missing) {
-    const type = next.files[sha]?.type ?? 'application/octet-stream';
-    await fetchFile({ url: `${base}/blobs/${sha}`, sha, type, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` }, signal).catch(
+  const held = (await heldKeys(blobs)).hashes;
+  const own = planSync(next, held).missing;
+  // Still falling back: the manifest playing is not the synced one, so its files are put back too,
+  // after, and never holding up a publish (a new manifest replaces the fallback and needs only its own).
+  const theirs = fallback && same ? planSync(fallback, held).missing.filter((sha) => !own.includes(sha)) : [];
+  missingNow = own.length + theirs.length;
+  const download = (sha: string, type = 'application/octet-stream') =>
+    fetchFile({ url: `${base}/blobs/${sha}`, sha, type, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` }, signal).catch(
       (err: unknown) => {
         if (err instanceof UnauthorisedError || signal.aborted) throw err;
         throw new Error(`file ${sha.slice(0, 12)}: ${err instanceof Error ? err.message : String(err)}`);
       },
     );
+  for (const sha of own) {
+    await download(sha, next.files[sha]?.type);
     missingNow--;
   }
 
   signal.throwIfAborted();
   if (!same || rewrite) await (await caches.open(STATE)).put(ACTIVE, jsonResponse(text));
+  let repaired = 0;
+  for (const sha of theirs) {
+    try {
+      await download(sha, fallback?.files[sha]?.type);
+      missingNow--;
+      repaired++;
+    } catch (err) {
+      // Revoked: the caller wipes the screen. Anything else stays counted missing, so the next sync tries again.
+      if (err instanceof UnauthorisedError || signal.aborted) throw err;
+      console.warn('[sf] could not fetch back a file of the manifest falling back to', err);
+    }
+  }
   // Every pass, not only on a change: a file pinned at the last change is dropped once released.
   await cleanup(blobs, next, pinned);
-  return same ? { changed: false, downloaded: missing.length } : { manifest: next, changed: true, downloaded: missing.length };
+  const downloaded = own.length + repaired;
+  return same ? { changed: false, downloaded } : { manifest: next, changed: true, downloaded };
 }
 
 /** Delete every file neither the active manifest nor a pin needs, and any leftover partial download. */

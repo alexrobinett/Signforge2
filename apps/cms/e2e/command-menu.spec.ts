@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { fillUntilEnabled, hydrated, screenshot, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, screenshot, signInAs } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
@@ -24,6 +24,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await expect(search).toBeFocused();
   await expect(menu.getByRole('option', { name: /claim_screen/ })).toBeVisible();
   await expect(menu.getByRole('option', { name: /revoke_screen_credential/ })).toHaveCount(1);
+  await axe(page);
   await screenshot(page, '30-command-menu');
 
   // Filter to a tool that needs input, run it from its form: pair a screen a player started.
@@ -38,6 +39,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.keyboard.type('Deli counter');
   await page.keyboard.press('Tab');
   await page.keyboard.type('Europe/London');
+  await axe(page);
   await screenshot(page, '31-command-form');
   await page.keyboard.press('Enter');
   await expect(toast('Deli counter')).toBeVisible();
@@ -59,6 +61,31 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.keyboard.press('Enter');
   await expect(toast(/not found/)).toBeVisible();
   await expect(menu.getByLabel('name')).toBeVisible();
+
+  // A field the menu cannot read is refused before anything is sent: focus leaves Run for that
+  // field, which reads out the error as its description.
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('pair a screen');
+  await page.keyboard.press('Enter');
+  await expect(menu.getByLabel('code')).toBeFocused();
+  await page.keyboard.type('ABC234');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('Back office');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('UTC');
+  const hours = menu.getByLabel('displayHours');
+  await hours.fill('{"mon": [');
+  const run = menu.getByRole('button', { name: 'Run' });
+  await run.focus();
+  await page.keyboard.press('Enter');
+  await expect(hours).toBeFocused();
+  await expect(hours).toHaveAttribute('aria-invalid', 'true');
+  await expect(hours).toHaveAccessibleDescription(/must be JSON/);
+  // Refused again after a move back to Run: focus returns to the field.
+  await run.focus();
+  await page.keyboard.press('Enter');
+  await expect(hours).toBeFocused();
 
   // Escape closes it; Ctrl+K again, a page by name, Enter goes there.
   await page.keyboard.press('Escape');

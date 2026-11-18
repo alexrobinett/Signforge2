@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { fillUntilEnabled, orgSwitcher, screenshot, signIn } from './helpers';
+import { axe, fillUntilEnabled, orgSwitcher, screenshot, signIn } from './helpers';
 
 test('at phone width, navigation is a drawer and the dashboard works', async ({ page }) => {
   const email = `e2e-phone-${Date.now()}@example.com`;
@@ -11,11 +11,13 @@ test('at phone width, navigation is a drawer and the dashboard works', async ({ 
 
   // No horizontal scroll at phone width.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
   await screenshot(page, '08-phone-overview');
 
   await page.getByRole('button', { name: 'Open navigation' }).click();
   const drawer = page.getByRole('dialog', { name: 'Navigation' });
   await expect(orgSwitcher(page)).toContainText('Pocket Signs');
+  await axe(page);
   await screenshot(page, '09-phone-drawer');
   await drawer.getByRole('link', { name: 'Playlists' }).click();
   await expect(drawer).toBeHidden();

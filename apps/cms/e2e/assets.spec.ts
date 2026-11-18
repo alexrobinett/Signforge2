@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { png, rotatedPhoto } from '@signforge/media/testing';
-import { fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.21';
@@ -14,6 +14,7 @@ test('upload images, search them by name, see which are in use, and delete one n
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
   await expect(page.getByRole('heading', { name: 'No images yet' })).toBeVisible();
   await hydrated(page);
+  await axe(page);
   await shots(page, '20-assets-empty');
 
   // A 4K phone photo held upright, a logo, and a file that is not an image.
@@ -23,7 +24,11 @@ test('upload images, search them by name, see which are in use, and delete one n
     { name: 'notes.png', mimeType: 'image/png', buffer: Buffer.from('not an image') },
   ]);
   await expect(page.getByRole('alert')).toContainText('Could not upload notes.png. The file is not an image this browser can read.', { timeout: 60_000 });
-  const tiles = page.getByRole('main').getByRole('listitem');
+  // The library's items, not the uploads': a refused upload stays listed until dismissed.
+  const tiles = page
+    .getByRole('main')
+    .getByRole('listitem')
+    .filter({ hasNot: page.getByRole('alert') });
   await expect(tiles).toHaveCount(2);
   await expect(page.getByText('2 images · none in use')).toBeVisible();
   // Newest first; what a landscape screen gets, scaled to cover 1920x1080 (the photo turned upright).
@@ -31,6 +36,7 @@ test('upload images, search them by name, see which are in use, and delete one n
   await expect(tiles.nth(1)).toContainText('raspberries-cup.jpg');
   await expect(tiles.nth(1)).toContainText('1920×1080 · JPEG');
   await expect(tiles.nth(1).locator('img')).toHaveJSProperty('naturalWidth', 1920);
+  await axe(page);
   await shots(page, '21-assets-library');
   await page.getByRole('button', { name: 'Dismiss notes.png' }).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -58,6 +64,7 @@ test('upload images, search them by name, see which are in use, and delete one n
 
   await page.getByRole('button', { name: 'Delete lobby-logo.png' }).click();
   await expect(page.getByRole('alertdialog', { name: 'Delete lobby-logo.png?' })).toBeVisible();
+  await axe(page);
   await shots(page, '22-assets-delete');
   await page.getByRole('button', { name: 'Delete image' }).click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
@@ -65,5 +72,6 @@ test('upload images, search them by name, see which are in use, and delete one n
   await expect(page.getByText('1 image · 1 in use')).toBeVisible();
 
   await page.setViewportSize({ width: 412, height: 915 });
+  await axe(page);
   await shots(page, '23-phone-assets');
 });

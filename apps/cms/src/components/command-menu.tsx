@@ -1,6 +1,7 @@
 import { useParams } from '@tanstack/react-router';
 import { ArrowLeftIcon, CornerDownLeftIcon, LoaderCircleIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
+import { useCallback } from 'react';
 import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
 import { Input } from '~/components/ui/input';
@@ -19,8 +20,21 @@ const Mono = ({ children, className = '' }: { children: string; className?: stri
 /** The form's first field takes focus when the form appears. Stable, so it runs once per form. */
 const focusFirstField = (form: HTMLFormElement | null) => form?.querySelector<HTMLElement>('input, select, textarea')?.focus();
 
-function FieldInput({ field, id, defaultValue, invalid }: { field: Field; id: string; defaultValue: string | undefined; invalid: boolean }) {
+function FieldInput({
+  field,
+  id,
+  defaultValue,
+  invalid,
+  ref,
+}: {
+  field: Field;
+  id: string;
+  defaultValue: string | undefined;
+  invalid: boolean;
+  ref: ((el: HTMLElement | null) => void) | undefined;
+}) {
   const common = {
+    ref,
     id,
     name: field.name,
     required: field.required && !field.nullable,
@@ -64,6 +78,9 @@ function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> })
   // The page's own ids fill the fields of the same name: on a screen's page, its screenId.
   const params: Record<string, string | undefined> = useParams({ strict: false });
   const { tool } = entry;
+  // Each refusal moves focus to its field, which then reads out its error (its description): from
+  // Run, a keyboard or screen-reader user would miss both. A new error is a new ref, so React calls it again.
+  const focusInvalid = useCallback((el: HTMLElement | null) => (fieldError ? el?.focus() : undefined), [fieldError]);
 
   return (
     <form
@@ -96,7 +113,7 @@ function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> })
                   {f.name}
                   {f.required ? '' : ' (optional)'}
                 </Label>
-                <FieldInput field={f} id={id} defaultValue={params[f.name]} invalid={error !== null} />
+                <FieldInput field={f} id={id} defaultValue={params[f.name]} invalid={error !== null} ref={error === null ? undefined : focusInvalid} />
                 <p id={`${id}-hint`} className={error ? 'text-xs font-medium text-destructive' : 'text-xs text-muted-foreground empty:hidden'}>
                   {error ?? f.hint}
                 </p>

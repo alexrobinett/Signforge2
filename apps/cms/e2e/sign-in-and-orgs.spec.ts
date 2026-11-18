@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { fillUntilEnabled, hydrated, orgSwitcher, requestCode, screenshot } from './helpers';
+import { axe, fillUntilEnabled, hydrated, orgSwitcher, requestCode, screenshot } from './helpers';
 import { codeFor } from './servers';
 
 async function activeOrgId(page: Page) {
@@ -18,6 +18,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await expect(page.getByText('The code is printed in the terminal running the API')).toBeVisible();
   // GitHub is not configured locally, so it is not offered.
   await expect(page.getByRole('button', { name: /GitHub/ })).toHaveCount(0);
+  await axe(page);
   await screenshot(page, '01-sign-in');
 
   await requestCode(page, email);
@@ -30,12 +31,14 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await expect(page).toHaveURL(/\/sign-in\?redirect=%2Fscreens$/);
 
   await page.getByLabel('Sign-in code').fill(code);
+  await axe(page);
   await screenshot(page, '02-code');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 
   // Signed in with no org yet: back on the page asked for, offered to create the first org.
   await expect(page).toHaveURL(/\/screens$/);
   await expect(page.getByRole('heading', { name: 'Welcome to SignForge' })).toBeVisible();
+  await axe(page);
   await screenshot(page, '03-first-org');
   await fillUntilEnabled(page, 'Organization name', 'Acme Coffee', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
@@ -50,6 +53,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await page.getByRole('menuitem', { name: 'Create organization' }).click();
   const dialog = page.getByRole('dialog', { name: 'Create organization' });
   await dialog.getByLabel('Organization name').fill('Blue Harbour Cinemas');
+  await axe(page);
   await screenshot(page, '04-create-org-dialog');
   await dialog.getByRole('button', { name: 'Create organization' }).click();
   await expect(dialog).toBeHidden();
@@ -60,6 +64,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   // Switch back to the first.
   await switcher.click();
   await expect(page.getByRole('menuitemradio', { name: 'Blue Harbour Cinemas' })).toHaveAttribute('aria-checked', 'true');
+  await axe(page);
   await screenshot(page, '05-switcher');
   await page.getByRole('menuitemradio', { name: 'Acme Coffee' }).click();
   await expect(switcher).toContainText('Acme Coffee');
@@ -79,6 +84,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   }
   await nav.getByRole('link', { name: 'Overview' }).click();
   await expect(page.getByRole('heading', { name: 'Acme Coffee', level: 1 })).toBeVisible();
+  await axe(page);
   await screenshot(page, '06-overview');
 
   // Dark theme, from the account menu; it survives a reload.
@@ -90,6 +96,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await page.reload();
   await hydrated(page);
   await expect(page.locator('html')).toHaveClass(/\bdark\b/);
+  await axe(page);
   await screenshot(page, '07-overview-dark');
 
   // Sign out, and the dashboard is closed again.
