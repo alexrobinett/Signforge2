@@ -9,6 +9,8 @@ the supervisor only does *how*, over a local HTTP API:
   POST /display/off   put the TV in standby over CEC, then turn the video signal off
   GET  /display       last state and which methods worked
   GET  /credential    the screen's API credential, for the player's own origin (see below)
+  POST /credential    {"credential": "sfd_..."}: store the credential pairing gave the player
+  DELETE /credential  forget it: the server revoked it
 
 Two methods, because panels differ:
   CEC     TVs and commercial displays. Ignored by most monitors.
@@ -25,11 +27,13 @@ forces one, the preflight is granted only to the player's origin, and a request 
 this address (DNS rebinding) is refused.
 
 The screen's API credential (`sfd_<screen>.<secret>`) lives in ~/signforge/device.credential, mode
-0600, installed by hand until pairing (M3-08) writes it. GET /credential hands it to the player under
-the same rule as /token: the player's origin, this Host, never in a URL. It is read on each request,
-so a new credential needs no restart; 404 while there is none.
+0600. Pairing (M3-08) writes it: the player pairs with the API and hands the credential here with
+POST /credential, and deletes it with DELETE /credential when the server refuses it. Both need the
+token, like the display routes. It can still be installed by hand. GET /credential hands it to the
+player under the same rule as /token: the player's origin, this Host, never in a URL. It is read on
+each request, so a new credential needs no restart; 404 while there is none.
 """
-import hmac, json, os, secrets, subprocess, threading
+import hmac, json, os, re, secrets, subprocess, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8091
@@ -62,6 +66,27 @@ def load_credential():
             return f.read().strip() or None
     except OSError:
         return None
+CREDENTIAL = re.compile(r"^sfd_[A-Za-z0-9_-]{1,64}\.[A-Za-z0-9_-]{43}$")
+
+
+def store_credential(cred):
+    """Write the credential atomically, 0600 from the start."""
+    tmp = CREDENTIAL_FILE + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(cred + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, CREDENTIAL_FILE)
+
+
+def delete_credential():
+    try:
+        os.remove(CREDENTIAL_FILE)
+    except FileNotFoundError:
+        pass
+
+
 lock = threading.Lock()
 state = {"on": True, "cec": "unknown", "signal": "unknown"}
 
@@ -161,8 +186,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_response(204)
         self.send_header("access-control-allow-origin", self.headers["Origin"])
-        self.send_header("access-control-allow-methods", "GET, POST")
-        self.send_header("access-control-allow-headers", "x-sf-token")
+        self.send_header("access-control-allow-methods", "GET, POST, DELETE")
+        self.send_header("access-control-allow-headers", "x-sf-token, content-type")
         self.send_header("access-control-allow-private-network", "true")
         self.end_headers()
 
@@ -185,8 +210,28 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "forbidden"})
         if self.path in ("/display/on", "/display/off"):
             self.reply(200, set_display(self.path.endswith("/on")))
+        elif self.path == "/credential":
+            try:
+                length = int(self.headers.get("content-length") or 0)
+                cred = json.loads(self.rfile.read(min(length, 4096)) or b"{}").get("credential")
+            except (ValueError, AttributeError):
+                cred = None
+            if not isinstance(cred, str) or not CREDENTIAL.match(cred):
+                return self.reply(400, {"error": "send {\"credential\": \"sfd_<screen>.<secret>\"}"})
+            store_credential(cred)
+            print("credential stored", flush=True)
+            self.reply(200, {})
         else:
             self.reply(404, {"error": "not found"})
+
+    def do_DELETE(self):
+        if not self.authorised():
+            return self.reply(403, {"error": "forbidden"})
+        if self.path != "/credential":
+            return self.reply(404, {"error": "not found"})
+        delete_credential()
+        print("credential deleted", flush=True)
+        self.reply(200, {})
 
     def log_message(self, *a):
         pass

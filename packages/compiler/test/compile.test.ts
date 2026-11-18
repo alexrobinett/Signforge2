@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateManifest } from '@signforge/player-core';
+import { validateManifest } from '@signforge/contract';
 import { compileScreen } from '../src/index';
 import { opts, org, promo } from './fixtures';
 
@@ -24,7 +24,14 @@ describe('compileScreen', () => {
     deal.data = { title: 'Two for $4', items: [{ name: 'Latte' }, { hot: true }] };
     const { manifest } = await compileScreen(input, opts());
     expect(manifest!.spots.deal).toMatchObject({
-      data: { title: 'Two for $4', price: 2, items: [{ name: 'Latte', hot: false }, { name: 'Item', hot: true }] },
+      data: {
+        title: 'Two for $4',
+        price: 2,
+        items: [
+          { name: 'Latte', hot: false },
+          { name: 'Item', hot: true },
+        ],
+      },
     });
     expect(manifest!.spots.deal).not.toHaveProperty('data.photo');
   });
@@ -33,7 +40,15 @@ describe('compileScreen', () => {
     const input = org();
     input.spots.push(
       { id: 'too-long', name: 'Too long', kind: 'template', template: 'base/promo@1.0.0', data: {}, assets: { photo: 'b'.repeat(64) }, durationMs: 90_000 },
-      { id: 'bad-data', name: 'Bad data', kind: 'template', template: 'base/promo@1.0.0', data: { price: 'free' }, assets: { photo: 'b'.repeat(64) }, durationMs: 8000 },
+      {
+        id: 'bad-data',
+        name: 'Bad data',
+        kind: 'template',
+        template: 'base/promo@1.0.0',
+        data: { price: 'free' },
+        assets: { photo: 'b'.repeat(64) },
+        durationMs: 8000,
+      },
       { id: 'orphan', name: 'Orphan', kind: 'template', template: 'base/gone@2.0.0', data: {}, assets: {}, durationMs: 8000 },
     );
     input.playlists[0]!.items.push({ spot: 'too-long' }, { spot: 'bad-data' }, { spot: 'orphan' });
@@ -46,10 +61,16 @@ describe('compileScreen', () => {
     ]);
   });
 
-  it("keeps only the schedule entries that target this screen, its groups or the whole org", async () => {
+  it('keeps only the schedule entries that target this screen, its groups or the whole org', async () => {
     const input = org();
     const e = (id: string, target: 'org' | 'group' | 'screen', targetId?: string) => ({ id, playlist: 'all-day', priority: 1, target, targetId });
-    input.schedule = [e('everyone', 'org'), e('front-desk', 'group', 'front'), e('kitchen', 'group', 'kitchen'), e('mine', 'screen', 'counter'), e('lobby', 'screen', 'lobby')];
+    input.schedule = [
+      e('everyone', 'org'),
+      e('front-desk', 'group', 'front'),
+      e('kitchen', 'group', 'kitchen'),
+      e('mine', 'screen', 'counter'),
+      e('lobby', 'screen', 'lobby'),
+    ];
     const { manifest } = await compileScreen(input, opts());
     expect(manifest!.schedule).toEqual([
       { id: 'everyone', playlist: 'all-day', priority: 1, target: 'org' },
@@ -62,7 +83,10 @@ describe('compileScreen', () => {
     const input = org();
     input.templates['base/menu@1.0.0'] = { manifest: { ...promo, id: 'menu' }, html: 'd'.repeat(64) };
     input.files['d'.repeat(64)] = { size: 500, type: 'text/html' };
-    input.dataSources = [{ id: 'weather', refreshS: 300 }, { id: 'news', refreshS: 300 }];
+    input.dataSources = [
+      { id: 'weather', refreshS: 300 },
+      { id: 'news', refreshS: 300 },
+    ];
     const deal = input.spots[0] as Extract<(typeof input.spots)[number], { kind: 'template' }>;
     deal.bindings = { title: { source: 'weather', path: 'current.summary' } };
 
@@ -81,9 +105,25 @@ describe('compileScreen', () => {
     expect(Object.keys(full.files)).toContain('c'.repeat(64));
   });
 
-  it('reports broken spots even when no schedule reaches them yet, alongside any manifest problem', async () => {
+  it('checks only what it compiles: a broken spot no schedule of this screen reaches does not stop it', async () => {
     const input = org();
-    input.spots.push({ id: 'draft', name: 'Draft', kind: 'template', template: 'base/promo@1.0.0', data: {}, assets: { photo: 'b'.repeat(64) }, durationMs: 1000 });
+    input.spots.push({
+      id: 'draft',
+      name: 'Draft',
+      kind: 'template',
+      template: 'base/promo@1.0.0',
+      data: {},
+      assets: { photo: 'b'.repeat(64) },
+      durationMs: 1000,
+    });
+    input.playlists.push({ id: 'elsewhere', name: 'Elsewhere', transition: { type: 'cut' }, items: [{ spot: 'draft' }] });
+    input.schedule = [{ id: 'kitchen-only', playlist: 'elsewhere', priority: 1, target: 'group', targetId: 'kitchen' }];
+    const result = await compileScreen(input, opts());
+    expect(result.problems).toEqual([]);
+    expect(Object.keys(result.manifest!.spots)).not.toContain('draft');
+
+    // Once this screen reaches it, it is reported, alongside any manifest problem.
+    input.schedule = [{ id: 'front', playlist: 'elsewhere', priority: 1, target: 'group', targetId: 'front' }];
     input.defaultPlaylist = 'missing';
     expect((await compileScreen(input, opts())).problems).toEqual([
       "spot draft: duration 1000 ms is outside the template's range 4000 to 60000",

@@ -32,3 +32,20 @@ export async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${dir}/${name}.png` });
 }
+
+/**
+ * Fill a field and wait until `button` is enabled, retrying until the page has hydrated: before
+ * that the input takes text but React has not seen it.
+ */
+export async function fillUntilEnabled(page: Page, label: string, value: string, button: string) {
+  await expect(async () => {
+    await page.getByLabel(label).fill('');
+    await page.getByLabel(label).fill(value);
+    await expect(page.getByRole('button', { name: button })).toBeEnabled({ timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
+}
+
+/** Wait until React has hydrated the page (`data-hydrated` on body), so clicks reach handlers. */
+export async function hydrated(page: Page) {
+  await expect(page.locator('body[data-hydrated]')).toBeAttached({ timeout: 30_000 });
+}

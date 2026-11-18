@@ -1,6 +1,6 @@
 {
   "id": "agenda",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "name": "Agenda",
   "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
   "fields": {
@@ -19,9 +19,9 @@
         "location": { "type": "text", "label": "Location", "default": "" }
       }
     },
-    "rows": { "type": "number", "label": "Events to show", "default": 5, "min": 1, "max": 6 },
+    "rows": { "type": "number", "label": "Most events to show (as many as fit, up to this)", "default": 25, "min": 1, "max": 25 },
     "empty": { "type": "text", "label": "Shown when there is nothing coming up", "default": "Nothing scheduled", "maxLength": 48 },
-    "accent": { "type": "color", "label": "Accent colour", "default": "#ffb547" }
+    "accent": { "type": "color", "label": "Accent colour", "default": "$brand.accent" }
   },
   "duration": { "defaultMs": 10000, "minMs": 5000, "maxMs": 120000 },
   "orientations": ["landscape", "portrait"],

@@ -1,7 +1,7 @@
 // Generated from the registry: every tool, called as org B's owner with org A's ids, finds
 // nothing and changes nothing. A new tool is covered as soon as it is registered; a new kind of
 // id field fails here until it is mapped to one of org A's rows below.
-import { scoped } from '@signforge/db';
+import { scoped, startPairing } from '@signforge/db';
 import { seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -23,12 +23,20 @@ const ORG_A_IDS: Record<string, (a: SeededOrg) => string> = {
   bundle: () => BUNDLE,
   sources: () => SOURCES,
   asset: (a) => a.asset,
+  brandKit: (a) => a.brandKit,
+  logoOnDarkAsset: (a) => a.asset,
+  logoOnLightAsset: (a) => a.asset,
 };
+
+/** Ids that name a catalogue every org shares, not an org's row. */
+const CATALOGUE_IDS: Record<string, string> = { displayFont: 'base/oswald', bodyFont: 'base/inter' };
 
 /** `example` with every id field replaced by org A's id of that kind. Also says whether it named any. */
 function withOrgAIds(example: unknown, a: SeededOrg): { input: unknown; ids: number } {
   let ids = 0;
   const pick = (key: string, kind: string) => {
+    // Font ids name the shared catalogue, not an org's row: any org may use them.
+    if (CATALOGUE_IDS[kind]) return CATALOGUE_IDS[kind];
     const get = ORG_A_IDS[kind];
     if (!get) throw new Error(`input field "${key}" names ids of kind "${kind}": add it to ORG_A_IDS`);
     ids++;
@@ -65,6 +73,8 @@ async function orgAState() {
     assets: await a.assets.list(),
     renditions: await a.assets.renditions.list(),
     audit: await a.auditLog.list(),
+    brandKits: await a.brandKits.list(),
+    brandAssignments: await a.brandKits.assignments.list(),
   };
 }
 
@@ -73,9 +83,16 @@ beforeAll(async () => {
   await env.BLOBS.put(manifestKey('org-a', s.a.screen, MANIFEST), '{}');
   await env.BLOBS.put(orgBlobKey('org-a', BUNDLE), '<!doctype html>');
   await env.BLOBS.put(orgBlobKey('org-a', SOURCES), '{}');
-  callerB = { org: scoped(env.DB, 'org-b'), role: 'owner', actor: { kind: 'user', id: 'user-b', clientId: 'test' }, blobs: env.BLOBS,
+  callerB = {
+    org: scoped(env.DB, 'org-b'),
+    role: 'owner',
+    actor: { kind: 'user', id: 'user-b', clientId: 'test' },
+    blobs: env.BLOBS,
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
+    rateLimit: async () => true,
   };
+  // claim_screen's example code, open to claim.
+  await startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() });
   before = await orgAState();
 });
 

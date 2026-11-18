@@ -1,6 +1,6 @@
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { MenuIcon } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Logo } from '~/components/logo';
 import { OrgSwitcher } from '~/components/org-switcher';
 import { Button } from '~/components/ui/button';
@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from 
 import { UserMenu } from '~/components/user-menu';
 import { SECTIONS } from '~/lib/sections';
 import type { Shell } from '~/server/shell.functions';
+import { useAppStore } from '~/state/provider';
 
 function Sidebar({ shell }: { shell: Shell }) {
   return (
@@ -37,18 +38,18 @@ function Sidebar({ shell }: { shell: Shell }) {
   );
 }
 
-/** The signed-in frame: a sidebar on wide screens, a top bar with a navigation drawer on phones. */
+/**
+ * The signed-in frame: a sidebar on wide screens, a top bar with a navigation drawer on phones.
+ * The store closes the drawer whenever navigation changes the path (src/state/ui.ts).
+ */
 export function AppShell({ shell, children }: { shell: Shell; children: ReactNode }) {
-  const [drawer, setDrawer] = useState(false);
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  useEffect(() => setDrawer(false), [pathname]);
+  const drawerOpen = useAppStore((s) => s.ui.drawerOpen);
+  const openDrawer = useAppStore((s) => s.openDrawer);
+  const closeDrawer = useAppStore((s) => s.closeDrawer);
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
-      <a
-        href="#main"
-        className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
-      >
+      <a href="#main" className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3">
         Skip to content
       </a>
       <aside className="sticky top-0 hidden h-dvh border-r bg-sidebar text-sidebar-foreground lg:block" aria-label="Sidebar">
@@ -56,7 +57,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
       </aside>
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/90 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/75 lg:hidden">
-          <Sheet open={drawer} onOpenChange={setDrawer}>
+          <Sheet open={drawerOpen} onOpenChange={(open) => (open ? openDrawer() : closeDrawer())}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" aria-label="Open navigation">
                 <MenuIcon className="size-5" aria-hidden />

@@ -1,12 +1,12 @@
 {
   "id": "clock",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "name": "Clock",
   "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
   "fields": {
     "greeting": { "type": "text", "label": "Greeting (empty for good morning/afternoon/evening)", "default": "", "maxLength": 40 },
     "message": { "type": "text", "label": "Message", "default": "", "maxLength": 80 },
-    "accent": { "type": "color", "label": "Accent colour", "default": "#7cc4ff" },
+    "accent": { "type": "color", "label": "Accent colour", "default": "$brand.accent" },
     "hour24": { "type": "boolean", "label": "24-hour time", "default": false },
     "seconds": { "type": "boolean", "label": "Show seconds", "default": false }
   },

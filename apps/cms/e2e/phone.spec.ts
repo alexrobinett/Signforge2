@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { orgSwitcher, screenshot, signIn } from './helpers';
+import { fillUntilEnabled, orgSwitcher, screenshot, signIn } from './helpers';
 
 test('at phone width, navigation is a drawer and the dashboard works', async ({ page }) => {
   const email = `e2e-phone-${Date.now()}@example.com`;
   await page.goto('/sign-in');
   await signIn(page, email);
-  await page.getByLabel('Organization name').fill('Pocket Signs');
+  await fillUntilEnabled(page, 'Organization name', 'Pocket Signs', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name: 'Pocket Signs', level: 1 })).toBeVisible();
 

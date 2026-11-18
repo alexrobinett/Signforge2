@@ -36,6 +36,55 @@
       "when": 1794925910158,
       "tag": "0004_platform_audit_log",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794934088585,
+      "tag": "0005_idempotency_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794934709833,
+      "tag": "0006_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794935966415,
+      "tag": "0007_brand_kits",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794938678941,
+      "tag": "0008_sync_heartbeat",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794947325618,
+      "tag": "0009_pairing_collected",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794947871890,
+      "tag": "0010_content_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794970545649,
+      "tag": "0011_screen_display_override",
+      "breakpoints": true
     }
   ]
 }

@@ -16,13 +16,15 @@ export interface DeviceScreen {
   screenId: string;
   desiredManifestId: string | null;
   previousManifestId: string | null;
-  /** Hex SHA-256 of each credential secret that is not revoked. Empty if the screen is revoked. */
-  secretHashes: string[];
+  /** The contract's `DisplayOverride` set from the CMS, as stored; it may have ended. */
+  displayOverrideJson: string | null;
+  /** Each credential that is not revoked, with the hex SHA-256 of its secret. Empty if the screen is revoked. */
+  credentials: { id: string; secretHash: string /** Whether a request has authenticated with it yet. */; used: boolean }[];
 }
 
 /**
  * The screen a credential names, with its unrevoked credential hashes, or undefined if there is
- * no such screen. The caller compares the presented secret's hash against `secretHashes`.
+ * no such screen. The caller compares the presented secret's hash against each credential's `secretHash`.
  */
 export async function findDeviceScreen(d1: D1Database, screenId: string): Promise<DeviceScreen | undefined> {
   if (!isId(screenId)) return undefined;
@@ -35,7 +37,10 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
       status: sc.status,
       desiredManifestId: sc.desiredManifestId,
       previousManifestId: sc.previousManifestId,
+      displayOverrideJson: sc.displayOverrideJson,
+      credentialId: cr.id,
       secretHash: cr.secretHash,
+      lastUsedAt: cr.lastUsedAt,
     })
     .from(sc)
     .leftJoin(cr, and(eq(cr.orgId, sc.orgId), eq(cr.screenId, sc.id), isNull(cr.revokedAt)))
@@ -48,6 +53,10 @@ export async function findDeviceScreen(d1: D1Database, screenId: string): Promis
     screenId,
     desiredManifestId: first.desiredManifestId,
     previousManifestId: first.previousManifestId,
-    secretHashes: first.status === 'active' ? rows.flatMap((r) => (r.secretHash ? [r.secretHash] : [])) : [],
+    displayOverrideJson: first.displayOverrideJson,
+    credentials:
+      first.status === 'active'
+        ? rows.flatMap((r) => (r.credentialId && r.secretHash ? [{ id: r.credentialId, secretHash: r.secretHash, used: r.lastUsedAt !== null }] : []))
+        : [],
   };
 }

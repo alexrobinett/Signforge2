@@ -16,9 +16,10 @@ import {
 } from '~/components/ui/dropdown-menu';
 import { authClient } from '~/lib/auth-client';
 import { initials } from '~/lib/paths';
-import { useTheme, type Theme } from '~/lib/theme';
+import type { Theme } from '~/lib/theme';
 import { cn } from '~/lib/utils';
 import type { Shell } from '~/server/shell.functions';
+import { useAppStore } from '~/state/provider';
 
 const THEMES: { value: Theme; label: string; icon: typeof SunIcon }[] = [
   { value: 'light', label: 'Light', icon: SunIcon },
@@ -29,7 +30,8 @@ const THEMES: { value: Theme; label: string; icon: typeof SunIcon }[] = [
 export function UserMenu({ user, compact = false }: { user: Shell['user']; compact?: boolean }) {
   const router = useRouter();
   const navigate = useNavigate();
-  const { theme, setTheme } = useTheme();
+  const theme = useAppStore((s) => s.ui.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
   const display = user.name || user.email;
 
   async function signOut() {

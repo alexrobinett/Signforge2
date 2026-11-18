@@ -11,6 +11,7 @@
     "test": "vitest run && vitest run -c vitest.e2e.config.ts"
   },
   "dependencies": {
+    "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
     "@signforge/media": "workspace:*",
@@ -20,11 +21,11 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.4",
     "@cloudflare/workers-types": "^5.20261117.1",
+    "@signforge/cli": "workspace:*",
     "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",
     "miniflare": "5.20261117.0-beta",
     "playwright-core": "^1.65.1",
-    "vitest": "^5.1.0",
-    "wrangler": "^4.164.0"
+    "vitest": "^5.1.0"
   }
 }

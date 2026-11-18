@@ -5,8 +5,7 @@
   "durationMs": 10000,
   "data": {
     "title": "Holidays",
-    "subtitle": "United States",
-    "rows": 5
+    "subtitle": "United States"
   },
   "bindings": {
     "events": {

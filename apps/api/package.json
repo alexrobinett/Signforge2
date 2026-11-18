@@ -4,16 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "types": "wrangler types",
-    "typecheck": "wrangler types >/dev/null && tsc -p . && tsc -p scripts",
+    "dev": "wrangler dev --env dev",
+    "types": "wrangler types --env dev --strict-vars=false",
+    "typecheck": "wrangler types --env dev --strict-vars=false >/dev/null && tsc -p . && tsc -p scripts",
     "test": "vitest run",
-    "dev:screen": "wrangler d1 migrations apply DB --local >&2 && tsx scripts/dev-screen.ts"
+    "dev:screen": "wrangler d1 migrations apply DB --local --env dev >&2 && tsx scripts/dev-screen.ts"
   },
   "dependencies": {
+    "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
-    "@signforge/player-core": "workspace:*",
     "@signforge/tools": "workspace:*",
     "better-auth": "^1.7.25",
     "hono": "^4.13.19"

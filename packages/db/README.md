@@ -21,20 +21,37 @@ The table objects (`src/schema.ts`) are not exported. `test/node/boundary.test.t
 Code that has to find a row before it knows the org (device auth by screen id, pairing, the data-source poller) gets a narrow function here, added by the ticket that needs it. It does not get the tables. So far:
 
 - `findMembership(db, orgId, userId)`: re-checks the active org on every `/api` request.
-- `findDeviceScreen(db, screenId)` (`src/device.ts`): a screen's org, desired and previous manifest ids, and the hashes of its unrevoked credentials (none if the screen is revoked). The device API checks the secret against them, then uses `scoped(db, orgId)`.
+- `findDeviceScreen(db, screenId)` (`src/device.ts`): a screen's org, desired and previous manifest ids, and the hashes of its unrevoked credentials (each with whether it was used yet) (none if the screen is revoked). The device API checks the secret against them, then uses `scoped(db, orgId)`.
   The temporary `/admin` upload routes (M3-04) also use it to find a screen's org, behind the deploy secret. The publish they end with goes through the tool registry with `scoped(db, orgId)`.
 
 - `organizationExists(db, orgId)`: the `/admin` template routes check the org they are told to write to.
+- `startPairing(db, { code, pollTokenHash, now })` and `collectPairing(db, pollTokenHash, now, mint)` (`src/pairing.ts`): the screen's half of pairing. `startPairing` stores a code for 15 minutes (`PAIRING_TTL_MS`), sweeping codes past their time in the same batch, and returns false if the code is in use. `collectPairing` answers `waiting` or `expired` until the code is claimed; then it mints the credential and stores it with `scoped(db, claimedOrg).pairing.collect(...)`, the org being the one the claim stored on the code, never one the screen names. A repeat poll (a lost reply) replaces that credential with a fresh one while it is unused and the first collect was under `PAIRING_TTL_MS` ago; each step of the batch is guarded on the code still naming the credential it replaces, so of two racing polls one writes. `org.screens.credentials.markUsed(id, now)` records a credential's first use (device auth, once per credential): a used credential is never replaced.
+
+`org.pairing.open(code, now)` says whether a code can be claimed now (unknown, expired and claimed are all false), and `org.pairing.stage.claim(code, screenId, now)` binds it to a screen staged before it in the same batch. Its second statement makes the whole batch fail, writing nothing, if the code was not open when it ran.
 
 Base templates are written by `platform(db)` (`src/platform.ts`), the one scope that is not an org's. It reads and writes only rows with a null org: `templates`, `template_versions`, and the `platform_audit_log` that records each change. Its `templates` has the same shape as an org scope's, so one tool serves both. Only `/admin` uses it, through the tool dispatcher's platform registry. `org.templates.ownByKey(key)` and `org.templates.versions.ownVersion(templateId, version)` return the scope's own rows only, never base ones.
 
 `org.screens.setDesiredManifest(screenId, manifestId)` keeps the manifest it replaces as `previous_manifest_id`, whose files a screen mid-switch may still fetch.
 
+`org.screens.sync(screenId, write)` is a screen's sync in one atomic batch: its heartbeat and last-seen time, and its hourly play counts added unless the batch's `seq` is already stored in its `epoch`. The repeat check is inside the SQL, so a retried or doubled request counts once. It returns the highest stored `seq` and the rows D1 wrote.
+
 `org.screenGroups.setMembers(groupId, screenIds)` replaces a group's members in one batch, after checking the group and every screen are the org's (`NotInOrgError` otherwise, changing nothing).
 
 `org.assets.usage(assetIds?)` maps each asset to the ids of the spots that use it, through an image or video spot's `asset_id` or a template spot's asset map. Unused assets are absent. The asset tools use it for usage counts and to refuse deleting an asset in use.
 
-`org.auditLog.append(...)` is called by the tool dispatcher (`packages/tools`) and nothing else. Each row records the actor kind and id, the client id (`client_id`: `cms`, `sf-push`, an agent's OAuth client), the action, the target and a redacted detail.
+### Staged writes
+
+D1 has no interactive transactions, but a `batch()` is atomic. So each repository also has a `stage` (`src/writes.ts`): `org.screens.stage.update(row, patch)`, `org.assets.stage.insert(values)`, `org.screenGroups.stage.setMembers(groupId, screenIds)` and so on build the statements of a change without running them. They return `{ row, writes }`: the row as it will be once written (ids, timestamps and column defaults are fixed when staged, so it is exact), and opaque `Write`s, stamped with the scope's org like every other write. `org.commit(writes)` runs them in one batch: all take effect, or none. `platform(db)` has the same `stage` on `templates` and `templates.versions`, and its own `commit`.
+
+The tool dispatcher (`packages/tools`) is what commits: a tool stages its change, and the dispatcher commits it with its audit row (`org.auditLog.stage(...)`) and, for a keyed creation, its idempotency record. `org.auditLog.append(...)` writes a row on its own and is for seeding tests only. Each audit row records the actor kind and id, the client id (`client_id`: `cms`, `sf-push`, an agent's OAuth client), the action, the target and a redacted detail.
+
+### Drafts and published versions
+
+Spots, playlists and schedule entries have a draft and a published version (`src/drafts.ts`, docs/backend-plan.md#publishing). The row's columns are the draft: `insert`, `update` and `stage.update` change only them, and drop `publishedJson` and `publishedAt` if a caller passes them. `org.spots.stage.publish(row)`, `org.playlists.stage.publish(row, items)` and `org.scheduleEntries.stage.publish(row)` stage copying the row's content as read (a playlist's with its items) into `published_json`. `published(row)` returns the published version shaped as the row (a playlist's with `items`), or undefined if it was never published; `draftChanged(row, items?)` says whether the draft differs from it.
+
+`org.playlists.allItems()` and `org.screenGroups.allMembers()` read every playlist's items and every group membership in one query each, for a publish. `org.settings.get()` and `org.settings.stage.set({ defaultPlaylistId })` hold the org's default playlist, refused (`NotInOrgError`) for a playlist the org does not have. `org.assets.usage` counts a spot's draft and its published version, so an asset a screen still plays counts as used.
+
+`org.idempotency.get(key)` and `org.idempotency.stage({ key, action, inputSha256, outputJson })` read and stage the `idempotency_keys` record of a creating tool call, keyed `(org_id, key)`: a second record of the same key fails its whole batch.
 
 ## Better Auth's tables
 
@@ -51,10 +68,11 @@ Then mirror the change in `src/schema.ts` and run `generate`.
 From `docs/backend-plan.md#data-model-d1`, checked against the migrated database by `test/schema.test.ts`:
 
 - Text ids matching the contract's `ID_PATTERN`; `newId(prefix)` makes them. Integer millisecond timestamps.
+- Content rows (`spots`, `playlists`, `schedule_entries`, `data_sources`, `brand_kits`) are keyed `(org_id, id)`. Content and manifests name spot, playlist, entry and data-source ids, so `insert` takes a caller's id for them (any `ID_PATTERN` id; two orgs may use the same). Every other tenant table keeps a global `id` primary key, and `insert` always makes the id itself, ignoring one the caller passes: a screen's id must be unique across orgs (its credential and its Durable Object name it alone), and nothing else needs a chosen id. `platform(db)` makes base template ids the same way. Tests that need a screen with a fixed id (a golden manifest's) use `seedScreen(db, orgId, screen)` from `@signforge/db/testing`.
 - Every tenant table has `org_id NOT NULL`; its indexes lead with `org_id`; every row is unique on `(org_id, id)`.
 - References between tenant rows are composite `(org_id, x_id)` foreign keys.
 
-Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); nor is `platform_audit_log` (changes made outside any org); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. Every tenant `org_id` references Better Auth's `organization(id)`, without cascade.
+Deliberate exceptions: `pairing_codes` is not a tenant table (a code exists before an org claims it); nor is `platform_audit_log` (changes made outside any org); `templates` and `template_versions` allow a null org for base templates; `spots.template_version_id` references a version by id alone, because it may be a base one, and the repository checks it. Every tenant `org_id` references Better Auth's `organization(id)`, without cascade. `brand_kits` is keyed `(org_id, id)` and its ids are always the server's. `brand_assignments` has no id; it is unique per target (the org, a group, a screen) by partial indexes.
 
 Local D1 enforces foreign keys (`PRAGMA foreign_keys` is 1, and a test shows a cross-org row is refused). Production is verified in M3-00. Isolation does not depend on it: the repositories filter every query.
 
@@ -67,4 +85,4 @@ pnpm --filter @signforge/db generate         # writes migrations/NNNN_*.sql
 cd apps/api && pnpm exec wrangler d1 migrations apply DB --local
 ```
 
-`apps/api/wrangler.jsonc` points `migrations_dir` here. `0002_better_auth` rebuilds every tenant table to add the `organization` foreign key; it is safe only on a database with no tenant rows, which held for every environment when it was written. Tests in both packages apply the same migrations to their local D1 before running.
+`apps/api/wrangler.jsonc` points `migrations_dir` here. `0002_better_auth` rebuilds every tenant table to add the `organization` foreign key; it is safe only on a database with no tenant rows, which held for every environment when it was written. `0010_content_ids` rebuilds the four content tables with their new keys and keeps every row: D1 cannot turn foreign keys off, and dropping a parent fires its `ON DELETE CASCADE`, so it copies `playlist_items` and `data_snapshots` aside and puts them back (checked on a local D1 seeded before it ran). A later rebuild of a table with cascading children must do the same. Tests in both packages apply the same migrations to their local D1 before running.

@@ -10,3 +10,5 @@ examples/stress/media/*.mp4
 examples/stress/media/bottle-*.svg
 spike/pi-perf/rejected-media/*.mp4
 spike/pi-perf/results/shots
+__pycache__/
+*.pyc

@@ -20,12 +20,13 @@ const app = new Hono<{ Bindings: Env }>();
 // A user's session is never a screen's credential (M3-09).
 app.use('/v1/device/*', refuseSession);
 
-app.get('/health', (c) =>
-  c.json({ ok: true, environment: c.env.ENVIRONMENT, version: c.env.BUILD_VERSION, manifestSchema: MANIFEST_SCHEMA }),
-);
+app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT, version: c.env.BUILD_VERSION, manifestSchema: MANIFEST_SCHEMA }));
 
 app.route('/v1/device', device);
 app.route('/api', createApi());
 app.route('/admin', admin);
 
 export default app;
+
+// Durable Object classes are exported from the Worker's entry point.
+export { ScreenObject } from './device/screen-object';

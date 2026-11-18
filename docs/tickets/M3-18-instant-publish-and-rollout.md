@@ -1,6 +1,6 @@
 # M3-18 Instant publish and rollout
 
-Status: open  ·  Size: M  ·  Depends on: M3-17, M3-06
+Status: open  ·  Size: M  ·  Depends on: M3-17, M3-06, M3-34
 
 ## Goal
 
@@ -17,6 +17,10 @@ Publish compiles every affected screen, stores manifests, nudges screens, and sh
 - Fan-out through a Queue in batches of 50.
 - Rollout view: per publish, screens pending, applied, offline.
 - Per-org publish serialised (an org Durable Object or a D1 lock).
+
+- **From the design canvas (2026-11-17).** Design: the design canvas (https://claude.ai/artifact/JUMHm7PCsat6RV8yDXNb3H), `docs/proposals/cms-ui.md` and `docs/research/cms-ux.md`.
+  - The rollout bar says why each waiting screen waits: downloading (with `filesMissing`), asleep until a time, unreachable since a time.
+  - Undo a publish: manifests are immutable, so undo points each screen's desired manifest back at the one from the previous publish and nudges it. The publish toast carries Undo; the publish history has "Roll back to vN". Confirmation dialogs stay only for revoking a screen and deleting an asset in use.
 
 ## Out of scope
 

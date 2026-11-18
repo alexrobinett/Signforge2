@@ -1,31 +1,97 @@
 {
   // SignForge API: CMS API (/api), device API (/v1/device), MCP (/mcp, Milestone 4).
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "signforge-api",
-  "main": "src/index.ts",
+  // No top-level entry point, name, vars or bindings, on purpose: every environment is explicit,
+  // so a bare `wrangler deploy` (or `wrangler dev`) fails with "Missing entry-point" instead of
+  // shipping dev settings (the known dev auth secret, sign-in codes in the log) or an empty Worker.
+  // Local work opts in with `--env dev`; the package scripts and vitest.config.ts do.
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  "vars": { "ENVIRONMENT": "dev", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
-  // Cloudflare Email Sending. Dev records mail instead of sending it (src/email); the binding is
-  // here so its type is generated. Secrets (AUTH_SECRET, GITHUB_*) are listed in src/env.d.ts.
-  "send_email": [{ "name": "EMAIL" }],
-  // Local development and tests use these placeholders; real ids are set per environment.
-  "d1_databases": [{ "binding": "DB", "database_name": "signforge-dev", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
-  // local_dev: the S3 API wrangler dev serves for this bucket, so presigned asset uploads work
-  // locally (src/uploads.ts). Local-only credentials; they open nothing on Cloudflare.
-  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-dev", "local_dev": { "experimental_s3_credentials": { "accessKeyId": "signforge-local", "secretAccessKey": "signforge-local-only" } } }],
   "env": {
-    "demo": {
-      "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+    // Local development and tests (`wrangler dev --env dev`, vitest). Never deployed.
+    "dev": {
+      "name": "signforge-api",
+      "main": "src/index.ts",
+      "vars": { "ENVIRONMENT": "dev", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      // Cloudflare Email Sending. Dev records mail instead of sending it (src/email); the binding is
+      // here so its type is generated. Secrets (AUTH_SECRET, GITHUB_*) are listed in src/env.d.ts.
+      // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
+      // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
+      "ratelimits": [
+        { "name": "PAIR_START_LIMIT", "namespace_id": "801", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PAIR_POLL_LIMIT", "namespace_id": "802", "simple": { "limit": 600, "period": 60 } },
+        { "name": "PAIR_CLAIM_LIMIT", "namespace_id": "803", "simple": { "limit": 10, "period": 60 } }
+      ],
       "send_email": [{ "name": "EMAIL" }],
-      "d1_databases": [{ "binding": "DB", "database_name": "signforge-demo", "database_id": "ba1469f4-9efc-4bea-bb76-9c53c0ae6238", "migrations_dir": "../../packages/db/migrations" }],
+      // One Durable Object per screen, holding its nudge socket (src/device/screen-object.ts).
+      "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
+      // A placeholder id: dev only ever runs locally.
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "signforge-dev",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "../../packages/db/migrations"
+        }
+      ],
+      // local_dev: the S3 API wrangler dev serves for this bucket, so presigned asset uploads work
+      // locally (src/uploads.ts). Local-only credentials; they open nothing on Cloudflare.
+      "r2_buckets": [
+        {
+          "binding": "BLOBS",
+          "bucket_name": "signforge-dev",
+          "local_dev": { "experimental_s3_credentials": { "accessKeyId": "signforge-local", "secretAccessKey": "signforge-local-only" } }
+        }
+      ]
+    },
+    "demo": {
+      "name": "signforge-api-demo",
+      "main": "src/index.ts",
+      "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
+      // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
+      "ratelimits": [
+        { "name": "PAIR_START_LIMIT", "namespace_id": "811", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PAIR_POLL_LIMIT", "namespace_id": "812", "simple": { "limit": 600, "period": 60 } },
+        { "name": "PAIR_CLAIM_LIMIT", "namespace_id": "813", "simple": { "limit": 10, "period": 60 } }
+      ],
+      "send_email": [{ "name": "EMAIL" }],
+      "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "signforge-demo",
+          "database_id": "ba1469f4-9efc-4bea-bb76-9c53c0ae6238",
+          "migrations_dir": "../../packages/db/migrations"
+        }
+      ],
       "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-demo" }]
     },
     "prod": {
+      "name": "signforge-api-prod",
+      "main": "src/index.ts",
       "vars": { "ENVIRONMENT": "prod", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
+      // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
+      "ratelimits": [
+        { "name": "PAIR_START_LIMIT", "namespace_id": "821", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PAIR_POLL_LIMIT", "namespace_id": "822", "simple": { "limit": 600, "period": 60 } },
+        { "name": "PAIR_CLAIM_LIMIT", "namespace_id": "823", "simple": { "limit": 10, "period": 60 } }
+      ],
       "send_email": [{ "name": "EMAIL" }],
-      "d1_databases": [{ "binding": "DB", "database_name": "signforge-prod", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../packages/db/migrations" }],
+      "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "signforge-prod",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "../../packages/db/migrations"
+        }
+      ],
       "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-prod" }]
     }
   }

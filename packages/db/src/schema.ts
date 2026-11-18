@@ -8,6 +8,10 @@
  *  - Every tenant table has `org_id NOT NULL`, and its indexes lead with `org_id`.
  *  - Every row is unique on `(org_id, id)`, and references between tenant rows are composite
  *    `(org_id, x_id)` foreign keys, so a row cannot point into another org.
+ *  - Content rows (spots, playlists, schedule entries, data sources, and brand kits) are keyed
+ *    `(org_id, id)`: content names their ids, so two orgs may use the same one. Every other
+ *    tenant row has a global `id` primary key that only the server makes (`scoped.ts`), so no
+ *    caller can collide with or probe another org's ids.
  *
  * Exceptions, each deliberate:
  *  - `templates` and `template_versions`: a null `org_id` is a base template every org can use.
@@ -22,13 +26,27 @@
 import { sql } from 'drizzle-orm';
 import { check, customType, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
-const orgId = () => text('org_id').notNull().references(() => organization.id);
-const created = () => integer('created_at').notNull().$defaultFn(() => Date.now());
+const orgId = () =>
+  text('org_id')
+    .notNull()
+    .references(() => organization.id);
+const created = () =>
+  integer('created_at')
+    .notNull()
+    .$defaultFn(() => Date.now());
 const updated = () =>
   integer('updated_at')
     .notNull()
     .$defaultFn(() => Date.now())
     .$onUpdateFn(() => Date.now());
+/**
+ * Drafts (spots, playlists, schedule entries): the row's own columns are the draft, which edits
+ * change. `published_json` is the version screens get, a copy of the draft's content columns
+ * (and a playlist's items) taken when a publish promoted it; null until then. Only
+ * `stage.publish` in ./scoped.ts writes it.
+ */
+const publishedJson = () => text('published_json');
+const publishedAt = () => integer('published_at');
 
 // --------------------------------------------------------------- Better Auth
 
@@ -60,7 +78,9 @@ export const session = sqliteTable(
     updatedAt: date('updatedAt').notNull(),
     ipAddress: text('ipAddress'),
     userAgent: text('userAgent'),
-    userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     activeOrganizationId: text('activeOrganizationId'),
   },
   (t) => [index('session_userId_idx').on(t.userId)],
@@ -72,7 +92,9 @@ export const account = sqliteTable(
     id: text('id').primaryKey(),
     accountId: text('accountId').notNull(),
     providerId: text('providerId').notNull(),
-    userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     accessToken: text('accessToken'),
     refreshToken: text('refreshToken'),
     idToken: text('idToken'),
@@ -112,8 +134,12 @@ export const member = sqliteTable(
   'member',
   {
     id: text('id').primaryKey(),
-    organizationId: text('organizationId').notNull().references(() => organization.id, { onDelete: 'cascade' }),
-    userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    organizationId: text('organizationId')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     role: text('role').notNull(),
     createdAt: date('createdAt').notNull(),
   },
@@ -124,13 +150,17 @@ export const invitation = sqliteTable(
   'invitation',
   {
     id: text('id').primaryKey(),
-    organizationId: text('organizationId').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+    organizationId: text('organizationId')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
     role: text('role'),
     status: text('status').notNull(),
     expiresAt: date('expiresAt').notNull(),
     createdAt: date('createdAt').notNull(),
-    inviterId: text('inviterId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    inviterId: text('inviterId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
   },
   (t) => [index('invitation_organizationId_idx').on(t.organizationId), index('invitation_email_idx').on(t.email)],
 );
@@ -162,7 +192,23 @@ export const screens = sqliteTable(
     reportedManifestId: text('reported_manifest_id'),
     lastSeenAt: integer('last_seen_at'),
     playerVersion: text('player_version'),
-    status: text('status', { enum: ['active', 'revoked'] }).notNull().default('active'),
+    /**
+     * The screen's last heartbeat (`ScreenHeartbeat` in the API): display, clock, cache, fallback and
+     * refused data, as its last sync reported them. Null until it first syncs.
+     */
+    heartbeatJson: text('heartbeat_json'),
+    /**
+     * The contract's `DisplayOverride` set from the CMS (wake now, sleep now), or null. Sent to the
+     * screen over its socket when set, and in each sync while the screen reports something else.
+     * Ends by itself at its `until`.
+     */
+    displayOverrideJson: text('display_override_json'),
+    /** The `epoch` of the screen's play count batches, and the highest `seq` stored in it (contract `SyncRequest`). */
+    syncEpoch: text('sync_epoch'),
+    syncAckSeq: integer('sync_ack_seq').notNull().default(0),
+    status: text('status', { enum: ['active', 'revoked'] })
+      .notNull()
+      .default('active'),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -227,6 +273,12 @@ export const pairingCodes = sqliteTable(
     claimedOrgId: text('claimed_org_id'),
     claimedScreenId: text('claimed_screen_id'),
     claimedAt: integer('claimed_at'),
+    /**
+     * The credential the screen last collected, and when it first collected one. A repeat poll
+     * (the reply was lost) replaces that credential while it is unused (M3 review fix 2).
+     */
+    collectedCredentialId: text('collected_credential_id'),
+    collectedAt: integer('collected_at'),
     createdAt: created(),
   },
   (t) => [
@@ -251,7 +303,9 @@ export const assets = sqliteTable(
     width: integer('width'),
     height: integer('height'),
     durationMs: integer('duration_ms'),
-    status: text('status', { enum: ['pending', 'verified', 'rejected'] }).notNull().default('pending'),
+    status: text('status', { enum: ['pending', 'verified', 'rejected'] })
+      .notNull()
+      .default('pending'),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -310,7 +364,9 @@ export const templateVersions = sqliteTable(
     /** The contract's `TemplateManifest`. */
     manifestJson: text('manifest_json').notNull(),
     bundleSha256: text('bundle_sha256').notNull(),
-    status: text('status', { enum: ['draft', 'approved', 'retired'] }).notNull().default('draft'),
+    status: text('status', { enum: ['draft', 'approved', 'retired'] })
+      .notNull()
+      .default('draft'),
     checkReportJson: text('check_report_json'),
     createdAt: created(),
     updatedAt: updated(),
@@ -329,7 +385,7 @@ export const templateVersions = sqliteTable(
 export const spots = sqliteTable(
   'spots',
   {
-    id: text('id').primaryKey(),
+    id: text('id').notNull(),
     orgId: orgId(),
     name: text('name').notNull(),
     kind: text('kind', { enum: ['template', 'image', 'video', 'url'] }).notNull(),
@@ -346,11 +402,13 @@ export const spots = sqliteTable(
     fit: text('fit', { enum: ['cover', 'contain'] }),
     /** URL spots: an https page on another origin. */
     url: text('url'),
+    publishedJson: publishedJson(),
+    publishedAt: publishedAt(),
     createdAt: created(),
     updatedAt: updated(),
   },
   (t) => [
-    uniqueIndex('spots_org_id_uq').on(t.orgId, t.id),
+    primaryKey({ columns: [t.orgId, t.id] }),
     index('spots_org_asset_idx').on(t.orgId, t.assetId),
     foreignKey({ columns: [t.orgId, t.assetId], foreignColumns: [assets.orgId, assets.id] }),
   ],
@@ -359,15 +417,17 @@ export const spots = sqliteTable(
 export const playlists = sqliteTable(
   'playlists',
   {
-    id: text('id').primaryKey(),
+    id: text('id').notNull(),
     orgId: orgId(),
     name: text('name').notNull(),
     /** The contract's `Transition`. */
     transitionJson: text('transition_json').notNull(),
+    publishedJson: publishedJson(),
+    publishedAt: publishedAt(),
     createdAt: created(),
     updatedAt: updated(),
   },
-  (t) => [uniqueIndex('playlists_org_id_uq').on(t.orgId, t.id)],
+  (t) => [primaryKey({ columns: [t.orgId, t.id] })],
 );
 
 export const playlistItems = sqliteTable(
@@ -391,7 +451,7 @@ export const playlistItems = sqliteTable(
 export const scheduleEntries = sqliteTable(
   'schedule_entries',
   {
-    id: text('id').primaryKey(),
+    id: text('id').notNull(),
     orgId: orgId(),
     playlistId: text('playlist_id').notNull(),
     priority: integer('priority').notNull().default(0),
@@ -406,17 +466,102 @@ export const scheduleEntries = sqliteTable(
     /** Local `HH:MM`. */
     fromTime: text('from_time'),
     toTime: text('to_time'),
+    publishedJson: publishedJson(),
+    publishedAt: publishedAt(),
     createdAt: created(),
     updatedAt: updated(),
   },
   (t) => [
-    uniqueIndex('schedule_entries_org_id_uq').on(t.orgId, t.id),
+    primaryKey({ columns: [t.orgId, t.id] }),
     index('schedule_entries_org_playlist_idx').on(t.orgId, t.playlistId),
     foreignKey({ columns: [t.orgId, t.playlistId], foreignColumns: [playlists.orgId, playlists.id] }),
     foreignKey({ columns: [t.orgId, t.groupId], foreignColumns: [screenGroups.orgId, screenGroups.id] }).onDelete('cascade'),
     foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
     check(
       'schedule_entries_target_ck',
+      sql`(${t.target} = 'org' AND ${t.groupId} IS NULL AND ${t.screenId} IS NULL)
+        OR (${t.target} = 'group' AND ${t.groupId} IS NOT NULL AND ${t.screenId} IS NULL)
+        OR (${t.target} = 'screen' AND ${t.screenId} IS NOT NULL AND ${t.groupId} IS NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Org-wide settings, one row per org, made on first write. The default playlist plays on every
+ * screen when no schedule entry applies; it cannot be deleted while it is the default.
+ */
+export const orgSettings = sqliteTable(
+  'org_settings',
+  {
+    orgId: text('org_id')
+      .primaryKey()
+      .references(() => organization.id),
+    defaultPlaylistId: text('default_playlist_id'),
+    updatedAt: updated(),
+  },
+  (t) => [foreignKey({ columns: [t.orgId, t.defaultPlaylistId], foreignColumns: [playlists.orgId, playlists.id] })],
+);
+
+// --------------------------------------------------------------------- brand
+
+/**
+ * Brand kits: an org's colours, fonts, logo and shape. Keyed `(org_id, id)` and the id is always
+ * made by the server (`bk_...`), never chosen by a caller, so two orgs can never collide on one.
+ * Read at publish and frozen into each manifest; editing a kit reaches screens at the next publish.
+ */
+export const brandKits = sqliteTable(
+  'brand_kits',
+  {
+    id: text('id').notNull(),
+    orgId: orgId(),
+    name: text('name').notNull(),
+    /**
+     * The contract's `BrandColors` as `#rrggbb`, except that `onPrimary` and `onAccent` may be
+     * absent: absent means derived for contrast at publish (compiler `onColor`).
+     */
+    colorsJson: text('colors_json').notNull(),
+    shape: text('shape', { enum: ['square', 'soft', 'round'] }).notNull(),
+    /** Font catalogue ids (compiler `FONTS`), `<owner>/<id>`. Null: the template's own font. */
+    displayFontId: text('display_font_id'),
+    bodyFontId: text('body_font_id'),
+    /** Image assets, SVG or PNG. */
+    logoOnDarkAssetId: text('logo_on_dark_asset_id'),
+    logoOnLightAssetId: text('logo_on_light_asset_id'),
+    createdAt: created(),
+    updatedAt: updated(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.id] }),
+    foreignKey({ columns: [t.orgId, t.logoOnDarkAssetId], foreignColumns: [assets.orgId, assets.id] }),
+    foreignKey({ columns: [t.orgId, t.logoOnLightAssetId], foreignColumns: [assets.orgId, assets.id] }),
+  ],
+);
+
+/**
+ * Which kit applies where: the org's default (`org`), a group's, a screen's. At most one per
+ * target. A screen uses its own, else its groups' (a conflict when they differ), else the
+ * default: compiler `chooseBrandKit`. Deleting a group or screen drops its row.
+ */
+export const brandAssignments = sqliteTable(
+  'brand_assignments',
+  {
+    orgId: orgId(),
+    target: text('target', { enum: ['org', 'group', 'screen'] }).notNull(),
+    groupId: text('group_id'),
+    screenId: text('screen_id'),
+    brandKitId: text('brand_kit_id').notNull(),
+    updatedAt: updated(),
+  },
+  (t) => [
+    uniqueIndex('brand_assignments_org_uq').on(t.orgId).where(sql`${t.target} = 'org'`),
+    uniqueIndex('brand_assignments_group_uq').on(t.orgId, t.groupId).where(sql`${t.groupId} IS NOT NULL`),
+    uniqueIndex('brand_assignments_screen_uq').on(t.orgId, t.screenId).where(sql`${t.screenId} IS NOT NULL`),
+    index('brand_assignments_kit_idx').on(t.orgId, t.brandKitId),
+    foreignKey({ columns: [t.orgId, t.brandKitId], foreignColumns: [brandKits.orgId, brandKits.id] }),
+    foreignKey({ columns: [t.orgId, t.groupId], foreignColumns: [screenGroups.orgId, screenGroups.id] }).onDelete('cascade'),
+    foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
+    check(
+      'brand_assignments_target_ck',
       sql`(${t.target} = 'org' AND ${t.groupId} IS NULL AND ${t.screenId} IS NULL)
         OR (${t.target} = 'group' AND ${t.groupId} IS NOT NULL AND ${t.screenId} IS NULL)
         OR (${t.target} = 'screen' AND ${t.screenId} IS NOT NULL AND ${t.groupId} IS NULL)`,
@@ -465,7 +610,7 @@ export const publishScreens = sqliteTable(
 export const dataSources = sqliteTable(
   'data_sources',
   {
-    id: text('id').primaryKey(),
+    id: text('id').notNull(),
     orgId: orgId(),
     name: text('name').notNull(),
     format: text('format', { enum: ['json', 'ical', 'rss'] }).notNull(),
@@ -481,7 +626,7 @@ export const dataSources = sqliteTable(
     createdAt: created(),
     updatedAt: updated(),
   },
-  (t) => [uniqueIndex('data_sources_org_id_uq').on(t.orgId, t.id)],
+  (t) => [primaryKey({ columns: [t.orgId, t.id] })],
 );
 
 /** The latest snapshot of each source, at most 64 kB. */
@@ -508,7 +653,9 @@ export const auditLog = sqliteTable(
   {
     id: text('id').primaryKey(),
     orgId: orgId(),
-    at: integer('at').notNull().$defaultFn(() => Date.now()),
+    at: integer('at')
+      .notNull()
+      .$defaultFn(() => Date.now()),
     actorKind: text('actor_kind', { enum: ['user', 'agent', 'device', 'system'] }).notNull(),
     actorId: text('actor_id').notNull(),
     /** The app the actor acted through: `cms`, `sf-push`, or an agent's OAuth client id. */
@@ -518,7 +665,33 @@ export const auditLog = sqliteTable(
     targetId: text('target_id'),
     detailJson: text('detail_json'),
   },
-  (t) => [uniqueIndex('audit_log_org_id_uq').on(t.orgId, t.id), index('audit_log_org_at_idx').on(t.orgId, t.at)],
+  (t) => [
+    uniqueIndex('audit_log_org_id_uq').on(t.orgId, t.id),
+    index('audit_log_org_at_idx').on(t.orgId, t.at),
+    // A screen's recent events in the CMS: what was done to it, newest first.
+    index('audit_log_org_target_idx').on(t.orgId, t.targetKind, t.targetId, t.at),
+  ],
+);
+
+/**
+ * Idempotency keys: one row per creating tool call made with a key, written in the same batch as
+ * the change and its audit row. A retry with the same key gets `output_json` back and writes
+ * nothing; the same key with another action or input is refused. Keyed per org, so two orgs'
+ * keys never meet. Kept indefinitely for now; expiring old keys is M3-24's.
+ */
+export const idempotencyKeys = sqliteTable(
+  'idempotency_keys',
+  {
+    orgId: orgId(),
+    key: text('key').notNull(),
+    /** The tool name. */
+    action: text('action').notNull(),
+    /** SHA-256 of the canonical JSON of the input, without the key. */
+    inputSha256: text('input_sha256').notNull(),
+    outputJson: text('output_json').notNull(),
+    createdAt: created(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.key] })],
 );
 
 /**
@@ -529,7 +702,9 @@ export const platformAuditLog = sqliteTable(
   'platform_audit_log',
   {
     id: text('id').primaryKey(),
-    at: integer('at').notNull().$defaultFn(() => Date.now()),
+    at: integer('at')
+      .notNull()
+      .$defaultFn(() => Date.now()),
     actorKind: text('actor_kind', { enum: ['user', 'agent', 'device', 'system'] }).notNull(),
     actorId: text('actor_id').notNull(),
     clientId: text('client_id'),

@@ -1,5 +1,4 @@
 import { Building2Icon, ChevronsUpDownIcon, PlusIcon } from 'lucide-react';
-import { useState } from 'react';
 import { CreateOrgForm } from '~/components/create-org-form';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '~/components/ui/dialog';
@@ -13,10 +12,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu';
-import { useOrgActions } from '~/lib/orgs';
 import { initials } from '~/lib/paths';
 import { cn } from '~/lib/utils';
 import type { Shell } from '~/server/shell.functions';
+import { useAppStore } from '~/state/provider';
 
 const ROLE_LABEL = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' } as const;
 
@@ -30,25 +29,17 @@ export function OrgAvatar({ name, className }: { name: string; className?: strin
 
 /** Lists the user's orgs, switches the active one, and creates a new one. */
 export function OrgSwitcher({ shell }: { shell: Shell }) {
-  const { switchTo } = useOrgActions();
-  const [creating, setCreating] = useState(false);
-  const [switching, setSwitching] = useState<string | null>(null);
-  const [status, setStatus] = useState('');
+  const switchingTo = useAppStore((s) => s.orgs.switchingTo);
+  const status = useAppStore((s) => s.orgs.status);
+  const createDialogOpen = useAppStore((s) => s.orgs.createDialogOpen);
+  const switchOrg = useAppStore((s) => s.switchOrg);
+  const openCreateOrg = useAppStore((s) => s.openCreateOrg);
+  const closeCreateOrg = useAppStore((s) => s.closeCreateOrg);
   const active = shell.organization;
 
-  async function choose(id: string) {
-    if (id === active?.id) return;
+  function choose(id: string) {
     const org = shell.organizations.find((o) => o.id === id);
-    setSwitching(id);
-    setStatus(`Switching to ${org?.name ?? 'organization'}…`);
-    try {
-      await switchTo(id);
-      setStatus(`Switched to ${org?.name ?? 'organization'}.`);
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : 'Could not switch organization.');
-    } finally {
-      setSwitching(null);
-    }
+    if (id !== active?.id) void switchOrg({ id, name: org?.name ?? 'organization' }, 'switcher');
   }
 
   return (
@@ -68,9 +59,9 @@ export function OrgSwitcher({ shell }: { shell: Shell }) {
         <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width) min-w-60">
           <DropdownMenuLabel>Organizations</DropdownMenuLabel>
           {shell.organizations.length > 0 && (
-            <DropdownMenuRadioGroup value={active?.id ?? ''} onValueChange={(id) => void choose(id)}>
+            <DropdownMenuRadioGroup value={active?.id ?? ''} onValueChange={choose}>
               {shell.organizations.map((org) => (
-                <DropdownMenuRadioItem key={org.id} value={org.id} disabled={switching !== null}>
+                <DropdownMenuRadioItem key={org.id} value={org.id} disabled={switchingTo !== null}>
                   <OrgAvatar name={org.name} className="size-6 rounded text-[0.6rem]" />
                   <span className="truncate">{org.name}</span>
                 </DropdownMenuRadioItem>
@@ -78,7 +69,7 @@ export function OrgSwitcher({ shell }: { shell: Shell }) {
             </DropdownMenuRadioGroup>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setCreating(true)}>
+          <DropdownMenuItem onSelect={openCreateOrg}>
             <PlusIcon aria-hidden /> Create organization
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -86,17 +77,14 @@ export function OrgSwitcher({ shell }: { shell: Shell }) {
       <p role="status" className="sr-only">
         {status}
       </p>
-      <Dialog open={creating} onOpenChange={setCreating}>
+      <Dialog open={createDialogOpen} onOpenChange={(open) => (open ? openCreateOrg() : closeCreateOrg())}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create organization</DialogTitle>
             <DialogDescription>An organization holds screens and content. You will be its owner, and it becomes your active organization.</DialogDescription>
           </DialogHeader>
           <CreateOrgForm
-            onCreated={() => {
-              setCreating(false);
-              setStatus('Organization created.');
-            }}
+            form="switcher"
             footer={
               <DialogClose asChild>
                 <Button type="button" variant="outline">

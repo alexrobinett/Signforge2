@@ -10,19 +10,22 @@
  */
 import { describeTools, dispatch, registry, type Caller, type ToolErrorCode } from '@signforge/tools';
 import type { Hono } from 'hono';
+import { clientIp } from '../device/pairing';
+import { screenNotifier } from '../device/screens';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
 
-const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409> = {
+const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429> = {
   invalid_input: 400,
   forbidden: 403,
   unknown_tool: 404,
   not_found: 404,
   conflict: 409,
+  rate_limited: 429,
 };
 
 /** The CMS's client id in the audit log. */
-export const CMS_CLIENT_ID = 'cms';
+const CMS_CLIENT_ID = 'cms';
 
 export function mountTools(api: Hono<ApiEnv>) {
   api.get('/tools', (c) => c.json({ tools: describeTools(registry, { role: c.var.role }) }));
@@ -47,6 +50,15 @@ export function mountTools(api: Hono<ApiEnv>) {
       actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_CLIENT_ID },
       blobs: c.env.BLOBS,
       uploads: uploadSigner(c.env, c.req.url),
+      screens: screenNotifier(c.env),
+      // A claim counts against the member and against the address, so many accounts on one address share a limit.
+      rateLimit: async () => {
+        const [user, ip] = await Promise.all([
+          c.env.PAIR_CLAIM_LIMIT.limit({ key: `user:${c.var.session.user.id}` }),
+          c.env.PAIR_CLAIM_LIMIT.limit({ key: `ip:${clientIp(c)}` }),
+        ]);
+        return user.success && ip.success;
+      },
     };
     const result = await dispatch(registry, c.req.param('name'), input, caller);
     if (result.ok) return c.json(result.output as object);

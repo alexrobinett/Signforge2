@@ -1,0 +1,201 @@
+// The sync (M3-07): one periodic call carries the heartbeat and play counts up, and the desired
+// manifest, changed snapshots, a socket ticket, the server time and commands down.
+import { MANIFEST_SCHEMA, type SyncRequest, type SyncResponse } from '@signforge/contract';
+import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { env, exports } from 'cloudflare:workers';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { mintCredential } from '../src/device/credential';
+import { parseHeartbeat } from '@signforge/tools';
+import { manifestKey } from '../src/r2';
+
+const BASE = 'https://api.test/v1/device';
+const HOUR = '2026-11-17T09:00Z';
+const HOUR_MS = Date.parse(HOUR);
+
+interface Screen {
+  seed: SeededOrg;
+  credential: string;
+}
+
+async function setUp(orgId: string): Promise<Screen> {
+  const seed = await seedOrg(env.DB, orgId);
+  const { credential, secretHash } = await mintCredential(seed.screen);
+  await seed.scope.screens.credentials.insert({ screenId: seed.screen, secretHash });
+  return { seed, credential };
+}
+
+/** Put a manifest in R2 and make it the screen's desired one. */
+async function publish(s: Screen, id: string, manifest: { schema: number; dataSources?: Record<string, unknown>; templates?: Record<string, unknown> }) {
+  await env.BLOBS.put(manifestKey(s.seed.orgId, s.seed.screen, id), JSON.stringify({ id, files: {}, templates: {}, dataSources: {}, ...manifest }));
+  await s.seed.scope.screens.setDesiredManifest(s.seed.screen, id);
+}
+
+const body = (over: Partial<SyncRequest> = {}): SyncRequest => ({
+  seq: 0,
+  epoch: 'ep1',
+  player: { version: '2.0.0', manifestSchemas: [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA], protocols: [1, 2] },
+  manifest: { filesMissing: 0 },
+  display: { on: true },
+  deviceTime: new Date().toISOString(),
+  clock: { offsetMs: 0, trusted: true },
+  playCounts: [],
+  snapshots: {},
+  ...over,
+});
+
+async function sync(s: Screen, req: SyncRequest): Promise<SyncResponse> {
+  const res = await exports.default.fetch(`${BASE}/sync`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${s.credential}`, 'content-type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  expect(res.status).toBe(200);
+  return (await res.json()) as SyncResponse;
+}
+
+const plays = async (s: Screen) =>
+  (await s.seed.scope.playCounts.list({ from: HOUR_MS, to: HOUR_MS + 3_600_000, screenId: s.seed.screen })).map((c) => [c.spotId, c.plays, c.ms]);
+
+describe('play counts', () => {
+  let s: Screen;
+  beforeAll(async () => {
+    s = await setUp('sync-counts');
+  });
+
+  it('are stored once per seq, and acknowledged in the request epoch', async () => {
+    const counts = [
+      { hour: HOUR, spot: 'menu', plays: 3, ms: 30_000 },
+      { hour: HOUR, spot: 'news', plays: 1, ms: 8000 },
+    ];
+    const first = await sync(s, body({ seq: 1, playCounts: counts }));
+    expect(first).toMatchObject({ epoch: 'ep1', ackSeq: 1 });
+    // The response was lost: the screen sends the same batch again.
+    expect(await sync(s, body({ seq: 1, playCounts: counts }))).toMatchObject({ ackSeq: 1 });
+    expect(await plays(s)).toEqual([
+      ['menu', 3, 30_000],
+      ['news', 1, 8000],
+    ]);
+    expect(await sync(s, body({ seq: 2, playCounts: [{ hour: HOUR, spot: 'menu', plays: 2, ms: 20_000 }] }))).toMatchObject({ ackSeq: 2 });
+    expect(await plays(s)).toEqual([
+      ['menu', 5, 50_000],
+      ['news', 1, 8000],
+    ]);
+  });
+
+  it('from a screen that lost its counter start again in a new epoch', async () => {
+    expect(await sync(s, body({ epoch: 'ep2', seq: 1, playCounts: [{ hour: HOUR, spot: 'news', plays: 1, ms: 8000 }] }))).toMatchObject({
+      epoch: 'ep2',
+      ackSeq: 1,
+    });
+    expect(await plays(s)).toEqual([
+      ['menu', 5, 50_000],
+      ['news', 2, 16_000],
+    ]);
+  });
+
+  it('for an hour that has not begun are dropped, the rest kept', async () => {
+    const future = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 13) + ':00Z';
+    expect(
+      await sync(
+        s,
+        body({
+          epoch: 'ep2',
+          seq: 2,
+          playCounts: [
+            { hour: future, spot: 'menu', plays: 9, ms: 1 },
+            { hour: HOUR, spot: 'news', plays: 1, ms: 8000 },
+          ],
+        }),
+      ),
+    ).toMatchObject({ ackSeq: 2 });
+    expect(await s.seed.scope.playCounts.list({ from: Date.parse(future), to: Date.parse(future) + 3_600_000 })).toEqual([]);
+    expect((await plays(s)).at(-1)).toEqual(['news', 3, 24_000]);
+  });
+});
+
+describe('the heartbeat', () => {
+  it('records last seen, the player version and what the screen reported', async () => {
+    const s = await setUp('sync-heartbeat');
+    const before = Date.now();
+    const deviceTime = new Date(Date.now() - 3_600_000).toISOString();
+    await sync(
+      s,
+      body({
+        player: { version: '2.1.0', manifestSchemas: [MANIFEST_SCHEMA], protocols: [2] },
+        manifest: { active: 'm-old', filesMissing: 2, fallbackFrom: 'm-new' },
+        display: { on: false, methods: { cec: 'ok' } },
+        deviceTime,
+        clock: { offsetMs: 3_600_000, trusted: true },
+        dataRejected: { weather: 4 },
+      }),
+    );
+    const row = await s.seed.scope.screens.get(s.seed.screen);
+    expect(row?.lastSeenAt).toBeGreaterThanOrEqual(before);
+    expect(row?.playerVersion).toBe('2.1.0');
+    const beat = parseHeartbeat(row!.heartbeatJson);
+    expect(beat).toMatchObject({
+      manifest: { active: 'm-old', filesMissing: 2, fallbackFrom: 'm-new' },
+      display: { on: false, methods: { cec: 'ok' } },
+      clock: { offsetMs: 3_600_000, trusted: true },
+      dataRejected: { weather: 4 },
+      player: { manifestSchemas: [MANIFEST_SCHEMA], protocols: [2] },
+    });
+    // The device clock is an hour slow: the drift the server saw is about an hour.
+    expect(beat!.driftMs).toBeGreaterThan(3_590_000);
+    expect(beat!.driftMs).toBeLessThan(3_610_000);
+  });
+});
+
+describe('snapshots', () => {
+  it('are sent for the desired manifest sources the screen does not hold, or holds older', async () => {
+    const s = await setUp('sync-snapshots');
+    const src = s.seed.dataSource;
+    // A second source, not in the manifest: never sent.
+    const other = await s.seed.scope.dataSources.insert({ name: 'Other', format: 'json', urlEncrypted: 'enc:o', refreshS: 300 });
+    await s.seed.scope.dataSources.putSnapshot(other.id, { version: 'o1', fetchedAt: 1000, dataJson: '{"o":1}' });
+
+    expect((await sync(s, body())).snapshots).toEqual([]);
+    await publish(s, 'm-data', { schema: MANIFEST_SCHEMA, dataSources: { [src]: { id: src, refreshS: 300 } } });
+
+    const seededAt = (await s.seed.scope.dataSources.snapshot(src))!.fetchedAt;
+    const first = await sync(s, body());
+    expect(first.snapshots).toEqual([{ id: src, version: seededAt, fetchedAt: new Date(seededAt).toISOString(), data: { t: 12 } }]);
+    expect((await sync(s, body({ snapshots: { [src]: seededAt } }))).snapshots).toEqual([]);
+
+    await s.seed.scope.dataSources.putSnapshot(src, { version: 'v2', fetchedAt: seededAt + 60_000, dataJson: '{"t":13}' });
+    const changed = await sync(s, body({ snapshots: { [src]: seededAt } }));
+    expect(changed.snapshots).toEqual([{ id: src, version: seededAt + 60_000, fetchedAt: new Date(seededAt + 60_000).toISOString(), data: { t: 13 } }]);
+  });
+});
+
+describe('commands', () => {
+  it('tell a player that cannot play the desired manifest to reload', async () => {
+    const s = await setUp('sync-reload');
+    await publish(s, 'm-new', {
+      schema: MANIFEST_SCHEMA,
+      templates: { 'base/clock@1.1.0': { html: 'a'.repeat(64), manifest: { protocol: 2 } } },
+    });
+    expect((await sync(s, body())).commands).toEqual([]);
+    const oldSchema = body({ player: { version: '1.0.0', manifestSchemas: [MANIFEST_SCHEMA - 1], protocols: [1, 2] } });
+    expect((await sync(s, oldSchema)).commands).toEqual([{ type: 'reload' }]);
+    const oldProtocol = body({ player: { version: '1.0.0', manifestSchemas: [MANIFEST_SCHEMA], protocols: [1] } });
+    expect((await sync(s, oldProtocol)).commands).toEqual([{ type: 'reload' }]);
+  });
+
+  it("carry the screen's display override while the screen reports another, and its clearing", async () => {
+    const s = await setUp('sync-override');
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    await s.seed.scope.screens.update(s.seed.screen, { displayOverrideJson: JSON.stringify({ state: 'on', until }) });
+    expect((await sync(s, body())).commands).toEqual([{ type: 'display', override: { state: 'on', until } }]);
+    // The screen has it now: nothing more to send.
+    expect((await sync(s, body({ display: { on: true, override: { state: 'on', until } } }))).commands).toEqual([]);
+    // Cleared in the CMS, while the screen still holds it.
+    await s.seed.scope.screens.update(s.seed.screen, { displayOverrideJson: null });
+    expect((await sync(s, body({ display: { on: true, override: { state: 'on', until } } }))).commands).toEqual([{ type: 'display', override: null }]);
+    // An override that has ended is not sent.
+    await s.seed.scope.screens.update(s.seed.screen, {
+      displayOverrideJson: JSON.stringify({ state: 'off', until: new Date(Date.now() - 1000).toISOString() }),
+    });
+    expect((await sync(s, body())).commands).toEqual([]);
+  });
+});

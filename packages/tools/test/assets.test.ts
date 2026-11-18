@@ -58,15 +58,29 @@ async function upload(name: string, files: { landscape: [Uint8Array, unknown]; p
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'assets-org');
   owner = {
-    org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS,
-    uploads: r2Presigner({ endpoint: 'https://acct.r2.cloudflarestorage.com', bucket: 'signforge-test', accessKeyId: 'AKID', secretAccessKey: 'secret', now: () => Date.UTC(2026, 10, 17, 12) }),
+    org: scoped(env.DB, o.orgId),
+    role: 'owner',
+    actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
+    blobs: env.BLOBS,
+    uploads: r2Presigner({
+      endpoint: 'https://acct.r2.cloudflarestorage.com',
+      bucket: 'signforge-test',
+      accessKeyId: 'AKID',
+      secretAccessKey: 'secret',
+      now: () => Date.UTC(2026, 10, 17, 12),
+    }),
   };
 });
 
 describe('create_asset_upload', () => {
   it('creates a pending asset and a presigned PUT per distinct file', async () => {
-    const l = png(1920, 1280, 1), p = png(2880, 1920, 2);
-    const created = await upload('Menu photo', { landscape: [l, await claim(l, 'image/png', 1920, 1280)], portrait: [p, await claim(p, 'image/png', 2880, 1920)] }, false);
+    const l = png(1920, 1280, 1),
+      p = png(2880, 1920, 2);
+    const created = await upload(
+      'Menu photo',
+      { landscape: [l, await claim(l, 'image/png', 1920, 1280)], portrait: [p, await claim(p, 'image/png', 2880, 1920)] },
+      false,
+    );
     expect(created.asset).toMatchObject({ name: 'Menu photo', kind: 'image', status: 'pending', width: 1920, height: 1280 });
     expect(created.asset.renditions.map((r: { orientation: string }) => r.orientation)).toEqual(['landscape', 'portrait']);
     expect(created.uploads).toHaveLength(2);
@@ -83,17 +97,41 @@ describe('create_asset_upload', () => {
     const ok = { sha256: '2'.repeat(64), type: 'image/jpeg', size: 1000, width: 1080, height: 1920 };
     const r = await run('create_asset_upload', { name: 'x', renditions: { landscape: big, portrait: ok } });
     expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'renditions.landscape' }] });
-    expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, width: null }, portrait: ok } })).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, type: 'image/gif' }, portrait: ok } })).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, size: 30 * 1024 * 1024 }, portrait: ok } })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, width: null }, portrait: ok } })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+    });
+    expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, type: 'image/gif' }, portrait: ok } })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+    });
+    expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: { ...ok, size: 30 * 1024 * 1024 }, portrait: ok } })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+    });
+  });
+
+  it('refuses an image whose decoded size is over the pixel cap, though one side fits the box', async () => {
+    const strip = { sha256: '3'.repeat(64), type: 'image/png', size: 1000, width: 65_535, height: 1080 };
+    const ok = { sha256: '2'.repeat(64), type: 'image/jpeg', size: 1000, width: 1080, height: 1920 };
+    const r = await run('create_asset_upload', { name: 'x', renditions: { landscape: strip, portrait: ok } });
+    expect(r).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [{ path: 'renditions.landscape', message: '65535x1080 is 70.8 million pixels; a screen decodes at most 8.3 million (3840x2160)' }],
+    });
   });
 });
 
 describe('finalize_asset', () => {
   it('verifies an upload, moves it to its content-addressed key and is idempotent', async () => {
     // A phone JPEG stored 1920x1080 with orientation 6 displays as 1080x1920.
-    const l = jpeg(1920, 1080, 1), p = jpeg(1920, 1080, 6);
-    const created = await upload('Phone photo', { landscape: [l, await claim(l, 'image/jpeg', 1920, 1080)], portrait: [p, await claim(p, 'image/jpeg', 1080, 1920)] });
+    const l = jpeg(1920, 1080, 1),
+      p = jpeg(1920, 1080, 6);
+    const created = await upload('Phone photo', {
+      landscape: [l, await claim(l, 'image/jpeg', 1920, 1080)],
+      portrait: [p, await claim(p, 'image/jpeg', 1080, 1920)],
+    });
     const { asset, changed } = await call('finalize_asset', { assetId: created.asset.id });
     expect(changed).toBe(true);
     expect(asset.status).toBe('verified');
@@ -107,7 +145,10 @@ describe('finalize_asset', () => {
     expect(await call('finalize_asset', { assetId: asset.id })).toMatchObject({ changed: false, asset: { status: 'verified' } });
 
     // The same file again needs no upload: the server already holds it.
-    const again = await call('create_asset_upload', { name: 'Again', renditions: { landscape: await claim(l, 'image/jpeg', 1920, 1080), portrait: await claim(p, 'image/jpeg', 1080, 1920) } });
+    const again = await call('create_asset_upload', {
+      name: 'Again',
+      renditions: { landscape: await claim(l, 'image/jpeg', 1920, 1080), portrait: await claim(p, 'image/jpeg', 1080, 1920) },
+    });
     expect(again.uploads).toEqual([]);
     expect((await call('finalize_asset', { assetId: again.asset.id })).asset.status).toBe('verified');
   });
@@ -118,18 +159,34 @@ describe('finalize_asset', () => {
     expect(created.uploads).toHaveLength(1);
     const { asset } = await call('finalize_asset', { assetId: created.asset.id });
     expect(asset).toMatchObject({ status: 'verified', type: 'image/svg+xml', width: null, height: null });
-    expect(asset.renditions).toEqual([expect.objectContaining({ orientation: 'landscape', width: null }), expect.objectContaining({ orientation: 'portrait', width: null })]);
+    expect(asset.renditions).toEqual([
+      expect.objectContaining({ orientation: 'landscape', width: null }),
+      expect.objectContaining({ orientation: 'portrait', width: null }),
+    ]);
   });
 
   it('refuses bytes that do not match the claimed hash, deletes them and marks the asset rejected, audited', async () => {
-    const l = png(1920, 1080, 3), p = png(1080, 1920, 4);
-    const created = await upload('Tampered', { landscape: [l, await claim(l, 'image/png', 1920, 1080)], portrait: [p, await claim(p, 'image/png', 1080, 1920)] }, false);
-    const lsha = await sha256(l), psha = await sha256(p);
+    const l = png(1920, 1080, 3),
+      p = png(1080, 1920, 4);
+    const created = await upload(
+      'Tampered',
+      { landscape: [l, await claim(l, 'image/png', 1920, 1080)], portrait: [p, await claim(p, 'image/png', 1080, 1920)] },
+      false,
+    );
+    const lsha = await sha256(l),
+      psha = await sha256(p);
     await env.BLOBS.put(uploadKey(o.orgId, created.asset.id, lsha), png(1920, 1080, 99)); // other bytes
     await env.BLOBS.put(uploadKey(o.orgId, created.asset.id, psha), p);
 
     const r = await run('finalize_asset', { assetId: created.asset.id });
-    expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'landscape', message: expect.stringMatching(/SHA-256/) }, { path: 'landscape', message: expect.stringMatching(/bytes/) }] });
+    expect(r).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [
+        { path: 'landscape', message: expect.stringMatching(/SHA-256/) },
+        { path: 'landscape', message: expect.stringMatching(/bytes/) },
+      ],
+    });
     // Both uploads are gone, and nothing reached the content-addressed keys.
     for (const sha of [lsha, psha]) {
       expect(await env.BLOBS.head(uploadKey(o.orgId, created.asset.id, sha))).toBeNull();
@@ -152,7 +209,10 @@ describe('finalize_asset', () => {
     ];
     for (const [bytes, claimed, message] of cases) {
       const p = png(1080, 1920, 5);
-      const created = await upload('Bad', { landscape: [bytes, { ...(await claim(bytes, '', 0, 0)), ...(claimed as object) }], portrait: [p, await claim(p, 'image/png', 1080, 1920)] });
+      const created = await upload('Bad', {
+        landscape: [bytes, { ...(await claim(bytes, '', 0, 0)), ...(claimed as object) }],
+        portrait: [p, await claim(p, 'image/png', 1080, 1920)],
+      });
       const r = await run('finalize_asset', { assetId: created.asset.id });
       expect(r, String(message)).toMatchObject({ ok: false, error: 'invalid_input' });
       expect((r as { message: string }).message).toMatch(message);
@@ -160,10 +220,52 @@ describe('finalize_asset', () => {
   });
 
   it('refuses without changing anything while a file is not uploaded', async () => {
-    const l = png(1920, 1080, 6), p = png(1080, 1920, 7);
-    const created = await upload('Slow', { landscape: [l, await claim(l, 'image/png', 1920, 1080)], portrait: [p, await claim(p, 'image/png', 1080, 1920)] }, false);
-    expect(await run('finalize_asset', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'invalid_input', message: expect.stringMatching(/not uploaded yet/) });
+    const l = png(1920, 1080, 6),
+      p = png(1080, 1920, 7);
+    const created = await upload(
+      'Slow',
+      { landscape: [l, await claim(l, 'image/png', 1920, 1080)], portrait: [p, await claim(p, 'image/png', 1080, 1920)] },
+      false,
+    );
+    expect(await run('finalize_asset', { assetId: created.asset.id })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      message: expect.stringMatching(/not uploaded yet/),
+    });
     expect((await call('get_asset', { assetId: created.asset.id })).asset.status).toBe('pending');
+  });
+
+  it('refuses an asset missing a rendition, and leaves it unverified', async () => {
+    // Written before M3-33, when an asset and its renditions were separate writes: the portrait row never landed.
+    const l = png(1920, 1080, 8);
+    const c = await claim(l, 'image/png', 1920, 1080);
+    const org = scoped(env.DB, o.orgId);
+    const asset = await org.assets.insert({
+      kind: 'image',
+      name: 'Half',
+      sha256: c.sha256,
+      type: c.type,
+      size: c.size,
+      width: 1920,
+      height: 1080,
+      status: 'pending',
+    });
+    await org.assets.renditions.insert({
+      assetId: asset.id,
+      orientation: 'landscape',
+      sha256: c.sha256,
+      type: c.type,
+      size: c.size,
+      width: 1920,
+      height: 1080,
+    });
+    await env.BLOBS.put(uploadKey(o.orgId, asset.id, c.sha256), l);
+    expect(await run('finalize_asset', { assetId: asset.id })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringMatching(/no portrait rendition/),
+    });
+    expect((await call('get_asset', { assetId: asset.id })).asset.status).toBe('pending');
   });
 });
 
@@ -171,7 +273,14 @@ describe('list, usage and delete', () => {
   it('lists with usage counts and search, and refuses to delete an asset in use', async () => {
     const org = scoped(env.DB, o.orgId);
     // The seeded image spot uses o.asset; a template spot uses it through its asset map too.
-    const tpl = await org.spots.insert({ name: 'Menu', kind: 'template', durationMs: 10_000, templateVersionId: o.templateVersion, dataJson: '{}', assetMapJson: JSON.stringify({ hero: o.asset }) });
+    const tpl = await org.spots.insert({
+      name: 'Menu',
+      kind: 'template',
+      durationMs: 10_000,
+      templateVersionId: o.templateVersion,
+      dataJson: '{}',
+      assetMapJson: JSON.stringify({ hero: o.asset }),
+    });
 
     const { assets } = await call('list_assets', {});
     expect(assets.find((a: { id: string }) => a.id === o.asset)).toMatchObject({ usageCount: 2 });
@@ -187,14 +296,21 @@ describe('list, usage and delete', () => {
     await org.spots.delete(tpl.id);
     await org.playlists.setItems(o.playlist, [o.templateSpot]);
     await org.spots.delete(o.imageSpot);
+    // The seeded brand kit uses it as its logo, too.
+    expect(await run('delete_asset', { assetId: o.asset })).toMatchObject({ ok: false, error: 'conflict', details: { brandKitIds: [o.brandKit] } });
+    await org.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
     expect(await call('delete_asset', { assetId: o.asset })).toEqual({ deleted: o.asset });
     expect(await org.assets.get(o.asset)).toBeUndefined();
     expect(await org.assets.renditions.forAsset(o.asset)).toEqual([]);
   });
 
   it('deletes a pending asset and its uploads', async () => {
-    const l = png(1920, 1080, 8), p = png(1080, 1920, 9);
-    const created = await upload('Abandoned', { landscape: [l, await claim(l, 'image/png', 1920, 1080)], portrait: [p, await claim(p, 'image/png', 1080, 1920)] });
+    const l = png(1920, 1080, 8),
+      p = png(1080, 1920, 9);
+    const created = await upload('Abandoned', {
+      landscape: [l, await claim(l, 'image/png', 1920, 1080)],
+      portrait: [p, await claim(p, 'image/png', 1080, 1920)],
+    });
     await call('delete_asset', { assetId: created.asset.id });
     expect(await env.BLOBS.list({ prefix: `up/${o.orgId}/${created.asset.id}/` })).toMatchObject({ objects: [] });
   });

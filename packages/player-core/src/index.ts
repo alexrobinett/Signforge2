@@ -1,8 +1,25 @@
 /**
  * Player logic with no browser dependency: which playlist is live, what plays next,
- * and which files a manifest still needs. The browser shell supplies time, storage and frames.
+ * and which files a manifest still needs. Checking a manifest is the contract's job. The browser shell supplies time, storage and frames.
  */
-import { SUPPORTED_MANIFEST_SCHEMAS, isId, templateKey, type DataSnapshot, type DisplayHours, type Playlist, type ScheduleEntry, type ScreenManifest, type Spot, type TargetLevel } from '@signforge/contract';
+import {
+  readPath,
+  requiredFiles,
+  validateBoundValue,
+  type DataSnapshot,
+  type DisplayHours,
+  type Playlist,
+  type ScheduleEntry,
+  type ScreenManifest,
+  type Spot,
+  type TargetLevel,
+} from '@signforge/contract';
+
+/**
+ * Validation lives in the contract, which the server imports too. Re-exported here while callers
+ * move to `@signforge/contract`; new code imports from there.
+ */
+export { displayHoursProblems, requiredFiles, safeUrl, validateManifest, validTimezone } from '@signforge/contract';
 
 // ------------------------------------------------------------------ schedule
 
@@ -20,8 +37,14 @@ const DAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu:
 /** The wall-clock time in a given IANA time zone. */
 export function localTime(now: Date, timezone: string): LocalTime {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, hourCycle: 'h23', weekday: 'short',
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    timeZone: timezone,
+    hourCycle: 'h23',
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).formatToParts(now);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
   return {
@@ -55,7 +78,8 @@ export function entryApplies(e: ScheduleEntry, t: LocalTime): boolean {
 }
 
 const inWindow = (w: { from: string; to: string }, minutes: number) => {
-  const from = toMinutes(w.from), to = toMinutes(w.to);
+  const from = toMinutes(w.from),
+    to = toMinutes(w.to);
   return to <= from ? minutes >= from || minutes < to : minutes >= from && minutes < to;
 };
 
@@ -76,13 +100,64 @@ export function displayOn(hours: DisplayHours | undefined, t: LocalTime): boolea
   });
 }
 
+/** The instant a local wall-clock time happens in `timezone` (the later reading where a clock change repeats it). */
+function localToInstant(date: string, minutes: number, timezone: string): number {
+  const wall = Date.parse(`${date}T00:00:00Z`) + minutes * 60_000;
+  const offsetAt = (t: number) => {
+    const l = localTime(new Date(t), timezone);
+    return Date.parse(`${l.date}T00:00:00Z`) + l.minutes * 60_000 - Math.floor(t / 60_000) * 60_000;
+  };
+  const first = wall - offsetAt(wall);
+  return wall - offsetAt(first);
+}
+
+/** How far ahead `nextDisplayChange` looks: past a week, so a weekly window is always found. */
+const DISPLAY_LOOKAHEAD_DAYS = 9;
+
+/**
+ * When the display next turns on or off by its hours, after `now`: the CMS's "wakes 07:00", and
+ * the end of a display override. Undefined for a screen without hours, or one whose hours do not
+ * change in the next nine days. Changes happen only at a window's edge or at local midnight (an
+ * exception's day), so only those instants are checked.
+ */
+export function nextDisplayChange(hours: DisplayHours | undefined, timezone: string, now: Date): Date | undefined {
+  if (!hours) return undefined;
+  const edges = new Set<number>([0]);
+  for (const w of [...hours.weekly, ...(hours.exceptions ?? []).flatMap((e) => e.on)]) {
+    edges.add(toMinutes(w.from) % 1440);
+    edges.add(toMinutes(w.to) % 1440);
+  }
+  const today = localTime(now, timezone).date;
+  const start = Date.parse(`${today}T00:00:00Z`);
+  const candidates: number[] = [];
+  for (let d = -1; d <= DISPLAY_LOOKAHEAD_DAYS; d++) {
+    const date = new Date(start + d * 86_400_000).toISOString().slice(0, 10);
+    for (const m of edges) candidates.push(localToInstant(date, m, timezone));
+  }
+  const on = displayOn(hours, localTime(now, timezone));
+  const after = [...new Set(candidates)].filter((t) => t > now.getTime()).sort((a, b) => a - b);
+  const found = after.find((t) => displayOn(hours, localTime(new Date(t), timezone)) !== on);
+  return found === undefined ? undefined : new Date(found);
+}
+
 const LEVEL: Record<TargetLevel, number> = { org: 0, group: 1, screen: 2 };
 
+/**
+ * Whether `now` is inside an entry's absolute bounds. On a clock the screen does not trust, an entry
+ * with either bound never applies: better a takeover missed than one that never ends.
+ */
+export function withinBounds(e: ScheduleEntry, now: Date, clockTrusted = true): boolean {
+  if (e.startsAt === undefined && e.endsAt === undefined) return true;
+  if (!clockTrusted) return false;
+  const ms = now.getTime();
+  return !(e.startsAt !== undefined && ms < Date.parse(e.startsAt)) && !(e.endsAt !== undefined && ms >= Date.parse(e.endsAt));
+}
+
 /** Highest priority wins; on a tie the more specific target wins; otherwise the default playlist. */
-export function resolvePlaylist(manifest: ScreenManifest, now: Date): Playlist {
+export function resolvePlaylist(manifest: ScreenManifest, now: Date, { clockTrusted = true } = {}): Playlist {
   const t = localTime(now, manifest.screen.timezone);
   const live = manifest.schedule
-    .filter((e) => entryApplies(e, t) && manifest.playlists[e.playlist])
+    .filter((e) => withinBounds(e, now, clockTrusted) && entryApplies(e, t) && manifest.playlists[e.playlist])
     .sort((a, b) => b.priority - a.priority || LEVEL[b.target] - LEVEL[a.target] || a.id.localeCompare(b.id));
   const id = live[0]?.playlist ?? manifest.defaultPlaylist;
   const playlist = manifest.playlists[id];
@@ -118,8 +193,9 @@ export class Sequencer {
     return this.manifest.id;
   }
 
-  next(now: Date): Step | undefined {
-    const playlist = resolvePlaylist(this.manifest, now);
+  /** The next spot at `now`. On a clock the screen does not trust, bounded entries are skipped (`resolvePlaylist`). */
+  next(now: Date, opts: { clockTrusted?: boolean } = {}): Step | undefined {
+    const playlist = resolvePlaylist(this.manifest, now, opts);
     if (playlist.id !== this.playlistId) {
       this.playlistId = playlist.id;
       this.index = -1;
@@ -134,9 +210,9 @@ export class Sequencer {
   }
 
   /** What `next` would return, without moving. Used to prepare the following spot early. */
-  peek(now: Date): Step | undefined {
+  peek(now: Date, opts: { clockTrusted?: boolean } = {}): Step | undefined {
     const saved = { playlistId: this.playlistId, index: this.index };
-    const step = this.next(now);
+    const step = this.next(now, opts);
     this.playlistId = saved.playlistId;
     this.index = saved.index;
     return step;
@@ -145,155 +221,67 @@ export class Sequencer {
 
 // ----------------------------------------------------------------- live data
 
-/** Read a dot path out of a JSON value. Returns undefined when any step is missing. */
-export function readPath(data: unknown, path: string): unknown {
-  let v: unknown = data;
-  for (const key of path.split('.')) {
-    if (v === null || typeof v !== 'object') return undefined;
-    v = (v as Record<string, unknown>)[key];
-  }
-  return v;
+/** A live value that was refused: the source it came from and what is wrong with it. */
+export interface Rejected {
+  source: string;
+  problem: string;
 }
 
 /**
- * The data a template spot plays with: its static values, with each bound field replaced by
- * the latest snapshot value. A missing source or path leaves the static fallback in place.
+ * The data a template spot plays with: its static values, with each bound field replaced by the
+ * latest snapshot value when that value fits the field (`validateBoundValue`). A missing source
+ * leaves the static fallback in place quietly; a value that is missing at its path or does not
+ * fit also leaves the fallback, and is listed in `rejected` so a broken feed can be seen.
  */
-export function resolveSpotData(spot: Extract<Spot, { kind: 'template' }>, snapshots: ReadonlyMap<string, DataSnapshot>): Record<string, unknown> {
+export function resolveSpotData(
+  spot: Extract<Spot, { kind: 'template' }>,
+  fields: unknown,
+  snapshots: ReadonlyMap<string, DataSnapshot>,
+): { data: Record<string, unknown>; rejected: Rejected[] } {
   const data = { ...spot.data };
+  const rejected: Rejected[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    const v = snapshot ? readPath(snapshot.data, b.path) : undefined;
-    if (v !== undefined && v !== null) data[field] = v;
+    if (!snapshot) continue;
+    const v = readPath(snapshot.data, b.path);
+    const problems = validateBoundValue(fields, field, v);
+    if (problems.length) rejected.push(...problems.map((problem) => ({ source: b.source, problem })));
+    else data[field] = v;
   }
-  return data;
+  return { data, rejected };
+}
+
+/**
+ * How a snapshot serves the spots of a manifest: how many bound values it would fill, and what is
+ * wrong with the rest. A snapshot that fills none while some spot binds to it is broken for this
+ * screen, and must not replace the last good one.
+ */
+export function snapshotFit(manifest: ScreenManifest, snapshot: DataSnapshot): { fits: number; problems: string[] } {
+  let fits = 0;
+  const problems: string[] = [];
+  for (const spot of Object.values(manifest.spots)) {
+    if (spot.kind !== 'template') continue;
+    const fields = manifest.templates[spot.template]?.manifest.fields;
+    for (const [field, b] of Object.entries(spot.bindings ?? {})) {
+      if (b.source !== snapshot.id) continue;
+      const p = validateBoundValue(fields, field, readPath(snapshot.data, b.path));
+      if (p.length) problems.push(...p.map((e) => `spot "${spot.id}": ${e}`));
+      else fits++;
+    }
+  }
+  return { fits, problems };
 }
 
 // --------------------------------------------------------------------- files
 
-/** A screen checks a data source no more often than this. */
-const MIN_REFRESH_S = 60;
-const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Whether `tz` is an IANA time zone this runtime knows. */
-export function validTimezone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** A URL spot shows a page from the internet: never a relative, local or script URL. */
-export function safeUrl(url: unknown): boolean {
-  try {
-    return typeof url === 'string' && new URL(url).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-function windowProblems(where: string, w: { from?: string; to?: string; days?: number[]; startDate?: string; endDate?: string }, required: boolean): string[] {
-  const out: string[] = [];
-  for (const k of ['from', 'to'] as const) {
-    const v = w[k];
-    if (v === undefined ? required : typeof v !== 'string' || !TIME.test(v)) out.push(`${where}: ${k} must be HH:MM`);
-  }
-  if (w.days !== undefined && (!Array.isArray(w.days) || w.days.some((d) => !Number.isInteger(d) || d < 0 || d > 6))) out.push(`${where}: days must be 0-6`);
-  else if (required && !Array.isArray(w.days) && 'days' in w) out.push(`${where}: days must be a list`);
-  for (const k of ['startDate', 'endDate'] as const) if (w[k] !== undefined && !DATE.test(String(w[k]))) out.push(`${where}: ${k} must be YYYY-MM-DD`);
-  return out;
-}
-
-/** What is wrong with a screen's display hours, as `validateManifest` checks them. Empty if they are valid. */
-export function displayHoursProblems(hours: DisplayHours): string[] {
-  const errors: string[] = [];
-  if (!Array.isArray(hours.weekly)) errors.push('display hours have no weekly list');
-  else for (const w of hours.weekly) errors.push(...windowProblems('display hours', w, true));
-  for (const e of hours.exceptions ?? []) {
-    if (!DATE.test(e.date) || !Array.isArray(e.on)) errors.push(`display hours exception "${e.date}" is malformed`);
-    else for (const w of e.on) {
-      errors.push(...windowProblems(`display hours on ${e.date}`, w, true));
-      if (toMinutes(w.to) <= toMinutes(w.from)) errors.push(`display hours on ${e.date}: ${w.from}-${w.to} must end after it starts`);
-    }
-  }
-  return errors;
-}
-
-export function validateManifest(m: unknown): string[] {
-  const errors: string[] = [];
-  const s = m as Partial<ScreenManifest> | null;
-  if (!s || typeof s !== 'object') return ['manifest is not an object'];
-  if (!SUPPORTED_MANIFEST_SCHEMAS.includes(s.schema as number)) errors.push(`manifest schema ${String(s.schema)} is not one this player can play (${SUPPORTED_MANIFEST_SCHEMAS.join(', ')})`);
-  if (!s.id) errors.push('id is missing');
-  if (!s.screen?.timezone) errors.push('screen.timezone is missing');
-  if (!s.files || !s.spots || !s.playlists || !s.templates || !s.schedule || !s.dataSources) return [...errors, 'manifest is incomplete'];
-  if (!s.playlists[s.defaultPlaylist ?? '']) errors.push('defaultPlaylist does not exist');
-  for (const [key, t] of Object.entries(s.templates)) {
-    if (!t?.manifest || typeof t.manifest !== 'object') {
-      errors.push(`template "${key}" has no manifest`);
-      continue;
-    }
-    const owner = key.split('/')[0] ?? '';
-    if (!(owner === 'base' || isId(owner)) || key !== templateKey(t.manifest, owner)) {
-      errors.push(`template key "${key}" must be <owner>/${t.manifest.id}@${t.manifest.version}`);
-    }
-  }
-  for (const sha of requiredFiles(s as ScreenManifest)) if (!s.files[sha]) errors.push(`file ${sha.slice(0, 12)} is referenced but not listed`);
-  for (const [key, spot] of Object.entries(s.spots)) {
-    if (spot.id !== key) errors.push(`spot "${key}" is listed under a different id ("${spot.id}")`);
-    if (!isId(key)) errors.push(`spot id "${key}" is not a valid id`);
-    if (spot.kind === 'template' && !s.templates[spot.template]) errors.push(`spot "${spot.id}" uses unknown template ${spot.template}`);
-    if (!(spot.durationMs > 0)) errors.push(`spot "${spot.id}" has no duration`);
-    if (spot.kind === 'url' && !safeUrl(spot.url)) errors.push(`spot "${spot.id}" needs an absolute https URL`);
-    if (spot.kind === 'template') {
-      for (const b of Object.values(spot.bindings ?? {})) {
-        if (!s.dataSources[b.source]) errors.push(`spot "${spot.id}" binds to unknown data source "${b.source}"`);
-      }
-    }
-  }
-  if (s.screen?.timezone && !validTimezone(s.screen.timezone)) errors.push(`screen.timezone "${s.screen.timezone}" is not a time zone`);
-  if (s.screen?.id !== undefined && !isId(s.screen.id)) errors.push(`screen id "${s.screen.id}" is not a valid id`);
-  for (const e of s.schedule) {
-    if (!isId(e.id)) errors.push(`schedule entry id "${e.id}" is not a valid id`);
-    if (typeof e.priority !== 'number' || !Number.isFinite(e.priority)) errors.push(`schedule entry "${e.id}": priority must be a number`);
-    if (!['org', 'group', 'screen'].includes(e.target)) errors.push(`schedule entry "${e.id}": target must be org, group or screen`);
-    if (!s.playlists[e.playlist]) errors.push(`schedule entry "${e.id}" plays unknown playlist "${e.playlist}"`);
-    errors.push(...windowProblems(`schedule entry "${e.id}"`, e, false));
-  }
-  if (s.screen?.displayHours) errors.push(...displayHoursProblems(s.screen.displayHours));
-  for (const [key, p] of Object.entries(s.playlists)) {
-    if (p.id !== key) errors.push(`playlist "${key}" is listed under a different id ("${p.id}")`);
-    if (!isId(key)) errors.push(`playlist id "${key}" is not a valid id`);
-    const tr = p.transition as { type?: string; ms?: unknown } | undefined;
-    const okMs = (ms: unknown) => typeof ms === 'number' && ms >= 1 && ms <= 10_000;
-    if (!tr || !(tr.type === 'cut' || ((tr.type === 'fade' || tr.type === 'crossfade') && okMs(tr.ms)))) {
-      errors.push(`playlist "${key}": transition must be cut, fade or crossfade with ms between 1 and 10000`);
-    }
-    if (!Array.isArray(p.items)) {
-      errors.push(`playlist "${key}" has no items list`);
-      continue;
-    }
-    for (const item of p.items) if (!s.spots[item.spot]) errors.push(`playlist "${p.id}" lists unknown spot "${item.spot}"`);
-  }
-  for (const [key, d] of Object.entries(s.dataSources)) {
-    if (d.id !== key) errors.push(`data source "${key}" is listed under a different id ("${d.id}")`);
-    if (!isId(key)) errors.push(`data source id "${key}" is not a valid id`);
-    if (!(typeof d.refreshS === 'number' && d.refreshS >= MIN_REFRESH_S)) errors.push(`data source "${key}": refreshS must be at least ${MIN_REFRESH_S}`);
-  }
-  return errors;
-}
-
-/** Every file hash a manifest refers to. */
-export function requiredFiles(manifest: ScreenManifest): Set<string> {
+/** The files one spot needs to play: a template spot its bundle and assets, an image or video its file. */
+export function spotFiles(spot: Spot, manifest: ScreenManifest): Set<string> {
   const out = new Set<string>();
-  for (const t of Object.values(manifest.templates)) out.add(t.html);
-  for (const s of Object.values(manifest.spots)) {
-    if (s.kind === 'template') Object.values(s.assets).forEach((a) => out.add(a));
-    else if (s.kind === 'image' || s.kind === 'video') out.add(s.file);
-  }
+  if (spot.kind === 'template') {
+    const html = manifest.templates[spot.template]?.html;
+    if (html) out.add(html);
+    Object.values(spot.assets).forEach((a) => out.add(a));
+  } else if (spot.kind === 'image' || spot.kind === 'video') out.add(spot.file);
   return out;
 }
 
@@ -306,3 +294,6 @@ export function planSync(next: ScreenManifest, have: Iterable<string>): { missin
     stale: [...held].filter((h) => !need.has(h)),
   };
 }
+
+export { Clock, CLOCK_JUMP_MS, type ClockOptions, type PersistedClock } from './clock';
+export { PlayLedger, hourOf, type PlayBatch } from './plays';

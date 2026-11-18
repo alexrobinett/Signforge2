@@ -1,6 +1,6 @@
 {
   "id": "menu-board",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "name": "Menu Board",
   "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
   "fields": {
@@ -18,7 +18,7 @@
       }
     },
     "footnote": { "type": "text", "label": "Footnote", "default": "", "maxLength": 120 },
-    "accent": { "type": "color", "label": "Accent colour", "default": "#e9b44c" },
+    "accent": { "type": "color", "label": "Accent colour", "default": "$brand.accent" },
     "theme": { "type": "select", "label": "Theme", "options": ["dark", "light"], "default": "dark" }
   },
   "duration": { "defaultMs": 12000, "minMs": 5000, "maxMs": 3600000 },

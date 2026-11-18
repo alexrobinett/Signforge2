@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import type { ScreenManifest, Spot } from '@signforge/contract';
-import { Sequencer, displayOn, entryApplies, localTime, planSync, readPath, resolvePlaylist, resolveSpotData, validateManifest } from './index';
+import type { FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
+import {
+  Sequencer,
+  displayOn,
+  entryApplies,
+  localTime,
+  nextDisplayChange,
+  planSync,
+  resolvePlaylist,
+  resolveSpotData,
+  snapshotFit,
+  spotFiles,
+  validateManifest,
+} from './index';
 
 const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${id}`, fit: 'cover', durationMs: 5000 });
 
 function manifest(over: Partial<ScreenManifest> = {}): ScreenManifest {
   return {
-    schema: 2, id: 'm1', generatedAt: '2026-11-16T00:00:00Z',
+    schema: 2,
+    id: 'm1',
+    generatedAt: '2026-11-16T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'America/New_York', orientation: 'landscape' },
     files: { 'sha-a': { size: 1, type: 'image/png' }, 'sha-b': { size: 1, type: 'image/png' }, 'sha-c': { size: 1, type: 'image/png' } },
     templates: {},
@@ -52,6 +66,30 @@ describe('schedule', () => {
     expect(resolvePlaylist(m, at('12:00')).id).toBe('all');
   });
 
+  it('ends a takeover at its absolute end, whatever the local window says', () => {
+    const takeover = {
+      id: 't',
+      playlist: 'takeover',
+      priority: 99,
+      target: 'screen' as const,
+      startsAt: '2026-11-16T17:00:00Z',
+      endsAt: '2026-11-16T17:30:00Z',
+    };
+    const m = manifest({ schedule: [takeover] });
+    expect(resolvePlaylist(m, at('11:59')).id).toBe('all');
+    expect(resolvePlaylist(m, at('12:00')).id).toBe('takeover');
+    expect(resolvePlaylist(m, at('12:29')).id).toBe('takeover');
+    expect(resolvePlaylist(m, at('12:30')).id).toBe('all');
+  });
+
+  it('skips bounded entries on a clock it does not trust, so a takeover cannot run forever', () => {
+    const m = manifest({ schedule: [{ id: 't', playlist: 'takeover', priority: 99, target: 'screen', endsAt: '2026-11-16T17:30:00Z' }] });
+    expect(resolvePlaylist(m, at('12:00'), { clockTrusted: false }).id).toBe('all');
+    expect(resolvePlaylist(manifest(), at('07:30'), { clockTrusted: false }).id).toBe('breakfast');
+    expect(new Sequencer(m).next(at('12:00'), { clockTrusted: false })?.playlist.id).toBe('all');
+    expect(new Sequencer(m).next(at('12:00'))?.playlist.id).toBe('takeover');
+  });
+
   it('handles a window that crosses midnight and belongs to the day it started', () => {
     const late = { id: 'e', playlist: 'all', priority: 1, target: 'screen' as const, from: '22:00', to: '02:00', days: [1] };
     expect(entryApplies(late, localTime(at('23:00'), 'America/New_York'))).toBe(true);
@@ -80,7 +118,10 @@ describe('display hours', () => {
       { days: [1, 2, 3, 4, 5], from: '07:00', to: '19:00' },
       { days: [5], from: '22:00', to: '02:00' },
     ],
-    exceptions: [{ date: '2026-11-26', on: [] }, { date: '2026-11-27', on: [{ from: '10:00', to: '14:00' }] }],
+    exceptions: [
+      { date: '2026-11-26', on: [] },
+      { date: '2026-11-27', on: [{ from: '10:00', to: '14:00' }] },
+    ],
   };
 
   it('is always on with no hours set', () => {
@@ -142,30 +183,83 @@ describe('Sequencer', () => {
 });
 
 describe('live data', () => {
-  const weather = { id: 'weather', fetchedAt: 'now', data: { current: { temp: 41.2 }, daily: { max: [60.6] } } };
+  const weather = { id: 'weather', version: 1, fetchedAt: 'now', data: { current: { temp: 41.2 }, daily: { max: [60.6] }, city: 7 } };
+  const fields: Record<string, FieldDef> = {
+    city: { type: 'text', label: 'City' },
+    temp: { type: 'number', label: 'Temp', min: -100, max: 100 },
+    high: { type: 'number', label: 'High' },
+  };
   const bound: Extract<Spot, { kind: 'template' }> = {
-    id: 'w', name: 'w', kind: 'template', template: 't@1.0.0', durationMs: 5000, assets: {},
+    id: 'w',
+    name: 'w',
+    kind: 'template',
+    template: 't@1.0.0',
+    durationMs: 5000,
+    assets: {},
     data: { city: 'Atlanta', temp: 0, high: 0 },
     bindings: { temp: { source: 'weather', path: 'current.temp' }, high: { source: 'weather', path: 'daily.max.0' } },
   };
 
-  it('reads dot paths, including array indexes', () => {
-    expect(readPath(weather.data, 'daily.max.0')).toBe(60.6);
-    expect(readPath(weather.data, 'current.missing.deeper')).toBeUndefined();
-  });
-
   it('overlays snapshot values on the static data', () => {
-    expect(resolveSpotData(bound, new Map([['weather', weather]]))).toEqual({ city: 'Atlanta', temp: 41.2, high: 60.6 });
+    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]))).toEqual({ data: { city: 'Atlanta', temp: 41.2, high: 60.6 }, rejected: [] });
   });
 
   it('falls back to the static value when there is no snapshot yet', () => {
-    expect(resolveSpotData(bound, new Map())).toEqual(bound.data);
+    expect(resolveSpotData(bound, fields, new Map())).toEqual({ data: bound.data, rejected: [] });
+  });
+
+  it('keeps the static value for a live value that does not fit its field, and says why', () => {
+    const hot = { ...weather, data: { current: { temp: 400 }, daily: {} } };
+    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]))).toEqual({
+      data: bound.data,
+      rejected: [
+        { source: 'weather', problem: 'field "temp" must be at most 100' },
+        { source: 'weather', problem: 'field "high" has no value at the bound path' },
+      ],
+    });
+  });
+
+  it('counts how many bound values in a manifest a snapshot fits', () => {
+    const m = manifest();
+    const t: TemplateManifest = {
+      id: 't',
+      version: '1.0.0',
+      name: 'T',
+      fields,
+      background: '#000',
+      orientations: ['landscape'],
+      uses: [],
+      duration: { minMs: 1000, defaultMs: 5000, maxMs: 10_000 },
+    };
+    m.templates['t@1.0.0'] = { manifest: t, html: 'h' };
+    m.spots.w = bound;
+    m.spots.other = { ...bound, id: 'other', bindings: { city: { source: 'weather', path: 'city' }, temp: { source: 'elsewhere', path: 'x' } } };
+    expect(snapshotFit(m, weather)).toEqual({ fits: 2, problems: ['spot "other": field "city" must be text'] });
+    expect(snapshotFit(m, { ...weather, data: {} }).fits).toBe(0);
+    expect(snapshotFit(m, { ...weather, id: 'unbound' })).toEqual({ fits: 0, problems: [] });
   });
 });
 
 describe('files', () => {
   it('lists what to download and what to drop', () => {
     expect(planSync(manifest(), ['sha-a', 'sha-old'])).toEqual({ missing: ['sha-b', 'sha-c'], stale: ['sha-old'] });
+  });
+
+  it('names the files one spot needs: a template spot its bundle and assets, a media spot its file', () => {
+    const m = manifest();
+    m.templates['base/t@1.0.0'] = { manifest: {} as never, html: 'sha-html' };
+    const t: Spot = {
+      id: 't',
+      name: 't',
+      kind: 'template',
+      template: 'base/t@1.0.0',
+      durationMs: 1000,
+      data: {},
+      assets: { pic: 'sha-pic', logo: 'sha-logo' },
+    };
+    expect([...spotFiles(t, m)].sort()).toEqual(['sha-html', 'sha-logo', 'sha-pic']);
+    expect([...spotFiles(m.spots.a!, m)]).toEqual(['sha-a']);
+    expect([...spotFiles({ id: 'u', name: 'u', kind: 'url', url: 'https://example.com', durationMs: 1000 } as Spot, m)]).toEqual([]);
   });
 
   it('rejects a manifest that refers to things it does not carry', () => {
@@ -200,14 +294,26 @@ describe('files', () => {
   });
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
-    expect(validateManifest(manifest({ schema: 1 }))).toEqual(['manifest schema 1 is not one this player can play (2)']);
+    // A release plays schema N and N-1, so a screen updated while offline keeps its cached manifest.
+    expect(validateManifest(manifest({ schema: 2 }))).toEqual([]);
+    expect(validateManifest(manifest({ schema: 1 }))).toEqual(['manifest schema 1 is not one this player can play (2, 3)']);
+    expect(validateManifest(manifest({ schema: 4 }))).toEqual(['manifest schema 4 is not one this player can play (2, 3)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);
   });
 
   it('keys each template by its owner, id and version, so a base and an org template cannot collide', () => {
-    const t = { id: 'promo', version: '1.0.0', name: 'P', fields: {}, duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 }, orientations: ['landscape' as const], uses: [], background: '#000' };
+    const t = {
+      id: 'promo',
+      version: '1.0.0',
+      name: 'P',
+      fields: {},
+      duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 },
+      orientations: ['landscape' as const],
+      uses: [],
+      background: '#000',
+    };
     const ok = manifest({ templates: { 'base/promo@1.0.0': { manifest: t, html: 'sha-a' }, 'org_42/promo@1.0.0': { manifest: t, html: 'sha-b' } } });
     expect(validateManifest(ok)).toEqual([]);
     const bare = manifest({ templates: { 'promo@1.0.0': { manifest: t, html: 'sha-a' } } });
@@ -222,5 +328,43 @@ describe('files', () => {
       m.spots.u = { id: 'u', name: 'u', kind: 'url', url, durationMs: 5000 };
       expect(validateManifest(m)).toEqual(['spot "u" needs an absolute https URL']);
     }
+  });
+});
+
+describe('nextDisplayChange', () => {
+  const weekdays = { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '19:00' }] };
+  const ny = 'America/New_York';
+  const at = (iso: string) => new Date(iso);
+  const next = (hours: Parameters<typeof nextDisplayChange>[0], tz: string, iso: string) => nextDisplayChange(hours, tz, at(iso))?.toISOString();
+
+  it('is none for a screen without display hours, or one always on', () => {
+    expect(next(undefined, ny, '2026-11-18T15:00:00Z')).toBeUndefined();
+    expect(next({ weekly: [{ days: [0, 1, 2, 3, 4, 5, 6], from: '00:00', to: '24:00' }] }, ny, '2026-11-18T15:00:00Z')).toBeUndefined();
+  });
+
+  it("finds the end of the window it is in, in the screen's time zone", () => {
+    // Wed 18 Nov 10:00 in New York (UTC-5) -> 19:00 local.
+    expect(next(weekdays, ny, '2026-11-18T15:00:00Z')).toBe('2026-11-19T00:00:00.000Z');
+  });
+
+  it('skips the weekend to Monday morning', () => {
+    // Fri 20 Nov 20:00 local -> Mon 23 Nov 07:00 local.
+    expect(next(weekdays, ny, '2026-11-21T01:00:00Z')).toBe('2026-11-23T12:00:00.000Z');
+  });
+
+  it('skips a dated exception that keeps it off all day', () => {
+    const hours = { ...weekdays, exceptions: [{ date: '2026-11-26', on: [] }] };
+    // Wed 25 Nov 20:00 local: Thursday is closed, so Friday 07:00.
+    expect(next(hours, ny, '2026-11-26T01:00:00Z')).toBe('2026-11-27T12:00:00.000Z');
+  });
+
+  it('follows an overnight window past midnight', () => {
+    expect(next({ weekly: [{ days: [0, 1, 2, 3, 4, 5, 6], from: '22:00', to: '02:00' }] }, 'UTC', '2026-11-18T23:00:00Z')).toBe('2026-11-19T02:00:00.000Z');
+  });
+
+  it('crosses a daylight saving change on local time', () => {
+    // London goes to BST on Sun 29 Mar 2026; 07:00 local that Monday is 06:00Z.
+    const daily = { weekly: [{ days: [0, 1, 2, 3, 4, 5, 6], from: '07:00', to: '19:00' }] };
+    expect(next(daily, 'Europe/London', '2026-03-29T20:00:00Z')).toBe('2026-03-30T06:00:00.000Z');
   });
 });

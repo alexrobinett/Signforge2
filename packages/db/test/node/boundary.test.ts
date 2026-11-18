@@ -12,7 +12,8 @@ const ROOT = resolve(PKG, '../..');
 const SKIP = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', '.wrangler', 'vendor']);
 const CODE = /\.(?:[cm]?[jt]sx?)$/;
 const ALLOWED = new Set(['@signforge/db', '@signforge/db/testing']);
-const SPECIFIER = /\b(?:import|export)\s[^'";]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/g;
+const SPECIFIER =
+  /\b(?:import|export)\s[^'";]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/g;
 
 function* codeFiles(dir: string): Generator<string> {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -25,7 +26,7 @@ function* codeFiles(dir: string): Generator<string> {
 }
 
 /** Imports in `source` (a file at `file`) that reach into packages/db past its public entry points. */
-export function forbiddenImports(file: string, source: string): string[] {
+function forbiddenImports(file: string, source: string): string[] {
   const bad: string[] = [];
   for (const m of source.matchAll(SPECIFIER)) {
     const spec = (m[1] ?? m[2] ?? m[3] ?? m[4])!;
@@ -68,5 +69,24 @@ describe('import boundary', () => {
       const mod = (await import(path)) as Record<string, unknown>;
       for (const [name, value] of Object.entries(mod)) expect(is(value, Table), `${path}: ${name}`).toBe(false);
     }
+  });
+});
+
+describe('guarded fields', () => {
+  // `scoped` and `platform` must drop the same fields from a caller's values: one `strip`.
+  it('are stripped by one function, in src/writes.ts', () => {
+    const defining = readdirSync(join(PKG, 'src')).filter((f) => /\bfunction strip\b/.test(readFileSync(join(PKG, 'src', f), 'utf8')));
+    expect(defining).toEqual(['writes.ts']);
+  });
+});
+
+describe('tenant writes', () => {
+  // Pairing used to insert the screen's credential with raw SQL in src/pairing.ts (review fix 8).
+  it('are written in scoped.ts, never in raw SQL elsewhere in the package', () => {
+    const TENANT_WRITE = /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+[`"]?(?!pairing_codes\b|platform_audit_log\b)[a-z_]+/;
+    const outside = readdirSync(join(PKG, 'src')).filter(
+      (f) => !['scoped.ts', 'schema.ts'].includes(f) && TENANT_WRITE.test(readFileSync(join(PKG, 'src', f), 'utf8')),
+    );
+    expect(outside).toEqual([]);
   });
 });

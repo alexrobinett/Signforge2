@@ -9,7 +9,10 @@ import type * as s from './schema';
 export { scoped, NotInOrgError, type OrgScope, type NewRow, type RowPatch } from './scoped';
 export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
+export type { Staged, Write } from './writes';
+export { published, draftChanged, type DraftRow, type PublishedPlaylist } from './drafts';
 export { findDeviceScreen, type DeviceScreen } from './device';
+export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
 export { findMembership, organizationExists } from './members';
 
 // Row shapes, as types only.
@@ -29,3 +32,6 @@ export type DataSnapshotRow = typeof s.dataSnapshots.$inferSelect;
 export type AuditEntry = typeof s.auditLog.$inferSelect;
 export type PlatformAuditEntry = typeof s.platformAuditLog.$inferSelect;
 export type PlayCountRow = typeof s.playCounts.$inferSelect;
+export type OrgSettings = typeof s.orgSettings.$inferSelect;
+export type BrandKitRow = typeof s.brandKits.$inferSelect;
+export type BrandAssignment = typeof s.brandAssignments.$inferSelect;
