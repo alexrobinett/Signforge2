@@ -149,7 +149,7 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   await o.publishes.addScreens(publish.id, [{ screenId: screen.id, manifestId: 'd'.repeat(64) }]);
 
   const dataSource = await o.dataSources.insert({ id: id('source'), name: 'Weather', format: 'json', urlEncrypted: 'enc:xyz', refreshS: 300 });
-  await o.dataSources.putSnapshot(dataSource.id, { version: 'v1', fetchedAt: SEED_HOUR, dataJson: '{"t":12}' });
+  await o.dataSources.putSnapshot(dataSource.id, { version: 'v1', fetchedAt: SEED_HOUR, checkedAt: SEED_HOUR, dataJson: '{"t":12}' });
 
   const auditEntry = await o.auditLog.append({ id: id('audit'), actorKind: 'system', actorId: 'seed', action: 'seed', at: SEED_HOUR });
   const kit = await o.brandKits.insert({

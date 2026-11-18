@@ -2,12 +2,15 @@
  * Create a test screen in the local D1 that `wrangler dev` uses, and print its credential.
  * For local work without pairing a screen (M3-08 pairs one). Local only: it never touches Cloudflare.
  *
- *   pnpm --filter @signforge/api dev:screen [--content <dir>] [--data <dir>] [--org <id>] [--name <name>]
+ *   pnpm --filter @signforge/api dev:screen [--content <dir>] [--data <dir> | --sources <file>] [--org <id>] [--name <name>]
  *
  * --content  an `sf build` output directory (`dist/content`). Its manifest and files go into
  *            local R2 under the plan's layout, and the manifest becomes the screen's desired one.
  * --data     a directory of `<sourceId>.json` files, stored as the latest snapshot of each data
  *            source the manifest lists.
+ * --sources  a project's `data-sources.json`: each source the manifest lists becomes a real one,
+ *            its URL sealed, due now, so the poller (`wrangler dev --env dev --test-scheduled`, then
+ *            GET /__scheduled, or the cron each minute) fetches it.
  * --org      the org to put the screen in (default `dev`), created in the `organization` table if
  *            it is not there yet. Any id matching ID_PATTERN works.
  *
@@ -22,6 +25,7 @@ import type { ScreenManifest } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { seedOrganization } from '@signforge/db/testing';
 import { getPlatformProxy } from 'wrangler';
+import { feedUrlSealer } from '../src/data/cipher';
 import { mintCredential } from '../src/device/credential';
 import { manifestKey, orgBlobKey } from '../src/r2';
 
@@ -29,10 +33,19 @@ const { values: args } = parseArgs({
   options: {
     content: { type: 'string' },
     data: { type: 'string' },
+    sources: { type: 'string' },
     org: { type: 'string', default: 'dev' },
     name: { type: 'string' },
   },
 });
+/** An entry of a project's `data-sources.json`, as `sf feeds` reads it. */
+interface Feed {
+  url: string;
+  refreshS: number;
+  format?: 'json' | 'ical' | 'rss';
+  horizonDays?: number;
+}
+
 const log = (msg: string) => process.stderr.write(`${msg}\n`);
 // Wrangler logs to stdout (e.g. "Using secrets defined in .dev.vars"); keep stdout for the credential alone.
 console.log = console.error;
@@ -73,8 +86,18 @@ try {
     await org.screens.setDesiredManifest(screen.id, manifest.id);
     log(`manifest ${manifest.id.slice(0, 16)} and ${Object.keys(manifest.files).length} files loaded into local R2`);
 
+    const feeds: Record<string, Feed> = args.sources ? JSON.parse(readFileSync(resolve(args.sources), 'utf8')) : {};
     // The manifest names its data sources; give each a row so its snapshot has somewhere to live.
     for (const [id, s] of Object.entries(manifest.dataSources)) {
+      const feed = feeds[id];
+      if (feed) {
+        const urlEncrypted = await feedUrlSealer({ ENVIRONMENT: 'dev' }).seal({ orgId: org.orgId, id }, feed.url);
+        const row = { name: id, format: feed.format ?? 'json', urlEncrypted, refreshS: feed.refreshS, horizonDays: feed.horizonDays ?? null, nextPollAt: 0 };
+        if (await org.dataSources.get(id)) await org.dataSources.update(id, row);
+        else await org.dataSources.insert({ id, ...row });
+        log(`  data source ${id}: ${row.format}, polled every ${feed.refreshS} s`);
+        continue;
+      }
       if (!(await org.dataSources.get(id))) {
         // Data-source ids are per org (review fix 4), so the content's own ids always fit.
         await org.dataSources.insert({ id, name: id, format: 'json', urlEncrypted: '', refreshS: s.refreshS });
@@ -83,7 +106,8 @@ try {
       if (file && existsSync(file)) {
         const dataJson = JSON.stringify(JSON.parse(readFileSync(file, 'utf8')));
         const version = createHash('sha256').update(dataJson).digest('hex');
-        await org.dataSources.putSnapshot(id, { version, fetchedAt: Date.now(), dataJson });
+        const now = Date.now();
+        await org.dataSources.putSnapshot(id, { version, fetchedAt: now, checkedAt: now, dataJson });
         log(`  data source ${id}: snapshot loaded`);
       } else log(`  data source ${id}: no snapshot (pass --data <dir> with ${id}.json)`);
     }

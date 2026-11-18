@@ -19,7 +19,7 @@ describe('content files', () => {
     const first = h.content([{ id: 'a', asset: randomBytes(4096), bindings: { label: { source: 'feed', path: 'label' } }, durationMs: 800 }]);
     const p = await h.openPlayer((s) => {
       s.publish(first);
-      s.setData('feed', { id: 'feed', version: 1, fetchedAt: '2026-11-17T00:00:00Z', data: { label: 'a' } });
+      s.setData('feed', { id: 'feed', version: 1, fetchedAt: '2026-11-17T00:00:00Z', checkedAt: new Date().toISOString(), data: { label: 'a' } });
       s.intercept(/^\/content\/data\//, 'stall');
     });
     await p.until((s) => s.manifestId === first.manifest.id);

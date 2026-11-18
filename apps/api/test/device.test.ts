@@ -262,11 +262,22 @@ describe('GET /v1/device/blobs/:sha256', () => {
 
 describe('GET /v1/device/data/:id.json', () => {
   it('returns the latest snapshot of a source the manifest lists', async () => {
-    await scoped(env.DB, a.seed.orgId).dataSources.putSnapshot('dev-a-source', { version: 'v2', fetchedAt: Date.UTC(2026, 10, 17, 14), dataJson: '{"t":14}' });
+    await scoped(env.DB, a.seed.orgId).dataSources.putSnapshot('dev-a-source', {
+      version: 'v2',
+      fetchedAt: Date.UTC(2026, 10, 17, 14),
+      checkedAt: Date.UTC(2026, 10, 17, 14),
+      dataJson: '{"t":14}',
+    });
     const res = await get('/data/dev-a-source.json', a.credential);
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(await res.json()).toEqual({ id: 'dev-a-source', version: Date.UTC(2026, 10, 17, 14), fetchedAt: '2026-11-17T14:00:00.000Z', data: { t: 14 } });
+    expect(await res.json()).toEqual({
+      id: 'dev-a-source',
+      version: Date.UTC(2026, 10, 17, 14),
+      fetchedAt: '2026-11-17T14:00:00.000Z',
+      checkedAt: '2026-11-17T14:00:00.000Z',
+      data: { t: 14 },
+    });
   });
 
   it("is a 404 for a source the manifest does not list, or another org's", async () => {

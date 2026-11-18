@@ -41,7 +41,7 @@ import { clock, now, synced } from './clock';
 import { DeviceCredential } from './credential';
 import { identify } from './identify';
 import { pair } from './pairing';
-import { dataRejections, dataSettled, dataStatus, heldVersions, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
+import { dataRejections, dataSettled, dataStatus, heldVersions, offerChecked, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
 import { activeOverride, setOverride, wakeable } from './override';
 import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
 import { startPreview, type Preview } from './preview';
@@ -747,6 +747,7 @@ async function apiSync(): Promise<number> {
     }
   }
   await offerSnapshots(r.snapshots, manifest);
+  await offerChecked(r.checked ?? {});
   for (const c of r.commands) command(c);
   if (failed) throw failed;
   return r.nextSyncS;
