@@ -2,7 +2,7 @@
 // published version. See docs/backend-plan.md#publishing.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { draftChanged, published, scoped } from '../src/index';
+import { draftChanged, published, scoped, StaleVersionError } from '../src/index';
 import { seedOrg, type SeededOrg } from '../src/testing';
 
 let o: SeededOrg;
@@ -94,5 +94,43 @@ describe('org settings', () => {
   it('lists every group membership at once', async () => {
     const org = scoped(env.DB, o.orgId);
     expect(await org.screenGroups.allMembers()).toEqual([{ groupId: o.group, screenId: o.screen }]);
+  });
+});
+
+describe('promotion from an old read (R09)', () => {
+  let r: SeededOrg;
+  beforeAll(async () => {
+    r = await seedOrg(env.DB, 'drafts-race');
+  });
+
+  it('refuses to publish a spot edited since it was read, and writes nothing', async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = (await org.spots.get(r.imageSpot))!;
+    const edited = (await org.spots.update(r.imageSpot, { name: 'Edited meanwhile' }))!;
+
+    const err = await org.commit(org.spots.stage.publish(read).writes).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleVersionError);
+    expect(err).toMatchObject({ id: r.imageSpot, version: edited.rowVersion });
+    expect(await org.spots.get(r.imageSpot)).toEqual(edited);
+  });
+
+  it("refuses to publish a playlist whose items changed since it was read, and moves the playlist's version with them", async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = (await org.playlists.get(r.playlist))!;
+    const items = await org.playlists.items(r.playlist);
+    await org.playlists.setItems(r.playlist, [r.imageSpot]);
+    const now = (await org.playlists.get(r.playlist))!;
+    expect(now.rowVersion).toBe(read.rowVersion + 1);
+
+    await expect(org.commit(org.playlists.stage.publish(read, items).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect((await org.playlists.get(r.playlist))!.publishedJson).toBeNull();
+  });
+
+  it('refuses to publish a schedule entry edited since it was read', async () => {
+    const org = scoped(env.DB, r.orgId);
+    const read = (await org.scheduleEntries.get(r.scheduleEntry))!;
+    await org.scheduleEntries.update(r.scheduleEntry, { priority: 3 });
+    await expect(org.commit(org.scheduleEntries.stage.publish(read).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect((await org.scheduleEntries.get(r.scheduleEntry))!.publishedJson).toBeNull();
   });
 });

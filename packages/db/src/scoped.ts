@@ -54,6 +54,30 @@ function chunk<T>(rows: T[], columns: number): T[][] {
  */
 type Ids = 'content' | 'server';
 
+/**
+ * A first statement for a batch that fails it unless the row is still `version` when it runs, so
+ * a change made from an old read writes nothing (`commit` throws `StaleVersionError`).
+ */
+function versionGuard(db: Db, orgId: string, t: typeof s.screens | typeof s.spots, id: string, version: number): Write {
+  const check = db
+    .select({
+      // json() of text that is not JSON raises an error, which aborts the batch.
+      ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE ${t.orgId} = ${orgId} AND ${t.id} = ${id} AND ${t.rowVersion} = ${version}) THEN '1' ELSE 'stale version' END)`,
+    })
+    .from(s.organization)
+    .where(eq(s.organization.id, orgId));
+  const current = async () => {
+    const r = await db
+      .select({ version: t.rowVersion })
+      .from(t)
+      .where(and(eq(t.orgId, orgId), eq(t.id, id)))
+      .get();
+    if (!r) throw new NotInOrgError('row', id);
+    return r.version;
+  };
+  return guard(check, { id, version, current });
+}
+
 /** get / list / insert / update / delete over a table with an org and an id. */
 function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: string, ids: Ids = 'server') {
   const idFor = (values: { id?: string }) => {
@@ -90,19 +114,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
         .where(mine(id)),
     );
     if (ifVersion === undefined) return update;
-    const check = db
-      .select({
-        // json() of text that is not JSON raises an error, which aborts the batch.
-        ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE ${t.orgId} = ${orgId} AND ${t.id} = ${id} AND ${t.rowVersion} = ${ifVersion}) THEN '1' ELSE 'stale version' END)`,
-      })
-      .from(s.organization)
-      .where(eq(s.organization.id, orgId));
-    const now = async () => {
-      const r = await db.select({ version: t.rowVersion }).from(t).where(mine(id)).get();
-      if (!r) throw new NotInOrgError('row', id);
-      return r.version;
-    };
-    return { row, writes: [guard(check, { id, version: ifVersion, current: now }), ...update.writes] };
+    return { row, writes: [versionGuard(db, orgId, t, id, ifVersion), ...update.writes] };
   };
   return {
     get: async (id: string): Promise<Row | undefined> => (await db.select().from(t).where(mine(id)).get()) as Row | undefined,
@@ -197,19 +209,22 @@ function shared<T extends SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn 
 
 /**
  * Stage making a draft row's content (as read, plus a playlist's items) its published version.
- * Not an edit: `updated_at` keeps the draft's last edit.
+ * Refused, writing nothing, if the draft was edited since it was read (its version moved on: a
+ * playlist's moves with its items too), so a publish never promotes content older than the draft.
+ * Not an edit: the version stays, and `updated_at` keeps the draft's last edit.
  */
 function publisher<T extends typeof s.spots | typeof s.playlists | typeof s.scheduleEntries>(db: Db, orgId: string, table: T) {
   const t = table as unknown as typeof s.spots;
   return (row: T['$inferSelect'], items?: readonly string[]): Staged<T['$inferSelect']> => {
-    const set = { publishedJson: contentJson(row, items), publishedAt: Date.now(), updatedAt: row.updatedAt };
-    return staged(
+    const set = { publishedJson: contentJson(row, items), publishedAt: Date.now() };
+    const promoted = staged(
       { ...row, ...set },
       db
         .update(t)
-        .set(set)
+        .set({ ...set, updatedAt: row.updatedAt })
         .where(and(eq(t.orgId, orgId), eq(t.id, row.id))),
     );
+    return { row: promoted.row, writes: [versionGuard(db, orgId, t, row.id, row.rowVersion), ...promoted.writes] };
   };
 }
 
@@ -723,13 +738,18 @@ export function scoped(d1: D1Database, orgId: string) {
             .orderBy(asc(pi.position))
             .all()
         ).map((r) => r.spotId),
-      /** Replace a playlist's items. */
+      /** Replace a playlist's items: an edit of its draft, so its version moves on. */
       setItems: async (playlistId: string, spotIds: readonly string[]) => {
         if (!(await playlists.get(playlistId))) throw new NotInOrgError('playlist', playlistId);
         const found = new Set((await spotRows.getMany([...new Set(spotIds)])).map((r) => r.id));
         for (const id of spotIds) if (!found.has(id)) throw new NotInOrgError('spot', id);
         const rows = spotIds.map((spotId, position) => ({ orgId, playlistId, position, spotId }));
+        const pl = s.playlists;
         await db.batch([
+          db
+            .update(pl)
+            .set({ rowVersion: sql`${pl.rowVersion} + 1` })
+            .where(and(eq(pl.orgId, orgId), eq(pl.id, playlistId))),
           db.delete(pi).where(and(eq(pi.orgId, orgId), eq(pi.playlistId, playlistId))),
           ...chunk(rows, 4).map((part) => db.insert(pi).values(part)),
         ]);
