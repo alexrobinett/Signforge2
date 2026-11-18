@@ -10,6 +10,14 @@ Digital signage: a CMS publishes immutable manifests, and an offline-first web p
 - **Org isolation lives in one place.** Only `packages/db`'s scoped repositories touch tenant tables.
 - **Docs are plain and current.** Update the doc a change makes wrong, in the same change.
 
+## Keep it lean
+
+- **Do what was asked.** No extra files, options or flexibility nobody asked for; a refactor goes in its own change.
+- **Comment why, not what.** Add no docstrings or comments to code you did not change.
+- **Validate only at the edges.** Parse untrusted input once, where it enters; inside, trust the types. No fallbacks for cases that cannot happen; a fallback that is needed gets a name and a reason.
+- **No helpers for one use.** A wrapper that only forwards, or a function called once that hides nothing, is noise: call what exists.
+- **No `as` outside the allow-list** in `biome.jsonc`: parse or annotate. `pnpm lint` and `pnpm typecheck` must pass before "done"; in Claude Code a Stop hook (`.claude/hooks/stop-checks.sh`) holds you to it.
+
 ## Backend work
 
 Milestone 3 is cut into tickets: start at `docs/tickets/README.md`.

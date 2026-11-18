@@ -74,4 +74,5 @@ Put the player on the test Pi: `pnpm build && pnpm deploy:pi`. Measure playback 
 - Type assertions that narrow (`x as T`) fail lint outside tests, `packages/db/src` and the contract's validators. Files that had them when the rule came in are listed in `biome.jsonc`; that list only shrinks. Parse with the contract or annotate instead.
 - `pnpm knip` reports unused files, exports and dependencies. `knip.jsonc` lists what knip cannot see (entry files loaded by a CLI or a bundler, fonts read from CSS), each with its reason.
 - CI (`.github/workflows/ci.yml`) runs install, typecheck, lint, knip, the format check, the tests and the CMS end-to-end run.
+- In Claude Code, a Stop hook (`.claude/settings.json`, `.claude/hooks/stop-checks.sh`) runs `pnpm lint` and `pnpm typecheck` when the agent finishes, and sends it back to work while either fails, up to three times in a row. Turbo caches typecheck, so a run with nothing changed takes a few seconds.
 - Work is cut into tickets in [`docs/tickets/`](docs/tickets/README.md); `AGENTS.md` has the rules that are not written down elsewhere.
