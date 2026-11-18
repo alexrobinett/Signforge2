@@ -90,6 +90,12 @@ device.get('/data/:file', async (c) => {
   const snap = await scoped(c.env.DB, screen.orgId).dataSources.snapshot(id);
   if (!snap) return notFound('no snapshot yet');
   // The stored version is a hash, for telling whether data changed; a screen orders snapshots by the fetch time.
-  const body: DataSnapshot = { id, version: snap.fetchedAt, fetchedAt: new Date(snap.fetchedAt).toISOString(), data: JSON.parse(snap.dataJson) };
+  const body: DataSnapshot = {
+    id,
+    version: snap.fetchedAt,
+    fetchedAt: new Date(snap.fetchedAt).toISOString(),
+    checkedAt: new Date(snap.checkedAt).toISOString(),
+    data: JSON.parse(snap.dataJson),
+  };
   return c.json(body, 200, { 'cache-control': 'no-store' });
 });

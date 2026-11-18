@@ -26,6 +26,7 @@ const ORG_A_IDS: Record<string, (a: SeededOrg) => string> = {
   brandKit: (a) => a.brandKit,
   logoOnDarkAsset: (a) => a.asset,
   logoOnLightAsset: (a) => a.asset,
+  dataSource: (a) => a.dataSource,
 };
 
 /** Ids that name a catalogue every org shares, not an org's row. */
@@ -75,6 +76,8 @@ async function orgAState() {
     audit: await a.auditLog.list(),
     brandKits: await a.brandKits.list(),
     brandAssignments: await a.brandKits.assignments.list(),
+    dataSources: await a.dataSources.list(),
+    snapshots: await a.dataSources.snapshots([s.a.dataSource]),
   };
 }
 
@@ -90,6 +93,7 @@ beforeAll(async () => {
     blobs: env.BLOBS,
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
     rateLimit: async () => true,
+    feedUrls: { seal: async (_source, url) => `sealed:${url}` },
   };
   // claim_screen's example code, open to claim.
   await startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() });

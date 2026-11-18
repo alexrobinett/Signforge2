@@ -27,8 +27,9 @@
       // One Durable Object per screen, holding its nudge socket (src/device/screen-object.ts).
       "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
       "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
-      // The offline alert check (src/alerts.ts). Locally: `wrangler dev --env dev --test-scheduled`, then GET /__scheduled.
-      "triggers": { "crons": ["*/5 * * * *"] },
+      // The data-source poller (src/data/poller.ts) every minute and the offline alert check (src/alerts.ts) every 5;
+      // src/index.ts routes on the schedule. Locally: `wrangler dev --env dev --test-scheduled`, then GET /__scheduled?cron=*/5+*+*+*+*.
+      "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       // A placeholder id: dev only ever runs locally.
       "d1_databases": [
         {
@@ -62,7 +63,7 @@
       "send_email": [{ "name": "EMAIL" }],
       "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
       "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
-      "triggers": { "crons": ["*/5 * * * *"] },
+      "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       "d1_databases": [
         {
           "binding": "DB",
@@ -87,7 +88,7 @@
       "send_email": [{ "name": "EMAIL" }],
       "durable_objects": { "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }] },
       "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }],
-      "triggers": { "crons": ["*/5 * * * *"] },
+      "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       "d1_databases": [
         {
           "binding": "DB",

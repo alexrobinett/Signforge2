@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c524209d-574b-4623-8ef4-9119a9484947",
-  "prevId": "1f077e9a-e5f6-4d1b-a30e-b8c9e2d68c22",
+  "id": "af8bf138-6855-4d51-b01b-85c4f7e2e3e4",
+  "prevId": "9ce71866-5cd6-41be-bace-415b07e4f031",
   "tables": {
     "account": {
       "name": "account",
@@ -737,6 +737,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "data_json": {
           "name": "data_json",
           "type": "text",
@@ -820,6 +827,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "horizon_days": {
+          "name": "horizon_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "next_poll_at": {
           "name": "next_poll_at",
           "type": "integer",
@@ -856,6 +870,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
         },
         "created_at": {
           "name": "created_at",

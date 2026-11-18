@@ -11,6 +11,10 @@
     "items": {
       "source": "news-npr",
       "path": "items"
+    },
+    "language": {
+      "source": "news-npr",
+      "path": "language"
     }
   }
 }

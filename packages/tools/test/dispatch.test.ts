@@ -52,18 +52,22 @@ describe('the registry', () => {
       'claim_screen',
       'create_asset_upload',
       'create_brand_kit',
+      'create_data_source',
       'create_group',
       'delete_asset',
+      'delete_data_source',
       'delete_group',
       'finalize_asset',
       'get_asset',
       'get_brand_kit',
+      'get_data_source',
       'get_org_settings',
       'get_screen',
       'get_template',
       'identify_screen',
       'list_assets',
       'list_brand_kits',
+      'list_data_sources',
       'list_fonts',
       'list_groups',
       'list_screens',
@@ -80,6 +84,7 @@ describe('the registry', () => {
       'set_group_members',
       'set_template_version_status',
       'update_brand_kit',
+      'update_data_source',
       'update_org_settings',
       'update_screen_settings',
     ]);
@@ -89,7 +94,7 @@ describe('the registry', () => {
     const keyed = TOOLS.filter((t) => t.idempotent)
       .map((t) => t.name)
       .sort();
-    expect(keyed).toEqual(['claim_screen', 'create_asset_upload', 'create_brand_kit', 'create_group']);
+    expect(keyed).toEqual(['claim_screen', 'create_asset_upload', 'create_brand_kit', 'create_data_source', 'create_group']);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
     for (const name of keyed) {
       const schema = describeTools(registry, { role: 'owner' }).find((t) => t.name === name)!.inputSchema as {
@@ -149,11 +154,13 @@ describe('roles and scopes', () => {
     expect(names('viewer').sort()).toEqual([
       'get_asset',
       'get_brand_kit',
+      'get_data_source',
       'get_org_settings',
       'get_screen',
       'get_template',
       'list_assets',
       'list_brand_kits',
+      'list_data_sources',
       'list_fonts',
       'list_groups',
       'list_screens',
@@ -315,9 +322,9 @@ describe('screen notices', () => {
     const r = await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
     expect(r.ok).toBe(true);
     expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }]);
-    // Already revoked: nothing changed, nothing to tell.
+    // Already revoked: nothing changes, but the screen is told again, in case the first notice never arrived.
     await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
-    expect(told).toHaveLength(1);
+    expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }, { revoked: { screenId: o.screen, credentialId: cred.id } }]);
   });
 
   it('are not sent when the change is rolled back', async () => {

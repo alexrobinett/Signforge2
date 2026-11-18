@@ -100,6 +100,8 @@ describe('requests', () => {
         shape: 'soft',
       })
     ).id;
+    // get_data_source's example names `weather`.
+    await scoped(env.DB, org.id).dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
     // The same session, on a D1 binding that records writes.
     owner = new Client(t, setup.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of setup.jar) owner.jar.set(k, v);
@@ -223,11 +225,13 @@ describe('POST /api/tools/:name', () => {
     expect((await names(viewer)).sort()).toEqual([
       'get_asset',
       'get_brand_kit',
+      'get_data_source',
       'get_org_settings',
       'get_screen',
       'get_template',
       'list_assets',
       'list_brand_kits',
+      'list_data_sources',
       'list_fonts',
       'list_groups',
       'list_screens',

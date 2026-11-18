@@ -57,16 +57,18 @@ describe('ifVersion', () => {
     expect((await person.org.auditLog.list()).filter((a) => a.action === 'rename_screen').map((a) => a.actorKind)).toEqual(['agent']);
   });
 
-  it('guards groups and brand kits the same way', async () => {
+  it('guards groups, brand kits and data sources the same way', async () => {
     const stale = [
       ['rename_group', { groupId: o.group, name: 'Late', ifVersion: 9 }],
       ['set_group_members', { groupId: o.group, screenIds: [], ifVersion: 9 }],
       ['update_brand_kit', { brandKitId: o.brandKit, shape: 'round', ifVersion: 9 }],
+      ['update_data_source', { dataSourceId: o.dataSource, refreshS: 600, ifVersion: 9 }],
     ] as const;
     for (const [name, input] of stale) expect(await dispatch(registry, name, input, person), name).toMatchObject({ ok: false, error: 'conflict' });
     expect((await call(person, 'list_groups', {})).groups[0]).toMatchObject({ screenIds: [o.screen], version: 1 });
     expect((await call(person, 'rename_group', { groupId: o.group, name: 'Now', ifVersion: 1 })).group.version).toBe(2);
     expect((await call(person, 'update_brand_kit', { brandKitId: o.brandKit, shape: 'round', ifVersion: 1 })).brandKit.version).toBe(2);
+    expect((await call(person, 'update_data_source', { dataSourceId: o.dataSource, refreshS: 600, ifVersion: 1 })).dataSource.version).toBe(2);
   });
 });
 

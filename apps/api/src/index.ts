@@ -3,7 +3,7 @@
  * on another's tree: `/api` for CMS users (session cookie), `/v1/device` for screens (bearer
  * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. `/admin` takes
  * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
- * The Cron Trigger runs the offline alert check (src/alerts.ts).
+ * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.
@@ -14,6 +14,7 @@ import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
 import { checkScreenAlerts } from './alerts';
+import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
 import { emailSenderFor } from './email';
 
@@ -29,11 +30,20 @@ app.route('/v1/device', device);
 app.route('/api', createApi());
 app.route('/admin', admin);
 
+/** Each Cron Trigger's job, by its schedule as written in wrangler.jsonc `triggers`. */
+const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
+  // The data-source poller, every minute.
+  '* * * * *': (env, now) => pollDataSources(env, { now }),
+  // The offline alert check, every 5 minutes: screens sync that often, so a shorter period finds nothing new.
+  '*/5 * * * *': (env, now) => checkScreenAlerts(env, emailSenderFor(env), now),
+};
+
 export default {
   fetch: app.fetch,
-  // Every 5 minutes (wrangler.jsonc `triggers`): screens sync that often, so a shorter period finds nothing new.
   scheduled(controller, env, ctx) {
-    ctx.waitUntil(checkScreenAlerts(env, emailSenderFor(env), controller.scheduledTime));
+    const job = CRON_JOBS[controller.cron];
+    if (!job) throw new Error(`No job for cron "${controller.cron}"`);
+    ctx.waitUntil(job(env, controller.scheduledTime));
   },
 } satisfies ExportedHandler<Env>;
 

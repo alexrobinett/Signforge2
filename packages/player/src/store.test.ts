@@ -225,10 +225,11 @@ describe('file cleanup and pins', () => {
 
 describe('DeviceCredential', () => {
   const noSupervisor = vi.fn(async () => Promise.reject(new TypeError('Failed to fetch')));
+  const API = 'https://api.example/v1/device';
 
   it('collects the credential from the supervisor once and sends it as a bearer header', async () => {
-    const f = vi.fn(async () => Response.json({ credential: 'sfd_scr_1.secret' }));
-    const c = new DeviceCredential('http://127.0.0.1:8091', noSupervisor, f);
+    const f = vi.fn(async () => Response.json({ credential: 'sfd_scr_1.secret', api: API }));
+    const c = new DeviceCredential(API, 'http://127.0.0.1:8091', noSupervisor, f);
     expect(await c.headers()).toEqual({ authorization: 'Bearer sfd_scr_1.secret' });
     expect(await c.headers()).toEqual({ authorization: 'Bearer sfd_scr_1.secret' });
     expect(f).toHaveBeenCalledTimes(1);
@@ -237,18 +238,18 @@ describe('DeviceCredential', () => {
 
   it('says none while the supervisor has none, and takes one installed later', async () => {
     const f = vi.fn(async () => Response.json({ error: 'no credential' }, { status: 404 }));
-    const c = new DeviceCredential('http://127.0.0.1:8091', noSupervisor, f);
+    const c = new DeviceCredential(API, 'http://127.0.0.1:8091', noSupervisor, f);
     expect(await c.check()).toBe('none');
     expect(await c.headers()).toEqual({});
-    f.mockImplementation(async () => Response.json({ credential: 'sfd_scr_1.new' }));
+    f.mockImplementation(async () => Response.json({ credential: 'sfd_scr_1.new', api: API }));
     expect(await c.check()).toBe('held');
     expect(await c.headers()).toEqual({ authorization: 'Bearer sfd_scr_1.new' });
   });
 
   it('on revoke, deletes it from the supervisor and never uses it again', async () => {
-    const f = vi.fn(async () => Response.json({ credential: 'sfd_scr_1.old' }));
+    const f = vi.fn(async () => Response.json({ credential: 'sfd_scr_1.old', api: API }));
     const send = vi.fn(async () => Response.json({}));
-    const c = new DeviceCredential('http://127.0.0.1:8091', send, f);
+    const c = new DeviceCredential(API, 'http://127.0.0.1:8091', send, f);
     expect(await c.check()).toBe('held');
     await c.revoke();
     expect(send).toHaveBeenCalledWith('/credential', { method: 'DELETE' });
@@ -259,15 +260,29 @@ describe('DeviceCredential', () => {
 
   it('hands a paired credential to the supervisor, and uses it even when the supervisor cannot take it', async () => {
     const send = vi.fn(async (_path: string, _init: RequestInit) => Promise.reject(new TypeError('Failed to fetch')));
-    const c = new DeviceCredential('http://127.0.0.1:8091', send, noSupervisor);
+    const c = new DeviceCredential(API, 'http://127.0.0.1:8091', send, noSupervisor);
     await c.adopt('sfd_scr_2.paired');
     expect(send.mock.calls[0]![0]).toBe('/credential');
-    expect(JSON.parse(String(send.mock.calls[0]![1].body))).toEqual({ credential: 'sfd_scr_2.paired' });
+    expect(JSON.parse(String(send.mock.calls[0]![1].body))).toEqual({ credential: 'sfd_scr_2.paired', api: API });
     expect(await c.headers()).toEqual({ authorization: 'Bearer sfd_scr_2.paired' });
   });
 
+  it('does not use a credential bound to another API base, or to none', async () => {
+    for (const api of ['https://other.example/v1/device', 'https://api.example/v1/devices', null, undefined]) {
+      const c = new DeviceCredential(
+        API,
+        'http://127.0.0.1:8091',
+        noSupervisor,
+        vi.fn(async () => Response.json({ credential: 'sfd_scr_1.secret', api })),
+      );
+      expect(await c.check(), String(api)).toBe('elsewhere');
+      expect(await c.headers()).toEqual({});
+      expect(c.held).toBe(false);
+    }
+  });
+
   it('treats an unreachable supervisor as unknown, sending nothing', async () => {
-    const c = new DeviceCredential('http://127.0.0.1:8091', noSupervisor, noSupervisor);
+    const c = new DeviceCredential(API, 'http://127.0.0.1:8091', noSupervisor, noSupervisor);
     expect(await c.check()).toBe('unknown');
     expect(await c.headers()).toEqual({});
   });

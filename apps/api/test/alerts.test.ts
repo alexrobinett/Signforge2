@@ -1,9 +1,11 @@
 // Offline alerts (M3-42): a screen silent past its org's threshold emails once, and once more when it is back.
 import { scoped } from '@signforge/db';
+import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { checkScreenAlerts } from '../src/alerts';
-import { RecordingEmailSender } from '../src/email';
+import { emailSenderFor, RecordingEmailSender } from '../src/email';
+import worker from '../src/index';
 import { Client, email, testApp } from './client';
 
 const MIN = 60_000;
@@ -101,5 +103,27 @@ describe('offline alerts', () => {
 
     await checkScreenAlerts(env, outbox, start + 20 * MIN);
     expect(outbox.messages.filter((m) => /^(Muted|Revoked|Never seen) /.test(m.subject))).toEqual([]);
+  });
+});
+
+describe('the Cron Triggers', () => {
+  async function runCron(cron: string, scheduledTime: number) {
+    const ctx = createExecutionContext();
+    await worker.scheduled(createScheduledController({ scheduledTime, cron }), env, ctx);
+    await waitOnExecutionContext(ctx);
+  }
+
+  it("run the alert check on the five-minute schedule, not on the poller's one-minute one", async () => {
+    const { org } = await orgWithTeam();
+    const start = Date.now();
+    await pairedScreen(org.id, 'Cron lobby', start);
+    // Dev sends through the recorder, so the alerts the Worker sent can be read.
+    const outbox = emailSenderFor(env);
+    if (!(outbox instanceof RecordingEmailSender)) throw new Error('dev should send through the recorder');
+
+    await runCron('* * * * *', start + 16 * MIN);
+    expect(to(outbox, 'Cron lobby')).toEqual([]);
+    await runCron('*/5 * * * *', start + 16 * MIN);
+    expect(to(outbox, 'Cron lobby').map((m) => m.subject)).toEqual(['Cron lobby is offline', 'Cron lobby is offline']);
   });
 });

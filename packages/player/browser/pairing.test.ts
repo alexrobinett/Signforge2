@@ -48,6 +48,7 @@ it('a freshly flashed screen shows a code, and plays once it is claimed, without
   await p.until((s) => s.manifestId === content.manifest.id && s.played > 0, 15_000);
   expect(await shown(p)).toBeUndefined();
   expect(p.server.supervisorCredential).toBe(credential);
+  expect(p.server.supervisorApi).toBe(p.server.deviceApi);
   expect(p.server.requestsTo(/^\/$/)).toHaveLength(1); // no reload
 });
 
@@ -99,5 +100,47 @@ it('takes a credential installed by hand while it shows a code', async () => {
   }, remote);
   await p.until((s) => s.pairing !== '');
   p.server.supervisorCredential = FIXTURE_CREDENTIAL;
+  p.server.supervisorApi = p.server.deviceApi;
   await p.until((s) => s.pairing === '' && s.played > 0, 15_000);
+});
+
+// The credential goes only to the device API it was paired with, never to whatever API the
+// player's address names: a paired screen opened with another `content=` must not hand it over.
+it('a paired screen whose address names another API sends that API nothing, and keeps its credential', async () => {
+  const foreign = await h.playerServer();
+  const p = await h.openPlayer(undefined, { content: foreign.deviceApi, poll: '1', pairmove: '1' });
+  const s = await p.until((s) => s.auth === 'paired with another API');
+  await new Promise((r) => setTimeout(r, 2000));
+  expect(foreign.requests).toEqual([]);
+  expect(s.pairing).toBe('');
+  expect(p.server.supervisorCredential).toBe(FIXTURE_CREDENTIAL);
+  expect(p.server.supervisorApi).toBe(p.server.deviceApi);
+});
+
+it('nor does one whose address names another path on the same origin', async () => {
+  const p = await h.openPlayer(undefined, (server) => ({ content: `${server.localUrl}/elsewhere`, poll: '1' }));
+  await p.until((s) => s.auth === 'paired with another API');
+  await new Promise((r) => setTimeout(r, 1500));
+  expect(p.server.requests.filter((r) => r.bearer)).toEqual([]);
+});
+
+it('does not send a credential the supervisor holds for no API (one stored before credentials were bound)', async () => {
+  const content = h.content([{ id: 'a', durationMs: 800 }]);
+  const p = await h.openPlayer((server) => {
+    server.publish(content);
+    server.supervisorApi = undefined;
+  }, remote);
+  await p.until((s) => s.auth === 'paired with another API');
+  await new Promise((r) => setTimeout(r, 1500));
+  expect(p.server.requests.filter((r) => r.bearer)).toEqual([]);
+  expect(p.server.supervisorCredential).toBe(FIXTURE_CREDENTIAL);
+});
+
+it('sends its credential only to its own API', async () => {
+  const content = h.content([{ id: 'a', durationMs: 800 }]);
+  const p = await h.openPlayer((server) => server.publish(content), remote);
+  await p.until((s) => s.played > 0 && s.socket);
+  const sent = p.server.requests.filter((r) => r.bearer);
+  expect(sent.length).toBeGreaterThan(0);
+  expect(sent.every((r) => r.path.startsWith('/content/') && r.bearer === FIXTURE_CREDENTIAL)).toBe(true);
 });
