@@ -25,7 +25,7 @@ const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429> = {
 };
 
 /** The CMS's client id in the audit log. */
-export const CMS_CLIENT_ID = 'cms';
+const CMS_CLIENT_ID = 'cms';
 
 export function mountTools(api: Hono<ApiEnv>) {
   api.get('/tools', (c) => c.json({ tools: describeTools(registry, { role: c.var.role }) }));

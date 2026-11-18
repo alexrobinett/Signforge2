@@ -26,7 +26,7 @@ import { readFilesFrom } from './source';
 declare const __SF_CMS_ORIGIN__: string;
 
 /** The only origin whose pages may drive the preview. */
-export const CMS_ORIGIN = __SF_CMS_ORIGIN__ || location.origin;
+const CMS_ORIGIN = __SF_CMS_ORIGIN__ || location.origin;
 
 /** Whether the CMS origin frames this player directly. */
 function framedByCms(): boolean {

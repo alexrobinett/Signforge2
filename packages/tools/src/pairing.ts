@@ -21,7 +21,7 @@ const code = z
 
 const notOpen = (code: string) => new ToolError('not_found', `pairing code ${code} is not open: check it, or restart the screen for a new one`);
 
-export const claimScreen = defineTool({
+const claimScreen = defineTool({
   name: 'claim_screen',
   description:
     'Pair a screen: claim the code it shows, creating the screen in this organization with the given name and settings. The screen collects its credential on its next poll (within seconds) and starts playing what is published to it. A code works once, for 15 minutes. Claims are rate limited, right or wrong, so a code cannot be guessed. Pass an idempotencyKey so a retry cannot pair twice. Returns { screen }.',

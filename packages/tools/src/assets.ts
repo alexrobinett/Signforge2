@@ -27,10 +27,9 @@ export const MAX_RENDITION_BYTES = 20 * 1024 * 1024;
 export const UPLOAD_URL_SECONDS = 15 * 60;
 
 const ORIENTATIONS = ['landscape', 'portrait'] as const;
-type Orientation = (typeof ORIENTATIONS)[number];
 const STATUSES = ['pending', 'verified', 'rejected'] as const;
 
-export const renditionOutput = z.object({
+const renditionOutput = z.object({
   orientation: z.enum(ORIENTATIONS),
   sha256: z.string(),
   type: z.string(),
@@ -40,7 +39,7 @@ export const renditionOutput = z.object({
 });
 export type RenditionView = z.infer<typeof renditionOutput>;
 
-export const assetOutput = z.object({
+const assetOutput = z.object({
   id: z.string(),
   name: z.string(),
   kind: z.enum(['image', 'video']),
@@ -101,7 +100,7 @@ const renditionInput = z.object({
   height: pixels.nullable().describe('Pixels, as displayed; null for SVG'),
 });
 
-export const listAssets = defineTool({
+const listAssets = defineTool({
   name: 'list_assets',
   description:
     "List the organization's assets (uploaded images), newest first, a page at a time, each with its landscape and portrait renditions and usageCount: how many spots use it. An asset is usable once its status is verified. Pass query to match names (case-insensitive substring) and status to filter. Returns { assets: Asset[], next }; pass next as cursor, with the same query and status, for the following page.",
@@ -131,7 +130,7 @@ export const listAssets = defineTool({
   },
 });
 
-export const getAsset = defineTool({
+const getAsset = defineTool({
   name: 'get_asset',
   description: 'Get one asset with its renditions and the ids of the spots that use it. Returns { asset, spotIds }.',
   scope: 'content:read',
@@ -147,7 +146,7 @@ export const getAsset = defineTool({
   },
 });
 
-export const createAssetUpload = defineTool({
+const createAssetUpload = defineTool({
   name: 'create_asset_upload',
   description:
     "Start uploading an image. Scale it first (the CMS uses @signforge/media): a landscape and a portrait rendition, each the smallest size that covers its screen box (1920x1080, 1080x1920), JPEG, PNG or WebP; an SVG is sent as it is for both. Pass each rendition's SHA-256, type, byte size and pixel size. Returns { asset, uploads }: the new asset, pending, and for each file the server does not already hold, a URL to PUT it to with the given headers before expiresAt. Then call finalize_asset. Pass an idempotencyKey so a retry cannot create the asset twice; a retry returns the first call's upload URLs, which still expire at their expiresAt.",
@@ -245,7 +244,7 @@ interface Problem {
   message: string;
 }
 
-export const finalizeAsset = defineTool({
+const finalizeAsset = defineTool({
   name: 'finalize_asset',
   description:
     'Finish an upload started with create_asset_upload, once every file is PUT. The server re-hashes each file in storage and checks its type, size and pixel size against what was claimed and against the screen box. If all pass, the asset becomes verified and usable. If any fails, its files are deleted, the asset is marked rejected, and the call is refused with each problem; upload it again as a new asset. An asset without both renditions, or a file not uploaded yet, is refused without changing anything. Finalizing a verified asset changes nothing. Returns { asset, changed }.',
@@ -338,7 +337,7 @@ export const finalizeAsset = defineTool({
   },
 });
 
-export const deleteAsset = defineTool({
+const deleteAsset = defineTool({
   name: 'delete_asset',
   description:
     'Delete an asset from the library. Refused with a conflict while any spot uses it, or a brand kit uses it as its logo (details list the spot or brand kit ids); change or delete those first. Screens already playing it keep their copy until their next publish. Returns { deleted: assetId }.',

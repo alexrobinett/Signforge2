@@ -1,0 +1,8 @@
+{
+  "path": ["apps", "packages"],
+  "format": ["typescript", "tsx", "javascript"],
+  "ignore": ["**/node_modules/**", "**/dist/**", "**/.wrangler/**", "**/routeTree.gen.ts", "**/worker-configuration.d.ts", "packages/cli/test/golden/**"],
+  "gitignore": true,
+  "threshold": 1,
+  "reporters": ["console"]
+}

@@ -81,7 +81,7 @@ const fontOutput = z.object({
 
 const fontRef = z.object({ id: z.string(), family: z.string() }).nullable();
 
-export const brandKitOutput = z.object({
+const brandKitOutput = z.object({
   id: z.string(),
   name: z.string(),
   colors: z.object({
@@ -200,7 +200,7 @@ const logoFields = {
 
 // ------------------------------------------------------------------ tools
 
-export const listFonts = defineTool({
+const listFonts = defineTool({
   name: 'list_fonts',
   description:
     'List the fonts a brand kit can use: the curated catalogue of open (SIL OFL 1.1) fonts, each with its licence, ordered by id, a page at a time. Returns { fonts, next }.',
@@ -226,7 +226,7 @@ export const listFonts = defineTool({
   },
 });
 
-export const listBrandKits = defineTool({
+const listBrandKits = defineTool({
   name: 'list_brand_kits',
   description:
     "List the organization's brand kits, ordered by id, a page at a time: colours, fonts, logo, which is the default, which groups and screens chose each, and which screens each reaches. Returns { brandKits, next }.",
@@ -243,7 +243,7 @@ export const listBrandKits = defineTool({
   },
 });
 
-export const getBrandKit = defineTool({
+const getBrandKit = defineTool({
   name: 'get_brand_kit',
   description:
     'Get one brand kit: its colours (with derived on-colours), fonts, logo, contrast warnings, and reach, the screens its edits will reach at the next publish. Returns { brandKit }.',
@@ -256,7 +256,7 @@ export const getBrandKit = defineTool({
   handler: async ({ org, input }) => ({ brandKit: kitView(await requireKit(org, input.brandKitId), await brandContext(org)) }),
 });
 
-export const createBrandKit = defineTool({
+const createBrandKit = defineTool({
   name: 'create_brand_kit',
   description:
     "Create a brand kit: colours as hex, a shape, optional display and body fonts from list_fonts, and an optional logo (an SVG or PNG image asset). Leave out onPrimary and onAccent to have them derived for 4.5:1 contrast; pairs below 4.5:1 come back as warnings. The organization's first kit becomes its default; pass makeDefault for a later one. Screens get it at the next publish. Pass an idempotencyKey so a retry cannot create it twice. Returns { brandKit }.",
@@ -307,7 +307,7 @@ export const createBrandKit = defineTool({
   },
 });
 
-export const updateBrandKit = defineTool({
+const updateBrandKit = defineTool({
   name: 'update_brand_kit',
   description:
     'Change a brand kit. Give only what changes: colours (null for onPrimary or onAccent derives it again), shape, name, fonts (null for the template font), logos (null removes). Screens keep the kit as it was until the next publish; the result says which screens it will reach. Returns { brandKit }.',
@@ -356,7 +356,7 @@ export const updateBrandKit = defineTool({
   },
 });
 
-export const setDefaultBrandKit = defineTool({
+const setDefaultBrandKit = defineTool({
   name: 'set_default_brand_kit',
   description:
     "Make a brand kit the organization's default: the kit of every screen with no choice of its own and none from its groups. Takes effect at the next publish. Returns { brandKit }.",
@@ -374,7 +374,7 @@ export const setDefaultBrandKit = defineTool({
   },
 });
 
-export const assignBrandKit = defineTool({
+const assignBrandKit = defineTool({
   name: 'assign_brand_kit',
   description:
     "Choose the brand kit of one screen or one group (give exactly one of screenId and groupId); a null brandKitId removes the choice. A screen uses its own kit, else its groups' kit, else the default; a screen in two groups that chose different kits, with no kit of its own, cannot publish until one is chosen. Takes effect at the next publish. Returns { brandKit } for the kit chosen, or null when the choice was removed.",

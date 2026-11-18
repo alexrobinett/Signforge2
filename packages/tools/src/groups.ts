@@ -5,7 +5,7 @@ import { id, idempotencyKey, name } from './fields';
 import { nextOutput, page, pageInput } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
 
-export const groupOutput = z.object({
+const groupOutput = z.object({
   id: z.string(),
   name: z.string(),
   screenIds: z.array(z.string()).describe('The screens in the group, ordered by id'),
@@ -33,7 +33,7 @@ async function requireGroup(org: OrgScope, groupId: string) {
 
 const target = (input: { groupId: string }) => ({ kind: 'group', id: input.groupId });
 
-export const listGroups = defineTool({
+const listGroups = defineTool({
   name: 'list_groups',
   description:
     'List the screen groups in the organization with the ids of their screens, ordered by id, a page at a time. Returns { groups: Group[], next }; pass next as cursor for the following page.',
@@ -49,7 +49,7 @@ export const listGroups = defineTool({
   },
 });
 
-export const createGroup = defineTool({
+const createGroup = defineTool({
   name: 'create_group',
   description:
     'Create a screen group, optionally with its first screens. Pass an idempotencyKey so a retry cannot create it twice. Returns { group } with the new id.',
@@ -70,7 +70,7 @@ export const createGroup = defineTool({
   },
 });
 
-export const renameGroup = defineTool({
+const renameGroup = defineTool({
   name: 'rename_group',
   description: 'Rename a screen group. Returns { group }.',
   scope: 'screens:manage',
@@ -86,7 +86,7 @@ export const renameGroup = defineTool({
   },
 });
 
-export const deleteGroup = defineTool({
+const deleteGroup = defineTool({
   name: 'delete_group',
   description:
     'Delete a screen group. Its screens are not deleted. Refused with a conflict while a schedule entry targets the group; remove or retarget those entries first. Returns { deleted: groupId }.',
@@ -108,7 +108,7 @@ export const deleteGroup = defineTool({
   },
 });
 
-export const setGroupMembers = defineTool({
+const setGroupMembers = defineTool({
   name: 'set_group_members',
   description:
     "Replace a group's screens with exactly the given list. An empty list empties the group. Every screen must be in this organization, or nothing changes. Returns { group }.",

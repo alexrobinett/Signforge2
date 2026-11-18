@@ -45,8 +45,8 @@ export interface Renditions {
 }
 
 export class MediaError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'MediaError';
   }
 }
@@ -65,22 +65,32 @@ export async function sha256Hex(data: Blob | ArrayBuffer | Uint8Array): Promise<
 export async function makeRenditions(file: Blob, options: RenditionOptions = {}): Promise<Renditions> {
   const quality = options.quality ?? 0.85;
   const maxSourceBytes = options.maxSourceBytes ?? 50 * 1024 * 1024;
-  if (file.size > maxSourceBytes) throw new MediaError(`the file is ${(file.size / 1e6).toFixed(1)} MB; the most an image may be is ${(maxSourceBytes / 1e6).toFixed(0)} MB`);
+  if (file.size > maxSourceBytes)
+    throw new MediaError(`the file is ${(file.size / 1e6).toFixed(1)} MB; the most an image may be is ${(maxSourceBytes / 1e6).toFixed(0)} MB`);
   const bytes = new Uint8Array(await file.arrayBuffer());
   const info = readImageInfo(bytes);
 
   if (info?.type === 'image/svg+xml') {
     const blob = new Blob([bytes], { type: info.type });
     const sha256 = await sha256Hex(bytes);
-    const make = (orientation: Orientation): Rendition => ({ orientation, blob, type: info.type, width: null, height: null, size: blob.size, sha256, original: true });
+    const make = (orientation: Orientation): Rendition => ({
+      orientation,
+      blob,
+      type: info.type,
+      width: null,
+      height: null,
+      size: blob.size,
+      sha256,
+      original: true,
+    });
     return { source: { type: info.type, width: null, height: null, size: file.size }, landscape: make('landscape'), portrait: make('portrait') };
   }
 
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  } catch {
-    throw new MediaError('the file is not an image this browser can read');
+  } catch (e) {
+    throw new MediaError('the file is not an image this browser can read', { cause: e });
   }
   try {
     const sourceType = info?.type ?? file.type ?? '';

@@ -98,8 +98,9 @@ export class ToolError extends Error {
     message: string,
     readonly details?: unknown,
     readonly changed = false,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = 'ToolError';
   }
 }

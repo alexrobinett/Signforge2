@@ -14,9 +14,12 @@ export function PageHeader({ title, description, children }: { title: string; de
 }
 
 /** A section with nothing in it yet. */
-export function EmptyState({ icon: Icon, title, children }: { icon: Section['icon']; title: string; children: ReactNode }) {
+function EmptyState({ icon: Icon, title, children }: { icon: Section['icon']; title: string; children: ReactNode }) {
   return (
-    <section aria-labelledby="empty-title" className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-card/50 px-6 py-16 text-center">
+    <section
+      aria-labelledby="empty-title"
+      className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-card/50 px-6 py-16 text-center"
+    >
       <div className="mb-4 grid size-12 place-items-center rounded-full bg-accent text-accent-foreground">
         <Icon className="size-6" aria-hidden />
       </div>

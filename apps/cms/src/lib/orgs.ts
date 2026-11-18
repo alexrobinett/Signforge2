@@ -7,7 +7,7 @@ import type { AnyRouter } from '@tanstack/react-router';
 import { authClient, authErrorMessage } from './auth-client';
 import { slugify } from './paths';
 
-export class OrgActionError extends Error {}
+class OrgActionError extends Error {}
 
 const suffix = () => Math.random().toString(36).slice(2, 6);
 const slugTaken = (e: { code?: string; message?: string }) => /ALREADY_EXISTS|SLUG/i.test(`${e.code ?? ''} ${e.message ?? ''}`);
@@ -24,7 +24,7 @@ export async function createOrganization(router: AnyRouter, name: string) {
   const base = slugify(name);
   let res = await authClient.organization.create({ name, slug: base });
   if (res.error && slugTaken(res.error)) res = await authClient.organization.create({ name, slug: `${base}-${suffix()}` });
-  if (res.error || !res.data) throw new OrgActionError(authErrorMessage(res.error, 'Could not create the organization.'));
+  if (res.error) throw new OrgActionError(authErrorMessage(res.error, 'Could not create the organization.'));
   await router.invalidate();
   return res.data;
 }

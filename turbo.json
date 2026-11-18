@@ -1,5 +1,14 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "boundaries": {
+    "tags": {
+      "contract": {
+        "dependencies": {
+          "allow": []
+        }
+      }
+    }
+  },
   "tasks": {
     "typecheck": {
       "dependsOn": ["^typecheck"]

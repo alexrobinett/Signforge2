@@ -1,5 +1,5 @@
 import { LoaderCircleIcon } from 'lucide-react';
-import { useId, type FormEvent, type ReactNode } from 'react';
+import { useId, type SubmitEvent, type ReactNode } from 'react';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -24,7 +24,7 @@ export function CreateOrgForm({
   const createOrg = useAppStore((s) => s.createOrg);
   const id = useId();
 
-  function submit(e: FormEvent) {
+  function submit(e: SubmitEvent) {
     e.preventDefault();
     void createOrg(form);
   }
