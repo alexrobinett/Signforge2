@@ -72,6 +72,9 @@ jobs:
       # A commit that changes packages/contract changes nothing else (AGENTS.md, "The contract leads").
       - name: Contract commits
         run: sh scripts/check-contract-commits.sh ${{ github.event.pull_request.base.sha || github.event.before }}
+      # Every template is a devDependency of the API and the player, whose tests use it (docs/ci.md).
+      - name: Template dependencies
+        run: sh scripts/check-template-deps.sh
 
       # Which tasks run, whether any of them needs Chromium (the tests of a package that declares a
       # Playwright dependency launch it), and whether any needs the stress media (the cli's golden
