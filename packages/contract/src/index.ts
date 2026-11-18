@@ -715,8 +715,17 @@ export interface SyncResponse {
 }
 
 export type DeviceCommand =
-  /** Reload the player, e.g. after the server stops producing a schema this build can play. */
-  { type: 'reload' } | { type: 'display'; override: DisplayOverride | null } | { type: 'reboot' };
+  /** Reload the player, e.g. after the server stops producing a schema this build can play. A screen obeys it at most every 15 minutes. */
+  | { type: 'reload' }
+  /** Restart the player now, because a person asked from the CMS. Obeyed every time, unlike `reload`. */
+  | { type: 'restart' }
+  | { type: 'display'; override: DisplayOverride | null }
+  /** Show the screen's name over its content for `seconds`, so someone in the room can tell which screen this is. */
+  | { type: 'identify'; name: string; seconds: number }
+  | { type: 'reboot' };
+
+/** The longest an `identify` command shows the screen's name. */
+export const MAX_IDENTIFY_SECONDS = 60;
 
 /** Server to screen, over the socket. Kept rare: the socket exists to nudge, not to carry data. */
 export type ServerSocketMessage = { type: 'manifest'; id: string } | { type: 'command'; command: DeviceCommand } | { type: 'revoked' };

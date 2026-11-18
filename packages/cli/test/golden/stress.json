@@ -23,9 +23,21 @@
       "size": 320263,
       "type": "image/jpeg"
     },
+    "23b0811cdaed7d65f1c402b1f44a50ddf7cc63ecc024bc606cb8d912955b8df1": {
+      "size": 75775,
+      "type": "text/html"
+    },
+    "253e58441d0ec6175fa069ccececb2a5ecd4c9c32b47bc3902949c9f889bece7": {
+      "size": 72624,
+      "type": "text/html"
+    },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "36aba5637aea2c4970450c887bdc56d91aa647df47447351ede9d5a13afb341f": {
+      "size": 73655,
+      "type": "text/html"
     },
     "438f4125da11443807a1cbbd06e3f4733d2aaef4265dbf3398e9840901d230f0": {
       "size": 9615262,
@@ -35,25 +47,21 @@
       "size": 360551,
       "type": "image/jpeg"
     },
-    "60483ff73a7a59393cfb7afcc54f5e708244fdb8699b0dc623e7c85b56f8e9d4": {
-      "size": 72589,
-      "type": "text/html"
-    },
-    "6e34aca4756fd6948b2078d56c367f68940367b52e02fb15f40838a8d8943f0e": {
-      "size": 75775,
-      "type": "text/html"
-    },
-    "77bfca528b2b6030a30fbe94f3f7317f1e811534a6f3a0db38e968090374f9ad": {
-      "size": 76462,
-      "type": "text/html"
-    },
-    "7bbfb8c19989fb3e6f1a2e6b9caac8aa751cc2d73c80d688afe7d6d7b1427ddd": {
-      "size": 75189,
-      "type": "text/html"
-    },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "835e30bd9a92e42522afa08816d25c793b48757a3160186f396e483be295f57d": {
+      "size": 81069,
+      "type": "text/html"
+    },
+    "8a9c7061cdc3b149b7cacdafa02d4203460a3ed01e24dcb1703d35d6221f62ff": {
+      "size": 71842,
+      "type": "text/html"
+    },
+    "8bca0e4994edabc336d38c9fafb00beea47846cab5537b4bf6bf68ffaf0a19ea": {
+      "size": 76468,
+      "type": "text/html"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
@@ -63,24 +71,16 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "adbb1a0908721f28a666eccdfd6b8d64c7d4b60e00b45e9a06ee6b494a0c5233": {
-      "size": 73599,
-      "type": "text/html"
-    },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "beb5d2a1ffe59d0bd07b33e22e5a1a09baba56c92177658687aff7fdac3b51f1": {
-      "size": 80986,
-      "type": "text/html"
     },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
       "size": 182996,
       "type": "image/jpeg"
     },
-    "d42f779a97a703dc1360c73c0053002fd984c55e46dcf0711f914b71f5b5fead": {
-      "size": 71842,
+    "db318353a14261f6dc439cf7fb6b5d5c969f77c8b44c797126c669873bd1dcfc": {
+      "size": 75243,
       "type": "text/html"
     },
     "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688": {
@@ -88,7 +88,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "d47ec9ef35f55d5bfdacd61f81364f6bb88fef8741ad40d5b3384a8ec7f19434",
+  "id": "8d1cc7691d374362bece1e489b3f514c1a0ea317de37d72d3ef3cf9444b688c2",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -540,7 +540,7 @@
   },
   "templates": {
     "base/agenda@1.2.0": {
-      "html": "7bbfb8c19989fb3e6f1a2e6b9caac8aa751cc2d73c80d688afe7d6d7b1427ddd",
+      "html": "db318353a14261f6dc439cf7fb6b5d5c969f77c8b44c797126c669873bd1dcfc",
       "manifest": {
         "background": "#0d1117",
         "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
@@ -625,7 +625,7 @@
       }
     },
     "base/clock@1.2.0": {
-      "html": "60483ff73a7a59393cfb7afcc54f5e708244fdb8699b0dc623e7c85b56f8e9d4",
+      "html": "253e58441d0ec6175fa069ccececb2a5ecd4c9c32b47bc3902949c9f889bece7",
       "manifest": {
         "background": "#05070d",
         "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
@@ -675,7 +675,7 @@
       }
     },
     "base/cstore-promo@1.2.0": {
-      "html": "77bfca528b2b6030a30fbe94f3f7317f1e811534a6f3a0db38e968090374f9ad",
+      "html": "8bca0e4994edabc336d38c9fafb00beea47846cab5537b4bf6bf68ffaf0a19ea",
       "manifest": {
         "background": "#06122b",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
@@ -752,7 +752,7 @@
       }
     },
     "base/menu-board@1.2.0": {
-      "html": "adbb1a0908721f28a666eccdfd6b8d64c7d4b60e00b45e9a06ee6b494a0c5233",
+      "html": "36aba5637aea2c4970450c887bdc56d91aa647df47447351ede9d5a13afb341f",
       "manifest": {
         "background": "#14110f",
         "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
@@ -843,7 +843,7 @@
       }
     },
     "base/news@1.2.0": {
-      "html": "6e34aca4756fd6948b2078d56c367f68940367b52e02fb15f40838a8d8943f0e",
+      "html": "23b0811cdaed7d65f1c402b1f44a50ddf7cc63ecc024bc606cb8d912955b8df1",
       "manifest": {
         "background": "#0b0d12",
         "description": "The top story large, the next few below, and every headline in a crawl along the bottom. Bind items to an RSS data source.",
@@ -913,7 +913,7 @@
       }
     },
     "base/photo-promo@1.2.0": {
-      "html": "d42f779a97a703dc1360c73c0053002fd984c55e46dcf0711f914b71f5b5fead",
+      "html": "8a9c7061cdc3b149b7cacdafa02d4203460a3ed01e24dcb1703d35d6221f62ff",
       "manifest": {
         "background": "#000000",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
@@ -964,7 +964,7 @@
       }
     },
     "base/weather@1.2.0": {
-      "html": "beb5d2a1ffe59d0bd07b33e22e5a1a09baba56c92177658687aff7fdac3b51f1",
+      "html": "835e30bd9a92e42522afa08816d25c793b48757a3160186f396e483be295f57d",
       "manifest": {
         "background": "#0b1a33",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source.",

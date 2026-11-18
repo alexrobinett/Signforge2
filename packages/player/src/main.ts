@@ -39,6 +39,7 @@ import {
 import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { clock, now, synced } from './clock';
 import { DeviceCredential } from './credential';
+import { identify } from './identify';
 import { pair } from './pairing';
 import { dataRejections, dataSettled, dataStatus, heldVersions, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
 import { activeOverride, setOverride, wakeable } from './override';
@@ -592,6 +593,8 @@ async function pairScreen(): Promise<void> {
 function command(c: DeviceCommand): void {
   console.info(`[sf] command ${c.type}`);
   if (c.type === 'reload') reload();
+  else if (c.type === 'restart') location.reload();
+  else if (c.type === 'identify') identify(c.name, c.seconds);
   else if (c.type === 'display') {
     setOverride(c.override);
     display.wake();

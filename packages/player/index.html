@@ -19,6 +19,11 @@
   #pair { position: fixed; inset: 0; z-index: 50; background: #000; display: none; }
   #pair .card { position: absolute; text-align: center; color: #9aa4b2; font: 500 3vmin system-ui, sans-serif; white-space: nowrap; }
   #pair .code { margin: 2vmin 0; color: #d0d7de; font: 600 16vmin ui-monospace, monospace; letter-spacing: .08em; }
+  /* Identify (src/identify.ts): the screen's name in a bright frame, for a few seconds on request. */
+  #identify { position: fixed; inset: 0; z-index: 60; display: none; place-items: center; box-sizing: border-box; border: 2vmin solid #ffd60a; pointer-events: none; }
+  #identify .card { padding: 4vmin 6vmin; background: rgba(0,0,0,.85); border-radius: 2vmin; text-align: center; max-width: 80vw; }
+  #identify .label { color: #d0d7de; font: 500 3.5vmin system-ui, sans-serif; }
+  #identify .name { margin-top: 1.5vmin; color: #fff; font: 700 11vmin system-ui, sans-serif; overflow-wrap: anywhere; }
   /* Debug only: a speck that always moves, so the compositor draws every frame and gaps are measurable. */
   #heartbeat { position: fixed; right: 1vmin; bottom: 1vmin; width: 4px; height: 4px; background: #111; z-index: 99; display: none; will-change: transform; animation: hb 1s linear infinite; }
   @keyframes hb { to { transform: rotate(360deg) } }
@@ -29,6 +34,7 @@
 <div id="status">SignForge
 Starting…</div>
 <div id="pair"></div>
+<div id="identify"></div>
 <div id="hud"></div>
 <div id="heartbeat"></div>
 <script type="module" src="/src/main.ts"></script>
