@@ -81,6 +81,42 @@ describe('the clock', () => {
     expect(Math.abs(again.clock.offsetMs - offset)).toBeLessThan(5000);
     expect(again.log[0]!.spot).toBe('b');
   });
+
+  it('keeps the panel on while it is untrusted, whatever the hours and a saved override say, and applies them once a sync trusts it', async () => {
+    const content = h.content([{ id: 'a', durationMs: 500 }], {
+      // Closed all week.
+      edit: (m) => void (m.screen.displayHours = { weekly: [] }),
+    });
+    const p = await h.openPlayer((s) => s.publish(content), api);
+    // With nothing cached at boot, the hours are first read at the display loop's next check, 15 s on.
+    await p.until((s) => s.clock.trusted && !s.displayOn, 20_000);
+    const switches = () => p.server.requestsTo(/^\/supervisor\/display\//).map((r) => r.path);
+    await expect.poll(switches, { timeout: 5000 }).toEqual(['/supervisor/display/off']);
+
+    // A cold boot with no network and no clock: the device clock a day behind the last sync, and a
+    // "sleep" override saved that ended an hour ago, though by that clock it has a day to run.
+    const cut = p.server.intercept(/^\/content\//, { status: 503 });
+    await p.page.evaluate(
+      ({ syncedAt, until }) => {
+        localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: -86_400_000, syncedAt }));
+        localStorage.setItem('sf.displayOverride', JSON.stringify({ state: 'off', until }));
+      },
+      { syncedAt: Date.now(), until: new Date(Date.now() - HOUR).toISOString() },
+    );
+    await p.page.reload();
+    await expect.poll(switches, { timeout: 10_000 }).toHaveLength(2);
+    expect(switches()[1]).toBe('/supervisor/display/on');
+    const s = await p.until((s) => s.played >= 2);
+    expect(s.clock.trusted).toBe(false);
+    expect(s.displayOn).toBe(true);
+    expect(switches()).toHaveLength(2);
+
+    // The network back: the first sync trusts the clock, the expired override is dropped, and the closed hours apply.
+    cut();
+    await p.until((s) => s.clock.trusted && !s.displayOn);
+    await expect.poll(switches, { timeout: 10_000 }).toEqual(['/supervisor/display/off', '/supervisor/display/on', '/supervisor/display/off']);
+    expect(await p.page.evaluate(() => localStorage.getItem('sf.displayOverride'))).toBeNull();
+  });
 });
 
 describe('snapshots', () => {

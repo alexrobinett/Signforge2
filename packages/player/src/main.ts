@@ -536,9 +536,15 @@ async function displayLoop(): Promise<never> {
   let applied: boolean | undefined;
   return loopRestartingOnError('display', async () => {
     if (manifest) {
-      const at = new Date(now());
-      const override = activeOverride(at);
-      const on = override ? override.state === 'on' : displayOn(manifest.screen.displayHours, localTime(at, manifest.screen.timezone));
+      // An untrusted clock is behind, by any amount: neither the hours nor a saved override can be
+      // read against it, and a dark screen in opening hours is the worse mistake. The first good
+      // sync wakes this loop to read them again.
+      let on = true;
+      if (clock.trusted) {
+        const at = new Date(now());
+        const override = activeOverride(at);
+        on = override ? override.state === 'on' : displayOn(manifest.screen.displayHours, localTime(at, manifest.screen.timezone));
+      }
       if (on !== applied) {
         applied = on;
         console.info(`[sf] display ${on ? 'on' : 'off'}`);
@@ -747,7 +753,10 @@ async function apiSync(): Promise<number> {
   const parsed = parseSyncResponse(await res.json());
   if (!parsed.ok) throw new Error(`sync: ${parsed.problems.join('; ')}`);
   const r = parsed.value;
+  const wasTrusted = clock.trusted;
   synced(r.serverTime, sentAt, receivedAt);
+  // Display hours and any saved override were set aside while the clock was untrusted.
+  if (!wasTrusted) display.wake();
   if (r.epoch === batch.epoch) acknowledgePlays(r.epoch, r.ackSeq);
   settleTickets({ ticket: r.socketTicket });
   state.online = true;
