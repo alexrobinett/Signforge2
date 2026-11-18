@@ -13,7 +13,14 @@ const api = (s: FixtureServer) => ({ content: `${s.localUrl}/content` });
 
 /** The content server stops answering, as when the screen's network goes. */
 const cutNetwork = (p: Player) => p.server.intercept(/^\/content\//, { status: 503 });
-const clip = () => readFileSync(join(import.meta.dirname, 'fixtures/clip.webm'));
+/** A player whose last good manifest is `good`, and a video manifest to publish next. */
+async function goodThenVideo() {
+  const good = h.content([{ id: 'a', durationMs: 600 }], { variant: 'good' });
+  const video = h.content([{ id: 'v', video: readFileSync(join(import.meta.dirname, 'fixtures/clip.webm')), durationMs: 600 }], { variant: 'video' });
+  const p = await h.openPlayer((s) => s.publish(good));
+  await p.until((s) => s.lastGood === good.manifest.id);
+  return { p, good, video };
+}
 
 /** Reload the page (the cache survives) and wait for the player to start again. */
 async function restart(p: Player): Promise<void> {
@@ -155,10 +162,7 @@ describe('last known good', () => {
   });
 
   it('falls back from a video manifest whose videos the browser refuses to play, offline too', async () => {
-    const good = h.content([{ id: 'a', durationMs: 600 }], { variant: 'good' });
-    const video = h.content([{ id: 'v', video: clip(), durationMs: 600 }], { variant: 'video' });
-    const p = await h.openPlayer((s) => s.publish(good));
-    await p.until((s) => s.lastGood === good.manifest.id);
+    const { p, good, video } = await goodThenVideo();
 
     // The browser refuses to play, as it may refuse autoplay or a decoder; after a reload too.
     const refuse = () => {
@@ -183,10 +187,7 @@ describe('last known good', () => {
   });
 
   it('takes a video manifest as the last good one once a video has started playing', async () => {
-    const good = h.content([{ id: 'a', durationMs: 600 }], { variant: 'good' });
-    const video = h.content([{ id: 'v', video: clip(), durationMs: 600 }], { variant: 'video' });
-    const p = await h.openPlayer((s) => s.publish(good));
-    await p.until((s) => s.lastGood === good.manifest.id);
+    const { p, video } = await goodThenVideo();
 
     p.server.publish(video);
     const s = await p.until((s) => s.lastGood === video.manifest.id);

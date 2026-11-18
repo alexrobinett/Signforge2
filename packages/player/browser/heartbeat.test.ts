@@ -1,6 +1,7 @@
 // The sync loop against the device API (M3-07): one periodic sync carries the heartbeat and play
 // counts, corrects the clock from server time, delivers snapshots, and hands the socket its ticket.
 import { describe, expect, it } from 'vitest';
+import type { Content, ContentOptions } from './content';
 import type { FixtureServer } from './fixture-server';
 import { useHarness, type PlayerState } from './harness';
 
@@ -23,6 +24,20 @@ function logged(s: PlayerState, before: number, durationMs: number) {
   }
   return out;
 }
+
+/**
+ * A screen whose display hours are closed all week, playing `content` from the API, once its panel
+ * is off; `switches` lists the power requests the supervisor got. With nothing cached at boot, the
+ * hours are first read at the display loop's next check, 15 s on.
+ */
+async function asleep(content: Content) {
+  const p = await h.openPlayer((s) => s.publish(content), api);
+  await p.until((s) => s.clock.trusted && !s.displayOn, 20_000);
+  const switches = () => p.server.requestsTo(/^\/supervisor\/display\//).map((r) => r.path);
+  await expect.poll(switches, { timeout: 5000 }).toEqual(['/supervisor/display/off']);
+  return { p, switches };
+}
+const closedAllWeek: ContentOptions['edit'] = (m) => void (m.screen.displayHours = { weekly: [] });
 
 describe('play counts', () => {
   it('reach the server once an hour ends, counted once although a reply was lost', async () => {
@@ -83,15 +98,7 @@ describe('the clock', () => {
   });
 
   it('keeps the panel on while it is untrusted, whatever the hours and a saved override say, and applies them once a sync trusts it', async () => {
-    const content = h.content([{ id: 'a', durationMs: 500 }], {
-      // Closed all week.
-      edit: (m) => void (m.screen.displayHours = { weekly: [] }),
-    });
-    const p = await h.openPlayer((s) => s.publish(content), api);
-    // With nothing cached at boot, the hours are first read at the display loop's next check, 15 s on.
-    await p.until((s) => s.clock.trusted && !s.displayOn, 20_000);
-    const switches = () => p.server.requestsTo(/^\/supervisor\/display\//).map((r) => r.path);
-    await expect.poll(switches, { timeout: 5000 }).toEqual(['/supervisor/display/off']);
+    const { p, switches } = await asleep(h.content([{ id: 'a', durationMs: 500 }], { edit: closedAllWeek }));
 
     // A cold boot with no network and no clock: the device clock a day behind the last sync, and a
     // "sleep" override saved that ended an hour ago, though by that clock it has a day to run.
@@ -159,7 +166,7 @@ describe('an untrusted clock', () => {
 describe('the first trusted sync', () => {
   it('applies the wake override it carries before the hours, so a panel kept on is never switched off', async () => {
     const content = h.content([{ id: 'a', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }], {
-      edit: (m) => void (m.screen.displayHours = { weekly: [] }),
+      edit: closedAllWeek,
     });
     const snap = (version: number) => ({
       id: 'news',
@@ -168,10 +175,7 @@ describe('the first trusted sync', () => {
       checkedAt: new Date().toISOString(),
       data: { headline: 'x' },
     });
-    const p = await h.openPlayer((s) => s.publish(content), api);
-    await p.until((s) => s.clock.trusted && !s.displayOn, 20_000);
-    const switches = () => p.server.requestsTo(/^\/supervisor\/display\//).map((r) => r.path);
-    await expect.poll(switches, { timeout: 5000 }).toEqual(['/supervisor/display/off']);
+    const { p, switches } = await asleep(content);
 
     // An untrusted cold boot with no network: on, whatever the closed hours say.
     const cut = p.server.intercept(/^\/content\//, { status: 503 });
