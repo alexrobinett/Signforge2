@@ -6,7 +6,7 @@ interface Item {
   source: string;
 }
 
-/** "33 minutes ago", "il y a 2 heures": the item's age in the screen's language. */
+/** "33 minutes ago", "il y a 2 heures": the item's age in the feed's language. */
 function ago(iso: string, now: Date, locale: string): string {
   const t = new Date(iso).getTime();
   if (!iso || Number.isNaN(t)) return '';
@@ -29,7 +29,8 @@ defineTemplate({
     document.getElementById('credit')!.textContent = credit;
     if (lead) {
       document.getElementById('lead')!.textContent = lead.title;
-      document.getElementById('age')!.textContent = ago(lead.published, now, ctx.locale);
+      // The age sits under the feed's own words, so it is in the feed's language; the screen's when the feed declares none.
+      document.getElementById('age')!.textContent = ago(lead.published, now, String(ctx.data.language || ctx.locale));
     }
     // Portrait has the height for more secondary headlines; drop any that do not fit.
     const more = document.getElementById('more')!;

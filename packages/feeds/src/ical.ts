@@ -11,6 +11,7 @@ export interface CalendarOptions {
   horizonDays?: number;
   maxBytes?: number;
   maxIterations?: number;
+  maxPastIterations?: number;
   maxEvents?: number;
 }
 
@@ -49,7 +50,7 @@ export function parseCalendar(text: string, options: CalendarOptions): CalendarF
   if (!roots.some((r) => r.name === 'vcalendar')) throw new FeedError('malformed', 'no VCALENDAR in the feed');
 
   const nowMs = options.now.getTime();
-  const window = { nowMs, endMs: nowMs + o.horizonDays * DAY_MS, maxIterations: o.maxIterations };
+  const window = { nowMs, endMs: nowMs + o.horizonDays * DAY_MS, maxIterations: o.maxIterations, maxPastIterations: o.maxPastIterations };
   const out: Occurrence[] = [];
 
   for (const cal of roots) {
@@ -92,6 +93,7 @@ interface Window {
   nowMs: number;
   endMs: number;
   maxIterations: number;
+  maxPastIterations: number;
 }
 
 function expand(event: ICAL.Event, defaultTz: string, w: Window, out: Occurrence[]): void {
@@ -111,16 +113,23 @@ function expand(event: ICAL.Event, defaultTz: string, w: Window, out: Occurrence
   const seen = new Set<ICAL.Event>();
   const it = event.iterator();
   let reachedEnd = false;
-  for (let i = 0; i < w.maxIterations; i++) {
+  // ical.js steps a series from its first occurrence and cannot skip ahead, so a long-running one
+  // passes over its past cheaply on a budget of its own; the cap that matters counts from now.
+  let past = 0;
+  let ahead = 0;
+  while (ahead < w.maxIterations && past < w.maxPastIterations) {
     const next = it.next();
     if (!next) {
       reachedEnd = true;
       break;
     }
-    if (sortMs(next, startHint, defaultTz) >= w.endMs) {
+    const startMs = sortMs(next, startHint, defaultTz);
+    if (startMs >= w.endMs) {
       reachedEnd = true;
       break;
     }
+    if (startMs < w.nowMs) past++;
+    else ahead++;
     const d = event.getOccurrenceDetails(next);
     if (d.item !== event) {
       seen.add(d.item);

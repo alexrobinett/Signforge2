@@ -125,11 +125,25 @@ describe('limits', () => {
     expect(parseCalendar(ics(daily('20261101T120000Z')), { now, maxEvents: 3 }).events).toHaveLength(3);
   });
 
-  it('stops a series after 500 occurrences from its first', () => {
-    // Started 600 days ago: the next 30 days lie past the cap.
-    const old = ics(daily('20250326T120000Z'));
-    expect(parseCalendar(old, { now }).events).toEqual([]);
-    expect(parseCalendar(old, { now, maxIterations: 700 }).events[0]?.start).toBe('2026-11-18T12:00:00+00:00');
+  it('counts the 500 occurrences of a series from now, not from its first', () => {
+    // Started 600 days and 20 years ago: both still show their next 25 days.
+    for (const first of ['20250326T120000Z', '20061117T120000Z']) {
+      const events = parseCalendar(ics(daily(first)), { now }).events;
+      expect(events[0]?.start).toBe('2026-11-18T12:00:00+00:00');
+      expect(events).toHaveLength(25);
+    }
+    expect(parseCalendar(ics(daily('20261101T120000Z')), { now, maxIterations: 3 }).events.map((e) => e.start)).toEqual([
+      '2026-11-18T12:00:00+00:00',
+      '2026-11-19T12:00:00+00:00',
+      '2026-11-20T12:00:00+00:00',
+    ]);
+  });
+
+  it('gives up on a series with more than 50,000 occurrences before now', () => {
+    const minutely = ['UID:m@test', 'DTSTART:20260101T000000Z', 'DTEND:20260101T000100Z', 'RRULE:FREQ=MINUTELY', 'SUMMARY:Spam'];
+    const t = performance.now();
+    expect(parseCalendar(ics(minutely), { now }).events).toEqual([]);
+    expect(performance.now() - t).toBeLessThan(2000);
   });
 
   it('refuses a body over the size limit, counting UTF-8 bytes', () => {

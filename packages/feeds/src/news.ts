@@ -10,6 +10,9 @@ export interface NewsOptions {
 
 type Node = Record<string, unknown>;
 
+/** A BCP 47 tag's shape (`en`, `fr-FR`, `zh-Hant-TW`); anything else in `<language>` counts as none. */
+const LANGUAGE_TAG = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/;
+
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@',
@@ -70,12 +73,14 @@ export function parseNews(body: string, options: NewsOptions = {}): NewsFeed {
   }
 
   let title = '';
+  let language = '';
   let items: NewsFeed['items'] = [];
   const rss = doc.rss as Node | undefined;
   const atom = doc.feed as Node | undefined;
   if (rss && typeof rss === 'object' && rss.channel && typeof rss.channel === 'object') {
     const channel = rss.channel as Node;
     title = text(channel.title);
+    language = text(channel.language);
     items = ((channel.item as Node[] | undefined) ?? []).map((it) => ({
       title: text(it.title),
       published: published(text(it.pubDate) || text(it.date)),
@@ -83,6 +88,7 @@ export function parseNews(body: string, options: NewsOptions = {}): NewsFeed {
     }));
   } else if (atom && typeof atom === 'object') {
     title = text(atom.title);
+    language = text(atom['@lang']);
     items = ((atom.entry as Node[] | undefined) ?? []).map((entry) => ({
       title: text(entry.title),
       published: published(text(entry.updated) || text(entry.published)),
@@ -102,5 +108,5 @@ export function parseNews(body: string, options: NewsOptions = {}): NewsFeed {
     .map((item, index) => ({ item, index, ms: when(item) }))
     .sort((a, b) => b.ms - a.ms || a.index - b.index)
     .map((x) => x.item);
-  return { title, items: items.slice(0, o.maxItems) };
+  return { title, language: LANGUAGE_TAG.test(language) ? language : '', items: items.slice(0, o.maxItems) };
 }

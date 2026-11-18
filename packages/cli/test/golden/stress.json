@@ -88,7 +88,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "fe08a182d1776a5e9955ebd0af095275a0a7392274f0cb962fbfaf7de106a519",
+  "id": "66fa1ed044584ddfc6a88ca5d3e4e3bfaf605dfa1e890d472cd0c99f09fd5c28",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -339,12 +339,17 @@
         "items": {
           "path": "items",
           "source": "news"
+        },
+        "language": {
+          "path": "language",
+          "source": "news"
         }
       },
       "data": {
         "accent": "#ff4d5e",
         "crawlSpeed": 6,
         "items": [],
+        "language": "",
         "source": "NPR",
         "title": "Latest news"
       },
@@ -352,7 +357,7 @@
       "id": "news",
       "kind": "template",
       "name": "NPR headlines",
-      "template": "base/news@1.1.0"
+      "template": "base/news@1.2.0"
     },
     "photo-berries": {
       "assets": {
@@ -842,7 +847,7 @@
         "version": "1.1.0"
       }
     },
-    "base/news@1.1.0": {
+    "base/news@1.2.0": {
       "html": "3ef9671e504266387e8649591684b6f1b0cef3991a3179bf8d0f7b99db9aa620",
       "manifest": {
         "background": "#0b0d12",
@@ -888,6 +893,12 @@
             "maxItems": 30,
             "type": "list"
           },
+          "language": {
+            "default": "",
+            "label": "Feed language (BCP 47, e.g. fr-FR)",
+            "maxLength": 35,
+            "type": "text"
+          },
           "source": {
             "default": "",
             "label": "Source credit",
@@ -909,7 +920,7 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.1.0"
+        "version": "1.2.0"
       }
     },
     "base/photo-promo@1.1.0": {

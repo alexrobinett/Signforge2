@@ -27,12 +27,26 @@ describe('Atom', () => {
   it('reads titles with entities and CDATA, prefers updated over published, and drops untitled entries', () => {
     expect(parseNews(atom)).toEqual({
       title: 'Parks & Recreation Department: Updates',
+      language: 'en',
       items: [
         { title: 'Skating rink opens Saturday – free rentals all weekend', published: '2026-11-17T12:30:00+00:00', source: 'Parks & Recreation Department: Updates' },
         { title: 'Leaf collection: the last pickup for the north side is Nov 20', published: '2026-11-14T08:00:00+00:00', source: 'Parks & Recreation Department: Updates' },
         { title: 'Winter hours start December 1', published: '2026-11-10T14:00:00+00:00', source: 'Parks & Recreation Department: Updates' },
       ],
     });
+  });
+});
+
+describe('language', () => {
+  it("carries the feed's declared language, RSS <language> or Atom xml:lang", () => {
+    expect(parseNews(npr).language).toBe('en');
+    expect(parseNews(atom).language).toBe('en');
+    expect(parseNews(rss('<item><title>Bonjour</title></item>', '').replace('<channel>', '<channel><language> fr-FR </language>')).language).toBe('fr-FR');
+  });
+
+  it('gives an empty language when the feed has none, or one that is not a language tag', () => {
+    expect(parseNews(rss('<item><title>Hi</title></item>')).language).toBe('');
+    expect(parseNews(rss('<item><title>Hi</title></item>').replace('<channel>', '<channel><language>not a <b>tag</b></language>')).language).toBe('');
   });
 });
 

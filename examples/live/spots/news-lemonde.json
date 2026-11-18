@@ -11,6 +11,10 @@
     "items": {
       "source": "news-lemonde",
       "path": "items"
+    },
+    "language": {
+      "source": "news-lemonde",
+      "path": "language"
     }
   }
 }

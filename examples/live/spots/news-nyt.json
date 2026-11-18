@@ -11,6 +11,10 @@
     "items": {
       "source": "news-nyt",
       "path": "items"
+    },
+    "language": {
+      "source": "news-nyt",
+      "path": "language"
     }
   }
 }

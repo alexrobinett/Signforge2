@@ -1,6 +1,6 @@
 {
   "id": "news",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "News",
   "description": "The top story large, the next few below, and every headline in a crawl along the bottom. Bind items to an RSS data source.",
   "fields": {
@@ -17,6 +17,7 @@
         "source": { "type": "text", "label": "Source", "default": "" }
       }
     },
+    "language": { "type": "text", "label": "Feed language (BCP 47, e.g. fr-FR)", "default": "", "maxLength": 35 },
     "accent": { "type": "color", "label": "Accent colour", "default": "#ff4d5e" },
     "crawlSpeed": { "type": "number", "label": "Crawl speed (screen widths per minute)", "default": 6, "min": 2, "max": 20 }
   },
