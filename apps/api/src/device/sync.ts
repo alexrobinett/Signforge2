@@ -8,7 +8,15 @@
  * exists or three if it is new (the row and two index entries). The player sends an hour's counts
  * once the hour has ended, so each (hour, spot) row is written about once.
  */
-import { parseSyncRequest, type DataSnapshot, type DeviceCommand, type DisplayOverride, type SyncRequest, type SyncResponse } from '@signforge/contract';
+import {
+  MAX_SYNC_SOURCES,
+  parseSyncRequest,
+  type DataSnapshot,
+  type DeviceCommand,
+  type DisplayOverride,
+  type SyncRequest,
+  type SyncResponse,
+} from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
 import { liveOverride, type ScreenHeartbeat } from '@signforge/tools';
 import type { Context } from 'hono';
@@ -90,7 +98,8 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
     display: req.display,
     clock: req.clock,
     driftMs: now - Date.parse(req.deviceTime),
-    dataRejected: req.dataRejected ?? {},
+    // A player before gh-45 reports every source seen since it started: kept to a bounded row.
+    dataRejected: Object.fromEntries(Object.entries(req.dataRejected ?? {}).slice(0, MAX_SYNC_SOURCES)),
   };
   const counts = req.playCounts
     .map((p) => ({ hour: Date.parse(p.hour), spotId: p.spot, plays: p.plays, ms: Math.round(p.ms) }))

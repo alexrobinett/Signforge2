@@ -1,6 +1,6 @@
 // The sync (M3-07): one periodic call carries the heartbeat and play counts up, and the desired
 // manifest, changed snapshots, a socket ticket, the server time and commands down.
-import { MANIFEST_SCHEMA, type SyncRequest, type SyncResponse } from '@signforge/contract';
+import { MANIFEST_SCHEMA, MAX_SYNC_SOURCES, type SyncRequest, type SyncResponse } from '@signforge/contract';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -149,6 +149,16 @@ describe('the heartbeat', () => {
     // The device clock is an hour slow: the drift the server saw is about an hour.
     expect(beat!.driftMs).toBeGreaterThan(3_590_000);
     expect(beat!.driftMs).toBeLessThan(3_610_000);
+  });
+
+  it('takes a heartbeat from a player that reports every source it has seen, and stores at most MAX_SYNC_SOURCES', async () => {
+    const s = await setUp('sync-heartbeat-sources');
+    // As a player before gh-45 sends after source turnover: every source since it started, kept across retries.
+    const seen = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 44 }, (_, i) => [`old-${i}`, i]));
+    const first = await sync(s, body({ seq: 1, snapshots: seen, dataRejected: seen, playCounts: [{ hour: HOUR, spot: 'menu', plays: 1, ms: 8000 }] }));
+    expect(first).toMatchObject({ ackSeq: 1, socketTicket: expect.any(String) });
+    const beat = parseHeartbeat((await s.seed.scope.screens.get(s.seed.screen))!.heartbeatJson);
+    expect(Object.keys(beat!.dataRejected)).toHaveLength(MAX_SYNC_SOURCES);
   });
 
   it('refuses a manifest id that is not a sha256, and stores nothing', async () => {
