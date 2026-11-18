@@ -2,7 +2,7 @@
 // database to `compileScreen`. See docs/backend-plan.md#publishing.
 import { compileScreen } from '@signforge/compiler';
 import { templateKey, type ScreenManifest, type Spot, type TemplateManifest } from '@signforge/contract';
-import { platform, published, scoped, type OrgScope } from '@signforge/db';
+import { platform, published, scoped, StaleVersionError, type OrgScope } from '@signforge/db';
 import { seedOrganization, seedScreen } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
@@ -175,7 +175,6 @@ describe('publishOrg', () => {
     expect(published((await org.spots.get(x('deal')))!)).toBeDefined();
     expect(published((await org.spots.get(x('broken')))!)).toBeUndefined();
     const again = await publishOrg(org, opts);
-    expect(again.writes).toEqual([]);
     expect(again.drafts.promoted).toEqual([]);
     expect(again.screens.map((s) => s.manifest!.id)).toEqual(result.screens.map((s) => s.manifest!.id));
   });
@@ -261,6 +260,62 @@ describe('publishOrg', () => {
     const org = scoped(env.DB, 'pub-no-default');
     const only = await org.screens.insert({ name: 'Only', timezone: 'UTC', orientation: 'landscape' });
     expect((await publishOrg(org, opts)).screens).toEqual([{ screenId: only.id, problems: ['the organization has no default playlist'] }]);
+  });
+});
+
+describe('concurrent publishes (R09)', () => {
+  type Publish = Awaited<ReturnType<typeof publishOrg>>;
+  /** Commit a publish as M3-18's publish tool will: its writes and every screen's switch, in one batch. */
+  const commitPublish = (org: OrgScope, result: Publish) =>
+    org.commit([
+      ...result.writes,
+      ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id).writes : [])),
+    ]);
+  const titleOn = (result: Publish, screenId: string) =>
+    (result.screens.find((s) => s.screenId === screenId)!.manifest!.spots[x('deal')] as Extract<Spot, { kind: 'template' }>).data.title;
+  const editDeal = (org: OrgScope, title: string) => org.spots.update(x('deal'), { dataJson: JSON.stringify({ title }) });
+
+  it('refuses an older publish that commits after a newer one, so the newest content stays on screen', async () => {
+    const { org, lobby } = await seedSmallOrg('pub-race-old');
+    await commitPublish(org, await publishOrg(org, opts));
+    await editDeal(org, 'Three for $5');
+    const older = await publishOrg(org, opts);
+    await editDeal(org, 'Four for $6');
+    const newer = await publishOrg(org, opts);
+    expect([titleOn(older, lobby.id), titleOn(newer, lobby.id)]).toEqual(['Three for $5', 'Four for $6']);
+
+    await commitPublish(org, newer);
+    await expect(commitPublish(org, older)).rejects.toBeInstanceOf(StaleVersionError);
+    expect((await org.screens.get(lobby.id))!.desiredManifestId).toBe(newer.screens.find((s) => s.screenId === lobby.id)!.manifest!.id);
+    expect(JSON.parse(published((await org.spots.get(x('deal')))!)!.dataJson!)).toEqual({ title: 'Four for $6' });
+  });
+
+  it('refuses an older publish with nothing to promote, which would switch screens back', async () => {
+    const { org, lobby } = await seedSmallOrg('pub-race-idle');
+    await commitPublish(org, await publishOrg(org, opts));
+    const older = await publishOrg(org, opts);
+    expect(older.drafts.promoted).toEqual([]);
+    await editDeal(org, 'Three for $5');
+    const newer = await publishOrg(org, opts);
+
+    await commitPublish(org, newer);
+    await expect(commitPublish(org, older)).rejects.toBeInstanceOf(StaleVersionError);
+    expect((await org.screens.get(lobby.id))!.desiredManifestId).toBe(newer.screens.find((s) => s.screenId === lobby.id)!.manifest!.id);
+  });
+
+  it('refuses the later of two publishes read at once, and the newest content wins when it runs again', async () => {
+    const { org, lobby } = await seedSmallOrg('pub-race-new');
+    await commitPublish(org, await publishOrg(org, opts));
+    const first = await publishOrg(org, opts);
+    await editDeal(org, 'Three for $5');
+    const second = await publishOrg(org, opts);
+
+    await commitPublish(org, first);
+    await expect(commitPublish(org, second)).rejects.toBeInstanceOf(StaleVersionError);
+    const again = await publishOrg(org, opts);
+    await commitPublish(org, again);
+    expect(titleOn(again, lobby.id)).toBe('Three for $5');
+    expect((await org.screens.get(lobby.id))!.desiredManifestId).toBe(again.screens.find((s) => s.screenId === lobby.id)!.manifest!.id);
   });
 });
 

@@ -147,3 +147,20 @@ describe('promotion from an old read (R09)', () => {
     expect((await org.scheduleEntries.get(r.scheduleEntry))!.publishedJson).toBeNull();
   });
 });
+
+describe('publish order (R09)', () => {
+  it('moves the publish revision on from the one read, and refuses a publish read before another committed', async () => {
+    const p = await seedOrg(env.DB, 'drafts-order');
+    const org = scoped(env.DB, p.orgId);
+    await org.commit((await org.settings.stage.set({ locale: 'en-GB' })).writes);
+    const before = (await org.settings.get())!;
+    expect(before.publishRevision).toBe(0);
+
+    await org.commit(org.publishes.stage.advance(0).writes);
+    const err = await org.commit(org.publishes.stage.advance(0).writes).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleVersionError);
+    expect(err).toMatchObject({ id: 'publish revision', version: 1 });
+    // Not a setting: an open settings form still saves.
+    expect(await org.settings.get()).toEqual({ ...before, publishRevision: 1 });
+  });
+});

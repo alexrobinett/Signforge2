@@ -895,6 +895,34 @@ export function scoped(d1: D1Database, orgId: string) {
 
     publishes: {
       ...publishes,
+      stage: {
+        ...publishes.stage,
+        /**
+         * Put a publish in order: stage moving the org's publish revision on from `revision`, the
+         * one read with the content it compiled (`org_settings.publish_revision`; 0 with no row).
+         * If another publish committed since, the batch fails (`StaleVersionError`, id
+         * `publish revision`) and writes nothing, so an older publish cannot switch screens back
+         * after a newer one. Commit the screens' switches in the same batch. With no settings row
+         * nothing moves, but such an org has no default playlist, so no screen publishes.
+         */
+        advance: (revision: number): Staged => {
+          const read = sql`COALESCE((SELECT ${os.publishRevision} FROM ${os} WHERE ${os.orgId} = ${orgId}), 0)`;
+          const check = db
+            .select({
+              // json() of text that is not JSON raises an error, which aborts the batch.
+              ok: sql`json(CASE WHEN ${read} = ${revision} THEN '1' ELSE 'stale version' END)`,
+            })
+            .from(s.organization)
+            .where(eq(s.organization.id, orgId));
+          const current = async () => (await db.select({ v: os.publishRevision }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 0;
+          // Not a setting: the version and `updatedAt` stay, so an open settings form does not conflict.
+          const move = db
+            .update(os)
+            .set({ publishRevision: sql`${os.publishRevision} + 1`, updatedAt: sql`${os.updatedAt}` })
+            .where(eq(os.orgId, orgId));
+          return { row: undefined, writes: [guard(check, { id: 'publish revision', version: revision, current }), ...staged(undefined, move).writes] };
+        },
+      },
       screens: (publishId: string) =>
         db
           .select({ screenId: ps.screenId, manifestId: ps.manifestId })
