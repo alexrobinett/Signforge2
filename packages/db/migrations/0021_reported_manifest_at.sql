@@ -1,0 +1,1 @@
+ALTER TABLE `screens` ADD `reported_manifest_at` integer;

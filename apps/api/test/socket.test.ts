@@ -312,3 +312,96 @@ describe('revoking a credential whose socket is open', () => {
     expect(res.webSocket).toBeNull();
   });
 });
+
+describe('the order of reports (gh-44)', () => {
+  // Well in the past, so every observation here is before it arrives.
+  const t0 = Date.now() - 600_000;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const ticketFor = async (s: Screen) => ((await (await sync(s.credential)).json()) as SyncResponse).socketTicket;
+  /** A sync reporting `active`, observed at `at` on a trusted clock that runs 5 s behind the server's. */
+  const syncObserved = (s: Screen, active: string, at: number) =>
+    sync(s.credential, { ...syncBody(), manifest: { active, filesMissing: 0 }, deviceTime: iso(at - 5000), clock: { offsetMs: 5000, trusted: true } });
+  const applied = (ws: WebSocket, manifest: string, observedAt?: number) =>
+    ws.send(JSON.stringify({ type: 'applied', manifest, ...(observedAt === undefined ? {} : { observedAt: iso(observedAt) }) }));
+  const reported = async (s: Screen) => (await s.seed.scope.screens.get(s.seed.screen))?.reportedManifestId;
+  /** Long enough for the object to have written, or skipped, what the socket just sent. */
+  const settle = () => new Promise((r) => setTimeout(r, 200));
+
+  it('keeps what the socket reported over a sync observed before it that arrives after', async () => {
+    const c = await setUp('ws-g');
+    await dispatch(registry, 'publish_manifest_to_screen', { screenId: c.seed.screen, manifestId: M2 }, caller(c));
+    const s = await connect(await ticketFor(c));
+    applied(s.ws, M2, t0 + 20_000);
+    await reportedIs(c, M2);
+    // The sync was built on M1 at t0 + 10 s and was still in flight.
+    expect((await syncObserved(c, M1, t0 + 10_000)).status).toBe(200);
+    expect(await reported(c)).toBe(M2);
+    const r = await dispatch(registry, 'get_screen', { screenId: c.seed.screen }, caller(c));
+    expect(r.ok && (r.output as { screen: { state: { kind: string } } }).screen.state.kind).toBe('online');
+    s.ws.close(1000);
+  });
+
+  it('takes the newer observation over either transport, keeps the first of two at one time, and leaves the version alone', async () => {
+    const c = await setUp('ws-h');
+    const before = (await c.seed.scope.screens.get(c.seed.screen))!;
+    const s = await connect(await ticketFor(c));
+    applied(s.ws, M2, t0 + 20_000);
+    await reportedIs(c, M2);
+    await syncObserved(c, M1, t0 + 30_000);
+    expect(await reported(c)).toBe(M1);
+    applied(s.ws, M2, t0 + 40_000);
+    await reportedIs(c, M2);
+    applied(s.ws, M1, t0 + 35_000);
+    await settle();
+    expect(await reported(c)).toBe(M2);
+    await syncObserved(c, M1, t0 + 40_000);
+    expect(await reported(c)).toBe(M2);
+    applied(s.ws, M1, t0 + 40_000);
+    await settle();
+    expect(await reported(c)).toBe(M2);
+    expect(await c.seed.scope.screens.get(c.seed.screen)).toMatchObject({ rowVersion: before.rowVersion, updatedAt: before.updatedAt });
+    s.ws.close(1000);
+  });
+
+  it('moves the time on a newer repeat over the socket, so a sync observed before it cannot win', async () => {
+    const c = await setUp('ws-k');
+    const s = await connect(await ticketFor(c));
+    applied(s.ws, M2, t0 + 20_000);
+    await reportedIs(c, M2);
+    // The screen went M2, M1 (never reported on the socket), M2 again: the resend is newer.
+    applied(s.ws, M2, t0 + 60_000);
+    await settle();
+    // A sync built on M1 at t0 + 40 s lands after the resend.
+    await syncObserved(c, M1, t0 + 40_000);
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
+  it('orders a report without a time, or from an untrusted clock, by when it arrived', async () => {
+    const c = await setUp('ws-i');
+    const s = await connect(await ticketFor(c));
+    applied(s.ws, M2, t0 + 20_000);
+    await reportedIs(c, M2);
+    // A player from before gh-44.
+    applied(s.ws, M1);
+    await reportedIs(c, M1);
+    // An untrusted clock, whatever time it says.
+    await sync(c.credential, { ...syncBody(), manifest: { active: M2, filesMissing: 0 }, deviceTime: iso(t0), clock: { offsetMs: 0, trusted: false } });
+    expect(await reported(c)).toBe(M2);
+    // A report by arrival is a time a later observation is ordered against: this one was before it.
+    await syncObserved(c, M1, t0 + 30_000);
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
+  it('counts an observation later than its arrival as its arrival, so a clock ahead cannot hold the column', async () => {
+    const c = await setUp('ws-j');
+    const s = await connect(await ticketFor(c));
+    applied(s.ws, M2, Date.now() + 3_600_000);
+    await reportedIs(c, M2);
+    await new Promise((r) => setTimeout(r, 20));
+    await syncObserved(c, M1, Date.now());
+    expect(await reported(c)).toBe(M1);
+    s.ws.close(1000);
+  });
+});

@@ -87,7 +87,11 @@ export class ScreenObject extends DurableObject<Env> {
     if (!(await liveCredentials(this.env.DB, holder.screenId)).has(holder.credentialId)) return closeRevoked(ws);
     // The screen reporting about itself, through its org's scope: the only write the socket makes.
     // Not skipped when this object saw the same id last: a sync may have reported another since.
-    await scoped(this.env.DB, holder.orgId).screens.reportManifest(holder.screenId, parsed.value.manifest);
+    const { manifest, observedAt } = parsed.value;
+    await scoped(this.env.DB, holder.orgId).screens.reportManifest(holder.screenId, manifest, {
+      ...(observedAt !== undefined && { observedAt: Date.parse(observedAt) }),
+      arrivedAt: Date.now(),
+    });
   }
 
   override async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {

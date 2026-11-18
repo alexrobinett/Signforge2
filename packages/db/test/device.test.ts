@@ -52,6 +52,17 @@ describe('screens.setDesiredManifest', () => {
   });
 });
 
+describe('screens.reportManifest', () => {
+  it('lets a report without a time replace one observed later, and counts it at its arrival', async () => {
+    const r = await seedOrg(env.DB, 'org-report');
+    const [m1, m2] = ['1'.repeat(64), '2'.repeat(64)];
+    await r.scope.screens.reportManifest(r.screen, m2, { observedAt: 200, arrivedAt: 300 });
+    // A player before gh-44 (or an untrusted clock): ordered by arrival, so it always replaces.
+    await r.scope.screens.reportManifest(r.screen, m1, { arrivedAt: 100 });
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m1, reportedManifestAt: 100 });
+  });
+});
+
 describe('screens.sync', () => {
   const HOUR = Date.UTC(2026, 10, 18, 9);
   const beat = (over: Partial<Parameters<ReturnType<typeof scoped>['screens']['sync']>[1]> = {}) => ({

@@ -710,6 +710,8 @@ const socket = API
       ticket: () => nextTicket(),
       onNudge: () => poll.wake(),
       onCommand: command,
+      // An untrusted clock's time cannot be ordered against the server's: the report goes by arrival.
+      observedAt: () => (clock.trusted ? new Date(now()).toISOString() : undefined),
       // `revoked` on the socket. A refused sync is handled by the sync loop.
       onUnauthorised: () => {
         if (credential?.held) void revoked().then(() => poll.wake());
