@@ -26,16 +26,14 @@ function SignInPage() {
   const next = safeRedirect(target);
 
   return (
-    <div className="grid min-h-dvh lg:grid-cols-[1.05fr_1fr]">
-      <BrandPanel />
-      <main className="flex flex-col px-4 py-8 sm:px-8">
-        <div className="lg:hidden">
-          <Logo />
-        </div>
-        <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center py-10">
+    <div className="flex min-h-dvh flex-col bg-card md:flex-row">
+      <RenderWall />
+      <main className="flex min-w-0 flex-[1_1_26rem] flex-col justify-between gap-10 px-5 py-8 sm:px-[clamp(1.25rem,6vw,5.5rem)] sm:py-10">
+        <Logo />
+        <div className="w-full max-w-[25rem]">
           <SignInForm options={options} next={next} />
         </div>
-        <p className="text-center text-xs text-muted-foreground">No password to remember. We email you a code each time.</p>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">New here? Signing in creates your account, and then your organization.</p>
       </main>
     </div>
   );
@@ -77,13 +75,13 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
 
   if (step === 'code') {
     return (
-      <div className="space-y-6">
+      <div className="space-y-7">
         <div className="space-y-2">
           {/* Focused on arrival, so a screen reader announces the new step. */}
-          <h1 ref={focusOnMount} tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none">
+          <h1 ref={focusOnMount} tabIndex={-1} className="text-[34px] leading-[1.15] font-semibold tracking-tight outline-none">
             Check your email
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-base leading-normal text-muted-foreground">
             We sent a 6-digit code to <span className="font-medium text-foreground">{email.trim()}</span>. It expires in 10 minutes.
           </p>
         </div>
@@ -103,11 +101,11 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
               required
               aria-invalid={error ? true : undefined}
               aria-describedby={describedBy}
-              className="h-12 text-center font-mono text-xl tracking-[0.5em] md:text-xl"
+              className="h-16 px-4 font-mono text-[32px] tracking-[0.5em] md:text-[32px]"
             />
           </div>
           <FormMessages error={error} errorId={errorId} notice={notice} />
-          <Button type="submit" size="lg" className="w-full" disabled={code.length !== 6 || pending !== null}>
+          <Button type="submit" size="lg" className="h-12 w-full text-base font-semibold" disabled={code.length !== 6 || pending !== null}>
             {pending === 'verify' && <LoaderCircleIcon className="animate-spin" aria-hidden />}
             {pending === 'verify' ? 'Signing in…' : 'Sign in'}
           </Button>
@@ -125,25 +123,12 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Sign in to SignForge</h1>
-        <p className="text-sm text-muted-foreground">Enter your email and we will send you a sign-in code. New here? The same step creates your account.</p>
+        <h1 className="text-[34px] leading-[1.15] font-semibold tracking-tight">Sign in to SignForge</h1>
+        <p className="text-base leading-normal text-muted-foreground">We will email you a 6-digit code. No password to remember.</p>
       </div>
-      {options.github && (
-        <>
-          <Button variant="outline" size="lg" className="w-full" onClick={() => void signInWithGitHub(next)} disabled={pending !== null}>
-            {pending === 'github' ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <GitHubMark className="size-4" />}
-            Continue with GitHub
-          </Button>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground" aria-hidden>
-            <span className="h-px flex-1 bg-border" />
-            or
-            <span className="h-px flex-1 bg-border" />
-          </div>
-        </>
-      )}
-      <form onSubmit={onEmailSubmit} className="space-y-4" noValidate>
+      <form onSubmit={onEmailSubmit} className="space-y-7" noValidate>
         <div className="space-y-2">
           <Label htmlFor={emailId}>Email</Label>
           <Input
@@ -153,18 +138,41 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
             value={email}
             onChange={(e) => editEmail(e.target.value)}
             autoComplete="email"
-            placeholder="you@company.com"
+            placeholder="you@yourbusiness.com"
             required
             autoFocus
             aria-invalid={error ? true : undefined}
             aria-describedby={describedBy}
+            className="h-12 text-base md:text-base"
           />
         </div>
         <FormMessages error={error} errorId={errorId} notice={null} />
-        <Button type="submit" size="lg" className="w-full" disabled={!/^\S+@\S+\.\S+$/.test(email.trim()) || pending !== null}>
-          {pending === 'send' ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <MailIcon aria-hidden />}
-          {pending === 'send' ? 'Sending code…' : 'Email me a code'}
-        </Button>
+        <div className="space-y-3">
+          <Button type="submit" size="lg" className="h-12 w-full text-base font-semibold" disabled={!/^\S+@\S+\.\S+$/.test(email.trim()) || pending !== null}>
+            {pending === 'send' ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <MailIcon aria-hidden />}
+            {pending === 'send' ? 'Sending code…' : 'Email me a code'}
+          </Button>
+          {options.github && (
+            <>
+              <div className="flex items-center gap-3 text-[13px] text-muted-foreground" aria-hidden>
+                <span className="h-px flex-1 bg-border" />
+                or
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="h-12 w-full text-base"
+                onClick={() => void signInWithGitHub(next)}
+                disabled={pending !== null}
+              >
+                {pending === 'github' ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <GitHubMark className="size-5" />}
+                Continue with GitHub
+              </Button>
+            </>
+          )}
+        </div>
       </form>
       {options.codesInTerminal && <DevCodeHint />}
     </div>
@@ -199,29 +207,48 @@ function DevCodeHint() {
   );
 }
 
-/** The left half at desktop width: a picture of what the product does. Decorative. */
-function BrandPanel() {
+/** Spots the SignForge player rendered (scripts/spot-shots.ts on examples/stress), tilted into a wall. */
+const WALL: { src: string; alt: string }[][] = [
+  [
+    { src: 'sport-drinks-1080x1920', alt: 'Sport drinks 2 for $4 promo, portrait' },
+    { src: 'clock-1920x1080', alt: 'Clock spot' },
+    { src: 'weather-rain-1920x1080', alt: 'Weather spot, rain in Seattle' },
+  ],
+  [
+    { src: 'energy-1920x1080', alt: 'Energy drinks 3 for $7 promo' },
+    { src: 'menu-1080x1920', alt: 'Coffee bar menu board, portrait' },
+    { src: 'meeting-room-1920x1080', alt: 'Room 4B bookings' },
+  ],
+  [
+    { src: 'weather-live-1080x1920', alt: 'Atlanta weather, portrait' },
+    { src: 'sport-drinks-1920x1080', alt: 'Sport drinks promo' },
+    { src: 'weather-snow-1920x1080', alt: 'Weather spot, snow in Denver' },
+  ],
+];
+
+/** The left half (the top on phones): what the product makes, drawn by the real player. */
+function RenderWall() {
   return (
-    <aside className="relative hidden overflow-hidden bg-[oklch(0.22_0.06_272)] p-10 text-white lg:flex lg:flex-col" aria-label="About SignForge">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,oklch(0.55_0.2_275/0.45),transparent_55%),radial-gradient(circle_at_90%_90%,oklch(0.6_0.15_200/0.3),transparent_50%)]" />
-      <Logo inverse className="relative" />
-      <div className="relative my-auto space-y-10">
-        <div aria-hidden className="mx-auto w-full max-w-md">
-          <div className="rounded-xl border border-white/15 bg-white/5 p-3 shadow-2xl backdrop-blur">
-            <div className="grid aspect-video grid-cols-3 grid-rows-2 gap-2 rounded-lg bg-black/40 p-2">
-              <div className="col-span-2 row-span-2 rounded-md bg-gradient-to-br from-indigo-400/80 to-cyan-300/70" />
-              <div className="rounded-md bg-white/15" />
-              <div className="rounded-md bg-white/10" />
-            </div>
+    <section
+      aria-label="Spots rendered by the SignForge player"
+      className="relative flex h-64 flex-col overflow-hidden bg-[#0e0f12] md:h-auto md:min-h-dvh md:flex-[1_1_35rem]"
+    >
+      <div className="-mt-10 grid flex-1 origin-[40%_30%] -rotate-[4deg] scale-[1.12] grid-cols-3 gap-3.5 px-3.5">
+        {WALL.map((column, i) => (
+          <div
+            key={column[0]!.src}
+            className={i === 0 ? 'flex flex-col gap-3.5 pt-[60px]' : i === 2 ? 'flex flex-col gap-3.5 pt-[120px]' : 'flex flex-col gap-3.5'}
+          >
+            {column.map((spot) => (
+              <img key={spot.src} src={`/sign-in/${spot.src}.webp`} alt={spot.alt} className="block w-full rounded-[10px]" loading="eager" decoding="async" />
+            ))}
           </div>
-          <div className="mx-auto h-6 w-2 bg-white/15" />
-          <div className="mx-auto h-1.5 w-24 rounded-full bg-white/15" />
-        </div>
-        <div className="max-w-md space-y-3">
-          <p className="text-2xl font-semibold tracking-tight">Every screen, on time, even offline.</p>
-          <p className="text-white/75">Build spots and playlists, schedule them, and publish to every screen in your organization at once.</p>
-        </div>
+        ))}
       </div>
-    </aside>
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0e0f12f5] from-30% to-transparent px-6 pt-28 pb-6 text-[#ededef] sm:px-10 sm:pb-9">
+        <p className="text-[13px] tracking-[0.08em] text-[#b4b6be] uppercase">Rendered by the SignForge player</p>
+        <p className="mt-2 max-w-[30ch] text-lg leading-snug font-medium sm:text-[22px]">Every spot here is a template filled in by someone in the CMS.</p>
+      </div>
+    </section>
   );
 }

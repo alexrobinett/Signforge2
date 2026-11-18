@@ -17,6 +17,7 @@ import {
   FORBIDDEN_CSS,
   FORBIDDEN_TEMPLATE_CODE,
   ID_PATTERN,
+  MAX_IDENTIFY_SECONDS,
   MAX_SYNC_PLAY_COUNTS,
   PREVIEW_PROTOCOL,
   SUPPORTED_MANIFEST_SCHEMAS,
@@ -624,9 +625,16 @@ function overrideProblems(o: unknown): string[] {
 /** One command from the server, in a sync response or over the socket. */
 export function validateDeviceCommand(c: unknown): string[] {
   if (!isObj(c)) return ['command is not an object'];
-  if (c.type === 'reload' || c.type === 'reboot') return [];
+  if (c.type === 'reload' || c.type === 'restart' || c.type === 'reboot') return [];
   if (c.type === 'display') return c.override === null ? [] : overrideProblems(c.override);
-  return ['command type must be reload, display or reboot'];
+  if (c.type === 'identify') {
+    const errors: string[] = [];
+    if (!isStr(c.name) || !c.name.trim() || c.name.length > 100) errors.push('identify needs the name to show, 1 to 100 characters');
+    if (!Number.isInteger(c.seconds) || (c.seconds as number) < 1 || (c.seconds as number) > MAX_IDENTIFY_SECONDS)
+      errors.push(`identify seconds must be a whole number from 1 to ${MAX_IDENTIFY_SECONDS}`);
+    return errors;
+  }
+  return ['command type must be reload, restart, display, identify or reboot'];
 }
 
 function displayStatusProblems(d: unknown): string[] {

@@ -41,7 +41,7 @@ const claimScreen = defineTool({
   output: z.object({ screen: screenOutput }),
   example: { code: 'ABC234', name: 'Lobby', timezone: 'Europe/London', orientation: 'landscape' },
   target: (_input, output) => ({ kind: 'screen', id: output.screen.id }),
-  handler: async ({ org, input, write, rateLimit }) => {
+  handler: async ({ org, input, write, rateLimit, blobs }) => {
     if (!rateLimit) throw new ToolError('forbidden', 'claim_screen needs a rate limit, and this caller has none');
     // Counted before the code is looked at, so right and wrong guesses cost the same.
     if (!(await rateLimit('pairing_claim'))) throw new ToolError('rate_limited', 'too many pairing claims; wait a minute and try again');
@@ -59,7 +59,7 @@ const claimScreen = defineTool({
     );
     // After the screen: the code references it. Fails the whole batch if another claim won the code.
     write(org.pairing.stage.claim(input.code, screen.id, now));
-    return { screen: screenView(screen) };
+    return { screen: await screenView(org, screen, blobs, Date.now(), []) };
   },
   // The claim's guard failed the batch: another claim took the code (or it expired) since `open`.
   refuseFailedCommit: async ({ org, input }) => ((await org.pairing.open(input.code, Date.now())) ? undefined : notOpen(input.code)),

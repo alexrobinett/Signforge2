@@ -8,8 +8,9 @@
  * exists or three if it is new (the row and two index entries). The player sends an hour's counts
  * once the hour has ended, so each (hour, spot) row is written about once.
  */
-import { parseSyncRequest, type DataSnapshot, type DeviceCommand, type SyncRequest, type SyncResponse } from '@signforge/contract';
+import { parseSyncRequest, type DataSnapshot, type DeviceCommand, type DisplayOverride, type SyncRequest, type SyncResponse } from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
+import { liveOverride, type ScreenHeartbeat } from '@signforge/tools';
 import type { Context } from 'hono';
 import type { DeviceEnv } from './auth';
 import { screenManifests, type ManifestSummary } from './manifests';
@@ -19,27 +20,6 @@ import { issueTicket } from './ticket';
 const SYNC_INTERVAL_S = 300;
 /** Counts for an hour this far past the server's are not believed: the screen's clock is wrong. */
 const FUTURE_SLACK_MS = 3_600_000;
-
-/** What the last sync reported, kept on the screen row as `heartbeat_json` for the CMS. */
-export interface ScreenHeartbeat {
-  at: number;
-  player: SyncRequest['player'];
-  manifest: SyncRequest['manifest'];
-  display: SyncRequest['display'];
-  clock: SyncRequest['clock'];
-  /** Server time minus the screen's own uncorrected clock when it sent the sync, in ms. */
-  driftMs: number;
-  dataRejected: Record<string, number>;
-}
-
-export function parseHeartbeat(json: string | null | undefined): ScreenHeartbeat | undefined {
-  if (!json) return undefined;
-  try {
-    return JSON.parse(json) as ScreenHeartbeat;
-  } catch {
-    return undefined;
-  }
-}
 
 const refuse = (status: number, error: string) => new Response(JSON.stringify({ error }), { status, headers: { 'content-type': 'application/json' } });
 
@@ -55,6 +35,19 @@ async function changedSnapshots(env: Env, screen: DeviceScreen, desired: Manifes
   return rows
     .filter((r) => r.fetchedAt > (held[r.dataSourceId] ?? -1))
     .map((r) => ({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), data: JSON.parse(r.dataJson) as unknown }));
+}
+
+const sameOverride = (a: DisplayOverride | null, b: DisplayOverride | null) =>
+  a?.state === b?.state && (a === null || Date.parse(a.until) === Date.parse(b!.until));
+
+/**
+ * The CMS's display override (wake now, sleep now), while the screen reports another: one it
+ * missed on the socket, or one cleared since. Nothing once it has ended, as the screen ends it too.
+ */
+function overrideCommand(screen: DeviceScreen, held: DisplayOverride | undefined, now: number): DeviceCommand | undefined {
+  const want = liveOverride(screen.displayOverrideJson, now);
+  const has = held && Date.parse(held.until) > now ? held : null;
+  return sameOverride(want, has) ? undefined : { type: 'display', override: want };
 }
 
 export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
@@ -97,6 +90,8 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   if (!stored) return refuse(401, 'unauthorized');
   const desired = manifests.find((m) => m.id === screen.desiredManifestId);
   const commands: DeviceCommand[] = desired && !canPlay(req.player, desired) ? [{ type: 'reload' }] : [];
+  const display = overrideCommand(screen, req.display.override, now);
+  if (display) commands.push(display);
 
   const res: SyncResponse = {
     serverTime: new Date().toISOString(),

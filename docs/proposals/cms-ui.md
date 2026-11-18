@@ -1,6 +1,6 @@
 # Proposal: the CMS interface on shadcn/ui
 
-Status: proposal, 2026-11-17. Direction from the owner: Landing A (navy, product-led) for the marketing page; the app itself neutral white, not paper; shadcn as the base, with our own components where the product needs them.
+Status: proposal, 2026-11-17. Decided the same day: Geist, and the token change with M3-11, which landed it (`apps/cms/src/styles.css`, checked by `apps/cms/test/tokens.test.ts`). M3-11 also added `--status-needs-you` (red, the triangle) beside the four states, made `--status-offline` grey, and added `--border-strong` for outline buttons and `--primary-disabled`. Direction from the owner: Landing A (navy, product-led) for the marketing page; the app itself neutral white, not paper; shadcn as the base, with our own components where the product needs them.
 
 ## Where we are
 
