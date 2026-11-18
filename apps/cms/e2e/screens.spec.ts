@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -47,6 +47,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   test.setTimeout(120_000);
   await page.goto('/sign-in');
   await hydrated(page);
+  await axe(page);
   await shots(page, '10-sign-in');
   await signInAs(page, `e2e-screens-${Date.now()}@example.com`, ADDRESS);
   await page.goto('/');
@@ -57,6 +58,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   // Empty: one path, pairing, with the code input on the page.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
   await expect(page.getByRole('heading', { name: 'See your first spot on a screen' })).toBeVisible();
+  await axe(page);
   await shots(page, '11-screens-empty');
 
   const screen = await startPairing(request);
@@ -101,11 +103,13 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await hours.getByRole('button', { name: 'Saturday' }).click();
   await hours.getByLabel('On at').fill('07:00');
   await hours.getByLabel('Off at').fill('19:00');
+  await axe(page);
   await shots(page, '12-display-hours');
   await hours.getByRole('button', { name: 'Save' }).click();
   await expect(hours).toBeHidden();
   await expect(page.getByText('Mon–Fri 07:00–19:00').first()).toBeVisible();
   await expect(page.getByText('Display hours changed').first()).toBeVisible();
+  await axe(page);
   await shots(page, '13-screen-detail');
 
   // A date with morning and evening hours keeps both through a save, and through an edit of one.
@@ -145,19 +149,23 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await page.getByRole('link', { name: 'Screens', exact: true }).first().click();
   await expect(page.getByRole('link', { name: 'Lobby' })).toBeVisible();
   await expect(page.getByRole('status').filter({ hasText: '1 screen' })).toBeVisible();
+  await axe(page);
   await shots(page, '14-screens-tiles');
   await page.getByRole('button', { name: 'Table' }).click();
   await expect(page).toHaveURL(/view=table/);
   await expect(page.getByRole('rowheader', { name: /Lobby/ })).toBeVisible();
+  await axe(page);
   await shots(page, '15-screens-table');
 
   await page.setViewportSize({ width: 412, height: 915 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Tiles' }).click();
+  await axe(page);
   await shots(page, '16-phone-screens');
   await page.getByRole('link', { name: 'Lobby' }).click();
   await expect(page.getByRole('heading', { name: 'Lobby', level: 1 })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
   await shots(page, '17-phone-screen-detail');
   await page.setViewportSize({ width: 1280, height: 720 });
 

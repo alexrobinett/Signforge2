@@ -207,7 +207,12 @@ function RoleTable() {
     yes ? <CheckIcon className="mx-auto size-4" aria-label="Yes" /> : <MinusIcon className="mx-auto size-4 text-muted-foreground" aria-label="No" />;
   return (
     <SettingsSection id={`${id}-roles`} title="What each role can do">
-      <div className="overflow-x-auto">
+      <section
+        aria-label="What each role can do"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: it scrolls at phone width and holds nothing focusable, so it takes focus itself, else a keyboard cannot scroll it (WCAG 2.1.1).
+        tabIndex={0}
+        className="overflow-x-auto rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      >
         <table className="w-full min-w-[28rem] text-sm">
           <thead className="text-muted-foreground">
             <tr>
@@ -234,7 +239,7 @@ function RoleTable() {
             ))}
           </tbody>
         </table>
-      </div>
+      </section>
     </SettingsSection>
   );
 }

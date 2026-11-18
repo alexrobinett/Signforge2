@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { fillUntilEnabled, hydrated, screenshot, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, screenshot, signInAs } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
@@ -24,6 +24,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await expect(search).toBeFocused();
   await expect(menu.getByRole('option', { name: /claim_screen/ })).toBeVisible();
   await expect(menu.getByRole('option', { name: /revoke_screen_credential/ })).toHaveCount(1);
+  await axe(page);
   await screenshot(page, '30-command-menu');
 
   // Filter to a tool that needs input, run it from its form: pair a screen a player started.
@@ -38,6 +39,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.keyboard.type('Deli counter');
   await page.keyboard.press('Tab');
   await page.keyboard.type('Europe/London');
+  await axe(page);
   await screenshot(page, '31-command-form');
   await page.keyboard.press('Enter');
   await expect(toast('Deli counter')).toBeVisible();

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { png } from '@signforge/media/testing';
-import { fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.31';
@@ -29,7 +29,7 @@ test.describe.configure({ mode: 'serial' });
 let page: Page;
 
 test.beforeAll(async ({ browser }) => {
-  page = await browser.newPage();
+  page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-spots-${Date.now()}@example.com`, ADDRESS);
   await page.goto('/');
   await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
@@ -37,7 +37,7 @@ test.beforeAll(async ({ browser }) => {
   await expect(page.getByRole('heading', { name: 'Northside Market', level: 1 })).toBeVisible();
 });
 
-test.afterAll(() => page.close());
+test.afterAll(() => page.context().close());
 
 test('make a spot from a template, see it on the real player as you type, and keep it as a draft', async () => {
   test.setTimeout(120_000);
@@ -64,6 +64,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   console.log(`stage updated ${latency} ms after the keystroke (Playwright's own polling included)`);
   expect(latency).toBeLessThan(1_000);
   await expect(page.getByText(/Saved \d/)).toBeVisible();
+  await axe(page);
   await shots(page, '30-spot-editor');
 
   // Invalid: the contract's message by the field, the stage keeps the last frame, nothing is saved.
@@ -73,6 +74,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await expect(stage.getByText('Holding the last valid frame until the marked field is fixed.')).toBeVisible();
   await expect(page.getByText('Not saved: fix the marked field')).toBeVisible();
   expect(await stageShows(page, 'Welcome to Northside')).toBe(true);
+  await axe(page);
   await shots(page, '31-spot-editor-invalid');
   await greeting.fill('Good to see you');
   await expect.poll(() => stageShows(page, 'Good to see you'), { timeout: 5_000 }).toBe(true);
@@ -83,6 +85,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await expect(page).toHaveURL(/[?&]o=portrait/);
   await expect(stage.getByText('1080 × 1920 ·', { exact: false })).toBeVisible();
   await expect.poll(() => stageShows(page, 'Good to see you'), { timeout: 30_000 }).toBe(true);
+  await axe(page);
   await shots(page, '32-spot-editor-portrait');
 
   // The draft was saved: a reload opens it as it was left.
@@ -145,10 +148,12 @@ test('every base template can be configured and previewed', async () => {
       await expect.poll(() => stageShows(page, 'Edited'), { message: t.key, timeout: 10_000 }).toBe(true);
       await expect(page.getByText(/Saved \d/), t.key).toBeVisible();
     }
+    await axe(page);
     await shots(page, `33-template-${t.key}`);
   }
   // At phone width the form and the stage stack.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('region', { name: 'Live preview' })).toBeVisible();
+  await axe(page);
   await shots(page, '34-spot-editor-phone');
 });
