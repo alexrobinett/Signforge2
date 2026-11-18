@@ -19,6 +19,23 @@ export const idempotencyKey = z
     'A key you choose for this one creation, such as a UUID. Retrying with the same key and input returns the first result and creates nothing more; reusing it for another input is refused',
   );
 
+/**
+ * On an update tool: the `version` of the row as the caller read it. The dispatcher refuses the
+ * call with `conflict`, details `{ id, version }` (the version now), if the row has changed since,
+ * and writes nothing. The check runs in the batch that writes the change.
+ */
+export const ifVersion = z
+  .number()
+  .int()
+  .positive()
+  .optional()
+  .describe(
+    'The version you read. If the row has changed since, nothing is written and the call is refused with conflict, details { id, version }: read it again and redo the change. Omit to change it whatever its version',
+  );
+
+/** A row's version, on the view of every row an update tool changes. */
+export const version = z.number().int().describe('Moves on with every change; pass it as ifVersion to update only what you read');
+
 export const name = (what: string) => z.string().trim().min(1, `the ${what} needs a name`).max(100).describe(`The ${what}'s name, 1 to 100 characters`);
 
 export const timezone = z.string().refine(validTimezone, 'not an IANA time zone').describe('IANA time zone, such as Europe/London');
