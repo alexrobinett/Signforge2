@@ -429,3 +429,7 @@ Notes on the sketch:
 **Size method.** Packages were installed with `--ignore-scripts` in a scratch directory. Each entry re-exported only the named APIs listed in the text, and was bundled with esbuild 0.28.2 (`--bundle --minify --format=esm --platform=browser`, `process.env.NODE_ENV="production"`), with React, React DOM and TanStack Router external, then compressed with `gzip -9`. Real app bundles differ with what is imported and how the bundler splits chunks.
 
 **Repo sources:** `docs/backend-plan.md`, `docs/architecture.md`, `packages/tools/README.md`, `docs/research/cms-ux.md`, `docs/proposals/cms-ui.md`, `docs/tickets/M3-11`, `M3-16`, `M3-18`, `M3-36`, `apps/cms` on `m3-foundations`, the `m3-11-cms-screens` worktree (`src/lib/tools.ts`, `src/lib/live.ts`, `src/server/screens.functions.ts`, `src/routes/_app/screens/`), and the `t3/cms-react-lint` worktree (`eslint.config.js`, `src/lib/orgs.ts`).
+
+## Decision (owner, 2026-11-17)
+
+TanStack Query for server data; Zustand for UI and flow state (mutations are store actions that call the tool and update the Query cache); the URL for anything a link carries. Fleet status polls for now. Reads are written with `queryOptions` keys and fetch functions so TanStack DB collections (Query collection, then a per-org Durable Object change stream) can take over for the editors and the fleet once DB 1.0 is stable. Lost updates are fixed in the tools first (M3-44).

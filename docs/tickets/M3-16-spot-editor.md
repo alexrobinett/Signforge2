@@ -1,6 +1,6 @@
 # M3-16 Spot editor
 
-Status: open  ·  Size: L  ·  Depends on: M3-14, M3-15, M3-13, M3-34, M3-36, M3-38
+Status: open  ·  Size: L  ·  Depends on: M3-14, M3-15, M3-13, M3-34, M3-36, M3-38, M3-44
 
 ## Goal
 
