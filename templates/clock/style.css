@@ -5,29 +5,29 @@
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
-body { font-family: "Inter", sans-serif; color: #fff; font-feature-settings: "tnum" 1; }
+body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--sf-text, #fff); font-feature-settings: "tnum" 1; }
 /* Clock. Dark by default (kind to OLED panels), and the whole block drifts slowly so no pixel
    holds the same value for long when the clock is left up for an hour. */
-:root { --accent: #7cc4ff; }
-html, body { background: #05070d; }
+:root { --accent: var(--sf-accent, #7cc4ff); --bg: var(--sf-bg, #05070d); }
+html, body { background: var(--bg); }
 .stage { --u: 1vmin; --out: calc(var(--sf-duration, 10s) - 0.6s); position: fixed; inset: 0; overflow: hidden;
-  background: radial-gradient(120% 120% at 50% 110%, #101a33 0%, #05070d 60%); display: grid; place-items: center; }
+  background: var(--bg); display: grid; place-items: center; }
 .blob { position: absolute; border-radius: 50%; opacity: .5; will-change: transform; animation: wander 40s ease-in-out infinite alternate; }
 /* The accent glow sits behind the time, wide and faint, so it reads as light, not a smudge. It is
    static: scaling a layer this size cost the Pi 4 about 4% of frames and stalls of up to half a
    second while the time repainted above it. */
 .b1 { width: 130vmin; height: 90vmin; left: 50%; top: 50%; margin: -45vmin 0 0 -65vmin; opacity: .4; animation: none; will-change: auto;
   background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 30%, transparent), color-mix(in srgb, var(--accent) 10%, transparent) 55%, transparent); }
-/* The second glow read as a leftover patch in the corner (visual review); it is gone. */
-.b2 { display: none; }
+/* Only the centred glow: a second glow, and later a gradient rising from below the screen, read as
+   a leftover patch in the bottom-right corner (visual reviews). */
 .content { position: relative; text-align: center; will-change: transform; animation: drift 90s ease-in-out infinite alternate; }
 .content > * { will-change: transform, opacity; animation: rise-in .9s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards; }
 .greeting { font-size: calc(var(--u) * 5); font-weight: 600; color: var(--accent); letter-spacing: .02em; animation-delay: .1s, var(--out); }
 .time { font-size: calc(var(--u) * 30); font-weight: 800; line-height: 1; letter-spacing: -.04em; animation-delay: .25s, var(--out); }
-.time .sec { font-size: .35em; font-weight: 600; color: rgba(255,255,255,.55); margin-left: .12em; letter-spacing: 0; }
+.time .sec { font-size: .35em; font-weight: 600; color: color-mix(in srgb, var(--sf-text, #fff) 55%, transparent); margin-left: .12em; letter-spacing: 0; }
 .time .ampm { font-size: .22em; font-weight: 700; margin-left: .2em; letter-spacing: .04em; vertical-align: .9em; }
-.date { font-size: calc(var(--u) * 5.6); font-weight: 500; color: rgba(255,255,255,.82); animation-delay: .4s, var(--out); }
-.message { font-size: calc(var(--u) * 3.6); font-weight: 500; color: rgba(255,255,255,.7); margin-top: calc(var(--u) * 4); animation-delay: .55s, var(--out); }
+.date { font-size: calc(var(--u) * 5.6); font-weight: 500; color: color-mix(in srgb, var(--sf-text, #fff) 82%, transparent); animation-delay: .4s, var(--out); }
+.message { font-size: calc(var(--u) * 3.6); font-weight: 500; color: var(--sf-muted, rgba(255,255,255,.7)); margin-top: calc(var(--u) * 4); animation-delay: .55s, var(--out); }
 .message:empty { display: none; }
 [data-orientation="portrait"] .time { font-size: calc(var(--u) * 24); }
 @keyframes rise-in { from { transform: translateY(5vh); opacity: 0 } }

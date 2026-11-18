@@ -5,36 +5,37 @@
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
-body { font-family: "Inter", sans-serif; color: #fff; font-feature-settings: "tnum" 1; }
+body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--text); font-feature-settings: "tnum" 1; }
 /* News. The crawl is one long strip of text holding every headline twice; it slides left by
    exactly one copy and repeats, so the loop is seamless and the GPU only moves a picture. */
-:root { --accent: #ff4d5e; }
-html, body { background: #0b0d12; }
+:root { --accent: var(--sf-accent, #ff4d5e); --on-accent: var(--sf-on-accent, #fff); --bg: var(--sf-bg, #0b0d12); --text: var(--sf-text, #fff); }
+html, body { background: var(--bg); }
 .stage { --u: 1vmin; --out: calc(var(--sf-duration, 15s) - 0.6s); position: fixed; inset: 0; overflow: hidden;
   display: grid; grid-template-rows: auto 1fr auto;
   /* One column exactly the screen's width. Without this the column grows to the widest unwrapped
      headline and every line runs off screen instead of wrapping or ending in an ellipsis. */
-  grid-template-columns: minmax(0, 1fr); background: radial-gradient(100% 80% at 80% 0%, #1b2233 0%, #0b0d12 60%); }
+  grid-template-columns: minmax(0, 1fr); background: radial-gradient(100% 80% at 80% 0%, var(--sf-surface, #1b2233) 0%, var(--bg) 60%); }
 header { display: flex; justify-content: space-between; align-items: center; padding: calc(var(--u) * 5) calc(var(--u) * 8) 0;
   will-change: opacity; animation: fade-in .6s ease both, fade-out .5s ease-in forwards; animation-delay: 0s, var(--out); }
-.badge { background: var(--accent); font-size: calc(var(--u) * 2.8); font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
-  padding: calc(var(--u) * .9) calc(var(--u) * 2); border-radius: calc(var(--u) * .8); }
-.clock { font-size: calc(var(--u) * 3.2); font-weight: 600; color: rgba(255,255,255,.7); }
+.badge { background: var(--accent); color: var(--on-accent); font-size: calc(var(--u) * 2.8); font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+  padding: calc(var(--u) * .9) calc(var(--u) * 2); border-radius: var(--sf-radius, calc(var(--u) * .8)); }
+.clock { font-size: calc(var(--u) * 3.2); font-weight: 600; color: var(--sf-muted, color-mix(in srgb, var(--text) 70%, transparent)); }
 /* The story block fills the space between header and crawl and centres in it; main.ts drops
    secondary headlines that would not fit. */
 main { padding: calc(var(--u) * 4) calc(var(--u) * 8) 0; min-width: 0; min-height: 0; overflow: hidden;
   display: flex; flex-direction: column; justify-content: center; }
 main > * { will-change: transform, opacity; animation: rise-in .8s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards; }
 .age { font-size: calc(var(--u) * 3.2); font-weight: 600; color: var(--accent); animation-delay: .15s, var(--out); }
-.lead { flex: none; font-size: calc(var(--u) * 9.6); font-weight: 800; line-height: 1.08; letter-spacing: -.02em; margin-top: calc(var(--u) * 1.4);
+.lead { flex: none; font-family: var(--sf-font-display, "Inter"), sans-serif; font-size: calc(var(--u) * 9.6); font-weight: 800; line-height: 1.08; letter-spacing: -.02em; margin-top: calc(var(--u) * 1.4);
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; animation-delay: .25s, var(--out); }
 .more { flex: none; list-style: none; margin-top: calc(var(--u) * 4.4); display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--u) * 2); animation-delay: .45s, var(--out); }
-.more li { font-size: calc(var(--u) * 3.8); font-weight: 500; color: rgba(255,255,255,.78); padding-left: calc(var(--u) * 3); position: relative;
+.more li { font-size: calc(var(--u) * 3.8); font-weight: 500; color: color-mix(in srgb, var(--text) 78%, transparent); padding-left: calc(var(--u) * 3); position: relative;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .more li::before { content: ""; position: absolute; left: 0; top: .55em; width: calc(var(--u) * 1.2); height: calc(var(--u) * 1.2); border-radius: 50%; background: var(--accent); }
-footer { display: flex; align-items: stretch; height: calc(var(--u) * 9); margin-top: calc(var(--u) * 5); background: #fff; color: #0b0d12;
+footer { display: flex; align-items: stretch; height: calc(var(--u) * 9); margin-top: calc(var(--u) * 5); background: var(--text); color: var(--bg);
   will-change: transform; animation: bar-in .7s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards; animation-delay: .3s, var(--out); }
-.label { flex: none; display: grid; place-items: center; padding: 0 calc(var(--u) * 3); background: var(--accent); color: #fff;
+/* A long source name ("THE NEW YORK TIMES") must not take the crawl's room: capped, and cut at a word. */
+.label { flex: none; display: flex; align-items: center; max-width: 24vw; white-space: nowrap; overflow: hidden; padding: 0 calc(var(--u) * 3); background: var(--accent); color: var(--on-accent);
   font-size: calc(var(--u) * 2.6); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; z-index: 1; }
 .label:empty { display: none; }
 footer[hidden] { display: none; }
@@ -46,6 +47,7 @@ footer[hidden] { display: none; }
 /* Portrait is narrow and tall: a larger lead, and secondary headlines wrap to two lines
    before their ellipsis. */
 [data-orientation="portrait"] .lead { font-size: calc(var(--u) * 10); -webkit-line-clamp: 5; }
+[data-orientation="portrait"] .label { max-width: 30vw; font-size: calc(var(--u) * 2.3); letter-spacing: .06em; padding: 0 calc(var(--u) * 2.4); }
 [data-orientation="portrait"] .age { font-size: calc(var(--u) * 3.6); }
 [data-orientation="portrait"] .more { margin-top: calc(var(--u) * 7); gap: calc(var(--u) * 3.6); }
 [data-orientation="portrait"] .more li { font-size: calc(var(--u) * 4.4); line-height: 1.25; white-space: normal;

@@ -5,24 +5,25 @@
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
-body { font-family: "Inter", sans-serif; color: #fff; font-feature-settings: "tnum" 1; }
+body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--text); font-feature-settings: "tnum" 1; }
 /* Agenda. Rows come in one after another; the list never scrolls, it shows the next few. */
-:root { --accent: #ffb547; }
-html, body { background: #0d1117; }
+:root { --accent: var(--sf-accent, #ffb547); --bg: var(--sf-bg, #0d1117); --text: var(--sf-text, #fff);
+  --muted: var(--sf-muted, color-mix(in srgb, var(--text) 60%, transparent)); }
+html, body { background: var(--bg); }
 .stage { --u: 1vmin; --out: calc(var(--sf-duration, 10s) - 0.6s); position: fixed; inset: 0; overflow: hidden;
   padding: calc(var(--u) * 7) calc(var(--u) * 8); display: flex; flex-direction: column;
-  background: linear-gradient(160deg, #161c27 0%, #0d1117 55%); }
+  background: linear-gradient(160deg, var(--sf-surface, #161c27) 0%, var(--bg) 55%); }
 header { display: flex; justify-content: space-between; align-items: flex-end; gap: 4vmin; margin-bottom: calc(var(--u) * 4);
   padding-bottom: calc(var(--u) * 2.4); border-bottom: .3vmin solid color-mix(in srgb, var(--accent) 60%, transparent);
   will-change: transform, opacity; animation: rise-in .8s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards; animation-delay: 0s, var(--out); }
-h1 { font-size: calc(var(--u) * 7.4); font-weight: 800; letter-spacing: -.02em; line-height: 1; }
-.subtitle { font-size: calc(var(--u) * 3); color: rgba(255,255,255,.6); margin-top: calc(var(--u) * 1.2); }
+h1 { font-family: var(--sf-font-display, "Inter"), sans-serif; font-size: calc(var(--u) * 7.4); font-weight: 800; letter-spacing: -.02em; line-height: 1; }
+.subtitle { font-size: calc(var(--u) * 3); color: var(--muted); margin-top: calc(var(--u) * 1.2); }
 .subtitle:empty { display: none; }
 .today { font-size: calc(var(--u) * 3.2); font-weight: 600; color: var(--accent); white-space: nowrap; }
 .events { list-style: none; display: flex; flex-direction: column; gap: calc(var(--u) * 2.2); flex: 1; min-height: 0; overflow: hidden; }
 .event { flex: none; }
 .event { display: flex; align-items: center; gap: calc(var(--u) * 3.4); padding: calc(var(--u) * 1.6) calc(var(--u) * 2.4);
-  border-radius: calc(var(--u) * 2); background: rgba(255,255,255,.045);
+  border-radius: var(--sf-radius, calc(var(--u) * 2)); background: color-mix(in srgb, var(--text) 4.5%, transparent);
   will-change: transform, opacity; animation: slide-in .7s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards;
   animation-delay: calc(.25s + var(--i) * .12s), var(--out); }
 .event.now { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset .5vmin 0 0 var(--accent); }
@@ -30,16 +31,16 @@ h1 { font-size: calc(var(--u) * 7.4); font-weight: 800; letter-spacing: -.02em; 
 .dow, .mon { display: block; font-size: calc(var(--u) * 2.2); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
 .num { display: block; font-size: calc(var(--u) * 6); font-weight: 800; margin: calc(var(--u) * .4) 0; }
 .what { min-width: 0; }
-.when { font-size: calc(var(--u) * 2.6); font-weight: 600; color: rgba(255,255,255,.65); }
+.when { font-size: calc(var(--u) * 2.6); font-weight: 600; color: color-mix(in srgb, var(--text) 65%, transparent); }
 /* Up to two lines, then an ellipsis. */
 .name { font-size: calc(var(--u) * 4.4); font-weight: 700; line-height: 1.15;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.where { font-size: calc(var(--u) * 2.6); color: rgba(255,255,255,.55); }
+.where { font-size: calc(var(--u) * 2.6); color: var(--muted); }
 .where:empty { display: none; }
 /* With nothing to show, the list collapses and the message takes the free space, centred. */
 .events:empty { display: none; }
 .empty { flex: 1; display: grid; place-items: center; text-align: center; font-size: calc(var(--u) * 5.6); font-weight: 600;
-  color: rgba(255,255,255,.55); will-change: transform, opacity;
+  color: var(--muted); will-change: transform, opacity;
   animation: rise-in .8s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards; animation-delay: .25s, var(--out); }
 .empty[hidden] { display: none; }
 [data-orientation="portrait"] header { flex-direction: column; align-items: flex-start; }

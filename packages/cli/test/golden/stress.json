@@ -15,57 +15,49 @@
   },
   "defaultPlaylist": "stress",
   "files": {
+    "0478219a1d8a5829d0be2e854eec4d9191d5b4af1cc1da667aa3312276a16af6": {
+      "size": 76402,
+      "type": "text/html"
+    },
     "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
       "size": 203915,
       "type": "image/jpeg"
     },
-    "1004799fc68ee5810ad920291b99a17fd570c8b895a2edc940c4b45253f975a8": {
-      "size": 74876,
+    "0a001f7b80f027ff62d1bba49f0609687dda00e6b66685d7e33945357501ef5c": {
+      "size": 75694,
       "type": "text/html"
     },
     "13e5b4d30ef207fd89c1cc9f8ce8f23781e9a6d71deb9f0dacf8550ce315a17b": {
       "size": 320263,
       "type": "image/jpeg"
     },
-    "16fa59d0f94ee01d64a716813d27213de083c9646fd7212e4f6c571013711780": {
-      "size": 72113,
-      "type": "text/html"
-    },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
     },
-    "3ef9671e504266387e8649591684b6f1b0cef3991a3179bf8d0f7b99db9aa620": {
-      "size": 74304,
-      "type": "text/html"
-    },
-    "49aee56d4affa8ece8b6544011437b0762679f6512c74ed29bd1e11b1ee92b4b": {
-      "size": 74519,
-      "type": "text/html"
+    "438f4125da11443807a1cbbd06e3f4733d2aaef4265dbf3398e9840901d230f0": {
+      "size": 9615262,
+      "type": "video/mp4"
     },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
     },
-    "62de776d9d29872fee400f7f0ab0e8bbb2f79c6026f1a017d43b0e77c7362e46": {
-      "size": 70981,
+    "5e0d6242949825c829250c738f6d4e17f10e01e192bf5b8b08551740b8d781a7": {
+      "size": 75195,
       "type": "text/html"
     },
-    "6e5063647416417713db7fa3ebb3725e96ba6827ffec911ea228d513bbddc76e": {
-      "size": 72971,
+    "606ffcdb174e6b19a45c0d5d9ddd63cff5e533429ced255219fe65577971a8e4": {
+      "size": 80253,
       "type": "text/html"
     },
-    "791b920edd67601625160ade53ef487bba49ee21e7808f0943c354a18a8fc24d": {
-      "size": 77282,
+    "61b99402e09e4d903bd4f236c94d03782f2dd6f82e80f976037665247c569d46": {
+      "size": 71661,
       "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
-      "size": 9600472,
-      "type": "video/mp4"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
@@ -79,6 +71,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "b77723a1a7965ef1479ba340a6923204a5890e9350a3c054caafa2b69aa6759c": {
+      "size": 72534,
+      "type": "text/html"
+    },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
       "size": 182996,
       "type": "image/jpeg"
@@ -86,9 +82,13 @@
     "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688": {
       "size": 421529,
       "type": "image/jpeg"
+    },
+    "ed4ec027e6d412495a222d2b997db314a54e423f9a10ba864ce7b2722227542e": {
+      "size": 73605,
+      "type": "text/html"
     }
   },
-  "id": "fe08a182d1776a5e9955ebd0af095275a0a7392274f0cb962fbfaf7de106a519",
+  "id": "03d189f324498056208024c01402c95e735dda8afdeb22089350883e7a747550",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -161,7 +161,7 @@
     "clock": {
       "assets": {},
       "data": {
-        "accent": "#7cc4ff",
+        "accent": "#f59e0b",
         "greeting": "",
         "hour24": false,
         "message": "Welcome to SignForge",
@@ -171,7 +171,7 @@
       "id": "clock",
       "kind": "template",
       "name": "Clock",
-      "template": "base/clock@1.1.0"
+      "template": "base/clock@1.2.0"
     },
     "energy": {
       "assets": {
@@ -192,7 +192,7 @@
       "id": "energy",
       "kind": "template",
       "name": "Energy drinks 3 for $7",
-      "template": "base/cstore-promo@1.1.0"
+      "template": "base/cstore-promo@1.2.0"
     },
     "holidays": {
       "assets": {},
@@ -203,10 +203,10 @@
         }
       },
       "data": {
-        "accent": "#ffb547",
+        "accent": "#f59e0b",
         "empty": "Nothing scheduled",
         "events": [],
-        "rows": 5,
+        "rows": 25,
         "subtitle": "United States",
         "title": "Holidays"
       },
@@ -214,7 +214,7 @@
       "id": "holidays",
       "kind": "template",
       "name": "US holidays (Google Calendar)",
-      "template": "base/agenda@1.1.0"
+      "template": "base/agenda@1.2.0"
     },
     "meeting-room": {
       "assets": {},
@@ -258,7 +258,7 @@
             "title": "Sprint retrospective"
           }
         ],
-        "rows": 4,
+        "rows": 25,
         "subtitle": "This week's bookings",
         "title": "Room 4B"
       },
@@ -266,12 +266,12 @@
       "id": "meeting-room",
       "kind": "template",
       "name": "Meeting room (fixed data)",
-      "template": "base/agenda@1.1.0"
+      "template": "base/agenda@1.2.0"
     },
     "menu": {
       "assets": {},
       "data": {
-        "accent": "#e9b44c",
+        "accent": "#f59e0b",
         "footnote": "Oat, almond or soy milk +$0.60",
         "items": [
           {
@@ -331,7 +331,7 @@
       "id": "menu",
       "kind": "template",
       "name": "Coffee menu",
-      "template": "base/menu-board@1.1.0"
+      "template": "base/menu-board@1.2.0"
     },
     "news": {
       "assets": {},
@@ -342,7 +342,7 @@
         }
       },
       "data": {
-        "accent": "#ff4d5e",
+        "accent": "#f59e0b",
         "crawlSpeed": 6,
         "items": [],
         "source": "NPR",
@@ -352,7 +352,7 @@
       "id": "news",
       "kind": "template",
       "name": "NPR headlines",
-      "template": "base/news@1.1.0"
+      "template": "base/news@1.2.0"
     },
     "photo-berries": {
       "assets": {
@@ -368,7 +368,7 @@
       "id": "photo-berries",
       "kind": "template",
       "name": "Photo promo, 1080p photo",
-      "template": "base/photo-promo@1.1.0"
+      "template": "base/photo-promo@1.2.0"
     },
     "photo-kitchen": {
       "assets": {
@@ -384,7 +384,7 @@
       "id": "photo-kitchen",
       "kind": "template",
       "name": "Photo promo, 4K photo 2",
-      "template": "base/photo-promo@1.1.0"
+      "template": "base/photo-promo@1.2.0"
     },
     "photo-river": {
       "assets": {
@@ -400,7 +400,7 @@
       "id": "photo-river",
       "kind": "template",
       "name": "Photo promo, 4K photo",
-      "template": "base/photo-promo@1.1.0"
+      "template": "base/photo-promo@1.2.0"
     },
     "sport-drinks": {
       "assets": {
@@ -421,7 +421,7 @@
       "id": "sport-drinks",
       "kind": "template",
       "name": "Sport drinks 2 for $4",
-      "template": "base/cstore-promo@1.1.0"
+      "template": "base/cstore-promo@1.2.0"
     },
     "still-snow": {
       "durationMs": 5000,
@@ -441,7 +441,7 @@
     },
     "video-pan": {
       "durationMs": 10000,
-      "file": "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169",
+      "file": "438f4125da11443807a1cbbd06e3f4733d2aaef4265dbf3398e9840901d230f0",
       "fit": "cover",
       "id": "video-pan",
       "kind": "video",
@@ -487,7 +487,7 @@
         "isDay": 1,
         "low": 61,
         "temp": 72,
-        "unit": "\u00b0F",
+        "unit": "°F",
         "wind": 5,
         "windUnit": "mph"
       },
@@ -495,7 +495,7 @@
       "id": "weather-live",
       "kind": "template",
       "name": "Weather, live",
-      "template": "base/weather@1.1.0"
+      "template": "base/weather@1.2.0"
     },
     "weather-rain": {
       "assets": {},
@@ -507,7 +507,7 @@
         "isDay": 1,
         "low": 47,
         "temp": 52,
-        "unit": "\u00b0F",
+        "unit": "°F",
         "wind": 12,
         "windUnit": "mph"
       },
@@ -515,7 +515,7 @@
       "id": "weather-rain",
       "kind": "template",
       "name": "Weather, rain (fixed data)",
-      "template": "base/weather@1.1.0"
+      "template": "base/weather@1.2.0"
     },
     "weather-snow": {
       "assets": {},
@@ -527,7 +527,7 @@
         "isDay": 0,
         "low": 19,
         "temp": 28,
-        "unit": "\u00b0F",
+        "unit": "°F",
         "wind": 8,
         "windUnit": "mph"
       },
@@ -535,12 +535,12 @@
       "id": "weather-snow",
       "kind": "template",
       "name": "Weather, snow (fixed data)",
-      "template": "base/weather@1.1.0"
+      "template": "base/weather@1.2.0"
     }
   },
   "templates": {
-    "base/agenda@1.1.0": {
-      "html": "49aee56d4affa8ece8b6544011437b0762679f6512c74ed29bd1e11b1ee92b4b",
+    "base/agenda@1.2.0": {
+      "html": "5e0d6242949825c829250c738f6d4e17f10e01e192bf5b8b08551740b8d781a7",
       "manifest": {
         "background": "#0d1117",
         "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
@@ -551,7 +551,7 @@
         },
         "fields": {
           "accent": {
-            "default": "#ffb547",
+            "default": "$brand.accent",
             "label": "Accent colour",
             "type": "color"
           },
@@ -594,9 +594,9 @@
             "type": "list"
           },
           "rows": {
-            "default": 5,
-            "label": "Events to show",
-            "max": 6,
+            "default": 25,
+            "label": "Most events to show (as many as fit, up to this)",
+            "max": 25,
             "min": 1,
             "type": "number"
           },
@@ -621,11 +621,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.1.0"
+        "version": "1.2.0"
       }
     },
-    "base/clock@1.1.0": {
-      "html": "16fa59d0f94ee01d64a716813d27213de083c9646fd7212e4f6c571013711780",
+    "base/clock@1.2.0": {
+      "html": "b77723a1a7965ef1479ba340a6923204a5890e9350a3c054caafa2b69aa6759c",
       "manifest": {
         "background": "#05070d",
         "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
@@ -636,7 +636,7 @@
         },
         "fields": {
           "accent": {
-            "default": "#7cc4ff",
+            "default": "$brand.accent",
             "label": "Accent colour",
             "type": "color"
           },
@@ -671,11 +671,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.1.0"
+        "version": "1.2.0"
       }
     },
-    "base/cstore-promo@1.1.0": {
-      "html": "1004799fc68ee5810ad920291b99a17fd570c8b895a2edc940c4b45253f975a8",
+    "base/cstore-promo@1.2.0": {
+      "html": "0478219a1d8a5829d0be2e854eec4d9191d5b4af1cc1da667aa3312276a16af6",
       "manifest": {
         "background": "#06122b",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
@@ -748,11 +748,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.1.0"
+        "version": "1.2.0"
       }
     },
-    "base/menu-board@1.1.0": {
-      "html": "6e5063647416417713db7fa3ebb3725e96ba6827ffec911ea228d513bbddc76e",
+    "base/menu-board@1.2.0": {
+      "html": "ed4ec027e6d412495a222d2b997db314a54e423f9a10ba864ce7b2722227542e",
       "manifest": {
         "background": "#14110f",
         "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
@@ -763,7 +763,7 @@
         },
         "fields": {
           "accent": {
-            "default": "#e9b44c",
+            "default": "$brand.accent",
             "label": "Accent colour",
             "type": "color"
           },
@@ -839,11 +839,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.1.0"
+        "version": "1.2.0"
       }
     },
-    "base/news@1.1.0": {
-      "html": "3ef9671e504266387e8649591684b6f1b0cef3991a3179bf8d0f7b99db9aa620",
+    "base/news@1.2.0": {
+      "html": "0a001f7b80f027ff62d1bba49f0609687dda00e6b66685d7e33945357501ef5c",
       "manifest": {
         "background": "#0b0d12",
         "description": "The top story large, the next few below, and every headline in a crawl along the bottom. Bind items to an RSS data source.",
@@ -854,7 +854,7 @@
         },
         "fields": {
           "accent": {
-            "default": "#ff4d5e",
+            "default": "$brand.accent",
             "label": "Accent colour",
             "type": "color"
           },
@@ -909,11 +909,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.1.0"
+        "version": "1.2.0"
       }
     },
-    "base/photo-promo@1.1.0": {
-      "html": "62de776d9d29872fee400f7f0ab0e8bbb2f79c6026f1a017d43b0e77c7362e46",
+    "base/photo-promo@1.2.0": {
+      "html": "61b99402e09e4d903bd4f236c94d03782f2dd6f82e80f976037665247c569d46",
       "manifest": {
         "background": "#000000",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
@@ -960,11 +960,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.1.0"
+        "version": "1.2.0"
       }
     },
-    "base/weather@1.1.0": {
-      "html": "791b920edd67601625160ade53ef487bba49ee21e7808f0943c354a18a8fc24d",
+    "base/weather@1.2.0": {
+      "html": "606ffcdb174e6b19a45c0d5d9ddd63cff5e533429ced255219fe65577971a8e4",
       "manifest": {
         "background": "#0b1a33",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source.",
@@ -1011,11 +1011,11 @@
             "type": "number"
           },
           "unit": {
-            "default": "\u00b0F",
+            "default": "°F",
             "label": "Temperature unit",
             "options": [
-              "\u00b0F",
-              "\u00b0C"
+              "°F",
+              "°C"
             ],
             "type": "select"
           },
@@ -1044,7 +1044,7 @@
         "uses": [
           "canvas"
         ],
-        "version": "1.1.0"
+        "version": "1.2.0"
       }
     }
   }

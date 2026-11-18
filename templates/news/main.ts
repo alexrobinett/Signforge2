@@ -1,4 +1,4 @@
-import { defineTemplate, formatter, now as clockNow } from '@signforge/template-sdk';
+import { defineTemplate, fitWords, formatter, now as clockNow } from '@signforge/template-sdk';
 
 interface Item {
   title: string;
@@ -15,6 +15,19 @@ function ago(iso: string, now: Date, locale: string): string {
   if (mins < 60) return rtf.format(-mins, 'minute');
   const hrs = Math.round(mins / 60);
   return hrs < 24 ? rtf.format(-hrs, 'hour') : rtf.format(-Math.round(hrs / 24), 'day');
+}
+
+/** Shorten an element's text to whole words that fit its box. Only text that overflows costs layouts. */
+function ellipsize(el: HTMLElement): void {
+  const text = el.textContent ?? '';
+  if (!text) return;
+  // Glyphs overhang a tight line-height by a few pixels; text cut by a line clamp overflows by a
+  // whole line. Half a line tells them apart.
+  const slack = parseFloat(getComputedStyle(el).fontSize) / 2;
+  el.textContent = fitWords(text, (s) => {
+    el.textContent = s;
+    return el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + slack;
+  });
 }
 
 defineTemplate({
@@ -40,6 +53,8 @@ defineTemplate({
     }
     const main = document.querySelector('main')!;
     while (more.children.length && main.scrollHeight > main.clientHeight + 1) more.lastElementChild!.remove();
+    // Text that does not fit ends on a whole word ("rain…"), not after a space as CSS cuts it ("rain …").
+    for (const el of [document.getElementById('lead')!, document.getElementById('credit')!, ...more.children]) ellipsize(el as HTMLElement);
 
     // The crawl holds the headlines twice and slides by exactly one copy, so it loops seamlessly.
     const crawl = document.getElementById('crawl')!;
