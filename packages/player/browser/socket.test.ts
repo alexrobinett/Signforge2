@@ -32,7 +32,9 @@ it('does not sync between nudges while the socket is up, and syncs every poll wh
   // With the API every look is a sync (M3-07); the manifest is fetched only when the sync names a new one.
   const polls = () => p.server.syncs.length;
   const before = polls();
-  await new Promise((r) => setTimeout(r, 2500));
+  // Three more plays of the 0.8 s spot: the player has run for over two of its 1 s poll intervals.
+  const played = (await p.state()).played;
+  await p.until((s) => s.played >= played + 3);
   expect(polls() - before).toBeLessThanOrEqual(1);
 
   // Refuse new sockets and drop the open one: the player falls back to polling every second.
