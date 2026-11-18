@@ -47,7 +47,7 @@ function MembersSettings() {
     <>
       <PageHeader
         title="Members & roles"
-        description={`${plural(members.length, 'person', 'people')} · ${plural(invitations.length, 'invite', 'invites')} waiting.`}
+        description={`${plural(members.length, 'person', 'people')}${isOwner ? ` · ${plural(invitations.length, 'invite', 'invites')} waiting` : ''}.`}
       />
       {isOwner && <InviteForm />}
       <SettingsSection id={`${id}-people`} title="People">

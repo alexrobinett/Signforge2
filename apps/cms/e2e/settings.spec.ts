@@ -119,6 +119,8 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(invitee.getByText('Only owners can change these.')).toBeVisible();
   await expect(invitee.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
   await invitee.goto('/settings/members');
+  await expect(invitee.getByRole('heading', { name: 'Members & roles' })).toBeVisible();
+  await expect(invitee.getByRole('region', { name: 'People' })).toContainText(editorEmail);
   await expect(invitee.getByRole('region', { name: 'Invite' })).toHaveCount(0);
   await expect(invitee.getByRole('combobox')).toHaveCount(0);
   await expect(invitee.getByRole('button', { name: 'Remove' })).toHaveCount(0);
