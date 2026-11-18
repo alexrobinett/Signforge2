@@ -37,6 +37,7 @@ describe('schema', () => {
       'brand_kits',
       'data_snapshots',
       'data_sources',
+      'draft_tombstones',
       'idempotency_keys',
       'org_settings',
       'play_counts',

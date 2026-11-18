@@ -57,9 +57,10 @@ const rowVersion = () => integer('row_version').notNull().default(1);
 const publishedAt = () => integer('published_at');
 /**
  * Which row a draft is across delete and make-again: a content id may be chosen again once its
- * row is deleted, and the new row starts at version 1, so `stage.publish` checks this with the
- * version. Random, fixed at insert (no SQL default: Drizzle would use it instead). Null on rows
- * made before migration 0019: a row made again with such an id gets a random one, so it still differs.
+ * row is deleted, and `stage.publish` checks this with the version. Since migration 0020 the
+ * version alone tells the rows apart (`draft_tombstones`); this stays as a second check, as
+ * dropping it would rebuild the tables. Random, fixed at insert (no SQL default: Drizzle would
+ * use it instead). Null on rows made before migration 0019.
  */
 const incarnation = () => text('incarnation').$defaultFn(() => newId('inc'));
 
@@ -512,6 +513,24 @@ export const scheduleEntries = sqliteTable(
         OR (${t.target} = 'screen' AND ${t.screenId} IS NOT NULL AND ${t.groupId} IS NULL)`,
     ),
   ],
+);
+
+/**
+ * The last version of each deleted draft (spot, playlist, schedule entry), so a row made again
+ * with its id continues from it (./scoped.ts) and an edit made from the old row cannot land on
+ * the new one: versions of an id never repeat within an org. Written only by the delete triggers
+ * migration 0020 adds, which also catch a schedule entry deleted with its screen or group. No
+ * `id` column: a row is the id of a row in `draft_table`.
+ */
+export const draftTombstones = sqliteTable(
+  'draft_tombstones',
+  {
+    orgId: orgId(),
+    draftTable: text('draft_table', { enum: ['spots', 'playlists', 'schedule_entries'] }).notNull(),
+    draftId: text('draft_id').notNull(),
+    rowVersion: integer('row_version').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.draftTable, t.draftId] })],
 );
 
 /**
