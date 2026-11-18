@@ -155,7 +155,7 @@ describe('sf fonts push', () => {
     expect(r.uploaded).toBe(all.length);
     for (const f of all) expect((await env.BLOBS.head(baseBlobKey(f.file)))?.size).toBe(f.size);
     expect((await env.BLOBS.head(baseBlobKey(all[0]!.file)))?.httpMetadata?.contentType).toBe('font/woff2');
-    const res = await member.get(`/api/blobs/${all[0]!.file}`);
+    const res = await member.get(`/api/blobs/v2/${all[0]!.file}`);
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(read('fonts/inter/400-normal.woff2'));
   });
 

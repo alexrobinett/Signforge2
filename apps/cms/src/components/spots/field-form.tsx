@@ -4,7 +4,7 @@
  * asset picker) and list (repeating rows, up to `maxItems`). The contract's message for a field
  * (`validateSpotData`) sits under it. Values a spot leaves out show the template's default.
  */
-import { BRAND_COLORS, type FieldDef, type ScalarFieldDef } from '@signforge/contract';
+import { BRAND_COLORS, type FieldDef, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { Button } from '~/components/ui/button';
@@ -149,7 +149,7 @@ function ImageField({
       </span>
       <div className="flex items-center gap-3">
         <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-[#0e0f12]">
-          {asset && <img src={`/api/blobs/${asset.sha256}`} alt="" className="size-full object-cover" />}
+          {asset && <img src={sessionBlobPath(asset.sha256)} alt="" className="size-full object-cover" />}
         </div>
         <span className="min-w-0 flex-1 truncate text-sm">{asset ? asset.name : 'No image chosen'}</span>
         <Button type="button" variant="outline" onClick={() => pick(name)} aria-describedby={problems ? errorId : undefined}>

@@ -4,7 +4,7 @@
  * stage at once and to the spot's draft a moment later (src/state/spot-editor.ts). The stage's
  * orientation, scale and brand kit are in the URL: `?o=portrait&scale=actual&kit=<id>`.
  */
-import { safeUrl } from '@signforge/contract';
+import { safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ChevronLeftIcon } from 'lucide-react';
@@ -169,7 +169,7 @@ function SpotEditor() {
               <Section title={spot.kind === 'image' ? 'Image' : 'Video'}>
                 <div className="flex items-center gap-3">
                   <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-[#0e0f12]">
-                    {image && <img src={`/api/blobs/${image.sha256}`} alt="" className="size-full object-cover" />}
+                    {image && <img src={sessionBlobPath(image.sha256)} alt="" className="size-full object-cover" />}
                   </div>
                   <span className="min-w-0 flex-1 truncate text-sm">{image?.name ?? 'Not in the library'}</span>
                   {spot.kind === 'image' && (
