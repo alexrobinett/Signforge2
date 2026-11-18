@@ -8,6 +8,11 @@
  * screens at 2 minutes write 21.6M heartbeat rows a month, plus the 21.6M of play counts, about
  * 43M against the 50M included. A minute would be 65M. A failed sync retries at the poll interval:
  * it wrote nothing. Static content has no sync: it polls the manifest at the poll interval.
+ *
+ * A sync the server answered counts as good even when fetching the manifest or its files then
+ * fails (a missing blob, a rejected manifest): the heartbeat was written. Were it retried at the
+ * poll interval, 1,000 such screens would write 86M heartbeat rows a month. The fetch retries on
+ * its own instead (`contentRetryMs`), and a fetch writes no D1 row.
  */
 export const SOCKET_DOWN_SYNC_S = 120;
 
@@ -41,4 +46,13 @@ export function syncWaitMs(t: SyncTiming, random: () => number = Math.random): n
  */
 export function syncGapMs(t: SyncTiming): number {
   return syncWaitMs({ ...t, ok: true, socketOpen: false }, () => 0);
+}
+
+/**
+ * The wait before fetching content again after `failures` fetches in a row failed, in ms: the
+ * poll interval, doubling, up to the server's sync interval, with 10% jitter.
+ */
+export function contentRetryMs(failures: number, t: Pick<SyncTiming, 'pollMs' | 'nextSyncS'>, random: () => number = Math.random): number {
+  const base = Math.min(t.pollMs * 2 ** (failures - 1), t.nextSyncS * 1000);
+  return base * (1 - JITTER + random() * 2 * JITTER);
 }

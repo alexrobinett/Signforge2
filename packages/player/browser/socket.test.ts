@@ -64,6 +64,23 @@ it('acts on a display override at once, not at the next display-hours check', as
   await p.until((s) => s.displayOn, 12_000);
 });
 
+it('asks the supervisor again for a switch it did not confirm, while the spots play', async () => {
+  const content = h.content([{ id: 'a', durationMs: 500 }]);
+  let recover = () => {};
+  const p = await h.openPlayer((server) => {
+    server.publish(content);
+    recover = server.intercept(/^\/supervisor\/display\//, { status: 503 });
+  }, remote('60'));
+  const switches = () => p.server.requestsTo(/^\/supervisor\/display\//).map((r) => `${r.path} ${r.status}`);
+  await expect.poll(switches, { timeout: 20_000 }).toEqual(['/supervisor/display/on 503']);
+  await p.until((s) => s.played >= 2 && s.displayOn);
+  recover();
+  await expect.poll(switches, { timeout: 10_000 }).toEqual(['/supervisor/display/on 503', '/supervisor/display/on 200']);
+  // Confirmed: asked no more.
+  await new Promise((r) => setTimeout(r, 6000));
+  expect(switches()).toHaveLength(2);
+});
+
 // `revoked` on the socket: browser/pairing.test.ts (the screen wipes itself and shows a code).
 
 it('shows its name over the content when identified, then takes it away', async () => {

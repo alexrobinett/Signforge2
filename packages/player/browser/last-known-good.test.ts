@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MANIFEST_SCHEMA, type Spot } from '@signforge/contract';
 import type { FixtureServer } from './fixture-server';
@@ -11,6 +13,14 @@ const api = (s: FixtureServer) => ({ content: `${s.localUrl}/content` });
 
 /** The content server stops answering, as when the screen's network goes. */
 const cutNetwork = (p: Player) => p.server.intercept(/^\/content\//, { status: 503 });
+/** A player whose last good manifest is `good`, and a video manifest to publish next. */
+async function goodThenVideo() {
+  const good = h.content([{ id: 'a', durationMs: 600 }], { variant: 'good' });
+  const video = h.content([{ id: 'v', video: readFileSync(join(import.meta.dirname, 'fixtures/clip.webm')), durationMs: 600 }], { variant: 'video' });
+  const p = await h.openPlayer((s) => s.publish(good));
+  await p.until((s) => s.lastGood === good.manifest.id);
+  return { p, good, video };
+}
 
 /** Reload the page (the cache survives) and wait for the player to start again. */
 async function restart(p: Player): Promise<void> {
@@ -135,6 +145,54 @@ describe('last known good', () => {
     const s = await p.until((s) => s.lastGood === second.manifest.id && s.log.at(-1)?.spot === 'c');
     expect(s.fallback).toBe('');
     expect(s.manifestId).toBe(second.manifest.id);
+  });
+
+  it('keeps the last good manifest when a URL-only one shows a page that failed to load', async () => {
+    const good = h.content([{ id: 'a', durationMs: 600 }], { variant: 'good' });
+    const page = h.content([{ id: 'u', url: 'https://down.test/', durationMs: 600 }], { variant: 'url' });
+    const p = await h.openPlayer((s) => s.publish(good));
+    // The page's server refuses the connection: the frame shows the browser's error page, and loads.
+    await p.page.context().route(/^https:\/\/down\.test\//, (route) => route.abort('connectionrefused'));
+    await p.until((s) => s.lastGood === good.manifest.id);
+
+    p.server.publish(page);
+    const s = await p.until((s) => s.log.filter((l) => l.manifest === page.manifest.id).length >= 2);
+    expect(s.manifestId).toBe(page.manifest.id);
+    expect(s.lastGood).toBe(good.manifest.id);
+  });
+
+  it('falls back from a video manifest whose videos the browser refuses to play, offline too', async () => {
+    const { p, good, video } = await goodThenVideo();
+
+    // The browser refuses to play, as it may refuse autoplay or a decoder; after a reload too.
+    const refuse = () => {
+      HTMLMediaElement.prototype.play = () => Promise.reject(new DOMException('refused', 'NotAllowedError'));
+    };
+    await p.page.addInitScript(refuse);
+    await p.page.evaluate(refuse);
+    p.server.publish(video);
+    let s = await p.until((s) => s.fallback === video.manifest.id);
+    const before = s.log.length;
+    s = await p.until((s) => s.log.length >= before + 2);
+    expect(s.log.filter((l) => l.manifest === video.manifest.id)).toEqual([]);
+    expect(s.log.slice(before).map((l) => l.manifest)).toEqual([good.manifest.id, good.manifest.id]);
+    expect(s.lastGood).toBe(good.manifest.id);
+    expect(s.skipped).toBeGreaterThanOrEqual(1);
+
+    // Restarted with no network: the video manifest again, refused again, then the good one.
+    cutNetwork(p);
+    await restart(p);
+    s = await p.until((s) => s.fallback === video.manifest.id && s.log.length >= 2, 15_000);
+    expect(s.log.map((l) => l.manifest)).toEqual([good.manifest.id, good.manifest.id]);
+  });
+
+  it('takes a video manifest as the last good one once a video has started playing', async () => {
+    const { p, video } = await goodThenVideo();
+
+    p.server.publish(video);
+    const s = await p.until((s) => s.lastGood === video.manifest.id);
+    expect(s.fallback).toBe('');
+    expect(s.log.at(-1)?.manifest).toBe(video.manifest.id);
   });
 
   it('plays a cached schema N-1 manifest after a restart with no network', async () => {

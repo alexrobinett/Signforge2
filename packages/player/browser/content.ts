@@ -55,6 +55,8 @@ export interface FixtureSpot {
   asset?: Buffer;
   /** Makes this a video spot playing this file instead of a template spot (`fixtures/clip.webm`). */
   video?: Buffer;
+  /** Makes this a URL spot showing this page instead. */
+  url?: string;
 }
 
 export interface Content {
@@ -118,6 +120,10 @@ export function buildContent(
   const blobs = new Map<string, Buffer>([[htmlSha, html]]);
   const files: ScreenManifest['files'] = { [htmlSha]: { size: html.byteLength, type: 'text/html' } };
   for (const s of spots) {
+    if (s.url) {
+      spotMap[s.id] = { id: s.id, name: s.id, kind: 'url', url: s.url, durationMs: s.durationMs ?? 1000 };
+      continue;
+    }
     if (s.video) {
       const sha = sha256(s.video);
       blobs.set(sha, s.video);

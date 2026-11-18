@@ -9,7 +9,8 @@
  *                 ?poll=<seconds> static content: how often to look for a new manifest (default 30). With the
  *                                 API each look is a sync, every `nextSyncS` (5 minutes) with jitter, every
  *                                 2 minutes while the socket is down (src/sync-interval.ts), and this often
- *                                 after a failed one. Given explicitly, it is also the socket-down interval (testing)
+ *                                 after a failed one; a failed content fetch first retries after this long.
+ *                                 Given explicitly, it is also the socket-down interval (testing)
  *                 ?stall=<seconds> give up on a download that receives nothing for this long (default 30; testing)
  *                 ?debug=1        show the on-screen status overlay
  *                 ?hb=1           with debug, also show a moving speck so every frame is drawn. It costs
@@ -48,12 +49,12 @@ import { DeviceCredential, type ScreenCredential } from './credential';
 import { identify } from './identify';
 import { pair } from './pairing';
 import { dataRejections, dataSettled, dataStatus, heldVersions, offerChecked, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
-import { activeOverride, setOverride, wakeable } from './override';
+import { activeOverride, savedOverride, setOverride, wakeable } from './override';
 import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
 import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
-import { syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
+import { contentRetryMs, syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
 import { SOURCE } from './source';
 import { PinSet, UnauthorisedError, filesMissing, loadManifests, rememberGood, requestPersistence, sync, wipeContent } from './store';
 
@@ -163,7 +164,7 @@ const state = {
     return pendingPlays();
   },
   persistent: false,
-  /** The id of the last manifest that played a spot: the one the player falls back to. */
+  /** The id of the last manifest that verifiably started a spot (`promote`): the one the player falls back to. */
   lastGood: '',
   /**
    * The id of the newest manifest while the player falls back from it, because nothing in it
@@ -257,8 +258,9 @@ let lastProgress = performance.now();
 /**
  * Swap to `next`. While it loaded, `next` sat fully drawn underneath `prev`, so the browser has
  * already painted it; revealing it costs nothing. A crossfade fades the old spot out on top of it.
+ * `started` is `next`'s `play()`; `done`, the end of the transition.
  */
-function show(next: Slot, prev: Slot | undefined, transition: Transition): Promise<void> {
+function show(next: Slot, prev: Slot | undefined, transition: Transition): { started: Promise<void>; done: Promise<void> } {
   if (prev && transition.type === 'fade') {
     // Out to black, then in. The next spot is hidden while the old one fades so only one is
     // ever drawn; it was fully drawn underneath until now, so it appears without a stall.
@@ -269,23 +271,22 @@ function show(next: Slot, prev: Slot | undefined, transition: Transition): Promi
     prev.el.style.zIndex = '3';
     prev.el.style.transition = `opacity ${half}ms ease-in`;
     prev.el.style.opacity = '0';
-    return sleep(half).then(() => {
+    const revealed = sleep(half).then(() => {
       prev.el.style.transition = 'none';
       prev.el.style.zIndex = '1';
       prev.clear();
       next.el.style.transition = `opacity ${half}ms ease-out`;
       next.el.style.opacity = '1';
-      next.play();
-      return sleep(half);
     });
+    return { started: revealed.then(() => next.play()), done: revealed.then(() => sleep(half)) };
   }
   const ms = prev && transition.type === 'crossfade' ? transition.ms : 0;
-  next.play();
+  const started = next.play();
   if (prev && ms) {
     prev.el.style.transition = `opacity ${ms}ms linear`;
     prev.el.style.opacity = '0';
   }
-  return sleep(ms).then(() => {
+  const done = sleep(ms).then(() => {
     next.el.style.zIndex = '2';
     if (prev) {
       prev.el.style.transition = 'none';
@@ -294,6 +295,7 @@ function show(next: Slot, prev: Slot | undefined, transition: Transition): Promi
       prev.clear();
     }
   });
+  return { started, done };
 }
 
 async function prepareStep(slot: Slot, step: Step, manifest: ScreenManifest): Promise<boolean> {
@@ -320,19 +322,25 @@ async function prepareStep(slot: Slot, step: Step, manifest: ScreenManifest): Pr
   }
 }
 
-function record(step: Step, manifestId: string): void {
+/**
+ * A spot of `manifestId` started playing, as far as the player can check: its manifest becomes
+ * the last good one. A URL spot never counts: its frame loads even when the page failed, onto the
+ * browser's error page. A draft in the preview is never a screen's last good manifest.
+ */
+function promote(spot: Spot, manifestId: string): void {
+  if (SOURCE !== 'device' || spot.kind === 'url' || manifestId === state.lastGood || source?.id !== manifestId) return;
+  state.lastGood = manifestId;
+  lastGood = source;
+  pins.hold('last-good', requiredFiles(source));
+  rememberGood(source).catch((err: unknown) => console.warn('[sf] could not store the last good manifest', err));
+}
+
+/** A spot shown at `at` (corrected time) has played: logged, and counted. */
+function record(step: Step, manifestId: string, at: number): void {
   preview?.played(manifestId, step.spot.id);
-  // A draft in the preview is never a screen's last good manifest.
-  if (SOURCE === 'device' && manifestId !== state.lastGood && source?.id === manifestId) {
-    state.lastGood = manifestId;
-    lastGood = source;
-    pins.hold('last-good', requiredFiles(source));
-    rememberGood(source).catch((err: unknown) => console.warn('[sf] could not store the last good manifest', err));
-  }
   state.spot = step.spot.id;
   state.playlist = step.playlist.id;
   state.played++;
-  const at = now();
   // On a clock it does not trust the screen cannot say which hour a play was in: not counted.
   if (SOURCE === 'device' && clock.trusted) recordPlay(at, step.spot.id, step.spot.durationMs);
   state.log.push({
@@ -406,6 +414,31 @@ async function playbackLoop(): Promise<never> {
   let failedInManifest = 0;
   let failingManifest = '';
 
+  /** A spot of `m` failed to prepare or to start: fall back after a full pass of them, pause after a few in a row. */
+  async function failed(step: Step, m: ScreenManifest): Promise<void> {
+    if (failingManifest !== m.id) {
+      failingManifest = m.id;
+      failedInManifest = 0;
+    }
+    if (++failedInManifest >= step.playlist.items.length && m.id !== state.lastGood && lastGood) {
+      failures = 0;
+      failedInManifest = 0;
+      fallBack();
+      return;
+    }
+    if (++failures >= MAX_CONSECUTIVE_FAILURES) {
+      current?.clear();
+      if (current) current.el.style.opacity = '0';
+      current = undefined;
+      currentSpot = undefined;
+      pins.release('playing');
+      status('SignForge\nContent is unavailable. Retrying…');
+      lastProgress = performance.now();
+      await sleep(5000);
+      failures = 0;
+    }
+  }
+
   return loopRestartingOnError('playback', async () => {
     if (!manifest || !sequencer) {
       await sleep(500);
@@ -465,32 +498,7 @@ async function playbackLoop(): Promise<never> {
     if (!ok) pins.release('preparing');
     phase = 'play';
     if (!state.displayOn) return;
-    if (!ok) {
-      if (failingManifest !== m.id) {
-        failingManifest = m.id;
-        failedInManifest = 0;
-      }
-      if (++failedInManifest >= step.playlist.items.length && m.id !== state.lastGood && lastGood) {
-        failures = 0;
-        failedInManifest = 0;
-        fallBack();
-        return;
-      }
-      if (++failures >= MAX_CONSECUTIVE_FAILURES) {
-        current?.clear();
-        if (current) current.el.style.opacity = '0';
-        current = undefined;
-        currentSpot = undefined;
-        pins.release('playing');
-        status('SignForge\nContent is unavailable. Retrying…');
-        lastProgress = performance.now();
-        await sleep(5000);
-        failures = 0;
-      }
-      return;
-    }
-    failures = 0;
-    failedInManifest = 0;
+    if (!ok) return failed(step, m);
 
     // Hold the current spot for its full length; a crossfade overlaps its last moments.
     if (currentSpot) await hold(startedAt + currentSpot.durationMs - fadeMs - performance.now());
@@ -498,9 +506,9 @@ async function playbackLoop(): Promise<never> {
     status('');
     startedAt = performance.now();
     spotStartedAt = startedAt;
-    record(step, m.id);
+    const shownAt = now();
     phase = 'transition';
-    const done = show(slot, current, step.playlist.transition);
+    const { started, done } = show(slot, current, step.playlist.transition);
     // A video keeps reading its file from the cache while it plays, and the outgoing spot is
     // still on screen until the transition ends.
     const playing = spotFiles(step.spot, m);
@@ -510,9 +518,26 @@ async function playbackLoop(): Promise<never> {
     current = slot;
     currentSpot = step.spot;
     currentManifest = m;
+    // A spot counts, and plays, once it has started: a video whose play() the browser refuses is a failed spot.
+    const playedOk = await started.then(
+      () => true,
+      (err: unknown) => {
+        state.skipped++;
+        state.lastError = `${step.spot.id}: did not start: ${err instanceof Error ? err.message : String(err)}`;
+        console.warn('[sf] skipped', state.lastError);
+        preview?.failed(state.lastError);
+        return false;
+      },
+    );
     await done;
     pins.hold('playing', playing);
     phase = 'play';
+    if (!playedOk) return failed(step, m);
+    // After the transition: storing the play and a new last good manifest costs frames on a Pi.
+    failures = 0;
+    failedInManifest = 0;
+    record(step, m.id, shownAt);
+    promote(step.spot, m.id);
   });
 }
 
@@ -520,51 +545,70 @@ async function playbackLoop(): Promise<never> {
 /** What the supervisor reported for each power method at the last switch, for the heartbeat. */
 let displayMethods: Record<string, string> | undefined;
 
-/** Ask the device supervisor to power the panel. Without one (a browser, the demo) the player just goes dark. */
-async function setPanel(on: boolean): Promise<void> {
-  if (KIND === 'browser') return void (state.display = 'browser: no panel');
+/** Ask the device supervisor to power the panel; true once it confirms. Without one (a browser, the demo) the player just goes dark. */
+async function setPanel(on: boolean): Promise<boolean> {
+  if (KIND === 'browser') {
+    state.display = 'browser: no panel';
+    return true;
+  }
   try {
     const res = await supervisorFetch(`/display/${on ? 'on' : 'off'}`, { method: 'POST' });
     if (res.ok) {
       const reply = (await res.json()) as Record<string, unknown>;
       state.display = JSON.stringify(reply);
       displayMethods = Object.fromEntries(Object.entries(reply).filter((e): e is [string, string] => typeof e[1] === 'string'));
-    } else state.display = `supervisor ${res.status}`;
+      return true;
+    }
+    state.display = `supervisor ${res.status}`;
   } catch {
     state.display = 'no supervisor';
   }
+  return false;
 }
+
+/** A switch the supervisor did not confirm (restarting, busy) is asked for again this soon. */
+const PANEL_RETRY_MS = 5000;
 
 /** Follow the screen's display hours. Checked often rather than timed, so clock and DST changes are harmless. */
 const display = wakeable();
 async function displayLoop(): Promise<never> {
+  /** What the loop last decided: playback follows this. */
   let applied: boolean | undefined;
+  /** The switch the supervisor last confirmed. */
+  let confirmed: boolean | undefined;
   return loopRestartingOnError('display', async () => {
-    if (manifest) {
+    // An untrusted clock is behind, by any amount: neither the hours nor a saved override can be
+    // read against it, and a dark screen in opening hours is the worse mistake, with or without
+    // content to show. The first good sync wakes this loop to read them again.
+    let on: boolean | undefined;
+    if (!clock.trusted) on = true;
+    else if (manifest) {
       const at = new Date(now());
       const override = activeOverride(at);
-      const on = override ? override.state === 'on' : displayOn(manifest.screen.displayHours, localTime(at, manifest.screen.timezone));
-      if (on !== applied) {
-        applied = on;
-        console.info(`[sf] display ${on ? 'on' : 'off'}`);
-        if (on) {
-          // Never let a slow or missing supervisor keep the screen dark during opening hours.
-          await Promise.race([setPanel(true), sleep(6000)]);
-          // A panel takes a few seconds to lock onto a returning signal or come out of standby;
-          // start after that so the first spot's intro is seen and the mode change is not measured.
-          await sleep(3000);
-          resetSleepSignal();
-          state.displayOn = true; // wakes the playback loop
-        } else {
-          state.displayOn = false;
-          markAsleep();
-          await sleep(1500); // let the playback loop clear the slots before the signal goes
-          await setPanel(false);
-        }
+      on = override ? override.state === 'on' : displayOn(manifest.screen.displayHours, localTime(at, manifest.screen.timezone));
+    }
+    if (on !== undefined && on !== applied) {
+      applied = on;
+      console.info(`[sf] display ${on ? 'on' : 'off'}`);
+      if (on) {
+        // Never let a slow or missing supervisor keep the screen dark during opening hours.
+        confirmed = (await Promise.race([setPanel(true), sleep(6000).then(() => false)])) ? true : undefined;
+        // A panel takes a few seconds to lock onto a returning signal or come out of standby;
+        // start after that so the first spot's intro is seen and the mode change is not measured.
+        await sleep(3000);
+        resetSleepSignal();
+        state.displayOn = true; // wakes the playback loop
+      } else {
+        state.displayOn = false;
+        markAsleep();
+        await sleep(1500); // let the playback loop clear the slots before the signal goes
+        confirmed = (await setPanel(false)) ? false : undefined;
       }
+    } else if (applied !== undefined && confirmed !== applied) {
+      confirmed = (await setPanel(applied)) ? applied : undefined;
     }
     // A display override from the socket wakes this at once.
-    await display.wait(15_000);
+    await display.wait(confirmed === applied ? 15_000 : PANEL_RETRY_MS);
   });
 }
 
@@ -584,6 +628,11 @@ function revoked(): Promise<void> {
     state.online = true;
     state.auth = 'revoked';
     const held = !!manifest || !!lastGood || pendingPlays() > 0;
+    // No content fetch may store or adopt anything after the wipe: stop the one in flight, and any retry.
+    contentDue = false;
+    contentAbort.abort(new Error('revoked'));
+    await contentFetch?.catch(() => undefined);
+    contentAbort = new AbortController();
     await credential?.revoke();
     setOverride(null);
     await wipeContent().catch((err: unknown) => console.warn('[sf] could not wipe the cache', err));
@@ -673,8 +722,8 @@ const socket = API
     })
   : undefined;
 
-/** Fetch the manifest; adopt it if new. Downloads every file it names that is missing. */
-async function fetchManifest(): Promise<void> {
+/** Fetch the manifest; adopt it if new. Downloads every file it names that is missing. `signal` stops it, adopting nothing. */
+async function fetchManifest(signal?: AbortSignal): Promise<void> {
   // While falling back, the manifest that failed counts as current: the server's answer is
   // 304 until it publishes something newer.
   const result = await sync(BASE, {
@@ -682,12 +731,18 @@ async function fetchManifest(): Promise<void> {
     headers: await deviceHeaders(),
     ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
     pinned: pins,
+    ...(signal ? { signal } : {}),
     // Falling back, the last good manifest plays: its files are put back too, since the synced one is not playing.
     ...(state.fallback && manifest ? { fallback: manifest } : {}),
   });
+  if (signal?.aborted) return;
   if (result.changed && result.manifest) {
     console.info(`[sf] manifest ${result.manifest.id} active (${result.downloaded} files downloaded)`);
     adopt(result.manifest);
+    // The sync that named it has kept its snapshots (apiSync offers them before it asks for content):
+    // once the stored copies are read, its sources have had their first load, and spots waiting on
+    // them start now rather than at the data wait's end.
+    if (API) await restoreSources(result.manifest).then(() => settleSources(result.manifest));
   }
 }
 
@@ -723,6 +778,46 @@ function settleTickets(result: { ticket: string } | { error: unknown }): void {
 /** When the manifest was last fetched in full, to put back evicted files (`performance.now()`). */
 let lastFileCheck = Number.NEGATIVE_INFINITY;
 
+const content = wakeable();
+/** A sync asked for the content, and it has not been fetched since. */
+let contentDue = false;
+/** Stops the content worker's fetch in flight (a revoke), and the fetch itself while it runs. */
+let contentAbort = new AbortController();
+let contentFetch: Promise<void> | undefined;
+
+/**
+ * The one worker that fetches content from the API: the manifest the server wants now, and its
+ * files. A sync only asks for it, so a long download or a failure never holds back the next
+ * heartbeat. A failure retries on its own, backing off (src/sync-interval.ts); a sync meanwhile
+ * makes it try at once, and every attempt fetches the latest desired manifest.
+ */
+async function contentLoop(): Promise<never> {
+  let failures = 0;
+  return loopRestartingOnError('content', async () => {
+    if (!contentDue) return content.wait(FILE_CHECK_MS);
+    contentDue = false;
+    const { signal } = contentAbort;
+    try {
+      await (contentFetch = fetchManifest(signal));
+      lastFileCheck = performance.now();
+      failures = 0;
+    } catch (err) {
+      // Stopped by a revoke, which also cancelled what was due.
+      if (signal.aborted) return;
+      // Refused: the sync revokes.
+      if (err instanceof UnauthorisedError) return poll.wake();
+      contentDue = true;
+      const message = err instanceof Error ? err.message : String(err);
+      state.lastError = `content: ${message}`;
+      console.warn('[sf] could not fetch the content', err);
+      if (!manifest) status(`SignForge\nWaiting for content…\n${message}`);
+      await content.wait(contentRetryMs(++failures, timing()));
+    } finally {
+      contentFetch = undefined;
+    }
+  });
+}
+
 /**
  * What a sync reports of a per-source map: only the sources of the manifests held (playing and last
  * good, the playing one's first), and at most MAX_SYNC_SOURCES, so source turnover cannot grow it.
@@ -732,8 +827,8 @@ function ofHeldSources(values: Record<string, number>): Record<string, number> {
   return Object.fromEntries([...ids].flatMap((id) => (values[id] === undefined ? [] : [[id, values[id]] as const])).slice(0, MAX_SYNC_SOURCES));
 }
 
-/** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. Returns when to sync next, in seconds. */
-async function apiSync(): Promise<number> {
+/** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. */
+async function apiSync(): Promise<void> {
   const batch = playBatch(now());
   const req: SyncRequest = {
     seq: batch.seq,
@@ -768,32 +863,35 @@ async function apiSync(): Promise<number> {
   const parsed = parseSyncResponse(await res.json());
   if (!parsed.ok) throw new Error(`sync: ${parsed.problems.join('; ')}`);
   const r = parsed.value;
+  syncTiming.nextSyncS = r.nextSyncS;
+  const wasTrusted = clock.trusted;
   synced(r.serverTime, sentAt, receivedAt);
   if (r.epoch === batch.epoch) acknowledgePlays(r.epoch, r.ackSeq);
   settleTickets({ ticket: r.socketTicket });
   state.online = true;
   state.auth = '';
   state.lastSync = new Date(now()).toISOString();
+  // Before anything awaits: a display override in this answer must be in place when the display
+  // loop next looks, or the first trusted look could switch the panel off and the override on again.
+  for (const c of r.commands) command(c);
+  // Display hours and any saved override were set aside while the clock was untrusted.
+  if (!wasTrusted) display.wake();
 
-  let failed: unknown;
-  const current = state.fallback || manifest?.id;
-  if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
-    try {
-      await fetchManifest();
-      lastFileCheck = performance.now();
-    } catch (err) {
-      failed = err;
-    }
-  }
   await offerSnapshots(r.snapshots, manifest);
   await offerChecked(r.checked ?? {});
-  for (const c of r.commands) command(c);
-  if (failed) throw failed;
-  return r.nextSyncS;
+  // After the snapshots are kept, so a manifest the content worker adopts has its data.
+  const current = state.fallback || manifest?.id;
+  if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
+    contentDue = true;
+    content.wake();
+  }
 }
 
+// Untrusted, the clock cannot tell whether the saved override has ended: it is reported as saved,
+// not expired against that clock, so the first answer can clear one the CMS cleared meanwhile
+// (the server ignores one that has ended). The first trusted look at the display expires it.
 const withOverride = () => {
-  const o = activeOverride(new Date(now()));
+  const o = clock.trusted ? activeOverride(new Date(now())) : savedOverride();
   return o ? { override: o } : {};
 };
 
@@ -834,7 +932,7 @@ async function syncLoop(): Promise<never> {
           if (!manifest) status('SignForge\nThis screen is paired with another API than its address names.');
         }
         if (credential.held) {
-          syncTiming.nextSyncS = await apiSync();
+          await apiSync();
           syncTiming.ok = true;
         }
       } else {
@@ -976,6 +1074,7 @@ async function boot(): Promise<void> {
   if (KIND === 'device') setInterval(() => void supervisorFetch('/alive', { method: 'POST' }).catch(() => undefined), ALIVE_MS);
 
   void syncLoop();
+  if (API) void contentLoop();
   socket?.start();
   // From the API, snapshots come on the sync; static content has no sync, so each source is fetched.
   // Never with the credential: from the API, data comes on the sync.

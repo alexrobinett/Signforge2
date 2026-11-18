@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SOCKET_DOWN_SYNC_S, syncGapMs, syncWaitMs } from './sync-interval';
+import { SOCKET_DOWN_SYNC_S, contentRetryMs, syncGapMs, syncWaitMs } from './sync-interval';
 
 const mid = () => 0.5; // no jitter
 const low = () => 0; // -10%
@@ -38,5 +38,13 @@ describe('the sync interval', () => {
   it('lets a socket ticket or a drop force a sync only once the shortest gap has passed', () => {
     expect(syncGapMs({ ...api, socketOpen: false })).toBe(108_000);
     expect(syncGapMs({ ...api, socketOpen: false, pollMs: 1000, pollOverride: true })).toBe(1000);
+  });
+});
+
+describe('a content retry', () => {
+  it("starts at the poll interval and doubles, jittered, up to the server's interval", () => {
+    expect([1, 2, 3, 4, 5, 6, 20].map((n) => contentRetryMs(n, api, mid))).toEqual([30_000, 60_000, 120_000, 240_000, 300_000, 300_000, 300_000]);
+    expect(contentRetryMs(1, api, low)).toBe(27_000);
+    expect(contentRetryMs(20, api, high)).toBe(330_000);
   });
 });

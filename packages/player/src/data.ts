@@ -96,9 +96,10 @@ async function refresh(base: string, id: string, manifest: ScreenManifest): Prom
 }
 
 /**
- * Snapshots from a sync's response, checked against `manifest` (the one playing once the sync
- * has adopted any new one). Then every source of the manifest counts as loaded: a spot waiting for
- * its feed starts with what there is.
+ * Snapshots from a sync's response, checked against `manifest`, the one playing when the answer
+ * came: a new manifest it names is adopted later, by the content worker, which then marks that
+ * manifest's sources loaded too. Then every source of `manifest` counts as loaded: a spot waiting
+ * for its feed starts with what there is.
  */
 export async function offerSnapshots(list: readonly DataSnapshot[], manifest: ScreenManifest | undefined): Promise<void> {
   for (const snap of list) await offer(snap.id, snap, manifest).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));

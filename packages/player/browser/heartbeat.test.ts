@@ -1,8 +1,9 @@
 // The sync loop against the device API (M3-07): one periodic sync carries the heartbeat and play
 // counts, corrects the clock from server time, delivers snapshots, and hands the socket its ticket.
 import { describe, expect, it } from 'vitest';
+import type { Content, ContentOptions } from './content';
 import type { FixtureServer } from './fixture-server';
-import { useHarness, type PlayerState } from './harness';
+import { useHarness, type Player, type PlayerState } from './harness';
 
 const h = useHarness();
 const HOUR = 3_600_000;
@@ -22,6 +23,37 @@ function logged(s: PlayerState, before: number, durationMs: number) {
     t.ms += durationMs;
   }
   return out;
+}
+
+/**
+ * A screen whose display hours are closed all week, playing `content` from the API, once its panel
+ * is off; `switches` lists the power requests the supervisor got. With nothing cached at boot, the
+ * hours are first read at the display loop's next check, 15 s on.
+ */
+async function asleep(content: Content) {
+  const p = await h.openPlayer((s) => s.publish(content), api);
+  await p.until((s) => s.clock.trusted && !s.displayOn, 20_000);
+  const switches = () => p.server.requestsTo(/^\/supervisor\/display\//).map((r) => r.path);
+  await expect.poll(switches, { timeout: 5000 }).toEqual(['/supervisor/display/off']);
+  return { p, switches };
+}
+const closedAllWeek: ContentOptions['edit'] = (m) => void (m.screen.displayHours = { weekly: [] });
+
+/**
+ * Cut the network and boot again as a Pi with no clock does: the device clock a day behind the last
+ * sync, with a "sleep" override saved ending at `sleepUntil` if given. Returns what restores the network.
+ */
+async function coldBootWithoutClock(p: Player, sleepUntil?: number): Promise<() => void> {
+  const cut = p.server.intercept(/^\/content\//, { status: 503 });
+  await p.page.evaluate(
+    ({ syncedAt, until }) => {
+      localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: -86_400_000, syncedAt }));
+      if (until) localStorage.setItem('sf.displayOverride', JSON.stringify({ state: 'off', until }));
+    },
+    { syncedAt: Date.now(), until: sleepUntil === undefined ? '' : new Date(sleepUntil).toISOString() },
+  );
+  await p.page.reload();
+  return cut;
 }
 
 describe('play counts', () => {
@@ -81,9 +113,143 @@ describe('the clock', () => {
     expect(Math.abs(again.clock.offsetMs - offset)).toBeLessThan(5000);
     expect(again.log[0]!.spot).toBe('b');
   });
+
+  it('keeps the panel on while it is untrusted, whatever the hours and a saved override say, and applies them once a sync trusts it', async () => {
+    const { p, switches } = await asleep(h.content([{ id: 'a', durationMs: 500 }], { edit: closedAllWeek }));
+
+    // A "sleep" override saved that ended an hour ago, though by the clock a day behind it has a day to run.
+    const cut = await coldBootWithoutClock(p, Date.now() - HOUR);
+    await expect.poll(switches, { timeout: 10_000 }).toHaveLength(2);
+    expect(switches()[1]).toBe('/supervisor/display/on');
+    const s = await p.until((s) => s.played >= 2);
+    expect(s.clock.trusted).toBe(false);
+    expect(s.displayOn).toBe(true);
+    expect(switches()).toHaveLength(2);
+
+    // The network back: the first sync trusts the clock, the expired override is dropped, and the closed hours apply.
+    cut();
+    await p.until((s) => s.clock.trusted && !s.displayOn);
+    await expect.poll(switches, { timeout: 10_000 }).toEqual(['/supervisor/display/off', '/supervisor/display/on', '/supervisor/display/off']);
+    expect(await p.page.evaluate(() => localStorage.getItem('sf.displayOverride'))).toBeNull();
+  });
+});
+
+describe('an untrusted clock', () => {
+  it('asks for the panel on with nothing cached to play', async () => {
+    const p = await h.openPlayer((s) => s.intercept(/^\/content\//, { status: 503 }), api);
+    await p.until((s) => !s.online);
+    await p.page.evaluate((syncedAt) => localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: 0, syncedAt })), Date.now() + 86_400_000);
+    await p.page.reload();
+    const s = await p.until((s) => !s.clock.trusted && !s.online);
+    expect(s.manifestId).toBe('');
+    await expect
+      .poll(() => p.server.requestsTo(/^\/supervisor\/display\//).map((r) => `${r.path} ${r.status}`), { timeout: 5000 })
+      .toEqual(['/supervisor/display/on 200']);
+  });
+
+  it('leaves a saved override alone while syncs fail', async () => {
+    const content = h.content([{ id: 'a', durationMs: 500 }]);
+    const p = await h.openPlayer((s) => s.publish(content), api);
+    await p.until((s) => s.clock.trusted && s.played > 0);
+
+    // The last sync was a day ahead of this clock, and the override ended an hour before it reads.
+    p.server.intercept(/^\/content\//, { status: 503 });
+    const saved = JSON.stringify({ state: 'off', until: new Date(Date.now() - HOUR).toISOString() });
+    await p.page.evaluate(
+      ({ syncedAt, saved }) => {
+        localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: 0, syncedAt }));
+        localStorage.setItem('sf.displayOverride', saved);
+      },
+      { syncedAt: Date.now() + 86_400_000, saved },
+    );
+    await p.page.reload();
+    const refused = () => p.server.requestsTo(/^\/content\/sync$/).filter((r) => r.bearer && r.status === 503).length;
+    const before = refused();
+    await expect.poll(refused, { timeout: 10_000 }).toBeGreaterThanOrEqual(before + 3);
+    expect((await p.state()).clock.trusted).toBe(false);
+    expect(await p.page.evaluate(() => localStorage.getItem('sf.displayOverride'))).toBe(saved);
+  });
+});
+
+describe('the first trusted sync', () => {
+  it('clears a saved override the CMS cleared while the screen was offline, before the display looks', async () => {
+    const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 500 }])), api);
+    await p.until((s) => s.clock.trusted && s.played > 0);
+
+    // A "sleep" saved with an hour to run, which the CMS cleared while the screen was offline.
+    p.server.displayOverride = null;
+    const reloaded = Date.now();
+    const cut = await coldBootWithoutClock(p, Date.now() + HOUR);
+    const switches = () =>
+      p.server
+        .requestsTo(/^\/supervisor\/display\//)
+        .filter((r) => r.at >= reloaded)
+        .map((r) => r.path);
+    await expect.poll(switches, { timeout: 10_000 }).toEqual(['/supervisor/display/on']);
+    // Past the 3 s a panel is given to wake: the display loop waits for its next check.
+    await new Promise((r) => setTimeout(r, 4000));
+
+    cut();
+    await p.until((s) => s.clock.trusted);
+    await expect.poll(() => p.page.evaluate(() => localStorage.getItem('sf.displayOverride')), { timeout: 5000 }).toBeNull();
+    // Longer than an off switch takes (1.5 s).
+    await new Promise((r) => setTimeout(r, 4000));
+    expect(switches()).toEqual(['/supervisor/display/on']);
+  });
+
+  it('applies the wake override it carries before the hours, so a panel kept on is never switched off', async () => {
+    const content = h.content([{ id: 'a', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }], {
+      edit: closedAllWeek,
+    });
+    const snap = (version: number) => ({
+      id: 'news',
+      version,
+      fetchedAt: new Date(version).toISOString(),
+      checkedAt: new Date().toISOString(),
+      data: { headline: 'x' },
+    });
+    const { p, switches } = await asleep(content);
+
+    // An untrusted cold boot with no network: on, whatever the closed hours say.
+    const cut = await coldBootWithoutClock(p);
+    await expect.poll(switches, { timeout: 10_000 }).toEqual(['/supervisor/display/off', '/supervisor/display/on']);
+    // Past the 3 s a panel is given to wake: the display loop now waits for its next check.
+    await new Promise((r) => setTimeout(r, 4000));
+
+    // Meanwhile someone woke the screen from the CMS: the first answer carries that override, and new data.
+    p.server.setData('news', snap(Date.now()));
+    p.server.commands.push({ type: 'display', override: { state: 'on', until: new Date(Date.now() + HOUR).toISOString() } });
+    cut();
+    await p.until((s) => s.clock.trusted);
+    await expect.poll(() => p.page.evaluate(() => localStorage.getItem('sf.displayOverride')), { timeout: 5000 }).toContain('"on"');
+    // Longer than an off switch takes (1.5 s).
+    await new Promise((r) => setTimeout(r, 4000));
+    expect(switches()).toEqual(['/supervisor/display/off', '/supervisor/display/on']);
+    expect((await p.state()).displayOn).toBe(true);
+  });
 });
 
 describe('snapshots', () => {
+  it('of a source a new manifest binds hold up none of its spots: it is loaded once the manifest is adopted', async () => {
+    const first = h.content([{ id: 'a', durationMs: 500 }], { variant: 'first' });
+    const bound = h.content([{ id: 'n', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }], {
+      variant: 'bound',
+    });
+    const p = await h.openPlayer((s) => s.publish(first), api);
+    await p.until((s) => s.manifestId === first.manifest.id && s.socket);
+    // Published with its feed's first snapshot; the socket nudges, and no other sync comes (every 5 minutes).
+    p.server.publish(bound);
+    p.server.setData('news', { id: 'news', version: 1, fetchedAt: new Date(1).toISOString(), checkedAt: new Date().toISOString(), data: { headline: 'Live' } });
+    p.server.push({ type: 'manifest', id: bound.manifest.id });
+    await p.until((s) => s.log.some((l) => l.manifest === bound.manifest.id));
+    await expect.poll(() => p.onScreen(), { timeout: 3000 }).toMatchObject({ label: 'Live' });
+    // 0.5 s spots: about 12 in 6 s, not one every 3 s (the data wait) as when the source never counts as loaded.
+    const before = (await p.state()).log.filter((l) => l.manifest === bound.manifest.id).length;
+    await new Promise((r) => setTimeout(r, 6000));
+    const after = (await p.state()).log.filter((l) => l.manifest === bound.manifest.id).length;
+    expect(after - before).toBeGreaterThanOrEqual(8);
+  });
+
   it('arrive on the sync, and a changed one reaches the screen on its next sync', async () => {
     const snap = (headline: string, version: number) => ({
       id: 'news',
@@ -189,6 +355,51 @@ describe('the heartbeat', () => {
     await expect
       .poll(() => p.server.syncs.at(-1)?.manifest, { timeout: 10_000 })
       .toEqual({ active: good.manifest.id, filesMissing: 0, fallbackFrom: broken.manifest.id, lastGood: good.manifest.id });
+  });
+});
+
+describe('a failed content fetch', () => {
+  it("leaves the heartbeat at the server's interval, while the fetch retries on its own", async () => {
+    const content = h.content([{ id: 'a', durationMs: 500 }]);
+    let restore = () => {};
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 4;
+      s.publish(content);
+      restore = s.intercept(/^\/content\/blobs\//, { status: 404 });
+    }, api);
+    await p.until((s) => s.socket);
+    const syncs = p.server.syncs.length;
+    const fetches = () => p.server.requestsTo(/^\/content\/blobs\//).length;
+    const tried = fetches();
+    await new Promise((r) => setTimeout(r, 9000));
+    // Every 4 s (±10%), not every second (`poll=1`) as after a failed sync.
+    expect(p.server.syncs.length - syncs).toBeGreaterThanOrEqual(2);
+    expect(p.server.syncs.length - syncs).toBeLessThanOrEqual(3);
+    expect(fetches() - tried).toBeGreaterThanOrEqual(3);
+    expect((await p.state()).online).toBe(true);
+
+    // The file back: it plays within a retry, which never waits longer than the sync interval.
+    restore();
+    await p.until((s) => s.manifestId === content.manifest.id, 6000);
+  });
+
+  it('never holds back the next heartbeat while a download is still going', async () => {
+    const content = h.content([{ id: 'a', durationMs: 500 }]);
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 2;
+      s.publish(content);
+      s.intercept(/^\/content\/blobs\//, 'stall');
+    }, api);
+    await p.until((s) => s.socket);
+    const syncs = p.server.syncs.length;
+    await new Promise((r) => setTimeout(r, 7000));
+    // The download has neither finished nor been given up on (the stall timeout is 30 s). A CORS
+    // preflight carries no credential.
+    const blobs = p.server.requestsTo(/^\/content\/blobs\//).filter((r) => r.bearer);
+    expect(blobs).toHaveLength(1);
+    expect(blobs[0]!.abortedAt).toBeUndefined();
+    // Every 2 s (±10%) all the same.
+    expect(p.server.syncs.length - syncs).toBeGreaterThanOrEqual(3);
   });
 });
 
