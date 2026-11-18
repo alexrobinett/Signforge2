@@ -665,6 +665,14 @@ export const MAX_SYNC_PLAY_COUNTS = 500;
  */
 export const MAX_SYNC_SOURCES = 256;
 
+/**
+ * The largest `POST /v1/device/sync` body the server reads, in bytes; a larger one is refused (413)
+ * before it is parsed. A sync holds at most MAX_SYNC_PLAY_COUNTS counts (about 50 kB). A player
+ * before gh-45 also sends both source maps with every source seen since it started, about 160
+ * bytes a source with 64-character ids: this leaves room for some 6000 sources in one run.
+ */
+export const MAX_SYNC_REQUEST_BYTES = 1_048_576;
+
 /** `POST /v1/device/sync`, every few minutes and whenever the socket is down. */
 export interface SyncRequest {
   /**

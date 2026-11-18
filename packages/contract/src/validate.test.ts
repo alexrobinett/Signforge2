@@ -553,6 +553,14 @@ describe('snapshots and device bodies', () => {
     expect(validateDeviceSocketMessage({ type: 'applied', manifest: upper.toLowerCase() })).toEqual([]);
   });
 
+  it('reports a source map with many bad entries as one problem, so the work it makes stays bounded', () => {
+    const bad = Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`bad id ${i}`, -1]));
+    expect(validateSyncRequest({ ...validSyncRequest(), snapshots: bad, dataRejected: bad })).toEqual([
+      'snapshots: "bad id 0" must be a source id with a version number (and 4999 more)',
+      'dataRejected: "bad id 0" must be a source id with a count (and 4999 more)',
+    ]);
+  });
+
   it('takes source maps over MAX_SYNC_SOURCES: a player before gh-45 sends every source it has seen since it started', () => {
     const many = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 44 }, (_, i) => [`s${i}`, 1]));
     expect(validateSyncRequest({ ...validSyncRequest(), snapshots: many, dataRejected: many })).toEqual([]);

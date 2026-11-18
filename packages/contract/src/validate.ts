@@ -677,6 +677,17 @@ function playCountProblems(p: unknown): string[] {
   return errors;
 }
 
+/**
+ * A sync's map of source id to a count, checked entry by entry but reported as one problem at
+ * most: a player before gh-45 sends every source it has seen, so one cause must not make a
+ * problem per entry. The size of the work is bounded by `MAX_SYNC_REQUEST_BYTES`.
+ */
+function sourceMapProblems(name: string, map: Obj, what: string): string[] {
+  const bad = Object.keys(map).filter((k) => !isIdValue(k) || !isCount(own(map, k)));
+  if (!bad.length) return [];
+  return [`${name}: "${show(bad[0])}" must be a source id with ${what}${bad.length > 1 ? ` (and ${bad.length - 1} more)` : ''}`];
+}
+
 const versions = (v: unknown) => Array.isArray(v) && v.every((n) => Number.isSafeInteger(n));
 
 /** `POST /v1/device/sync`, as the server receives it. */
@@ -699,14 +710,10 @@ export function validateSyncRequest(r: unknown): string[] {
   errors.push(...list('play count', r.playCounts, playCountProblems));
   if (Array.isArray(r.playCounts) && r.playCounts.length > MAX_SYNC_PLAY_COUNTS) errors.push(`playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`);
   if (!isObj(r.snapshots)) errors.push('snapshots must map source ids to versions');
-  else
-    for (const [k, v] of Object.entries(r.snapshots))
-      if (!isIdValue(k) || !isCount(v)) errors.push(`snapshots: "${k}" must be a source id with a version number`);
+  else errors.push(...sourceMapProblems('snapshots', r.snapshots, 'a version number'));
   if (r.dataRejected !== undefined) {
     if (!isObj(r.dataRejected)) errors.push('dataRejected must map source ids to counts');
-    else
-      for (const [k, v] of Object.entries(r.dataRejected))
-        if (!isIdValue(k) || !isCount(v)) errors.push(`dataRejected: "${k}" must be a source id with a count`);
+    else errors.push(...sourceMapProblems('dataRejected', r.dataRejected, 'a count'));
   }
   return errors;
 }
