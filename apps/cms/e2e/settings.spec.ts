@@ -146,7 +146,13 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByLabel('Editors can publish').uncheck();
   await page.getByRole('region', { name: 'Who publishes' }).getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Saved')).toBeVisible();
-  await expect(page.getByRole('row', { name: /Publish to screens/ }).getByRole('cell').nth(1).getByLabel('No')).toBeVisible();
+  await expect(
+    page
+      .getByRole('row', { name: /Publish to screens/ })
+      .getByRole('cell')
+      .nth(1)
+      .getByLabel('No'),
+  ).toBeVisible();
   await toTop(page.getByRole('region', { name: 'Who publishes' }));
   await shots(page, '48-settings-who-publishes');
   await publishOption(0);
