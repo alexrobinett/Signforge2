@@ -540,9 +540,17 @@ describe('snapshots and device bodies', () => {
 
   it('takes only sha256 manifest ids from a screen', () => {
     const r = validSyncRequest() as unknown as Record<string, unknown>;
-    r.manifest = { active: 'x'.repeat(10_000), filesMissing: 0, fallbackFrom: M2.toUpperCase(), lastGood: 'm1' };
-    expect(validateSyncRequest(r)).toEqual(['manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids']);
-    expect(validateDeviceSocketMessage({ type: 'applied', manifest: 'm1' })).toEqual(['applied message needs a sha256 manifest id']);
+    // Each id on its own, so no one check hides behind another: too long, and hex in uppercase.
+    const upper = 'ABCDEF'.repeat(10) + 'ABCD';
+    for (const field of ['active', 'fallbackFrom', 'lastGood'])
+      for (const bad of ['x'.repeat(10_000), upper]) {
+        r.manifest = { ...validSyncRequest().manifest, [field]: bad };
+        expect(validateSyncRequest(r), `${field} ${bad.slice(0, 8)}`).toEqual([
+          'manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids',
+        ]);
+      }
+    expect(validateDeviceSocketMessage({ type: 'applied', manifest: upper })).toEqual(['applied message needs a sha256 manifest id']);
+    expect(validateDeviceSocketMessage({ type: 'applied', manifest: upper.toLowerCase() })).toEqual([]);
   });
 
   it('takes source maps over MAX_SYNC_SOURCES: a player before gh-45 sends every source it has seen since it started', () => {
