@@ -6,6 +6,19 @@ import {
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
   checkTemplateBundle,
+  parseBrandKit,
+  parseDataSnapshot,
+  parseDeviceCommand,
+  parseDeviceSocketMessage,
+  parseDisplayHours,
+  parseManifest,
+  parsePairPollResponse,
+  parsePairStartResponse,
+  parsePreviewHostMessage,
+  parseServerSocketMessage,
+  parseSyncRequest,
+  parseSyncResponse,
+  parseTemplateManifest,
   requiredFiles,
   validateBrandKit,
   displayHoursProblems,
@@ -253,6 +266,45 @@ describe('every validator is total', () => {
   );
 });
 
+const parsers: [string, (v: unknown) => unknown, (v: unknown) => string[]][] = [
+  ['parseManifest', parseManifest, validateManifest],
+  ['parseTemplateManifest', parseTemplateManifest, validateTemplateManifest],
+  ['parseDataSnapshot', parseDataSnapshot, validateDataSnapshot],
+  ['parseBrandKit', parseBrandKit, validateBrandKit],
+  ['parseDisplayHours', parseDisplayHours, displayHoursProblems],
+  ['parsePairStartResponse', parsePairStartResponse, validatePairStartResponse],
+  ['parsePairPollResponse', parsePairPollResponse, validatePairPollResponse],
+  ['parseSyncRequest', parseSyncRequest, validateSyncRequest],
+  ['parseSyncResponse', parseSyncResponse, validateSyncResponse],
+  ['parseDeviceCommand', parseDeviceCommand, validateDeviceCommand],
+  ['parseServerSocketMessage', parseServerSocketMessage, validateServerSocketMessage],
+  ['parseDeviceSocketMessage', parseDeviceSocketMessage, validateDeviceSocketMessage],
+  ['parsePreviewHostMessage', parsePreviewHostMessage, validatePreviewHostMessage],
+];
+
+describe('every parser gives back what its validator accepts', () => {
+  for (const [name, parse, validate] of parsers) {
+    const fixture = validators.find(([v]) => v === validate.name)?.[2];
+    it(`${name} returns the value itself when valid, or the validator's problems`, () => {
+      fc.assert(
+        fc.property(fixture ? fc.oneof(json, mutated(fixture)) : json, (v) => {
+          const problems = validate(v);
+          expect(parse(v)).toEqual(problems.length ? { ok: false, problems } : { ok: true, value: v });
+          if (!problems.length) expect((parse(v) as { value: unknown }).value).toBe(v);
+        }),
+        { numRuns: 300 },
+      );
+    });
+  }
+
+  it('parseSyncRequest hands back the request, typed', () => {
+    const r = validSyncRequest();
+    const parsed = parseSyncRequest(r);
+    expect(parsed.ok && parsed.value.player.version).toBe('1.2.3');
+    expect(parseSyncRequest({ ...r, seq: -1 })).toEqual({ ok: false, problems: ['seq must be a whole number, 0 or more'] });
+  });
+});
+
 // ------------------------------------------------------------------ behaviour
 
 describe('validateTemplateManifest', () => {
@@ -402,7 +454,9 @@ describe('takeovers', () => {
     const m = validManifest();
     m.schedule[1] = { ...m.schedule[1]!, startsAt: '2026-11-17T16:00:00Z', endsAt: '2026-11-17T14:00:00Z' };
     expect(validateManifest(m)).toEqual(['schedule entry "takeover": endsAt must be after startsAt']);
-    m.schedule[1] = { ...m.schedule[1]!, startsAt: 'soon', endsAt: undefined };
+    const open = { ...m.schedule[1]!, startsAt: 'soon' };
+    delete open.endsAt;
+    m.schedule[1] = open;
     expect(validateManifest(m)).toEqual(['schedule entry "takeover": startsAt must be an ISO 8601 time']);
   });
 });

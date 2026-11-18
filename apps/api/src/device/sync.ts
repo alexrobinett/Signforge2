@@ -8,7 +8,7 @@
  * exists or three if it is new (the row and two index entries). The player sends an hour's counts
  * once the hour has ended, so each (hour, spot) row is written about once.
  */
-import { validateSyncRequest, type DataSnapshot, type DeviceCommand, type DisplayOverride, type SyncRequest, type SyncResponse } from '@signforge/contract';
+import { parseSyncRequest, type DataSnapshot, type DeviceCommand, type DisplayOverride, type SyncRequest, type SyncResponse } from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
 import { liveOverride, type ScreenHeartbeat } from '@signforge/tools';
 import type { Context } from 'hono';
@@ -57,9 +57,9 @@ export async function syncRoute(c: Context<DeviceEnv>): Promise<Response> {
   } catch {
     return refuse(400, 'the body is not JSON');
   }
-  const problems = validateSyncRequest(body);
-  if (problems.length) return c.json({ error: 'invalid sync request', problems }, 400);
-  const req = body as SyncRequest;
+  const parsed = parseSyncRequest(body);
+  if (!parsed.ok) return c.json({ error: 'invalid sync request', problems: parsed.problems }, 400);
+  const req = parsed.value;
   const screen = c.get('screen');
   const now = Date.now();
 
