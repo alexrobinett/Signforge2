@@ -26,11 +26,11 @@ export interface SocketHolder {
 export const HOLDER_HEADER = 'x-sf-socket-holder';
 
 /** The screen's keepalive and its automatic answer. */
-export const PING = 'ping';
-export const PONG = 'pong';
+const PING = 'ping';
+const PONG = 'pong';
 
 /** Close code for a revoked credential (4000-4999 is the application's range). */
-export const CLOSE_REVOKED = 4001;
+const CLOSE_REVOKED = 4001;
 
 export class ScreenObject extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {

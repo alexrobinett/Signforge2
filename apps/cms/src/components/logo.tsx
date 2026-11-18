@@ -1,7 +1,7 @@
 import { cn } from '~/lib/utils';
 
 /** The SignForge mark: a screen on a stand. */
-export function LogoMark({ className, inverse = false }: { className?: string; inverse?: boolean }) {
+function LogoMark({ className, inverse = false }: { className?: string; inverse?: boolean }) {
   const ink = inverse ? 'stroke-[oklch(0.3_0.12_272)]' : 'stroke-primary-foreground';
   return (
     <svg viewBox="0 0 32 32" aria-hidden className={cn('size-8 shrink-0', className)}>

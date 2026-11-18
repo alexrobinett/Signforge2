@@ -9,7 +9,8 @@
   "exports": {
     "./push": "./src/push.ts",
     "./template": "./src/template.ts",
-    "./template-push": "./src/template-push.ts"
+    "./template-push": "./src/template-push.ts",
+    "./golden/stress.json": "./test/golden/stress.json"
   },
   "scripts": {
     "typecheck": "tsc -p .",
@@ -19,11 +20,11 @@
     "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/feeds": "workspace:*",
-    "@signforge/player-core": "workspace:*",
     "esbuild": "^0.28.2",
     "sharp": "^0.35.5"
   },
   "devDependencies": {
-    "@types/node": "^26.6.6"
+    "@types/node": "^26.6.6",
+    "vitest": "^5.1.0"
   }
 }

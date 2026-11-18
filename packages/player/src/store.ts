@@ -7,7 +7,7 @@ import { safeUrl, validTimezone, validateManifest, type ScreenManifest } from '@
 import { planSync } from '@signforge/player-core';
 import { STALL_MS, UnauthorisedError, download, type DownloadRequest, type DownloadResult } from './download';
 
-export { STALL_MS, UnauthorisedError };
+export { UnauthorisedError };
 
 const BLOBS = 'sf-blobs-v1';
 const STATE = 'sf-state-v1';

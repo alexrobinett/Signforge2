@@ -32,3 +32,8 @@ export async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${dir}/${name}.png` });
 }
+
+/** Wait until React has hydrated the page (`data-hydrated` on body), so clicks reach handlers. */
+export async function hydrated(page: Page) {
+  await expect(page.locator('body[data-hydrated]')).toBeAttached({ timeout: 30_000 });
+}

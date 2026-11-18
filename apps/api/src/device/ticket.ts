@@ -9,7 +9,7 @@
 import { isId } from '@signforge/contract';
 import { authSecret } from '../auth';
 
-export const TICKET_TTL_MS = 60_000;
+const TICKET_TTL_MS = 60_000;
 
 export interface TicketHolder {
   screenId: string;

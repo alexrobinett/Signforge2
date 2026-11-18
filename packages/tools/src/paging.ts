@@ -49,7 +49,7 @@ function decode(cursor: string): SortKey {
 }
 
 /** Ascending, element by element; strings by code point. */
-export function compareKeys(a: SortKey, b: SortKey): number {
+function compareKeys(a: SortKey, b: SortKey): number {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const x = a[i];
     const y = b[i];

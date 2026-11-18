@@ -111,7 +111,7 @@ const blobKey = (scope: DataScope, sha256: string) => (scope.orgId === null ? ba
 const byOwnerThenName = (a: SortKey, b: SortKey) =>
   Number(a[0]) - Number(b[0]) || String(a[1]).localeCompare(String(b[1])) || (a[2] === b[2] ? 0 : String(a[2]) < String(b[2]) ? -1 : 1);
 
-export const listTemplates = defineTool({
+const listTemplates = defineTool({
   name: 'list_templates',
   description:
     "List the templates this org can use for spots: the platform's base templates and the org's own. Each has its versions, oldest first, with the version's manifest (name, fields, duration range, orientations), status (draft, approved or retired) and the server's check report. Only approved versions should be offered for new spots. Pass status to list only versions with that status; templates with none are left out. Base templates come first, then by name, a page at a time. Returns { templates: Template[], next }; pass next as cursor for the following page.",
@@ -134,7 +134,7 @@ export const listTemplates = defineTool({
   },
 });
 
-export const getTemplate = defineTool({
+const getTemplate = defineTool({
   name: 'get_template',
   description:
     "Get one template this org can use (its own or a base one) with every version: manifest, status and the server's check report. Returns { template }.",
@@ -154,7 +154,7 @@ export const getTemplate = defineTool({
 /** Sources as uploaded: a JSON object of file name to text. */
 const sourcesSchema = z.record(z.string(), z.string());
 
-export const registerTemplateVersion = defineSharedTool({
+const registerTemplateVersion = defineSharedTool({
   name: 'register_template_version',
   description:
     "Register a built template version whose bundle and sources are already uploaded (`sf template push` does both). The server lints them as `sf build` does: the manifest, forbidden CSS (backdrop-filter), the 600 kB size budget and network references on the bundle, and forbidden code (fetch, navigation) on the author's sources. Colour literals in the CSS outside a var(--sf-*) fallback are reported as warnings in the check report and do not stop the version. A version that fails is refused with each problem and nothing is stored. Versions are immutable: registering an existing version with the same bundle and manifest changes nothing, and with different ones is refused; bump the version instead. A new version is a draft. Returns { template, version, changed }.",
@@ -191,10 +191,15 @@ export const registerTemplateVersion = defineSharedTool({
     let sources: Record<string, string>;
     try {
       sources = sourcesSchema.parse(JSON.parse(await sourcesObj.text()));
-    } catch {
-      throw new ToolError('invalid_input', 'the sources are not a JSON object of file name to text', [
-        { path: 'sourcesId', message: 'not a JSON object of file name to text' },
-      ]);
+    } catch (e) {
+      // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument; the rule reads only the second argument.
+      throw new ToolError(
+        'invalid_input',
+        'the sources are not a JSON object of file name to text',
+        [{ path: 'sourcesId', message: 'not a JSON object of file name to text' }],
+        false,
+        { cause: e },
+      );
     }
 
     const report = checkTemplateBundle({ manifest: input.manifest, html, sources });
@@ -245,7 +250,7 @@ export const registerTemplateVersion = defineSharedTool({
   },
 });
 
-export const setTemplateVersionStatus = defineSharedTool({
+const setTemplateVersionStatus = defineSharedTool({
   name: 'set_template_version_status',
   description:
     'Approve a template version, so spots may use it, or retire it, so no new spot does. Spots already using a retired version keep playing it. Base templates belong to the platform; an org can change only its own. Setting the status it already has changes nothing. Returns { version, changed }.',

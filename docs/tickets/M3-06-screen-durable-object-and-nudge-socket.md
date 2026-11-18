@@ -46,4 +46,4 @@ Pi evidence was measured on the Pi 400 rig against the API run locally (`wrangle
 - Contract: `SyncResponse.desiredManifest` is optional (own commit), since a screen with nothing published still syncs for its ticket.
 - `POST /v1/device/sync` is minimal here: it issues the ticket and returns the desired manifest and server time, with `ackSeq: 0`, no snapshots and no commands, and stores nothing. M3-07 builds the rest. The player's socket syncs on its own for a ticket; M3-07 should make one sync loop feed it.
 - The `reboot` command is logged and ignored: the supervisor has no reboot endpoint.
-- Nothing sends a `command` yet; `sendCommand` in `apps/api/src/device/screens.ts` is there for the CMS's display override (M3-11).
+- Nothing sends a `command` yet. The unused `sendCommand` helper was removed when knip came in; M3-11's display override adds its own path.

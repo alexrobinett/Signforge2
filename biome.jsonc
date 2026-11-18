@@ -1,0 +1,125 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "master" },
+  "files": {
+    "includes": ["**", "!**/worker-configuration.d.ts", "!**/routeTree.gen.ts", "!packages/cli/test/golden", "!spike/pi-perf", "!spike/rive-promo"]
+  },
+  "formatter": { "includes": ["**", "!**/*.md"], "indentStyle": "space", "indentWidth": 2, "lineWidth": 160 },
+  "javascript": { "formatter": { "quoteStyle": "single" } },
+  "css": { "parser": { "tailwindDirectives": true }, "formatter": { "quoteStyle": "single" } },
+  "assist": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "useErrorCause": "error",
+        "noNonNullAssertion": "off",
+        "useTemplate": "off"
+      },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error",
+        "useExhaustiveSwitchCases": "error",
+        "useAwaitThenable": "error",
+        "noUselessAwait": "error",
+        "noUselessTypeAssertion": "error",
+        // No `as` that narrows a type: parse with the contract, or annotate. The overrides below
+        // allow it where it is the point (tests, the db layer, the validators) and in a frozen list.
+        "noUnsafeTypeAssertion": "error"
+      },
+      "complexity": { "noCommaOperator": "off" },
+      "correctness": { "noVoidTypeReturn": "off" },
+      "suspicious": {
+        "noAssignInExpressions": "off",
+        "useIterableCallbackReturn": "off",
+        "noUndeclaredEnvVars": "off",
+        "noImportCycles": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/test/**", "**/*.test.ts", "**/*.test.tsx", "**/e2e/**"],
+      "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } }
+    },
+    {
+      "includes": ["packages/tools/src/**"],
+      "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } }
+    },
+    {
+      "includes": ["examples/**", "templates/**", "apps/cms/public/**"],
+      "linter": { "rules": { "a11y": { "noSvgWithoutTitle": "off" } } }
+    },
+    {
+      // Type assertions belong here: test doubles and fixtures, Drizzle row typing in the db layer,
+      // the contract's validators, which read untrusted JSON field by field, and throwaway spikes.
+      "includes": [
+        "**/test/**",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/e2e/**",
+        "packages/player/browser/**",
+        "packages/db/src/**",
+        "packages/contract/src/validate.ts",
+        "spike/**"
+      ],
+      "linter": { "rules": { "nursery": { "noUnsafeTypeAssertion": "off" } } }
+    },
+    {
+      // Files that held type assertions when the rule came in (2026-11-17). This list only shrinks:
+      // remove a file once its casts are gone, and never add one. New code parses or annotates.
+      "includes": [
+        "apps/api/scripts/dev-screen.ts",
+        "apps/api/src/admin/index.ts",
+        "apps/api/src/api/index.ts",
+        "apps/api/src/api/tools.ts",
+        "apps/api/src/auth/options.ts",
+        "apps/api/src/auth/roles.ts",
+        "apps/api/src/device/pairing.ts",
+        "apps/api/src/device/screen-object.ts",
+        "apps/api/src/device/sync.ts",
+        "apps/api/src/device/ticket.ts",
+        "apps/cms/src/components/user-menu.tsx",
+        "apps/cms/src/server/shell.functions.ts",
+        "packages/cli/src/push.ts",
+        "packages/cli/src/sf.ts",
+        "packages/cli/src/template-push.ts",
+        "packages/cli/src/template.ts",
+        "packages/compiler/src/brand.ts",
+        "packages/compiler/src/index.ts",
+        "packages/contract/src/index.ts",
+        "packages/feeds/src/ical.ts",
+        "packages/feeds/src/index.ts",
+        "packages/feeds/src/news.ts",
+        "packages/media/src/renditions.ts",
+        "packages/media/src/upload.ts",
+        "packages/player-core/src/plays.ts",
+        "packages/player/src/clock.ts",
+        "packages/player/src/credential.ts",
+        "packages/player/src/data.ts",
+        "packages/player/src/download-worker.ts",
+        "packages/player/src/main.ts",
+        "packages/player/src/override.ts",
+        "packages/player/src/pairing.ts",
+        "packages/player/src/preview.ts",
+        "packages/player/src/slot.ts",
+        "packages/player/src/socket.ts",
+        "packages/player/src/store.ts",
+        "packages/player/vite.config.ts",
+        "packages/template-sdk/src/index.ts",
+        "packages/tools/src/brand.ts",
+        "packages/tools/src/dispatch.ts",
+        "packages/tools/src/publishing.ts",
+        "packages/tools/src/screens.ts",
+        "packages/tools/src/templates.ts",
+        "packages/tools/src/upload.ts",
+        "scripts/spot-shots.ts",
+        "templates/agenda/main.ts",
+        "templates/menu-board/main.ts",
+        "templates/news/main.ts"
+      ],
+      "linter": { "rules": { "nursery": { "noUnsafeTypeAssertion": "off" } } }
+    }
+  ]
+}

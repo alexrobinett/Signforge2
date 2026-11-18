@@ -49,7 +49,7 @@ import { adminAuth, type AdminEnv } from './auth';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 /** The audit log's actor and client for a publish from `sf push`. */
-export const SF_PUSH = 'sf-push';
+const SF_PUSH = 'sf-push';
 const encoder = new TextEncoder();
 
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');

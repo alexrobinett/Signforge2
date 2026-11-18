@@ -41,5 +41,5 @@ export const deviceAuth = createMiddleware<DeviceEnv>(async (c, next) => {
 
   c.set('screen', screen);
   c.set('credentialId', matched.id);
-  await next();
+  return next();
 });

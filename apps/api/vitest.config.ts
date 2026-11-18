@@ -1,7 +1,7 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 import { buildTemplate } from '@signforge/cli/template';
-// fonts.ts directly: Node loads this config, and the compiler's index uses extensionless imports.
-import { FONTS, fontFilePath } from '../../packages/compiler/src/fonts.ts';
+// The fonts entry, not the index: Node loads this config, and the compiler's index uses extensionless imports.
+import { FONTS, fontFilePath } from '@signforge/compiler/fonts';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 

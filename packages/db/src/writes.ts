@@ -29,7 +29,7 @@ export interface Staged<T = void> {
   writes: Write[];
 }
 
-export const write = (query: unknown): Write => ({ [QUERY]: query as Query });
+const write = (query: unknown): Write => ({ [QUERY]: query as Query });
 export const staged = <T>(row: T, ...queries: unknown[]): Staged<T> => ({ row, writes: queries.map(write) });
 
 /** Run writes in one atomic batch. Nothing to write runs nothing. */

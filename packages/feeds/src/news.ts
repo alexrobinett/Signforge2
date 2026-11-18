@@ -65,7 +65,8 @@ export function parseNews(body: string, options: NewsOptions = {}): NewsFeed {
   try {
     doc = parser.parse(body, true) as Node;
   } catch (e) {
-    throw new FeedError('malformed', `not an XML feed: ${(e as Error).message.slice(0, 80)}`);
+    // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument; the rule reads only the second argument.
+    throw new FeedError('malformed', `not an XML feed: ${(e as Error).message.slice(0, 80)}`, { cause: e });
   }
 
   let title = '';

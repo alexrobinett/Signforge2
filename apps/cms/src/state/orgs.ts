@@ -8,7 +8,7 @@ import type { SliceCreator } from './store';
  */
 export type CreateOrgFormId = 'picker' | 'switcher';
 
-export interface CreateOrgDraft {
+interface CreateOrgDraft {
   name: string;
   pending: boolean;
   error: string | null;
