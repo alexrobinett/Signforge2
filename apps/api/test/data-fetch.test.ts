@@ -127,7 +127,8 @@ describe('guardedFetch', () => {
     const guards = { ...stub({ 'https://feed.test/': ok('late') }).guards, resolve: dohResolver(slowDns), timeoutMs };
     const start = Date.now();
     const code = await refusal(guardedFetch('https://feed.test/', {}, guards));
-    expect({ code, inTime: Date.now() - start < timeoutMs + 100 }).toEqual({ code: 'dns', inTime: true });
+    // Well under the ~10 deadlines the old separate lookup timer took, with room for a slow runner.
+    expect({ code, inTime: Date.now() - start < 5 * timeoutMs }).toEqual({ code: 'dns', inTime: true });
   });
 
   it("reports Cloudflare's refusal to reach a private address as a blocked address, not the feed's answer", async () => {

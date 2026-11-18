@@ -3,7 +3,8 @@
  * is checked before it is requested: https on the default port, a hostname rather than an IP
  * address, and a name that does not resolve to a private or reserved address. Redirects are
  * followed by hand, at most 3, each checked again. The whole fetch has 5 seconds, under one
- * signal: every DNS lookup, every hop and the body read. The body may be 1 MB. A failure is a `FetchError` with a category; the upstream body is never echoed.
+ * signal: every DNS lookup, every hop and the body read. The body may be 1 MB. A failure is a
+ * `FetchError` with a category; the upstream body is never echoed.
  *
  * A Worker cannot pin the address it resolved, so the DNS check is a first filter and not the
  * defence against rebinding: that is Workers' outbound requests, which cannot reach private
