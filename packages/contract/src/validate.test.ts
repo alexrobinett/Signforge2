@@ -6,6 +6,19 @@ import {
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
   checkTemplateBundle,
+  parseBrandKit,
+  parseDataSnapshot,
+  parseDeviceCommand,
+  parseDeviceSocketMessage,
+  parseDisplayHours,
+  parseManifest,
+  parsePairPollResponse,
+  parsePairStartResponse,
+  parsePreviewHostMessage,
+  parseServerSocketMessage,
+  parseSyncRequest,
+  parseSyncResponse,
+  parseTemplateManifest,
   requiredFiles,
   validateBrandKit,
   displayHoursProblems,
@@ -250,6 +263,45 @@ describe('every validator is total', () => {
       return validateSpotData(o.fields, o.data, o.assets, o.bindings);
     },
   );
+});
+
+const parsers: [string, (v: unknown) => unknown, (v: unknown) => string[]][] = [
+  ['parseManifest', parseManifest, validateManifest],
+  ['parseTemplateManifest', parseTemplateManifest, validateTemplateManifest],
+  ['parseDataSnapshot', parseDataSnapshot, validateDataSnapshot],
+  ['parseBrandKit', parseBrandKit, validateBrandKit],
+  ['parseDisplayHours', parseDisplayHours, displayHoursProblems],
+  ['parsePairStartResponse', parsePairStartResponse, validatePairStartResponse],
+  ['parsePairPollResponse', parsePairPollResponse, validatePairPollResponse],
+  ['parseSyncRequest', parseSyncRequest, validateSyncRequest],
+  ['parseSyncResponse', parseSyncResponse, validateSyncResponse],
+  ['parseDeviceCommand', parseDeviceCommand, validateDeviceCommand],
+  ['parseServerSocketMessage', parseServerSocketMessage, validateServerSocketMessage],
+  ['parseDeviceSocketMessage', parseDeviceSocketMessage, validateDeviceSocketMessage],
+  ['parsePreviewHostMessage', parsePreviewHostMessage, validatePreviewHostMessage],
+];
+
+describe('every parser gives back what its validator accepts', () => {
+  for (const [name, parse, validate] of parsers) {
+    const fixture = validators.find(([v]) => v === validate.name)?.[2];
+    it(`${name} returns the value itself when valid, or the validator's problems`, () => {
+      fc.assert(
+        fc.property(fixture ? fc.oneof(json, mutated(fixture)) : json, (v) => {
+          const problems = validate(v);
+          expect(parse(v)).toEqual(problems.length ? { ok: false, problems } : { ok: true, value: v });
+          if (!problems.length) expect((parse(v) as { value: unknown }).value).toBe(v);
+        }),
+        { numRuns: 300 },
+      );
+    });
+  }
+
+  it('parseSyncRequest hands back the request, typed', () => {
+    const r = validSyncRequest();
+    const parsed = parseSyncRequest(r);
+    expect(parsed.ok && parsed.value.player.version).toBe('1.2.3');
+    expect(parseSyncRequest({ ...r, seq: -1 })).toEqual({ ok: false, problems: ['seq must be a whole number, 0 or more'] });
+  });
 });
 
 // ------------------------------------------------------------------ behaviour

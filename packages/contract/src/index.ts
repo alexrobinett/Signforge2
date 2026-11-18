@@ -6,7 +6,8 @@
  *   screen           <-> server   the device API: pairing, sync, socket messages
  *
  * Nothing here depends on a browser or on Node. The shapes and their constants are in
- * `shapes.ts`, and the runtime checks for every shape in `validate.ts`.
+ * `shapes.ts`, the runtime checks for every shape in `validate.ts`, and `parse.ts` turns each check
+ * into a parser that hands back the typed value.
  *
  * Versioning. Screens and template bundles outlive any one release, so both versions are ranges:
  *  - A template bundle records the frame protocol it was built against (`TemplateManifest.protocol`)
@@ -20,3 +21,4 @@
 
 export * from './shapes.ts';
 export * from './validate.ts';
+export * from './parse.ts';
