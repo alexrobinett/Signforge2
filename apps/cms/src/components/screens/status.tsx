@@ -25,7 +25,7 @@ const PILL: Record<Tone, string> = {
 
 export const toneOf = (kind: StateKind): Tone => (kind === 'unreachable' ? 'offline' : kind === 'needs_you' ? 'needs-you' : kind);
 
-export function StatusGlyph({ tone, className }: { tone: Tone; className?: string }) {
+function StatusGlyph({ tone, className }: { tone: Tone; className?: string }) {
   const c = cn('size-3 flex-none', GLYPH_COLOR[tone], className);
   switch (tone) {
     case 'online':
@@ -67,7 +67,7 @@ export function StatusGlyph({ tone, className }: { tone: Tone; className?: strin
 }
 
 /** The pill: shape and word on the state's own tint. */
-export function StatusPill({ tone, children, className }: { tone: Tone; children: string; className?: string }) {
+function StatusPill({ tone, children, className }: { tone: Tone; children: string; className?: string }) {
   return (
     <span className={cn('inline-flex items-center gap-1.5 rounded-full py-0.5 pr-2.5 pl-2 text-[13px] font-semibold whitespace-nowrap', PILL[tone], className)}>
       <StatusGlyph tone={tone} />

@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import { useHydrated } from '~/lib/hydrated';
 import { themeScript } from '~/lib/theme';
 import styles from '~/styles.css?url';
 
@@ -26,6 +27,9 @@ export const Route = createRootRoute({
 });
 
 function RootDocument({ children }: { children: ReactNode }) {
+  // `data-hydrated` tells tests (and anything else) when clicks reach React: before it, the page is
+  // the server's HTML and a menu button does nothing.
+  const hydrated = useHydrated();
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -34,7 +38,7 @@ function RootDocument({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <HeadContent />
       </head>
-      <body className="min-h-dvh">
+      <body className="min-h-dvh" data-hydrated={hydrated ? '' : undefined}>
         {children}
         <Scripts />
       </body>

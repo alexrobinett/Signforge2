@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { ArrowLeftIcon, LoaderCircleIcon, MailIcon, TerminalIcon } from 'lucide-react';
-import { useId, type FormEvent } from 'react';
+import { useId, type SubmitEvent } from 'react';
 import { GitHubMark, Logo } from '~/components/logo';
 import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
@@ -61,12 +61,12 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
   const codeId = useId();
   const errorId = useId();
 
-  function onEmailSubmit(e: FormEvent) {
+  function onEmailSubmit(e: SubmitEvent) {
     e.preventDefault();
     void startSignIn();
   }
 
-  function onCodeSubmit(e: FormEvent) {
+  function onCodeSubmit(e: SubmitEvent) {
     e.preventDefault();
     void submitCode(next);
   }

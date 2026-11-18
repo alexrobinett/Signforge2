@@ -2,7 +2,7 @@
 import { applyTheme, onSystemThemeChange, readStoredTheme, storeTheme, type Theme } from '~/lib/theme';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
-export interface UiState {
+interface UiState {
   drawerOpen: boolean;
   /** 'system' until the browser store reads the saved choice, so server and first client render agree. */
   theme: Theme;

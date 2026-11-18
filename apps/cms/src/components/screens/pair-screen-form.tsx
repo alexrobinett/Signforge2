@@ -4,14 +4,13 @@
  * same tools an agent would use (M3-08: no groups in the claim).
  */
 import { LoaderCircleIcon } from 'lucide-react';
-import { useId, useSyncExternalStore, type FormEvent } from 'react';
+import { useId, useSyncExternalStore, type SubmitEvent } from 'react';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
-import type { GroupView } from '~/lib/screen-types';
+import { isOrientation, type GroupView } from '~/lib/screen-types';
 import { useAppStore } from '~/state/provider';
-import type { Orientation } from '~/state/screens';
 import { DisplayHoursEditor, hoursProblems } from './display-hours-editor';
 import { normaliseCode, PAIRING_CODE_LENGTH, PairingCodeInput } from './pairing-code-input';
 
@@ -53,7 +52,7 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
 
   const ready = normaliseCode(code).length === PAIRING_CODE_LENGTH && name.trim().length > 0 && hoursProblems(hours).length === 0;
 
-  function submit(e: FormEvent) {
+  function submit(e: SubmitEvent) {
     e.preventDefault();
     if (ready) void pairScreen(groups, browser);
   }
@@ -86,7 +85,13 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor={`${id}-or`}>Orientation</Label>
-          <NativeSelect id={`${id}-or`} value={orientation} onChange={(e) => chooseNewScreenOrientation(e.target.value as Orientation)}>
+          <NativeSelect
+            id={`${id}-or`}
+            value={orientation}
+            onChange={(e) => {
+              if (isOrientation(e.target.value)) chooseNewScreenOrientation(e.target.value);
+            }}
+          >
             <option value="landscape">Landscape (16:9)</option>
             <option value="portrait">Portrait (9:16)</option>
           </NativeSelect>

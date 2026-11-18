@@ -149,6 +149,7 @@ export function startDataLoop(
   };
   void tick();
   // A wake during a pass runs one more pass after it, so sources added meanwhile are not missed.
+  // biome-ignore lint/nursery/noMisusedPromises: `running` is tested for being there, not awaited as a condition; it is undefined between passes.
   return () => void (running ? running.then(() => tick()) : tick());
 }
 

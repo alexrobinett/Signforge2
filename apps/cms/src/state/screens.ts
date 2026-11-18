@@ -4,12 +4,12 @@
  * in the URL (`/screens?view=table`), and screens themselves come from the route loaders.
  */
 import type { DisplayHours, GroupView, ScreenView } from '~/lib/screen-types';
-import { callTool, toolMessage } from '~/lib/tools';
+import { callTool, screenIdOf, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 
-export type Orientation = 'landscape' | 'portrait';
+type Orientation = 'landscape' | 'portrait';
 
-export interface PairingDraft {
+interface PairingDraft {
   code: string;
   name: string;
   /** Null until chosen: the form shows the browser's own zone. */
@@ -23,14 +23,14 @@ export interface PairingDraft {
   key: string | null;
 }
 
-export interface SettingsDraft {
+interface SettingsDraft {
   name: string;
   timezone: string;
   orientation: Orientation;
   groupIds: string[];
 }
 
-export interface ScreenPageState {
+interface ScreenPageState {
   /** The screen this state is about: a notice or an open editor belongs to one screen's page. */
   screenId: string | null;
   /** The action being sent (identify, restart, display, revoke), or null. */
@@ -44,13 +44,13 @@ export interface ScreenPageState {
   saveError: string | null;
 }
 
-export interface ScreensState {
+interface ScreensState {
   pairing: PairingDraft;
   page: ScreenPageState;
 }
 
 /** A command or change sent from a screen's page, with what to say when it worked. */
-export interface ScreenAction {
+interface ScreenAction {
   label: string;
   tool: string;
   input: Record<string, unknown>;
@@ -109,7 +109,7 @@ const newPage = (): ScreenPageState => ({
   saveError: null,
 });
 
-export const initialScreens: ScreensState = { pairing: newPairing(), page: newPage() };
+const initialScreens: ScreensState = { pairing: newPairing(), page: newPage() };
 
 const toggled = (ids: string[], id: string, member: boolean) => (member ? [...new Set([...ids, id])] : ids.filter((x) => x !== id));
 
@@ -132,19 +132,21 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
       pairing((p) => ({ ...p, key, pending: true, error: null }));
       const d = get().screens.pairing;
       try {
-        const { screen } = await callTool<{ screen: ScreenView }>('claim_screen', {
-          code: d.code,
-          name: d.name.trim(),
-          timezone: d.timezone ?? fallbackZone,
-          orientation: d.orientation,
-          ...(d.hours ? { displayHours: d.hours } : {}),
-          idempotencyKey: key,
-        });
+        const screenId = screenIdOf(
+          await callTool('claim_screen', {
+            code: d.code,
+            name: d.name.trim(),
+            timezone: d.timezone ?? fallbackZone,
+            orientation: d.orientation,
+            ...(d.hours ? { displayHours: d.hours } : {}),
+            idempotencyKey: key,
+          }),
+        );
         for (const g of groups.filter((g) => d.groupIds.includes(g.id))) {
-          await callTool('set_group_members', { groupId: g.id, screenIds: [...g.screenIds, screen.id] });
+          await callTool('set_group_members', { groupId: g.id, screenIds: [...g.screenIds, screenId] });
         }
         await router.invalidate();
-        await router.navigate({ to: '/screens/$screenId', params: { screenId: screen.id } });
+        await router.navigate({ to: '/screens/$screenId', params: { screenId } });
         set((s) => ({ screens: { ...s.screens, pairing: newPairing(), page: newPage() } }));
       } catch (err) {
         pairing((p) => ({ ...p, pending: false, error: toolMessage(err) }));

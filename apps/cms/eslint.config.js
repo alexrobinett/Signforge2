@@ -1,8 +1,9 @@
 /**
  * React rules for the CMS. Biome still formats and runs the repo-wide lint; this adds what Biome
- * cannot: the React hooks rules, the slop rules, and the bans on effects, useState and global
- * stores. The README's "React rules" and "State" sections say why.
+ * cannot: the React hooks rules, the slop rules, the bans on effects, useState and global stores,
+ * and a short list of typed rules. The README's "React rules" and "State" sections say why.
  */
+import comments from '@eslint-community/eslint-plugin-eslint-comments';
 import { defineConfig } from 'eslint/config';
 import reactHooks from 'eslint-plugin-react-hooks';
 import { createSlopConfig } from 'eslint-plugin-slop';
@@ -17,11 +18,26 @@ const noGlobalStore =
 
 export default defineConfig(
   { ignores: ['dist/**', '.wrangler/**', '.e2e/**', 'test-results/**', 'src/routeTree.gen.ts', 'worker-configuration.d.ts'] },
+  { linterOptions: { reportUnusedDisableDirectives: 'error' } },
   {
     files: ['src/**/*.{ts,tsx}', 'e2e/**/*.ts'],
-    languageOptions: { parser: tseslint.parser },
+    // The type information comes from the TypeScript 6 alias in package.json: typescript-eslint cannot load TypeScript 7.
+    languageOptions: { parser: tseslint.parser, parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    plugins: { '@typescript-eslint': tseslint.plugin, 'eslint-comments': comments },
     // Full inspection, not the default of recent changes only, so a result never depends on git history.
     extends: [createSlopConfig({ cwd: import.meta.dirname, inspection: 'full' })],
+    rules: {
+      'eslint-comments/require-description': 'error',
+      'preserve-caught-error': 'error',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/no-unnecessary-condition': 'error',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'error',
+      '@typescript-eslint/switch-exhaustiveness-check': ['error', { allowDefaultCaseForExhaustiveSwitch: false }],
+      // TanStack Router's redirect() and notFound() are thrown on purpose.
+      '@typescript-eslint/only-throw-error': ['error', { allow: [{ from: 'package', package: '@tanstack/router-core', name: ['Redirect', 'NotFoundError'] }] }],
+      '@typescript-eslint/no-deprecated': 'error',
+    },
   },
   {
     files: ['src/**/*.{ts,tsx}'],

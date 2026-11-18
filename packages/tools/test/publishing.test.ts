@@ -6,7 +6,7 @@ import { platform, published, scoped, type OrgScope } from '@signforge/db';
 import { seedOrganization, seedScreen } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import stressGolden from '../../cli/test/golden/stress.json';
+import stressGolden from '@signforge/cli/golden/stress.json';
 import { loadCompileInput, loadOrg, publishOrg } from '../src/publishing';
 
 const hash = async (text: string) =>

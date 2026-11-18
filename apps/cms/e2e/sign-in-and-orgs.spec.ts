@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { fillUntilEnabled, orgSwitcher, requestCode, screenshot } from './helpers';
+import { fillUntilEnabled, hydrated, orgSwitcher, requestCode, screenshot } from './helpers';
 import { codeFor } from './servers';
 
 async function activeOrgId(page: Page) {
@@ -67,6 +67,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
 
   // The switch is held by the session, not the page.
   await page.reload();
+  await hydrated(page);
   await expect(switcher).toContainText('Acme Coffee');
 
   // Every section is reachable from the navigation.
@@ -87,6 +88,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await page.getByRole('menuitemradio', { name: 'Dark' }).click();
   await expect(page.locator('html')).toHaveClass(/\bdark\b/);
   await page.reload();
+  await hydrated(page);
   await expect(page.locator('html')).toHaveClass(/\bdark\b/);
   await screenshot(page, '07-overview-dark');
 

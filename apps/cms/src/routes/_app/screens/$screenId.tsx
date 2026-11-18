@@ -3,9 +3,9 @@
  * cache, display hours with exceptions, versions and recent events; Identify, Restart, wake or
  * sleep now; settings, and revoke behind a confirmation (the one thing here that cannot be undone).
  */
-import { createFileRoute, getRouteApi, Link, notFound, useRouter } from '@tanstack/react-router';
+import { createFileRoute, getRouteApi, Link, notFound } from '@tanstack/react-router';
 import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon } from 'lucide-react';
-import { useId, type FormEvent, type ReactNode } from 'react';
+import { useId, type SubmitEvent, type ReactNode } from 'react';
 import { describeHours, DisplayHoursEditor, hoursProblems, WeekBars } from '~/components/screens/display-hours-editor';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
 import { ScreenStatus } from '~/components/screens/status';
@@ -27,8 +27,7 @@ import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
 import { useCanManage, useNow, useRole } from '~/lib/live';
 import { ago, describeScreen, eventText, localClock } from '~/lib/screen-status';
-import type { DisplayHours, GroupView, ScreenView } from '~/lib/screen-types';
-import { callTool, toolMessage } from '~/lib/tools';
+import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
 
@@ -367,7 +366,7 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
   const zones = Intl.supportedValuesOf('timeZone');
   if (!draft) return null;
 
-  function save(e: FormEvent) {
+  function save(e: SubmitEvent) {
     e.preventDefault();
     void saveScreenSettings(screen, groups);
   }
@@ -396,7 +395,13 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor={`${id}-o`}>Orientation</Label>
-            <NativeSelect id={`${id}-o`} value={draft.orientation} onChange={(e) => chooseDraftOrientation(e.target.value as ScreenView['orientation'])}>
+            <NativeSelect
+              id={`${id}-o`}
+              value={draft.orientation}
+              onChange={(e) => {
+                if (isOrientation(e.target.value)) chooseDraftOrientation(e.target.value);
+              }}
+            >
               <option value="landscape">Landscape (16:9)</option>
               <option value="portrait">Portrait (9:16)</option>
             </NativeSelect>
@@ -445,7 +450,7 @@ function HoursDialog({ screen }: { screen: ScreenView }) {
   const close = useAppStore((s) => s.closeScreenEditor);
   const ok = hoursProblems(hours).length === 0;
 
-  function save(e: FormEvent) {
+  function save(e: SubmitEvent) {
     e.preventDefault();
     if (ok) void saveDisplayHours(screen.id);
   }

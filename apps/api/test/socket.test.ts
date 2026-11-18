@@ -50,11 +50,14 @@ async function sync(credential: string, body: unknown = syncBody()) {
   });
 }
 
+/** The response to a socket upgrade with this ticket. */
+const upgrade = (ticket: string) => exports.default.fetch(`${BASE}/ws?ticket=${encodeURIComponent(ticket)}`, { headers: { upgrade: 'websocket' } });
+
 /** An open socket and the messages it has received. */
 async function connect(ticket: string) {
-  const res = await exports.default.fetch(`${BASE}/ws?ticket=${encodeURIComponent(ticket)}`, { headers: { upgrade: 'websocket' } });
+  const res = await upgrade(ticket);
   const ws = res.webSocket;
-  if (!ws) return { status: res.status };
+  if (!ws) throw new Error(`socket refused with ${res.status}`);
   ws.accept();
   const messages: (ServerSocketMessage | string)[] = [];
   let closed: number | undefined;
@@ -127,25 +130,25 @@ describe('POST /v1/device/sync', () => {
 
 describe('GET /v1/device/ws', () => {
   it('refuses a missing or forged ticket', async () => {
-    expect((await connect('')).status).toBe(401);
-    expect((await connect('ws-a-screen.crd.1.AAAA')).status).toBe(401);
+    expect((await upgrade('')).status).toBe(401);
+    expect((await upgrade('ws-a-screen.crd.1.AAAA')).status).toBe(401);
   });
 
   it('answers keepalive pings without the object, and carries a publish to the screen at once', async () => {
     const ticket = ((await (await sync(a.credential)).json()) as SyncResponse).socketTicket;
     const s = await connect(ticket);
     expect(s.status).toBe(101);
-    s.ws!.send('ping');
-    await until(() => s.messages!.includes('pong'));
+    s.ws.send('ping');
+    await until(() => s.messages.includes('pong'));
 
     const r = await dispatch(registry, 'publish_manifest_to_screen', { screenId: a.seed.screen, manifestId: M1 }, caller(a, 'editor'));
     expect(r.ok).toBe(true);
-    await until(() => s.messages!.some((m) => typeof m === 'object' && m.type === 'manifest'));
-    expect(s.messages!.filter((m) => typeof m === 'object')).toEqual([{ type: 'manifest', id: M1 }]);
+    await until(() => s.messages.some((m) => typeof m === 'object' && m.type === 'manifest'));
+    expect(s.messages.filter((m) => typeof m === 'object')).toEqual([{ type: 'manifest', id: M1 }]);
 
     // The next sync names it too.
     expect(((await (await sync(a.credential)).json()) as SyncResponse).desiredManifest).toBe(M1);
-    s.ws!.close(1000);
+    s.ws.close(1000);
   });
 
   it('carries identify, restart and a display override from the CMS to the screen at once', async () => {
@@ -158,37 +161,37 @@ describe('GET /v1/device/ws', () => {
       const r = await dispatch(registry, tool, { screenId: a.seed.screen, ...input }, caller(a, 'editor'));
       expect(r.ok, tool).toBe(true);
     }
-    await until(() => s.messages!.filter((m) => typeof m === 'object').length >= 3);
-    const commands = s.messages!.flatMap((m) => (typeof m === 'object' && m.type === 'command' ? [m.command] : []));
+    await until(() => s.messages.filter((m) => typeof m === 'object').length >= 3);
+    const commands = s.messages.flatMap((m) => (typeof m === 'object' && m.type === 'command' ? [m.command] : []));
     expect(commands).toEqual([
       { type: 'identify', name: expect.any(String), seconds: 10 },
       { type: 'restart' },
       { type: 'display', override: { state: 'off', until: expect.any(String) } },
     ]);
-    s.ws!.close(1000);
+    s.ws.close(1000);
   });
 
   it('writes what the screen applied through to D1', async () => {
     const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
-    s.ws!.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
     const reported = async () => (await scoped(env.DB, a.seed.orgId).screens.get(a.seed.screen))?.reportedManifestId;
     const end = Date.now() + 3000;
     while ((await reported()) !== M2 && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
     expect(await reported()).toBe(M2);
     // Nothing of org B's changed.
     expect((await scoped(env.DB, b.seed.orgId).screens.get(b.seed.screen))?.reportedManifestId).toBeNull();
-    s.ws!.close(1000);
+    s.ws.close(1000);
   });
 
   it("does not reach another screen's socket", async () => {
     const sa = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
     const sb = await connect(((await (await sync(b.credential)).json()) as SyncResponse).socketTicket);
     await dispatch(registry, 'publish_manifest_to_screen', { screenId: b.seed.screen, manifestId: M2 }, caller(b));
-    await until(() => sb.messages!.length > 0);
+    await until(() => sb.messages.length > 0);
     await new Promise((r) => setTimeout(r, 100));
     expect(sa.messages).toEqual([]);
-    sa.ws!.close(1000);
-    sb.ws!.close(1000);
+    sa.ws.close(1000);
+    sb.ws.close(1000);
   });
 
   it('closes the socket when its credential is revoked, and refuses the ticket after', async () => {
@@ -196,8 +199,8 @@ describe('GET /v1/device/ws', () => {
     const s = await connect(ticket);
     const r = await dispatch(registry, 'revoke_screen_credential', { screenId: b.seed.screen, credentialId: b.credentialId }, caller(b));
     expect(r.ok).toBe(true);
-    await until(() => s.closed!() !== undefined);
+    await until(() => s.closed() !== undefined);
     expect(s.messages).toContainEqual({ type: 'revoked' });
-    expect((await connect(ticket)).status).toBe(401);
+    expect((await upgrade(ticket)).status).toBe(401);
   });
 });

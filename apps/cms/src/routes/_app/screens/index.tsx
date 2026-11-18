@@ -17,7 +17,7 @@ import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import { describeHours } from '~/components/screens/display-hours-editor';
 import { ago, describeScreen, rollup, summarise } from '~/lib/screen-status';
-import type { GroupView, ScreenView, StateKind } from '~/lib/screen-types';
+import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
 import { useCanManage, useNow } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { getScreens } from '~/server/screens.functions';
@@ -30,14 +30,12 @@ interface Search {
   status?: StateKind;
 }
 
-const STATES: StateKind[] = ['online', 'updating', 'asleep', 'unreachable', 'needs_you'];
-
 export const Route = createFileRoute('/_app/screens/')({
   validateSearch: (s: Record<string, unknown>): Search => ({
     ...(s.view === 'table' ? { view: 'table' as const } : {}),
     ...(typeof s.q === 'string' && s.q ? { q: s.q } : {}),
     ...(typeof s.group === 'string' && s.group ? { group: s.group } : {}),
-    ...(typeof s.status === 'string' && STATES.includes(s.status as StateKind) ? { status: s.status as StateKind } : {}),
+    ...(isStateKind(s.status) ? { status: s.status } : {}),
   }),
   loader: () => getScreens(),
   head: () => ({ meta: [{ title: 'Screens · SignForge' }] }),
@@ -67,7 +65,7 @@ function ScreensPage() {
     }
     return true;
   });
-  const set = (next: Partial<Search>) => navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
+  const set = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
 
   if (!screens.length) {
     return (
@@ -118,10 +116,10 @@ function ScreensPage() {
           <NativeSelect
             id="screen-status"
             value={search.status ?? ''}
-            onChange={(e) => set({ status: (e.target.value || undefined) as StateKind | undefined })}
+            onChange={(e) => set({ status: isStateKind(e.target.value) ? e.target.value : undefined })}
           >
             <option value="">Any</option>
-            {STATES.map((k) => (
+            {STATE_KINDS.map((k) => (
               <option key={k} value={k}>
                 {KIND_WORD[k]}
               </option>

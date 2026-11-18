@@ -81,7 +81,7 @@ export const screenOutput = z.object({
 export type ScreenView = z.infer<typeof screenOutput>;
 
 /** A credential, without its hash. */
-export const credentialOutput = z.object({ id: z.string(), createdAt: z.number(), lastUsedAt: z.number().nullable(), revokedAt: z.number().nullable() });
+const credentialOutput = z.object({ id: z.string(), createdAt: z.number(), lastUsedAt: z.number().nullable(), revokedAt: z.number().nullable() });
 export type CredentialView = z.infer<typeof credentialOutput>;
 
 /** Manifests are immutable (their id is their hash), so a parsed one is kept for the life of the isolate. */
@@ -194,7 +194,7 @@ function inputOf(detailJson: string | null): Record<string, unknown> {
 /** How many of a screen's events `get_screen` returns. */
 const EVENTS = 20;
 
-export const listScreens = defineTool({
+const listScreens = defineTool({
   name: 'list_screens',
   description:
     'List the screens in the organization with their settings, status and manifests, ordered by id, a page at a time. Returns { screens: Screen[], next }; pass next as cursor for the following page.',
@@ -213,7 +213,7 @@ export const listScreens = defineTool({
   },
 });
 
-export const getScreen = defineTool({
+const getScreen = defineTool({
   name: 'get_screen',
   description:
     'Get one screen by id: its settings, state, last heartbeat, what it should be showing, manifests, the ids of the groups it is in, its credentials (never their secrets) and its recent events (what was done to it, newest first). Returns { screen, groupIds, credentials, events }.',
@@ -248,7 +248,7 @@ export const getScreen = defineTool({
   },
 });
 
-export const renameScreen = defineTool({
+const renameScreen = defineTool({
   name: 'rename_screen',
   description: 'Rename a screen. The name is what people see in the CMS; screens do not show it. Returns { screen }.',
   scope: 'screens:manage',
@@ -264,7 +264,7 @@ export const renameScreen = defineTool({
   },
 });
 
-export const updateScreenSettings = defineTool({
+const updateScreenSettings = defineTool({
   name: 'update_screen_settings',
   description:
     "Change a screen's time zone, locale, orientation or display hours. Give only the fields to change; null clears locale (the player's default) or display hours (always on). Display hours are checked as the player checks them. The screen picks the change up with the next publish to it. Returns { screen }.",
@@ -300,7 +300,7 @@ export const updateScreenSettings = defineTool({
   },
 });
 
-export const setDisplayOverride = defineTool({
+const setDisplayOverride = defineTool({
   name: 'set_display_override',
   description: `Wake a screen's display now ('on'), put it to sleep now ('off'), or go back to its display hours (null), for someone standing at the screen. The override lasts until the screen's next scheduled display change, and at most ${OVERRIDE_LIMIT_MS / 3_600_000} hours (the limit alone on a screen without display hours), then ends by itself. The screen gets it at once over its socket, or at its next sync. Returns { screen }.`,
   scope: 'screens:manage',
@@ -325,7 +325,7 @@ export const setDisplayOverride = defineTool({
   },
 });
 
-export const identifyScreen = defineTool({
+const identifyScreen = defineTool({
   name: 'identify_screen',
   description: `Show the screen's name over its content for ${IDENTIFY_SECONDS} seconds, so someone in the room can tell which screen it is. Reaches a screen whose socket is open; one that is unreachable does not get it. Returns { screenId, seconds }.`,
   scope: 'screens:manage',
@@ -343,7 +343,7 @@ export const identifyScreen = defineTool({
   },
 });
 
-export const restartScreen = defineTool({
+const restartScreen = defineTool({
   name: 'restart_screen',
   description:
     "Restart the screen's player now: it reloads, plays from its cache at once and syncs. Use it when a screen looks stuck. Reaches a screen whose socket is open. Rebooting the device is not available yet. Returns { screenId }.",
@@ -362,7 +362,7 @@ export const restartScreen = defineTool({
   },
 });
 
-export const revokeScreenCredential = defineTool({
+const revokeScreenCredential = defineTool({
   name: 'revoke_screen_credential',
   description:
     "Revoke one of a screen's credentials, so a device holding it can no longer fetch anything; its open socket is closed. Use get_screen to see the credentials. Revoking an already revoked credential changes nothing. Owners only. Returns { credential }.",

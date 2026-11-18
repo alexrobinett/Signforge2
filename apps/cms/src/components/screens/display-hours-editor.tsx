@@ -22,7 +22,7 @@ const DAYS: [number, string, string][] = [
   [0, 'Sun', 'Sunday'],
 ];
 
-export const DEFAULT_HOURS: DisplayHours = { weekly: [{ days: [1, 2, 3, 4, 5, 6, 0], from: '07:00', to: '22:00' }] };
+const DEFAULT_HOURS: DisplayHours = { weekly: [{ days: [1, 2, 3, 4, 5, 6, 0], from: '07:00', to: '22:00' }] };
 
 export function hoursProblems(hours: DisplayHours | null): string[] {
   if (!hours) return [];

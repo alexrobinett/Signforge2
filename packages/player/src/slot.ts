@@ -19,7 +19,7 @@ import { liveData, reportRejected } from './data';
 import { getFile } from './source';
 
 /** A spot that has not reported ready by this point is skipped. */
-export const READY_TIMEOUT_MS = 2000;
+const READY_TIMEOUT_MS = 2000;
 
 // A template gets no network at all: scripts and styles are inline, media arrives as blobs. No
 // `frame-src`, so it falls back to `'none'`: the template cannot load a frame or navigate its own.

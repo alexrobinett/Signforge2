@@ -3,10 +3,17 @@
  * packages/tools). Kept as types here so the CMS bundle does not pull in the tools package; the
  * tools' output schemas are the source of truth.
  */
-export type StateKind = 'online' | 'updating' | 'asleep' | 'unreachable' | 'needs_you';
-export type NeedsYouReason = 'revoked' | 'behind' | 'nothing_published' | 'fallback';
+export const STATE_KINDS = ['online', 'updating', 'asleep', 'unreachable', 'needs_you'] as const;
+export type StateKind = (typeof STATE_KINDS)[number];
 
-export interface DisplayWindow {
+/** Whether a value read from a URL or a select is one of the states. */
+export const isStateKind = (v: unknown): v is StateKind => STATE_KINDS.some((k) => k === v);
+
+/** Whether a value read from a select is an orientation. */
+export const isOrientation = (v: unknown): v is 'landscape' | 'portrait' => v === 'landscape' || v === 'portrait';
+type NeedsYouReason = 'revoked' | 'behind' | 'nothing_published' | 'fallback';
+
+interface DisplayWindow {
   from: string;
   to: string;
 }
@@ -14,7 +21,7 @@ export interface DisplayHours {
   weekly: (DisplayWindow & { days: number[] })[];
   exceptions?: { date: string; on: DisplayWindow[] }[];
 }
-export interface DisplayOverride {
+interface DisplayOverride {
   state: 'on' | 'off';
   until: string;
 }
@@ -61,14 +68,14 @@ export interface GroupView {
   screenIds: string[];
 }
 
-export interface CredentialView {
+interface CredentialView {
   id: string;
   createdAt: number;
   lastUsedAt: number | null;
   revokedAt: number | null;
 }
 
-export interface ScreenEvent {
+interface ScreenEvent {
   at: number;
   action: string;
   actor: { kind: string; id: string };
@@ -77,7 +84,7 @@ export interface ScreenEvent {
 }
 
 /** A JSON value: what a server function may return. */
-export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 export interface ScreenDetail {
   screen: ScreenView;

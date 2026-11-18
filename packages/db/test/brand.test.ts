@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { NotInOrgError, scoped } from '../src/index';
+import { NotInOrgError } from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 const COLORS = JSON.stringify({ primary: '#112233', accent: '#ffcc00', background: '#000000', surface: '#111111', text: '#ffffff', muted: '#aaaaaa' });

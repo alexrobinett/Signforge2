@@ -18,7 +18,9 @@ export interface ScreenHeartbeat {
 export function parseHeartbeat(json: string | null | undefined): ScreenHeartbeat | undefined {
   if (!json) return undefined;
   try {
-    return JSON.parse(json) as ScreenHeartbeat;
+    // Written by the API's sync route from a validated SyncRequest.
+    const heartbeat: ScreenHeartbeat = JSON.parse(json);
+    return heartbeat;
   } catch {
     return undefined;
   }

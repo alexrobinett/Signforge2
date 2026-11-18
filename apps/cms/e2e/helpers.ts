@@ -44,3 +44,8 @@ export async function fillUntilEnabled(page: Page, label: string, value: string,
     await expect(page.getByRole('button', { name: button })).toBeEnabled({ timeout: 1_000 });
   }).toPass({ timeout: 30_000 });
 }
+
+/** Wait until React has hydrated the page (`data-hydrated` on body), so clicks reach handlers. */
+export async function hydrated(page: Page) {
+  await expect(page.locator('body[data-hydrated]')).toBeAttached({ timeout: 30_000 });
+}

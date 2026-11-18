@@ -3,7 +3,7 @@ import { authClient, authErrorMessage } from '~/lib/auth-client';
 import { initialOrgs } from './orgs';
 import type { SliceCreator } from './store';
 
-export interface SignInState {
+interface SignInState {
   step: 'email' | 'code';
   email: string;
   code: string;
