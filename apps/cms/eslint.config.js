@@ -28,6 +28,7 @@ export default defineConfig(
     extends: [createSlopConfig({ cwd: import.meta.dirname, inspection: 'full' })],
     rules: {
       'eslint-comments/require-description': 'error',
+      'preserve-caught-error': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/no-unnecessary-condition': 'error',

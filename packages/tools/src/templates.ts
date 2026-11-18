@@ -183,10 +183,15 @@ const registerTemplateVersion = defineSharedTool({
     let sources: Record<string, string>;
     try {
       sources = sourcesSchema.parse(JSON.parse(await sourcesObj.text()));
-    } catch {
-      throw new ToolError('invalid_input', 'the sources are not a JSON object of file name to text', [
-        { path: 'sourcesId', message: 'not a JSON object of file name to text' },
-      ]);
+    } catch (e) {
+      // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument; the rule reads only the second argument.
+      throw new ToolError(
+        'invalid_input',
+        'the sources are not a JSON object of file name to text',
+        [{ path: 'sourcesId', message: 'not a JSON object of file name to text' }],
+        false,
+        { cause: e },
+      );
     }
 
     const report = checkTemplateBundle({ manifest: input.manifest, html, sources });

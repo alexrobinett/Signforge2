@@ -66,6 +66,7 @@ src/components/ui/        shadcn/ui components (components.json is set up for th
 - **React hooks rules** (`eslint-plugin-react-hooks`, recommended).
 - **Slop rules** (`eslint-plugin-slop`, every rule, whole files): no em dashes, no inflated words, non-JSDoc comments of 50 words at most, `/** */` on exported things, no trivial wrappers or type aliases.
 - **Typed rules** (typescript-eslint, with type information): no floating or misused promises, no condition the types say is always true or false (a fallback for a field that is required), no assertion that changes nothing, every case of a union switch and no needless `default`, only `Error`s thrown (TanStack's `redirect()` and `notFound()` excepted), and no deprecated APIs (React's `FormEvent`: use `SubmitEvent`). They add about 2 s to the lint.
+- **Errors keep their cause.** A new error thrown inside a `catch` passes the caught one as `{ cause }` (`preserve-caught-error`; Biome's `useErrorCause` does the same for the rest of the repo).
 
 If a rule must be broken, use `// eslint-disable-next-line <rule> -- <why>`: a disable without a reason, or one that no longer silences anything, is an error. There are none today.
 

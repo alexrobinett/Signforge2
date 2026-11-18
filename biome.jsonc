@@ -13,6 +13,7 @@
     "rules": {
       "preset": "recommended",
       "style": {
+        "useErrorCause": "error",
         "noNonNullAssertion": "off",
         "useTemplate": "off"
       },

@@ -42,11 +42,10 @@ export function parseCalendar(text: string, options: CalendarOptions): CalendarF
   try {
     jcal = ICAL.parse(text);
   } catch (e) {
-    throw new FeedError('malformed', `not an iCalendar feed: ${(e as Error).message.slice(0, 80)}`);
+    // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument; the rule reads only the second argument.
+    throw new FeedError('malformed', `not an iCalendar feed: ${(e as Error).message.slice(0, 80)}`, { cause: e });
   }
-  const roots = (Array.isArray(jcal) && typeof jcal[0] === 'string' ? [jcal] : (jcal as unknown[])).map(
-    (j) => new ICAL.Component(j as unknown[]),
-  );
+  const roots = (Array.isArray(jcal) && typeof jcal[0] === 'string' ? [jcal] : (jcal as unknown[])).map((j) => new ICAL.Component(j as unknown[]));
   if (!roots.some((r) => r.name === 'vcalendar')) throw new FeedError('malformed', 'no VCALENDAR in the feed');
 
   const nowMs = options.now.getTime();
@@ -139,15 +138,17 @@ function expand(event: ICAL.Event, defaultTz: string, w: Window, out: Occurrence
   }
 }
 
-const isCancelled = (e: ICAL.Event) =>
-  String(e.component.getFirstPropertyValue('status') ?? '').toUpperCase() === 'CANCELLED';
+const isCancelled = (e: ICAL.Event) => String(e.component.getFirstPropertyValue('status') ?? '').toUpperCase() === 'CANCELLED';
 
 function tzidOf(c: ICAL.Component, prop: string): string | undefined {
   const v = c.getFirstProperty(prop)?.getParameter('tzid');
   return typeof v === 'string' && v ? v : undefined;
 }
 
-const clean = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
+const clean = (v: unknown) =>
+  String(v ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const wallOf = (t: ICAL.Time): Wall => ({
   year: t.year,
