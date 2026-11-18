@@ -46,7 +46,7 @@ defineTemplate({
     }
     // Portrait has the height for more secondary headlines; drop any that do not fit.
     const more = document.getElementById('more')!;
-    for (const item of rest.slice(0, ctx.orientation === 'portrait' ? 5 : 3)) {
+    for (const item of rest.slice(0, ctx.orientation === 'portrait' ? 5 : 4)) {
       const li = document.createElement('li');
       li.textContent = item.title;
       more.appendChild(li);

@@ -8,7 +8,7 @@ html, body { height: 100%; overflow: hidden; }
 body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--ink); font-feature-settings: "tnum" 1; }
 /* Menu Board. Static once it is in; only the intro and outro move, so it can stay up for an hour. */
 :root { --accent: var(--sf-accent, #e9b44c); --bg: var(--sf-bg, #14110f); --ink: var(--sf-text, #f6efe6);
-  --muted: var(--sf-muted, color-mix(in srgb, var(--ink) 62%, transparent)); --card: var(--sf-surface, rgba(255,255,255,.04)); }
+  --muted: var(--sf-muted, color-mix(in srgb, var(--ink) 62%, transparent)); --card: color-mix(in srgb, var(--sf-surface, rgba(255,255,255,.04)) 90%, var(--sf-text, transparent)); }
 /* The light theme swaps the kit's background and text: the same pair, so it stays legible. */
 .light { --bg: var(--sf-text, #f7f1e8); --ink: var(--sf-bg, #1d1a17); --muted: color-mix(in srgb, var(--ink) 60%, transparent);
   --card: color-mix(in srgb, var(--ink) 3.5%, transparent); }

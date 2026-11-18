@@ -26,7 +26,7 @@ html, body { background: var(--bg); }
 .time { font-family: var(--sf-font-display, "Inter"), sans-serif; font-size: calc(var(--u) * 30); font-weight: 800; line-height: 1; letter-spacing: -.04em; animation-delay: .25s, var(--out); }
 .time .sec { font-size: .35em; font-weight: 600; color: color-mix(in srgb, var(--sf-text, #fff) 55%, transparent); margin-left: .12em; letter-spacing: 0; }
 .time .ampm { font-size: .22em; font-weight: 700; margin-left: .2em; letter-spacing: .04em; vertical-align: .9em; }
-.date { font-size: calc(var(--u) * 5.6); font-weight: 500; color: color-mix(in srgb, var(--sf-text, #fff) 82%, transparent); animation-delay: .4s, var(--out); }
+.date { margin-top: calc(var(--u) * 1.2); font-size: calc(var(--u) * 5.6); font-weight: 500; color: color-mix(in srgb, var(--sf-text, #fff) 82%, transparent); animation-delay: .4s, var(--out); }
 .message { font-size: calc(var(--u) * 3.6); font-weight: 500; color: var(--sf-muted, rgba(255,255,255,.7)); margin-top: calc(var(--u) * 4); animation-delay: .55s, var(--out); }
 .message:empty { display: none; }
 [data-orientation="portrait"] .time { font-size: calc(var(--u) * 24); }

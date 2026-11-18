@@ -46,6 +46,7 @@ body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--sf-te
 .rain, .storm, .night { --cloud: color-mix(in srgb, var(--sf-muted, #b9c3d1) 75%, var(--sf-text, #b9c3d1)); }
 /* A light kit: clouds in its background colour over a sky darkened with its muted colour, and a
    clear sky only tinted with its primary colour. */
+.light-kit .info { box-shadow: none; }
 .light-kit { --cloud: var(--sf-bg); --sky-a: color-mix(in srgb, var(--sf-primary) 35%, var(--sf-bg)); --sky-b: color-mix(in srgb, var(--sf-primary) 12%, var(--sf-bg)); }
 .light-kit.night { --sky-a: color-mix(in srgb, var(--sf-muted) 45%, var(--sf-bg)); --sky-b: color-mix(in srgb, var(--sf-primary) 20%, var(--sf-muted)); }
 .light-kit.cloudy, .light-kit.fog, .light-kit.rain, .light-kit.storm, .light-kit.snow {
@@ -60,8 +61,8 @@ body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--sf-te
 .cloud::after { width: 26vmin; height: 26vmin; right: 5vmin; top: -13vmin; }
 /* Clouds keep to the top band; the forecast card sits low and to the left. */
 /* c1 starts already on screen: entering from the edge it read as a clipped cloud by the city name. */
-.c1 { top: 4vh; left: -50vmin; animation-delay: -12s; }
-.c2 { top: 14vh; left: -50vmin; animation-duration: 38s; animation-delay: -14s; scale: .7; }
+.c1 { top: 1vh; left: -50vmin; animation-delay: -12s; scale: .85; }
+.c2 { top: 5vh; left: -50vmin; animation-duration: 38s; animation-delay: -14s; scale: .7; }
 .c3 { top: 2vh; left: -50vmin; animation-duration: 32s; animation-delay: -24s; scale: .55; }
 /* Solid colours on every part: overlapping translucent circles show their seams. */
 .partly .c1, .partly .c2 { opacity: .92; }
@@ -91,7 +92,7 @@ body { font-family: var(--sf-font-body, "Inter"), sans-serif; color: var(--sf-te
 .city { font-size: calc(var(--u) * 5); font-weight: 700; letter-spacing: .02em; text-transform: uppercase; animation-delay: .2s, var(--out); }
 .temp { display: flex; align-items: flex-start; font-family: var(--sf-font-display, "Inter"), sans-serif; font-size: calc(var(--u) * 34); font-weight: 900; line-height: .9; letter-spacing: -.05em; animation-delay: .35s, var(--out); }
 .temp .unit { font-size: .3em; margin-top: .22em; margin-left: .08em; font-weight: 700; letter-spacing: 0; }
-.cond { font-family: var(--sf-font-display, "Inter"), sans-serif; font-size: calc(var(--u) * 6.4); font-weight: 800; animation-delay: .5s, var(--out); }
+.cond { margin-top: calc(var(--u) * 1.2); font-family: var(--sf-font-display, "Inter"), sans-serif; font-size: calc(var(--u) * 6.4); font-weight: 800; animation-delay: .5s, var(--out); }
 .range, .extra { display: flex; gap: calc(var(--u) * 5); font-size: calc(var(--u) * 3.6); font-weight: 500; margin-top: calc(var(--u) * 1.6); }
 .range { animation-delay: .65s, var(--out); }
 .extra { animation-delay: .8s, var(--out); color: var(--sf-muted, color-mix(in srgb, var(--sf-text, #fff) 90%, transparent)); }
