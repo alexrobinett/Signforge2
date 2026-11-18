@@ -2,7 +2,9 @@
  * The dispatcher: the one door to every tool.
  *
  *   1. Find the tool by name.
- *   2. Check the caller's role reaches the tool's minimum and its scopes include the tool's.
+ *   2. Check the caller's role reaches the tool's minimum and its scopes include the tool's. An
+ *      editor's scopes are read per call from the org's settings: with `editorsPublish` off, they
+ *      lack `content:publish` (owner decision Q7).
  *   3. Validate the input with the tool's zod schema.
  *   4. Run the handler with `scoped(db, orgId)`, the actor and the parsed input. A handler reads
  *      freely but never writes: it stages each change with `ctx.write`.
@@ -23,6 +25,7 @@ import { NotInOrgError, StaleVersionError, type OrgScope, type Staged, type Writ
 import { canonicalJson } from '@signforge/contract';
 import { z } from 'zod';
 import { checkOutput } from './output';
+import { orgSettings } from './settings';
 import type { UploadSigner } from './upload';
 import {
   ROLE_SCOPES,
@@ -63,15 +66,26 @@ export type DispatchResult = { ok: true; output: unknown } | { ok: false; error:
 
 const rank = (r: Role) => ROLES.indexOf(r);
 
-/** The scopes a caller actually holds: its grant's, capped by its role's. */
-export function effectiveScopes(caller: Pick<Caller, 'role' | 'scopes'>): Scope[] {
-  const allowed = ROLE_SCOPES[caller.role] ?? [];
-  return caller.scopes ? caller.scopes.filter((s) => allowed.includes(s)) : [...allowed];
+/** A caller's role and grant, and whether its org lets editors publish (`editorsPublish` in its settings). */
+export type Grant = Pick<Caller, 'role' | 'scopes'> & { editorsPublish: boolean };
+
+/** The scopes a caller actually holds: its grant's, capped by its role's as its org has it. */
+export function effectiveScopes(grant: Grant): Scope[] {
+  const editorOnly = grant.role === 'editor' && !grant.editorsPublish;
+  const allowed = ROLE_SCOPES[grant.role].filter((s) => !(editorOnly && s === 'content:publish'));
+  return grant.scopes ? grant.scopes.filter((s) => allowed.includes(s)) : [...allowed];
 }
 
 /** Whether the caller may use the tool at all. */
-export function permits(caller: Pick<Caller, 'role' | 'scopes'>, tool: AnyTool<any>): boolean {
-  return rank(caller.role) >= rank(tool.minRole) && effectiveScopes(caller).includes(tool.scope);
+export function permits(grant: Grant, tool: AnyTool<any>): boolean {
+  return rank(grant.role) >= rank(tool.minRole) && effectiveScopes(grant).includes(tool.scope);
+}
+
+/** The caller's grant, with the org's setting read now, so an owner's change applies from the next call. */
+export async function grantOf(caller: Pick<Caller<DataScope>, 'org' | 'role' | 'scopes'>): Promise<Grant> {
+  // Only an editor's scopes depend on it. The platform's data has no org settings, and its callers are owners.
+  const editorsPublish = caller.role !== 'editor' || !('settings' in caller.org) || (await orgSettings(caller.org)).editorsPublish;
+  return { role: caller.role, scopes: caller.scopes, editorsPublish };
 }
 
 const SECRET_KEY = /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|pairing_?code|^code$/i;
@@ -111,7 +125,9 @@ export async function dispatch<D extends DataScope>(
 ): Promise<DispatchResult> {
   const tool = registry.get(name);
   if (!tool) return fail('unknown_tool', `no tool named ${JSON.stringify(name)}`);
-  if (!permits(caller, tool)) {
+  const grant = await grantOf(caller);
+  if (!permits(grant, tool)) {
+    if (permits({ ...grant, editorsPublish: true }, tool)) return fail('forbidden', 'Only owners publish in this organization');
     return fail('forbidden', `${tool.name} needs the ${tool.scope} scope and at least the ${tool.minRole} role`);
   }
 
@@ -240,9 +256,9 @@ async function sha256Hex(text: string) {
 }
 
 /** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema input and output. */
-export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, caller: Pick<Caller, 'role' | 'scopes'>) {
+export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, grant: Grant) {
   return [...registry.values()]
-    .filter((t) => permits(caller, t))
+    .filter((t) => permits(grant, t))
     .map((t) => ({
       name: t.name,
       description: t.description,

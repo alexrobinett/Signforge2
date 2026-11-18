@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
 import { API_LOG } from './servers';
 
@@ -19,6 +19,8 @@ async function invitePathFor(email: string): Promise<string> {
 }
 
 const settingsNav = (page: Page) => page.getByRole('navigation', { name: 'Settings' });
+/** Scroll so `section` starts at the top of the viewport, for a screenshot of it. */
+const toTop = (section: Locator) => section.evaluate((el) => el.scrollIntoView({ block: 'start' }));
 
 test('an owner sets defaults, alerts and members; an invited editor joins and can only read them', async ({ page, browser }) => {
   test.setTimeout(180_000);
@@ -119,9 +121,50 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(invitee.getByText('Only owners can change these.')).toBeVisible();
   await expect(invitee.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
   await invitee.goto('/settings/members');
+  await expect(invitee.getByRole('heading', { name: 'Members & roles' })).toBeVisible();
+  await expect(invitee.getByRole('region', { name: 'People' })).toContainText(editorEmail);
   await expect(invitee.getByRole('region', { name: 'Invite' })).toHaveCount(0);
   await expect(invitee.getByRole('combobox')).toHaveCount(0);
   await expect(invitee.getByRole('button', { name: 'Remove' })).toHaveCount(0);
+  await expect(invitee.getByLabel('Editors can publish')).toBeDisabled();
+  await toTop(invitee.getByRole('region', { name: 'Who publishes' }));
+  await shots(invitee, '49-settings-who-publishes-editor');
+
+  // Who publishes (Q7): the owner stops editors publishing, and the editor's publish control goes.
+  const publishOption = async (count: number) => {
+    await invitee.reload();
+    await hydrated(invitee);
+    await invitee.keyboard.press('ControlOrMeta+k');
+    const menu = invitee.getByRole('dialog', { name: 'Command menu' });
+    await expect(menu.getByRole('option', { name: /rename_screen/ })).toHaveCount(1);
+    await expect(menu.getByRole('option', { name: /publish_manifest_to_screen/ })).toHaveCount(count);
+    await invitee.keyboard.press('Escape');
+  };
+  await publishOption(1);
+  await page.reload();
+  await hydrated(page);
+  await page.getByLabel('Editors can publish').uncheck();
+  await page.getByRole('region', { name: 'Who publishes' }).getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(
+    page
+      .getByRole('row', { name: /Publish to screens/ })
+      .getByRole('cell')
+      .nth(1)
+      .getByLabel('No'),
+  ).toBeVisible();
+  await toTop(page.getByRole('region', { name: 'Who publishes' }));
+  await shots(page, '48-settings-who-publishes');
+  await publishOption(0);
+  const refused = await invitee.request.post('/api/tools/publish_manifest_to_screen', { data: { screenId: 'scr_none', manifestId: 'f'.repeat(64) } });
+  expect(refused.status()).toBe(403);
+  expect(await refused.json()).toMatchObject({ error: 'forbidden', message: 'Only owners publish in this organization' });
+  await page.reload();
+  await hydrated(page);
+  await page.getByLabel('Editors can publish').check();
+  await page.getByRole('region', { name: 'Who publishes' }).getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved')).toBeVisible();
+  await publishOption(1);
 
   // The owner makes them a viewer, then removes them.
   await page.reload();
@@ -151,6 +194,8 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.goto('/settings/members');
   await hydrated(page);
   await shots(page, '46-settings-members-phone');
+  await toTop(page.getByRole('region', { name: 'Who publishes' }));
+  await shots(page, '50-settings-who-publishes-phone');
   await page.goto('/settings/notifications');
   await shots(page, '47-settings-notifications-phone');
 });

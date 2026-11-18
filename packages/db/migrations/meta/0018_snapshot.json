@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "47bda425-123f-4062-b75e-88f19984cf45",
+  "id": "e36a3b50-1675-4e6f-851f-1bf97bf14869",
   "prevId": "8dbda4c5-c1b5-4709-89f1-f86a6e6cf430",
   "tables": {
     "account": {
@@ -1212,6 +1212,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "editors_publish": {
+          "name": "editors_publish",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
         "row_version": {
           "name": "row_version",
           "type": "integer",
@@ -1219,14 +1227,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": 1
-        },
-        "publish_revision": {
-          "name": "publish_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
         },
         "updated_at": {
           "name": "updated_at",
@@ -1699,21 +1699,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "row_version": {
-          "name": "row_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "incarnation": {
-          "name": "incarnation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "published_json": {
           "name": "published_json",
           "type": "text",
@@ -2055,21 +2040,6 @@
         },
         "to_time": {
           "name": "to_time",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "row_version": {
-          "name": "row_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "incarnation": {
-          "name": "incarnation",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -2843,13 +2813,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": 1
-        },
-        "incarnation": {
-          "name": "incarnation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "published_json": {
           "name": "published_json",

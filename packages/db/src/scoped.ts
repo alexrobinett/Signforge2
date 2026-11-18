@@ -833,6 +833,7 @@ export function scoped(d1: D1Database, orgId: string) {
             unreachableAfterMs: null,
             alertsJson: null,
             publishRevision: 0,
+            editorsPublish: true,
             ...current,
             ...patch,
             rowVersion: version + 1,

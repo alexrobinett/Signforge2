@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { commandEntries, needsInput, NULL_CHOICE, parseToolList, resultText, toolInput, withKey } from '../../src/lib/command-menu';
 import { SECTIONS } from '../../src/lib/sections';
 
-// What `GET /api/tools` sends: `describeTools` for the member's role.
-const listed = (role: Role) => parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role }) })));
+// What `GET /api/tools` sends: `describeTools` for the member's role, in an org where editors publish (the default).
+const listed = (role: Role) => parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role, editorsPublish: true }) })));
 const toolNames = (role: Role) => commandEntries(listed(role)).flatMap((e) => (e.kind === 'tool' ? [e.tool.name] : []));
 
 describe('command menu entries', () => {

@@ -23,7 +23,7 @@ export {
   type ToolContext,
   type ToolErrorCode,
 } from './tool';
-export { dispatch, describeTools, effectiveScopes, permits, redact, type Caller, type DispatchResult } from './dispatch';
+export { dispatch, describeTools, effectiveScopes, grantOf, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
 export { setOutputChecks } from './output';
 export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
 export { platformRegistry, PLATFORM_TOOLS, registry, TOOLS } from './registry';
