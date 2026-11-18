@@ -315,3 +315,25 @@ describe('list, usage and delete', () => {
     expect(await env.BLOBS.list({ prefix: `up/${o.orgId}/${created.asset.id}/` })).toMatchObject({ objects: [] });
   });
 });
+
+describe('renew_asset_upload', () => {
+  it('signs new URLs for the files of the same pending asset not yet PUT, and refuses once it is finished', async () => {
+    const l = png(1920, 1080, 7),
+      p = png(1080, 1920, 8);
+    const created = await upload(
+      'Renewed',
+      { landscape: [l, await claim(l, 'image/png', 1920, 1080)], portrait: [p, await claim(p, 'image/png', 1080, 1920)] },
+      false,
+    );
+    await env.BLOBS.put(uploadKey(o.orgId, created.asset.id, await sha256(l)), l);
+
+    const renewed = await call('renew_asset_upload', { assetId: created.asset.id });
+    expect(renewed.asset).toMatchObject({ id: created.asset.id, status: 'pending' });
+    expect(renewed.uploads.map((u: { sha256: string }) => u.sha256)).toEqual([await sha256(p)]);
+    expect(new URL(renewed.uploads[0].url).pathname).toBe(`/signforge-test/up/${o.orgId}/${created.asset.id}/${await sha256(p)}`);
+
+    await env.BLOBS.put(uploadKey(o.orgId, created.asset.id, await sha256(p)), p);
+    expect((await call('finalize_asset', { assetId: created.asset.id })).asset.status).toBe('verified');
+    expect(await run('renew_asset_upload', { assetId: created.asset.id })).toMatchObject({ ok: false, error: 'conflict' });
+  });
+});

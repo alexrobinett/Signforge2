@@ -3,7 +3,7 @@
  * entries come from the shell's loader (src/lib/command-menu.ts); results and refusals are toasts.
  */
 import { toast } from 'sonner';
-import { needsInput, resultText, toolInput, type CommandEntry, type ToolListing } from '~/lib/command-menu';
+import { needsInput, resultText, toolInput, withKey, type CommandEntry, type PendingCall, type ToolListing } from '~/lib/command-menu';
 import { callTool, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
@@ -14,6 +14,8 @@ interface CommandMenuState {
   running: boolean;
   /** A form field the menu could not read, before anything was sent. */
   fieldError: { field: string; message: string } | null;
+  /** The last call that did not succeed: sent again with the same input, it keeps its idempotency key, closed or not. */
+  pending: PendingCall | null;
 }
 
 export interface CommandMenuSlice {
@@ -25,11 +27,12 @@ export interface CommandMenuSlice {
   submitToolForm: (label: string, tool: ToolListing, form: FormData) => Promise<void>;
 }
 
-const CLOSED: CommandMenuState = { open: false, form: null, running: false, fieldError: null };
+const CLOSED: CommandMenuState = { open: false, form: null, running: false, fieldError: null, pending: null };
 
 export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router }) => {
-  const run = async (label: string, tool: ToolListing, input: Record<string, unknown>) => {
-    set((s) => ({ commandMenu: { ...s.commandMenu, running: true, fieldError: null } }));
+  const run = async (label: string, tool: ToolListing, read: Record<string, unknown>) => {
+    const { input, pending } = withKey(tool, read, get().commandMenu.pending);
+    set((s) => ({ commandMenu: { ...s.commandMenu, running: true, fieldError: null, pending } }));
     try {
       const output = await callTool(tool.name, input);
       set({ commandMenu: CLOSED });
@@ -44,11 +47,11 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
   return {
     commandMenu: CLOSED,
     // The phone drawer has the menu's button: the menu takes its place.
-    openCommandMenu: () => set((s) => ({ commandMenu: { ...CLOSED, open: true }, ui: { ...s.ui, drawerOpen: false } })),
-    closeCommandMenu: () => set({ commandMenu: CLOSED }),
+    openCommandMenu: () => set((s) => ({ commandMenu: { ...CLOSED, open: true, pending: s.commandMenu.pending }, ui: { ...s.ui, drawerOpen: false } })),
+    closeCommandMenu: () => set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } })),
     chooseCommand: async (entry) => {
       if (entry.kind === 'go') {
-        set({ commandMenu: CLOSED });
+        set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
         await router.navigate({ to: entry.to });
       } else if (needsInput(entry.tool)) {
         set((s) => ({ commandMenu: { ...s.commandMenu, form: entry.tool.name, fieldError: null } }));

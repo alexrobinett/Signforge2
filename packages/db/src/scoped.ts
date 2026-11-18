@@ -217,6 +217,8 @@ export interface SyncWrite {
   at: number;
   playerVersion: string;
   heartbeatJson: string;
+  /** The manifest the heartbeat says is playing, if any. */
+  active?: string;
   epoch: string;
   seq: number;
   counts: readonly { hour: number; spotId: string; plays: number; ms: number }[];
@@ -369,8 +371,20 @@ export function scoped(d1: D1Database, orgId: string) {
         },
       },
       /**
-       * A screen's sync (`POST /v1/device/sync`), in one atomic batch: its heartbeat and last-seen
-       * time, and its play counts added to the hourly totals unless the batch's `seq` is already
+       * The manifest a screen says is on screen, from its socket's `applied`. A sync's heartbeat
+       * writes the same column (`sync`), so it holds the latest report over either transport.
+       * Telemetry, not a setting: the row's version and `updatedAt` stay, so an editor open on the
+       * screen does not conflict with its own rollout. A repeat writes no row.
+       */
+      reportManifest: async (screenId: string, manifestId: string) => {
+        await d1
+          .prepare('UPDATE screens SET reported_manifest_id = ? WHERE org_id = ? AND id = ? AND reported_manifest_id IS NOT ?')
+          .bind(manifestId, orgId, screenId, manifestId)
+          .run();
+      },
+      /**
+       * A screen's sync (`POST /v1/device/sync`), in one atomic batch: its heartbeat, last-seen
+       * time and the manifest it reports playing (`reportManifest`), and its play counts added to the hourly totals unless the batch's `seq` is already
        * stored in its `epoch` (a retry). The check is in the statements, so two copies of one
        * request racing still count once. Leaves `updatedAt`, the settings' change time, alone.
        * Returns the highest seq stored in the epoch, and the rows D1 wrote (the budget's unit), or
@@ -391,10 +405,11 @@ export function scoped(d1: D1Database, orgId: string) {
         const update = d1
           .prepare(
             `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?,
+               reported_manifest_id = coalesce(?, reported_manifest_id),
                sync_ack_seq = CASE WHEN sync_epoch IS ? THEN max(sync_ack_seq, ?) ELSE ? END, sync_epoch = ?
              WHERE org_id = ? AND id = ? RETURNING sync_ack_seq`,
           )
-          .bind(v.at, v.playerVersion, v.heartbeatJson, v.epoch, v.seq, v.seq, v.epoch, orgId, screenId);
+          .bind(v.at, v.playerVersion, v.heartbeatJson, v.active ?? null, v.epoch, v.seq, v.seq, v.epoch, orgId, screenId);
         const results = await d1.batch([...inserts, update]);
         const row = results.at(-1)!.results[0] as { sync_ack_seq: number } | undefined;
         if (!row) return undefined;

@@ -1,6 +1,6 @@
 import { describeTools, registry, TOOLS, type Role } from '@signforge/tools';
 import { describe, expect, it } from 'vitest';
-import { commandEntries, needsInput, NULL_CHOICE, parseToolList, resultText, toolInput } from '../../src/lib/command-menu';
+import { commandEntries, needsInput, NULL_CHOICE, parseToolList, resultText, toolInput, withKey } from '../../src/lib/command-menu';
 import { SECTIONS } from '../../src/lib/sections';
 
 // What `GET /api/tools` sends: `describeTools` for the member's role.
@@ -68,17 +68,28 @@ describe('a tool form’s input', () => {
     expect(toolInput(fieldsOf('list_screens'), form({ limit: 'many' }))).toEqual({ ok: false, field: 'limit', message: 'limit must be a number.' });
   });
 
-  it('reads JSON fields, fills the idempotency key, and refuses JSON that does not parse', () => {
+  it('reads JSON fields, and refuses JSON that does not parse', () => {
     const fields = fieldsOf('create_group');
     expect(fields.map((f) => f.type)).toEqual(['text', 'json', 'key']);
-    const result = toolInput(fields, form({ name: 'Downtown', screenIds: '["s1","s2"]' }));
-    expect(result).toMatchObject({ ok: true, input: { name: 'Downtown', screenIds: ['s1', 's2'] } });
-    expect(result.ok && typeof result.input.idempotencyKey === 'string' && result.input.idempotencyKey.length >= 8).toBe(true);
+    expect(toolInput(fields, form({ name: 'Downtown', screenIds: '["s1","s2"]' }))).toEqual({ ok: true, input: { name: 'Downtown', screenIds: ['s1', 's2'] } });
     expect(toolInput(fields, form({ name: 'x', screenIds: '[s1' }))).toEqual({
       ok: false,
       field: 'screenIds',
       message: 'screenIds must be JSON, such as ["a", "b"] or {"key": "value"}.',
     });
+  });
+
+  it('keeps one idempotency key per call across retries, and makes a new one for a new call', () => {
+    const tool = listed('owner').find((t) => t.name === 'create_group')!;
+    const first = withKey(tool, { name: 'Downtown' }, null);
+    const key = first.input.idempotencyKey;
+    expect(typeof key === 'string' && key.length >= 8).toBe(true);
+    // The answer was lost: the same form sent again is the same call.
+    expect(withKey(tool, { name: 'Downtown' }, first.pending).input).toEqual({ name: 'Downtown', idempotencyKey: key });
+    // Changed input, or another tool, is a new call.
+    expect(withKey(tool, { name: 'Uptown' }, first.pending).input.idempotencyKey).not.toBe(key);
+    const rename = listed('owner').find((t) => t.name === 'rename_screen')!;
+    expect(withKey(rename, { screenId: 's', name: 'Downtown' }, first.pending)).toEqual({ input: { screenId: 's', name: 'Downtown' }, pending: null });
   });
 
   it('runs at once only when the tool needs no input', () => {

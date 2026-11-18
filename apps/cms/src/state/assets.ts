@@ -7,7 +7,10 @@ import { uploadImage } from '@signforge/media';
 import { callTool, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 
-/** A file on its way up. It leaves the list once it is in the library; a refusal stays until dismissed. */
+/**
+ * A file on its way up. It leaves the list once it is in the library; a refusal stays until
+ * dismissed. Its key is also the upload's idempotency key.
+ */
 interface Upload {
   key: string;
   name: string;
@@ -49,7 +52,7 @@ export const createAssetsSlice: SliceCreator<AssetsSlice> = (set, get, { router 
       // One at a time: a 4K photo decoded twice is already a lot of memory for a phone.
       for (const { file, key } of queued) {
         try {
-          await uploadImage(file, { callTool });
+          await uploadImage(file, { callTool, idempotencyKey: key });
           uploads((u) => u.filter((x) => x.key !== key));
           await router.invalidate();
         } catch (err) {
