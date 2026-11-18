@@ -1,6 +1,6 @@
 # M3-41 Browser test screen
 
-Status: open  ·  Size: M  ·  Depends on: M3-08, M3-11
+Status: done (branch m3-41-browser-test-screen)  ·  Size: M  ·  Depends on: M3-08, M3-11
 
 ## Goal
 
@@ -23,6 +23,6 @@ A new org's first screen in under a minute, with no hardware: "Open a test scree
 
 ## Done when
 
-- [ ] From an empty org, "Open a test screen", pair it, publish a spot, and see it play in the tab, in under a minute (Playwright).
-- [ ] Revoking the browser screen wipes its credential and cache.
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [x] From an empty org, "Open a test screen", pair it, publish a spot, and see it play in the tab, in under a minute (Playwright). `apps/cms/e2e/test-screen.spec.ts`: from the click to the spot playing in the tab took 6.3 s locally (asserted under 60 s). It publishes through `/admin` as `sf push` does, since the CMS cannot publish until M3-18.
+- [x] Revoking the browser screen wipes its credential and cache. The same e2e revokes it from its page and finds the IndexedDB credential and `sf-blobs-v1` empty, with a code shown; `packages/player/browser/browser-screen.test.ts` also checks it still pairs after a reload.
+- [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated (docs/architecture.md "Browser test screen", docs/backend-plan.md pairing and route trees, apps/cms/README.md, packages/player/browser/README.md).

@@ -98,10 +98,13 @@ test('a new org opens a test screen, pairs it, publishes to it and sees it play 
 
   const manifestId = await publishImage(page, screenId);
   await expect
-    .poll(async () => {
-      const s = await player(tab);
-      return !!s && s.manifestId === manifestId && s.played > 0;
-    }, { timeout: 45_000 })
+    .poll(
+      async () => {
+        const s = await player(tab);
+        return !!s && s.manifestId === manifestId && s.played > 0;
+      },
+      { timeout: 45_000 },
+    )
     .toBe(true);
   const elapsed = Date.now() - started;
   console.info(`test screen: opened, paired, published and playing in ${(elapsed / 1000).toFixed(1)} s`);
