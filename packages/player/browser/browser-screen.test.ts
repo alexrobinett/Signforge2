@@ -1,7 +1,9 @@
 // A browser test screen (M3-41): the player in a tab on the CMS's hostname, with no supervisor.
 // It pairs as `kind: browser`, keeps its credential in IndexedDB, sends no cookie with any device
 // request (the API there sits beside the user's session), never asks a supervisor, and ignores
-// display power commands. A revoke wipes its credential and cache.
+// display power commands. A revoke wipes its credential and cache. The credential goes only to
+// the API base it paired with: the tab is on the CMS's origin, where anyone can open it with
+// another `content=`.
 import { expect, it } from 'vitest';
 import type { FixtureServer } from './fixture-server';
 import { useHarness, type Player } from './harness';
@@ -50,7 +52,7 @@ it('pairs as a browser, keeps its credential across a reload, and sends no cooki
 
   const credential = p.server.claim(s.pairing);
   await p.until((s) => s.manifestId === content.manifest.id && s.played > 0 && s.socket, 15_000);
-  expect(await storedCredential(p)).toBe(credential);
+  expect(await storedCredential(p)).toEqual({ credential, api: `${p.server.url}/content` });
 
   const codes = p.server.pairings.length;
   await p.page.reload();
@@ -87,4 +89,20 @@ it('revoked: wipes its credential and cache, and shows a code again, after a rel
 
   await p.page.reload();
   await p.until((s) => s.pairing !== '' && s.manifestId === '');
+});
+
+it('opened with another API, sends that API nothing, does not pair, and keeps its credential', async () => {
+  const content = h.content([{ id: 'a', durationMs: 800 }]);
+  const p = await openTestScreen(content);
+  const credential = p.server.claim((await p.until((s) => s.pairing !== '')).pairing);
+  await p.until((s) => s.played > 0 && s.socket, 15_000);
+
+  const foreign = await h.playerServer();
+  await p.page.goto(`${p.server.url}/?${new URLSearchParams({ poll: '1', kind: 'browser', pairmove: '1', content: foreign.deviceApi })}`);
+  const s = await p.until((s) => s.auth === 'paired with another API');
+  await new Promise((r) => setTimeout(r, 2000));
+  expect(foreign.requests).toEqual([]);
+  expect((await p.state()).pairing).toBe('');
+  expect(s.pairing).toBe('');
+  expect(await storedCredential(p)).toEqual({ credential, api: `${p.server.url}/content` });
 });

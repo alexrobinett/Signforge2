@@ -99,7 +99,7 @@ const BASE = new URL(CONTENT, location.href).href.replace(/\/$/, '');
  */
 const credential: ScreenCredential | undefined =
   KIND === 'browser'
-    ? new BrowserCredential()
+    ? new BrowserCredential(BASE)
     : new URL(BASE).origin === location.origin
       ? undefined
       : new DeviceCredential(BASE, SUPERVISOR, supervisorFetch);

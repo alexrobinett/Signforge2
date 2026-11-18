@@ -32,7 +32,7 @@ const kept = (tab: Page) =>
         })
       : undefined;
     db.close();
-    return { credential: typeof credential === 'string', files: (await (await caches.open('sf-blobs-v1')).keys()).length };
+    return { credential: credential !== undefined, files: (await (await caches.open('sf-blobs-v1')).keys()).length };
   });
 
 /** Publish one image spot to the screen, as `sf push` does until the CMS publishes (M3-18). */
