@@ -5,7 +5,7 @@
  */
 import { createFileRoute, getRouteApi, Link, notFound, useRouter } from '@tanstack/react-router';
 import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon } from 'lucide-react';
-import { useId, useReducer, type FormEvent, type ReactNode } from 'react';
+import { useId, type FormEvent, type ReactNode } from 'react';
 import { describeHours, DisplayHoursEditor, hoursProblems, WeekBars } from '~/components/screens/display-hours-editor';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
 import { ScreenStatus } from '~/components/screens/status';
@@ -30,6 +30,7 @@ import { ago, describeScreen, eventText, localClock } from '~/lib/screen-status'
 import type { DisplayHours, GroupView, ScreenView } from '~/lib/screen-types';
 import { callTool, toolMessage } from '~/lib/tools';
 import { getScreen } from '~/server/screens.functions';
+import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/_app/screens/$screenId')({
   loader: async ({ params }) => {
@@ -60,22 +61,22 @@ function ScreenPage() {
   const canManage = useCanManage();
   const owner = useRole() === 'owner';
   const now = useNow(at);
-  const router = useRouter();
-  const [{ busy, notice, editing, revoking }, dispatch] = useReducer(page, { busy: null, notice: null, editing: null, revoking: false });
+  const pageState = useAppStore((s) => s.screens.page);
+  const actOnScreen = useAppStore((s) => s.actOnScreen);
+  const openScreenSettings = useAppStore((s) => s.openScreenSettings);
+  const openDisplayHours = useAppStore((s) => s.openDisplayHours);
+  const askToRevoke = useAppStore((s) => s.askToRevoke);
+  const revokeScreen = useAppStore((s) => s.revokeScreen);
+  // Page state belongs to one screen: another screen's notice or editor is not shown here.
+  const ours = pageState.screenId === screen.id;
+  const busy = ours ? pageState.busy : null;
+  const notice = ours ? pageState.notice : null;
+  const editing = ours ? pageState.editing : null;
+  const revoking = pageState.revoking;
   const d = describeScreen(screen, now);
   const inGroups = groups.filter((g) => groupIds.includes(g.id));
   const revoked = screen.status === 'revoked';
-
-  async function run(label: string, tool: string, input: Record<string, unknown>, done: string) {
-    dispatch({ type: 'actionStarted', label });
-    try {
-      await callTool(tool, { screenId: screen.id, ...input });
-      dispatch({ type: 'actionDone', text: done });
-      await router.invalidate();
-    } catch (err) {
-      dispatch({ type: 'actionFailed', text: toolMessage(err) });
-    }
-  }
+  const run = (label: string, tool: string, input: Record<string, unknown>, done: string) => void actOnScreen(screen.id, { label, tool, input, done });
 
   const spinner = (label: string, icon: ReactNode) => (busy === label ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : icon);
   const override = screen.displayOverride;
@@ -148,12 +149,12 @@ function ScreenPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => dispatch({ type: 'editOpened', what: 'settings' })}>Settings and groups…</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => dispatch({ type: 'editOpened', what: 'hours' })}>Display hours…</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => openScreenSettings(screen, groupIds)}>Settings and groups…</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => openDisplayHours(screen)}>Display hours…</DropdownMenuItem>
                   {owner && (
                     <>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => dispatch({ type: 'revokeAsked', open: true })}>
+                      <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => askToRevoke(true)}>
                         Revoke…
                       </DropdownMenuItem>
                     </>
@@ -234,7 +235,7 @@ function ScreenPage() {
             title="Display hours"
             action={
               canManage && !revoked ? (
-                <Button variant="link" size="sm" className="h-auto px-0 underline" onClick={() => dispatch({ type: 'editOpened', what: 'hours' })}>
+                <Button variant="link" size="sm" className="h-auto px-0 underline" onClick={() => openDisplayHours(screen)}>
                   Edit
                 </Button>
               ) : undefined
@@ -284,9 +285,9 @@ function ScreenPage() {
         </div>
       </div>
 
-      {editing === 'settings' && <SettingsDialog screen={screen} groups={groups} groupIds={groupIds} onClose={() => dispatch({ type: 'editClosed' })} />}
-      {editing === 'hours' && <HoursDialog screen={screen} onClose={() => dispatch({ type: 'editClosed' })} />}
-      <AlertDialog open={revoking} onOpenChange={(open) => dispatch({ type: 'revokeAsked', open })}>
+      {editing === 'settings' && <SettingsDialog screen={screen} groups={groups} />}
+      {editing === 'hours' && <HoursDialog screen={screen} />}
+      <AlertDialog open={revoking} onOpenChange={askToRevoke}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Revoke {screen.name}?</AlertDialogTitle>
@@ -299,16 +300,10 @@ function ScreenPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() =>
-                void (async () => {
-                  for (const c of credentials.filter((c) => c.revokedAt == null)) {
-                    await run(
-                      'revoke',
-                      'revoke_screen_credential',
-                      { credentialId: c.id },
-                      'Revoked. The screen has stopped playing and shows a pairing code.',
-                    );
-                  }
-                })()
+                void revokeScreen(
+                  screen.id,
+                  credentials.filter((c) => c.revokedAt == null).map((c) => c.id),
+                )
               }
             >
               Revoke
@@ -318,89 +313,6 @@ function ScreenPage() {
       </AlertDialog>
     </div>
   );
-}
-
-interface PageState {
-  /** The action being sent (identify, restart, display, revoke), or null. */
-  busy: string | null;
-  notice: { ok: boolean; text: string } | null;
-  editing: 'settings' | 'hours' | null;
-  revoking: boolean;
-}
-type PageAction =
-  | { type: 'actionStarted'; label: string }
-  | { type: 'actionDone'; text: string }
-  | { type: 'actionFailed'; text: string }
-  | { type: 'editOpened'; what: 'settings' | 'hours' }
-  | { type: 'editClosed' }
-  | { type: 'revokeAsked'; open: boolean };
-
-function page(s: PageState, a: PageAction): PageState {
-  switch (a.type) {
-    case 'actionStarted':
-      return { ...s, busy: a.label, notice: null };
-    case 'actionDone':
-      return { ...s, busy: null, notice: { ok: true, text: a.text } };
-    case 'actionFailed':
-      return { ...s, busy: null, notice: { ok: false, text: a.text } };
-    case 'editOpened':
-      return { ...s, editing: a.what };
-    case 'editClosed':
-      return { ...s, editing: null };
-    case 'revokeAsked':
-      return { ...s, revoking: a.open };
-  }
-}
-
-interface SettingsState {
-  name: string;
-  timezone: string;
-  orientation: ScreenView['orientation'];
-  chosen: string[];
-  pending: boolean;
-  error: string | null;
-}
-type SettingsAction =
-  | { type: 'nameEntered'; name: string }
-  | { type: 'zoneChosen'; timezone: string }
-  | { type: 'orientationChosen'; orientation: ScreenView['orientation'] }
-  | { type: 'groupToggled'; groupId: string; member: boolean }
-  | { type: 'saveStarted' }
-  | { type: 'saveFailed'; error: string };
-
-function settings(s: SettingsState, a: SettingsAction): SettingsState {
-  switch (a.type) {
-    case 'nameEntered':
-      return { ...s, name: a.name };
-    case 'zoneChosen':
-      return { ...s, timezone: a.timezone };
-    case 'orientationChosen':
-      return { ...s, orientation: a.orientation };
-    case 'groupToggled':
-      return { ...s, chosen: a.member ? [...s.chosen, a.groupId] : s.chosen.filter((g) => g !== a.groupId) };
-    case 'saveStarted':
-      return { ...s, pending: true, error: null };
-    case 'saveFailed':
-      return { ...s, pending: false, error: a.error };
-  }
-}
-
-interface HoursState {
-  hours: DisplayHours | null;
-  pending: boolean;
-  error: string | null;
-}
-type HoursAction = { type: 'hoursChanged'; hours: DisplayHours | null } | { type: 'saveStarted' } | { type: 'saveFailed'; error: string };
-
-function hoursEdit(s: HoursState, a: HoursAction): HoursState {
-  switch (a.type) {
-    case 'hoursChanged':
-      return { ...s, hours: a.hours };
-    case 'saveStarted':
-      return { ...s, pending: true, error: null };
-    case 'saveFailed':
-      return { ...s, pending: false, error: a.error };
-  }
 }
 
 const short = (id: string | null) => (id ? <span title={id}>{id.slice(0, 7)}</span> : 'none');
@@ -439,41 +351,27 @@ function CacheState({ screen }: { screen: ScreenView }) {
   );
 }
 
-function SettingsDialog({ screen, groups, groupIds, onClose }: { screen: ScreenView; groups: GroupView[]; groupIds: string[]; onClose: () => void }) {
-  const router = useRouter();
+function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupView[] }) {
   const id = useId();
-  const [{ name, timezone, orientation, chosen, pending, error }, dispatch] = useReducer(settings, {
-    name: screen.name,
-    timezone: screen.timezone,
-    orientation: screen.orientation,
-    chosen: groupIds,
-    pending: false,
-    error: null,
-  });
+  const draft = useAppStore((s) => s.screens.page.settings);
+  const saving = useAppStore((s) => s.screens.page.saving);
+  const error = useAppStore((s) => s.screens.page.saveError);
+  const renameDraft = useAppStore((s) => s.renameDraft);
+  const chooseDraftZone = useAppStore((s) => s.chooseDraftZone);
+  const chooseDraftOrientation = useAppStore((s) => s.chooseDraftOrientation);
+  const toggleDraftGroup = useAppStore((s) => s.toggleDraftGroup);
+  const saveScreenSettings = useAppStore((s) => s.saveScreenSettings);
+  const close = useAppStore((s) => s.closeScreenEditor);
   const zones = Intl.supportedValuesOf('timeZone');
+  if (!draft) return null;
 
-  async function save(e: FormEvent) {
+  function save(e: FormEvent) {
     e.preventDefault();
-    dispatch({ type: 'saveStarted' });
-    try {
-      if (name.trim() !== screen.name) await callTool('rename_screen', { screenId: screen.id, name: name.trim() });
-      if (timezone !== screen.timezone || orientation !== screen.orientation)
-        await callTool('update_screen_settings', { screenId: screen.id, timezone, orientation });
-      for (const g of groups) {
-        const was = g.screenIds.includes(screen.id);
-        const now = chosen.includes(g.id);
-        if (was !== now)
-          await callTool('set_group_members', { groupId: g.id, screenIds: now ? [...g.screenIds, screen.id] : g.screenIds.filter((x) => x !== screen.id) });
-      }
-      await router.invalidate();
-      onClose();
-    } catch (err) {
-      dispatch({ type: 'saveFailed', error: toolMessage(err) });
-    }
+    void saveScreenSettings(screen, groups);
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && close()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
@@ -482,11 +380,11 @@ function SettingsDialog({ screen, groups, groupIds, onClose }: { screen: ScreenV
         <form onSubmit={save} className="grid gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor={`${id}-n`}>Name</Label>
-            <Input id={`${id}-n`} value={name} onChange={(e) => dispatch({ type: 'nameEntered', name: e.target.value })} maxLength={100} required />
+            <Input id={`${id}-n`} value={draft.name} onChange={(e) => renameDraft(e.target.value)} maxLength={100} required />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor={`${id}-tz`}>Time zone</Label>
-            <NativeSelect id={`${id}-tz`} value={timezone} onChange={(e) => dispatch({ type: 'zoneChosen', timezone: e.target.value })}>
+            <NativeSelect id={`${id}-tz`} value={draft.timezone} onChange={(e) => chooseDraftZone(e.target.value)}>
               {zones.map((z) => (
                 <option key={z} value={z}>
                   {z.replaceAll('_', ' ')}
@@ -496,11 +394,7 @@ function SettingsDialog({ screen, groups, groupIds, onClose }: { screen: ScreenV
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor={`${id}-o`}>Orientation</Label>
-            <NativeSelect
-              id={`${id}-o`}
-              value={orientation}
-              onChange={(e) => dispatch({ type: 'orientationChosen', orientation: e.target.value as ScreenView['orientation'] })}
-            >
+            <NativeSelect id={`${id}-o`} value={draft.orientation} onChange={(e) => chooseDraftOrientation(e.target.value as ScreenView['orientation'])}>
               <option value="landscape">Landscape (16:9)</option>
               <option value="portrait">Portrait (9:16)</option>
             </NativeSelect>
@@ -514,8 +408,8 @@ function SettingsDialog({ screen, groups, groupIds, onClose }: { screen: ScreenV
                     <input
                       type="checkbox"
                       className="size-4 accent-primary"
-                      checked={chosen.includes(g.id)}
-                      onChange={(e) => dispatch({ type: 'groupToggled', groupId: g.id, member: e.target.checked })}
+                      checked={draft.groupIds.includes(g.id)}
+                      onChange={(e) => toggleDraftGroup(g.id, e.target.checked)}
                     />
                     {g.name}
                   </label>
@@ -527,11 +421,11 @@ function SettingsDialog({ screen, groups, groupIds, onClose }: { screen: ScreenV
             {error}
           </p>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>
-            <Button type="submit" disabled={pending || !name.trim()}>
-              {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} Save
+            <Button type="submit" disabled={saving || !draft.name.trim()}>
+              {saving && <LoaderCircleIcon className="animate-spin" aria-hidden />} Save
             </Button>
           </DialogFooter>
         </form>
@@ -540,26 +434,22 @@ function SettingsDialog({ screen, groups, groupIds, onClose }: { screen: ScreenV
   );
 }
 
-function HoursDialog({ screen, onClose }: { screen: ScreenView; onClose: () => void }) {
-  const router = useRouter();
-  const [{ hours, pending, error }, dispatch] = useReducer(hoursEdit, { hours: screen.displayHours, pending: false, error: null });
+function HoursDialog({ screen }: { screen: ScreenView }) {
+  const hours = useAppStore((s) => s.screens.page.hours);
+  const saving = useAppStore((s) => s.screens.page.saving);
+  const error = useAppStore((s) => s.screens.page.saveError);
+  const editDraftHours = useAppStore((s) => s.editDraftHours);
+  const saveDisplayHours = useAppStore((s) => s.saveDisplayHours);
+  const close = useAppStore((s) => s.closeScreenEditor);
   const ok = hoursProblems(hours).length === 0;
 
-  async function save(e: FormEvent) {
+  function save(e: FormEvent) {
     e.preventDefault();
-    if (!ok) return;
-    dispatch({ type: 'saveStarted' });
-    try {
-      await callTool('update_screen_settings', { screenId: screen.id, displayHours: hours });
-      await router.invalidate();
-      onClose();
-    } catch (err) {
-      dispatch({ type: 'saveFailed', error: toolMessage(err) });
-    }
+    if (ok) void saveDisplayHours(screen.id);
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && close()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Display hours for {screen.name}</DialogTitle>
@@ -568,16 +458,16 @@ function HoursDialog({ screen, onClose }: { screen: ScreenView; onClose: () => v
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="grid gap-4">
-          <DisplayHoursEditor value={hours} onChange={(hours) => dispatch({ type: 'hoursChanged', hours })} />
+          <DisplayHoursEditor value={hours} onChange={editDraftHours} />
           <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
             {error}
           </p>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>
-            <Button type="submit" disabled={pending || !ok}>
-              {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} Save
+            <Button type="submit" disabled={saving || !ok}>
+              {saving && <LoaderCircleIcon className="animate-spin" aria-hidden />} Save
             </Button>
           </DialogFooter>
         </form>

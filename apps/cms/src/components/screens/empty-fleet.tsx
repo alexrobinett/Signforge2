@@ -39,7 +39,7 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
             <li className="flex gap-3.5">
               {testScreenHref && <Step n={2} />}
               <div className="min-w-0 flex-1">
-                <PairScreenForm groups={groups} compact defaultName={testScreenHref ? 'Test screen' : ''} />
+                <PairScreenForm groups={groups} compact />
               </div>
             </li>
           </ol>

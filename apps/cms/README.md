@@ -37,6 +37,7 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 | Command | What it runs |
 | --- | --- |
 | `pnpm --filter @signforge/cms typecheck` | `wrangler types --env dev`, then `tsc` |
+| `pnpm --filter @signforge/cms lint` | ESLint with the React rules below. Root `pnpm lint` runs Biome, then this |
 | `pnpm --filter @signforge/cms test` | Unit tests (Vitest) |
 | `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer; and on Screens, pair a screen (a pairing started on the API as a player would), see it sync, sleep and wake it, identify it, set its display hours, the tile and table views at desktop and phone width, and revoke it. The screens spec sends its own `cf-connecting-ip`, so its sign-in has its own rate limit. It starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
 | `CLOUDFLARE_ENV=demo pnpm --filter @signforge/cms build` | Production build into `dist/` for that environment. Without `CLOUDFLARE_ENV` it fails: there is no default environment |
@@ -55,8 +56,47 @@ src/server/screens.functions.ts  the Screens loaders: tools called as the member
 public/sign-in/           spots the player rendered (scripts/spot-shots.ts), for the sign-in wall
 src/routes/api/$.ts       `/api/*` handed to the API Worker
 src/server/               server-only: the API binding, the shell's server functions
+src/state/                the app store: one slice per area (see State below)
 src/components/ui/        shadcn/ui components (components.json is set up for the shadcn CLI)
 ```
+
+## React rules
+
+`eslint.config.js` adds what Biome cannot check. Biome still formats and lints the whole repo.
+
+- **No `useState`, and no `useEffect`, `useLayoutEffect` or `useInsertionEffect`.** Effects and state scattered across components are where UI bugs hide: a value copied into state goes stale, and an effect that syncs it runs at the wrong time or not at all. Instead:
+  - App and flow state goes in the app store (next section). `useReducer` is allowed only for state that belongs to one component and never leaves it, as a small typed reducer.
+  - Work caused by an event goes in the event handler or a store action.
+  - DOM work such as focus goes in a ref callback. Make it a stable function (see `focusOnMount` in `routes/sign-in.tsx`): an inline one runs on every render.
+  - A value that follows from props, loader data or the store is derived during render, not kept in sync.
+  - Outside state, such as storage or a media query, is read with `useSyncExternalStore` or kept in the store, which subscribes once (see `connectUi` in `state/ui.ts`).
+  - The ban needs named imports (`import { useId } from 'react'`); a namespace import of React is reported too.
+- **No `create` from `zustand`.** It makes one store for the whole server, shared between requests. Use `useAppStore`.
+- **React hooks rules** (`eslint-plugin-react-hooks`, recommended).
+- **Slop rules** (`eslint-plugin-slop`, every rule, whole files): no em dashes, no inflated words, non-JSDoc comments of 50 words at most, `/** */` on exported things, no trivial wrappers or type aliases.
+
+If a rule must be broken, use `// eslint-disable-next-line <rule> -- <why>`. There are none today.
+
+typescript-eslint, which parses TypeScript for ESLint, cannot load TypeScript 7. So this package's `typescript` devDependency is an alias for `@typescript/typescript6`, the TypeScript 6 API, as the TypeScript 7 release notes recommend. `tsc` still runs TypeScript 7, from the repo root.
+
+## State
+
+Where each kind of state lives:
+
+- **Server data** (the shell, orgs, later screens and spots) comes from route loaders and the API. It is never copied into the store.
+- **Anything a link should carry** (list view, filters, search, selected tab) lives in the route's typed search params (`validateSearch`). The URL is state too.
+- **UI and in-progress state** (the drawer, the theme, the sign-in steps, form drafts, later the spot editor's draft) lives in the app store, `src/state/`.
+
+The store is Zustand, built with `createStore` from `zustand/vanilla`. `getRouter()` in `src/router.tsx` makes one store per router, which is one per request on the server and one per page in the browser, and its `Wrap` provides it. Components read it with `useAppStore(selector)`, select one value or action at a time (a selector that builds a new object re-renders forever), and call actions. They hold no state of their own.
+
+Keeping it in one place means every change to the UI's state is in `src/state/`, as named actions, where a person or an agent can read them all.
+
+To add a slice:
+
+1. Make `src/state/<area>.ts` with its state under one key (`ui`, `signIn`, `orgs`, `screens`) and its actions, typed as `SliceCreator<YourSlice>`.
+2. Name actions as verbs on the domain (`openDrawer`, `startSignIn`, `createOrg`) and write each transition inside them with `set((s) => ...)`. Do not add a generic `patch` or `setField` action: that is `useState` under another name.
+3. Actions that call the API use the helpers in `src/lib/` and the router from the store's deps (`router.invalidate()` after a change).
+4. Add the slice to `AppState` and `createAppStore` in `src/state/store.ts`. If it must start from browser state, set that in a browser-only hook like `connectUi`, which changes the current state but not the initial one, so hydration still matches the server.
 
 ## Deploying
 
