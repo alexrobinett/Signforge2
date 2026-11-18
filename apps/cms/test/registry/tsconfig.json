@@ -1,0 +1,11 @@
+{
+  // Its own project: the tools package needs Workers types and ES2024, which the CMS (DOM) does not load.
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2024"],
+    "types": ["node", "@cloudflare/workers-types"],
+    "paths": { "~/*": ["../../src/*"] }
+  },
+  "include": ["."]
+}
