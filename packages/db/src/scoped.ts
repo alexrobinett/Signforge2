@@ -237,6 +237,19 @@ function publisher<T extends typeof s.spots | typeof s.playlists | typeof s.sche
   };
 }
 
+/**
+ * Whether a screen's report of the manifest on screen replaces the one stored (gh-44), as SQL over
+ * `screens`, and the time stored with it. One observed on a trusted clock replaces only a report
+ * observed earlier, so a sync built before a socket's `applied` cannot undo it when it arrives
+ * after; of two at one time the first stays. A time after the report arrived counts as its
+ * arrival, so a clock ahead cannot hold the column. Without a time (a player before gh-44, or an
+ * untrusted clock) a report is ordered by arrival, as before: it replaces, and counts as observed then.
+ */
+function manifestReport(observedAt: number | undefined, arrivedAt: number) {
+  const at = Math.min(observedAt ?? arrivedAt, arrivedAt);
+  return { at, takes: '(? OR reported_manifest_at IS NULL OR ? > reported_manifest_at)', takesArgs: [observedAt === undefined ? 1 : 0, at] };
+}
+
 /** What one screen sync writes (`screens.sync`). Hours are UTC hour starts in ms. */
 export interface SyncWrite {
   at: number;
@@ -244,6 +257,8 @@ export interface SyncWrite {
   heartbeatJson: string;
   /** The manifest the heartbeat says is playing, if any. */
   active?: string;
+  /** When the screen observed `active`, on the server's clock; absent if its clock is untrusted. */
+  observedAt?: number;
   epoch: string;
   seq: number;
   counts: readonly { hour: number; spotId: string; plays: number; ms: number }[];
@@ -439,14 +454,18 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       /**
        * The manifest a screen says is on screen, from its socket's `applied`. A sync's heartbeat
-       * writes the same column (`sync`), so it holds the latest report over either transport.
-       * Telemetry, not a setting: the row's version and `updatedAt` stay, so an editor open on the
-       * screen does not conflict with its own rollout. A repeat writes no row.
+       * writes the same column (`sync`), so it holds the latest observed over either transport
+       * (`manifestReport`). Telemetry, not a setting: the row's version and `updatedAt` stay, so an
+       * editor open on the screen does not conflict with its own rollout. A repeat writes no row.
        */
-      reportManifest: async (screenId: string, manifestId: string) => {
+      reportManifest: async (screenId: string, manifestId: string, when: { observedAt?: number; arrivedAt: number }) => {
+        const r = manifestReport(when.observedAt, when.arrivedAt);
         await d1
-          .prepare('UPDATE screens SET reported_manifest_id = ? WHERE org_id = ? AND id = ? AND reported_manifest_id IS NOT ?')
-          .bind(manifestId, orgId, screenId, manifestId)
+          .prepare(
+            `UPDATE screens SET reported_manifest_id = ?, reported_manifest_at = ?
+             WHERE org_id = ? AND id = ? AND reported_manifest_id IS NOT ? AND ${r.takes}`,
+          )
+          .bind(manifestId, r.at, orgId, screenId, manifestId, ...r.takesArgs)
           .run();
       },
       /**
@@ -480,13 +499,22 @@ export function scoped(d1: D1Database, orgId: string) {
              ON CONFLICT (org_id, screen_id, epoch) DO UPDATE SET ack_seq = excluded.ack_seq WHERE excluded.ack_seq > sync_epochs.ack_seq`,
           )
           .bind(v.epoch, v.seq, orgId, screenId, v.seq);
+        // The manifest it reports replaces the stored one only if observed later (`manifestReport`).
+        const r = manifestReport(v.observedAt, v.at);
+        const report =
+          v.active === undefined
+            ? { sql: '', args: [] }
+            : {
+                sql: `, reported_manifest_id = CASE WHEN ${r.takes} THEN ? ELSE reported_manifest_id END,
+                   reported_manifest_at = CASE WHEN ${r.takes} THEN ? ELSE reported_manifest_at END`,
+                args: [...r.takesArgs, v.active, ...r.takesArgs, r.at],
+              };
         const update = d1
           .prepare(
-            `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?,
-               reported_manifest_id = coalesce(?, reported_manifest_id)
+            `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?${report.sql}
              WHERE org_id = ? AND id = ? RETURNING ${mark} AS ack_seq`,
           )
-          .bind(v.at, v.playerVersion, v.heartbeatJson, v.active ?? null, orgId, screenId, ...markArgs);
+          .bind(v.at, v.playerVersion, v.heartbeatJson, ...report.args, orgId, screenId, ...markArgs);
         const results = await d1.batch([...inserts, advance, update]);
         const row = results.at(-1)!.results[0] as { ack_seq: number } | undefined;
         if (!row) return undefined;
