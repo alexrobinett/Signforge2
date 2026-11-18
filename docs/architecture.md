@@ -227,16 +227,22 @@ Built (tickets in `docs/tickets/`):
 
 - **API Worker** (`apps/api`, Hono on Workers): D1 through `packages/db`, whose scoped repositories are the only code that touches tenant tables, and R2 for blobs and manifests.
 - **Device routes**: a screen authenticates with an opaque per-screen credential and fetches its manifest and files. The Pi plays from the API, and survives losing it. Pairing (M3-08) gives a screen its credential; `dev:screen` still makes one for local work.
-- **Screen socket** (M3-06): a Durable Object per screen (`ScreenObject`) holds one hibernating WebSocket. A publish or a revoked credential reaches the screen through it at once; the player polls only while it is down.
+- **Screen socket** (M3-06): a Durable Object per screen (`ScreenObject`) holds one hibernating WebSocket. A publish, a command or a revoked credential reaches the screen through it at once.
+- **Sync** (M3-07): one periodic `POST /v1/device/sync` carries the heartbeat and play counts up, and the desired manifest id, data snapshots, a socket ticket, the server time and commands down.
+- **Data sources** (M3-23): a one-minute Cron Trigger polls feeds in the Worker; screens get the snapshots on their next sync.
 - **`sf push`**: publishes an `sf build` output to a screen through a temporary `/admin` tree (see the backend plan for what replaces it).
-- **Auth and orgs**: Better Auth with email codes, GitHub and organizations; a CMS shell (TanStack Start) with sign-in, org creation and switching.
-- **Tool registry**: every change is a tool with an input and output schema, a scope and a role, audited. List tools page.
+- **Auth and orgs**: Better Auth with email codes, GitHub and organizations; the CMS (TanStack Start) with sign-in, org creation and switching.
+- **Tool registry**: every change is a tool with an input and output schema, a scope and a role; `GET /api/tools` lists them. A change and its audit row are written together, a retry with the same key does not repeat it (M3-33), and edits carry `ifVersion` so a person and an agent do not overwrite each other (M3-44).
+- **Drafts** (M3-34): spots, playlists and schedule entries have a draft and a published state; a publish promotes the drafts that pass their checks and reports the rest.
 - **Server compiler** (`packages/compiler`), golden-tested against `sf build`.
-- **Assets**: presigned upload, browser-made renditions and a server-side check on finalize. The library page waits for the CMS design.
+- **Assets** (M3-14, M3-21): presigned upload, browser-made renditions, a server-side check on finalize, and the library page. Video is checked against its one profile in the browser and again on the server.
 - **Templates**: pushed, checked again on the server, versioned and approved; base templates are seeded on deploy.
+- **Brand kits** (M3-38, M3-39, M3-25): several per org, applied by the compiler at publish; templates draw with the kit's colours, fonts and logo. There is no CMS page for them yet (M3-40).
+- **CMS**: the Screens pages (claim, settings, display hours, wake and sleep now, identify, revoke; M3-11), a browser test screen (M3-41), org settings, members and offline alerts by email (M3-42), the command menu (M3-43), and the spot editor: a form made from the template's fields beside the real player (M3-16, first PR).
+- **Player resilience** (M3-26 to M3-30, M3-36): browser tests, the wrapper frame around templates, last known good, pinned files and streamed downloads, checked live data, and the preview content source the spot editor uses.
 - **Feed normalisers** (`packages/feeds`): iCal, RSS and Atom into fixed shapes.
 
-After the full review of 2026-11-17 (`docs/reviews/2026-11-17-full-review.md`), foundations come next: player resilience with browser tests, contract fixes, write safety, then the screen socket, sync and pairing, before the spot and playlist editors.
+Next: the playlist editor, publishing and rollout from the CMS, schedules and timed publish (M3-17 to M3-20), then hardening (M3-24). The follow-ups from the review of 2026-11-18 (`docs/reviews/2026-11-18-full-review.md`) are GitHub issue #28 and the issues under it.
 
 ## Out of v1
 
