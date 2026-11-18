@@ -198,10 +198,12 @@ function ScreenPage() {
                 </span>
               )}
             </figcaption>
-            {screen.showing && (
+            {screen.showing ? (
               <p className="text-[13px] text-muted-foreground">
                 {d.line}. Worked out from its published manifest, schedule and display hours, as the screen does; not a screenshot.
               </p>
+            ) : (
+              screen.state.reason !== 'nothing_published' && <p className="text-[13px] text-muted-foreground">{d.line}.</p>
             )}
           </figure>
 

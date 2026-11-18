@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { screenshot, signIn } from './helpers';
+import { fillUntilEnabled, screenshot, signIn } from './helpers';
 import { API_PORT } from './servers';
 
 // Its own client address, so its sign-in has its own rate limit and leaves the other specs theirs.
@@ -56,7 +56,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await page.goto('/sign-in');
   await shots(page, '10-sign-in');
   await signIn(page, `e2e-screens-${Date.now()}@example.com`);
-  await page.getByLabel('Organization name').fill('Northside Market');
+  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name: 'Northside Market', level: 1 })).toBeVisible();
 
@@ -124,12 +124,12 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await shots(page, '15-screens-table');
 
   await page.setViewportSize({ width: 412, height: 915 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Tiles' }).click();
   await shots(page, '16-phone-screens');
   await page.getByRole('link', { name: 'Lobby' }).click();
   await expect(page.getByRole('heading', { name: 'Lobby', level: 1 })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await shots(page, '17-phone-screen-detail');
   await page.setViewportSize({ width: 1280, height: 720 });
 

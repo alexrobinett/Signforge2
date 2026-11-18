@@ -304,7 +304,7 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
 
 function ScreenTable({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Map<string, GroupView[]>; now: number }) {
   return (
-    <div className="overflow-x-auto rounded-xl border bg-card">
+    <div className="relative overflow-x-auto rounded-xl border bg-card">
       <table className="w-full min-w-[56rem] border-collapse text-sm">
         <thead className="bg-muted text-xs tracking-wide text-muted-foreground uppercase">
           <tr>
