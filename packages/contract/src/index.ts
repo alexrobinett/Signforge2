@@ -513,6 +513,13 @@ export interface CalendarFeed {
 }
 export interface NewsFeed {
   title: string;
+  /**
+   * The feed's language as it declares it (RSS `<language>`, Atom `xml:lang`), a BCP 47 tag such as
+   * `fr-FR`, or `''` when it declares none. A template writes the feed's own words, such as an
+   * age label, in it, and in the screen's locale when it is empty. Always present, so a spot can
+   * bind it whatever the feed.
+   */
+  language: string;
   /** Newest first. */
   items: { title: string; published: string; source: string }[];
 }
