@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3f63d45c-d073-4ab6-8c17-c7bd915abcf4",
+  "id": "471c3ad5-98fd-4369-9a65-1e194595a2b0",
   "prevId": "ffd5eb40-3ece-48fa-9ddb-5bf437939c3e",
   "tables": {
     "account": {
@@ -438,6 +438,11 @@
           "name": "audit_log_org_at_idx",
           "columns": ["org_id", "at"],
           "isUnique": false
+        },
+        "audit_log_org_target_idx": {
+          "name": "audit_log_org_target_idx",
+          "columns": ["org_id", "target_kind", "target_id", "at"],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -724,13 +729,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "checked_at": {
-          "name": "checked_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "data_json": {
           "name": "data_json",
           "type": "text",
@@ -812,13 +810,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "horizon_days": {
-          "name": "horizon_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "next_poll_at": {
@@ -2362,6 +2353,13 @@
         },
         "heartbeat_json": {
           "name": "heartbeat_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "display_override_json": {
+          "name": "display_override_json",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

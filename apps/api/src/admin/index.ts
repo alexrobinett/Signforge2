@@ -30,7 +30,7 @@
  * own id before it is. Blobs and manifests are content-addressed and inert: nothing plays them
  * until a publish names them. Pushing the same build again uploads nothing and changes nothing.
  */
-import { baseTemplateHtml, isId, manifestIdInput, validateManifest, type ScreenManifest } from '@signforge/contract';
+import { baseTemplateHtml, isId, manifestIdInput, parseManifest, type ScreenManifest } from '@signforge/contract';
 import { findDeviceScreen, organizationExists, platform, scoped } from '@signforge/db';
 import {
   dispatch,
@@ -73,9 +73,10 @@ async function readManifest(text: string): Promise<{ manifest: ScreenManifest } 
   } catch {
     return { problems: ['body is not JSON'] };
   }
-  const problems = validateManifest(m);
-  if (problems.length) return { problems };
-  const manifest = m as ScreenManifest;
+  const parsed = parseManifest(m);
+  if (!parsed.ok) return { problems: parsed.problems };
+  const manifest = parsed.value;
+  const problems: string[] = [];
   if (!SHA256.test(manifest.id) || (await sha256(manifestIdInput(manifest))) !== manifest.id) {
     return { problems: ['id is not the hash of the manifest (see canonicalJson in packages/contract)'] };
   }

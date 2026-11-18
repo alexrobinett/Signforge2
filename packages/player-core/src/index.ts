@@ -101,6 +101,46 @@ export function displayOn(hours: DisplayHours | undefined, t: LocalTime): boolea
   });
 }
 
+/** The instant a local wall-clock time happens in `timezone` (the later reading where a clock change repeats it). */
+function localToInstant(date: string, minutes: number, timezone: string): number {
+  const wall = Date.parse(`${date}T00:00:00Z`) + minutes * 60_000;
+  const offsetAt = (t: number) => {
+    const l = localTime(new Date(t), timezone);
+    return Date.parse(`${l.date}T00:00:00Z`) + l.minutes * 60_000 - Math.floor(t / 60_000) * 60_000;
+  };
+  const first = wall - offsetAt(wall);
+  return wall - offsetAt(first);
+}
+
+/** How far ahead `nextDisplayChange` looks: past a week, so a weekly window is always found. */
+const DISPLAY_LOOKAHEAD_DAYS = 9;
+
+/**
+ * When the display next turns on or off by its hours, after `now`: the CMS's "wakes 07:00", and
+ * the end of a display override. Undefined for a screen without hours, or one whose hours do not
+ * change in the next nine days. Changes happen only at a window's edge or at local midnight (an
+ * exception's day), so only those instants are checked.
+ */
+export function nextDisplayChange(hours: DisplayHours | undefined, timezone: string, now: Date): Date | undefined {
+  if (!hours) return undefined;
+  const edges = new Set<number>([0]);
+  for (const w of [...hours.weekly, ...(hours.exceptions ?? []).flatMap((e) => e.on)]) {
+    edges.add(toMinutes(w.from) % 1440);
+    edges.add(toMinutes(w.to) % 1440);
+  }
+  const today = localTime(now, timezone).date;
+  const start = Date.parse(`${today}T00:00:00Z`);
+  const candidates: number[] = [];
+  for (let d = -1; d <= DISPLAY_LOOKAHEAD_DAYS; d++) {
+    const date = new Date(start + d * 86_400_000).toISOString().slice(0, 10);
+    for (const m of edges) candidates.push(localToInstant(date, m, timezone));
+  }
+  const on = displayOn(hours, localTime(now, timezone));
+  const after = [...new Set(candidates)].filter((t) => t > now.getTime()).sort((a, b) => a - b);
+  const found = after.find((t) => displayOn(hours, localTime(new Date(t), timezone)) !== on);
+  return found === undefined ? undefined : new Date(found);
+}
+
 const LEVEL: Record<TargetLevel, number> = { org: 0, group: 1, screen: 2 };
 
 /**

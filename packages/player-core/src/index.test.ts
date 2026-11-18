@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
 import { SNAPSHOT_STALE_MS } from '@signforge/contract';
-import { Sequencer, displayOn, entryApplies, localTime, planSync, resolvePlaylist, resolveSpotData, snapshotFit, spotFiles, validateManifest } from './index';
+import {
+  Sequencer,
+  displayOn,
+  entryApplies,
+  localTime,
+  nextDisplayChange,
+  planSync,
+  resolvePlaylist,
+  resolveSpotData,
+  snapshotFit,
+  spotFiles,
+  validateManifest,
+} from './index';
 
 const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${id}`, fit: 'cover', durationMs: 5000 });
 
@@ -331,5 +343,43 @@ describe('files', () => {
       m.spots.u = { id: 'u', name: 'u', kind: 'url', url, durationMs: 5000 };
       expect(validateManifest(m)).toEqual(['spot "u" needs an absolute https URL']);
     }
+  });
+});
+
+describe('nextDisplayChange', () => {
+  const weekdays = { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '19:00' }] };
+  const ny = 'America/New_York';
+  const at = (iso: string) => new Date(iso);
+  const next = (hours: Parameters<typeof nextDisplayChange>[0], tz: string, iso: string) => nextDisplayChange(hours, tz, at(iso))?.toISOString();
+
+  it('is none for a screen without display hours, or one always on', () => {
+    expect(next(undefined, ny, '2026-11-18T15:00:00Z')).toBeUndefined();
+    expect(next({ weekly: [{ days: [0, 1, 2, 3, 4, 5, 6], from: '00:00', to: '24:00' }] }, ny, '2026-11-18T15:00:00Z')).toBeUndefined();
+  });
+
+  it("finds the end of the window it is in, in the screen's time zone", () => {
+    // Wed 18 Nov 10:00 in New York (UTC-5) -> 19:00 local.
+    expect(next(weekdays, ny, '2026-11-18T15:00:00Z')).toBe('2026-11-19T00:00:00.000Z');
+  });
+
+  it('skips the weekend to Monday morning', () => {
+    // Fri 20 Nov 20:00 local -> Mon 23 Nov 07:00 local.
+    expect(next(weekdays, ny, '2026-11-21T01:00:00Z')).toBe('2026-11-23T12:00:00.000Z');
+  });
+
+  it('skips a dated exception that keeps it off all day', () => {
+    const hours = { ...weekdays, exceptions: [{ date: '2026-11-26', on: [] }] };
+    // Wed 25 Nov 20:00 local: Thursday is closed, so Friday 07:00.
+    expect(next(hours, ny, '2026-11-26T01:00:00Z')).toBe('2026-11-27T12:00:00.000Z');
+  });
+
+  it('follows an overnight window past midnight', () => {
+    expect(next({ weekly: [{ days: [0, 1, 2, 3, 4, 5, 6], from: '22:00', to: '02:00' }] }, 'UTC', '2026-11-18T23:00:00Z')).toBe('2026-11-19T02:00:00.000Z');
+  });
+
+  it('crosses a daylight saving change on local time', () => {
+    // London goes to BST on Sun 29 Mar 2026; 07:00 local that Monday is 06:00Z.
+    const daily = { weekly: [{ days: [0, 1, 2, 3, 4, 5, 6], from: '07:00', to: '19:00' }] };
+    expect(next(daily, 'Europe/London', '2026-03-29T20:00:00Z')).toBe('2026-03-30T06:00:00.000Z');
   });
 });

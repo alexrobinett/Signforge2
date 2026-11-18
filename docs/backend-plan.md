@@ -122,7 +122,7 @@ Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 
 **Sync.** `POST /v1/device/sync`, every 5 minutes with jitter, the interval set by the server; every 2 minutes while the screen's socket is down, so that with every socket down at once 1,000 screens write about 43M rows a month (a minute would be 65M).
 - **The screen sends:** player version and the manifest schemas and frame protocols it plays, the active manifest (and the one it fell back from), files missing, display state and power methods, its clock and offset, snapshot versions held, data refused per source, and hourly play counts.
-- **The server returns:** the desired manifest ID, any changed data snapshots, a short-lived socket ticket, the server time and commands. The server time is there because a Pi has no battery-backed clock. `reload` is sent while the screen's player cannot play the desired manifest's schema or a template's protocol.
+- **The server returns:** the desired manifest ID, any changed data snapshots, a short-lived socket ticket, the server time and commands. The server time is there because a Pi has no battery-backed clock. `reload` is sent while the screen's player cannot play the desired manifest's schema or a template's protocol; `display` while the screen's stored override (wake now, sleep now) differs from the one it reports.
 - **What it stores** (`apps/api/src/device/sync.ts`, `scoped(...).screens.sync`): on the screen row, the last-seen time, the player version, the heartbeat (`heartbeat_json`, with the drift between server and device clocks) and the play count `(epoch, seq)`; and the counts, added to `play_counts` in the same D1 batch unless the seq is already stored in its epoch. The repeat check is in the SQL, so two copies of one request racing count once. Play counts carry no manifest: which manifest a screen had when is in its publish history.
 - **D1 writes per sync**, measured in `packages/db/test/device.test.ts` from D1's `rows_written`: 1 for a sync with no counts (the screen row; none of its indexed columns change), plus 3 for each count of a new (hour, spot) row (the row, its key and the org-hour index) or 1 for one added to an existing row. The screen sends an hour's counts once the hour has ended, so each (hour, spot) row is written once: at 1,000 screens on a 5-minute sync, 8.6M writes a month for heartbeats plus about 3 per spot played per screen per hour (10 spots: 21.6M), about 30M in all against the 50M included. Sending the running hour on every sync would cost twelve times as much for counts.
 
@@ -155,7 +155,7 @@ Its service worker already leaves `/v1/` alone, so device API responses are neve
 
 **Display power**
 - **Hours.** Display hours are part of the screen's manifest, so a change is a publish and works offline. The player already enforces them (see `architecture.md`).
-- **Commands.** The socket adds `wake now` and `sleep now`, a temporary override for someone standing at a dark screen. They expire at the next scheduled change.
+- **Commands.** The socket adds `wake now` and `sleep now`, a temporary override for someone standing at a dark screen. They expire at the next scheduled change, at most 12 hours. `identify` (the screen shows its name for 10 seconds) and `restart` (the player reloads) are socket-only: a screen that is not connected misses them.
 - **Status.** The display's actual state and the power method that worked are reported on sync.
 
 ## Data sources

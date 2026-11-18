@@ -9,7 +9,8 @@
  *   5. Commit the staged writes and their `audit_log` row (actor kind and id, client id, action,
  *      target, and the input with secrets redacted) in one D1 `batch()`, which is atomic: if the
  *      audit row cannot be written, the change is not made either. A call that staged nothing
- *      changed nothing and is not audited, nor is a read. A refusal (`ToolError`) commits nothing,
+ *      changed nothing and is not audited, nor is a read, unless the tool is `alwaysAudited`
+ *      (a command to a screen). A refusal (`ToolError`) commits nothing,
  *      unless it says it `changed` something: then what was staged is committed, audited with
  *      the refusal. Any other error commits nothing.
  *
@@ -137,7 +138,7 @@ export async function dispatch<D extends DataScope>(
    */
   const tell = async () => {
     const { screens } = caller;
-    if (!screens || !writes.length) return;
+    if (!screens || !(writes.length || tool.alwaysAudited)) return;
     await Promise.all(notices.map((send) => send(screens).catch((err: unknown) => console.warn(`[tools] ${tool.name}: could not tell the screen`, err))));
   };
   const write = <T>(change: Staged<T>): T => {
@@ -147,7 +148,7 @@ export async function dispatch<D extends DataScope>(
   };
   // The writes and their audit row, in one atomic batch. Nothing staged, nothing written.
   const commit = async (target: { kind: string; id: string } | undefined, detail: Record<string, unknown>) => {
-    if (!writes.length) return;
+    if (!writes.length && !tool.alwaysAudited) return;
     const audit = caller.org.auditLog.stage({
       actorKind: caller.actor.kind,
       actorId: caller.actor.id,

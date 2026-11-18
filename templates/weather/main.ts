@@ -62,55 +62,69 @@ async function precipitation(condition: Condition, viewport: { width: number; he
   // The size the player gives us, not innerWidth: the frame may not be laid out yet.
   const unit = Math.min(viewport.width, viewport.height) / 100;
   const tile = Math.round(unit * 40);
-  const layers = kind === 'snow'
-    ? [{ count: 28, size: 0.55, alpha: 0.55, secs: 7 }, { count: 12, size: 1.0, alpha: 0.95, secs: 4 }]
-    : [{ count: heavy ? 60 : 40, size: 0.65, alpha: 0.3, secs: 0.42 }, { count: heavy ? 26 : 16, size: 1.0, alpha: 0.55, secs: 0.3 }];
+  const layers =
+    kind === 'snow'
+      ? [
+          { count: 28, size: 0.55, alpha: 0.55, secs: 7 },
+          { count: 12, size: 1.0, alpha: 0.95, secs: 4 },
+        ]
+      : [
+          { count: heavy ? 60 : 40, size: 0.65, alpha: 0.3, secs: 0.42 },
+          { count: heavy ? 26 : 16, size: 1.0, alpha: 0.55, secs: 0.3 },
+        ];
 
-  await Promise.all(layers.map(async (l, li) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = tile;
-    const g = canvas.getContext('2d')!;
-    const rand = rng(1234 + li * 977);
-    const u = unit * l.size;
-    for (let i = 0; i < l.count; i++) {
-      const x = rand() * tile;
-      const y = rand() * tile;
-      const r = rand();
-      // Draw each particle at every wrapped position so the tile repeats without seams.
-      for (const ox of [-tile, 0, tile]) {
-        for (const oy of [-tile, 0, tile]) {
-          if (kind === 'snow') {
-            const rad = (0.35 + r * 0.6) * u;
-            g.fillStyle = `rgba(255, 255, 255, ${l.alpha})`;
-            g.beginPath();
-            g.arc(x + ox, y + oy, rad, 0, 6.2832);
-            g.fill();
-          } else {
-            const len = (2.5 + r * 3) * u;
-            const grad = g.createLinearGradient(0, y + oy, 0, y + oy + len);
-            grad.addColorStop(0, 'rgba(205, 228, 255, 0)');
-            grad.addColorStop(1, `rgba(220, 235, 255, ${l.alpha})`);
-            g.strokeStyle = grad;
-            g.lineWidth = Math.max(1, 0.2 * u);
-            g.lineCap = 'round';
-            g.beginPath();
-            g.moveTo(x + ox, y + oy);
-            g.lineTo(x + ox, y + oy + len);
-            g.stroke();
+  // Built in parallel, appended in order: the slow far layer must stay behind the near one, and
+  // appending as each tile finishes encoding would swap them at random.
+  const built = await Promise.all(
+    layers.map(async (l, li) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = tile;
+      const g = canvas.getContext('2d')!;
+      const rand = rng(1234 + li * 977);
+      const u = unit * l.size;
+      for (let i = 0; i < l.count; i++) {
+        const x = rand() * tile;
+        const y = rand() * tile;
+        const r = rand();
+        // Draw each particle at every wrapped position so the tile repeats without seams.
+        for (const ox of [-tile, 0, tile]) {
+          for (const oy of [-tile, 0, tile]) {
+            if (kind === 'snow') {
+              const rad = (0.35 + r * 0.6) * u;
+              g.fillStyle = `rgba(255, 255, 255, ${l.alpha})`;
+              g.beginPath();
+              g.arc(x + ox, y + oy, rad, 0, 6.2832);
+              g.fill();
+            } else {
+              const len = (2.5 + r * 3) * u;
+              const grad = g.createLinearGradient(0, y + oy, 0, y + oy + len);
+              grad.addColorStop(0, 'rgba(205, 228, 255, 0)');
+              grad.addColorStop(1, `rgba(220, 235, 255, ${l.alpha})`);
+              g.strokeStyle = grad;
+              g.lineWidth = Math.max(1, 0.2 * u);
+              g.lineCap = 'round';
+              g.beginPath();
+              g.moveTo(x + ox, y + oy);
+              g.lineTo(x + ox, y + oy + len);
+              g.stroke();
+            }
           }
         }
       }
-    }
-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(`could not encode a ${tile}px tile`))), 'image/png'));
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    const layer = document.createElement('div');
-    layer.className = `fall ${kind}`;
-    layer.style.setProperty('--tile', `${tile}px`);
-    layer.style.backgroundImage = `url(${url})`;
-    layer.style.animationDuration = kind === 'snow' ? `${l.secs}s, 6s` : `${l.secs}s`;
-    host.appendChild(layer);
-  }));
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(`could not encode a ${tile}px tile`))), 'image/png'),
+      );
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const layer = document.createElement('div');
+      layer.className = `fall ${kind}`;
+      layer.style.setProperty('--tile', `${tile}px`);
+      layer.style.backgroundImage = `url(${url})`;
+      layer.style.animationDuration = kind === 'snow' ? `${l.secs}s, 6s` : `${l.secs}s`;
+      return layer;
+    }),
+  );
+  host.append(...built);
 }

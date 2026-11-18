@@ -151,6 +151,26 @@ describe('GET /v1/device/ws', () => {
     s.ws.close(1000);
   });
 
+  it('carries identify, restart and a display override from the CMS to the screen at once', async () => {
+    const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
+    for (const [tool, input] of [
+      ['identify_screen', {}],
+      ['restart_screen', {}],
+      ['set_display_override', { state: 'off' }],
+    ] as const) {
+      const r = await dispatch(registry, tool, { screenId: a.seed.screen, ...input }, caller(a, 'editor'));
+      expect(r.ok, tool).toBe(true);
+    }
+    await until(() => s.messages.filter((m) => typeof m === 'object').length >= 3);
+    const commands = s.messages.flatMap((m) => (typeof m === 'object' && m.type === 'command' ? [m.command] : []));
+    expect(commands).toEqual([
+      { type: 'identify', name: expect.any(String), seconds: 10 },
+      { type: 'restart' },
+      { type: 'display', override: { state: 'off', until: expect.any(String) } },
+    ]);
+    s.ws.close(1000);
+  });
+
   it('writes what the screen applied through to D1', async () => {
     const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
     s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
