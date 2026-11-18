@@ -1,4 +1,5 @@
 import { defineTemplate, fitWords, formatter, now as clockNow } from '@signforge/template-sdk';
+import { readableOn } from '@signforge/template-sdk/contrast';
 
 interface Item {
   title: string;
@@ -33,7 +34,11 @@ function ellipsize(el: HTMLElement): void {
 defineTemplate({
   prepare(ctx) {
     const root = document.documentElement;
-    root.style.setProperty('--accent', String(ctx.data.accent));
+    const accent = String(ctx.data.accent);
+    root.style.setProperty('--accent', accent);
+    // The badge is the spot's accent, which need not be the kit's (with no kit it is the default
+    // palette's amber, where the template's white text read at 2.14:1): its text is chosen against it.
+    root.style.setProperty('--on-accent', readableOn(accent, getComputedStyle(root).getPropertyValue('--on-accent')));
     const now = clockNow();
     const items = ((ctx.data.items as Item[]) ?? []).filter((i) => i.title);
     const [lead, ...rest] = items;
