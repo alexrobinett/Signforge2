@@ -258,7 +258,7 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
         const id = idFor(values);
         const rowVersion = ((await deleted(id).get())?.version ?? 0) + 1;
         const row = fullRow(t, { ...strip(values as object), id, orgId, rowVersion });
-        // Read again when it runs, so a delete committed in between still counts. The row then says a lower version than stored, which refuses an edit made from it: never one let through.
+        // Read again when it runs, so a delete committed in between, or staged earlier in the same batch, still counts. The row then says a lower version than stored, which refuses an edit made from it: never one let through.
         return staged(row as Row, db.insert(t).values({ ...row, rowVersion: firstVersion(id) } as never));
       },
       publish: publisher(db, orgId, table),

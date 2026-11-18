@@ -49,7 +49,8 @@ const updated = () =>
  */
 const publishedJson = () => text('published_json');
 /**
- * A row people edit: starts at 1 and moves on with every change through a repository's `stage`,
+ * A row people edit: starts at 1 (a draft made again with a deleted one's id starts above its tombstone)
+ * and moves on with every change through a repository's `stage`,
  * so an update made from an old read can be refused (`ifVersion`, ./scoped.ts). Not
  * `version`, which a template version already has for its semver.
  */
