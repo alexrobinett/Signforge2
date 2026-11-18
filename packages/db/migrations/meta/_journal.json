@@ -92,6 +92,13 @@
       "when": 1794983878080,
       "tag": "0012_row_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795002436705,
+      "tag": "0013_spot_row_version",
+      "breakpoints": true
     }
   ]
 }

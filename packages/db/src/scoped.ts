@@ -245,6 +245,19 @@ export function scoped(d1: D1Database, orgId: string) {
   const checkTemplateVersion = async (id: string | null | undefined) => {
     if (id != null && !(await templateVersions.get(id))) throw new NotInOrgError('template version', id);
   };
+  /** A template spot's image fields name assets in JSON, which no foreign key covers: each must be the org's. */
+  const checkAssetMap = async (json: string | null | undefined) => {
+    if (json == null) return;
+    const ids = [...new Set(Object.values(JSON.parse(json) as Record<string, string>))];
+    const found = new Set((await assets.getMany(ids)).map((a) => a.id));
+    for (const id of ids) if (!found.has(id)) throw new NotInOrgError('asset', id);
+  };
+  type SpotPatch = { templateVersionId?: string | null; assetMapJson?: string | null; assetId?: string | null };
+  const checkSpot = async (v: SpotPatch) => {
+    await checkTemplateVersion(v.templateVersionId);
+    await checkAssetMap(v.assetMapJson);
+    if (v.assetId != null && !(await assets.get(v.assetId))) throw new NotInOrgError('asset', v.assetId);
+  };
 
   const m = s.screenGroupMembers;
   const os = s.orgSettings;
@@ -641,22 +654,23 @@ export function scoped(d1: D1Database, orgId: string) {
     spots: {
       ...spotRows,
       insert: async (values: NewRow<typeof s.spots>) => {
-        await checkTemplateVersion(values.templateVersionId);
+        await checkSpot(values);
         return spotRows.insert(values);
       },
       update: async (id: string, patch: RowPatch<typeof s.spots>) => {
-        await checkTemplateVersion(patch.templateVersionId);
+        await checkSpot(patch);
         return spotRows.update(id, patch);
       },
       stage: {
         ...spotRows.stage,
         insert: async (values: NewRow<typeof s.spots>) => {
-          await checkTemplateVersion(values.templateVersionId);
+          await checkSpot(values);
           return spotRows.stage.insert(values);
         },
-        update: async (current: typeof s.spots.$inferSelect, patch: RowPatch<typeof s.spots>) => {
-          await checkTemplateVersion(patch.templateVersionId);
-          return spotRows.stage.update(current, patch);
+        /** With `ifVersion`, refused (`StaleVersionError`) unless the draft is still that version, as for every versioned row. */
+        update: async (current: typeof s.spots.$inferSelect, patch: RowPatch<typeof s.spots>, ifVersion?: number) => {
+          await checkSpot(patch);
+          return spotRows.stage.update(current, patch, ifVersion);
         },
         publish: publisher(db, orgId, s.spots),
       },

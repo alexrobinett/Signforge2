@@ -155,6 +155,8 @@ describe("a call made for org B with org A's ids", () => {
       ['playCounts.add', () => b.playCounts.add(a.screen, [{ hour: a.hour, spotId: a.templateSpot, plays: 1, ms: 1 }])],
       ['spot on A template version', () => b.spots.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })],
       ['spot moved to A template version', () => b.spots.update(s.b.templateSpot, { templateVersionId: a.templateVersion })],
+      ['spot image field on A asset', () => b.spots.update(s.b.templateSpot, { assetMapJson: JSON.stringify({ photo: a.asset }) })],
+      ['spot staged with A asset', async () => b.spots.stage.update((await b.spots.get(s.b.imageSpot))!, { assetId: a.asset })],
     ];
     for (const [name, call] of refused) await expect(call(), name).rejects.toBeInstanceOf(NotInOrgError);
     expect(await b.playlists.items(s.b.playlist)).toEqual([s.b.templateSpot, s.b.imageSpot]);
