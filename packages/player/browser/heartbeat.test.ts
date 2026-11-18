@@ -207,6 +207,7 @@ describe('a failed content fetch', () => {
     const tried = fetches();
     await new Promise((r) => setTimeout(r, 9000));
     // Every 4 s (±10%), not every second (`poll=1`) as after a failed sync.
+    expect(p.server.syncs.length - syncs).toBeGreaterThanOrEqual(2);
     expect(p.server.syncs.length - syncs).toBeLessThanOrEqual(3);
     expect(fetches() - tried).toBeGreaterThanOrEqual(3);
     expect((await p.state()).online).toBe(true);
@@ -214,6 +215,25 @@ describe('a failed content fetch', () => {
     // The file back: it plays within a retry, which never waits longer than the sync interval.
     restore();
     await p.until((s) => s.manifestId === content.manifest.id, 6000);
+  });
+
+  it('never holds back the next heartbeat while a download is still going', async () => {
+    const content = h.content([{ id: 'a', durationMs: 500 }]);
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 2;
+      s.publish(content);
+      s.intercept(/^\/content\/blobs\//, 'stall');
+    }, api);
+    await p.until((s) => s.socket);
+    const syncs = p.server.syncs.length;
+    await new Promise((r) => setTimeout(r, 7000));
+    // The download has neither finished nor been given up on (the stall timeout is 30 s). A CORS
+    // preflight carries no credential.
+    const blobs = p.server.requestsTo(/^\/content\/blobs\//).filter((r) => r.bearer);
+    expect(blobs).toHaveLength(1);
+    expect(blobs[0]!.abortedAt).toBeUndefined();
+    // Every 2 s (±10%) all the same.
+    expect(p.server.syncs.length - syncs).toBeGreaterThanOrEqual(3);
   });
 });
 

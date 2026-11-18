@@ -737,33 +737,36 @@ function settleTickets(result: { ticket: string } | { error: unknown }): void {
 /** When the manifest was last fetched in full, to put back evicted files (`performance.now()`). */
 let lastFileCheck = Number.NEGATIVE_INFINITY;
 
-/** Content fetches from the API that failed in a row, and the timer of the next retry. */
-const contentRetry = { failures: 0, timer: 0 };
-let retrieving: Promise<void> | undefined;
+const content = wakeable();
+/** A sync asked for the content, and it has not been fetched since. */
+let contentDue = false;
 
 /**
- * Fetch the manifest the last sync named, and its files. A failure retries on its own timer,
- * backing off (src/sync-interval.ts), so the heartbeat keeps the server's interval. Rejects only
- * when the API refuses the credential.
+ * The one worker that fetches content from the API: the manifest the server wants now, and its
+ * files. A sync only asks for it, so a long download or a failure never holds back the next
+ * heartbeat. A failure retries on its own, backing off (src/sync-interval.ts); a sync meanwhile
+ * makes it try at once, and every attempt fetches the latest desired manifest.
  */
-function retrieveContent(): Promise<void> {
-  retrieving ??= (async () => {
-    clearTimeout(contentRetry.timer);
+async function contentLoop(): Promise<never> {
+  let failures = 0;
+  return loopRestartingOnError('content', async () => {
+    if (!contentDue) return content.wait(FILE_CHECK_MS);
+    contentDue = false;
     try {
       await fetchManifest();
       lastFileCheck = performance.now();
-      contentRetry.failures = 0;
+      failures = 0;
     } catch (err) {
-      if (err instanceof UnauthorisedError) throw err;
+      // Refused: the sync revokes.
+      if (err instanceof UnauthorisedError) return poll.wake();
+      contentDue = true;
       const message = err instanceof Error ? err.message : String(err);
       state.lastError = `content: ${message}`;
       console.warn('[sf] could not fetch the content', err);
       if (!manifest) status(`SignForge\nWaiting for content…\n${message}`);
-      // A retry the API refuses leaves the revoke to a sync.
-      contentRetry.timer = window.setTimeout(() => void retrieveContent().catch(() => poll.wake()), contentRetryMs(++contentRetry.failures, timing()));
+      await content.wait(contentRetryMs(++failures, timing()));
     }
-  })().finally(() => (retrieving = undefined));
-  return retrieving;
+  });
 }
 
 /** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. */
@@ -809,7 +812,10 @@ async function apiSync(): Promise<void> {
   state.lastSync = new Date(now()).toISOString();
 
   const current = state.fallback || manifest?.id;
-  if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) await retrieveContent();
+  if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
+    contentDue = true;
+    content.wake();
+  }
   await offerSnapshots(r.snapshots, manifest);
   await offerChecked(r.checked ?? {});
   for (const c of r.commands) command(c);
@@ -996,6 +1002,7 @@ async function boot(): Promise<void> {
   }, 10_000);
 
   void syncLoop();
+  if (API) void contentLoop();
   socket?.start();
   // From the API, snapshots come on the sync; static content has no sync, so each source is fetched.
   // Never with the credential: from the API, data comes on the sync.
