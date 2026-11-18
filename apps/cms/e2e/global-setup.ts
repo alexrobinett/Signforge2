@@ -39,12 +39,30 @@ export default async function globalSetup() {
 
   const log = openSync(API_LOG, 'a');
   const children: ChildProcess[] = [
-    spawn('pnpm', ['exec', 'wrangler', 'dev', '--env', 'dev', '--port', String(API_PORT), '--persist-to', state, '--ip', '127.0.0.1'], {
-      cwd: apiDir,
-      env,
-      stdio: ['ignore', log, log],
-      detached: true,
-    }),
+    spawn(
+      'pnpm',
+      [
+        'exec',
+        'wrangler',
+        'dev',
+        '--env',
+        'dev',
+        '--port',
+        String(API_PORT),
+        '--persist-to',
+        state,
+        '--ip',
+        '127.0.0.1',
+        '--var',
+        `LOCAL_S3_ORIGIN:http://127.0.0.1:${API_PORT}`,
+      ],
+      {
+        cwd: apiDir,
+        env,
+        stdio: ['ignore', log, log],
+        detached: true,
+      },
+    ),
     spawn('pnpm', ['exec', 'vite', 'dev', '--port', String(CMS_PORT)], {
       cwd: cmsDir,
       env,
