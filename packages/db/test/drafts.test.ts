@@ -133,7 +133,7 @@ describe('promotion from an old read (R09)', () => {
     const promotion = org.spots.stage.publish(read);
     await org.spots.delete(read.id);
     const again = await org.spots.insert({ ...values, name: 'Made again' });
-    expect(again.rowVersion).toBe(read.rowVersion);
+    expect(again.rowVersion).toBe(read.rowVersion + 1);
 
     await expect(org.commit(promotion.writes)).rejects.toBeInstanceOf(StaleVersionError);
     expect(await org.spots.get(read.id)).toEqual(again);
@@ -239,5 +239,96 @@ describe('rollout history in the publish batch (review 5)', () => {
     const p = await seedOrg(env.DB, 'drafts-rollout-foreign');
     const org = scoped(env.DB, p.orgId);
     await expect(org.publishes.stage.addScreens(p.publish, [{ screenId: 'scr_not_mine', manifestId: 'a'.repeat(64) }])).rejects.toBeInstanceOf(NotInOrgError);
+  });
+});
+
+describe('versions across delete and make-again (#64)', () => {
+  let t: SeededOrg;
+  beforeAll(async () => {
+    t = await seedOrg(env.DB, 'drafts-tomb');
+  });
+
+  // Each case reads a draft at version 2, deletes it, makes it again with its id, and then tries
+  // the edit made from the old read, as an edit tool would: the row now, guarded by the version read.
+  const cases = {
+    spot: async () => {
+      const org = scoped(env.DB, t.orgId);
+      const values = { id: 'tomb-spot', name: 'Spot', kind: 'image', durationMs: 5000, assetId: t.asset, fit: 'cover' } as const;
+      await org.spots.insert(values);
+      const read = (await org.spots.update(values.id, { name: 'Spot, edited' }))!;
+      await org.spots.delete(values.id);
+      const again = await org.spots.insert(values);
+      const edit = () => org.spots.stage.update(again, { name: 'From the old read' }, read.rowVersion);
+      return { read, again, edit, now: () => org.spots.get(values.id) };
+    },
+    playlist: async () => {
+      const org = scoped(env.DB, t.orgId);
+      const values = { id: 'tomb-playlist', name: 'Playlist', transitionJson: JSON.stringify({ type: 'cut' }) };
+      await org.playlists.insert(values);
+      const read = (await org.playlists.update(values.id, { name: 'Playlist, edited' }))!;
+      await org.commit(org.playlists.stage.delete(values.id).writes);
+      const made = await org.playlists.stage.insert(values);
+      await org.commit(made.writes);
+      const again = made.row;
+      const edit = async () => org.playlists.stage.update(again, { name: 'From the old read' }, read.rowVersion);
+      return { read, again, edit, now: () => org.playlists.get(values.id) };
+    },
+    'schedule entry': async () => {
+      const org = scoped(env.DB, t.orgId);
+      const values = { id: 'tomb-entry', playlistId: t.playlist, target: 'group', groupId: t.group, priority: 1 } as const;
+      await org.scheduleEntries.insert(values);
+      const read = (await org.scheduleEntries.update(values.id, { priority: 2 }))!;
+      await org.scheduleEntries.delete(values.id);
+      const again = await org.scheduleEntries.insert(values);
+      const edit = async () => org.scheduleEntries.stage.update(again, { priority: 9 }, read.rowVersion);
+      return { read, again, edit, now: () => org.scheduleEntries.get(values.id) };
+    },
+  };
+
+  for (const [kind, make] of Object.entries(cases)) {
+    it(`continues a ${kind}'s versions, so an edit from before the delete is refused and writes nothing`, async () => {
+      const { read, again, edit, now } = await make();
+      expect(read.rowVersion).toBe(2);
+      expect(again.rowVersion).toBe(3);
+      expect(await now()).toEqual(again);
+      const err = await edit().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(StaleVersionError);
+      expect(err).toMatchObject({ version: 3 });
+      expect(await now()).toEqual(again);
+    });
+  }
+
+  it('refuses in the batch an edit staged from the old row, made again after it was read', async () => {
+    const org = scoped(env.DB, t.orgId);
+    const values = { id: 'tomb-batch', name: 'Spot', kind: 'image', durationMs: 5000, assetId: t.asset, fit: 'cover' } as const;
+    const read = await org.spots.insert(values);
+    const edit = await org.spots.stage.update(read, { name: 'From the old read' }, read.rowVersion);
+    await org.spots.delete(values.id);
+    const again = await org.spots.insert(values);
+    expect(again.rowVersion).toBe(2);
+
+    await expect(org.commit(edit.writes)).rejects.toMatchObject({ name: 'StaleVersionError', version: 2 });
+    expect(await org.spots.get(values.id)).toEqual(again);
+  });
+
+  it('continues the versions of a schedule entry deleted with its group', async () => {
+    const c = await seedOrg(env.DB, 'drafts-tomb-cascade');
+    const org = scoped(env.DB, c.orgId);
+    const read = (await org.scheduleEntries.update(c.scheduleEntry, { priority: 5 }))!;
+    expect(read.rowVersion).toBe(2);
+    await org.screenGroups.delete(c.group);
+    expect(await org.scheduleEntries.get(c.scheduleEntry)).toBeUndefined();
+
+    const again = await org.scheduleEntries.insert({ id: c.scheduleEntry, playlistId: c.playlist, target: 'org', priority: 1 });
+    expect(again.rowVersion).toBe(3);
+  });
+
+  it("starts another org's row with the same id at 1", async () => {
+    const other = await seedOrg(env.DB, 'drafts-tomb-other');
+    const org = scoped(env.DB, other.orgId);
+    await scoped(env.DB, t.orgId).spots.delete('tomb-spot');
+    const spot = await org.spots.insert({ id: 'tomb-spot', name: 'Theirs', kind: 'image', durationMs: 5000, assetId: other.asset, fit: 'cover' });
+    expect(spot.rowVersion).toBe(1);
+    expect((await org.playlists.stage.insert({ id: 'tomb-playlist', name: 'Theirs', transitionJson: '{"type":"cut"}' })).row.rowVersion).toBe(1);
   });
 });

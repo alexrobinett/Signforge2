@@ -9,7 +9,7 @@
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
 import type { ScreenKind } from '@signforge/contract';
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableName, gt, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
@@ -57,7 +57,8 @@ type Ids = 'content' | 'server';
 /**
  * A first statement for a batch that fails it unless the row is still `version` when it runs, so
  * a change made from an old read writes nothing (`commit` throws `StaleVersionError`). A draft
- * passes its `incarnation` too: a row deleted and made again with its id starts at version 1 again.
+ * made again with its id continues its versions (`drafts`), so the version tells the rows apart;
+ * a publish passes the draft's `incarnation` too, as a second check (./schema.ts).
  * A draft deleted since it was read is stale too, at version 0, not `NotInOrgError`: a publish
  * targets the org, not the draft, so it is a conflict to load and compile again after.
  */
@@ -215,13 +216,63 @@ function shared<T extends SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn 
   };
 }
 
+type DraftTable = typeof s.spots | typeof s.playlists | typeof s.scheduleEntries;
+
+/**
+ * A draft table's rows: `entity`, except that a row made with the id of a deleted one continues
+ * its versions from the last (`draft_tombstones`, kept by delete triggers), so an edit or publish
+ * made from the old row is refused on the new one. `stage.insert` reads that version to give the
+ * exact row, so it is async.
+ */
+function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: string) {
+  type Row = T['$inferSelect'];
+  const rows = entity(db, orgId, table, prefix, 'content');
+  // Drizzle's builders do not type-check over a generic table; the public signatures carry the types.
+  const t = table as unknown as typeof s.spots;
+  const dt = s.draftTombstones;
+  const tableName = getTableName(t) as (typeof dt.$inferSelect)['draftTable'];
+  const deleted = (id: string) =>
+    db
+      .select({ version: dt.rowVersion })
+      .from(dt)
+      .where(and(eq(dt.orgId, orgId), eq(dt.draftTable, tableName), eq(dt.draftId, id)));
+  const firstVersion = (id: string) => sql`coalesce((${deleted(id)}), 0) + 1`;
+  const idFor = (values: { id?: string }) => {
+    const id = values.id ?? newId(prefix);
+    assertId(id);
+    return id;
+  };
+  return {
+    ...rows,
+    insert: async (values: NewRow<T>): Promise<Row> => {
+      const id = idFor(values);
+      return (await db
+        .insert(t)
+        .values({ ...strip(values as object), id, orgId, rowVersion: firstVersion(id) } as never)
+        .returning()
+        .get()) as Row;
+    },
+    stage: {
+      ...rows.stage,
+      insert: async (values: NewRow<T>): Promise<Staged<Row>> => {
+        const id = idFor(values);
+        const rowVersion = ((await deleted(id).get())?.version ?? 0) + 1;
+        const row = fullRow(t, { ...strip(values as object), id, orgId, rowVersion });
+        // Read again when it runs, so a delete committed in between, or staged earlier in the same batch, still counts. The row then says a lower version than stored, which refuses an edit made from it: never one let through.
+        return staged(row as Row, db.insert(t).values({ ...row, rowVersion: firstVersion(id) } as never));
+      },
+      publish: publisher(db, orgId, table),
+    },
+  };
+}
+
 /**
  * Stage making a draft row's content (as read, plus a playlist's items) its published version.
  * Refused, writing nothing, if the draft was edited since it was read (its version moved on: a
  * playlist's moves with its items too), so a publish never promotes content older than the draft.
  * Not an edit: the version stays, and `updated_at` keeps the draft's last edit as stored.
  */
-function publisher<T extends typeof s.spots | typeof s.playlists | typeof s.scheduleEntries>(db: Db, orgId: string, table: T) {
+function publisher<T extends DraftTable>(db: Db, orgId: string, table: T) {
   const t = table as unknown as typeof s.spots;
   return (row: T['$inferSelect'], items?: readonly string[]): Staged<T['$inferSelect']> => {
     const set = { publishedJson: contentJson(row, items), publishedAt: Date.now() };
@@ -277,9 +328,9 @@ export function scoped(d1: D1Database, orgId: string) {
   const assetRenditions = entity(db, orgId, s.assetRenditions, 'rnd');
   const templates = shared(db, orgId, s.templates, 'tpl');
   const templateVersions = shared(db, orgId, s.templateVersions, 'tpv');
-  const spotRows = entity(db, orgId, s.spots, 'spt', 'content');
-  const playlists = entity(db, orgId, s.playlists, 'pls', 'content');
-  const scheduleEntries = entity(db, orgId, s.scheduleEntries, 'sch', 'content');
+  const spotRows = drafts(db, orgId, s.spots, 'spt');
+  const playlists = drafts(db, orgId, s.playlists, 'pls');
+  const scheduleEntries = drafts(db, orgId, s.scheduleEntries, 'sch');
   const publishes = entity(db, orgId, s.publishes, 'pub');
   const dataSources = entity(db, orgId, s.dataSources, 'src', 'content');
   const audit = entity(db, orgId, s.auditLog, 'aud');
@@ -785,13 +836,11 @@ export function scoped(d1: D1Database, orgId: string) {
           await checkSpot(patch);
           return spotRows.stage.update(current, patch, ifVersion);
         },
-        publish: publisher(db, orgId, s.spots),
       },
     },
 
     playlists: {
       ...playlists,
-      stage: { ...playlists.stage, publish: publisher(db, orgId, s.playlists) },
       /** Every playlist's draft items: playlist id to spot ids in play order. Playlists with none are absent. */
       allItems: async () => {
         const rows = await db
@@ -832,7 +881,7 @@ export function scoped(d1: D1Database, orgId: string) {
       },
     },
 
-    scheduleEntries: { ...scheduleEntries, stage: { ...scheduleEntries.stage, publish: publisher(db, orgId, s.scheduleEntries) } },
+    scheduleEntries,
 
     /** Org-wide settings: one row, absent until first set. */
     settings: {
