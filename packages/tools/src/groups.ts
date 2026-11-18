@@ -15,7 +15,13 @@ export const groupOutput = z.object({
 export type GroupView = z.infer<typeof groupOutput>;
 const groupResult = z.object({ group: groupOutput });
 
-const viewOf = (g: ScreenGroup, screenIds: string[]): GroupView => ({ id: g.id, name: g.name, screenIds: screenIds.toSorted(), createdAt: g.createdAt, updatedAt: g.updatedAt });
+const viewOf = (g: ScreenGroup, screenIds: string[]): GroupView => ({
+  id: g.id,
+  name: g.name,
+  screenIds: screenIds.toSorted(),
+  createdAt: g.createdAt,
+  updatedAt: g.updatedAt,
+});
 
 const groupView = async (org: OrgScope, g: ScreenGroup) => viewOf(g, await org.screenGroups.members(g.id));
 
@@ -45,7 +51,8 @@ export const listGroups = defineTool({
 
 export const createGroup = defineTool({
   name: 'create_group',
-  description: 'Create a screen group, optionally with its first screens. Pass an idempotencyKey so a retry cannot create it twice. Returns { group } with the new id.',
+  description:
+    'Create a screen group, optionally with its first screens. Pass an idempotencyKey so a retry cannot create it twice. Returns { group } with the new id.',
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
@@ -87,14 +94,15 @@ export const deleteGroup = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ groupId: id('group') }),
-  output: z.object({ deleted: z.string().describe('The deleted group\'s id') }),
+  output: z.object({ deleted: z.string().describe("The deleted group's id") }),
   example: { groupId: 'grp_example' },
   target,
   handler: async ({ org, input, write }) => {
     await requireGroup(org, input.groupId);
     // The schema would cascade the delete to these entries; a person should decide that.
     const entries = (await org.scheduleEntries.list()).filter((e) => e.groupId === input.groupId).map((e) => e.id);
-    if (entries.length) throw new ToolError('conflict', `group ${input.groupId} is targeted by ${entries.length} schedule entries`, { scheduleEntryIds: entries });
+    if (entries.length)
+      throw new ToolError('conflict', `group ${input.groupId} is targeted by ${entries.length} schedule entries`, { scheduleEntryIds: entries });
     write(org.screenGroups.stage.delete(input.groupId));
     return { deleted: input.groupId };
   },
@@ -102,7 +110,8 @@ export const deleteGroup = defineTool({
 
 export const setGroupMembers = defineTool({
   name: 'set_group_members',
-  description: "Replace a group's screens with exactly the given list. An empty list empties the group. Every screen must be in this organization, or nothing changes. Returns { group }.",
+  description:
+    "Replace a group's screens with exactly the given list. An empty list empties the group. Every screen must be in this organization, or nothing changes. Returns { group }.",
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
