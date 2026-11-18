@@ -848,8 +848,10 @@ async function apiSync(): Promise<void> {
   await offerChecked(r.checked ?? {});
 }
 
+// Untrusted, the player applies no override (displayLoop), so it reports none: reading one would
+// also expire it against that clock. The first trusted look at the display does.
 const withOverride = () => {
-  const o = activeOverride(new Date(now()));
+  const o = clock.trusted ? activeOverride(new Date(now())) : null;
   return o ? { override: o } : {};
 };
 

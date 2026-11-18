@@ -119,6 +119,31 @@ describe('the clock', () => {
   });
 });
 
+describe('an untrusted clock', () => {
+  it('leaves a saved override alone while syncs fail', async () => {
+    const content = h.content([{ id: 'a', durationMs: 500 }]);
+    const p = await h.openPlayer((s) => s.publish(content), api);
+    await p.until((s) => s.clock.trusted && s.played > 0);
+
+    // The last sync was a day ahead of this clock, and the override ended an hour before it reads.
+    p.server.intercept(/^\/content\//, { status: 503 });
+    const saved = JSON.stringify({ state: 'off', until: new Date(Date.now() - HOUR).toISOString() });
+    await p.page.evaluate(
+      ({ syncedAt, saved }) => {
+        localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: 0, syncedAt }));
+        localStorage.setItem('sf.displayOverride', saved);
+      },
+      { syncedAt: Date.now() + 86_400_000, saved },
+    );
+    await p.page.reload();
+    const refused = () => p.server.requestsTo(/^\/content\/sync$/).filter((r) => r.bearer && r.status === 503).length;
+    const before = refused();
+    await expect.poll(refused, { timeout: 10_000 }).toBeGreaterThanOrEqual(before + 3);
+    expect((await p.state()).clock.trusted).toBe(false);
+    expect(await p.page.evaluate(() => localStorage.getItem('sf.displayOverride'))).toBe(saved);
+  });
+});
+
 describe('the first trusted sync', () => {
   it('applies the wake override it carries before the hours, so a panel kept on is never switched off', async () => {
     const content = h.content([{ id: 'a', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }], {
