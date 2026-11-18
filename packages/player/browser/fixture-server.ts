@@ -69,6 +69,8 @@ const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javas
 export class FixtureServer {
   readonly requests: RequestRecord[] = [];
   private content?: Content;
+  /** Content whose files are served beside the published content's: a screen's last good manifest. */
+  private lastGood?: Content;
   private data = new Map<string, unknown>();
   private rules: { match: RegExp; action: Action }[] = [];
   private server = createServer((req, res) => this.handle(req, res));
@@ -142,6 +144,11 @@ export class FixtureServer {
   dropSockets(): void {
     for (const s of this.sockets) s.destroy();
     this.sockets.clear();
+  }
+
+  /** Serve this content's files too, as the device API serves the last good manifest a screen reports. */
+  serveLastGood(content: Content): void {
+    this.lastGood = content;
   }
 
   /** Serve this content from now on. The player sees it at its next poll. */
@@ -323,7 +330,7 @@ export class FixtureServer {
       }
       const blob = /^blobs\/([0-9a-f]{64})$/.exec(rest);
       if (blob) {
-        const body = c?.blobs.get(blob[1]!);
+        const body = c?.blobs.get(blob[1]!) ?? this.lastGood?.blobs.get(blob[1]!);
         return body ? send(200, body) : send(404, '');
       }
       const data = /^data\/([^/]+)\.json$/.exec(rest);

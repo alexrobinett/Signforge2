@@ -678,6 +678,8 @@ async function fetchManifest(): Promise<void> {
     headers: await deviceHeaders(),
     ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
     pinned: pins,
+    // Falling back, the last good manifest plays: its files are put back too, since the synced one is not playing.
+    ...(state.fallback && manifest ? { fallback: manifest } : {}),
   });
   if (result.changed && result.manifest) {
     console.info(`[sf] manifest ${result.manifest.id} active (${result.downloaded} files downloaded)`);

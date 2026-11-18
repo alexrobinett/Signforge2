@@ -150,7 +150,7 @@ export class PinSet implements Iterable<string> {
   }
 }
 
-/** Files of the manifest last synced that were missing and are not yet downloaded. */
+/** Files of the manifest last synced, and of the one playing while falling back, that were missing and are not yet downloaded. */
 let missingNow = 0;
 export const filesMissing = (): number => missingNow;
 
@@ -173,13 +173,15 @@ export interface SyncOptions {
    * cleanup runs, after the downloads, so pins taken meanwhile count.
    */
   pinned?: Iterable<string>;
+  /** The manifest playing instead of the synced one, which played nothing: its missing files are fetched back too. */
+  fallback?: ScreenManifest;
 }
 
 /**
  * Fetch the manifest at `base`. If it is new, download and verify every missing file, then
  * make it active in one step. Any failure leaves the current manifest and files untouched.
  */
-export async function sync(base: string, { currentId, headers = {}, stallMs = STALL_MS, pinned = [] }: SyncOptions = {}): Promise<SyncResult> {
+export async function sync(base: string, { currentId, headers = {}, stallMs = STALL_MS, pinned = [], fallback }: SyncOptions = {}): Promise<SyncResult> {
   const get = (conditional: boolean) =>
     fetch(`${base}/manifest.json`, {
       // no-store keeps the browser's HTTP cache out of it, so the condition is ours to send.
@@ -219,10 +221,11 @@ export async function sync(base: string, { currentId, headers = {}, stallMs = ST
   // Even when the manifest is unchanged, files may have gone: the browser can evict the cache
   // under storage pressure if persistence was refused. Fetch back whatever is missing.
   const blobs = await caches.open(BLOBS);
-  const { missing } = planSync(next, (await heldKeys(blobs)).hashes);
+  const held = (await heldKeys(blobs)).hashes;
+  const missing = [...new Set([...planSync(next, held).missing, ...(fallback ? planSync(fallback, held).missing : [])])];
   missingNow = missing.length;
   for (const sha of missing) {
-    const type = next.files[sha]?.type ?? 'application/octet-stream';
+    const type = (next.files[sha] ?? fallback?.files[sha])?.type ?? 'application/octet-stream';
     await fetchFile({ url: `${base}/blobs/${sha}`, sha, type, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` }).catch(
       (err: unknown) => {
         if (err instanceof UnauthorisedError) throw err;
