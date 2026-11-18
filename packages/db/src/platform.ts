@@ -8,7 +8,7 @@
  * an org scope it writes the org's templates, on this one base templates. It never reads or
  * writes an org's rows.
  */
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { newId } from './ids';
 import type { NewRow, RowPatch } from './scoped';
@@ -131,8 +131,8 @@ export function platform(d1: D1Database) {
         const row = fullRow(pa, { ...strip(entry), id: entry.id ?? newId('pau') });
         return staged(row as typeof pa.$inferSelect, db.insert(pa).values(row as never));
       },
-      /** Newest first. */
-      list: ({ limit = 50 }: { limit?: number } = {}) => db.select().from(pa).orderBy(desc(pa.at), desc(pa.id)).limit(limit).all(),
+      /** Newest first; rows of the same millisecond by insertion order (`rowid`), as ids are random. */
+      list: ({ limit = 50 }: { limit?: number } = {}) => db.select().from(pa).orderBy(desc(pa.at), desc(sql`rowid`)).limit(limit).all(),
     },
   };
 }

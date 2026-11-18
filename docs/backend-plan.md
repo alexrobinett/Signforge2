@@ -114,7 +114,7 @@ For zero-touch installs, the CMS mints a credential that the image script pre-se
 
 Until then the tree answers 404 wherever `ADMIN_TOKEN` is unset.
 
-**The screen's Durable Object** holds the desired manifest ID and one hibernating WebSocket.
+**The screen's Durable Object** holds one hibernating WebSocket. The desired manifest ID is in D1 (`screens.desired_manifest_id`), where sync and the manifest route read it; the object only passes a new one on.
 - Keepalive pings get an automatic reply (`setWebSocketAutoResponse`) without waking it or billing duration. Whether those pings count as billed requests (incoming messages bill at 20:1) is not documented: at a 60-second ping and 1,000 screens the worst case is 2.2M requests a month, about $0.18 over the allowance. The player pings every 50 seconds, under the usual 100-second proxy and NAT idle timeouts, and treats a ping without a pong in 10 seconds as a dead connection. The billed count is still to be read from analytics on a paid account (M3-06 could not deploy); lengthen the ping if it shows pings are billed and connections hold.
 - Server to screen: new manifest, command, revoked.
 - Screen to server: applied only, written through to D1. The CMS reads rollout from D1 and never calls 1,000 Durable Objects.
