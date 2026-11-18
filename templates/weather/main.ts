@@ -66,7 +66,9 @@ async function precipitation(condition: Condition, viewport: { width: number; he
     ? [{ count: 28, size: 0.55, alpha: 0.55, secs: 7 }, { count: 12, size: 1.0, alpha: 0.95, secs: 4 }]
     : [{ count: heavy ? 60 : 40, size: 0.65, alpha: 0.3, secs: 0.42 }, { count: heavy ? 26 : 16, size: 1.0, alpha: 0.55, secs: 0.3 }];
 
-  await Promise.all(layers.map(async (l, li) => {
+  // Built in parallel, appended in order: the slow far layer must stay behind the near one, and
+  // appending as each tile finishes encoding would swap them at random.
+  const built = await Promise.all(layers.map(async (l, li) => {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = tile;
     const g = canvas.getContext('2d')!;
@@ -111,6 +113,7 @@ async function precipitation(condition: Condition, viewport: { width: number; he
     layer.style.setProperty('--tile', `${tile}px`);
     layer.style.backgroundImage = `url(${url})`;
     layer.style.animationDuration = kind === 'snow' ? `${l.secs}s, 6s` : `${l.secs}s`;
-    host.appendChild(layer);
+    return layer;
   }));
+  host.append(...built);
 }
