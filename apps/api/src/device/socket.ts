@@ -21,6 +21,7 @@ export async function socketRoute(c: Context<DeviceEnv>): Promise<Response> {
   if (!screen?.credentials.some((cr) => cr.id === holder.credentialId)) return refuse(401, 'unauthorized');
   const checked: SocketHolder = { orgId: screen.orgId, ...holder };
   const headers = new Headers(c.req.raw.headers);
+  headers.delete('cookie');
   headers.set(HOLDER_HEADER, JSON.stringify(checked));
   return screenObject(c.env, holder.screenId).fetch(new Request(c.req.raw.url, { headers }));
 }

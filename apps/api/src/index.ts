@@ -21,8 +21,11 @@ import { emailSenderFor } from './email';
 // `Env` is generated from wrangler.jsonc by `wrangler types` (worker-configuration.d.ts).
 export const app = new Hono<{ Bindings: Env }>();
 
-// A user's session is never a screen's credential (M3-09).
-app.use('/v1/device/*', refuseSession);
+// A user's session is never a screen's credential (M3-09). The socket upgrade is let through with
+// one, because a test screen on the CMS's hostname (M3-41) cannot keep its user's cookie off a
+// WebSocket handshake as it does off its fetches. The socket route reads only its ticket, which
+// only a credential's sync mints, and passes no cookie on.
+app.use('/v1/device/*', (c, next) => (c.req.path === '/v1/device/ws' ? next() : refuseSession(c, next)));
 
 app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT, version: c.env.BUILD_VERSION, manifestSchema: MANIFEST_SCHEMA }));
 

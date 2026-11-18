@@ -184,6 +184,8 @@ export async function sync(base: string, { currentId, headers = {}, stallMs = ST
     fetch(`${base}/manifest.json`, {
       // no-store keeps the browser's HTTP cache out of it, so the condition is ours to send.
       cache: 'no-store',
+      // The device API refuses a session cookie, which a test screen on the CMS's hostname has.
+      credentials: 'omit',
       headers: conditional && currentId ? { ...headers, 'if-none-match': `"${currentId}"` } : headers,
       signal: AbortSignal.timeout(20_000),
     });

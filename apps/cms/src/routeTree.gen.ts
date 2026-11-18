@@ -27,6 +27,7 @@ import { Route as AppSettingsGeneralRouteImport } from './routes/_app/settings/g
 import { Route as AppSettingsMembersRouteImport } from './routes/_app/settings/members'
 import { Route as AppSettingsNotificationsRouteImport } from './routes/_app/settings/notifications'
 import { Route as AppSettingsScreensRouteImport } from './routes/_app/settings/screens'
+import { Route as V1DeviceSplatRouteImport } from './routes/v1/device/$'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -119,6 +120,11 @@ const AppSettingsScreensRoute = AppSettingsScreensRouteImport.update({
   path: '/screens',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const V1DeviceSplatRoute = V1DeviceSplatRouteImport.update({
+  id: '/v1/device/$',
+  path: '/v1/device/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -136,6 +142,7 @@ export interface FileRoutesByFullPath {
   '/settings/members': typeof AppSettingsMembersRoute
   '/settings/notifications': typeof AppSettingsNotificationsRoute
   '/settings/screens': typeof AppSettingsScreensRoute
+  '/v1/device/$': typeof V1DeviceSplatRoute
   '/screens/': typeof AppScreensIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
 }
@@ -154,6 +161,7 @@ export interface FileRoutesByTo {
   '/settings/members': typeof AppSettingsMembersRoute
   '/settings/notifications': typeof AppSettingsNotificationsRoute
   '/settings/screens': typeof AppSettingsScreensRoute
+  '/v1/device/$': typeof V1DeviceSplatRoute
   '/screens': typeof AppScreensIndexRoute
   '/settings': typeof AppSettingsIndexRoute
 }
@@ -175,6 +183,7 @@ export interface FileRoutesById {
   '/_app/settings/members': typeof AppSettingsMembersRoute
   '/_app/settings/notifications': typeof AppSettingsNotificationsRoute
   '/_app/settings/screens': typeof AppSettingsScreensRoute
+  '/v1/device/$': typeof V1DeviceSplatRoute
   '/_app/screens/': typeof AppScreensIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
 }
@@ -196,6 +205,7 @@ export interface FileRouteTypes {
     | '/settings/members'
     | '/settings/notifications'
     | '/settings/screens'
+    | '/v1/device/$'
     | '/screens/'
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
@@ -214,6 +224,7 @@ export interface FileRouteTypes {
     | '/settings/members'
     | '/settings/notifications'
     | '/settings/screens'
+    | '/v1/device/$'
     | '/screens'
     | '/settings'
   id:
@@ -234,6 +245,7 @@ export interface FileRouteTypes {
     | '/_app/settings/members'
     | '/_app/settings/notifications'
     | '/_app/settings/screens'
+    | '/v1/device/$'
     | '/_app/screens/'
     | '/_app/settings/'
   fileRoutesById: FileRoutesById
@@ -243,6 +255,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  V1DeviceSplatRoute: typeof V1DeviceSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -373,6 +386,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsScreensRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/v1/device/$': {
+      id: '/v1/device/$'
+      path: '/v1/device/$'
+      fullPath: '/v1/device/$'
+      preLoaderRoute: typeof V1DeviceSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -427,6 +447,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
   ApiSplatRoute: ApiSplatRoute,
+  V1DeviceSplatRoute: V1DeviceSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

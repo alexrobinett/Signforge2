@@ -33,14 +33,24 @@ describe('pairing', () => {
     expect(await startPairing(env.DB, { ...p, now: T0 })).toBe(true);
     expect(await collectPairing(env.DB, p.pollTokenHash, T0 + 5000, mint)).toEqual({ status: 'waiting' });
 
-    expect(await scoped(env.DB, 'org-pa').pairing.open(p.code, T0 + 6000)).toBe(true);
+    expect(await scoped(env.DB, 'org-pa').pairing.open(p.code, T0 + 6000)).toBe('device');
     const screenId = await claim('org-pa', p.code, T0 + 6000);
 
     expect(await collectPairing(env.DB, p.pollTokenHash, T0 + 10_000, mint)).toEqual({ status: 'paired', screenId, credential: `sfd_${screenId}.secret` });
     const screen = await findDeviceScreen(env.DB, screenId);
     expect(screen?.orgId).toBe('org-pa');
     expect(screen?.credentials.map((c) => c.secretHash)).toEqual(['c'.repeat(64)]);
-    expect(await scoped(env.DB, 'org-pb').pairing.open(p.code, T0 + 15_000)).toBe(false);
+    expect(await scoped(env.DB, 'org-pb').pairing.open(p.code, T0 + 15_000)).toBeUndefined();
+  });
+
+  it('keeps the kind the screen gave at start, for the claim to make that kind of screen', async () => {
+    const p = fresh();
+    await startPairing(env.DB, { ...p, kind: 'browser', now: T0 });
+    const org = scoped(env.DB, 'org-pa');
+    expect(await org.pairing.open(p.code, T0 + 1000)).toBe('browser');
+    const screen = org.screens.stage.insert({ name: 'Test screen', timezone: 'UTC', orientation: 'landscape', kind: 'browser' });
+    await org.commit([...screen.writes, ...org.pairing.stage.claim(p.code, screen.row.id, T0 + 1000).writes]);
+    expect((await org.screens.get(screen.row.id))?.kind).toBe('browser');
   });
 
   it('survives a lost reply: a repeat poll replaces the unused credential with a fresh one', async () => {
@@ -90,7 +100,7 @@ describe('pairing', () => {
     await startPairing(env.DB, { ...p, now: T0 });
     const late = T0 + PAIRING_TTL_MS;
     expect(PAIRING_TTL_MS).toBe(15 * 60_000);
-    expect(await scoped(env.DB, 'org-pa').pairing.open(p.code, late)).toBe(false);
+    expect(await scoped(env.DB, 'org-pa').pairing.open(p.code, late)).toBeUndefined();
     await expect(claim('org-pa', p.code, late)).rejects.toThrow();
     expect(await collectPairing(env.DB, p.pollTokenHash, late, mint)).toEqual({ status: 'expired' });
   });

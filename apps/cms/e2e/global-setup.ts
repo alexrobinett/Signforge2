@@ -7,7 +7,7 @@ import { chromium } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, openSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { API_LOG, API_PORT, CMS_PORT, CMS_URL, RUN_DIR } from './servers';
+import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, RUN_DIR } from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
 const cmsDir = fileURLToPath(new URL('../', import.meta.url));
@@ -36,6 +36,9 @@ export default async function globalSetup() {
     encoding: 'utf8',
   });
   if (migrate.status !== 0) throw new Error(`migrations failed:\n${migrate.stdout}\n${migrate.stderr}`);
+  // The CMS serves the player build as its test screen (vite.config.ts). Built for this host: no CMS_ORIGIN.
+  const player = spawnSync('pnpm', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' }, encoding: 'utf8' });
+  if (player.status !== 0) throw new Error(`player build failed:\n${player.stdout}\n${player.stderr}`);
 
   const log = openSync(API_LOG, 'a');
   const children: ChildProcess[] = [
@@ -55,6 +58,8 @@ export default async function globalSetup() {
         '127.0.0.1',
         '--var',
         `LOCAL_S3_ORIGIN:http://127.0.0.1:${API_PORT}`,
+        '--var',
+        `ADMIN_TOKEN:${ADMIN_TOKEN}`,
       ],
       {
         cwd: apiDir,

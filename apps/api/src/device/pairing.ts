@@ -2,13 +2,13 @@
  * Pairing (docs/backend-plan.md#screens), the screen's half. Before the bearer middleware: an
  * unpaired screen has no credential.
  *
- *   POST /v1/device/pair/start                  -> PairStartResponse: a code to show, a poll token to keep
+ *   POST /v1/device/pair/start { kind? }        -> PairStartResponse: a code to show, a poll token to keep
  *   POST /v1/device/pair/poll  { pollToken }    -> PairPollResponse: waiting, expired, or paired with the credential (once)
  *
  * A member claims the code with the `claim_screen` tool (packages/tools/src/pairing.ts). Both calls
  * are rate limited per address (`PAIR_START_LIMIT`, `PAIR_POLL_LIMIT`); 429 carries `retry-after`.
  */
-import type { PairPollResponse, PairStartResponse } from '@signforge/contract';
+import { parsePairStartRequest, type PairPollResponse, type PairStartResponse } from '@signforge/contract';
 import { collectPairing, PAIRING_TTL_MS, startPairing } from '@signforge/db';
 import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from '@signforge/tools';
 import type { Context } from 'hono';
@@ -43,13 +43,23 @@ function randomToken(): string {
 
 export async function pairStart(c: Context<PairEnv>): Promise<Response> {
   if (!(await c.env.PAIR_START_LIMIT.limit({ key: clientIp(c) })).success) return tooMany();
+  // Players before M3-41 send no body: a device.
+  const text = await c.req.text();
+  let body: unknown = null;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    // Not JSON: refused below.
+  }
+  const request = parsePairStartRequest(body);
+  if (!request.ok) return json({ error: 'invalid_input', message: request.problems.join('; ') }, 400);
   const pollToken = randomToken();
   const pollTokenHash = await hashSecret(pollToken);
   const now = Date.now();
   // A clash with a live code is rare (a billion codes); pick another.
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = randomCode();
-    if (await startPairing(c.env.DB, { code, pollTokenHash, now })) {
+    if (await startPairing(c.env.DB, { code, pollTokenHash, kind: request.value.kind, now })) {
       const body: PairStartResponse = { code, pollToken, expiresAt: new Date(now + PAIRING_TTL_MS).toISOString() };
       return json(body);
     }

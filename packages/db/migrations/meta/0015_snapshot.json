@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "af8bf138-6855-4d51-b01b-85c4f7e2e3e4",
-  "prevId": "9ce71866-5cd6-41be-bace-415b07e4f031",
+  "id": "af6b455c-7bca-4448-89d8-660b7aaa3bd0",
+  "prevId": "545a871f-a0de-4fd1-ab68-dda6bc76a6c5",
   "tables": {
     "account": {
       "name": "account",
@@ -1335,6 +1335,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'device'"
+        },
         "expires_at": {
           "name": "expires_at",
           "type": "integer",
@@ -2486,6 +2494,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'device'"
         },
         "display_hours_json": {
           "name": "display_hours_json",
