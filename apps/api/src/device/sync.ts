@@ -5,8 +5,9 @@
  * snapshots newer than the screen holds, a socket ticket, the server time and any commands.
  *
  * D1 writes per sync: one (the screen row) plus, for each play count, one if its hour's row
- * exists or three if it is new (the row and two index entries). The player sends an hour's counts
- * once the hour has ended, so each (hour, spot) row is written about once.
+ * exists or three if it is new (the row and two index entries), and one for a batch that moves its
+ * epoch's mark (two for an epoch's first). The player sends an hour's counts once the hour has
+ * ended, so each (hour, spot) row is written about once.
  */
 import { parseSyncRequest, type DataSnapshot, type DeviceCommand, type DisplayOverride, type SyncRequest, type SyncResponse } from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
