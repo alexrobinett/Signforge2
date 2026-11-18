@@ -31,7 +31,7 @@ interface Occurrence extends CalendarEvent {
  * An iCalendar feed (Google Calendar, Outlook, ...) as a CalendarFeed: the events that have not
  * ended by `now` and start within the horizon, recurring ones expanded, soonest first.
  *
- * Times follow datad.py: a TZID that names an IANA zone is used directly; otherwise the file's
+ * Times: a TZID that names an IANA zone is used directly; otherwise the file's
  * VTIMEZONE definition for it (Outlook's "Eastern Standard Time"); otherwise, like floating
  * times, X-WR-TIMEZONE; otherwise UTC.
  */
@@ -193,7 +193,7 @@ function sortMs(t: ICAL.Time, tzid: string | undefined, defaultTz: string): numb
 /**
  * One occurrence of `item`. `end` is given for an expanded instance of a series; otherwise the
  * item's own DTEND or DURATION is used, and failing both, a day for an all-day event and an
- * hour for a timed one, as datad.py did.
+ * hour for a timed one.
  */
 function occurrence(item: ICAL.Event, start: ICAL.Time, end: ICAL.Time | null, defaultTz: string): Occurrence | null {
   const c = item.component;

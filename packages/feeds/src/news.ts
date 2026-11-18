@@ -30,7 +30,7 @@ const parser = new XMLParser({
 
 /**
  * Entity declarations are how XML bombs work, and no real feed needs them. A DOCTYPE can only
- * appear before the root element; `<!ENTITY` is refused anywhere, as datad.py did.
+ * appear before the root element; `<!ENTITY` is refused anywhere.
  */
 function refuseDeclarations(text: string): void {
   const bare = text.replace(/<!--[\s\S]*?-->/g, '');

@@ -75,7 +75,7 @@ describe('Google Calendar export', () => {
         'Main hall',
       ),
       timed('Standup', '2026-11-20T09:30:00-05:00', '2026-11-20T09:45:00-05:00'),
-      // No DTEND: an hour, as datad.py did.
+      // No DTEND: an hour.
       timed('Fire drill', '2026-11-23T16:00:00-05:00', '2026-11-23T17:00:00-05:00'),
       allDay('Thanksgiving potluck', '2026-11-26', '2026-11-27'),
     ]);
@@ -85,7 +85,7 @@ describe('Google Calendar export', () => {
 describe('Outlook export', () => {
   it("uses the file's VTIMEZONE for Windows zone names and honours EXDATE", () => {
     expect(parseCalendar(outlook, { now }).events).toEqual([
-      // "W. Europe Standard Time" has no VTIMEZONE in the file and no X-WR-TIMEZONE: UTC, as datad.py did.
+      // "W. Europe Standard Time" has no VTIMEZONE in the file and no X-WR-TIMEZONE: UTC.
       timed('Call with Berlin office', '2026-11-18T16:00:00+00:00', '2026-11-18T17:00:00+00:00'),
       timed('Vendor call', '2026-11-18T09:00:00-08:00', '2026-11-18T09:30:00-08:00', 'Conference Room 3 (Seattle)'),
       // Thursday 19th is an EXDATE.
