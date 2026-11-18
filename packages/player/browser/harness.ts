@@ -69,8 +69,13 @@ export interface Harness {
   playerServer(): Promise<FixtureServer>;
 }
 
-/** Register the hooks for one test file and return its harness. */
-export function useHarness(): Harness {
+/**
+ * Register the hooks for one test file and return its harness. `siteIsolation` runs its browser
+ * with `--site-per-process`: Chromium on the Pi isolates sites by default, and with that puts each
+ * sandboxed template frame in a renderer of its own. The headless shell does neither unless told,
+ * and with it crashes on a sandboxed frame in an `about:blank` page, which `blankPage` hosts.
+ */
+export function useHarness({ siteIsolation = false } = {}): Harness {
   const playerDir = inject('playerDir');
   const templateHtml = inject('templateHtml');
   const brandTemplateHtml = inject('brandTemplateHtml');
@@ -83,7 +88,10 @@ export function useHarness(): Harness {
     // answers; Chromium's local network access checks would block that as a public site framing a
     // local one, which is a property of the test setup, not of a CMS deployment.
     browser = await chromium.launch({
-      args: ['--disable-features=LocalNetworkAccessChecks,PrivateNetworkAccessForNavigations,BlockInsecurePrivateNetworkRequests'],
+      args: [
+        ...(siteIsolation ? ['--site-per-process'] : []),
+        '--disable-features=LocalNetworkAccessChecks,PrivateNetworkAccessForNavigations,BlockInsecurePrivateNetworkRequests',
+      ],
     });
   });
   afterEach(async () => {
