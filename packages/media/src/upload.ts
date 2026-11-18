@@ -22,6 +22,8 @@ export interface UploadOptions extends RenditionOptions {
   /** The asset's name in the library. Default: the file's name. */
   name?: string;
   callTool: CallTool;
+  /** Sent to `create_asset_upload`: the same upload retried with the same key makes one asset. */
+  idempotencyKey?: string;
   fetch?: typeof fetch;
 }
 
@@ -35,7 +37,10 @@ export async function uploadImage(file: Blob, options: UploadOptions): Promise<{
   const put = options.fetch ?? fetch;
   const name = options.name ?? ((file as File).name || 'image');
   const renditions = await makeRenditions(file, options);
-  const created = (await options.callTool('create_asset_upload', assetUploadInput(name, renditions))) as { asset: { id: string }; uploads: UploadTarget[] };
+  const created = (await options.callTool('create_asset_upload', { ...assetUploadInput(name, renditions), idempotencyKey: options.idempotencyKey })) as {
+    asset: { id: string };
+    uploads: UploadTarget[];
+  };
   const blobs = new Map([renditions.landscape, renditions.portrait].map((r) => [r.sha256, r.blob]));
   for (const target of created.uploads) {
     const blob = blobs.get(target.sha256);
