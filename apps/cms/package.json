@@ -40,6 +40,7 @@
     "@playwright/test": "^1.65.1",
     "@signforge/api": "workspace:*",
     "@signforge/compiler": "workspace:*",
+    "@signforge/player": "workspace:*",
     "@signforge/tools": "workspace:*",
     "@tailwindcss/vite": "^4.3.5",
     "@types/node": "^26.6.6",

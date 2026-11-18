@@ -1,13 +1,17 @@
 /**
  * The Screens page of an org with no screens (canvas board "Empty fleet", research idea 10): one
  * path, pairing, with the code input on the page. "Open a test screen" (a player in a browser tab,
- * M3-41) is its first step once that ticket gives it a URL: pass `testScreenHref`.
+ * M3-41) is its first step when given `testScreenHref`, and names the screen to pair "Test screen"
+ * unless a name is typed already.
  */
 import { ExternalLinkIcon } from 'lucide-react';
 import type { GroupView } from '~/lib/screen-types';
+import { useAppStore } from '~/state/provider';
 import { PairScreenForm } from './pair-screen-form';
 
 export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: GroupView[]; canManage: boolean; testScreenHref?: string }) {
+  const named = useAppStore((s) => s.screens.pairing.name !== '');
+  const nameNewScreen = useAppStore((s) => s.nameNewScreen);
   return (
     <section aria-labelledby="empty-fleet" className="flex flex-wrap items-center gap-9 rounded-xl border bg-card p-5 sm:p-9">
       <div className="flex max-w-xl min-w-0 flex-[1_1_26rem] flex-col gap-6">
@@ -28,7 +32,9 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
                 <a
                   href={testScreenHref}
                   target="_blank"
-                  rel="noopener"
+                  // No window handle either way: the test screen shares this origin, and holds only its own credential.
+                  rel="noopener noreferrer"
+                  onClick={() => named || nameNewScreen('Test screen')}
                   className="inline-flex h-11 items-center gap-2 self-start rounded-lg bg-primary px-4 text-[15px] font-semibold text-primary-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   Open a test screen <ExternalLinkIcon className="size-4" aria-hidden />

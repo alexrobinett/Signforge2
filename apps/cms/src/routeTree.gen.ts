@@ -19,6 +19,7 @@ import { Route as AppSpotsRouteImport } from './routes/_app/spots'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as AppScreensIndexRouteImport } from './routes/_app/screens/index'
 import { Route as AppScreensScreenIdRouteImport } from './routes/_app/screens/$screenId'
+import { Route as V1DeviceSplatRouteImport } from './routes/v1/device/$'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -69,6 +70,11 @@ const AppScreensScreenIdRoute = AppScreensScreenIdRouteImport.update({
   path: '/screens/$screenId',
   getParentRoute: () => AppRoute,
 } as any)
+const V1DeviceSplatRoute = V1DeviceSplatRouteImport.update({
+  id: '/v1/device/$',
+  path: '/v1/device/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -79,6 +85,7 @@ export interface FileRoutesByFullPath {
   '/spots': typeof AppSpotsRoute
   '/api/$': typeof ApiSplatRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/v1/device/$': typeof V1DeviceSplatRoute
   '/screens/': typeof AppScreensIndexRoute
 }
 export interface FileRoutesByTo {
@@ -90,6 +97,7 @@ export interface FileRoutesByTo {
   '/api/$': typeof ApiSplatRoute
   '/': typeof AppIndexRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/v1/device/$': typeof V1DeviceSplatRoute
   '/screens': typeof AppScreensIndexRoute
 }
 export interface FileRoutesById {
@@ -103,6 +111,7 @@ export interface FileRoutesById {
   '/api/$': typeof ApiSplatRoute
   '/_app/': typeof AppIndexRoute
   '/_app/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/v1/device/$': typeof V1DeviceSplatRoute
   '/_app/screens/': typeof AppScreensIndexRoute
 }
 export interface FileRouteTypes {
@@ -116,6 +125,7 @@ export interface FileRouteTypes {
     | '/spots'
     | '/api/$'
     | '/screens/$screenId'
+    | '/v1/device/$'
     | '/screens/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -127,6 +137,7 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/'
     | '/screens/$screenId'
+    | '/v1/device/$'
     | '/screens'
   id:
     | '__root__'
@@ -139,6 +150,7 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/_app/'
     | '/_app/screens/$screenId'
+    | '/v1/device/$'
     | '/_app/screens/'
   fileRoutesById: FileRoutesById
 }
@@ -146,6 +158,7 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   SignInRoute: typeof SignInRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  V1DeviceSplatRoute: typeof V1DeviceSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -220,6 +233,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppScreensScreenIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/v1/device/$': {
+      id: '/v1/device/$'
+      path: '/v1/device/$'
+      fullPath: '/v1/device/$'
+      preLoaderRoute: typeof V1DeviceSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -249,6 +269,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   SignInRoute: SignInRoute,
   ApiSplatRoute: ApiSplatRoute,
+  V1DeviceSplatRoute: V1DeviceSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

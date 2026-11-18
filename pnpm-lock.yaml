@@ -336,6 +336,9 @@ importers:
       '@signforge/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
+      '@signforge/player':
+        specifier: workspace:*
+        version: link:../../packages/player
       '@signforge/tools':
         specifier: workspace:*
         version: link:../../packages/tools

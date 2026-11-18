@@ -32,6 +32,8 @@ export interface ScreenView {
   timezone: string;
   locale: string | null;
   orientation: 'landscape' | 'portrait';
+  /** A browser screen is a test screen: the player in a browser tab (M3-41). */
+  kind: 'device' | 'browser';
   displayHours: DisplayHours | null;
   status: 'active' | 'revoked';
   desiredManifestId: string | null;

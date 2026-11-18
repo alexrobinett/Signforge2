@@ -71,7 +71,8 @@ function ScreensPage() {
     return (
       <div className="space-y-6">
         <PageHeader title="Screens" description="No screens here yet." />
-        <EmptyFleet groups={groups} canManage={canManage} />
+        {/* The player build on this site (vite.config.ts), with the device API on this origin too. */}
+        <EmptyFleet groups={groups} canManage={canManage} testScreenHref="/test-screen/?kind=browser&content=/v1/device" />
       </div>
     );
   }
@@ -291,7 +292,7 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
                   </span>
                 )}
               </div>
-              <p className="text-[13px] text-muted-foreground">{[where, d.line].filter(Boolean).join(' · ')}</p>
+              <p className="text-[13px] text-muted-foreground">{[s.kind === 'browser' && 'Test screen', where, d.line].filter(Boolean).join(' · ')}</p>
             </div>
           </li>
         );
@@ -346,6 +347,7 @@ function ScreenTable({ screens, groupsOf, now }: { screens: ScreenView[]; groups
                     {s.name}
                   </Link>
                   <div className="text-[13px] font-normal text-muted-foreground">
+                    {s.kind === 'browser' && 'Test screen · '}
                     {groupsOf
                       .get(s.id)
                       ?.map((g) => g.name)
