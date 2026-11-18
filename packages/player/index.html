@@ -6,8 +6,14 @@
 <title>SignForge Player</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
-  .slot { position: fixed; inset: 0; opacity: 0; z-index: 1; overflow: hidden; display: grid; place-items: center; background: #000; will-change: opacity; }
-  .slot > * { border: 0; display: block; }
+  .slot { position: fixed; inset: 0; opacity: 0; z-index: 1; overflow: hidden; display: grid; place-items: center; will-change: opacity; }
+  /* The black behind a spot is two layers with a 1px gap at the centre, which the spot itself
+     covers. A slot on top then never hides the one underneath completely, so Chromium keeps
+     drawing (and rendering) the next spot while it loads: see "Playback" in docs/architecture.md. */
+  .slot::before, .slot::after { content: ''; position: absolute; top: 0; bottom: 0; background: var(--slot-bg, #000); will-change: transform; }
+  .slot::before { left: 0; right: calc(50% + 1px); }
+  .slot::after { left: 50%; right: 0; }
+  .slot > * { border: 0; display: block; position: relative; z-index: 1; }
   #status { position: fixed; inset: 0; display: grid; place-items: center; color: #9aa4b2; font: 500 2.4vmin system-ui, sans-serif; text-align: center; white-space: pre-line; }
   /* Pairing (src/pairing.ts): the code, large, on black. The card moves every minute (OLED). */
   #pair { position: fixed; inset: 0; z-index: 50; background: #000; display: none; }
