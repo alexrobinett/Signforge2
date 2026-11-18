@@ -16,7 +16,9 @@ export function readableOn(fill: string, text: string): string {
 /**
  * WCAG relative luminance of a `#rgb`/`#rrggbb` colour. The SDK's `isLight` keeps its own copy:
  * it is in every template's bundle, and a bundle whose bytes change needs a new template version.
+ * The compiler has a third, for the brand lint; the copies are ignored by the duplicate check.
  */
+// jscpd:ignore-start
 function luminance(color: string): number | undefined {
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim())?.[1];
   if (!hex) return undefined;
@@ -27,3 +29,4 @@ function luminance(color: string): number | undefined {
   });
   return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
 }
+// jscpd:ignore-end

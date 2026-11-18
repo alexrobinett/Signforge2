@@ -120,8 +120,9 @@ export async function publishImage(page: Page, screenId: string, spot = 'Welcome
 const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 
 /**
- * Run axe on the page as it is, in the light theme and the dark, and fail on any violation.
- * Transitions and animations are off while it runs: else it reads colours halfway through the
+ * Run axe on the page as it is, in the light theme and the dark, and fail on any violation
+ * (results axe cannot decide, such as text over a gradient, are not failures). Transitions and
+ * animations are off in the top document while it runs: else it reads colours halfway through the
  * theme change, or a dialog's fade. The spot editor's preview is checked too: the real player
  * showing a template, so every base template's text must read on its colours (#57).
  */
