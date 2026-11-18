@@ -36,6 +36,8 @@ export interface PlayerState {
   pairing: string;
   /** The correction from server time, and whether the player trusts its clock. */
   clock: { offsetMs: number; trusted: boolean };
+  /** The last 50 prepares: start of loading to ready. */
+  prepares: { spot: string; ms: number }[];
 }
 
 export interface Player {
@@ -142,6 +144,7 @@ export function useHarness(): Harness {
             socket,
             clock,
             pairing,
+            prepares,
           } = s;
           return {
             manifestId,
@@ -161,6 +164,7 @@ export function useHarness(): Harness {
             socket,
             pairing,
             clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
+            prepares: prepares.map(({ spot, ms }) => ({ spot, ms })),
           };
         });
       const until = async (predicate: (s: PlayerState) => boolean, timeoutMs = 10_000) => {

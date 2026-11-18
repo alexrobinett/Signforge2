@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { orgSwitcher, requestCode, screenshot, hydrated } from './helpers';
+import { fillUntilEnabled, hydrated, orgSwitcher, requestCode, screenshot } from './helpers';
 import { codeFor } from './servers';
 
 async function activeOrgId(page: Page) {
@@ -37,7 +37,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await expect(page).toHaveURL(/\/screens$/);
   await expect(page.getByRole('heading', { name: 'Welcome to SignForge' })).toBeVisible();
   await screenshot(page, '03-first-org');
-  await page.getByLabel('Organization name').fill('Acme Coffee');
+  await fillUntilEnabled(page, 'Organization name', 'Acme Coffee', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name: 'Screens', level: 1 })).toBeVisible();
   const switcher = orgSwitcher(page);

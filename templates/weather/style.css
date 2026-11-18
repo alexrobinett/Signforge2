@@ -1,90 +1,453 @@
 /* Weather Now. The scene (sky, sun or moon, clouds, rain or snow) follows the condition class
    set on .stage by main.ts. Rain and snow are drawn on one canvas, not as DOM elements. */
 @font-face {
-  font-family: "Inter";
-  src: url("./node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2");
+  font-family: 'Inter';
+  src: url('./node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2');
   font-weight: 100 900;
 }
-*, *::before, *::after { box-sizing: border-box; margin: 0; }
-html, body { height: 100%; overflow: hidden; background: #0b1a33; }
-body { font-family: "Inter", sans-serif; color: #fff; }
-.stage { --u: 1vmin; --out: calc(var(--sf-duration, 8s) - 0.6s); position: fixed; inset: 0; overflow: hidden; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+}
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--sf-bg, #0b1a33);
+}
+body {
+  font-family: var(--sf-font-body, 'Inter'), sans-serif;
+  color: var(--sf-text, #fff);
+}
+.stage {
+  --u: 1vmin;
+  --out: calc(var(--sf-duration, 8s) - 0.6s);
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
 
-.sky { position: absolute; inset: 0; background: linear-gradient(170deg, #2f80ed 0%, #56ccf2 100%); }
-.night .sky { background: linear-gradient(170deg, #0b1a33 0%, #1d2b64 100%); }
-.cloudy .sky, .fog .sky { background: linear-gradient(170deg, #5b6b82 0%, #9fb1c7 100%); }
-.rain .sky, .storm .sky { background: linear-gradient(170deg, #26364d 0%, #51657f 100%); }
-.snow .sky { background: linear-gradient(170deg, #6f8fb0 0%, #dfe9f3 100%); }
-.night.cloudy .sky, .night.rain .sky, .night.storm .sky, .night.snow .sky, .night.fog .sky { background: linear-gradient(170deg, #0a1220 0%, #2b3a52 100%); }
+/* The sky is mixed from the kit's colours, one pair of stops per condition. Each mix gives both
+   of its colours the same fallback, so with no kit the sky is exactly that colour. */
+.stage {
+  --sky-a: color-mix(in srgb, var(--sf-primary, #2f80ed) 75%, var(--sf-bg, #2f80ed));
+  --sky-b: color-mix(in srgb, var(--sf-primary, #56ccf2) 45%, var(--sf-text, #56ccf2));
+}
+.night {
+  --sky-a: var(--sf-bg, #0b1a33);
+  --sky-b: color-mix(in srgb, var(--sf-primary, #1d2b64) 30%, var(--sf-bg, #1d2b64));
+}
+.cloudy,
+.fog {
+  --sky-a: color-mix(in srgb, var(--sf-muted, #5b6b82) 45%, var(--sf-surface, #5b6b82));
+  --sky-b: color-mix(in srgb, var(--sf-muted, #9fb1c7) 80%, var(--sf-surface, #9fb1c7));
+}
+.rain,
+.storm {
+  --sky-a: color-mix(in srgb, var(--sf-surface, #26364d) 70%, var(--sf-bg, #26364d));
+  --sky-b: color-mix(in srgb, var(--sf-muted, #51657f) 35%, var(--sf-surface, #51657f));
+}
+.snow {
+  --sky-a: color-mix(in srgb, var(--sf-muted, #6f8fb0) 55%, var(--sf-surface, #6f8fb0));
+  --sky-b: color-mix(in srgb, var(--sf-text, #dfe9f3) 75%, var(--sf-muted, #dfe9f3));
+}
+.night.cloudy,
+.night.rain,
+.night.storm,
+.night.snow,
+.night.fog {
+  --sky-a: color-mix(in srgb, var(--sf-bg, #0a1220) 85%, var(--sf-surface, #0a1220));
+  --sky-b: color-mix(in srgb, var(--sf-muted, #2b3a52) 25%, var(--sf-surface, #2b3a52));
+}
+.sky {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(170deg, var(--sky-a) 0%, var(--sky-b) 100%);
+}
 
-.orb { position: absolute; right: 10vw; top: 50%; margin-top: -24vmin; width: 48vmin; height: 48vmin; will-change: transform, opacity;
-  animation: orb-in 1.2s cubic-bezier(.2,1.2,.3,1) both, fade-out .5s ease-in forwards; animation-delay: .1s, var(--out); }
-.orb .disc { position: absolute; inset: 18%; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff6c9, #ffc93c 60%, #ff9f1c);
-  box-shadow: 0 0 9vmin rgba(255, 205, 80, .75); }
-.orb .rays { position: absolute; inset: 0; border-radius: 50%; will-change: transform; animation: spin 40s linear infinite;
-  background: repeating-conic-gradient(rgba(255, 220, 120, .55) 0 6deg, transparent 6deg 30deg);
-  -webkit-mask: radial-gradient(circle, transparent 36%, #000 37%, #000 62%, transparent 70%); mask: radial-gradient(circle, transparent 36%, #000 37%, #000 62%, transparent 70%); }
-.night .orb .disc { background: radial-gradient(circle at 35% 35%, #ffffff, #dfe7f5 60%, #aab7d1); box-shadow: 0 0 8vmin rgba(200, 220, 255, .5); }
-.night .orb .rays { display: none; }
+.orb {
+  position: absolute;
+  right: 10vw;
+  top: 50%;
+  margin-top: -24vmin;
+  width: 48vmin;
+  height: 48vmin;
+  will-change: transform, opacity;
+  animation:
+    orb-in 1.2s cubic-bezier(0.2, 1.2, 0.3, 1) both,
+    fade-out 0.5s ease-in forwards;
+  animation-delay: 0.1s, var(--out);
+}
+.orb .disc {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 35%,
+    color-mix(in srgb, var(--sf-accent, #fff6c9) 25%, var(--sf-text, #fff6c9)),
+    var(--sf-accent, #ffc93c) 60%,
+    color-mix(in srgb, var(--sf-accent, #ff9f1c) 80%, var(--sf-primary, #ff9f1c))
+  );
+  box-shadow: 0 0 9vmin color-mix(in srgb, var(--sf-accent, #ffcd50) 75%, transparent);
+}
+.orb .rays {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  will-change: transform;
+  animation: spin 40s linear infinite;
+  background: repeating-conic-gradient(color-mix(in srgb, var(--sf-accent, #ffdc78) 55%, transparent) 0 6deg, transparent 6deg 30deg);
+  /* A mask reads only alpha: --opaque is any opaque colour. */
+  --opaque: var(--sf-text, #000);
+  -webkit-mask: radial-gradient(circle, transparent 36%, var(--opaque) 37%, var(--opaque) 62%, transparent 70%);
+  mask: radial-gradient(circle, transparent 36%, var(--opaque) 37%, var(--opaque) 62%, transparent 70%);
+}
+.night .orb .disc {
+  background: radial-gradient(
+    circle at 35% 35%,
+    var(--sf-text, #fff),
+    color-mix(in srgb, var(--sf-text, #dfe7f5) 85%, var(--sf-muted, #dfe7f5)) 60%,
+    color-mix(in srgb, var(--sf-text, #aab7d1) 55%, var(--sf-muted, #aab7d1))
+  );
+  box-shadow: 0 0 8vmin color-mix(in srgb, var(--sf-text, #c8dcff) 50%, transparent);
+}
+.night .orb .rays {
+  display: none;
+}
 /* Overcast, rain, snow and fog hide the sun or moon: only partly cloudy shows it behind clouds. */
-.cloudy .orb, .rain .orb, .storm .orb, .snow .orb, .fog .orb { opacity: 0; animation: none; }
+.cloudy .orb,
+.rain .orb,
+.storm .orb,
+.snow .orb,
+.fog .orb {
+  opacity: 0;
+  animation: none;
+}
 
-.cloud { position: absolute; width: 46vmin; height: 15vmin; border-radius: 10vmin; background: #fff; opacity: 0;
-  will-change: transform; animation: drift 26s linear infinite; }
-.cloud::before, .cloud::after { content: ""; position: absolute; border-radius: 50%; background: inherit; }
-.cloud::before { width: 20vmin; height: 20vmin; left: 6vmin; top: -9vmin; }
-.cloud::after { width: 26vmin; height: 26vmin; right: 5vmin; top: -13vmin; }
-/* Clouds keep to the top band; the text block sits low and to the left, behind a scrim. */
-.c1 { top: 11vh; left: -50vmin; }
-.c2 { top: 6vh; left: -50vmin; animation-duration: 38s; animation-delay: -14s; scale: .7; }
-.c3 { top: 2vh; left: -50vmin; animation-duration: 32s; animation-delay: -24s; scale: .55; }
+.stage {
+  --cloud: color-mix(in srgb, var(--sf-text, #fff) 90%, var(--sf-surface, #fff));
+}
+.rain,
+.storm,
+.night {
+  --cloud: color-mix(in srgb, var(--sf-muted, #b9c3d1) 75%, var(--sf-text, #b9c3d1));
+}
+/* A light kit: clouds in its background colour over a sky darkened with its muted colour, and a
+   clear sky only tinted with its primary colour. */
+.light-kit {
+  --cloud: var(--sf-bg);
+  --sky-a: color-mix(in srgb, var(--sf-primary) 35%, var(--sf-bg));
+  --sky-b: color-mix(in srgb, var(--sf-primary) 12%, var(--sf-bg));
+}
+.light-kit.night {
+  --sky-a: color-mix(in srgb, var(--sf-muted) 45%, var(--sf-bg));
+  --sky-b: color-mix(in srgb, var(--sf-primary) 20%, var(--sf-muted));
+}
+.light-kit.cloudy,
+.light-kit.fog,
+.light-kit.rain,
+.light-kit.storm,
+.light-kit.snow {
+  --sky-a: color-mix(in srgb, var(--sf-muted) 75%, var(--sf-surface));
+  --sky-b: color-mix(in srgb, var(--sf-muted) 50%, var(--sf-surface));
+}
+.light-kit .orb .disc {
+  background: radial-gradient(
+    circle at 35% 35%,
+    var(--sf-bg),
+    color-mix(in srgb, var(--sf-accent) 45%, var(--sf-bg)) 60%,
+    color-mix(in srgb, var(--sf-accent) 70%, var(--sf-bg))
+  );
+}
+.light-kit.night .orb .disc {
+  background: radial-gradient(
+    circle at 35% 35%,
+    var(--sf-bg),
+    color-mix(in srgb, var(--sf-bg) 80%, var(--sf-muted)) 60%,
+    color-mix(in srgb, var(--sf-bg) 60%, var(--sf-muted))
+  );
+  box-shadow: 0 0 8vmin color-mix(in srgb, var(--sf-bg) 60%, transparent);
+}
+.cloud {
+  position: absolute;
+  width: 46vmin;
+  height: 15vmin;
+  border-radius: 10vmin;
+  background: var(--cloud);
+  opacity: 0;
+  will-change: transform;
+  animation: drift 26s linear infinite;
+}
+.cloud::before,
+.cloud::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  background: inherit;
+}
+.cloud::before {
+  width: 20vmin;
+  height: 20vmin;
+  left: 6vmin;
+  top: -9vmin;
+}
+.cloud::after {
+  width: 26vmin;
+  height: 26vmin;
+  right: 5vmin;
+  top: -13vmin;
+}
+/* Clouds keep to the top band; the forecast card sits low and to the left. */
+/* c1 starts already on screen: entering from the edge it read as a clipped cloud by the city name. */
+.c1 {
+  top: 1vh;
+  left: -50vmin;
+  animation-delay: -12s;
+  scale: 0.85;
+}
+.c2 {
+  top: 5vh;
+  left: -50vmin;
+  animation-duration: 38s;
+  animation-delay: -14s;
+  scale: 0.7;
+}
+.c3 {
+  top: 2vh;
+  left: -50vmin;
+  animation-duration: 32s;
+  animation-delay: -24s;
+  scale: 0.55;
+}
 /* Solid colours on every part: overlapping translucent circles show their seams. */
-.partly .c1, .partly .c2 { opacity: .92; }
-.cloudy .cloud, .rain .cloud, .storm .cloud, .snow .cloud, .fog .cloud { opacity: .92; }
-.rain .cloud, .storm .cloud, .night .cloud { background: #b9c3d1; }
+.partly .c1,
+.partly .c2 {
+  opacity: 0.92;
+}
+.cloudy .cloud,
+.rain .cloud,
+.storm .cloud,
+.snow .cloud,
+.fog .cloud {
+  opacity: 0.92;
+}
+/* When the sky is covered, a large cloud takes the sun's place, so the side opposite the forecast
+   is not left empty. Still: only rain, snow and the small clouds move. */
+.cloud.hero {
+  right: 6vw;
+  top: 50%;
+  margin-top: -10vmin;
+  width: 72vmin;
+  height: 24vmin;
+  border-radius: 16vmin;
+  animation: none;
+  will-change: auto;
+}
+.cloud.hero::before {
+  width: 32vmin;
+  height: 32vmin;
+  left: 9vmin;
+  top: -15vmin;
+}
+.cloud.hero::after {
+  width: 42vmin;
+  height: 42vmin;
+  right: 8vmin;
+  top: -22vmin;
+}
+.cloud.hero {
+  opacity: 0;
+}
+.cloudy .cloud.hero,
+.rain .cloud.hero,
+.storm .cloud.hero,
+.snow .cloud.hero,
+.fog .cloud.hero {
+  opacity: 1;
+  animation:
+    fade-in 1s ease both,
+    fade-out 0.5s ease-in forwards;
+  animation-delay: 0.1s, var(--out);
+}
 
-#fx { position: absolute; inset: 0; overflow: hidden; }
+#fx {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
 /* Rain falls at an angle: rotate the whole field and oversize it so the corners stay covered. */
-#fx.slant { inset: -25%; transform: rotate(14deg); }
-#fx .fall { position: absolute; left: 0; right: 0; top: calc(var(--tile) * -1); bottom: 0; background-size: var(--tile) var(--tile);
-  will-change: transform; animation: fall 1s linear infinite; }
-#fx .snow { animation-name: fall, sway; animation-timing-function: linear, ease-in-out; animation-direction: normal, alternate; }
+#fx.slant {
+  inset: -25%;
+  transform: rotate(14deg);
+}
+#fx .fall {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--tile) * -1);
+  bottom: 0;
+  background-size: var(--tile) var(--tile);
+  will-change: transform;
+  animation: fall 1s linear infinite;
+}
+#fx .snow {
+  animation-name: fall, sway;
+  animation-timing-function: linear, ease-in-out;
+  animation-direction: normal, alternate;
+}
 
-/* A soft shade between the effects and the text, so clouds, rain and snow never cross the
-   forecast at full strength. A gradient, drawn once; no filter. */
-.scrim { position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(70% 85% at 0% 75%, rgba(6, 16, 36, .34) 0%, rgba(6, 16, 36, .2) 50%, rgba(6, 16, 36, 0) 100%);
-  animation: fade-in .8s ease both, fade-out .5s ease-in forwards; animation-delay: 0s, var(--out); }
-/* Rain and snow fill the whole sky, so shade them harder behind the text: a flake under a stat
-   reads as grey, not as part of the number. */
-.rain .scrim, .storm .scrim, .snow .scrim {
-  background: radial-gradient(75% 90% at 0% 80%, rgba(6, 16, 36, .7) 0%, rgba(6, 16, 36, .5) 45%, rgba(6, 16, 36, 0) 100%); }
-.info { position: absolute; left: calc(var(--u) * 8); bottom: calc(var(--u) * 8); text-shadow: 0 .6vmin 2.4vmin rgba(0,0,0,.35); }
-.info > * { will-change: transform, opacity; animation: rise-in .8s cubic-bezier(.2,.8,.2,1) both, fade-out .5s ease-in forwards; }
-.city { font-size: calc(var(--u) * 5); font-weight: 700; letter-spacing: .02em; text-transform: uppercase; animation-delay: .2s, var(--out); }
-.temp { display: flex; align-items: flex-start; font-size: calc(var(--u) * 44); font-weight: 900; line-height: .9; letter-spacing: -.05em; animation-delay: .35s, var(--out); }
-.temp .unit { font-size: .3em; margin-top: .22em; margin-left: .08em; font-weight: 700; letter-spacing: 0; }
-.cond { font-size: calc(var(--u) * 6.4); font-weight: 800; animation-delay: .5s, var(--out); }
-.range, .extra { display: flex; gap: calc(var(--u) * 5); font-size: calc(var(--u) * 3.6); font-weight: 500; margin-top: calc(var(--u) * 1.6); }
-.range { animation-delay: .65s, var(--out); }
-.extra { animation-delay: .8s, var(--out); opacity: .9; }
-.range b, .extra b { font-weight: 800; }
+/* The forecast sits on an opaque card in the kit's surface colour: rain, snow and clouds pass
+   behind it and never cross the reading (a translucent shade still let them through, dimmed). */
+.info {
+  position: absolute;
+  left: calc(var(--u) * 6);
+  bottom: calc(var(--u) * 6);
+  padding: calc(var(--u) * 4) calc(var(--u) * 5.5);
+  background: var(--sf-surface, #0f1d36);
+  border-radius: min(var(--sf-radius, 3vmin), 4vmin);
+  box-shadow: 0 1.5vmin 5vmin color-mix(in srgb, var(--sf-bg, #000) 35%, transparent);
+  will-change: transform, opacity;
+  animation:
+    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    fade-out 0.5s ease-in forwards;
+  animation-delay: 0s, var(--out);
+}
+/* On a light kit a shadow of its background reads as a pale halo. */
+.light-kit .info {
+  box-shadow: none;
+}
+.info > * {
+  will-change: transform, opacity;
+  animation:
+    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    fade-out 0.5s ease-in forwards;
+}
+.city {
+  font-size: calc(var(--u) * 5);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  animation-delay: 0.2s, var(--out);
+}
+.temp {
+  display: flex;
+  align-items: flex-start;
+  font-family: var(--sf-font-display, 'Inter'), sans-serif;
+  font-size: calc(var(--u) * 34);
+  font-weight: 900;
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+  animation-delay: 0.35s, var(--out);
+}
+.temp .unit {
+  font-size: 0.3em;
+  margin-top: 0.22em;
+  margin-left: 0.08em;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.cond {
+  margin-top: calc(var(--u) * 1.2);
+  font-family: var(--sf-font-display, 'Inter'), sans-serif;
+  font-size: calc(var(--u) * 6.4);
+  font-weight: 800;
+  animation-delay: 0.5s, var(--out);
+}
+.range,
+.extra {
+  display: flex;
+  gap: calc(var(--u) * 5);
+  font-size: calc(var(--u) * 3.6);
+  font-weight: 500;
+  margin-top: calc(var(--u) * 1.6);
+}
+.range {
+  animation-delay: 0.65s, var(--out);
+}
+.extra {
+  animation-delay: 0.8s, var(--out);
+  color: var(--sf-muted, color-mix(in srgb, var(--sf-text, #fff) 90%, transparent));
+}
+.range b,
+.extra b {
+  font-weight: 800;
+}
 
-[data-orientation="portrait"] .orb { right: 50%; margin-right: -24vmin; top: 10vh; margin-top: 0; }
-[data-orientation="portrait"] .c1 { top: 22vh; }
-[data-orientation="portrait"] .c2 { top: 30vh; }
-[data-orientation="portrait"] .c3 { top: 8vh; }
-[data-orientation="portrait"] .scrim { background: linear-gradient(0deg, rgba(6, 16, 36, .34) 0%, rgba(6, 16, 36, .2) 30%, rgba(6, 16, 36, 0) 55%); }
-[data-orientation="portrait"] .rain .scrim, [data-orientation="portrait"] .storm .scrim, [data-orientation="portrait"] .snow .scrim {
-  background: linear-gradient(0deg, rgba(6, 16, 36, .7) 0%, rgba(6, 16, 36, .5) 35%, rgba(6, 16, 36, 0) 60%); }
-[data-orientation="portrait"] .info { left: 8vw; right: 8vw; bottom: 12vh; }
-[data-orientation="portrait"] .temp { font-size: calc(var(--u) * 44); }
+[data-orientation='portrait'] .orb {
+  right: 50%;
+  margin-right: -24vmin;
+  top: 10vh;
+  margin-top: 0;
+}
+[data-orientation='portrait'] .c1 {
+  top: 22vh;
+}
+[data-orientation='portrait'] .c2 {
+  top: 30vh;
+}
+[data-orientation='portrait'] .c3 {
+  top: 8vh;
+}
+[data-orientation='portrait'] .info {
+  left: 6vw;
+  right: 6vw;
+  bottom: 6vh;
+  padding: calc(var(--u) * 6) calc(var(--u) * 7);
+}
+[data-orientation='portrait'] .temp {
+  font-size: calc(var(--u) * 40);
+}
+[data-orientation='portrait'] .hero {
+  right: 50%;
+  margin-right: -36vmin;
+  top: 14vh;
+  margin-top: 0;
+}
 
-@keyframes orb-in  { from { transform: translateY(20vh) scale(.5); opacity: 0 } }
-@keyframes rise-in { from { transform: translateY(6vh); opacity: 0 } }
-@keyframes fade-in { from { opacity: 0 } }
-@keyframes fade-out { to { opacity: 0 } }
-@keyframes spin  { to { transform: rotate(360deg) } }
-@keyframes drift { to { transform: translateX(calc(100vw + 60vmin)) } }
-@keyframes fall  { to { transform: translateY(var(--tile)) } }
-@keyframes sway  { from { translate: -1.5vmin 0 } to { translate: 1.5vmin 0 } }
+@keyframes orb-in {
+  from {
+    transform: translateY(20vh) scale(0.5);
+    opacity: 0;
+  }
+}
+@keyframes rise-in {
+  from {
+    transform: translateY(6vh);
+    opacity: 0;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes drift {
+  to {
+    transform: translateX(calc(100vw + 60vmin));
+  }
+}
+@keyframes fall {
+  to {
+    transform: translateY(var(--tile));
+  }
+}
+@keyframes sway {
+  from {
+    translate: -1.5vmin 0;
+  }
+  to {
+    translate: 1.5vmin 0;
+  }
+}

@@ -740,11 +740,12 @@ export function scoped(d1: D1Database, orgId: string) {
       append: (entry: NewRow<typeof s.auditLog>) => audit.insert(entry),
       /** The audit row for a change, staged to commit with it. */
       stage: (entry: NewRow<typeof s.auditLog>) => audit.stage.insert(entry),
-      /** Newest first. */
-      list: ({ limit = 50, before }: { limit?: number; before?: number } = {}) => {
+      /** Newest first. With `target`, only what was done to that one thing (a screen's recent events). */
+      list: ({ limit = 50, before, target }: { limit?: number; before?: number; target?: { kind: string; id: string } } = {}) => {
         const a = s.auditLog;
         const where: SQL[] = [eq(a.orgId, orgId)];
         if (before != null) where.push(lt(a.at, before));
+        if (target) where.push(eq(a.targetKind, target.kind), eq(a.targetId, target.id));
         return db
           .select()
           .from(a)

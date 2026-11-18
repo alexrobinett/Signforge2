@@ -11,7 +11,15 @@
  * no-network policy are the guarantee; the bundle carries the SDK, which itself calls
  * `parent.postMessage`, so the code list cannot run on it.
  */
-import { canonicalJson, checkTemplateBundle, TEMPLATE_CHECKS, templateKey, type TemplateCheckReport, type TemplateManifest } from '@signforge/contract';
+import {
+  canonicalJson,
+  checkTemplateBundle,
+  parseTemplateManifest,
+  TEMPLATE_CHECKS,
+  templateKey,
+  type TemplateCheckReport,
+  type TemplateManifest,
+} from '@signforge/contract';
 import type { Template, TemplateVersion } from '@signforge/db';
 import { z } from 'zod';
 import { id } from './fields';
@@ -195,11 +203,13 @@ const registerTemplateVersion = defineSharedTool({
     }
 
     const report = checkTemplateBundle({ manifest: input.manifest, html, sources });
-    if (!report.ok) {
+    // The parse fails only when the report's manifest check does, so the problems below are never empty.
+    const parsed = parseTemplateManifest(input.manifest);
+    if (!report.ok || !parsed.ok) {
       const problems = report.checks.flatMap((c) => c.problems.map((message) => ({ path: c.check, message })));
       throw new ToolError('invalid_input', `the template failed its checks: ${problems.map((p) => p.message).join('; ')}`, problems);
     }
-    const manifest = input.manifest as unknown as TemplateManifest;
+    const manifest = parsed.value;
     const manifestJson = JSON.stringify(manifest);
 
     const existing = await org.templates.ownByKey(manifest.id);

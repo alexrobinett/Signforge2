@@ -27,18 +27,18 @@
 import {
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
+  parseSyncResponse,
   requiredFiles,
-  validateSyncResponse,
   type DeviceCommand,
   type ScreenManifest,
   type Spot,
   type SyncRequest,
-  type SyncResponse,
   type Transition,
 } from '@signforge/contract';
 import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
 import { clock, now, synced } from './clock';
 import { DeviceCredential } from './credential';
+import { identify } from './identify';
 import { pair } from './pairing';
 import { dataRejections, dataSettled, dataStatus, heldVersions, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
 import { activeOverride, setOverride, wakeable } from './override';
@@ -592,6 +592,8 @@ async function pairScreen(): Promise<void> {
 function command(c: DeviceCommand): void {
   console.info(`[sf] command ${c.type}`);
   if (c.type === 'reload') reload();
+  else if (c.type === 'restart') location.reload();
+  else if (c.type === 'identify') identify(c.name, c.seconds);
   else if (c.type === 'display') {
     setOverride(c.override);
     display.wake();
@@ -717,10 +719,9 @@ async function apiSync(): Promise<number> {
   const receivedAt = Date.now();
   if (res.status === 401) throw new UnauthorisedError();
   if (!res.ok) throw new Error(`sync: HTTP ${res.status}`);
-  const reply = (await res.json()) as unknown;
-  const problems = validateSyncResponse(reply);
-  if (problems.length) throw new Error(`sync: ${problems.join('; ')}`);
-  const r = reply as SyncResponse;
+  const parsed = parseSyncResponse(await res.json());
+  if (!parsed.ok) throw new Error(`sync: ${parsed.problems.join('; ')}`);
+  const r = parsed.value;
   synced(r.serverTime, sentAt, receivedAt);
   if (r.epoch === batch.epoch) acknowledgePlays(r.epoch, r.ackSeq);
   settleTickets({ ticket: r.socketTicket });

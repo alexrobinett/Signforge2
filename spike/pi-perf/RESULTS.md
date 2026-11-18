@@ -206,6 +206,50 @@ The old build logged `energy: not ready within 2000 ms` once after a restart on 
 - energy, the spot that failed on the old build, prepared in 220 to 286 ms every time, including as the second spot after each restart.
 - **Over the 500 ms budget: the first prepare after a restart.** weather-atlanta first 711 to 948 ms (later ones 323 to 454 ms); sport-drinks first 516 to 894 ms (later ones 256 to 369 ms). That is under half the 2000 ms timeout at worst; a slower cold start (a busier Pi, a first boot) is untested. When the Pi was put back on its old player and cloud config afterwards, that old build skipped `weather-atlanta: not ready within 2000 ms` repeatedly (offline, on the cached test content), so the old build still fails this way. Later prepares are within budget except weather-atlanta once at 521 ms on its rain snapshot.
 
+## Brand tokens and template polish (M3-25, 2026-11-17)
+
+Same Pi and stress playlist, fade 600 ms (`transition=fade600`; note that `transition=fade` is a 500 ms fade, so the M3-39 tables above, taken with `fade`, were 500 ms fades), soak logger stopped, cache cleared and the service worker bypassed before every run, builds alternated.
+
+### The transition drift is run-to-run spread, not a regression
+
+Transitions dropped 2 to 4.4% since M3-05 against 1.5% in the third round. The third round's own build (commit 301eee9, its player and its content) was rebuilt and run against today's, interleaved, 150 s each:
+
+| Build | Transition dropped (3 runs) | Overall |
+| --- | --- | --- |
+| Third round (301eee9) | 1.85, 3.86, 3.24% (12, 25, 21 of about 650 frames) | 0.31, 0.54, 0.41% |
+| Today's player and content | 1.63, 3.06, 1.93% (10, 19, 12 of about 620) | 0.58, 0.58, 0.51% |
+
+The old build reproduces the "drift" today, so the code did not regress. The transition phase is only about 650 frames a run, and one build spreads from 1.6 to 3.9% between runs; the third round's 1.5% was a single run. Compare transitions over three or more interleaved runs, and judge builds on the overall and playing figures.
+
+### video-pan: 900 ms prepares
+
+Traced with timing in the player: a video prepare was about 350 ms to `canplaythrough`, then 600 ms waiting for a `requestVideoFrameCallback` that never fires on a paused video that has never played, so every video prepare waited out its 600 ms timer. The player now treats a video spot as ready at `canplaythrough`. video-pan, mini playlist with clock and photo-river, 3 runs each:
+
+| Build | video-pan prepare | Overall | Play + prepare dropped |
+| --- | --- | --- | --- |
+| With the wait | 913 to 1034 ms | 0.60 to 0.71% | 53 to 63 frames |
+| Ready at canplaythrough | 305 to 399 ms | 0.60 to 0.66% | 52 to 56 frames |
+
+The decoder's warm-up frames now count while the spot before plays rather than inside a longer prepare; their sum is unchanged. Transitions in this mini playlist dropped 2 to 6 frames a run against 1.
+
+### The full stress playlist (290 s per run)
+
+A: the `m3-foundations` player and templates, no kit. B: this branch (player and templates), no kit. C: this branch with a brand kit whose fonts the templates now use (Montserrat display, Inter body).
+
+| Variant | Overall dropped | Playing | Prepares over 500 ms | Prepare median | news | video-pan | Skipped |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A | 0.58, 0.70% | 0.12, 0.21% | 3/36, 3/36 | 248 ms | 332-500 ms | 861-937 ms | 0 |
+| B | 0.75*, 0.60, 0.62% | 0.29*, 0.11, 0.15% | 0, 0, 1/36 | 254-265 ms | 379-472 ms | 254-323 ms | 0 |
+| C | 0.73, 0.79, 0.78% | 0.12, 0.16, 0.15% | 4, 2, 2/36 | 328-342 ms | 1421-1622 ms, then 549-550 | 226-355 ms | 0 |
+
+\* B's first run overlapped another agent briefly taking the Pi (a 333 ms frame); every other run's worst frame is 83 to 167 ms.
+
+Without a kit (B) nothing regresses and the prepare budget is met everywhere. With brand fonts (C) frames stay under 1%, but **news over 500 ms is still open**:
+
+- **news loads under video-pan**, and under a playing video its work in the frame is 2 to 3 times slower (theme and fonts 94 to 168 ms against 34 to 54 under clock; prepare 175 to 250 against 53 to 81).
+- **The opaque video layer covers the 1 px gap** that keeps the slot underneath drawn (Slow prepares, above). Chromium knows a video layer is opaque, unlike a template frame, so the news frame underneath is culled and throttled to one frame a second: in about half the prepares under video, waiting for two animation frames (`settle`) took 1.0 to 1.1 s (news 1465 to 1607 ms). Under clock, news prepares in 229 to 278 ms.
+- **Not adopted, a next step:** the video at `opacity: 0.999` (one layer blended, not a render surface) removed the stall in one probe (news under video 466 to 586 ms against 471 to 1607, 12 prepares each), but its frame cost while video plays was not measured. Even without the stall, news under video is 470 to 590 ms with brand fonts, so news needs less work as well (its crawl is measured over about 14,600 px of text).
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
