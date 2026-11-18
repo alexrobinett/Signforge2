@@ -102,7 +102,15 @@ describe('the registry', () => {
     const keyed = TOOLS.filter((t) => t.idempotent)
       .map((t) => t.name)
       .sort();
-    expect(keyed).toEqual(['claim_screen', 'create_asset_upload', 'create_brand_kit', 'create_data_source', 'create_group', 'create_spot', 'create_video_upload']);
+    expect(keyed).toEqual([
+      'claim_screen',
+      'create_asset_upload',
+      'create_brand_kit',
+      'create_data_source',
+      'create_group',
+      'create_spot',
+      'create_video_upload',
+    ]);
     for (const t of TOOLS.filter((t) => t.name.startsWith('create_'))) expect(t.idempotent, t.name).toBe(true);
     for (const name of keyed) {
       const schema = describeTools(registry, { role: 'owner' }).find((t) => t.name === name)!.inputSchema as {
