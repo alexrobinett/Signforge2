@@ -30,8 +30,8 @@ interface VersionGuard {
   id: string;
   /** The version the change was made from. */
   version: number;
-  /** The row's version now. Throws `NotInOrgError` if the row is gone. */
-  current: () => Promise<number>;
+  /** The row's version now if it is no longer the row the change was made from, else undefined. Throws `NotInOrgError` if the row is gone. */
+  stale: () => Promise<number | undefined>;
 }
 
 /**
@@ -73,9 +73,9 @@ export async function commit(db: Db, writes: readonly Write[]): Promise<void> {
     await db.batch([first!, ...rest]);
   } catch (err) {
     for (const g of writes.flatMap((w) => w[GUARD] ?? [])) {
-      const now = await g.current();
+      const now = await g.stale();
       // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
-      if (now !== g.version) throw new StaleVersionError(g.id, now, { cause: err });
+      if (now !== undefined) throw new StaleVersionError(g.id, now, { cause: err });
     }
     throw err;
   }
@@ -89,11 +89,21 @@ interface ColumnInfo {
 
 /**
  * A caller's values without the fields it may never set (`Guarded` in ./scoped.ts): the org, the
- * id, the creation time, the row's version, the org's publish revision and a draft's published
- * version. `scoped` and `platform` both use it.
+ * id, the creation time, the row's version, a draft's incarnation, the org's publish revision
+ * and a draft's published version. `scoped` and `platform` both use it.
  */
 export function strip<T extends object>(v: T): T {
-  const { orgId: _o, id: _i, createdAt: _c, rowVersion: _v, publishRevision: _r, publishedJson: _pj, publishedAt: _pa, ...rest } = v as Record<string, unknown>;
+  const {
+    orgId: _o,
+    id: _i,
+    createdAt: _c,
+    rowVersion: _v,
+    incarnation: _n,
+    publishRevision: _r,
+    publishedJson: _pj,
+    publishedAt: _pa,
+    ...rest
+  } = v as Record<string, unknown>;
   return rest as T;
 }
 

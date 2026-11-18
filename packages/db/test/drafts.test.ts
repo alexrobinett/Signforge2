@@ -126,6 +126,19 @@ describe('promotion from an old read (R09)', () => {
     expect((await org.playlists.get(r.playlist))!.publishedJson).toBeNull();
   });
 
+  it('refuses to publish a deleted spot into one made again with its id (review 4)', async () => {
+    const org = scoped(env.DB, r.orgId);
+    const values = { id: 'drafts-race-again', kind: 'image', durationMs: 5000, assetId: r.asset, fit: 'cover' } as const;
+    const read = await org.spots.insert({ ...values, name: 'Deleted' });
+    const promotion = org.spots.stage.publish(read);
+    await org.spots.delete(read.id);
+    const again = await org.spots.insert({ ...values, name: 'Made again' });
+    expect(again.rowVersion).toBe(read.rowVersion);
+
+    await expect(org.commit(promotion.writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await org.spots.get(read.id)).toEqual(again);
+  });
+
   it("keeps the draft's edit time as stored, not as it was read", async () => {
     const org = scoped(env.DB, r.orgId);
     const read = (await org.spots.get(r.templateSpot))!;

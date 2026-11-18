@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ee581e61-4117-459f-864f-b281ba1b6912",
+  "id": "12dc4a91-5ca3-4ab7-b2e2-97fd525f2a2f",
   "prevId": "ad8f24e4-ac77-4a7a-a808-98b832e9c30b",
   "tables": {
     "account": {
@@ -1707,6 +1707,13 @@
           "autoincrement": false,
           "default": 1
         },
+        "incarnation": {
+          "name": "incarnation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "published_json": {
           "name": "published_json",
           "type": "text",
@@ -2060,6 +2067,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": 1
+        },
+        "incarnation": {
+          "name": "incarnation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "published_json": {
           "name": "published_json",
@@ -2844,6 +2858,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": 1
+        },
+        "incarnation": {
+          "name": "incarnation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "published_json": {
           "name": "published_json",

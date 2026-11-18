@@ -30,10 +30,10 @@ export class NotInOrgError extends Error {
 
 /**
  * Fields a caller may never set: the org is the scope's, the id is fixed at insert, a row's
- * version and the org's publish revision move on by themselves, and a draft's published version
- * is written only by `stage.publish` (./drafts.ts).
+ * version and the org's publish revision move on by themselves, a draft's incarnation is fixed at
+ * insert, and a draft's published version is written only by `stage.publish` (./drafts.ts).
  */
-type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'publishRevision' | 'publishedJson' | 'publishedAt';
+type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'incarnation' | 'publishRevision' | 'publishedJson' | 'publishedAt';
 export type NewRow<T extends SQLiteTable> = Omit<T['$inferInsert'], Guarded> & { id?: string };
 export type RowPatch<T extends SQLiteTable> = Partial<Omit<T['$inferInsert'], Guarded>>;
 
@@ -56,26 +56,29 @@ type Ids = 'content' | 'server';
 
 /**
  * A first statement for a batch that fails it unless the row is still `version` when it runs, so
- * a change made from an old read writes nothing (`commit` throws `StaleVersionError`).
+ * a change made from an old read writes nothing (`commit` throws `StaleVersionError`). A draft
+ * passes its `incarnation` too: a row deleted and made again with its id starts at version 1 again.
  */
-function versionGuard(db: Db, orgId: string, t: typeof s.screens | typeof s.spots, id: string, version: number): Write {
+function versionGuard(db: Db, orgId: string, t: typeof s.screens | typeof s.spots, id: string, version: number, incarnation?: string | null): Write {
+  // Only drafts have the column; the others have no way to be made again with an id.
+  const sameRow = incarnation === undefined ? sql`1` : sql`${sql.identifier('incarnation')} IS ${incarnation}`;
   const check = db
     .select({
       // json() of text that is not JSON raises an error, which aborts the batch.
-      ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE ${t.orgId} = ${orgId} AND ${t.id} = ${id} AND ${t.rowVersion} = ${version}) THEN '1' ELSE 'stale version' END)`,
+      ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE ${t.orgId} = ${orgId} AND ${t.id} = ${id} AND ${t.rowVersion} = ${version} AND ${sameRow}) THEN '1' ELSE 'stale version' END)`,
     })
     .from(s.organization)
     .where(eq(s.organization.id, orgId));
-  const current = async () => {
+  const stale = async () => {
     const r = await db
-      .select({ version: t.rowVersion })
+      .select({ version: t.rowVersion, same: sql<number>`${sameRow}` })
       .from(t)
       .where(and(eq(t.orgId, orgId), eq(t.id, id)))
       .get();
     if (!r) throw new NotInOrgError('row', id);
-    return r.version;
+    return r.version === version && r.same ? undefined : r.version;
   };
-  return guard(check, { id, version, current });
+  return guard(check, { id, version, stale });
 }
 
 /** get / list / insert / update / delete over a table with an org and an id. */
@@ -225,7 +228,7 @@ function publisher<T extends typeof s.spots | typeof s.playlists | typeof s.sche
         .set({ ...set, updatedAt: sql`${t.updatedAt}` })
         .where(and(eq(t.orgId, orgId), eq(t.id, row.id))),
     );
-    return { row: promoted.row, writes: [versionGuard(db, orgId, t, row.id, row.rowVersion), ...promoted.writes] };
+    return { row: promoted.row, writes: [versionGuard(db, orgId, t, row.id, row.rowVersion, row.incarnation), ...promoted.writes] };
   };
 }
 
@@ -800,7 +803,10 @@ export function scoped(d1: D1Database, orgId: string) {
               .onConflictDoUpdate({ target: os.orgId, set: { ...patch, rowVersion: sql`${os.rowVersion} + 1`, updatedAt } }),
           );
           if (ifVersion === undefined) return upsert;
-          const now = async () => (await db.select({ v: os.rowVersion }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 1;
+          const stale = async () => {
+            const now = (await db.select({ v: os.rowVersion }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 1;
+            return now === ifVersion ? undefined : now;
+          };
           const check = db
             .select({
               // json() of text that is not JSON raises an error, which aborts the batch.
@@ -808,7 +814,7 @@ export function scoped(d1: D1Database, orgId: string) {
             })
             .from(s.organization)
             .where(eq(s.organization.id, orgId));
-          return { row, writes: [guard(check, { id: 'settings', version: ifVersion, current: now }), ...upsert.writes] };
+          return { row, writes: [guard(check, { id: 'settings', version: ifVersion, stale }), ...upsert.writes] };
         },
       },
     },
@@ -914,13 +920,16 @@ export function scoped(d1: D1Database, orgId: string) {
             })
             .from(s.organization)
             .where(eq(s.organization.id, orgId));
-          const current = async () => (await db.select({ v: os.publishRevision }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 0;
+          const stale = async () => {
+            const now = (await db.select({ v: os.publishRevision }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 0;
+            return now === revision ? undefined : now;
+          };
           // Not a setting: the version and `updatedAt` stay, so an open settings form does not conflict.
           const move = db
             .insert(os)
             .values({ orgId, publishRevision: 1 })
             .onConflictDoUpdate({ target: os.orgId, set: { publishRevision: sql`${os.publishRevision} + 1`, updatedAt: sql`${os.updatedAt}` } });
-          return { row: undefined, writes: [guard(check, { id: 'publish revision', version: revision, current }), ...staged(undefined, move).writes] };
+          return { row: undefined, writes: [guard(check, { id: 'publish revision', version: revision, stale }), ...staged(undefined, move).writes] };
         },
       },
       screens: (publishId: string) =>
