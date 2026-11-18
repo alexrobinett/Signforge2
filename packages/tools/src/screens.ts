@@ -69,7 +69,7 @@ export const screenOutput = z.object({
           name: z.string(),
           kind: z.enum(['template', 'image', 'video', 'url']),
           template: z.string().nullable(),
-          image: z.string().nullable().describe('SHA-256 of an image the spot shows, for a thumbnail (GET /api/blobs/:sha256)'),
+          image: z.string().nullable().describe('SHA-256 of an image the spot shows, for a thumbnail (GET /api/blobs/v2/:sha256)'),
         })
         .nullable()
         .describe("The playlist's first spot"),
