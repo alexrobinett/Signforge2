@@ -399,36 +399,46 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       /**
        * A screen's sync (`POST /v1/device/sync`), in one atomic batch: its heartbeat, last-seen
-       * time and the manifest it reports playing (`reportManifest`), and its play counts added to the hourly totals unless the batch's `seq` is already
-       * stored in its `epoch` (a retry). The check is in the statements, so two copies of one
-       * request racing still count once. Leaves `updatedAt`, the settings' change time, alone.
-       * Returns the highest seq stored in the epoch, and the rows D1 wrote (the budget's unit), or
-       * undefined if the org has no such screen.
+       * time and the manifest it reports playing (`reportManifest`), and its play counts added to
+       * the hourly totals if the batch's `seq` is above the highest stored in its `epoch`
+       * (`sync_epochs`; seq 0 is no batch). Each epoch keeps its own mark, so retries from before
+       * and after a re-image count once in any order. The check is in the statements, so two
+       * copies of one request racing still count once. Leaves `updatedAt`, the settings' change
+       * time, alone. Returns the highest seq stored in the epoch, and the rows D1 wrote (the
+       * budget's unit), or undefined if the org has no such screen.
        */
       sync: async (screenId: string, v: SyncWrite): Promise<{ ackSeq: number; rowsWritten: number } | undefined> => {
-        const repeat = 'org_id = ? AND id = ? AND (sync_epoch IS NOT ? OR sync_ack_seq < ?)';
+        const mark = 'coalesce((SELECT ack_seq FROM sync_epochs WHERE org_id = ? AND screen_id = ? AND epoch = ?), 0)';
+        const markArgs = [orgId, screenId, v.epoch];
         const inserts = chunk([...v.counts], 7).map((part) =>
           d1
             .prepare(
               `INSERT INTO play_counts (org_id, screen_id, hour, spot_id, plays, ms)
                SELECT column1, column2, column3, column4, column5, column6 FROM (VALUES ${part.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')})
-               WHERE EXISTS (SELECT 1 FROM screens WHERE ${repeat})
+               WHERE EXISTS (SELECT 1 FROM screens WHERE org_id = ? AND id = ?) AND ? > ${mark}
                ON CONFLICT (org_id, screen_id, hour, spot_id) DO UPDATE SET plays = plays + excluded.plays, ms = ms + excluded.ms`,
             )
-            .bind(...part.flatMap((c) => [orgId, screenId, c.hour, c.spotId, c.plays, c.ms]), orgId, screenId, v.epoch, v.seq),
+            .bind(...part.flatMap((c) => [orgId, screenId, c.hour, c.spotId, c.plays, c.ms]), orgId, screenId, v.seq, ...markArgs),
         );
+        // A repeat or an older seq leaves the mark, and writes nothing.
+        const advance = d1
+          .prepare(
+            `INSERT INTO sync_epochs (org_id, screen_id, epoch, ack_seq)
+             SELECT org_id, id, ?, ? FROM screens WHERE org_id = ? AND id = ? AND ? > 0
+             ON CONFLICT (org_id, screen_id, epoch) DO UPDATE SET ack_seq = excluded.ack_seq WHERE excluded.ack_seq > sync_epochs.ack_seq`,
+          )
+          .bind(v.epoch, v.seq, orgId, screenId, v.seq);
         const update = d1
           .prepare(
             `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?,
-               reported_manifest_id = coalesce(?, reported_manifest_id),
-               sync_ack_seq = CASE WHEN sync_epoch IS ? THEN max(sync_ack_seq, ?) ELSE ? END, sync_epoch = ?
-             WHERE org_id = ? AND id = ? RETURNING sync_ack_seq`,
+               reported_manifest_id = coalesce(?, reported_manifest_id)
+             WHERE org_id = ? AND id = ? RETURNING ${mark} AS ack_seq`,
           )
-          .bind(v.at, v.playerVersion, v.heartbeatJson, v.active ?? null, v.epoch, v.seq, v.seq, v.epoch, orgId, screenId);
-        const results = await d1.batch([...inserts, update]);
-        const row = results.at(-1)!.results[0] as { sync_ack_seq: number } | undefined;
+          .bind(v.at, v.playerVersion, v.heartbeatJson, v.active ?? null, orgId, screenId, ...markArgs);
+        const results = await d1.batch([...inserts, advance, update]);
+        const row = results.at(-1)!.results[0] as { ack_seq: number } | undefined;
         if (!row) return undefined;
-        return { ackSeq: row.sync_ack_seq, rowsWritten: results.reduce((n, r) => n + (r.meta.rows_written ?? 0), 0) };
+        return { ackSeq: row.ack_seq, rowsWritten: results.reduce((n, r) => n + (r.meta.rows_written ?? 0), 0) };
       },
       /** Ids of the groups a screen belongs to. */
       groupsOf: async (screenId: string) =>
