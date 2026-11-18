@@ -23,6 +23,7 @@
  * Every tenant `org_id` references Better Auth's `organization` table, with no cascade: an org
  * cannot be deleted while it holds content.
  */
+import { SCREEN_KINDS } from '@signforge/contract';
 import { sql } from 'drizzle-orm';
 import { check, customType, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
@@ -184,6 +185,8 @@ export const screens = sqliteTable(
     timezone: text('timezone').notNull(),
     locale: text('locale'),
     orientation: text('orientation', { enum: ['landscape', 'portrait'] }).notNull(),
+    /** The contract's `ScreenKind`: a device, or a test screen in a browser tab. Set at the claim, from what the screen said at pair start. */
+    kind: text('kind', { enum: SCREEN_KINDS }).notNull().default('device'),
     /** The contract's `DisplayHours`, or null for always on. */
     displayHoursJson: text('display_hours_json'),
     desiredManifestId: text('desired_manifest_id'),
@@ -269,6 +272,8 @@ export const pairingCodes = sqliteTable(
     id: text('id').primaryKey(),
     code: text('code').notNull(),
     pollTokenHash: text('poll_token_hash').notNull(),
+    /** What the screen said it is at pair start (contract `PairStartRequest`). */
+    kind: text('kind', { enum: SCREEN_KINDS }).notNull().default('device'),
     expiresAt: integer('expires_at').notNull(),
     claimedOrgId: text('claimed_org_id'),
     claimedScreenId: text('claimed_screen_id'),

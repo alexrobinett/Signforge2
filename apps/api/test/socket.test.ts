@@ -51,7 +51,8 @@ async function sync(credential: string, body: unknown = syncBody()) {
 }
 
 /** The response to a socket upgrade with this ticket. */
-const upgrade = (ticket: string) => exports.default.fetch(`${BASE}/ws?ticket=${encodeURIComponent(ticket)}`, { headers: { upgrade: 'websocket' } });
+const upgrade = (ticket: string, headers: Record<string, string> = {}) =>
+  exports.default.fetch(`${BASE}/ws?ticket=${encodeURIComponent(ticket)}`, { headers: { upgrade: 'websocket', ...headers } });
 
 /** An open socket and the messages it has received. */
 async function connect(ticket: string) {
@@ -132,6 +133,18 @@ describe('GET /v1/device/ws', () => {
   it('refuses a missing or forged ticket', async () => {
     expect((await upgrade('')).status).toBe(401);
     expect((await upgrade('ws-a-screen.crd.1.AAAA')).status).toBe(401);
+  });
+
+  it('lets a session cookie through on the upgrade, and decides by the ticket alone', async () => {
+    // A test screen on the CMS's hostname cannot keep its user's cookie off a WebSocket handshake.
+    const cookie = { cookie: 'sf.session_token=x' };
+    expect((await upgrade('', cookie)).status).toBe(401);
+    expect(await (await upgrade('', cookie)).json()).toEqual({ error: 'unauthorized' });
+    const ticket = ((await (await sync(a.credential)).json()) as SyncResponse).socketTicket;
+    const res = await upgrade(ticket, cookie);
+    expect(res.status).toBe(101);
+    res.webSocket?.accept();
+    res.webSocket?.close(1000);
   });
 
   it('answers keepalive pings without the object, and carries a publish to the screen at once', async () => {
