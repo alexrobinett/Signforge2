@@ -216,6 +216,13 @@ describe('the heartbeat', () => {
     expect(refused.status).toBe(400);
     expect(((await refused.json()) as { problems: string[] }).problems).toHaveLength(2);
 
+    // A play-count list filling the ceiling: one problem, not one per entry (a 500 before).
+    const counts = JSON.stringify(body({ playCounts: Array.from({ length: 349_000 }, () => ({})) }));
+    expect(counts.length).toBeLessThan(MAX_SYNC_REQUEST_BYTES);
+    const tooMany = await post(counts);
+    expect(tooMany.status).toBe(400);
+    expect(((await tooMany.json()) as { problems: string[] }).problems).toHaveLength(1);
+
     // Over the ceiling: refused before it is parsed, with a length or streamed without one.
     const seenAt = (await s.seed.scope.screens.get(s.seed.screen))?.lastSeenAt;
     const more = { ...legacy, ...Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`t${String(i).padStart(63, '0')}`, 1_763_384_400_000])) };
