@@ -22,7 +22,8 @@ import { ago, describeScreen, rollup, summarise } from '~/lib/screen-status';
 import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
 import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
-import { screensQuery, screenStatusQuery, withStatus } from '~/queries/screens';
+import { withStatus } from '~/lib/fleet-status';
+import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
 
 type View = 'tiles' | 'table';
