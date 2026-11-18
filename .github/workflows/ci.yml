@@ -31,6 +31,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm knip # unused files, exports and dependencies; knip.jsonc lists what it cannot see
+      - run: pnpm dupes # copy-paste across apps/ and packages/ may not pass 1% (.jscpd.json)
       - run: pnpm exec turbo boundaries # imports stay inside their package and name declared dependencies
       # A commit that changes packages/contract changes nothing else (AGENTS.md, "The contract leads").
       - run: sh scripts/check-contract-commits.sh ${{ github.event.pull_request.base.sha || github.event.before }}
