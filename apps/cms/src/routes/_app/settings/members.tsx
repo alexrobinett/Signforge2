@@ -224,7 +224,7 @@ function PublishingForm({ settings, canEdit }: { settings: OrgSettings; canEdit:
       <SettingsSection
         id={`${id}-publishing`}
         title="Who publishes"
-        description="Owners always publish to screens. Turn this off and editors still edit spots, playlists and screens, but an owner publishes their changes."
+        description="Owners always publish to screens. Turn this off and editors still edit spots, playlists and assets, and pair, restart and rename screens, but only owners publish."
       >
         <label className="flex items-start gap-3 text-sm">
           <input
