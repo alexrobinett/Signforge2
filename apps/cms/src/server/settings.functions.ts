@@ -12,7 +12,7 @@ import { inOrg, tool } from './tools.server';
 async function read<T>(path: `/api/${string}`): Promise<T> {
   const res = await callApi(path);
   if (!res.ok) throw new Error(`${path} failed: ${res.status}`);
-  // Better Auth's response for that endpoint (better-auth 1.7.25, pinned).
+  // The endpoint's response: Better Auth's (better-auth 1.7.25, pinned) or the API's own /api/session.
   const body: T = await res.json();
   return body;
 }
