@@ -33,7 +33,7 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 | Command | What it runs |
 | --- | --- |
 | `pnpm --filter @signforge/cms typecheck` | `wrangler types --env dev`, then `tsc` |
-| `pnpm --filter @signforge/cms lint` | ESLint with the React rules below. Root `pnpm lint` runs Biome, then this |
+| `pnpm --filter @signforge/cms lint` | ESLint with the React rules below. Root `pnpm lint` runs Biome, then this through Turbo (task `lint`, cached) |
 | `pnpm --filter @signforge/cms test` | Unit tests (Vitest) |
 | `pnpm --filter @signforge/cms test:e2e` | Playwright against a real local API and CMS: sign in with an email code, create two orgs, switch, navigate, sign out, and the phone-width drawer. It starts its own API (port 8797) and CMS (port 3997) with a fresh database and dev registry, so it does not touch servers you have running. Set `E2E_SCREENSHOTS=<dir>` to save screenshots. Root `pnpm test` runs it too (Turbo task `test:e2e`, never cached). Its ports are fixed, so two checkouts cannot run it at the same time. First run: `pnpm --filter @signforge/cms exec playwright install chromium`. |
 | `CLOUDFLARE_ENV=demo pnpm --filter @signforge/cms build` | Production build into `dist/` for that environment. Without `CLOUDFLARE_ENV` it fails: there is no default environment |
