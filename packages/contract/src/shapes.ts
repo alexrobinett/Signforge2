@@ -658,8 +658,10 @@ export interface PlayCount {
 export const MAX_SYNC_PLAY_COUNTS = 500;
 
 /**
- * The most sources one sync reports in `snapshots` or in `dataRejected`. Far above what any screen
- * holds; the server stores what a screen reports, so a misbehaving one must not write a huge row.
+ * The most sources a player reports in `snapshots` or `dataRejected`: it sends only the sources of
+ * the manifests it holds. A sync with more is still taken, as players before gh-45 send every
+ * source seen since they started; the server keeps at most this many of `dataRejected`, so a
+ * misbehaving screen cannot write a huge row.
  */
 export const MAX_SYNC_SOURCES = 256;
 

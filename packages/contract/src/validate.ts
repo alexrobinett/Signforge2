@@ -20,7 +20,6 @@ import {
   MAX_IDENTIFY_SECONDS,
   MAX_SNAPSHOT_BYTES,
   MAX_SYNC_PLAY_COUNTS,
-  MAX_SYNC_SOURCES,
   PREVIEW_PROTOCOL,
   SCREEN_KINDS,
   SUPPORTED_MANIFEST_SCHEMAS,
@@ -700,13 +699,11 @@ export function validateSyncRequest(r: unknown): string[] {
   errors.push(...list('play count', r.playCounts, playCountProblems));
   if (Array.isArray(r.playCounts) && r.playCounts.length > MAX_SYNC_PLAY_COUNTS) errors.push(`playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`);
   if (!isObj(r.snapshots)) errors.push('snapshots must map source ids to versions');
-  else if (Object.keys(r.snapshots).length > MAX_SYNC_SOURCES) errors.push(`snapshots holds at most ${MAX_SYNC_SOURCES} sources`);
   else
     for (const [k, v] of Object.entries(r.snapshots))
       if (!isIdValue(k) || !isCount(v)) errors.push(`snapshots: "${k}" must be a source id with a version number`);
   if (r.dataRejected !== undefined) {
     if (!isObj(r.dataRejected)) errors.push('dataRejected must map source ids to counts');
-    else if (Object.keys(r.dataRejected).length > MAX_SYNC_SOURCES) errors.push(`dataRejected holds at most ${MAX_SYNC_SOURCES} sources`);
     else
       for (const [k, v] of Object.entries(r.dataRejected))
         if (!isIdValue(k) || !isCount(v)) errors.push(`dataRejected: "${k}" must be a source id with a count`);

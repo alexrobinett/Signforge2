@@ -538,19 +538,16 @@ describe('snapshots and device bodies', () => {
     expect(validateSyncRequest(without)).toEqual([]);
   });
 
-  it('takes only sha256 manifest ids from a screen, and bounds its source maps', () => {
+  it('takes only sha256 manifest ids from a screen', () => {
     const r = validSyncRequest() as unknown as Record<string, unknown>;
     r.manifest = { active: 'x'.repeat(10_000), filesMissing: 0, fallbackFrom: M2.toUpperCase(), lastGood: 'm1' };
-    r.snapshots = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 1 }, (_, i) => [`s${i}`, 1]));
-    r.dataRejected = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 1 }, (_, i) => [`s${i}`, 1]));
-    expect(validateSyncRequest(r)).toEqual([
-      'manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids',
-      `snapshots holds at most ${MAX_SYNC_SOURCES} sources`,
-      `dataRejected holds at most ${MAX_SYNC_SOURCES} sources`,
-    ]);
-    r.snapshots = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES }, (_, i) => [`s${i}`, 1]));
-    expect(validateSyncRequest({ ...validSyncRequest(), snapshots: r.snapshots })).toEqual([]);
+    expect(validateSyncRequest(r)).toEqual(['manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids']);
     expect(validateDeviceSocketMessage({ type: 'applied', manifest: 'm1' })).toEqual(['applied message needs a sha256 manifest id']);
+  });
+
+  it('takes source maps over MAX_SYNC_SOURCES: a player before gh-45 sends every source it has seen since it started', () => {
+    const many = Object.fromEntries(Array.from({ length: MAX_SYNC_SOURCES + 44 }, (_, i) => [`s${i}`, 1]));
+    expect(validateSyncRequest({ ...validSyncRequest(), snapshots: many, dataRejected: many })).toEqual([]);
   });
 
   it('lets a screen with nothing published sync, for its socket ticket', () => {
