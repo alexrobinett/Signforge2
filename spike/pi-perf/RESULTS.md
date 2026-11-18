@@ -369,6 +369,19 @@ No spot was skipped. The beat costs nothing beyond run-to-run noise. The 317 and
 
 Hang: `kill -STOP` of every Chromium renderer (the player's and the templates') while the cloud config played. Twice, the supervisor restarted the kiosk 27.5 s and 31.7 s after the stop (30 s after the last beat, checked every 5 s); the first spot played again 36.1 s after the stop. systemd's stop took 0.3 s, as it sends SIGCONT with SIGTERM. With the signal turned off (`/display/off`) for 75 s the page stayed `visible`, the beat went on and nothing was restarted. The polkit rule lets the supervisor's user restart `signforge-kiosk` and nothing else (stopping `signforge-player-web` was refused).
 
+## Badge text chosen for its fill (issue #57, 2026-11-18)
+
+news 1.3.1 and cstore-promo 1.2.1 choose their badge text in `prepare` with the SDK's `readableOn` (two custom property reads, one `getComputedStyle` in news). This branch's player at a subdirectory of the rig, with content built from master's templates (before) and this branch's (after) beside it; cut, 60 s per run after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order alternated (before, after, then after, before).
+
+| Content | Build | Overall | Playing | Loading next | Worst frame | Prepares (ms) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `examples/stress`, no kit: energy, sport-drinks, news | before | 0.28, 0.94% | 0.00, 0.71% | 12.5, 13.6% | 50, 433 ms | energy 202-231, sport-drinks 221-245, news 185-253 |
+| | after | 0.17, 0.22% | 0.00, 0.00% | 8.6, 11.6% | 33, 50 ms | energy 204-223, sport-drinks 215-277, news 207-289 |
+| `examples/demo`, demo kit: energy, sport-drinks | before | 0.56, 0.50% | 0.06, 0.09% | 16.2, 14.0% | 67, 67 ms | energy 278-316, sport-drinks 282-327 |
+| | after | 0.39, 0.47% | 0.06, 0.03% | 10.9, 14.3% | 50, 50 ms | energy 304-326, sport-drinks 295-361 |
+
+No cost in frames. The one 433 ms frame was while a spot played, in master's last run. With the kit, energy's prepares were 10 to 26 ms slower (medians 315 against 295 ms) over six each, about the run-to-run spread, and all well within 500 ms. Nothing was skipped.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
