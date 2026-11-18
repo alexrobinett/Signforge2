@@ -32,6 +32,9 @@ export async function hashSecret(secret: string): Promise<string> {
 export async function mintCredential(screenId: string): Promise<{ credential: string; secretHash: string }> {
   if (!ID_PATTERN.test(screenId)) throw new TypeError('screen id must match ID_PATTERN');
   const bytes = crypto.getRandomValues(new Uint8Array(32));
-  const secret = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const secret = btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
   return { credential: `${PREFIX}${screenId}.${secret}`, secretHash: await hashSecret(secret) };
 }
