@@ -37,6 +37,9 @@ const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
 /** Ids that name a catalogue every org shares, not an org's row: any org may use them. */
 const CATALOGUE_IDS: Record<string, string> = { displayFont: 'base/oswald', bodyFont: 'base/inter' };
 
+/** Ids that name no row at all, so no org has one to lend: an R2 multipart upload's (finalize_video_upload finds the asset first). */
+const NOT_ROWS = new Set(['upload']);
+
 /** The kind of id a field names, if it names one: `screenId` → `screen`, `groupIds` → `group`. */
 const kindOf = (key: string) => (key.endsWith('Ids') ? key.slice(0, -3) : key.endsWith('Id') ? key.slice(0, -2) : undefined);
 
@@ -54,7 +57,7 @@ function idFields(schema: unknown, path: string[] = []): IdField[] {
   if (s.items?.properties && idFields(s.items, path).length) throw new Error(`${path.join('.')}: ids inside a list of objects; teach idFields to reach them`);
   return Object.entries(s.properties ?? {}).flatMap(([key, prop]) => {
     const kind = kindOf(key);
-    if (kind && !CATALOGUE_IDS[kind]) {
+    if (kind && !CATALOGUE_IDS[kind] && !NOT_ROWS.has(kind)) {
       if (!ORG_IDS[kind]) throw new Error(`input field "${key}" names ids of kind "${kind}": add it to ORG_IDS`);
       return [{ path: [...path, key], kind, many: key.endsWith('Ids'), optional: !s.required?.includes(key) }];
     }

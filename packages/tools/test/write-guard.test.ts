@@ -60,6 +60,8 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   logoOnDarkAsset: (o) => o.asset,
   logoOnLightAsset: (o) => o.asset,
   dataSource: (o) => o.dataSource,
+  // An R2 multipart upload's id, not a row.
+  upload: () => 'upload-id',
   // Catalogue ids, the same for every org.
   displayFont: () => 'base/oswald',
   bodyFont: () => 'base/inter',
@@ -107,7 +109,14 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     });
     await env.BLOBS.put(uploadKey(o.orgId, o.asset, 'b'.repeat(64)), 'not the claimed bytes');
   },
+  // A pending video whose uploaded bytes are no MP4: finalize rejects it.
+  finalize_video_upload: async (o) => {
+    const asset = await o.scope.assets.update(o.asset, { kind: 'video', status: 'pending', type: 'video/mp4', size: 11 });
+    await env.BLOBS.put(uploadKey(o.orgId, o.asset, asset!.sha256), 'not a video');
+  },
 };
+/** Tools whose example is refused on purpose, changing the asset as it does so. */
+const REJECTS = new Set(['finalize_asset', 'finalize_video_upload']);
 /** Tools whose example still cannot get as far as writing: their bundle is not uploaded. They are covered in templates.test.ts. */
 const STOPS_SHORT = new Set(['register_template_version']);
 
@@ -128,7 +137,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
   };
   const reg = new Map([[tool.name, tool]]);
   const result = await dispatch(reg, tool.name, input ?? withOwnIds(tool.example, o), caller);
-  if (tool.name === 'finalize_asset') expect((await o.scope.assets.get(o.asset))?.status).toBe('rejected');
+  if (REJECTS.has(tool.name)) expect((await o.scope.assets.get(o.asset))?.status).toBe('rejected');
   const audit = await scoped(env.DB, o.orgId).auditLog.list({ limit: 10 });
   return { result, outside, audited: audit.some((e) => e.action === tool.name) };
 }
@@ -142,8 +151,8 @@ describe('every tool that changes data', () => {
     it(`${tool.name}: writes nothing outside the batch`, async () => {
       const { result, outside } = await runRecorded(tool, undefined);
       expect(outside, `${tool.name} wrote straight to D1 (${JSON.stringify(result)})`).toEqual([]);
-      // finalize_asset refuses the seeded files (their hashes are made up), marking the asset rejected: a write too.
-      if (!STOPS_SHORT.has(tool.name) && tool.name !== 'finalize_asset') expect(result, tool.name).toMatchObject({ ok: true });
+      // The finalize tools refuse the seeded files, marking the asset rejected: a write too.
+      if (!STOPS_SHORT.has(tool.name) && !REJECTS.has(tool.name)) expect(result, tool.name).toMatchObject({ ok: true });
     });
   }
 

@@ -13,7 +13,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@signforge/contract": "workspace:*"
+    "@signforge/contract": "workspace:*",
+    "@signforge/media-check": "workspace:*",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

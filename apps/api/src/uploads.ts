@@ -3,7 +3,9 @@
  *
  * Deployed: R2's S3 API, `R2_S3_ENDPOINT` (`https://<account>.r2.cloudflarestorage.com`) and
  * `R2_BUCKET_NAME`, signed with an R2 API token's `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`
- * (secrets). The bucket needs a CORS rule allowing PUT with `content-type` from the CMS origin.
+ * (secrets). The bucket needs a CORS rule allowing PUT with `content-type` from the CMS origin and
+ * exposing `ETag` (a video's parts are completed with them), and a lifecycle rule on `up/` that
+ * expires objects and aborts incomplete multipart uploads after a day.
  *
  * `wrangler dev` (ENVIRONMENT `dev`, no endpoint set): the local bucket's S3 API, which wrangler
  * serves on the Worker's own origin at `/cdn-cgi/local/r2/s3` and checks against the credentials

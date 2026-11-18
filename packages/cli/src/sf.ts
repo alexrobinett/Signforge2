@@ -31,14 +31,12 @@
  *   { "colors": { ... all eight ... }, "shape": "soft",
  *     "fonts": { "display": "base/oswald", "body": "base/inter" }, "logo": { "onDark": "logo.svg" } }
  */
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import {
   SCREEN_BOX,
-  VIDEO_SPEC,
   coverSize,
   validateBrandKit,
   templateKey,
@@ -61,6 +59,7 @@ import { FeedError, normaliseFeed } from '@signforge/feeds';
 import { compileScreen, fontById, fontFilePath, onColor, spotProblems, type CompileInput, type TargetedEntry } from '@signforge/compiler';
 import { push, PushError } from './push';
 import { buildTemplate, type BuiltTemplate } from './template';
+import { checkVideoFile } from './video';
 import { pushFonts, pushTemplate, TemplatePushError } from './template-push';
 
 const MIME: Record<string, string> = {
@@ -98,79 +97,6 @@ async function fitImage(data: Buffer, type: string, box: ScreenBox): Promise<{ d
           ? await resized.avif({ quality: 60 }).toBuffer()
           : await resized.jpeg({ quality: 85, mozjpeg: true }).toBuffer();
   return { data: out, note: `${w}x${h} -> ${size.width}x${size.height}, ${(data.length / 1024).toFixed(0)} -> ${(out.length / 1024).toFixed(0)} kB` };
-}
-
-/** Check a video against the screen profile with ffprobe. Returns problems; skipped with a warning only if ffprobe is not installed. */
-function checkVideo(path: string): string[] {
-  let out: string;
-  try {
-    out = execFileSync(
-      'ffprobe',
-      [
-        '-v',
-        'error',
-        '-select_streams',
-        'v:0',
-        '-show_entries',
-        'stream=codec_name,profile,pix_fmt,level,field_order,width,height,avg_frame_rate,r_frame_rate,bit_rate:format=bit_rate',
-        '-of',
-        'json',
-        path,
-      ],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      console.warn(`  warning: ffprobe not found; ${basename(path)} was not checked against the video spec`);
-      return [];
-    }
-    return [
-      `ffprobe could not read the file: ${
-        String((err as { stderr?: string }).stderr ?? err)
-          .trim()
-          .split('\n')[0]
-      }`,
-    ];
-  }
-  type Stream = {
-    codec_name: string;
-    profile?: string;
-    pix_fmt?: string;
-    level?: number;
-    field_order?: string;
-    width: number;
-    height: number;
-    avg_frame_rate: string;
-    r_frame_rate: string;
-    bit_rate?: string;
-  };
-  const probe = JSON.parse(out) as { streams: Stream[]; format?: { bit_rate?: string } };
-  const v = probe.streams[0];
-  if (!v) return ['no video stream'];
-  const rate = (r: string) => {
-    const [num, den] = r.split('/').map(Number);
-    return den ? (num ?? 0) / den : 0;
-  };
-  const fps = rate(v.avg_frame_rate) || rate(v.r_frame_rate);
-  // The stream's own bit rate when the container records it, the whole file's otherwise.
-  const bitrate = Number(v.bit_rate) || Number(probe.format?.bit_rate);
-  const long = Math.max(v.width, v.height),
-    short = Math.min(v.width, v.height);
-  const problems: string[] = [];
-  if (v.codec_name !== VIDEO_SPEC.codec) problems.push(`codec is ${v.codec_name}; screens need ${VIDEO_SPEC.codec}`);
-  if (!(VIDEO_SPEC.pixelFormats as readonly string[]).includes(v.pix_fmt ?? ''))
-    problems.push(`pixel format is ${v.pix_fmt}; screens need 8-bit 4:2:0 (yuv420p)`);
-  if (v.profile && !(VIDEO_SPEC.profiles as readonly string[]).includes(v.profile))
-    problems.push(`H.264 profile ${v.profile} is not supported; use High or Main`);
-  if (v.level !== undefined && v.level > VIDEO_SPEC.maxLevel) problems.push(`H.264 level ${v.level / 10} is above ${VIDEO_SPEC.maxLevel / 10}`);
-  if (v.field_order && !['progressive', 'unknown'].includes(v.field_order)) problems.push('video is interlaced; screens need progressive');
-  if (long > VIDEO_SPEC.maxWidth || short > VIDEO_SPEC.maxHeight)
-    problems.push(`${v.width}x${v.height} is larger than ${VIDEO_SPEC.maxWidth}x${VIDEO_SPEC.maxHeight}`);
-  if (!(fps > 0)) problems.push('frame rate could not be read');
-  else if (fps > VIDEO_SPEC.maxFps + 0.5) problems.push(`${fps.toFixed(0)} fps is above ${VIDEO_SPEC.maxFps}`);
-  if (!(bitrate > 0)) problems.push('bit rate could not be read');
-  else if (bitrate > VIDEO_SPEC.maxBitrate) problems.push(`${(bitrate / 1e6).toFixed(1)} Mbit/s is above ${VIDEO_SPEC.maxBitrate / 1e6}`);
-  return problems;
 }
 
 const sha256 = (data: Buffer | string) => createHash('sha256').update(data).digest('hex');
@@ -224,11 +150,15 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
       return '';
     }
     const type = MIME[extname(path).toLowerCase()] ?? 'application/octet-stream';
-    if (type.startsWith('video/') && !fitted.has(rel))
-      problems.add(
-        where,
-        checkVideo(path).map((p) => `${rel}: ${p}`),
-      );
+    if (type.startsWith('video/') && !fitted.has(rel)) {
+      const found = checkVideoFile(path);
+      if (found === null) console.warn(`  warning: ffprobe not found; ${rel} was not checked against the video spec`);
+      else
+        problems.add(
+          where,
+          found.map((p) => `${rel}: ${p}`),
+        );
+    }
     if (!fitted.has(rel)) {
       const { data, note } = await fitImage(readFileSync(path), type, SCREEN_BOX[screen.orientation]);
       if (note) console.log(`  image ${rel}  ${note}`);
