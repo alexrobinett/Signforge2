@@ -165,7 +165,7 @@ export class Slot {
       this.video = undefined;
     }
     this.el.replaceChildren();
-    this.el.style.background = '';
+    this.el.style.removeProperty('--slot-bg');
     this.urls.forEach((u) => URL.revokeObjectURL(u));
     this.urls = [];
     this.spot = undefined;
@@ -222,7 +222,7 @@ export class Slot {
       const ratio = orientation === 'landscape' ? 16 / 9 : 9 / 16;
       w = Math.min(sw, sh * ratio);
       h = w / ratio;
-      this.el.style.background = t.manifest.background;
+      this.el.style.setProperty('--slot-bg', t.manifest.background);
     }
 
     // The template runs in a wrapper frame the player writes and the template cannot touch. The

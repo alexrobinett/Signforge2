@@ -50,9 +50,10 @@ The player and the template talk only through messages. The SDK handles all of i
 
 1. The template loads and reports `loaded`.
 2. The player sends `init` with the spot's data, its image files, the duration of this play, the orientation, the viewport size, the screen's time zone and locale, and (protocol 2) the screen's clock and, when the screen has a brand kit, its theme.
-3. The SDK fills in the data, waits for fonts and images to decode and for the result to be painted, pauses every animation, and reports `ready`.
-4. When the spot goes on screen the player sends `play`. Every animation restarts from zero.
-5. The player removes the template when the spot's duration is up. The template is not asked.
+3. The template's document is hidden from load until this first `init`, and until its frame has its size. A new frame starts at 0x0, and what the browser tiles before the size arrives keeps the smallest tiles: on the Pi a full-screen layer then took about a second to raster. Nothing a template does in `prepare` sees the difference.
+4. The SDK fills in the data, waits for fonts and images to decode and for the result to be painted, pauses every animation, and reports `ready`.
+5. When the spot goes on screen the player sends `play`. Every animation restarts from zero.
+6. The player removes the template when the spot's duration is up. The template is not asked.
 
 A template that has not reported `ready` within 2 seconds is skipped.
 
@@ -81,7 +82,7 @@ When the screen has a brand kit, the player sends it in `init` as `theme`, and b
 - Brand fonts: `--sf-font-display` and `--sf-font-body`, each set when the kit has that font and the template's `<style>` uses that variable. The SDK adds them as `@font-face` rules for `sf-brand-display` and `sf-brand-body` with `data:` URLs (as a template's own fonts arrive; nothing is fetched, and the no-network policy is unchanged) and loads them before `ready`, so the first frame draws with them. A family the template never uses is not loaded: on the Pi, unused faces still slowed the first paint of a large photo. Faces built from bytes (`new FontFace(name, buffer)`) were tried first and dropped: on the Pi about one prepare in three of a template over a 4K photo then took about a second to paint.
 - The logo: `<img data-sf-src="$brand.logo">` gets the kit's logo, the on-light version when `--sf-bg` is light and the kit has one, else the on-dark one. It is also `ctx.assets['$brand.logo']`.
 
-Cost on the Pi (`spike/pi-perf/RESULTS.md`, Brand fonts): a kit costs a template that does not use the brand fonts nothing; drawing in them adds 30 to 100 ms to most prepares, but cstore-promo, news and photo-promo went over the 500 ms budget in a first trial. Measure a template on the Pi after moving it onto the brand fonts.
+Cost on the Pi (`spike/pi-perf/RESULTS.md`, Brand fonts and Slow prepares): a kit costs a template that does not use the brand fonts nothing; drawing in them adds about 0 to 80 ms to a prepare, and with the brand fonts every stress template prepares within 500 ms except video-pan (over in every build) and news at 517 ms once. Measure a template on the Pi after moving it onto the brand fonts.
 
 Write every brand value with a fallback, so the template still draws on a screen with no kit, where nothing is set: `color: var(--sf-text, #f8fafc)`, `font-family: var(--sf-font-display, Inter), sans-serif`, and give the logo `<img>` a `src` of its own (a `data:` URL) or hide it when it has none. Colours built on a token are fine: `color-mix(in srgb, var(--sf-accent, #22d3ee) 30%, transparent)`.
 

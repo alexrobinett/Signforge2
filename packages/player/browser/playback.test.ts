@@ -25,6 +25,37 @@ describe('playback loop', () => {
       .toBe(true);
   });
 
+  // Chromium sends a frame that has drawn nothing for more than 3 frames one frame a second, and
+  // a frame an opaque one covers completely is never drawn: the next spot, loading underneath,
+  // then took over a second to reach ready on the Pi. So the black behind a spot leaves a 1 px
+  // column uncovered, at the centre, where the spot itself covers it.
+  it('never covers the slot underneath completely with the black behind the spot on top', async () => {
+    const content = h.content([
+      { id: 'a', durationMs: 4000 },
+      { id: 'b', durationMs: 4000 },
+    ]);
+    const p = await h.openPlayer((s) => s.publish(content));
+    await p.until((s) => s.spot === 'a');
+    const shown = await p.page.evaluate(() => {
+      const slot = [...document.querySelectorAll<HTMLElement>('.slot')].find((s) => s.style.zIndex === '2')!;
+      const box = slot.getBoundingClientRect();
+      const painted = (st: CSSStyleDeclaration) => st.backgroundColor !== 'rgba(0, 0, 0, 0)';
+      // What the black covers, as [from, to) in px: the slot's own background and its pseudo-elements.
+      const black: [number, number][] = painted(getComputedStyle(slot)) ? [[box.left, box.right]] : [];
+      for (const pseudo of ['::before', '::after']) {
+        const st = getComputedStyle(slot, pseudo);
+        if (st.content !== 'none' && painted(st)) black.push([box.left + Number.parseFloat(st.left), box.right - Number.parseFloat(st.right)]);
+      }
+      const covered = (x: number) => black.some(([from, to]) => x >= from && x < to);
+      const gaps: number[] = [];
+      for (let x = 0; x < box.width; x++) if (!covered(x + 0.5)) gaps.push(x);
+      const frame = slot.querySelector('iframe')!.getBoundingClientRect();
+      return { width: box.width, gaps, frameCovers: gaps.every((x) => x >= frame.left && x + 1 <= frame.right) };
+    });
+    expect(shown.gaps).toEqual([shown.width / 2 - 1]);
+    expect(shown.frameCovers).toBe(true);
+  });
+
   it('skips a spot whose template throws in prepare and plays the next', async () => {
     const content = h.content([
       { id: 'a', durationMs: 800 },
