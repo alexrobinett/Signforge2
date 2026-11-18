@@ -27,6 +27,9 @@ export function setOverride(o: DisplayOverride | null): void {
   }
 }
 
+/** The override saved, ended or not: what to report on a clock that cannot tell. */
+export const savedOverride = (): DisplayOverride | null => current;
+
 /** The override in force at `now`, or null. An expired one is forgotten. */
 export function activeOverride(now: Date): DisplayOverride | null {
   if (current && Date.parse(current.until) <= now.getTime()) setOverride(null);

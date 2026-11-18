@@ -49,7 +49,7 @@ import { DeviceCredential, type ScreenCredential } from './credential';
 import { identify } from './identify';
 import { pair } from './pairing';
 import { dataRejections, dataSettled, dataStatus, heldVersions, offerChecked, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
-import { activeOverride, setOverride, wakeable } from './override';
+import { activeOverride, savedOverride, setOverride, wakeable } from './override';
 import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
 import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
@@ -887,10 +887,11 @@ async function apiSync(): Promise<void> {
   }
 }
 
-// Untrusted, the player applies no override (displayLoop), so it reports none: reading one would
-// also expire it against that clock. The first trusted look at the display does.
+// Untrusted, the clock cannot tell whether the saved override has ended: it is reported as saved,
+// not expired against that clock, so the first answer can clear one the CMS cleared meanwhile
+// (the server ignores one that has ended). The first trusted look at the display expires it.
 const withOverride = () => {
-  const o = clock.trusted ? activeOverride(new Date(now())) : null;
+  const o = clock.trusted ? activeOverride(new Date(now())) : savedOverride();
   return o ? { override: o } : {};
 };
 

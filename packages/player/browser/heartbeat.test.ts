@@ -164,6 +164,39 @@ describe('an untrusted clock', () => {
 });
 
 describe('the first trusted sync', () => {
+  it('clears a saved override the CMS cleared while the screen was offline, before the display looks', async () => {
+    const p = await h.openPlayer((s) => s.publish(h.content([{ id: 'a', durationMs: 500 }])), api);
+    await p.until((s) => s.clock.trusted && s.played > 0);
+
+    // Offline, a "sleep" saved with an hour to run, and a clock a day behind; the CMS cleared it meanwhile.
+    const cut = p.server.intercept(/^\/content\//, { status: 503 });
+    await p.page.evaluate(
+      ({ syncedAt, until }) => {
+        localStorage.setItem('sf.clock', JSON.stringify({ offsetMs: -86_400_000, syncedAt }));
+        localStorage.setItem('sf.displayOverride', JSON.stringify({ state: 'off', until }));
+      },
+      { syncedAt: Date.now(), until: new Date(Date.now() + HOUR).toISOString() },
+    );
+    p.server.displayOverride = null;
+    const reloaded = Date.now();
+    await p.page.reload();
+    const switches = () =>
+      p.server
+        .requestsTo(/^\/supervisor\/display\//)
+        .filter((r) => r.at >= reloaded)
+        .map((r) => r.path);
+    await expect.poll(switches, { timeout: 10_000 }).toEqual(['/supervisor/display/on']);
+    // Past the 3 s a panel is given to wake: the display loop waits for its next check.
+    await new Promise((r) => setTimeout(r, 4000));
+
+    cut();
+    await p.until((s) => s.clock.trusted);
+    await expect.poll(() => p.page.evaluate(() => localStorage.getItem('sf.displayOverride')), { timeout: 5000 }).toBeNull();
+    // Longer than an off switch takes (1.5 s).
+    await new Promise((r) => setTimeout(r, 4000));
+    expect(switches()).toEqual(['/supervisor/display/on']);
+  });
+
   it('applies the wake override it carries before the hours, so a panel kept on is never switched off', async () => {
     const content = h.content([{ id: 'a', durationMs: 500, label: 'Fallback', bindings: { label: { source: 'news', path: 'headline' } } }], {
       edit: closedAllWeek,

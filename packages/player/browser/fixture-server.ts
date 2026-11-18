@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { extname, join, normalize } from 'node:path';
-import type { DeviceCommand, PlayCount, SyncRequest } from '@signforge/contract';
+import type { DeviceCommand, DisplayOverride, PlayCount, SyncRequest } from '@signforge/contract';
 import type { Content } from './content';
 
 export type Action =
@@ -91,6 +91,12 @@ export class FixtureServer {
   nextSyncS = 300;
   /** Commands the next sync carries, once. */
   readonly commands: DeviceCommand[] = [];
+  /**
+   * The display override the CMS holds for the screen (null: none). Set, every sync whose reported
+   * override differs gets a `display` command, as the API's `overrideCommand` sends; an ended
+   * override counts as none on either side. Undefined: no such check.
+   */
+  displayOverride: DisplayOverride | null | undefined;
   /** Syncs carrying play counts to process and then drop without an answer, as a lost response would be. */
   loseCountReplies = 0;
   /** What the supervisor holds; undefined is a freshly flashed screen. */
@@ -167,6 +173,14 @@ export class FixtureServer {
     const rule = { match, action };
     this.rules.push(rule);
     return () => void (this.rules = this.rules.filter((r) => r !== rule));
+  }
+
+  private overrideCommand(held: DisplayOverride | undefined): DeviceCommand[] {
+    if (this.displayOverride === undefined) return [];
+    const live = (o: DisplayOverride | null | undefined) => (o && Date.parse(o.until) > Date.now() ? o : null);
+    const want = live(this.displayOverride);
+    const has = live(held);
+    return want?.state === has?.state && want?.until === has?.until ? [] : [{ type: 'display', override: want }];
   }
 
   /** Total plays and ms the syncs stored, by `hour spot`. */
@@ -313,7 +327,7 @@ export class FixtureServer {
             snapshots,
             checked,
             socketTicket: `ticket-${this.syncs.length}`,
-            commands: this.commands.splice(0),
+            commands: [...this.commands.splice(0), ...this.overrideCommand(sync.display.override)],
           };
           if (sync.playCounts.length && this.loseCountReplies > 0) {
             this.loseCountReplies--;
