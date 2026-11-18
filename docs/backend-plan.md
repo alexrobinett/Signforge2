@@ -45,7 +45,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 | `publishes`, `publish_screens` | status, publish at, actor; which manifest each screen got. Rollout status is a join against `screens.reported_manifest_id`. |
 | `data_sources`, `data_snapshots` | format, encrypted URL (a private calendar URL is a secret), refresh, calendar look-ahead, next poll at, ETag, failures, last error category; latest snapshot, at most 64 kB, with its hash and when it was fetched and last checked |
 | `audit_log` | when, actor kind (user, agent, device, system), actor, action, target, detail |
-| `idempotency_keys` | key, action, input hash, the first result: a retried creation returns it and writes nothing |
+| `idempotency_keys` | key, action, input hash, the first result: a retried creation returns it and writes nothing. Deleted after about 7 days, by the first five-minute Cron Trigger run of each UTC day |
 | `play_counts` | screen, hour, spot: plays and milliseconds |
 | `brand_kits` | name, colours, shape, display and body font (catalogue ids), logo assets. Keyed `(org_id, id)` with server-made ids (see Brand kits) |
 | `brand_assignments` | which kit the org (its default), a group or a screen uses; at most one per target |
