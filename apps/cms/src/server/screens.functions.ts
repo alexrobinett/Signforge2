@@ -7,8 +7,15 @@ import { createServerFn } from '@tanstack/react-start';
 import type { GroupView, ScreenDetail, ScreenView } from '~/lib/screen-types';
 import { callApi } from './api.server';
 
-async function tool<T>(name: string, input: unknown): Promise<T> {
+/**
+ * The one way these loaders reach data: a tool, as the signed-in member. Switching to a client
+ * cache later (docs/research/cms-data-layer.md) changes this and the loaders, not the pages.
+ */
+async function tool<T>(name: string, input: unknown): Promise<T>;
+async function tool<T>(name: string, input: unknown, opts: { missing: 'null' }): Promise<T | null>;
+async function tool<T>(name: string, input: unknown, opts?: { missing: 'null' }): Promise<T | null> {
   const res = await callApi(`/api/tools/${name}`, input);
+  if (res.status === 404 && opts?.missing === 'null') return null;
   if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
   return (await res.json()) as T;
 }
@@ -33,9 +40,7 @@ export const getScreens = createServerFn({ method: 'GET' }).handler(async () => 
 export const getScreen = createServerFn({ method: 'GET' })
   .validator((screenId: string) => screenId)
   .handler(async ({ data: screenId }) => {
-    const res = await callApi('/api/tools/get_screen', { screenId });
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`get_screen failed: ${res.status}`);
-    const [detail, groups] = await Promise.all([res.json() as Promise<ScreenDetail>, all<GroupView>('list_groups', 'groups')]);
+    const [detail, groups] = await Promise.all([tool<ScreenDetail>('get_screen', { screenId }, { missing: 'null' }), all<GroupView>('list_groups', 'groups')]);
+    if (!detail) return null;
     return { ...detail, groups, at: Date.now() };
   });

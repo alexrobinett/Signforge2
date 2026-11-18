@@ -72,7 +72,12 @@ export interface ScreenEvent {
   at: number;
   action: string;
   actor: { kind: string; id: string };
+  /** What the tool was given, secrets redacted. */
+  input: { [key: string]: Json };
 }
+
+/** A JSON value: what a server function may return. */
+export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 export interface ScreenDetail {
   screen: ScreenView;

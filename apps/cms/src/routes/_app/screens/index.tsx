@@ -1,7 +1,7 @@
 /**
  * Screens: the live tile wall by default (canvas board Screens A), or the dense table (board B, on
  * the light kit). Each screen says what it should be showing and what it is doing, as a fact.
- * Groups are locations: each rolls up to its most urgent screen. Refreshed every 15 seconds.
+ * Groups are locations: each rolls up to its most urgent screen.
  */
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { LayoutGridIcon, PlusIcon, SearchIcon, TableIcon } from 'lucide-react';
@@ -18,7 +18,7 @@ import { NativeSelect } from '~/components/ui/select';
 import { describeHours } from '~/components/screens/display-hours-editor';
 import { ago, describeScreen, rollup, summarise } from '~/lib/screen-status';
 import type { GroupView, ScreenView, StateKind } from '~/lib/screen-types';
-import { useCanManage, useLiveData, useNow } from '~/lib/live';
+import { useCanManage, useNow } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { getScreens } from '~/server/screens.functions';
 
@@ -49,7 +49,6 @@ function ScreensPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
-  useLiveData();
   const now = useNow(at);
 
   const view: View = search.view ?? 'tiles';
@@ -82,9 +81,7 @@ function ScreensPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Screens">{canManage && <PairDialog groups={groups} />}</PageHeader>
-      <p role="status" className="-mt-4 text-sm text-muted-foreground">
-        {summarise(screens)}
-      </p>
+      <Summary screens={screens} />
 
       {groups.length > 0 && <Locations groups={groups} screens={screens} onPick={(group) => set({ group })} />}
 
@@ -166,6 +163,23 @@ function ScreensPage() {
   );
 }
 
+/** The facts under the heading; the screens that need a person in the one red. */
+function Summary({ screens }: { screens: ScreenView[] }) {
+  const parts = summarise(screens).split(' · ');
+  const needs = parts.at(-1)?.endsWith(' you') ? parts.pop() : undefined;
+  return (
+    <p role="status" className="-mt-4 text-[15px] text-muted-foreground">
+      {parts.join(' · ')}
+      {needs && (
+        <>
+          {' · '}
+          <strong className="font-semibold text-status-needs-you-foreground">{needs}</strong>
+        </>
+      )}
+    </p>
+  );
+}
+
 function Chip({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
@@ -233,11 +247,11 @@ function Locations({ groups, screens, onPick }: { groups: GroupView[]; screens: 
   );
 }
 
-const shortId = (id: string | null) => (id ? id.slice(0, 7) : '—');
+const shortId = (id: string | null) => (id ? id.slice(0, 7) : 'none');
 
 function versionText(s: ScreenView) {
   const playing = s.reportedManifestId ?? s.heartbeat?.activeManifestId ?? null;
-  if (!s.desiredManifestId) return { text: '—', behind: false };
+  if (!s.desiredManifestId) return { text: 'none', behind: false };
   if (playing && playing !== s.desiredManifestId) return { text: `${shortId(playing)} → ${shortId(s.desiredManifestId)}`, behind: true };
   return { text: shortId(s.desiredManifestId), behind: false };
 }
@@ -270,12 +284,14 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
                 >
                   {s.name}
                 </Link>
-                <span
-                  className={cn('font-mono text-xs tabular-nums', v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground')}
-                  title="Version (manifest id)"
-                >
-                  {v.text}
-                </span>
+                {s.desiredManifestId && (
+                  <span
+                    className={cn('font-mono text-xs tabular-nums', v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground')}
+                    title="Version (manifest id)"
+                  >
+                    {v.text}
+                  </span>
+                )}
               </div>
               <p className="text-[13px] text-muted-foreground">{[where, d.line].filter(Boolean).join(' · ')}</p>
             </div>
@@ -290,7 +306,7 @@ function ScreenTable({ screens, groupsOf, now }: { screens: ScreenView[]; groups
   return (
     <div className="overflow-x-auto rounded-xl border bg-card">
       <table className="w-full min-w-[56rem] border-collapse text-sm">
-        <thead className="sticky top-0 bg-muted text-xs tracking-wide text-muted-foreground uppercase">
+        <thead className="bg-muted text-xs tracking-wide text-muted-foreground uppercase">
           <tr>
             <th scope="col" className="px-3 py-2.5 pl-4 text-left font-semibold">
               Should be showing
@@ -310,8 +326,11 @@ function ScreenTable({ screens, groupsOf, now }: { screens: ScreenView[]; groups
             <th scope="col" className="px-3 py-2.5 text-right font-semibold">
               Version
             </th>
-            <th scope="col" className="px-3 py-2.5 pr-4 text-right font-semibold">
+            <th scope="col" className="px-3 py-2.5 text-right font-semibold">
               Last heard
+            </th>
+            <th scope="col" className="px-3 py-2.5 pr-4">
+              <span className="sr-only">Action</span>
             </th>
           </tr>
         </thead>
@@ -349,10 +368,19 @@ function ScreenTable({ screens, groupsOf, now }: { screens: ScreenView[]; groups
                   {v.text}
                 </td>
                 <td
-                  className="px-3 py-1.5 pr-4 text-right font-mono text-[13px] whitespace-nowrap text-muted-foreground tabular-nums"
+                  className="px-3 py-1.5 text-right font-mono text-[13px] whitespace-nowrap text-muted-foreground tabular-nums"
                   title={s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : undefined}
                 >
                   {s.lastSeenAt ? `${ago(now - s.lastSeenAt)} ago` : 'never'}
+                </td>
+                <td className="px-3 py-1.5 pr-4 text-right">
+                  {s.state.kind === 'needs_you' && (
+                    <Button asChild variant="outline" size="sm">
+                      <Link to="/screens/$screenId" params={{ screenId: s.id }} aria-label={`Troubleshoot ${s.name}`}>
+                        Troubleshoot
+                      </Link>
+                    </Button>
+                  )}
                 </td>
               </tr>
             );

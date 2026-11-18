@@ -33,9 +33,7 @@ function SignInPage() {
         <div className="w-full max-w-[25rem]">
           <SignInForm options={options} next={next} />
         </div>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          New here? Signing in creates your account. No password to remember: we email you a code each time.
-        </p>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">New here? Signing in creates your account, and then your organization.</p>
       </main>
     </div>
   );

@@ -1,30 +1,27 @@
-/** Keeping a page live: re-reading its data, a ticking clock, and what the member may do. */
-import { getRouteApi, useRouter } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+/**
+ * A ticking clock for relative times, and what the member may do. Pages re-read their data on
+ * navigation and after an action; live fleet status (polling or the screen sockets) waits for the
+ * data-layer decision (docs/research/cms-data-layer.md).
+ */
+import { getRouteApi } from '@tanstack/react-router';
+import { useSyncExternalStore } from 'react';
 
-/** How often the Screens pages re-read their data while visible. */
-export const REFRESH_MS = 15_000;
+/** How often the clock the pages read from ticks. */
+const TICK_MS = 10_000;
 
-export function useLiveData(ms = REFRESH_MS) {
-  const router = useRouter();
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (document.visibilityState === 'visible') void router.invalidate();
-    }, ms);
+/** The clock, in TICK_MS steps, as an outside store. */
+const clock = {
+  subscribe(changed: () => void) {
+    const t = setInterval(changed, TICK_MS);
     return () => clearInterval(t);
-  }, [router, ms]);
-}
+  },
+  now: () => Math.floor(Date.now() / TICK_MS) * TICK_MS,
+};
 
-/** The time the page reads from: the server's when its data came, then the browser's, every 10 s. */
+/** The time the page reads from: never earlier than when its data came (`at`), then ticking. */
 export function useNow(at: number): number {
-  const [now, setNow] = useState(at);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: new data (`at`) restarts the clock.
-  useEffect(() => {
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 10_000);
-    return () => clearInterval(t);
-  }, [at]);
-  return now;
+  const ticked = useSyncExternalStore(clock.subscribe, clock.now, () => at);
+  return Math.max(at, ticked);
 }
 
 const app = getRouteApi('/_app');

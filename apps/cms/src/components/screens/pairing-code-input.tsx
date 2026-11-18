@@ -80,7 +80,7 @@ export function PairingCodeInput({
               else if (e.key === 'ArrowRight') focus(i + 1);
             }}
             className={cn(
-              'h-14 w-11 rounded-lg border border-input bg-card text-center font-mono text-2xl font-semibold uppercase shadow-xs outline-none sm:w-12',
+              'h-15 w-11 rounded-lg border border-input bg-card text-center font-mono text-2xl font-semibold uppercase shadow-xs outline-none sm:w-13',
               'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive',
             )}
           />

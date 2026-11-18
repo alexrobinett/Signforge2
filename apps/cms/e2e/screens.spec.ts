@@ -83,7 +83,8 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await sync(request, credential);
   await page.reload();
   await expect(page.getByText('Needs you').first()).toBeVisible();
-  await expect(page.getByText('Nothing is published to it yet')).toBeVisible();
+  await expect(page.getByText('Nothing published to it yet', { exact: true })).toBeVisible();
+  await expect(page.getByText('Nothing to cache yet: nothing is published to it.')).toBeVisible();
 
   // Sleep now: stored, and carried by the next sync to the screen.
   await page.getByRole('button', { name: 'Sleep now' }).click();
@@ -99,7 +100,8 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   // Display hours, checked as the player checks them.
   await page.getByRole('button', { name: 'Edit' }).click();
   const hours = page.getByRole('dialog', { name: 'Display hours for Lobby' });
-  await hours.getByRole('radio', { name: 'Set hours' }).click();
+  await hours.getByText('Set hours', { exact: true }).click();
+  await expect(hours.getByRole('radio', { name: 'Set hours' })).toBeChecked();
   await hours.getByRole('button', { name: 'Sunday' }).click();
   await hours.getByRole('button', { name: 'Saturday' }).click();
   await hours.getByLabel('On at').fill('07:00');
@@ -108,7 +110,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await hours.getByRole('button', { name: 'Save' }).click();
   await expect(hours).toBeHidden();
   await expect(page.getByText('Mon–Fri 07:00–19:00').first()).toBeVisible();
-  await expect(page.getByText('Settings changed').first()).toBeVisible();
+  await expect(page.getByText('Display hours changed').first()).toBeVisible();
   await shots(page, '13-screen-detail');
 
   // The wall, and the table.

@@ -21,6 +21,9 @@
   --popover-foreground: var(--foreground);
   --primary: #1f3fbf;
   --primary-foreground: #ffffff;
+  /* A primary button not yet usable: a quiet tint with dark words, not a faded blue. */
+  --primary-disabled: #c7cfee;
+  --primary-disabled-foreground: #1e2a5e;
   --secondary: #f2f4f7;
   --secondary-foreground: #101828;
   --muted: #f2f4f7;
@@ -82,6 +85,8 @@
   --popover-foreground: var(--foreground);
   --primary: #7b93ff;
   --primary-foreground: #0b0d12;
+  --primary-disabled: #232a45;
+  --primary-disabled-foreground: #a9b8ff;
   --secondary: #1a1e27;
   --secondary-foreground: #f2f4f7;
   --muted: #1a1e27;
@@ -138,6 +143,8 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-disabled: var(--primary-disabled);
+  --color-primary-disabled-foreground: var(--primary-disabled-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);

@@ -84,10 +84,18 @@ describe('list_screens and get_screen', () => {
     await call('rename_screen', { screenId: o.screen, name: 'Lobby' });
     await call('rename_screen', { screenId: o.screen, name: 'Front lobby' });
     const { events } = await call('get_screen', { screenId: o.screen });
-    expect(events.slice(0, 2)).toEqual([
-      { at: expect.any(Number), action: 'rename_screen', actor: { kind: 'user', id: 'user-1' } },
-      { at: expect.any(Number), action: 'rename_screen', actor: { kind: 'user', id: 'user-1' } },
-    ]);
+    expect(
+      events
+        .slice(0, 2)
+        .map((e: { input: { name: string } }) => e.input.name)
+        .sort(),
+    ).toEqual(['Front lobby', 'Lobby']);
+    expect(events[0]).toEqual({
+      at: expect.any(Number),
+      action: 'rename_screen',
+      actor: { kind: 'user', id: 'user-1' },
+      input: { screenId: o.screen, name: expect.any(String) },
+    });
   });
 });
 

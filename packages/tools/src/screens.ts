@@ -181,6 +181,16 @@ async function requireScreen(org: OrgScope, screenId: string) {
   return row;
 }
 
+/** The (redacted) input an audit row recorded. */
+function inputOf(detailJson: string | null): Record<string, unknown> {
+  try {
+    const input = (JSON.parse(detailJson ?? '{}') as { input?: unknown }).input;
+    return input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 /** How many of a screen's events `get_screen` returns. */
 const EVENTS = 20;
 
@@ -216,7 +226,12 @@ export const getScreen = defineTool({
     groupIds: z.array(z.string()),
     credentials: z.array(credentialOutput),
     events: z.array(
-      z.object({ at: z.number(), action: z.string().describe('The tool that made the change'), actor: z.object({ kind: z.string(), id: z.string() }) }),
+      z.object({
+        at: z.number(),
+        action: z.string().describe('The tool that made the change'),
+        actor: z.object({ kind: z.string(), id: z.string() }),
+        input: z.record(z.string(), z.unknown()).describe('What the tool was given, secrets redacted'),
+      }),
     ),
   }),
   example: { screenId: 'scr_example' },
@@ -228,7 +243,7 @@ export const getScreen = defineTool({
       org.auditLog.list({ target: { kind: 'screen', id: screen.id }, limit: EVENTS }),
       screenView(org, screen, blobs),
     ]);
-    const events = audit.map((e) => ({ at: e.at, action: e.action, actor: { kind: e.actorKind, id: e.actorId } }));
+    const events = audit.map((e) => ({ at: e.at, action: e.action, actor: { kind: e.actorKind, id: e.actorId }, input: inputOf(e.detailJson) }));
     return { screen: view, groupIds, credentials: credentials.map(credentialView), events };
   },
 });

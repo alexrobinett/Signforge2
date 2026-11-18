@@ -37,7 +37,7 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
               </li>
             )}
             <li className="flex gap-3.5">
-              <Step n={testScreenHref ? 2 : 1} />
+              {testScreenHref && <Step n={2} />}
               <div className="min-w-0 flex-1">
                 <PairScreenForm groups={groups} compact defaultName={testScreenHref ? 'Test screen' : ''} />
               </div>
@@ -60,6 +60,7 @@ export function EmptyFleet({ groups, canManage, testScreenHref }: { groups: Grou
               <span className="size-2.5 rounded-full bg-border-strong" />
             </span>
             <span className="rounded-md bg-card px-2.5 py-1">SignForge player</span>
+            <span className="flex-1 truncate rounded-md bg-card px-2.5 py-1 font-mono">…/player/pair</span>
           </div>
           <div
             role="img"
