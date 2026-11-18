@@ -140,37 +140,61 @@ export function DisplayHoursEditor({ value, onChange }: { value: DisplayHours | 
                 const all = value.exceptions ?? [];
                 const set = (next: (typeof all)[number]) => setExceptions(all.map((x, j) => (j === i ? next : x)));
                 const closed = e.on.length === 0;
+                const setWindows = (on: typeof e.on) => set({ ...e, on });
+                const date = e.date || 'this date';
                 return (
                   // biome-ignore lint/suspicious/noArrayIndexKey: a dated exception is edited in place, date included.
-                  <li key={i} className="flex flex-wrap items-end gap-2 rounded-lg border p-3">
-                    <div className="grid gap-1 text-xs font-medium">
-                      <label htmlFor={`${id}-date-${i}`}>Date</label>
-                      <Input id={`${id}-date-${i}`} type="date" value={e.date} onChange={(ev) => set({ ...e, date: ev.target.value })} className="w-40" />
+                  <li key={i} className="space-y-2 rounded-lg border p-3">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="grid gap-1 text-xs font-medium">
+                        <label htmlFor={`${id}-date-${i}`}>Date</label>
+                        <Input id={`${id}-date-${i}`} type="date" value={e.date} onChange={(ev) => set({ ...e, date: ev.target.value })} className="w-40" />
+                      </div>
+                      <label className="flex h-10 items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={closed}
+                          onChange={(ev) => setWindows(ev.target.checked ? [] : [{ from: '09:00', to: '17:00' }])}
+                          className="size-4 accent-primary"
+                        />
+                        Off all day
+                      </label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove ${date}`}
+                        onClick={() => setExceptions(all.filter((_, j) => j !== i))}
+                      >
+                        <Trash2Icon aria-hidden />
+                      </Button>
                     </div>
-                    <label className="flex h-10 items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={closed}
-                        onChange={(ev) => set({ ...e, on: ev.target.checked ? [] : [{ from: '09:00', to: '17:00' }] })}
-                        className="size-4 accent-primary"
-                      />
-                      Off all day
-                    </label>
                     {!closed && (
-                      <>
-                        <TimeField label="On at" value={e.on[0]!.from} onChange={(from) => set({ ...e, on: [{ ...e.on[0]!, from }] })} />
-                        <TimeField label="Off at" value={e.on[0]!.to} onChange={(to) => set({ ...e, on: [{ ...e.on[0]!, to }] })} />
-                      </>
+                      <fieldset className="space-y-2">
+                        <legend className="sr-only">Hours on {date}</legend>
+                        {e.on.map((w, k) => (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: a window has no id; its place in the list is what it is.
+                          <div key={k} className="flex flex-wrap items-end gap-2">
+                            <TimeField label="On at" value={w.from} onChange={(from) => setWindows(e.on.map((x, j) => (j === k ? { ...x, from } : x)))} />
+                            <TimeField label="Off at" value={w.to} onChange={(to) => setWindows(e.on.map((x, j) => (j === k ? { ...x, to } : x)))} />
+                            {e.on.length > 1 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Remove hours ${k + 1} on ${date}`}
+                                onClick={() => setWindows(e.on.filter((_, j) => j !== k))}
+                              >
+                                <Trash2Icon aria-hidden />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setWindows([...e.on, { from: '18:00', to: '22:00' }])}>
+                          <PlusIcon aria-hidden /> Add hours on this date
+                        </Button>
+                      </fieldset>
                     )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Remove ${e.date || 'this date'}`}
-                      onClick={() => setExceptions(all.filter((_, j) => j !== i))}
-                    >
-                      <Trash2Icon aria-hidden />
-                    </Button>
                   </li>
                 );
               })}
