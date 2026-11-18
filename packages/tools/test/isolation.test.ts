@@ -198,7 +198,10 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
       it(`${tool.name}: names no ids, and works on org B alone`, async () => {
         const result = await dispatch(registry, tool.name, tool.example, callerB);
         expect(result.ok, JSON.stringify(result)).toBe(true);
-        expect(JSON.stringify(result)).not.toContain('org-a');
+        // Names and content ids say org-a; server ids (a screen's scr_…) do not, so look for each of org A's ids too.
+        const out = JSON.stringify(result);
+        expect(out).not.toContain('org-a');
+        for (const id of Object.values(s.a).filter((v) => typeof v === 'string')) expect(out, id).not.toContain(id);
       });
     }
     for (const field of fields) {

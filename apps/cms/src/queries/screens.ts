@@ -1,0 +1,31 @@
+/**
+ * Server data for the Screens page, as TanStack Query options (docs/research/cms-data-layer.md,
+ * Decision). The page reads every screen once, with its settings and what it should be showing,
+ * and then polls only what each screen is doing (`list_screen_status`), which reads no manifests.
+ * The full list is read again when the poll sees what it does not have (`listOutOfDate`).
+ */
+import { queryOptions } from '@tanstack/react-query';
+import { listOutOfDate } from '~/lib/fleet-status';
+import { getScreenStatus, getScreens } from '~/server/screens.functions';
+
+/**
+ * How often an open Screens page asks what the screens are doing. A screen syncs every 5 minutes
+ * and is unreachable after the org's threshold (5 minutes at least), so this shows a change within
+ * 15 seconds of the server seeing it. Query does not poll a tab in the background.
+ */
+const POLL_MS = 15_000;
+
+export const screensQuery = (orgId: string) => queryOptions({ queryKey: ['org', orgId, 'screens'], queryFn: () => getScreens() });
+
+export const screenStatusQuery = (orgId: string) =>
+  queryOptions({
+    queryKey: ['org', orgId, 'screenStatus'],
+    queryFn: async ({ client }) => {
+      const status = await getScreenStatus();
+      const list = screensQuery(orgId);
+      const known = client.getQueryData(list.queryKey);
+      if (known && listOutOfDate(known.screens, status.screens)) void client.invalidateQueries({ queryKey: list.queryKey, exact: true });
+      return status;
+    },
+    refetchInterval: POLL_MS,
+  });

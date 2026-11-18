@@ -3,6 +3,7 @@
  * frame, its name, what a screen gets, and how many spots use it. An upload that did not pass shows that instead of a
  * picture: its files were never stored.
  */
+import { sessionBlobPath } from '@signforge/contract';
 import { SearchIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Input } from '~/components/ui/input';
@@ -19,7 +20,7 @@ function AssetThumb({ asset }: { asset: AssetView }) {
       {word ? (
         <span className="px-3 text-center text-sm text-[#b4b6be]">{word}</span>
       ) : (
-        <img src={`/api/blobs/${asset.sha256}`} alt="" loading="lazy" className={cn('size-full', svg ? 'object-contain p-4' : 'object-cover')} />
+        <img src={sessionBlobPath(asset.sha256)} alt="" loading="lazy" className={cn('size-full', svg ? 'object-contain p-4' : 'object-cover')} />
       )}
     </div>
   );

@@ -743,6 +743,15 @@ export type DeviceSocketMessage = { type: 'applied'; manifest: string };
 /** The preview channel's version, in every message both ways. */
 export const PREVIEW_PROTOCOL = 1;
 
+/**
+ * Where the CMS and the preview fetch a saved file with the user's session, relative to the CMS
+ * origin. `v2` is a new cache key: until #43 these responses were cached as immutable for a year,
+ * so a browser may still hold a copy under the old `/api/blobs/<sha256>` that it would reuse
+ * without asking. Nothing requests that URL any more. Change the version again if this route's
+ * caching ever has to tighten.
+ */
+export const sessionBlobPath = (sha256: string) => `/api/blobs/v2/${sha256}`;
+
 /** CMS page to preview player. */
 export interface PreviewDraftMessage {
   sfPreview: number;
@@ -750,7 +759,7 @@ export interface PreviewDraftMessage {
   /** A compiled draft manifest. Its first spot plays now, and later drafts update it in place. */
   manifest: ScreenManifest;
   /**
-   * Files of the manifest, by hash. A file not here is fetched from `<cms>/api/blobs/<sha256>`
+   * Files of the manifest, by hash. A file not here is fetched from `<cms>` + `sessionBlobPath(sha256)`
    * with the user's session, so the CMS posts only what is not saved yet.
    */
   files?: Record<string, Blob>;
