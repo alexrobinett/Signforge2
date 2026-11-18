@@ -30,7 +30,7 @@ Lists the tools the caller's role may use:
 | 403 | `forbidden` | The caller's role or scopes do not allow the tool. |
 | 404 | `unknown_tool` | No tool has that name. |
 | 404 | `not_found` | An id names nothing in this org, including another org's ids. |
-| 409 | `conflict` | The change would break something else. `details` says what. |
+| 409 | `conflict` | The change would break something else, or (with `ifVersion`) the row changed since the caller read it. `details` says what. |
 | 429 | `rate_limited` | Too many attempts (`claim_screen`); try again in a minute. |
 | 401, 403 | `unauthenticated`, `no_active_organization`, `not_a_member` | Returned by `requireOrg`, before any tool runs. |
 
@@ -42,8 +42,8 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | --- | --- | --- | --- | --- |
 | `list_screens` | content:read | viewer | `{ limit?, cursor? }` | `{ screens: Screen[], next }`, by id |
 | `get_screen` | content:read | viewer | `{ screenId }` | `{ screen, groupIds, credentials, events }` |
-| `rename_screen` | screens:manage | editor | `{ screenId, name }` | `{ screen }` |
-| `update_screen_settings` | screens:manage | editor | `{ screenId, timezone?, locale?, orientation?, displayHours? }` | `{ screen }` |
+| `rename_screen` | screens:manage | editor | `{ screenId, name, ifVersion? }` | `{ screen }` |
+| `update_screen_settings` | screens:manage | editor | `{ screenId, timezone?, locale?, orientation?, displayHours?, ifVersion? }` | `{ screen }` |
 | `set_display_override` | screens:manage | editor | `{ screenId, state: 'on' \| 'off' \| null }` | `{ screen }` |
 | `identify_screen` | screens:manage | editor | `{ screenId }` | `{ screenId, seconds }` |
 | `restart_screen` | screens:manage | editor | `{ screenId }` | `{ screenId }` |
@@ -51,9 +51,11 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `claim_screen` | screens:manage | editor | `{ code, name, timezone, orientation, locale?, displayHours?, idempotencyKey? }` | `{ screen }`; 404 for a code that is not open, 429 over the rate limit |
 | `list_groups` | content:read | viewer | `{ limit?, cursor? }` | `{ groups: Group[], next }`, by id |
 | `create_group` | screens:manage | editor | `{ name, screenIds?, idempotencyKey? }` | `{ group }` |
-| `rename_group` | screens:manage | editor | `{ groupId, name }` | `{ group }` |
+| `rename_group` | screens:manage | editor | `{ groupId, name, ifVersion? }` | `{ group }` |
 | `delete_group` | screens:manage | editor | `{ groupId }` | `{ deleted }`, or 409 while a schedule entry targets the group |
-| `set_group_members` | screens:manage | editor | `{ groupId, screenIds }` | `{ group }` |
+| `set_group_members` | screens:manage | editor | `{ groupId, screenIds, ifVersion? }` | `{ group }` |
+| `add_group_members` | screens:manage | editor | `{ groupId, screenIds }` | `{ group }` |
+| `remove_group_members` | screens:manage | editor | `{ groupId, screenIds }` | `{ group }` |
 | `publish_manifest_to_screen` | content:publish | editor | `{ screenId, manifestId }` | `{ screenId, manifestId, changed }` |
 | `list_templates` | content:read | viewer | `{ status?, limit?, cursor? }` | `{ templates: Template[], next }`, base first, then by name |
 | `get_template` | content:read | viewer | `{ templateId }` | `{ template }` |
@@ -68,15 +70,17 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `list_brand_kits` | content:read | viewer | `{ limit?, cursor? }` | `{ brandKits: BrandKit[], next }`, by id |
 | `get_brand_kit` | content:read | viewer | `{ brandKitId }` | `{ brandKit }` |
 | `create_brand_kit` | content:draft | editor | `{ name, colors, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId?, makeDefault?, idempotencyKey? }` | `{ brandKit }` |
-| `update_brand_kit` | content:draft | editor | `{ brandKitId, name?, colors?, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId? }` | `{ brandKit }` |
+| `update_brand_kit` | content:draft | editor | `{ brandKitId, name?, colors?, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId?, ifVersion? }` | `{ brandKit }` |
 | `set_default_brand_kit` | content:draft | editor | `{ brandKitId }` | `{ brandKit }` |
 | `assign_brand_kit` | content:draft | editor | `{ brandKitId \| null, screenId? \| groupId? }` | `{ brandKit \| null }` |
 | `get_org_settings` | content:read | viewer | `{}` | `{ settings }` |
-| `update_org_settings` | org:manage | owner | `{ timezone?, locale?, displayHours?, updateWindow?, unreachableAfterMinutes?, alerts? }` | `{ settings }` |
+| `update_org_settings` | org:manage | owner | `{ timezone?, locale?, displayHours?, updateWindow?, unreachableAfterMinutes?, alerts?, ifVersion? }` | `{ settings }` |
 
 Details:
 
 - **Idempotency keys.** The creating tools (`create_group`, `create_asset_upload`, `create_brand_kit`, `claim_screen`) take an optional `idempotencyKey`: 8 to 128 printable ASCII characters the caller picks for one creation, such as a UUID. The CMS should send one with every create. A retry with the same key and input returns the first call's output and writes nothing, even when two calls race. The same key with a different input is refused with `conflict`. Keys are per org and kept for now (expiry is M3-24). A retried `create_asset_upload` returns the first call's upload URLs, which expire at their `expiresAt`. `register_template_version` needs no key: a version is registered once, and registering it again returns `changed: false`.
+- **Conditional updates (`ifVersion`).** Screens, groups, brand kits and org settings carry a `version` in their view: 1 when made (org settings: 1 until first set), moving on with every change through a tool (a group's also when its screens change; a screen's not with heartbeats or publishes). Every update tool takes an optional `ifVersion`, the version the caller read. If the row has changed since, the call is refused with `conflict`, `details: { id, version }` (the version now), and nothing is written; read it again and redo the change. The check runs inside the batch that writes the change, so a change landing between the tool's read and its commit is caught too. Without `ifVersion` a change is made whatever the version. A save that makes several calls passes on the version each one returns. The CMS sends `ifVersion` with every edit of a screen and shows "This changed since you opened it" with a reload.
+- **Group members.** `add_group_members` and `remove_group_members` change only the screens they name, so they cannot drop a screen someone else added; the CMS uses them. `set_group_members` replaces the whole list and should be given `ifVersion`.
 - **Lists page.** Every `list_*` tool takes `limit` (default 50, at most 200) and `cursor`, and returns `next`. Pass `next` back as `cursor`, with the same filters, for the following page; `next` is `null` on the last page. A cursor is opaque. It holds the sort key of the last row returned, so rows added or removed between calls are neither repeated nor skipped. A cursor the server did not make is `invalid_input`. The repositories still read the org's whole list and the tool cuts the page; paging in SQL can wait until lists are large.
 - **`update_screen_settings`.** Changes only the fields it is given. `null` clears `locale` (back to the player's default) or `displayHours` (always on). Display hours are checked by the contract's `displayHoursProblems`, the same check the player runs, so the CMS can show its messages as they are. A screen picks up a settings change with the next publish to it.
 - **A screen's view** (`Screen` in every screen tool's output) adds what the CMS shows (`src/screen-state.ts`): `state` (`online`, `updating`, `asleep` with `wakesAt`, `unreachable`, or `needs_you` with a `reason`: `behind`, `revoked`, `nothing_published`, `fallback`), the last `heartbeat`, `showing` (what it should be showing now, worked out from its desired manifest with `player-core`: the playlist, its first spot, and an image hash for a thumbnail), and `displayOverride`. `status` is `revoked` once every credential the screen had is revoked (one that has not collected a credential yet is waiting, not revoked). A screen not heard from for the org's `unreachableAfterMinutes` (15 by default, `UNREACHABLE_AFTER_MS`) is unreachable; that is calm while it is on its desired manifest, because it keeps playing it, and `needs_you` / `behind` when it is not.
@@ -176,14 +180,21 @@ Callers so far:
    - Give an `example`.
 2. Name id fields after their kind, such as `screenId` or `playlistIds`.
 3. Reach data only through `ctx.org`, and write only by staging: `ctx.write(ctx.org.<repo>.stage.<op>(...))`. A creating tool sets `idempotent: true` and adds `idempotencyKey` (`src/fields.ts`) to its input. A missing row is `throw notFound(...)`, and a repository's `NotInOrgError` maps to `not_found` on its own.
-4. Add it to `TOOLS` in `src/registry.ts`.
+4. An update tool (one that changes a row a person or agent edits: named `update_<thing>` or `rename_<thing>`, or `set_<thing>_members` for one that replaces a list) is conditional:
+   - Give the row a version: a `row_version` column (`rowVersion()` in `packages/db/src/schema.ts`, with a migration). The repositories move it on with every `stage.update` and `stage.touch`.
+   - Put `version` (`src/fields.ts`) in the row's view, set from `row.rowVersion`.
+   - Add `ifVersion` (`src/fields.ts`) to the input, and pass it to the repository: `ctx.write(org.<repo>.stage.update(row, patch, input.ifVersion))`. For a change to what belongs to a row (a group's members), `stage.touch(row, input.ifVersion)` moves the row's version on, guarded the same way.
+   - That is all. The repository refuses a stale version before staging, and again inside the batch; the dispatcher turns either into `conflict` with `{ id, version }`. The tool does not compare versions itself.
+   - A tool that replaces a whole list also gets add and remove forms (`add_group_members`, `remove_group_members`), which need no version.
+5. Add it to `TOOLS` in `src/registry.ts`.
 
 `test/isolation.test.ts` then calls it as org B's owner, with org A's ids put into its example, and expects `not_found`. A tool with no id fields must succeed without returning anything of org A's. An id field of a new kind fails that test until you map it in `ORG_A_IDS`.
 
 ## Tests
 
 - `test/isolation.test.ts`: generated from the registry, as above.
-- `test/conventions.test.ts`: fails on a tool without an output schema or a `list_*` tool without paging, and checks the output check and paging itself.
+- `test/conventions.test.ts`: fails on a tool without an output schema, a `list_*` tool without paging, or an update tool without `ifVersion` in its input and `version` in its output, and checks the output check and paging itself.
+- `test/versions.test.ts`: a stale `ifVersion` is refused and writes nothing, even when the change lands between the read and the commit; group members added and removed without dropping anyone's.
 - `test/write-guard.test.ts`: generated from the registry. It runs every tool that changes data on a D1 that records any write sent outside `batch()`, and fails if there is one. A tool whose example refuses before writing is set up to get further in `PREPARE`.
 - `test/dispatch.test.ts`: role and scope checks, validation, the audit log and redaction, a failing audit row rolling the change back, and idempotency keys.
 - `test/tools.test.ts`, `test/templates.test.ts`, `test/assets.test.ts`: what each tool does.

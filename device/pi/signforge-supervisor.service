@@ -1,6 +1,6 @@
 [Unit]
 Description=SignForge device supervisor (display power)
-After=network-online.target
+# Listens on 127.0.0.1 only, so it needs no network; the kiosk starts after it.
 Before=signforge-kiosk.service
 
 [Service]

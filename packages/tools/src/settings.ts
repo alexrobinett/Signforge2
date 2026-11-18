@@ -6,7 +6,7 @@
 import type { DisplayHours } from '@signforge/contract';
 import type { OrgScope, OrgSettings } from '@signforge/db';
 import { z } from 'zod';
-import { displayHours, locale, timezone } from './fields';
+import { displayHours, ifVersion, locale, timezone, version } from './fields';
 import { UNREACHABLE_AFTER_MS } from './screen-state';
 import { defineTool } from './tool';
 
@@ -45,6 +45,7 @@ const settingsView = z.object({
   updateWindow: z.object({ from: z.string(), to: z.string() }),
   unreachableAfterMinutes: z.number(),
   alerts: z.object({ screen_offline: rule, publish_finished: rule, agent_refused: rule }),
+  version: version.describe('1 until first set, then moves on with every change; pass it as ifVersion to update only what you read'),
   updatedAt: z.number().nullable(),
 });
 type SettingsView = z.output<typeof settingsView>;
@@ -68,6 +69,7 @@ function settingsOf(row: OrgSettings | undefined): SettingsView {
     updateWindow: row?.updateWindowJson ? JSON.parse(row.updateWindowJson) : DEFAULT_UPDATE_WINDOW,
     unreachableAfterMinutes: (row?.unreachableAfterMs ?? UNREACHABLE_AFTER_MS) / 60_000,
     alerts: { ...DEFAULT_ALERTS, ...stored },
+    version: row?.rowVersion ?? 1,
     updatedAt: row?.updatedAt ?? null,
   };
 }
@@ -88,7 +90,7 @@ const getOrgSettings = defineTool({
 const updateOrgSettings = defineTool({
   name: 'update_org_settings',
   description:
-    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts sets the rule for each alert kind given. Settings for new screens apply to screens paired afterwards. Returns { settings }.",
+    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts sets the rule for each alert kind given. Settings for new screens apply to screens paired afterwards. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { settings }.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
@@ -100,22 +102,26 @@ const updateOrgSettings = defineTool({
       updateWindow: updateWindow.optional(),
       unreachableAfterMinutes: unreachableAfterMinutes.optional(),
       alerts: z.object({ screen_offline: rule.optional(), publish_finished: rule.optional(), agent_refused: rule.optional() }).optional(),
+      ifVersion,
     })
-    .refine((v) => Object.keys(v).length > 0, 'nothing to change'),
+    .refine((v) => Object.keys(v).some((k) => k !== 'ifVersion'), 'nothing to change'),
   output: z.object({ settings: settingsView }),
   example: { unreachableAfterMinutes: 15 },
   target: () => ({ kind: 'org', id: 'settings' }),
   handler: async ({ org, input, write }) => {
     const current = await org.settings.get();
     const row = write(
-      await org.settings.stage.set({
-        ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
-        ...(input.locale !== undefined ? { locale: input.locale } : {}),
-        ...(input.displayHours !== undefined ? { displayHoursJson: input.displayHours && JSON.stringify(input.displayHours) } : {}),
-        ...(input.updateWindow ? { updateWindowJson: JSON.stringify(input.updateWindow) } : {}),
-        ...(input.unreachableAfterMinutes ? { unreachableAfterMs: input.unreachableAfterMinutes * 60_000 } : {}),
-        ...(input.alerts ? { alertsJson: JSON.stringify({ ...settingsOf(current).alerts, ...input.alerts }) } : {}),
-      }),
+      await org.settings.stage.set(
+        {
+          ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
+          ...(input.locale !== undefined ? { locale: input.locale } : {}),
+          ...(input.displayHours !== undefined ? { displayHoursJson: input.displayHours && JSON.stringify(input.displayHours) } : {}),
+          ...(input.updateWindow ? { updateWindowJson: JSON.stringify(input.updateWindow) } : {}),
+          ...(input.unreachableAfterMinutes ? { unreachableAfterMs: input.unreachableAfterMinutes * 60_000 } : {}),
+          ...(input.alerts ? { alertsJson: JSON.stringify({ ...settingsOf(current).alerts, ...input.alerts }) } : {}),
+        },
+        input.ifVersion,
+      ),
     );
     return { settings: settingsOf(row) };
   },

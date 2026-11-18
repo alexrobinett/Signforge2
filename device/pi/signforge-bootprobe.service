@@ -1,0 +1,13 @@
+[Unit]
+Description=SignForge boot probe (measurement only, not enabled by deploy: kernel start to first spot, see bench.py)
+DefaultDependencies=no
+After=local-fs.target
+
+[Service]
+Type=exec
+User=alex
+ExecStart=/usr/bin/python3 /home/alex/signforge/bench.py boot probe
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

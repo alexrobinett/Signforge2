@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d1d27271-c11d-44b3-84fe-7d4ea52697cb",
+  "id": "1f077e9a-e5f6-4d1b-a30e-b8c9e2d68c22",
   "prevId": "471c3ad5-98fd-4369-9a65-1e194595a2b0",
   "tables": {
     "account": {
@@ -644,6 +644,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -1135,48 +1143,6 @@
         },
         "default_playlist_id": {
           "name": "default_playlist_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "timezone": {
-          "name": "timezone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "locale": {
-          "name": "locale",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "display_hours_json": {
-          "name": "display_hours_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "update_window_json": {
-          "name": "update_window_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "unreachable_after_ms": {
-          "name": "unreachable_after_ms",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "alerts_json": {
-          "name": "alerts_json",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -2269,6 +2235,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -2299,96 +2273,6 @@
           "columnsFrom": ["org_id"],
           "columnsTo": ["id"],
           "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "screen_incidents": {
-      "name": "screen_incidents",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "org_id": {
-          "name": "org_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "screen_id": {
-          "name": "screen_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "opened_at": {
-          "name": "opened_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cleared_at": {
-          "name": "cleared_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "screen_incidents_org_id_uq": {
-          "name": "screen_incidents_org_id_uq",
-          "columns": ["org_id", "id"],
-          "isUnique": true
-        },
-        "screen_incidents_open_uq": {
-          "name": "screen_incidents_open_uq",
-          "columns": ["org_id", "screen_id", "kind"],
-          "isUnique": true,
-          "where": "\"screen_incidents\".\"cleared_at\" IS NULL"
-        }
-      },
-      "foreignKeys": {
-        "screen_incidents_org_id_organization_id_fk": {
-          "name": "screen_incidents_org_id_organization_id_fk",
-          "tableFrom": "screen_incidents",
-          "tableTo": "organization",
-          "columnsFrom": ["org_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "screen_incidents_org_id_screen_id_screens_org_id_id_fk": {
-          "name": "screen_incidents_org_id_screen_id_screens_org_id_id_fk",
-          "tableFrom": "screen_incidents",
-          "tableTo": "screens",
-          "columnsFrom": ["org_id", "screen_id"],
-          "columnsTo": ["org_id", "id"],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -2519,6 +2403,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'active'"
+        },
+        "row_version": {
+          "name": "row_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
         },
         "created_at": {
           "name": "created_at",

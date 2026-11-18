@@ -136,3 +136,51 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   const refused = await request.post(`${DEVICE}/sync`, { headers: { authorization: `Bearer ${credential}` }, data: {} });
   expect(refused.status()).toBe(401);
 });
+
+test('an edit keeps a change someone else made while the form was open, and refuses one it would overwrite', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-versions-${Date.now()}@example.com`);
+  await page.goto('/');
+  await fillUntilEnabled(page, 'Organization name', 'Eastside Deli', 'Create organization');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page.getByRole('heading', { name: 'Eastside Deli', level: 1 })).toBeVisible();
+
+  // The page's own session stands in for an agent: what matters is that its changes land in between.
+  const tool = async (name: string, input: unknown) => {
+    const res = await page.request.post(`/api/tools/${name}`, { data: input });
+    expect(res.status(), `${name}: ${await res.text()}`).toBe(200);
+    return (await res.json()) as { screen?: { id: string }; group?: { id: string; screenIds: string[] } };
+  };
+  const pair = async (name: string) =>
+    (await tool('claim_screen', { code: (await startPairing(request)).code, name, timezone: 'UTC', orientation: 'landscape' })).screen!.id;
+  const lobby = await pair('Lobby');
+  const hall = await pair('Hall');
+  const group = (await tool('create_group', { name: 'Windows' })).group!;
+
+  await page.goto(`/screens/${lobby}`);
+  await hydrated(page);
+  await page.getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('menuitem', { name: 'Settings and groups…' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByLabel('Windows').check();
+
+  // An agent puts Hall in the group while the form is open; saving the form keeps it there.
+  await tool('add_group_members', { groupId: group.id, screenIds: [hall] });
+  await settings.getByRole('button', { name: 'Save' }).click();
+  await expect(settings).toBeHidden();
+  const { groups } = (await (await page.request.post('/api/tools/list_groups', { data: {} })).json()) as { groups: { id: string; screenIds: string[] }[] };
+  expect(groups.find((g) => g.id === group.id)?.screenIds).toEqual([hall, lobby].sort());
+
+  // An agent renames the screen while the form is open; the person's rename is refused, not written over it.
+  await page.getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('menuitem', { name: 'Settings and groups…' }).click();
+  await tool('rename_screen', { screenId: lobby, name: 'Front lobby' });
+  await settings.getByLabel('Name').fill('Main lobby');
+  await settings.getByRole('button', { name: 'Save' }).click();
+  await expect(settings.getByText('This changed since you opened it.')).toBeVisible();
+  await settings.getByRole('button', { name: 'Reload' }).click();
+  await expect(settings).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Front lobby', level: 1 })).toBeVisible();
+});

@@ -34,6 +34,7 @@ describe('org settings', () => {
             publish_finished: { who: 'editors', email: true },
             agent_refused: { who: 'owners', email: true },
           },
+          version: 1,
         },
       },
     });
@@ -84,9 +85,21 @@ describe('org settings', () => {
       { updateWindow: { from: '02:00', to: '02:00' } },
       { timezone: 'Mars/Olympus' },
       {},
+      { ifVersion: 1 },
     ]) {
       expect(await dispatch(registry, 'update_org_settings', bad, as('owner'))).toMatchObject({ ok: false, error: 'invalid_input' });
     }
+  });
+
+  it('refuses a change made from an old read, writing nothing', async () => {
+    const read = await dispatch(registry, 'get_org_settings', {}, as('owner'));
+    if (!read.ok) throw new Error(read.message);
+    const { version, timezone } = (read.output as { settings: { version: number; timezone: string | null } }).settings;
+    const stale = await dispatch(registry, 'update_org_settings', { timezone: 'Asia/Tokyo', ifVersion: version - 1 }, as('owner'));
+    expect(stale).toMatchObject({ ok: false, error: 'conflict', details: { id: 'settings', version } });
+    expect(await dispatch(registry, 'get_org_settings', {}, as('owner'))).toMatchObject({ output: { settings: { timezone, version } } });
+    const fresh = await dispatch(registry, 'update_org_settings', { timezone: 'Asia/Tokyo', ifVersion: version }, as('owner'));
+    expect(fresh).toMatchObject({ ok: true, output: { settings: { timezone: 'Asia/Tokyo', version: version + 1 } } });
   });
 
   it("marks a screen unreachable after the org's threshold, not before", async () => {

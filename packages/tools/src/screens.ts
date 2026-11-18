@@ -3,7 +3,7 @@ import type { DisplayHours, DisplayOverride, ScreenManifest } from '@signforge/c
 import type { OrgScope, Screen, ScreenCredential } from '@signforge/db';
 import { nextDisplayChange } from '@signforge/player-core';
 import { z } from 'zod';
-import { displayHours, id, locale, name, orientation, timezone } from './fields';
+import { displayHours, id, ifVersion, locale, name, orientation, timezone, version } from './fields';
 import { parseHeartbeat } from './heartbeat';
 import { nextOutput, page, pageInput } from './paging';
 import { manifestKey } from './r2';
@@ -76,6 +76,7 @@ export const screenOutput = z.object({
     })
     .nullable()
     .describe('What the screen should be showing now, worked out from its desired manifest as the player does; null when nothing is published'),
+  version: version.describe('Moves on when its name or settings change (not with heartbeats or publishes); pass it as ifVersion to update only what you read'),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -177,6 +178,7 @@ export async function screenView(
         }
       : null,
     showing,
+    version: s.rowVersion,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
   };
@@ -259,24 +261,25 @@ const getScreen = defineTool({
 
 const renameScreen = defineTool({
   name: 'rename_screen',
-  description: 'Rename a screen. The name is what people see in the CMS; screens do not show it. Returns { screen }.',
+  description:
+    'Rename a screen. The name is what people see in the CMS; screens do not show it. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { screen }.',
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
-  input: z.object({ screenId: id('screen'), name: name('screen') }),
+  input: z.object({ screenId: id('screen'), name: name('screen'), ifVersion }),
   output: z.object({ screen: screenOutput }),
   example: { screenId: 'scr_example', name: 'Lobby' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, write, blobs }) => {
     const screen = await requireScreen(org, input.screenId);
-    return { screen: await screenView(org, write(org.screens.stage.update(screen, { name: input.name })), blobs) };
+    return { screen: await screenView(org, write(org.screens.stage.update(screen, { name: input.name }, input.ifVersion)), blobs) };
   },
 });
 
 const updateScreenSettings = defineTool({
   name: 'update_screen_settings',
   description:
-    "Change a screen's time zone, locale, orientation or display hours. Give only the fields to change; null clears locale (the player's default) or display hours (always on). Display hours are checked as the player checks them. The screen picks the change up with the next publish to it. Returns { screen }.",
+    "Change a screen's time zone, locale, orientation or display hours. Give only the fields to change; null clears locale (the player's default) or display hours (always on). Display hours are checked as the player checks them. The screen picks the change up with the next publish to it. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { screen }.",
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
@@ -287,6 +290,7 @@ const updateScreenSettings = defineTool({
       locale: locale.nullable().optional(),
       orientation: orientation.optional(),
       displayHours: displayHours.nullable().optional(),
+      ifVersion,
     })
     .refine(
       (v) => v.timezone !== undefined || v.locale !== undefined || v.orientation !== undefined || v.displayHours !== undefined,
@@ -298,12 +302,16 @@ const updateScreenSettings = defineTool({
   handler: async ({ org, input, write, blobs }) => {
     const screen = await requireScreen(org, input.screenId);
     const row = write(
-      org.screens.stage.update(screen, {
-        timezone: input.timezone,
-        locale: input.locale,
-        orientation: input.orientation,
-        displayHoursJson: input.displayHours === undefined ? undefined : input.displayHours === null ? null : JSON.stringify(input.displayHours),
-      }),
+      org.screens.stage.update(
+        screen,
+        {
+          timezone: input.timezone,
+          locale: input.locale,
+          orientation: input.orientation,
+          displayHoursJson: input.displayHours === undefined ? undefined : input.displayHours === null ? null : JSON.stringify(input.displayHours),
+        },
+        input.ifVersion,
+      ),
     );
     return { screen: await screenView(org, row, blobs) };
   },

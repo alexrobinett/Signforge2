@@ -17,4 +17,5 @@ ALTER TABLE `org_settings` ADD `locale` text;--> statement-breakpoint
 ALTER TABLE `org_settings` ADD `display_hours_json` text;--> statement-breakpoint
 ALTER TABLE `org_settings` ADD `update_window_json` text;--> statement-breakpoint
 ALTER TABLE `org_settings` ADD `unreachable_after_ms` integer;--> statement-breakpoint
-ALTER TABLE `org_settings` ADD `alerts_json` text;
+ALTER TABLE `org_settings` ADD `alerts_json` text;--> statement-breakpoint
+ALTER TABLE `org_settings` ADD `row_version` integer DEFAULT 1 NOT NULL;

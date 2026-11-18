@@ -46,6 +46,12 @@ const updated = () =>
  * `stage.publish` in ./scoped.ts writes it.
  */
 const publishedJson = () => text('published_json');
+/**
+ * A row people edit: starts at 1 and moves on with every change through a repository's `stage`,
+ * so an update made from an old read can be refused (`ifVersion`, ./scoped.ts). Not
+ * `version`, which a template version already has for its semver.
+ */
+const rowVersion = () => integer('row_version').notNull().default(1);
 const publishedAt = () => integer('published_at');
 
 // --------------------------------------------------------------- Better Auth
@@ -209,6 +215,7 @@ export const screens = sqliteTable(
     status: text('status', { enum: ['active', 'revoked'] })
       .notNull()
       .default('active'),
+    rowVersion: rowVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -221,6 +228,8 @@ export const screenGroups = sqliteTable(
     id: text('id').primaryKey(),
     orgId: orgId(),
     name: text('name').notNull(),
+    /** Moves on when the name or the members change. */
+    rowVersion: rowVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -507,6 +516,8 @@ export const orgSettings = sqliteTable(
     unreachableAfterMs: integer('unreachable_after_ms'),
     /** Who gets which alert, by email (packages/tools `alerts`). Null for the defaults. */
     alertsJson: text('alerts_json'),
+    /** An org with no row has every default, at version 1; each `settings.stage.set` moves it on. */
+    rowVersion: rowVersion(),
     updatedAt: updated(),
   },
   (t) => [foreignKey({ columns: [t.orgId, t.defaultPlaylistId], foreignColumns: [playlists.orgId, playlists.id] })],
@@ -561,6 +572,7 @@ export const brandKits = sqliteTable(
     /** Image assets, SVG or PNG. */
     logoOnDarkAssetId: text('logo_on_dark_asset_id'),
     logoOnLightAssetId: text('logo_on_light_asset_id'),
+    rowVersion: rowVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },

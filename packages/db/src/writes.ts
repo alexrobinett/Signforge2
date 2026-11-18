@@ -17,10 +17,36 @@ type Db = DrizzleD1Database<Record<string, never>>;
 type Query = Parameters<Db['batch']>[0][number];
 
 const QUERY = Symbol('write');
+const GUARD = Symbol('guard');
 
 /** One statement of a staged change. Run only by a scope's `commit`. */
 export interface Write {
   readonly [QUERY]: Query;
+  /** On a version guard (./scoped.ts): which row it checked, and how to read its version now. */
+  readonly [GUARD]?: VersionGuard;
+}
+
+interface VersionGuard {
+  id: string;
+  /** The version the change was made from. */
+  version: number;
+  /** The row's version now. Throws `NotInOrgError` if the row is gone. */
+  current: () => Promise<number>;
+}
+
+/**
+ * A change refused because its row is no longer the version it was made from: someone else
+ * changed it since it was read. `version` is the row's version now; nothing was written.
+ */
+export class StaleVersionError extends Error {
+  constructor(
+    readonly id: string,
+    readonly version: number,
+    options?: ErrorOptions,
+  ) {
+    super(`${id} has changed since you read it; it is now version ${version}. Read it again and redo the change`, options);
+    this.name = 'StaleVersionError';
+  }
 }
 
 /** A staged change: the statements to run, and the row (if any) as it will be afterwards. */
@@ -32,11 +58,27 @@ export interface Staged<T = void> {
 const write = (query: unknown): Write => ({ [QUERY]: query as Query });
 export const staged = <T>(row: T, ...queries: unknown[]): Staged<T> => ({ row, writes: queries.map(write) });
 
-/** Run writes in one atomic batch. Nothing to write runs nothing. */
+/** A statement that fails its batch unless the row is still the version it was read at. */
+export const guard = (query: unknown, g: VersionGuard): Write => ({ [QUERY]: query as Query, [GUARD]: g });
+
+/**
+ * Run writes in one atomic batch. Nothing to write runs nothing. A batch failed by a version
+ * guard throws `StaleVersionError` (`NotInOrgError` if the row is gone), so a caller can tell a
+ * refusal from a fault; any other failure is rethrown as it is.
+ */
 export async function commit(db: Db, writes: readonly Write[]): Promise<void> {
   if (!writes.length) return;
   const [first, ...rest] = writes.map((w) => w[QUERY]);
-  await db.batch([first!, ...rest]);
+  try {
+    await db.batch([first!, ...rest]);
+  } catch (err) {
+    for (const g of writes.flatMap((w) => w[GUARD] ?? [])) {
+      const now = await g.current();
+      // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
+      if (now !== g.version) throw new StaleVersionError(g.id, now, { cause: err });
+    }
+    throw err;
+  }
 }
 
 interface ColumnInfo {
@@ -47,10 +89,10 @@ interface ColumnInfo {
 
 /**
  * A caller's values without the fields it may never set (`Guarded` in ./scoped.ts): the org, the
- * id, the creation time and a draft's published version. `scoped` and `platform` both use it.
+ * id, the creation time, the row's version and a draft's published version. `scoped` and `platform` both use it.
  */
 export function strip<T extends object>(v: T): T {
-  const { orgId: _o, id: _i, createdAt: _c, publishedJson: _pj, publishedAt: _pa, ...rest } = v as Record<string, unknown>;
+  const { orgId: _o, id: _i, createdAt: _c, rowVersion: _v, publishedJson: _pj, publishedAt: _pa, ...rest } = v as Record<string, unknown>;
   return rest as T;
 }
 

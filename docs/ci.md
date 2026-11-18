@@ -7,8 +7,9 @@ One job, `check`, in `.github/workflows/ci.yml`, on every pull request and every
 1. Install, with the pnpm store restored from the cache.
 2. The repo-wide checks, a few seconds each, on every run: Biome lint, the format check on changed files, knip, jscpd, `turbo boundaries` and the contract-commit check.
 3. The plan: `turbo run … --affected --dry=json` lists the tasks that will run. Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media and tools).
-4. `turbo run typecheck test test:e2e lint --affected --summarize`, with Turbo's cache restored from earlier runs.
-5. The timing summary on the run's page: each step's time, then each Turbo task's time and whether it came from the cache (`scripts/ci-summary.sh`).
+4. The stress media, only if the cli's or the tools' tests run (see [Stress media](#stress-media)).
+5. `turbo run typecheck test test:e2e lint --affected --summarize`, with Turbo's cache restored from earlier runs.
+6. The timing summary on the run's page: each step's time, then each Turbo task's time and whether it came from the cache (`scripts/ci-summary.sh`).
 
 ## What "affected" means
 
@@ -28,10 +29,26 @@ knip lists these dependencies as ones it cannot see used.
 
 One check sees more than the package graph does: packages/db's boundary test scans the whole repo for imports that reach past `@signforge/db`. A pull request runs it only when db is affected. On other pull requests, db's `exports` and `turbo boundaries` refuse those imports, and `master` runs the scan.
 
+## Stress media
+
+`examples/stress` plays photos and a video that are not in git: they are large, and the photos are third-party. The canonical set is the tarball on the release `stress-media-v1`, and `examples/stress/media.sha256` lists each file's sha256. `sh scripts/stress-media.sh` downloads it with `gh` (logged in, or `GH_TOKEN` set) and checks every file; with the media already in place it only checks.
+
+The stress golden (`packages/cli/test/golden/stress.json`) is built from exactly those bytes, and the tools' publishing test compares against that golden. The cli's golden test checks the media against `media.sha256` first. Without the canonical set it fails in CI (`CI` set) and skips elsewhere, saying so on stderr and in the test name.
+
+CI fetches the media when the plan includes the cli's or the tools' tests, with the job's `GITHUB_TOKEN`, and caches it under the hash of `media.sha256`. `media.sha256` is under `examples/`, a global dependency, so a new version reruns every task.
+
+A new version (new photos, a re-encoded video) is a new release and a regenerated golden, in one pull request:
+1. `rm -rf examples/stress/media && sh scripts/stress-media.sh --generate` makes a set with curl and ffmpeg, or put the files there by hand. ffmpeg's output differs by machine and version, which is why the set is published rather than generated.
+2. In `examples/stress/media`: `tar -czf ../stress-media-v2.tar.gz *` and `shasum -a 256 * > ../media.sha256`.
+3. `gh release create stress-media-v2 examples/stress/stress-media-v2.tar.gz --latest=false`, then delete the local tarball. Keep the old releases: older commits fetch them.
+4. Set `release=stress-media-v2` in `scripts/stress-media.sh`.
+5. Run `sf build examples/stress` and save its `manifest.json` as `packages/cli/test/golden/stress.json`, without `generatedAt`, keys sorted, two-space indent.
+
 ## Caches
 
 - **pnpm store**: restored on every run, keyed by the lockfile, falling back to the newest store. It is saved only from `master`: an upload took up to a minute, and a pull request would pay that again on each new lockfile.
 - **Playwright**: the headless shell (`playwright install --only-shell chromium`, which every browser test uses), keyed by the Playwright version in the lockfile. System packages are installed only when the shell links a library the runner lacks. On GitHub's Ubuntu 24.04 image none is missing, which saves the 15 s apt run.
+- **Stress media**: `examples/stress/media`, keyed by the hash of `examples/stress/media.sha256`.
 - **Turbo**: `.turbo/cache`, saved under the commit's sha and restored from the newest entry, even after a failure, so a rerun replays the tasks that passed. Turbo caches every task but the e2e run (`cache: false`). A pull request can read its own earlier runs and `master`'s, but not other pull requests'.
 
 A remote cache would share Turbo's cache with laptops and across pull requests. The README says how to move to one.
