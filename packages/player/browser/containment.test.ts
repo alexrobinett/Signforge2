@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest';
 import type { FixtureMode } from './content';
 import { spotsPlayed, useHarness, type Player } from './harness';
 
-const h = useHarness();
+// As on the Pi, so a template frame that shares the player's process is seen (the last test).
+const h = useHarness({ siteIsolation: true });
 
 /**
  * Open the player on `a`, the hostile spot, `b`. A leak is a request that reached the server, or a
@@ -106,5 +107,22 @@ describe('the template frame', () => {
       );
     });
     expect(reach).toEqual({ origin: 'null', top: 'blocked', parent: 'blocked', caches: expect.stringMatching(/blocked|none/), storage: 'blocked' });
+  });
+});
+
+describe('a template frame', () => {
+  // So a template that wedges its renderer does not stop the player, or its beat to the supervisor.
+  it('runs in a process of its own, not the player’s', async () => {
+    const p = await h.openPlayer((server) => server.publish(h.content([{ id: 'a', durationMs: 5000 }])));
+    await p.until((s) => s.spot === 'a');
+    // A template's frame is the child of a wrapper frame, which is the child of the player.
+    const templates = p.page.frames().filter((f) => f.parentFrame()?.parentFrame() === p.page.mainFrame());
+    expect(templates.length).toBeGreaterThan(0);
+    // DevTools makes a target of type "iframe" only for a frame in another renderer process
+    // (IsolateSandboxedIframes); a frame that shares the player's process has none.
+    const cdp = await p.page.context().newCDPSession(p.page);
+    const { targetInfos } = await cdp.send('Target.getTargets');
+    const outOfProcess = targetInfos.filter((t) => t.type === 'iframe' && t.url === 'about:srcdoc');
+    expect(outOfProcess.length).toBe(templates.length);
   });
 });

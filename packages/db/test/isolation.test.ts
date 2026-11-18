@@ -137,7 +137,6 @@ describe("a call made for org B with org A's ids", () => {
       desiredManifestId: null,
       reportedManifestId: null,
       lastSeenAt: null,
-      syncEpoch: null,
     });
     expect((await ra.playCounts.list({ from: a.hour, to: a.hour + 3_600_000 })).map((c) => c.plays)).toEqual([3]);
     expect((await ra.screens.credentials.get(a.credential))?.revokedAt).toBeNull();

@@ -99,6 +99,37 @@ describe('play counts', () => {
     ]);
   });
 
+  it('count once when retries from before and after a re-image interleave', async () => {
+    const r = await setUp('sync-reimage');
+    const batch = (epoch: string, seq: number, n: number) => body({ epoch, seq, playCounts: [{ hour: HOUR, spot: 'menu', plays: n, ms: n * 1000 }] });
+    const acks: [string, number][] = [];
+    const deliveries: [string, number, number][] = [
+      ['old', 1, 1],
+      ['new', 1, 10],
+      ['old', 1, 1],
+      ['new', 1, 10],
+      ['old', 2, 2],
+      ['new', 2, 20],
+      ['old', 2, 2],
+      ['new', 2, 20],
+    ];
+    for (const [epoch, seq, n] of deliveries) {
+      const res = await sync(r, batch(epoch, seq, n));
+      acks.push([res.epoch, res.ackSeq]);
+    }
+    expect(acks).toEqual([
+      ['old', 1],
+      ['new', 1],
+      ['old', 1],
+      ['new', 1],
+      ['old', 2],
+      ['new', 2],
+      ['old', 2],
+      ['new', 2],
+    ]);
+    expect(await plays(r)).toEqual([['menu', 33, 33_000]]);
+  });
+
   it('for an hour that has not begun are dropped, the rest kept', async () => {
     const future = new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 13) + ':00Z';
     expect(

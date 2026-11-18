@@ -8,7 +8,7 @@ What runs on a Raspberry Pi 4 player, and how to set one up. The test rig is a P
 | --- | --- |
 | `signforge-kiosk` | cage (Wayland kiosk compositor) running `kiosk.sh`: forces 1080p 60 Hz, then Chromium in kiosk mode on the URL in `~/signforge/kiosk.env` |
 | `signforge-player-web` | serves `~/signforge/www` (the player build) on 127.0.0.1:8090, standing in for the CDN |
-| `signforge-supervisor` | `supervisor.py`: display power and the screen's credential, on 127.0.0.1:8091 |
+| `signforge-supervisor` | `supervisor.py`: display power and the screen's credential, on 127.0.0.1:8091. It restarts `signforge-kiosk` when the player has not beaten `POST /alive` for 30 s, allowed by the polkit rule `signforge-supervisor.rules` for that unit only |
 | `signforge-datad`, `signforge-soak` | development stand-ins: a feed writer and a soak logger (`~/signforge/soak.csv`) |
 | `signforge-bootprobe` | measurement only, never enabled by a deploy: records kernel start to first spot (`bench.py boot`) |
 

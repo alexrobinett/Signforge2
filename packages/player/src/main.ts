@@ -70,6 +70,8 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 /** The longest a spot waits for its data feeds' first load. */
 const DATA_WAIT_MS = 3000;
 const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
+/** How often the player tells the supervisor it is alive. Its `STALE_S` must allow for a few missed. */
+const ALIVE_MS = 5000;
 const KIND: ScreenKind = query.get('kind') === 'browser' ? 'browser' : 'device';
 /** The supervisor's secret, collected from it at first use. Never in the URL: templates can read that. */
 let supervisorToken = '';
@@ -967,6 +969,9 @@ async function boot(): Promise<void> {
     if (!state.displayOn) lastProgress = performance.now();
     else if (manifest && performance.now() - lastProgress > longest + 30_000) location.reload();
   }, 10_000);
+  // That watchdog runs in the renderer it watches. The supervisor restarts the kiosk when these
+  // beats stop (device/pi/supervisor.py). Without a supervisor (the demo in a browser) nobody hears them.
+  if (KIND === 'device') setInterval(() => void supervisorFetch('/alive', { method: 'POST' }).catch(() => undefined), ALIVE_MS);
 
   void syncLoop();
   socket?.start();
