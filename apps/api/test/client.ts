@@ -9,9 +9,7 @@ import { expect } from 'vitest';
 import { createApi } from '../src/api';
 import { RecordingEmailSender } from '../src/email';
 
-export const ORIGIN = 'https://api.test';
-
-export type Api = ReturnType<typeof createApi>;
+const ORIGIN = 'https://api.test';
 
 /** A fresh `/api` app, as a new isolate would build it. */
 export function testApp({ outbox = new RecordingEmailSender() }: { outbox?: RecordingEmailSender } = {}) {
@@ -42,11 +40,7 @@ export class Client {
     const headers = new Headers({ 'cf-connecting-ip': this.ip, origin: ORIGIN, ...extra });
     if (this.jar.size) headers.set('cookie', this.cookie);
     if (body !== undefined) headers.set('content-type', 'application/json');
-    const res = await this.t.app.request(
-      `${ORIGIN}${path}`,
-      { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
-      this.bindings,
-    );
+    const res = await this.t.app.request(`${ORIGIN}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }, this.bindings);
     for (const c of res.headers.getSetCookie()) {
       const [pair = '', ...attrs] = c.split(';');
       const eq = pair.indexOf('=');

@@ -15,7 +15,9 @@ export const idempotencyKey = z
   .max(128)
   .regex(/^[\x21-\x7e]+$/, 'printable ASCII, no spaces')
   .optional()
-  .describe('A key you choose for this one creation, such as a UUID. Retrying with the same key and input returns the first result and creates nothing more; reusing it for another input is refused');
+  .describe(
+    'A key you choose for this one creation, such as a UUID. Retrying with the same key and input returns the first result and creates nothing more; reusing it for another input is refused',
+  );
 
 export const name = (what: string) => z.string().trim().min(1, `the ${what} needs a name`).max(100).describe(`The ${what}'s name, 1 to 100 characters`);
 
@@ -43,8 +45,13 @@ const window = z.object({ from: hhmm, to: hhmm });
  */
 export const displayHours = z
   .object({
-    weekly: z.array(window.extend({ days: z.array(z.number().int()).describe('0 is Sunday') })).describe('Daily windows on the given days, in the screen\'s time zone; a window whose end is at or before its start crosses midnight'),
-    exceptions: z.array(z.object({ date: z.string().describe('YYYY-MM-DD'), on: z.array(window) })).optional().describe('Dates whose windows replace the weekly ones; no windows means off all day'),
+    weekly: z
+      .array(window.extend({ days: z.array(z.number().int()).describe('0 is Sunday') }))
+      .describe("Daily windows on the given days, in the screen's time zone; a window whose end is at or before its start crosses midnight"),
+    exceptions: z
+      .array(z.object({ date: z.string().describe('YYYY-MM-DD'), on: z.array(window) }))
+      .optional()
+      .describe('Dates whose windows replace the weekly ones; no windows means off all day'),
   })
   .superRefine((hours, ctx) => {
     for (const message of displayHoursProblems(hours)) ctx.addIssue({ code: 'custom', message });

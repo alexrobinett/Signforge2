@@ -6,7 +6,7 @@ import { defineTool, notFound, ToolError } from './tool';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
-export const publishManifestToScreen = defineTool({
+const publishManifestToScreen = defineTool({
   name: 'publish_manifest_to_screen',
   description:
     "Make a manifest already uploaded for a screen its desired manifest, so the screen switches to it at once (over its socket, or at its next sync if that is down). The manifest it replaces stays available to the screen while it switches. Use it to publish what `sf push` uploaded or to roll back to the screen's previousManifestId. Publishing the current manifest again changes nothing. Returns { screenId, manifestId, changed }.",

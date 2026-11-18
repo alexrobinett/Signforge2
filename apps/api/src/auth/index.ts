@@ -6,8 +6,7 @@ import { betterAuth } from 'better-auth';
 import type { EmailSender } from '../email';
 import { authOptions } from './options';
 
-export { COOKIE_PREFIX } from './options';
-export { roles, ROLES, type Role } from './roles';
+export { ROLES, type Role } from './roles';
 
 /** Only for `wrangler dev` and tests. Every other environment must set the AUTH_SECRET secret. */
 const DEV_SECRET = 'signforge-dev-secret-not-for-deployed-environments';

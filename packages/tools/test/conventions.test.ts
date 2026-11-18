@@ -4,7 +4,19 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { defineTool, describeTools, dispatch, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, PLATFORM_TOOLS, registry, setOutputChecks, TOOLS, type AnyTool, type Caller } from '../src';
+import {
+  defineTool,
+  describeTools,
+  dispatch,
+  DEFAULT_PAGE_LIMIT,
+  MAX_PAGE_LIMIT,
+  PLATFORM_TOOLS,
+  registry,
+  setOutputChecks,
+  TOOLS,
+  type AnyTool,
+  type Caller,
+} from '../src';
 
 let o: SeededOrg;
 let owner: Caller;
@@ -100,12 +112,13 @@ describe('paging', () => {
   it('gives every list tool the same rows, in the same order, one at a time as all at once', async () => {
     const org = scoped(env.DB, o.orgId);
     // Assets made back to back often share a millisecond; the id breaks the tie.
-    for (const n of ['Tie a', 'Tie b', 'Tie c']) await org.assets.insert({ kind: 'image', name: n, sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1, status: 'verified' });
+    for (const n of ['Tie a', 'Tie b', 'Tie c'])
+      await org.assets.insert({ kind: 'image', name: n, sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1, status: 'verified' });
     for (const t of TOOLS.filter((t) => t.name.startsWith('list_'))) {
       const whole = await dispatch(registry, t.name, { limit: MAX_PAGE_LIMIT }, owner);
       if (!whole.ok) throw new Error(`${t.name}: ${whole.message}`);
       const [field] = Object.keys(whole.output as object).filter((k) => k !== 'next');
-      const ids = ((whole.output as Record<string, { id: string }[]>)[field!]!).map((r) => r.id);
+      const ids = (whole.output as Record<string, { id: string }[]>)[field!]!.map((r) => r.id);
       expect(ids.length, t.name).toBeGreaterThan(0);
 
       const walked: string[] = [];

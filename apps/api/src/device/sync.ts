@@ -16,7 +16,7 @@ import { screenManifests, type ManifestSummary } from './manifests';
 import { issueTicket } from './ticket';
 
 /** How often a screen syncs. */
-export const SYNC_INTERVAL_S = 300;
+const SYNC_INTERVAL_S = 300;
 /** Counts for an hour this far past the server's are not believed: the screen's clock is wrong. */
 const FUTURE_SLACK_MS = 3_600_000;
 

@@ -1,0 +1,95 @@
+/** Switching the active organization, and the create-organization forms. */
+import { createOrganization, switchOrganization } from '~/lib/orgs';
+import type { SliceCreator } from './store';
+
+/**
+ * Where a create-organization form sits. Each has its own draft, since both can be on screen:
+ * the first-org card on the org picker, and the switcher's dialog.
+ */
+export type CreateOrgFormId = 'picker' | 'switcher';
+
+interface CreateOrgDraft {
+  name: string;
+  pending: boolean;
+  error: string | null;
+}
+
+export interface OrgsState {
+  /** The org being switched to, while the switch runs. */
+  switchingTo: string | null;
+  /** What the switcher announces to screen readers. */
+  status: string;
+  /** Why the last switch from the org picker failed. */
+  pickerError: string | null;
+  createDialogOpen: boolean;
+  drafts: Record<CreateOrgFormId, CreateOrgDraft>;
+}
+
+export interface OrgsSlice {
+  orgs: OrgsState;
+  /** Makes `org` active. From the switcher it announces progress; from the picker it shows an error only. */
+  switchOrg: (org: { id: string; name: string }, from: 'switcher' | 'picker') => Promise<void>;
+  openCreateOrg: () => void;
+  /** Closes the switcher's dialog and drops its draft, as cancelling should. */
+  closeCreateOrg: () => void;
+  editOrgName: (form: CreateOrgFormId, name: string) => void;
+  /** Creates the org from that form's draft; it becomes the active org. */
+  createOrg: (form: CreateOrgFormId) => Promise<void>;
+}
+
+const emptyDraft: CreateOrgDraft = { name: '', pending: false, error: null };
+
+export const initialOrgs: OrgsState = {
+  switchingTo: null,
+  status: '',
+  pickerError: null,
+  createDialogOpen: false,
+  drafts: { picker: emptyDraft, switcher: emptyDraft },
+};
+
+export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) => {
+  const draft = (form: CreateOrgFormId, change: Partial<CreateOrgDraft>) =>
+    set((s) => ({ orgs: { ...s.orgs, drafts: { ...s.orgs.drafts, [form]: { ...s.orgs.drafts[form], ...change } } } }));
+
+  return {
+    orgs: initialOrgs,
+
+    async switchOrg(org, from) {
+      const announce = from === 'switcher';
+      set((s) => ({
+        orgs: {
+          ...s.orgs,
+          switchingTo: org.id,
+          status: announce ? `Switching to ${org.name}…` : s.orgs.status,
+          pickerError: announce ? s.orgs.pickerError : null,
+        },
+      }));
+      try {
+        await switchOrganization(router, org.id);
+        if (announce) set((s) => ({ orgs: { ...s.orgs, status: `Switched to ${org.name}.` } }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not switch organization.';
+        set((s) => ({ orgs: announce ? { ...s.orgs, status: message } : { ...s.orgs, pickerError: message } }));
+      } finally {
+        set((s) => ({ orgs: { ...s.orgs, switchingTo: null } }));
+      }
+    },
+
+    openCreateOrg: () => set((s) => ({ orgs: { ...s.orgs, createDialogOpen: true } })),
+    closeCreateOrg: () => set((s) => ({ orgs: { ...s.orgs, createDialogOpen: false, drafts: { ...s.orgs.drafts, switcher: emptyDraft } } })),
+    editOrgName: (form, name) => draft(form, { name }),
+
+    async createOrg(form) {
+      const name = get().orgs.drafts[form].name.trim();
+      if (!name) return draft(form, { error: 'Enter a name.' });
+      draft(form, { pending: true, error: null });
+      try {
+        await createOrganization(router, name);
+        draft(form, emptyDraft);
+        if (form === 'switcher') set((s) => ({ orgs: { ...s.orgs, createDialogOpen: false, status: 'Organization created.' } }));
+      } catch (err) {
+        draft(form, { pending: false, error: err instanceof Error ? err.message : 'Could not create the organization.' });
+      }
+    },
+  };
+};

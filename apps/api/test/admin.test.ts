@@ -28,7 +28,17 @@ async function build(seed: string): Promise<Build> {
   const html = encoder.encode(`<!doctype html><title>${seed}</title>`);
   const image = encoder.encode(`png ${seed}`);
   const [htmlSha, imageSha] = await Promise.all([sha256(html), sha256(image)]);
-  const tm = { id: 'card', version: '1.0.0', name: 'Card', fields: {}, duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 }, orientations: ['landscape' as const], uses: [], background: '#000', protocol: 1 };
+  const tm = {
+    id: 'card',
+    version: '1.0.0',
+    name: 'Card',
+    fields: {},
+    duration: { defaultMs: 5000, minMs: 1000, maxMs: 9000 },
+    orientations: ['landscape' as const],
+    uses: [],
+    background: '#000',
+    protocol: 1,
+  };
   const body: Omit<ScreenManifest, 'id' | 'generatedAt'> = {
     schema: 2,
     screen: { id: 'local', name: 'Local', timezone: 'UTC', orientation: 'landscape' },
@@ -44,14 +54,24 @@ async function build(seed: string): Promise<Build> {
     defaultPlaylist: 'main',
   };
   const manifest: ScreenManifest = { ...body, id: await sha256(manifestIdInput(body)), generatedAt: '2026-11-17T00:00:00.000Z' };
-  return { manifest, manifestText: JSON.stringify(manifest, null, 2), blobs: new Map([[htmlSha, html], [imageSha, image]]) };
+  return {
+    manifest,
+    manifestText: JSON.stringify(manifest, null, 2),
+    blobs: new Map([
+      [htmlSha, html],
+      [imageSha, image],
+    ]),
+  };
 }
 
 /** Counts PUTs of files so a test can tell what a push uploaded. */
 function client(b: Build, screen: string, extra: Partial<PushOptions> = {}) {
   const puts: string[] = [];
   const opts: PushOptions = {
-    api: API, screen, token: TOKEN, manifestText: b.manifestText,
+    api: API,
+    screen,
+    token: TOKEN,
+    manifestText: b.manifestText,
     readBlob: (sha) => b.blobs.get(sha)!,
     fetch: (url, init) => {
       if (init?.method === 'PUT' && url.includes('/blobs/')) puts.push(url);
@@ -78,12 +98,26 @@ beforeAll(async () => {
 });
 
 describe('admin auth', () => {
-  const paths: [string, string][] = [['POST', '/screens/x/missing'], ['PUT', `/screens/x/blobs/${'a'.repeat(64)}`], ['PUT', `/base/blobs/${'a'.repeat(64)}`], ['PUT', '/screens/x/manifest'],
-    ['PUT', `/orgs/x/blobs/${'a'.repeat(64)}`], ['PUT', '/base/templates'], ['PUT', '/orgs/x/templates']];
+  const paths: [string, string][] = [
+    ['POST', '/screens/x/missing'],
+    ['PUT', `/screens/x/blobs/${'a'.repeat(64)}`],
+    ['PUT', `/base/blobs/${'a'.repeat(64)}`],
+    ['PUT', '/screens/x/manifest'],
+    ['PUT', `/orgs/x/blobs/${'a'.repeat(64)}`],
+    ['PUT', '/base/templates'],
+    ['PUT', '/orgs/x/templates'],
+  ];
 
   it('is a 401 with no token, a wrong token, or a device credential', async () => {
     for (const [method, path] of paths) {
-      for (const auth of [undefined, 'Bearer wrong-token', `Bearer ${TOKEN}x`, `Bearer ${TOKEN.slice(0, -1)}`, `Basic ${btoa(`admin:${TOKEN}`)}`, `Bearer ${credential}`]) {
+      for (const auth of [
+        undefined,
+        'Bearer wrong-token',
+        `Bearer ${TOKEN}x`,
+        `Bearer ${TOKEN.slice(0, -1)}`,
+        `Basic ${btoa(`admin:${TOKEN}`)}`,
+        `Bearer ${credential}`,
+      ]) {
         const res = await exports.default.fetch(`${API}/admin${path}`, { method, body: '{}', headers: auth ? { authorization: auth } : {} });
         expect(res.status, `${method} ${path} ${auth?.slice(0, 12)}`).toBe(401);
         expect(await res.json()).toEqual({ error: 'unauthorized' });
@@ -94,7 +128,10 @@ describe('admin auth', () => {
   it('is off entirely when ADMIN_TOKEN is unset', async () => {
     for (const token of [undefined, '']) {
       for (const [method, path] of paths) {
-        const res = await app.fetch(new Request(`${API}/admin${path}`, { method, body: '{}', headers: { authorization: `Bearer ${token}` } }), { ...env, ADMIN_TOKEN: token });
+        const res = await app.fetch(new Request(`${API}/admin${path}`, { method, body: '{}', headers: { authorization: `Bearer ${token}` } }), {
+          ...env,
+          ADMIN_TOKEN: token,
+        });
         expect(res.status, `${method} ${path}`).toBe(404);
       }
     }

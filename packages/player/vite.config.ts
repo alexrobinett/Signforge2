@@ -7,7 +7,9 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 function playerVersion(): string {
   if (process.env.SF_PLAYER_VERSION) return process.env.SF_PLAYER_VERSION;
   try {
-    return `${pkg.version}+${execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()}`;
+    return `${pkg.version}+${execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim()}`;
   } catch {
     return pkg.version;
   }

@@ -1,33 +1,32 @@
 import { LoaderCircleIcon } from 'lucide-react';
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, type SubmitEvent, type ReactNode } from 'react';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { useOrgActions } from '~/lib/orgs';
 import { cn } from '~/lib/utils';
+import type { CreateOrgFormId } from '~/state/orgs';
+import { useAppStore } from '~/state/provider';
 
-export function CreateOrgForm({ onCreated, submitLabel = 'Create organization', footer, className }: { onCreated?: () => void; submitLabel?: string; footer?: ReactNode; className?: string }) {
-  const { create } = useOrgActions();
-  const [name, setName] = useState('');
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+/** Names and creates an org. `form` picks the store draft it edits (src/state/orgs.ts). */
+export function CreateOrgForm({
+  form,
+  submitLabel = 'Create organization',
+  footer,
+  className,
+}: {
+  form: CreateOrgFormId;
+  submitLabel?: string;
+  footer?: ReactNode;
+  className?: string;
+}) {
+  const { name, pending, error } = useAppStore((s) => s.orgs.drafts[form]);
+  const editOrgName = useAppStore((s) => s.editOrgName);
+  const createOrg = useAppStore((s) => s.createOrg);
   const id = useId();
 
-  async function submit(e: FormEvent) {
+  function submit(e: SubmitEvent) {
     e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return setError('Enter a name.');
-    setError(null);
-    setPending(true);
-    try {
-      await create(trimmed);
-      setName('');
-      onCreated?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create the organization.');
-    } finally {
-      setPending(false);
-    }
+    void createOrg(form);
   }
 
   return (
@@ -38,7 +37,7 @@ export function CreateOrgForm({ onCreated, submitLabel = 'Create organization', 
           id={`${id}-name`}
           name="name"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => editOrgName(form, e.target.value)}
           placeholder="Acme Coffee"
           autoComplete="organization"
           maxLength={80}
