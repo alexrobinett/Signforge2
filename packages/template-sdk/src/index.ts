@@ -267,3 +267,30 @@ export function formatter(ctx: Pick<TemplateContext, 'timezone' | 'locale'>, opt
 export function dayKey(ctx: Pick<TemplateContext, 'timezone'>, date: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: ctx.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
+
+/**
+ * The longest run of `text`'s leading words, ending in "…", that `fits` accepts; `text` itself if
+ * it fits. Where CSS `text-overflow: ellipsis` would cut after a space ("rain to …"), this ends on
+ * a word ("rain…"). `fits` usually sets an element's text and checks it does not overflow:
+ *
+ *   el.textContent = fitWords(title, (s) => ((el.textContent = s), el.scrollHeight <= el.clientHeight + 1));
+ *
+ * A binary search: about log2(words) calls of `fits`, each one a layout.
+ */
+export function fitWords(text: string, fits: (candidate: string) => boolean): string {
+  if (fits(text)) return text;
+  const words = text.trim().split(/\s+/);
+  const cut = (n: number) =>
+    `${words
+      .slice(0, n)
+      .join(' ')
+      .replace(/[\s,;:.\-–—]+$/, '')}…`;
+  let lo = 1;
+  let hi = words.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(cut(mid))) lo = mid;
+    else hi = mid - 1;
+  }
+  return cut(lo);
+}
