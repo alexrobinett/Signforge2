@@ -20,6 +20,8 @@ Make Milestone 3 safe to leave running: quotas, cleanup, environments, and a pub
 - Player releases: the API hosts content-addressed player builds; sync names the release a screen should run; the supervisor downloads, verifies and swaps it.
 - URL spots: at publish, check the page allows framing (`X-Frame-Options`, `frame-ancestors`), since a blocked page still fires `load`.
 
+- **From the design canvas (2026-11-17):** a Billing & usage settings page showing screens, storage and data sources against the per-org quotas (prices left out until there is billing), and the Audit log page with filters by actor (person or agent), action and target.
+
 ## Out of scope
 
 - Billing.

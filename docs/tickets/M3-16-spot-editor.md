@@ -20,10 +20,17 @@ Create and edit spots with a form generated from the template's fields and a liv
 - Edits save to the spot's draft (M3-34).
 - Image, video and URL spots: file or URL plus fit and duration. URL spots validated with `safeUrl`.
 
+- **From the design canvas (2026-11-17).** Design: the design canvas (https://claude.ai/artifact/JUMHm7PCsat6RV8yDXNb3H), `docs/proposals/cms-ui.md` and `docs/research/cms-ux.md`.
+  - The stage is labelled "Draft. Not on any screen." While a field is invalid, the stage keeps the last valid frame and shows the contract's message by the field; publish stays disabled.
+  - The stage updates within 100 ms of a keystroke (debounced `draft` messages, M3-36).
+
 ## Out of scope
 
 - Playlists.
 - Timeline scrubbing (`seek`), click-to-edit (`field-clicked`) and template notices (`notice`): later, after v1 (owner decision 2026-11-17).
+
+- Later, not v1: the time scrubber ("what will this screen show on Friday at 6 pm?") needs a clock override in the preview channel, a contract change; an agent's draft shown before and after on two stages (Milestone 4).
+
 
 ## Done when
 
