@@ -192,6 +192,31 @@ describe('the heartbeat', () => {
   });
 });
 
+describe('a failed content fetch', () => {
+  it("leaves the heartbeat at the server's interval, while the fetch retries on its own", async () => {
+    const content = h.content([{ id: 'a', durationMs: 500 }]);
+    let restore = () => {};
+    const p = await h.openPlayer((s) => {
+      s.nextSyncS = 4;
+      s.publish(content);
+      restore = s.intercept(/^\/content\/blobs\//, { status: 404 });
+    }, api);
+    await p.until((s) => s.socket);
+    const syncs = p.server.syncs.length;
+    const fetches = () => p.server.requestsTo(/^\/content\/blobs\//).length;
+    const tried = fetches();
+    await new Promise((r) => setTimeout(r, 9000));
+    // Every 4 s (±10%), not every second (`poll=1`) as after a failed sync.
+    expect(p.server.syncs.length - syncs).toBeLessThanOrEqual(3);
+    expect(fetches() - tried).toBeGreaterThanOrEqual(3);
+    expect((await p.state()).online).toBe(true);
+
+    // The file back: it plays within a retry, which never waits longer than the sync interval.
+    restore();
+    await p.until((s) => s.manifestId === content.manifest.id, 6000);
+  });
+});
+
 describe('commands on the sync', () => {
   it('reload the player, but not again within minutes', async () => {
     const p = await h.openPlayer((s) => {

@@ -9,7 +9,8 @@
  *                 ?poll=<seconds> static content: how often to look for a new manifest (default 30). With the
  *                                 API each look is a sync, every `nextSyncS` (5 minutes) with jitter, every
  *                                 2 minutes while the socket is down (src/sync-interval.ts), and this often
- *                                 after a failed one. Given explicitly, it is also the socket-down interval (testing)
+ *                                 after a failed one; a failed content fetch first retries after this long.
+ *                                 Given explicitly, it is also the socket-down interval (testing)
  *                 ?stall=<seconds> give up on a download that receives nothing for this long (default 30; testing)
  *                 ?debug=1        show the on-screen status overlay
  *                 ?hb=1           with debug, also show a moving speck so every frame is drawn. It costs
@@ -52,7 +53,7 @@ import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from
 import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
-import { syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
+import { contentRetryMs, syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
 import { SOURCE } from './source';
 import { PinSet, UnauthorisedError, filesMissing, loadManifests, rememberGood, requestPersistence, sync, wipeContent } from './store';
 
@@ -722,8 +723,37 @@ function settleTickets(result: { ticket: string } | { error: unknown }): void {
 /** When the manifest was last fetched in full, to put back evicted files (`performance.now()`). */
 let lastFileCheck = Number.NEGATIVE_INFINITY;
 
-/** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. Returns when to sync next, in seconds. */
-async function apiSync(): Promise<number> {
+/** Content fetches from the API that failed in a row, and the timer of the next retry. */
+const contentRetry = { failures: 0, timer: 0 };
+let retrieving: Promise<void> | undefined;
+
+/**
+ * Fetch the manifest the last sync named, and its files. A failure retries on its own timer,
+ * backing off (src/sync-interval.ts), so the heartbeat keeps the server's interval. Rejects only
+ * when the API refuses the credential.
+ */
+function retrieveContent(): Promise<void> {
+  retrieving ??= (async () => {
+    clearTimeout(contentRetry.timer);
+    try {
+      await fetchManifest();
+      lastFileCheck = performance.now();
+      contentRetry.failures = 0;
+    } catch (err) {
+      if (err instanceof UnauthorisedError) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      state.lastError = `content: ${message}`;
+      console.warn('[sf] could not fetch the content', err);
+      if (!manifest) status(`SignForge\nWaiting for content…\n${message}`);
+      // A retry the API refuses leaves the revoke to a sync.
+      contentRetry.timer = window.setTimeout(() => void retrieveContent().catch(() => poll.wake()), contentRetryMs(++contentRetry.failures, timing()));
+    }
+  })().finally(() => (retrieving = undefined));
+  return retrieving;
+}
+
+/** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. */
+async function apiSync(): Promise<void> {
   const batch = playBatch(now());
   const req: SyncRequest = {
     seq: batch.seq,
@@ -753,6 +783,7 @@ async function apiSync(): Promise<number> {
   const parsed = parseSyncResponse(await res.json());
   if (!parsed.ok) throw new Error(`sync: ${parsed.problems.join('; ')}`);
   const r = parsed.value;
+  syncTiming.nextSyncS = r.nextSyncS;
   const wasTrusted = clock.trusted;
   synced(r.serverTime, sentAt, receivedAt);
   // Display hours and any saved override were set aside while the clock was untrusted.
@@ -763,21 +794,11 @@ async function apiSync(): Promise<number> {
   state.auth = '';
   state.lastSync = new Date(now()).toISOString();
 
-  let failed: unknown;
   const current = state.fallback || manifest?.id;
-  if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
-    try {
-      await fetchManifest();
-      lastFileCheck = performance.now();
-    } catch (err) {
-      failed = err;
-    }
-  }
+  if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) await retrieveContent();
   await offerSnapshots(r.snapshots, manifest);
   await offerChecked(r.checked ?? {});
   for (const c of r.commands) command(c);
-  if (failed) throw failed;
-  return r.nextSyncS;
 }
 
 const withOverride = () => {
@@ -822,7 +843,7 @@ async function syncLoop(): Promise<never> {
           if (!manifest) status('SignForge\nThis screen is paired with another API than its address names.');
         }
         if (credential.held) {
-          syncTiming.nextSyncS = await apiSync();
+          await apiSync();
           syncTiming.ok = true;
         }
       } else {
