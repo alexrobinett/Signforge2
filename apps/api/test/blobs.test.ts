@@ -42,8 +42,23 @@ describe('GET /api/blobs/:sha256', () => {
     const res = await alice.get(`/api/blobs/${A_FILE}`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('image/png');
-    expect(res.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
+    expect(res.headers.get('cache-control')).toBe('private, no-cache');
+    expect(res.headers.get('etag')).toBe(`"${A_FILE}"`);
     expect(await res.text()).toBe('org a file');
+  });
+
+  it('makes the browser ask again each time, so a signed-out browser gets no cached copy', async () => {
+    const carol = new Client(t);
+    await carol.signIn(email('carol'));
+    const org = (await carol.createOrg('Blobs C')).id;
+    await env.BLOBS.put(orgBlobKey(org, A_FILE), 'org c file', { httpMetadata: { contentType: 'image/png' } });
+    const again = { 'if-none-match': `"${A_FILE}"` };
+    const fresh = await carol.get(`/api/blobs/${A_FILE}`, again);
+    expect(fresh.status).toBe(304);
+    expect(fresh.headers.get('cache-control')).toBe('private, no-cache');
+    expect(await fresh.text()).toBe('');
+    await carol.ok('/api/auth/sign-out');
+    expect((await carol.get(`/api/blobs/${A_FILE}`, again)).status).toBe(401);
   });
 
   it("is a 404 for another org's file, which that org can fetch", async () => {

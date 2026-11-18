@@ -4,10 +4,14 @@
  * The org comes from the session (`requireOrg`), never from the request, so a hash only ever
  * resolves under that org's own R2 prefix, or under the shared prefix when it is a base
  * template's HTML or a catalogue brand font (public OFL bytes every org may use). Responses are `private` and can never run as a page here (`blobHeaders`).
+ *
+ * The browser must ask again before each use (`no-cache`, answered 304 while the session may still
+ * see the file): a year-long fresh copy would outlive a sign-out, an org switch or a removal on a
+ * shared browser and skip this check.
  */
 import { isCatalogueFontFile } from '@signforge/compiler';
 import type { Hono } from 'hono';
-import { baseBlobKey, blobHeaders, orgBlobKey } from '../r2';
+import { baseBlobKey, blobHeaders, matches, orgBlobKey } from '../r2';
 import type { ApiEnv } from '.';
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -20,6 +24,9 @@ export function mountBlobs(api: Hono<ApiEnv>): void {
     let obj = await c.env.BLOBS.get(orgBlobKey(c.var.orgId, sha));
     if (!obj && (isCatalogueFontFile(sha) || (await c.var.org.templates.versions.baseBundle(sha)))) obj = await c.env.BLOBS.get(baseBlobKey(sha));
     if (!obj) return notFound();
-    return new Response(obj.body, { headers: blobHeaders(sha, obj.httpMetadata?.contentType || 'application/octet-stream', obj.size) });
+    const headers = blobHeaders(sha, obj.httpMetadata?.contentType || 'application/octet-stream', obj.size, 'private, no-cache');
+    if (!matches(c.req.header('if-none-match'), `"${sha}"`)) return new Response(obj.body, { headers });
+    await obj.body.cancel();
+    return new Response(null, { status: 304, headers: { etag: `"${sha}"`, 'cache-control': 'private, no-cache' } });
   });
 }
