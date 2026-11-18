@@ -252,3 +252,4 @@ After the full review of 2026-11-17 (`docs/reviews/2026-11-17-full-review.md`), 
 - Which hardware, if any, v1 supports for 4K. A Pi 5 is the obvious candidate and is untested.
 - Current browser support for WebMCP has not been checked.
 - Replacement artwork and fonts for the C-Store template: the SignForge 1 repo contains Petro-Points artwork and Gibson and Minion font files that should not be reused without a licence.
+
