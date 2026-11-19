@@ -31,3 +31,56 @@ test('a session that ends while the app is open goes to sign-in and back, from a
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
   await expect(page).toHaveURL('/sign-in?redirect=%2Fassets');
 });
+
+test('a session that ends on Spots or in the spot editor goes to sign-in at once, without a storm of requests', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-ended-spots-${Date.now()}@example.com`, ADDRESS);
+  await page.goto('/');
+  await fillUntilEnabled(page, 'Organization name', 'Quay Florist', 'Create organization');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page.getByRole('heading', { name: 'Quay Florist', level: 1 })).toBeVisible();
+  const spotsLink = page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' });
+  await spotsLink.click();
+  await hydrated(page);
+  await page.getByRole('button', { name: 'New spot' }).click();
+  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: 'Clock' });
+  await page.getByLabel('Name').fill('Window clock');
+  await page.getByRole('button', { name: 'Create spot' }).click();
+  await expect(page).toHaveURL(/\/spots\/[^/?]+$/);
+  const editor = new URL(page.url()).pathname;
+  const session = await page.context().cookies();
+
+  // Every call the browser makes to a server function, from when the session ends.
+  let calls = 0;
+  page.on('request', (r) => {
+    if (r.url().includes('/_serverFn/')) calls++;
+  });
+  /** End the session, do `then`, and land on sign-in with the way back, in a handful of calls that then stop. */
+  async function ends(then: () => Promise<unknown>, back: string) {
+    await page.context().clearCookies();
+    calls = 0;
+    await then();
+    await expect(page).toHaveURL(`/sign-in?redirect=${encodeURIComponent(back)}`);
+    await page.waitForTimeout(2_000);
+    expect(calls).toBeLessThan(20);
+    await page.context().addCookies(session);
+  }
+
+  // From Overview, follow the link to Spots.
+  await page.goto('/');
+  await hydrated(page);
+  await ends(() => spotsLink.click(), '/spots');
+
+  // From Spots, open the editor.
+  await page.goto('/spots');
+  await hydrated(page);
+  await ends(() => page.getByRole('link', { name: 'Window clock' }).click(), editor);
+
+  // Spots left open until its reads are stale, then the tab is shown again (Query refetches on focus).
+  await page.goto('/spots');
+  await hydrated(page);
+  await page.waitForTimeout(11_000);
+  await ends(() => page.evaluate(() => window.dispatchEvent(new Event('visibilitychange'))), '/spots');
+});
