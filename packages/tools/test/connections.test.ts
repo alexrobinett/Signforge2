@@ -130,6 +130,21 @@ describe('connecting an account', () => {
     expect(await result('start_connection', { provider: 'fake', connectionId: other.connection })).toMatchObject({ ok: false, error: 'not_found' });
   });
 
+  it('refuses an agent, which could start an authorization but never finish it', async () => {
+    const agent: Caller = {
+      ...owner,
+      actor: { kind: 'agent', id: 'grant-1', clientId: 'some-agent' },
+      agentLimiter: { take: async () => ({ ok: true }), audited: async () => undefined },
+    };
+    const before = (await owner.org.connections.authorizations.list()).length;
+    expect(await result('start_connection', { provider: 'fake' }, agent)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+      message: expect.stringContaining('signed in to the CMS'),
+    });
+    expect((await owner.org.connections.authorizations.list()).length).toBe(before);
+  });
+
   it('refuses a provider this deployment cannot connect, and viewers', async () => {
     expect(await result('start_connection', { provider: 'nope' })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await result('start_connection', { provider: 'fake' }, viewer)).toMatchObject({ ok: false, error: 'forbidden' });

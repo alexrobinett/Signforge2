@@ -112,6 +112,12 @@ const startConnection = defineTool({
   target: (input, output) =>
     input.connectionId ? { kind: 'connection', id: input.connectionId } : { kind: 'connection_authorization', id: output.authorizationId },
   handler: async ({ org, actor, input, write, connectors }) => {
+    // The provider sends a browser back, and the callback finishes as its session's user: an agent's authorization could never be finished.
+    if (actor.kind !== 'user')
+      throw new ToolError(
+        'forbidden',
+        'Only a person signed in to the CMS can connect an account: the provider sends their browser back to SignForge, which finishes it as them. Ask them to connect it on the Integrations page',
+      );
     const providers = connectorsOf(connectors);
     if (!providers.providers.includes(input.provider))
       throw new ToolError('invalid_input', `${input.provider} cannot be connected here; this deployment connects: ${providers.providers.join(', ') || 'none'}`);
