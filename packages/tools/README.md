@@ -77,7 +77,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `update_brand_kit` | content:draft | editor | `{ brandKitId, name?, colors?, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId?, ifVersion? }` | `{ brandKit }` |
 | `set_default_brand_kit` | content:draft | editor | `{ brandKitId }` | `{ brandKit }` |
 | `assign_brand_kit` | content:draft | editor | `{ brandKitId \| null, screenId? \| groupId? }` | `{ brandKit \| null }` |
-| `list_data_sources` | content:read | viewer | `{ limit?, cursor? }` | `{ dataSources: DataSource[], next }`, by id |
+| `list_data_sources` | content:read | viewer | `{ limit?, cursor? }` | `{ dataSources: DataSource[], next }`, by id; each with `lastFetchedAt` and `lastCheckedAt` (its last good poll, null before one) and the `spots` that bind it, as drafted or as published |
 | `get_data_source` | content:read | viewer | `{ dataSourceId }` | `{ dataSource, snapshot \| null }` |
 | `create_data_source` | content:draft | editor | `{ id?, name, format, feedUrl, refreshS?, horizonDays?, idempotencyKey? }` | `{ dataSource }`; 409 past 10 per org |
 | `update_data_source` | content:draft | editor | `{ dataSourceId, name?, feedUrl?, refreshS?, horizonDays? \| null, ifVersion? }` | `{ dataSource }` |
