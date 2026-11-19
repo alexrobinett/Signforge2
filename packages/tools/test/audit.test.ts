@@ -163,6 +163,13 @@ describe('list_audit_log', () => {
   it('refuses a cursor it did not make', async () => {
     const forged = btoa(JSON.stringify(['a', 'b'])).replace(/=+$/, '');
     expect(await dispatch(registry, 'list_audit_log', { cursor: forged }, as('viewer'))).toMatchObject({ ok: false, error: 'invalid_input' });
+    // One naming this org, but not made by this list, is not said to be another org's.
+    const own = btoa(JSON.stringify(['a', 1, o.orgId])).replace(/=+$/, '');
+    expect(await dispatch(registry, 'list_audit_log', { cursor: own }, as('viewer'))).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      message: 'cursor cannot be used: it is not one this list returned; start again without it',
+    });
   });
 
   it('searches with the longest text it takes, in any script and with wildcard characters', async () => {

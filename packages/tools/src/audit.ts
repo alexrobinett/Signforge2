@@ -100,7 +100,7 @@ const listAuditLog = defineTool({
 function seqKey(key: readonly (string | number)[], orgId: string | null): [number, number] {
   const [at, seq, org] = key;
   if (key.length === 3 && typeof at === 'number' && typeof seq === 'number' && org === orgId) return [at, seq];
-  const why = key.length === 3 && typeof org === 'string' ? 'it was made in another organization' : 'it is not one this list returned';
+  const why = key.length === 3 && typeof org === 'string' && org !== orgId ? 'it was made in another organization' : 'it is not one this list returned';
   throw new ToolError('invalid_input', `cursor cannot be used: ${why}; start again without it`, [{ path: 'cursor', message: why }]);
 }
 
