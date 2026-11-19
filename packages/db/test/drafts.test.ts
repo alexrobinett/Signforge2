@@ -210,7 +210,7 @@ describe('rollout history in the publish batch (review 5)', () => {
     const manifestId = 'a'.repeat(64);
     const stage = async (revision: number) => {
       const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision: revision + 1 });
-      const rollout = await org.publishes.stage.addScreens(publish.row.id, [{ screenId: p.screen, manifestId }]);
+      const rollout = org.publishes.stage.addScreens(publish.row.id, [{ screenId: p.screen, manifestId }]);
       return {
         id: publish.row.id,
         writes: [
@@ -238,7 +238,10 @@ describe('rollout history in the publish batch (review 5)', () => {
   it('refuses a rollout row for a screen the org does not have', async () => {
     const p = await seedOrg(env.DB, 'drafts-rollout-foreign');
     const org = scoped(env.DB, p.orgId);
-    await expect(org.publishes.stage.addScreens(p.publish, [{ screenId: 'scr_not_mine', manifestId: 'a'.repeat(64) }])).rejects.toBeInstanceOf(NotInOrgError);
+    const other = await seedOrg(env.DB, 'drafts-rollout-other');
+    const rollout = org.publishes.stage.addScreens(p.publish, [{ screenId: other.screen, manifestId: 'a'.repeat(64) }]);
+    await expect(org.commit(rollout.writes)).rejects.toMatchObject({ name: 'StaleVersionError', id: 'screens', version: 0 });
+    expect(await scoped(env.DB, other.orgId).publishes.screens(p.publish)).toEqual([]);
   });
 
   it('fails the batch as a stale read when a screen is deleted between the read and the commit (#52)', async () => {
@@ -246,7 +249,7 @@ describe('rollout history in the publish batch (review 5)', () => {
     const org = scoped(env.DB, p.orgId);
     const other = await org.screens.insert({ name: 'Other', timezone: 'UTC', orientation: 'landscape' });
     const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision: 2 });
-    const rollout = await org.publishes.stage.addScreens(publish.row.id, [
+    const rollout = org.publishes.stage.addScreens(publish.row.id, [
       { screenId: p.screen, manifestId: 'a'.repeat(64) },
       { screenId: other.id, manifestId: 'b'.repeat(64) },
     ]);
@@ -260,7 +263,7 @@ describe('publish history', () => {
   /** Commit a publish at `revision` switching each screen to its manifest, as the publish tool does. */
   const publishAt = async (org: ReturnType<typeof scoped>, revision: number, rows: { screenId: string; manifestId: string }[], restoresId?: string) => {
     const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision, restoresId });
-    const rollout = await org.publishes.stage.addScreens(publish.row.id, rows);
+    const rollout = org.publishes.stage.addScreens(publish.row.id, rows);
     await org.commit([...publish.writes, ...rollout.writes, ...rows.flatMap((r) => org.screens.stage.setDesiredManifest(r.screenId, r.manifestId).writes)]);
     return publish.row;
   };

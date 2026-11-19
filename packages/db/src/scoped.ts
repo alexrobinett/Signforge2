@@ -1091,17 +1091,18 @@ export function scoped(d1: D1Database, orgId: string) {
         /**
          * As `addScreens`, staged, so a publish's rollout rows commit in one batch with its row
          * (`stage.insert`, staged before them), its order (`advance`) and its screens' switches.
-         * Throws `NotInOrgError` for a screen the org does not have. The publish may not be stored
-         * yet, so it is not read: the `(org_id, publish_id)` foreign key refuses another org's.
+         * The batch fails as a stale read (`StaleVersionError`, id `screens`, version 0) unless
+         * every screen is the org's when it commits: one deleted since the publish read it, or
+         * another org's, which would otherwise fail on the rows' foreign key. A publish retries
+         * that from a fresh read. Nothing is read here: 1,000 screens are one statement's check.
+         * The publish may not be stored yet: the `(org_id, publish_id)` foreign key refuses another org's.
          */
-        addScreens: async (publishId: string, rows: readonly { screenId: string; manifestId: string }[]): Promise<Staged> => {
-          const ids = await orgScreens(rows.map((r) => r.screenId));
+        addScreens: (publishId: string, rows: readonly { screenId: string; manifestId: string }[]): Staged => {
+          const ids = [...new Set(rows.map((r) => r.screenId))];
           const values = rows.map((r) => ({ orgId, publishId, screenId: r.screenId, manifestId: r.manifestId }));
           const inserts = staged(undefined, ...chunk(values, 4).map((part) => db.insert(ps).values(part)));
           if (!ids.length) return inserts;
-          // A screen deleted since the read would fail the batch on the rows' foreign key. Checked
-          // first, so it fails as a stale read (`StaleVersionError`, id `screens`) that a publish
-          // retries from a fresh read; the ids go as one JSON value, past the 100-parameter limit.
+          // The ids go as one JSON value, past the 100-parameter limit.
           const sc = s.screens;
           const found = sql`(SELECT count(*) FROM ${sc} WHERE ${sc.orgId} = ${orgId} AND ${sc.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)})))`;
           const check = db
