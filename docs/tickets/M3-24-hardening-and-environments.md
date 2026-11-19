@@ -28,6 +28,7 @@ Make Milestone 3 safe to leave running: quotas, cleanup, environments, and a pub
 
 ## Done when
 
+- [x] Audit log view in the CMS (#82): `/audit`, filters by who, what, target, time and text, Load older and Export CSV, over `list_audit_log` (packages/tools); `packages/tools/test/audit.test.ts` and the generated isolation and conventions tests; `apps/cms/e2e/audit.spec.ts` makes a change, sees it, filters to it and exports it.
 - [ ] A deploy to demo and prod from a clean checkout works from the documented command.
 - [ ] Cleanup deletes only unreferenced blobs: tested.
 - [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.

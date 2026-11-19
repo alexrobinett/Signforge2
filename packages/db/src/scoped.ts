@@ -9,7 +9,7 @@
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
 import type { ScreenKind } from '@signforge/contract';
-import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
@@ -48,6 +48,22 @@ export class NotInOrgError extends Error {
 type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'incarnation' | 'publishRevision' | 'publishedJson' | 'publishedAt';
 export type NewRow<T extends SQLiteTable> = Omit<T['$inferInsert'], Guarded> & { id?: string };
 export type RowPatch<T extends SQLiteTable> = Partial<Omit<T['$inferInsert'], Guarded>>;
+
+/** What `auditLog.page` reads: a page after `after`, filtered (`from` inclusive, `to` exclusive, in ms). */
+interface AuditPage {
+  limit: number;
+  after?: readonly [at: number, seq: number];
+  actorKind?: (typeof s.auditLog.$inferSelect)['actorKind'];
+  actorId?: string;
+  action?: string;
+  targetKind?: string;
+  targetId?: string;
+  from?: number;
+  to?: number;
+  query?: string;
+  /** Actions whose detail `query` must not read, because the caller is not shown it. */
+  hideDetailOf?: readonly string[];
+}
 
 /** D1 binds at most 100 parameters per statement; leave one for the org. */
 function chunk<T>(rows: T[], columns: number): T[][] {
@@ -1497,6 +1513,43 @@ export function scoped(d1: D1Database, orgId: string) {
           .where(and(...where))
           .orderBy(desc(a.at), desc(sql`rowid`))
           .limit(limit)
+          .all();
+      },
+      /**
+       * One page of the log, newest first, in `list`'s order, read in SQL: up to `limit` rows after
+       * `after` (the `[at, seq]` of the last row of the page before), each with its `seq` (its
+       * `rowid`, which breaks ties within a millisecond; audit_log_org_at_idx holds it, so the
+       * order needs no sort). Every filter is optional; `query` matches the action, the actor's
+       * and the target's ids and the detail (but not that of `hideDetailOf`'s actions), as text,
+       * ignoring ASCII case.
+       */
+      page: (p: AuditPage) => {
+        const a = s.auditLog;
+        const seq = sql<number>`rowid`;
+        const where: SQL[] = [eq(a.orgId, orgId)];
+        if (p.after) {
+          const [at, rowid] = p.after;
+          where.push(or(lt(a.at, at), and(eq(a.at, at), sql`rowid < ${rowid}`))!);
+        }
+        if (p.actorKind) where.push(eq(a.actorKind, p.actorKind));
+        if (p.actorId) where.push(eq(a.actorId, p.actorId));
+        if (p.action) where.push(eq(a.action, p.action));
+        if (p.targetKind) where.push(eq(a.targetKind, p.targetKind));
+        if (p.targetId) where.push(eq(a.targetId, p.targetId));
+        if (p.from != null) where.push(sql`${a.at} >= ${p.from}`);
+        if (p.to != null) where.push(lt(a.at, p.to));
+        if (p.query) {
+          // instr, not LIKE: D1 refuses a LIKE pattern over 50 bytes, and instr has no wildcards to escape.
+          const has = (c: SQLiteColumn) => sql`instr(lower(${c}), lower(${p.query})) > 0`;
+          const detail = p.hideDetailOf?.length ? and(has(a.detailJson), notInArray(a.action, [...p.hideDetailOf]))! : has(a.detailJson);
+          where.push(or(has(a.action), has(a.actorId), has(a.targetId), detail)!);
+        }
+        return db
+          .select({ ...getTableColumns(a), seq })
+          .from(a)
+          .where(and(...where))
+          .orderBy(desc(a.at), desc(seq))
+          .limit(p.limit)
           .all();
       },
     },
