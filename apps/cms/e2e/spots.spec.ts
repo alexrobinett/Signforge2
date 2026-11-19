@@ -121,6 +121,10 @@ async function weatherAllDay() {
     ['Dusk', { code: 63, sunrise: now - 10 * h, sunset: now - 600 }],
     ['Midnight', { code: 0, sunrise: now - 14 * h, sunset: now - 4 * h }],
   ];
+  // The fields a feed would fill are the fallback values, under "If the source is down": with no
+  // source bound, they are what the stage plays.
+  const fallback = page.getByRole('button', { name: 'If the source is down' });
+  if ((await fallback.getAttribute('aria-expanded')) !== 'true') await fallback.click();
   for (const [phase, values] of phases) {
     for (const [field, value] of Object.entries(values)) await page.locator(`#field-${field}`).fill(String(value));
     await page.locator('#field-city').fill(phase);
