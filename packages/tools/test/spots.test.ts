@@ -171,6 +171,59 @@ describe('spot bindings', () => {
     });
   });
 
+  it("maps a table's columns onto a list field, and refuses an unknown column, a source that is not a table and a field that is not a list", async () => {
+    const { call, version, org } = await setup('spots-bind-table');
+    await org.dataSources.insert({ id: 'menu', name: 'Menu', format: 'csv', urlEncrypted: 'enc:m', refreshS: 300 });
+    const items = { dataSourceId: 'menu', path: 'rows', table: { columns: { name: 'Item' }, filter: { column: 'Section', equals: 'Mains' } } };
+    // Before its first poll the columns are not known: the poller checks them.
+    const { spot } = await ok(call('create_spot', { name: 'Menu', kind: 'template', templateVersionId: version, bindings: { items } }));
+    expect(spot).toMatchObject({ bindings: { items } });
+    const spotId = (spot as { id: string }).id;
+    expect(await ok(call('get_spot', { spotId }))).toMatchObject({ spot: { bindings: { items } } });
+    expect(await org.spots.get(spotId)).toMatchObject({ bindingsJson: JSON.stringify({ items: { source: 'menu', path: 'rows', table: items.table } }) });
+
+    await org.dataSources.putSnapshot('menu', {
+      version: 'm',
+      fetchedAt: 1,
+      checkedAt: 1,
+      dataJson: JSON.stringify({ columns: ['Item', 'Price', 'Section'], rows: [['Soup', '4', 'Mains']] }),
+    });
+    const refused: [unknown, string][] = [
+      [
+        { items: { ...items, table: { columns: { name: 'Dish' }, sort: { column: 'Rank' } } } },
+        'binding for "items": menu has no column "Dish", "Rank" (it has Item, Price, Section)',
+      ],
+      [{ items: { ...items, dataSourceId: 'news' } }, 'binding for "items": news is a news feed, not a table (csv or json-table)'],
+      [{ items: { ...items, dataSourceId: 'weather' } }, 'binding for "items": weather is a json source, not a table (csv or json-table)'],
+      [{ headline: items }, 'binding for "headline" maps a table, which fills a list field only, and "headline" is a text field'],
+      [{ items: { ...items, table: { columns: { name: 'Item', size: 'Price' } } } }, 'binding for "items": "size" is not a property of its items (name)'],
+      [{ items: { ...items, table: { columns: {} } } }, 'binding for "items" needs a column for "name"'],
+      [{ headline: { dataSourceId: 'menu', path: 'items.0' } }, 'menu is a table, which has no items.0 (it has columns, rows)'],
+    ];
+    for (const [bindings, message] of refused)
+      expect(await call('update_spot', { spotId, bindings }), JSON.stringify(bindings)).toMatchObject({
+        ok: false,
+        error: 'invalid_input',
+        details: [{ path: 'bindings', message }],
+      });
+    // A single field takes one cell by its path.
+    expect(await ok(call('update_spot', { spotId, bindings: { items, headline: { dataSourceId: 'menu', path: 'rows.0.0' } } }))).toMatchObject({
+      spot: { bindings: { headline: { dataSourceId: 'menu', path: 'rows.0.0' } } },
+    });
+  });
+
+  it("refuses a table binding to another org's table, without reading its columns", async () => {
+    const other = await setup('spots-bind-table-other');
+    await other.org.dataSources.insert({ id: 'menu', name: 'Menu', format: 'csv', urlEncrypted: 'enc:m', refreshS: 300 });
+    const { call, version } = await setup('spots-bind-table-mine');
+    const items = { dataSourceId: 'menu', path: 'rows', table: { columns: { name: 'Item' } } };
+    expect(await call('create_spot', { name: 'x', kind: 'template', templateVersionId: version, bindings: { items } })).toMatchObject({
+      ok: false,
+      error: 'not_found',
+      message: 'data source menu not found',
+    });
+  });
+
   it('refuses bindings on a spot that is not a template', async () => {
     const { call, asset } = await setup('spots-bind-image');
     expect(await call('create_spot', { name: 'x', kind: 'image', assetId: asset, bindings: {} })).toMatchObject({ ok: false, error: 'invalid_input' });

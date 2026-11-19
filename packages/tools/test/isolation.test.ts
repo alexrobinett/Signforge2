@@ -196,6 +196,7 @@ beforeAll(async () => {
     rateLimit: async () => true,
     feedUrls: { seal: async (_source, url) => `sealed:${url}` },
     places: { search: async () => [] },
+    tables: { read: async () => ({ columns: [], rows: [] }) },
     connectors,
   };
   // finish_connection's example state, pending for org B's owner.
