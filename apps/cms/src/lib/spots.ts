@@ -18,6 +18,7 @@ import {
   type Transition,
 } from '@signforge/contract';
 import type { AssetView } from './assets';
+import type { BindingInput } from './live-data';
 
 export type SpotKind = 'template' | 'image' | 'video' | 'url';
 type Fit = 'cover' | 'contain';
@@ -31,7 +32,7 @@ export interface SpotView {
   templateVersionId: string | null;
   data: Record<string, unknown> | null;
   assets: Record<string, string> | null;
-  bindings: Record<string, { source: string; path: string }> | null;
+  bindings: Record<string, BindingInput> | null;
   assetId: string | null;
   fit: Fit | null;
   url: string | null;
@@ -79,6 +80,8 @@ export interface SpotDraft {
   durationMs: number;
   data: Record<string, unknown>;
   assets: Record<string, string>;
+  /** Fields bound to a data source; their `data` is the fallback. */
+  bindings: Record<string, BindingInput>;
   assetId: string | null;
   fit: Fit;
   url: string;
@@ -89,6 +92,7 @@ export const draftOf = (s: SpotView): SpotDraft => ({
   durationMs: s.durationMs,
   data: s.data ?? {},
   assets: s.assets ?? {},
+  bindings: s.bindings ?? {},
   assetId: s.assetId,
   fit: s.fit ?? 'cover',
   url: s.url ?? '',
@@ -167,12 +171,20 @@ function fileFor(assets: AssetView[], orientation: Orientation, files: CompileIn
 }
 
 /** A spot's draft as the contract's `Spot`, or undefined when its template is not available. */
-function spotContent(spot: SpotView, draft: SpotDraft, version: TemplateVersionView | undefined, file: (assetId: string | null) => string): Spot | undefined {
+function spotContent(
+  spot: SpotView,
+  draft: SpotDraft,
+  version: TemplateVersionView | undefined,
+  file: (assetId: string | null) => string,
+  live: boolean,
+): Spot | undefined {
   const base = { id: spot.id, name: draft.name || spot.name, durationMs: draft.durationMs };
   if (spot.kind === 'template') {
     if (!version) return undefined;
     const assets = Object.fromEntries(Object.entries(draft.assets).map(([field, id]) => [field, file(id)]));
-    return { ...base, kind: 'template', template: version.key, data: draft.data, assets, ...(spot.bindings ? { bindings: spot.bindings } : {}) };
+    // The tools' bindings ({ dataSourceId, path }) as the contract's ({ source, path }).
+    const bindings = Object.fromEntries(Object.entries(draft.bindings).map(([field, b]) => [field, { source: b.dataSourceId, path: b.path }]));
+    return { ...base, kind: 'template', template: version.key, data: draft.data, assets, ...(live && Object.keys(bindings).length ? { bindings } : {}) };
   }
   if (spot.kind === 'url') return { ...base, kind: 'url', url: draft.url };
   return { ...base, kind: spot.kind, file: file(draft.assetId), fit: draft.fit };
@@ -197,6 +209,7 @@ const compileFor = (preview: SpotPreview['preview'], files: CompileInput['files'
 /**
  * The draft compiled for the stage: a screen of this orientation playing just this spot, with
  * the brand kit and template `preview` holds. Problems are the compiler's, as a publish would see them.
+ * With `live` false the spot is compiled without its bindings, so the player shows the fallback.
  */
 export async function compilePreview(opts: {
   spot: SpotView;
@@ -205,10 +218,11 @@ export async function compilePreview(opts: {
   preview: SpotPreview['preview'];
   assets: AssetView[];
   orientation: Orientation;
+  live: boolean;
 }): Promise<{ manifest?: ScreenManifest; problems: string[] }> {
   const { spot, preview, orientation } = opts;
   const files: CompileInput['files'] = { ...preview.files };
-  const content = spotContent(spot, opts.draft, opts.version, fileFor(opts.assets, orientation, files));
+  const content = spotContent(spot, opts.draft, opts.version, fileFor(opts.assets, orientation, files), opts.live);
   if (!content) return { problems: ['the template is not available'] };
   return compileFor(preview, files, orientation, [content], { id: PREVIEW_PLAYLIST, name: 'Preview', transition: { type: 'cut' }, items: [{ spot: spot.id }] });
 }
@@ -234,7 +248,8 @@ export async function compilePlaylistPreview(opts: {
   const leftOut = new Map<string, string[]>();
   for (const id of new Set(playlist.spotIds)) {
     const spot = byId.get(id);
-    const content = spot && spotContent(spot, draftOf(spot), opts.versions.get(spot.templateVersionId ?? ''), file);
+    // Bound as saved; the playlist stage posts no snapshots, so a bound spot plays its fallback there.
+    const content = spot && spotContent(spot, draftOf(spot), opts.versions.get(spot.templateVersionId ?? ''), file, true);
     const problems = !content
       ? ['its template is not available']
       : content.kind === 'template'
