@@ -732,4 +732,32 @@ describe('the publish tools (M3-18)', () => {
     expect(out.screens.map((s) => s.outcome)).toEqual(['updated', 'updated']);
     expect(await call('set_default_playlist', { playlistId: 'pls_gone' })).toMatchObject({ ok: false, error: 'not_found' });
   });
+
+  it("deletes the spot editor's weather sources once no spot binds them, as drafted or as published (#98)", async () => {
+    const { org } = await seedSmallOrg('tool-pub-sources');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    const [w1, w2, w3] = ['weather-1-c-kmh-aaaaaa', 'weather-2-f-mph-bbbbbb', 'weather-3-c-mph-cccccc'];
+    for (const id of [w1, w2, w3, 'news-typed'])
+      await org.dataSources.insert({ id, name: id, format: id.startsWith('news') ? 'rss' : 'json', urlEncrypted: `enc:${id}`, refreshS: 600 });
+    const bind = (id: string) => org.spots.update(x('deal'), { bindingsJson: JSON.stringify({ title: { source: id, path: 'current.title' } }) });
+    const left = async () => new Set((await org.dataSources.list()).map((d) => d.id));
+
+    await bind(w1);
+    const first = await ok(p.call('publish', {}));
+    // w2 and w3 are bound by nothing; a feed someone typed stays whatever binds it.
+    expect(first.removedDataSources).toEqual([w2, w3].sort());
+    const after = await left();
+    expect([w1, 'news-typed'].map((id) => after.has(id))).toEqual([true, true]);
+    expect([w2, w3].map((id) => after.has(id))).toEqual([false, false]);
+
+    // The editor moves the spot off w1: its delete is refused while the published version binds it.
+    await org.dataSources.insert({ id: w3, name: w3, format: 'json', urlEncrypted: `enc:${w3}`, refreshS: 600 });
+    await bind(w3);
+    expect(await call('delete_data_source', { dataSourceId: w1 })).toMatchObject({ ok: false, error: 'conflict' });
+    const second = await ok(p.call('publish', {}));
+    expect(second.removedDataSources).toEqual([w1]);
+    expect((await left()).has(w1)).toBe(false);
+    expect((await left()).has(w3)).toBe(true);
+  });
 });

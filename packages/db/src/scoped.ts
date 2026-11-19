@@ -1243,6 +1243,31 @@ export function scoped(d1: D1Database, orgId: string) {
           return dataSources.stage.update(current, patch, ifVersion);
         },
         /**
+         * Delete each of these sources, with its snapshot, that no spot binds when the batch runs: in
+         * its draft or its published version. The check is in the statement, so a spot bound to one
+         * since the caller looked keeps it, and staged after a publish's promotions it sees them.
+         */
+        deleteUnbound: (ids: readonly string[]): Staged => {
+          if (!ids.length) return { row: undefined, writes: [] };
+          const ds = s.dataSources;
+          const sp = s.spots;
+          const binds = (bindings: SQL) =>
+            sql`EXISTS (SELECT 1 FROM ${sp}, json_each(COALESCE(${bindings}, '{}')) AS b WHERE ${sp.orgId} = ${ds.orgId} AND json_extract(b.value, '$.source') = ${ds.id})`;
+          return staged(
+            undefined,
+            db
+              .delete(ds)
+              .where(
+                and(
+                  eq(ds.orgId, orgId),
+                  sql`${ds.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`,
+                  sql`NOT ${binds(sql`${sp.bindingsJson}`)}`,
+                  sql`NOT ${binds(sql`json_extract(${sp.publishedJson}, '$.bindingsJson')`)}`,
+                ),
+              ),
+          );
+        },
+        /**
          * The sources reading through `connectionId` polled again at once, their failures and backoff
          * gone: for a connection reconnected. Their versions stay, as with a poll.
          */

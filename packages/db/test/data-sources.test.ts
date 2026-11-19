@@ -62,3 +62,30 @@ describe('a poll saved', () => {
     expect(await o.dataSources.get(a.dataSource)).toMatchObject({ nextPollAt: NOW + 900_000, failures: 1, rowVersion: before.rowVersion });
   });
 });
+
+describe('dataSources.stage.deleteUnbound', () => {
+  it('deletes, with its snapshot, each source no spot binds in its draft or its published version, checked when the batch runs', async () => {
+    const o = await seedOrg(env.DB, 'org-unbound');
+    const org = o.scope;
+    const source = (id: string) => org.dataSources.insert({ id, name: id, format: 'json', urlEncrypted: `enc:${id}`, refreshS: 300 });
+    const bind = (id: string) => JSON.stringify({ title: { source: id, path: 'title' } });
+    for (const id of ['ub-draft', 'ub-published', 'ub-free', 'ub-late']) await source(id);
+    await org.dataSources.putSnapshot('ub-free', { version: 'v1', fetchedAt: NOW, checkedAt: NOW, dataJson: '{}' });
+    // Published bound to ub-published, then the draft moved to ub-draft.
+    await org.spots.update(o.templateSpot, { bindingsJson: bind('ub-published') });
+    await org.commit(org.spots.stage.publish((await org.spots.get(o.templateSpot))!).writes);
+    await org.spots.update(o.templateSpot, { bindingsJson: bind('ub-draft') });
+
+    const cleanup = org.dataSources.stage.deleteUnbound(['ub-draft', 'ub-published', 'ub-free', 'ub-late', b.dataSource]);
+    // Bound between the look and the commit: it stays.
+    await org.spots.update(o.imageSpot, { bindingsJson: bind('ub-late') });
+    await org.commit(cleanup.writes);
+
+    const left = new Set((await org.dataSources.list()).map((d) => d.id));
+    expect(['ub-draft', 'ub-published', 'ub-late'].every((id) => left.has(id))).toBe(true);
+    expect(left.has('ub-free')).toBe(false);
+    expect(await org.dataSources.snapshot('ub-free')).toBeUndefined();
+    // Another org's id deletes nothing of theirs.
+    expect(await b.scope.dataSources.get(b.dataSource)).toBeDefined();
+  });
+});

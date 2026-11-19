@@ -534,13 +534,14 @@ const pinKey = (kind: DraftKind, id: string) => `${kind}:${id}`;
  *
  * With `pins`, only those drafts are promoted, and only at the version pinned: one that changed or
  * was deleted since is refused (`conflict`, details `{ id, version }`, the version now, 0 if gone).
- * `revision` is the org's publish revision as read; the publish moves it to the next.
+ * `revision` is the org's publish revision as read; the publish moves it to the next. `graph` is the
+ * org as it will be once the writes commit, its drafts promoted.
  */
 export async function publishOrg(
   org: OrgScope,
   opts: CompileOptions,
   pins?: readonly DraftPin[],
-): Promise<{ writes: Write[]; drafts: DraftReport; screens: ScreenPublish[]; revision: number }> {
+): Promise<{ writes: Write[]; drafts: DraftReport; screens: ScreenPublish[]; revision: number; graph: OrgGraph }> {
   const read = await loadOrg(org);
   const pinned = pins && new Map(pins.map((p) => [pinKey(p.kind, p.id), p.version]));
   if (pins) {
@@ -577,5 +578,5 @@ export async function publishOrg(
     const problems = [...reasons, ...kitReasons, ...result.problems];
     screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
-  return { writes, drafts, screens, revision: read.publishRevision };
+  return { writes, drafts, screens, revision: read.publishRevision, graph };
 }

@@ -7,12 +7,14 @@
  * the publish's row and rollout rows, and each changed screen's switch. A screen whose manifest
  * did not change is not touched. The dispatcher runs it one call at a time per org, and again
  * from a fresh read when it loses a race (`publishes` on the tool). Screens are told after the
- * commit, through the notifier's `manifests` (the API: a queue, 50 screens a message).
+ * commit, through the notifier's `manifests` (the API: a queue, 50 screens a message). The same
+ * batch deletes the weather sources the spot editor made that no spot binds any more.
  *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
-import type { OrgScope } from '@signforge/db';
+import { published, type OrgScope } from '@signforge/db';
 import { z } from 'zod';
+import { madeBySpotEditor } from './data-sources';
 import { sha256Hex } from './dispatch';
 import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
@@ -57,6 +59,14 @@ const publishManifestToScreen = defineTool({
     return { screenId: screen.id, manifestId: input.manifestId, changed };
   },
 });
+
+/** The data source ids a spot's stored bindings (`bindings_json`) name. */
+function sourcesIn(json: string | null | undefined): string[] {
+  if (!json) return [];
+  // Written by the spot tools, from the contract's `Binding`s.
+  const bindings: Record<string, { source: string }> = JSON.parse(json);
+  return Object.values(bindings).map((b) => b.source);
+}
 
 const DRAFT_KINDS = ['spot', 'playlist', 'schedule_entry'] as const satisfies readonly DraftKind[];
 const draftRef = z.object({ kind: z.enum(DRAFT_KINDS), id: z.string() });
@@ -110,6 +120,9 @@ const publish = defineTool({
     publish: madeOutput,
     promoted: z.array(draftRef).describe('Drafts this publish made live'),
     held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Drafts that failed their checks and keep their published version'),
+    removedDataSources: z
+      .array(z.string())
+      .describe('Weather sources the spot editor made that no spot binds any more, deleted with the publish (one a spot was bound to meanwhile stays)'),
     screens: z.array(
       z.object({
         screenId: z.string(),
@@ -130,8 +143,12 @@ const publish = defineTool({
     }));
     const report = { promoted: result.drafts.promoted, held: result.drafts.held, screens };
     const changed = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.manifest] : []));
-    if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report };
+    if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report, removedDataSources: [] };
     write({ row: undefined, writes: result.writes });
+    // The spot editor's weather sources that no spot binds once this commits, as drafted or as published.
+    const bound = new Set(result.graph.spots.flatMap((s) => [s.bindingsJson, published(s)?.bindingsJson].flatMap(sourcesIn)));
+    const removedDataSources = result.graph.dataSources.map((d) => d.id).filter((id) => madeBySpotEditor(id) && !bound.has(id));
+    write(org.dataSources.stage.deleteUnbound(removedDataSources));
     const made = await switchScreens(
       ctx,
       result.revision + 1,
@@ -142,7 +159,7 @@ const publish = defineTool({
     await Promise.all(
       changed.map((m) => blobs.put(manifestKey(org.orgId, m.screen.id, m.id), JSON.stringify(m), { httpMetadata: { contentType: 'application/json' } })),
     );
-    return { publish: made, ...report };
+    return { publish: made, ...report, removedDataSources };
   },
 });
 
