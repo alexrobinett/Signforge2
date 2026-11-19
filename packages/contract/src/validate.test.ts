@@ -760,6 +760,29 @@ describe('forbidden code lint', () => {
   });
 });
 
+describe('script check', () => {
+  const problems = (html: string) =>
+    checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'scripts')?.problems;
+  const START = ['every script must start with exactly "use strict"; (sf build makes it so): one that does not, does not run'];
+
+  it('passes classic scripts that start with exactly "use strict";, and data blocks', () => {
+    expect(problems('<script>"use strict";go()</script><script type="text/javascript">"use strict";\r\nmore()</script>')).toEqual([]);
+    expect(problems('<script type="application/json">{"a":1}</script>')).toEqual([]);
+  });
+
+  it('refuses a script that starts any other way, whatever comes first', () => {
+    for (const text of ['\uFEFF"use strict";x()', '/* licence */"use strict";x()', "'use strict';x()", '"use strict"\r\nx()', ' "use strict";x()', 'x()'])
+      expect(problems(`<script>${text}</script>`), JSON.stringify(text)).toEqual(START);
+  });
+
+  it('refuses a module and an external script, which do not run', () => {
+    expect(problems('<script type="module">"use strict";x()</script>')).toEqual([
+      'a module script does not run in a template; sf build makes one classic script',
+    ]);
+    expect(problems('<script src="x.js"></script>')).toEqual(['a script must be inline: an external script does not run in a template']);
+  });
+});
+
 describe('validatePairStartRequest', () => {
   it('takes an empty body as a device, and a known kind', () => {
     expect(validatePairStartRequest({})).toEqual([]);
