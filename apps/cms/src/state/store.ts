@@ -12,6 +12,7 @@ import { connectCommandMenu, createCommandMenuSlice, type CommandMenuSlice } fro
 import { connectUi, createUiSlice, type UiSlice } from './ui';
 import { createAssetsSlice, type AssetsSlice } from './assets';
 import { createAuditSlice, type AuditSlice } from './audit';
+import { createBrandKitsSlice, type BrandKitsSlice } from './brand-kits';
 import { createIntegrationsSlice, type IntegrationsSlice } from './integrations';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
@@ -34,6 +35,7 @@ export type AppState = UiSlice &
   SpotSourceSlice &
   IntegrationsSlice &
   AuditSlice &
+  BrandKitsSlice &
   PublishingSlice;
 export type AppStore = StoreApi<AppState>;
 
@@ -59,6 +61,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createSpotEditorSlice(set, get, deps),
     ...createSpotSourceSlice(set, get, deps),
     ...createPlaylistEditorSlice(set, get, deps),
+    ...createBrandKitsSlice(set, get, deps),
     ...createIntegrationsSlice(set, get, deps),
     ...createAuditSlice(set, get, deps),
     ...createPublishingSlice(set, get, deps),
