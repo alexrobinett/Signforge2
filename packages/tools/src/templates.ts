@@ -258,7 +258,7 @@ const registerTemplateVersion = defineSharedTool({
     let runtime: TemplateRuntimeReport | undefined;
     if (org.orgId !== null) {
       if (!templateCheck) throw new Error('registering an org template needs the runtime check, and the caller has none');
-      runtime = await templateCheck({ manifest, html });
+      runtime = await templateCheck({ orgId: org.orgId, manifest, html });
       if (!runtime.ok) {
         throw new ToolError(
           'invalid_input',

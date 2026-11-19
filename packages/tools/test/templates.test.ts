@@ -37,10 +37,10 @@ const runtimeReport = (problems: string[] = []): TemplateRuntimeReport => ({
   renders: [{ orientation: 'landscape', viewport: { width: 1920, height: 1080 }, readyMs: 80, frames: { count: 60, longestMs: 17 } }],
   cost: { startMs: 0, checkMs: 2800 },
 });
-/** The checks a fake runtime check was asked for, by template id. */
+/** The checks a fake runtime check was asked for, as `<org>/<template id>`. */
 const checked: string[] = [];
-const passing: TemplateChecker = async ({ manifest }) => {
-  checked.push(manifest.id);
+const passing: TemplateChecker = async ({ orgId, manifest }) => {
+  checked.push(`${orgId}/${manifest.id}`);
   return runtimeReport();
 };
 
@@ -149,8 +149,17 @@ describe('the runtime check', () => {
   it('runs on a new org version, and its report is stored with the version', async () => {
     const ids = await orgUpload(html('h1{color:teal}'));
     const out = await call('register_template_version', { manifest: manifest({ id: 'rendered' }), ...ids });
-    expect(checked).toContain('rendered');
+    expect(checked).toContain(`${o.orgId}/rendered`);
     expect(out.version.checkReport.runtime).toEqual(runtimeReport());
+  });
+
+  it("runs in the caller's org, from its scope, whatever the input names", async () => {
+    const other = await seedOrg(env.DB, 'tpl-other');
+    const as: Caller = { ...owner, org: scoped(env.DB, other.orgId) };
+    const ids = await upload((sha) => orgBlobKey(other.orgId, sha), html('h1{color:lime}'), sources());
+    await call('register_template_version', { manifest: manifest({ id: 'scoped' }), ...ids, orgId: o.orgId }, as);
+    expect(checked).toContain(`${other.orgId}/scoped`);
+    expect(checked).not.toContain(`${o.orgId}/scoped`);
   });
 
   it('refuses a version that fails it, with each problem, and stores nothing', async () => {

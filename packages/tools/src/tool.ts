@@ -67,10 +67,11 @@ export interface FeedUrlSealer {
 
 /**
  * Runs the runtime check on a built template: a headless render in a container with no network
- * (`apps/template-check`). Implemented by the API with the check Worker. Rejects when the check
- * could not run; a template that fails it resolves with `ok: false` and its problems.
+ * (`apps/template-check`), the org's own, so one org's template never shares a browser with
+ * another's. `orgId` is the scope's, never the input's. Implemented by the API with the check
+ * Worker. Rejects when the check could not run; a template that fails it resolves with `ok: false`.
  */
-export type TemplateChecker = (template: { manifest: TemplateManifest; html: string }) => Promise<TemplateRuntimeReport>;
+export type TemplateChecker = (template: { orgId: string; manifest: TemplateManifest; html: string }) => Promise<TemplateRuntimeReport>;
 
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
 export interface ToolContext<I, D extends DataScope = OrgScope> {

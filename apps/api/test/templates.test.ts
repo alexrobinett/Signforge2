@@ -143,9 +143,10 @@ describe('org templates', () => {
   it('carry the runtime check in their check report', async () => {
     const r = await push(card({ id: 'checked-card' }), { owner: { org: orgId } });
     const version = await scoped(env.DB, orgId).templates.versions.get(r.templateVersionId);
+    // Checked in the org's own container: the API names the org from its scope.
     expect(JSON.parse(version!.checkReportJson!).runtime).toMatchObject({
       ok: true,
-      runner: { image: 'stand-in' },
+      runner: { image: `stand-in /check/org/${orgId}` },
       renders: [{ orientation: 'landscape' }, { orientation: 'portrait' }],
     });
   });

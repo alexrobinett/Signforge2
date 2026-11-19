@@ -2,6 +2,7 @@
  * The runner's HTTP API, inside the container. Only the check Worker's Durable Object reaches it.
  *
  *   GET  /health  { image, browser, network, canary }; it listens only once the browser is up
+ * Every answer has `x-runner-boot`, this process's id: two orgs' checks never share one.
  *   POST /check   { manifest, html } -> TemplateRuntimeReport; `?startMs=` is the container's start, which the Worker timed
  *
  * Two things must hold or every check is refused (503), so a broken container never passes a template:
@@ -9,6 +10,7 @@
  * - the check still sees a blocked request: its canary (./check.ts) must be reported.
  */
 import { parseTemplateManifest, TEMPLATE_BUDGET, type TemplateRuntimeReport } from '@signforge/contract';
+import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { launchBrowser } from './browser';
 import { canary, checkTemplate } from './check';
@@ -93,7 +95,9 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
     send(res, 200, await run);
   }
 
+  const boot = randomUUID();
   const server = createServer((req, res) => {
+    res.setHeader('x-runner-boot', boot);
     if (req.method === 'GET' && req.url === '/health') return send(res, 200, { ...runner, network, canary: canaryResult });
     if (req.method === 'POST' && req.url?.split('?')[0] === '/check')
       return void check(req, res).catch((e: unknown) => send(res, 500, { error: e instanceof Error ? e.message : String(e) }));

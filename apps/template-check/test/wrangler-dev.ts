@@ -24,7 +24,9 @@ const freePort = () =>
 export default async function setup(project: TestProject) {
   const [port, inspector] = [await freePort(), await freePort()];
   const env = process.platform === 'darwin' && process.arch === 'arm64' ? ['--env', 'arm64'] : [];
-  const dev = spawn('pnpm', ['exec', 'wrangler', 'dev', ...env, '--port', String(port), '--inspector-port', String(inspector)], {
+  // Three containers at most, so the test can reach the limit with base, org-a and org-b.
+  const args = ['exec', 'wrangler', 'dev', ...env, '--port', String(port), '--inspector-port', String(inspector), '--var', 'MAX_CONTAINERS:3'];
+  const dev = spawn('pnpm', args, {
     cwd: new URL('..', import.meta.url).pathname,
     stdio: ['ignore', 'pipe', 'pipe'],
   });

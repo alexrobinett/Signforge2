@@ -20,8 +20,16 @@
       "images": { "runner": { "dockerfile": "./Dockerfile" } }
     }
   ],
-  "durable_objects": { "bindings": [{ "name": "TEMPLATE_CHECK", "class_name": "TemplateCheckContainer" }] },
-  "exports": { "TemplateCheckContainer": { "type": "durable-object", "storage": "sqlite" } },
+  // How many orgs' containers may run at once (src/worker/index.ts, CheckSlots). Past it, a new org's
+  // check is refused to retry.
+  "vars": { "MAX_CONTAINERS": "10" },
+  "durable_objects": {
+    "bindings": [{ "name": "TEMPLATE_CHECK", "class_name": "TemplateCheckContainer" }, { "name": "CHECK_SLOTS", "class_name": "CheckSlots" }]
+  },
+  "exports": {
+    "TemplateCheckContainer": { "type": "durable-object", "storage": "sqlite" },
+    "CheckSlots": { "type": "durable-object", "storage": "sqlite" }
+  },
   "env": {
     // Local only, on an Apple Silicon Mac: `wrangler dev --env arm64`. Wrangler builds linux/amd64,
     // which Chromium cannot run under Rosetta (it is killed for memory), so this builds the native
@@ -35,7 +43,10 @@
           "images": { "runner": { "dockerfile": "./Dockerfile", "build_vars": { "RUNNER_PLATFORM": "linux/arm64" } } }
         }
       ],
-      "durable_objects": { "bindings": [{ "name": "TEMPLATE_CHECK", "class_name": "TemplateCheckContainer" }] }
+      "vars": { "MAX_CONTAINERS": "10" },
+      "durable_objects": {
+        "bindings": [{ "name": "TEMPLATE_CHECK", "class_name": "TemplateCheckContainer" }, { "name": "CHECK_SLOTS", "class_name": "CheckSlots" }]
+      }
     }
   }
 }

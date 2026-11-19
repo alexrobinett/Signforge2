@@ -25,16 +25,18 @@ async function templateBuilds() {
 
 // TEMPLATE_CHECK: the check Worker (apps/template-check), replaced here by a stand-in in Node that
 // passes every template except one whose bundle holds `sf-runtime-fail` (refused with a request) or
-// `sf-runtime-garbage` (answered with a report the contract refuses). The real runner's tests are
-// apps/template-check's.
+// `sf-runtime-garbage` (answered with a report the contract refuses). Its runner image names the
+// org path it was called on, as the check Worker picks the org's container by it. The real runner's
+// tests are apps/template-check's.
 async function templateCheck(request: Request): Promise<Response> {
+  const path = new URL(request.url).pathname;
   const { manifest, html }: { manifest: { orientations: ('landscape' | 'portrait')[] }; html: string } = await request.json();
   if (html.includes('sf-runtime-garbage')) return Response.json({ ok: 'yes' });
   const problems = html.includes('sf-runtime-fail') ? ['requested https://example.com/leak (blocked)'] : [];
   return Response.json({
     ok: !problems.length,
     problems,
-    runner: { image: 'stand-in', browser: 'Chromium 159' },
+    runner: { image: `stand-in ${path}`, browser: 'Chromium 159' },
     renders: manifest.orientations.map((orientation) => ({
       orientation,
       viewport: orientation === 'landscape' ? { width: 1920, height: 1080 } : { width: 1080, height: 1920 },
