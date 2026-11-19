@@ -17,7 +17,7 @@ export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } f
 export { findMembership, organizationExists, orgMembers } from './members';
 export { findAlertWork, type AlertWork } from './alerts';
 export { AUDIT_ROWS_PER_RUN, DEFAULT_AUDIT_RETENTION_DAYS, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from './retention';
-export { claimDueAlertDeliveries } from './deliveries';
+export { alertChannelsOf, claimDueAlertDeliveries, settleAlertDeliveries, type AttemptResult } from './deliveries';
 
 // Row shapes, as types only.
 export type Screen = typeof s.screens.$inferSelect;

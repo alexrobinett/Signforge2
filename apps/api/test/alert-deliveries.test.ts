@@ -274,6 +274,38 @@ describe('alerts to Slack and webhooks', () => {
   });
 });
 
+describe("a delivery run's D1 queries", () => {
+  it("stay a handful however many it sends, well under the Free plan's 50 an invocation", async () => {
+    const now = Date.now();
+    const answers: Record<string, number[]> = {};
+    for (let i = 0; i < 3; i++) {
+      const { org, webhookUrl } = await orgWithChannels();
+      answers[webhookUrl] = [200];
+      const o = scoped(env.DB, org.id);
+      const event = { type: 'test', occurredAt: new Date(now).toISOString(), org: { id: org.id, name: org.name }, data: { message: 'Budget' } };
+      await o.commit(
+        [0, 1, 2, 3].flatMap(
+          (n) =>
+            o.alertDeliveries.stage.insert({
+              channel: 'webhook',
+              eventId: `evt_budget_${n}`,
+              eventType: 'test',
+              eventJson: JSON.stringify({ ...event, id: `evt_budget_${n}` }),
+              nextAttemptAt: now,
+              giveUpAt: now,
+            }).writes,
+        ),
+      );
+    }
+    const { guards, to } = receivers(answers);
+    const watched = watchedD1(env.DB);
+
+    await deliverAlerts({ ...env, DB: watched.db }, new RecordingEmailSender(), { now, guards });
+    expect(Object.keys(answers).flatMap((url) => to(url))).toHaveLength(12);
+    expect(watched.seen.queries).toBeLessThanOrEqual(3);
+  });
+});
+
 describe('when the delivery queue cannot be written', () => {
   it('still emails the alert, opens the incident once, and alerts no more on the next check', async () => {
     const { org, outbox } = await orgWithChannels();

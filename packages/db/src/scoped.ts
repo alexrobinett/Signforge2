@@ -15,6 +15,7 @@ import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
+import { type AttemptResult, settleStatement } from './deliveries';
 import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
@@ -1103,27 +1104,9 @@ export function scoped(d1: D1Database, orgId: string) {
           .where(and(eq(ad.orgId, orgId), eq(ad.id, id), eq(ad.status, 'pending'), lte(ad.nextAttemptAt, now)))
           .returning()
           .get(),
-      /**
-       * What attempt `attempt` (its `attempts` once claimed) came to: delivered, to be tried again at
-       * `retryAt`, or given up on (no `retryAt`). It ends the claim. An attempt that is no longer
-       * the latest settles nothing, so a late answer cannot overwrite a newer one.
-       */
-      settle: async (
-        id: string,
-        attempt: number,
-        now: number,
-        result: { ok: true; httpStatus: number | null } | { ok: false; httpStatus: number | null; error: string; retryAt?: number },
-      ) => {
-        const set = result.ok
-          ? { status: 'delivered' as const, lastHttpStatus: result.httpStatus, lastError: null }
-          : result.retryAt === undefined
-            ? { status: 'failed' as const, lastHttpStatus: result.httpStatus, lastError: result.error }
-            : { nextAttemptAt: result.retryAt, lastHttpStatus: result.httpStatus, lastError: result.error };
-        await db
-          .update(ad)
-          .set({ ...set, leasedUntil: null, updatedAt: now })
-          .where(and(eq(ad.orgId, orgId), eq(ad.id, id), eq(ad.attempts, attempt), eq(ad.status, 'pending')))
-          .run();
+      /** What attempt `attempt` came to, as `settleAlertDeliveries` (./deliveries.ts) records a run's. */
+      settle: async (id: string, attempt: number, now: number, result: AttemptResult) => {
+        await settleStatement(db, orgId, id, attempt, now, result).run();
       },
       stage: {
         insert: alertDeliveries.stage.insert,

@@ -13,17 +13,28 @@
  * signed as `SignForge-Signature: v1=<hex HMAC-SHA256 of "<timestamp>.<body>" under the secret>`
  * with `SignForge-Timestamp` in Unix seconds (packages/tools README, Alert channels).
  */
-import { type AlertDeliveryRow, claimDueAlertDeliveries, type OrgScope, orgMembers, scoped } from '@signforge/db';
+import {
+  type AlertChannelRow,
+  alertChannelsOf,
+  type AlertDeliveryRow,
+  type AttemptResult,
+  claimDueAlertDeliveries,
+  orgMembers,
+  scoped,
+  settleAlertDeliveries,
+} from '@signforge/db';
 import type { AlertEvent } from '@signforge/tools';
 import { openAlertSecret } from './data/cipher';
 import { dohResolver, FetchError, type FetchGuards, guardedPost } from './data/fetch';
 import type { EmailSender } from './email';
 
 /**
- * Deliveries per run. Each POST takes one fetch and its host's DNS two more, once per run; the
- * Free plan allows 50 fetches an invocation, so 15 new hosts at most. The rest wait for the next run.
+ * Deliveries per run. Each POST takes one fetch, and its host's DNS two more, once per run: 12 to
+ * as many hosts is 36 of the Free plan's 50 fetches an invocation. Its D1 queries do not grow with
+ * it: the claim, the channels and the settles are one each (`claimDueAlertDeliveries` in
+ * packages/db), and an email test reads its org's members once. The rest wait for the next run.
  */
-const DELIVERIES_PER_RUN = 15;
+const DELIVERIES_PER_RUN = 12;
 /** How long a claimed attempt is held: past one run's sends at 5 seconds each, and short of the next run. */
 const LEASE_MS = 4 * 60_000;
 const FIRST_RETRY_MS = 5 * 60_000;
@@ -45,9 +56,32 @@ const workerGuards = (): FetchGuards => ({ fetch: workerFetch, resolve: dohResol
 
 type DeliveryEnv = Pick<Env, 'DB' | 'DATA_SOURCE_KEY' | 'ENVIRONMENT'>;
 
-/** Send what is due at `now`, one at a time, so one receiver at a time sees SignForge and Slack's one message a second holds. */
+/** Where an attempt sends: the channel its delivery names, and for email the org's members. */
+interface Reach {
+  channel: (orgId: string, kind: AlertChannelRow['kind']) => AlertChannelRow | undefined;
+  members: (orgId: string) => Promise<{ userId: string; email: string }[]>;
+}
+
+/** The org's members, read once per run or call. */
+function membersOnce(db: D1Database): Reach['members'] {
+  const read = new Map<string, Promise<{ userId: string; email: string }[]>>();
+  return (orgId) => {
+    let m = read.get(orgId);
+    if (!m) read.set(orgId, (m = orgMembers(db, orgId)));
+    return m;
+  };
+}
+
+/**
+ * Send what is due at `now`, one at a time, so one receiver at a time sees SignForge and Slack's
+ * one message a second holds; then record every attempt in one batch. A run that dies before that
+ * leaves its attempts claimed, and the next run after the lease sends them again.
+ */
 export async function deliverAlerts(env: DeliveryEnv, email: EmailSender, { now, guards = workerGuards() }: { now: number; guards?: FetchGuards }) {
   const claimed = await claimDueAlertDeliveries(env.DB, now, { limit: DELIVERIES_PER_RUN, leaseMs: LEASE_MS });
+  if (!claimed.length) return;
+  const channels = await alertChannelsOf(env.DB, claimed);
+  const reach: Reach = { channel: (orgId, kind) => channels.find((c) => c.orgId === orgId && c.kind === kind), members: membersOnce(env.DB) };
   // One lookup per host per run: most deliveries go to hooks.slack.com.
   const lookups = new Map<string, Promise<string[]>>();
   const resolve: FetchGuards['resolve'] = (host, signal) => {
@@ -55,14 +89,15 @@ export async function deliverAlerts(env: DeliveryEnv, email: EmailSender, { now,
     if (!found) lookups.set(host, (found = guards.resolve(host, signal)));
     return found;
   };
+  const settled: { orgId: string; id: string; attempt: number; result: AttemptResult }[] = [];
   const failed: unknown[] = [];
-  for (const { orgId, id } of claimed) {
-    const org = scoped(env.DB, orgId);
-    const row = await org.alertDeliveries.get(id);
-    // Expired since it was claimed.
-    if (!row) continue;
-    await attempt(env, email, { ...guards, resolve }, org, row, now).catch((e: unknown) => failed.push(e));
+  for (const row of claimed) {
+    await attempt(env, email, { ...guards, resolve }, reach, row, now).then(
+      (result) => settled.push({ orgId: row.orgId, id: row.id, attempt: row.attempts, result }),
+      (e: unknown) => failed.push(e),
+    );
   }
+  await settleAlertDeliveries(env.DB, now, settled);
   if (failed.length) throw new AggregateError(failed, 'alert deliveries failed');
 }
 
@@ -70,15 +105,17 @@ export async function deliverAlerts(env: DeliveryEnv, email: EmailSender, { now,
 export async function deliverAlert(env: DeliveryEnv, email: EmailSender, orgId: string, id: string, { now = Date.now(), guards = workerGuards() } = {}) {
   const org = scoped(env.DB, orgId);
   const row = await org.alertDeliveries.claim(id, now, LEASE_MS);
-  if (row) await attempt(env, email, guards, org, row, now);
+  if (!row) return;
+  const channel = row.channel === 'email' ? undefined : await org.alertChannels.get(row.channel);
+  const reach: Reach = { channel: () => channel, members: membersOnce(env.DB) };
+  await org.alertDeliveries.settle(row.id, row.attempts, now, await attempt(env, email, guards, reach, row, now));
 }
 
 /** One claimed attempt, and what it came to. A bug (anything but a failed send) is thrown, and the attempt is retried once its lease ends. */
-async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards, org: OrgScope, row: AlertDeliveryRow, now: number) {
+async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards, reach: Reach, row: AlertDeliveryRow, now: number): Promise<AttemptResult> {
   const event: AlertEvent = JSON.parse(row.eventJson);
   try {
-    const httpStatus = await send(env, email, guards, org, row, event);
-    await org.alertDeliveries.settle(row.id, row.attempts, now, { ok: true, httpStatus });
+    return { ok: true, httpStatus: await send(env, email, guards, reach, row, event) };
   } catch (e) {
     const failure =
       e instanceof Undeliverable
@@ -90,33 +127,21 @@ async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards
             : undefined;
     if (!failure) throw e;
     const retryAt = now + retryDelay(row.attempts);
-    await org.alertDeliveries.settle(row.id, row.attempts, now, {
-      ok: false,
-      httpStatus: failure.httpStatus,
-      error: failure.error,
-      ...(failure.final || retryAt > row.giveUpAt ? {} : { retryAt }),
-    });
+    return { ok: false, httpStatus: failure.httpStatus, error: failure.error, ...(failure.final || retryAt > row.giveUpAt ? {} : { retryAt }) };
   }
 }
 
 /** Send it on its channel; the receiver's HTTP status, or null for email. */
-async function send(
-  env: DeliveryEnv,
-  email: EmailSender,
-  guards: FetchGuards,
-  org: OrgScope,
-  row: AlertDeliveryRow,
-  event: AlertEvent,
-): Promise<number | null> {
+async function send(env: DeliveryEnv, email: EmailSender, guards: FetchGuards, reach: Reach, row: AlertDeliveryRow, event: AlertEvent): Promise<number | null> {
   if (row.channel === 'email') {
-    const member = (await orgMembers(env.DB, org.orgId)).find((m) => m.userId === row.toUserId);
+    const member = (await reach.members(row.orgId)).find((m) => m.userId === row.toUserId);
     if (!member) throw new Undeliverable('no-member');
     await email.send({ to: member.email, subject: `SignForge: ${summary(event)}`, text: summary(event) });
     return null;
   }
-  const channel = await org.alertChannels.get(row.channel);
+  const channel = reach.channel(row.orgId, row.channel);
   if (!channel) throw new Undeliverable('no-channel');
-  const where = { orgId: org.orgId, kind: channel.kind };
+  const where = { orgId: row.orgId, kind: channel.kind };
   const url = await openAlertSecret(env, where, 'url', channel.urlEncrypted);
   if (!url) throw new Undeliverable('sealed-url');
   const headers = new Headers({ 'content-type': 'application/json', 'user-agent': 'SignForge alerts' });

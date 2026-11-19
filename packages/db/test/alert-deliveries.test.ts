@@ -59,12 +59,12 @@ describe('alert deliveries', () => {
       claimDueAlertDeliveries(env.DB, at, { limit: 50, leaseMs: 4 * MIN }),
       claimDueAlertDeliveries(env.DB, at, { limit: 50, leaseMs: 4 * MIN }),
     ]);
-    const claimed = [...first!, ...second!];
+    const claimed = [...first!, ...second!].map(({ orgId, id, attempts }) => ({ orgId, id, attempts }));
     const [a] = await mine(s.a.orgId, 'evt_claim_a');
     const [b] = await mine(s.b.orgId, 'evt_claim_b');
     expect(claimed.filter((c) => c.id === a!.id || c.id === b!.id).sort((x, y) => x.orgId.localeCompare(y.orgId))).toEqual([
-      { orgId: s.a.orgId, id: a!.id },
-      { orgId: s.b.orgId, id: b!.id },
+      { orgId: s.a.orgId, id: a!.id, attempts: 1 },
+      { orgId: s.b.orgId, id: b!.id, attempts: 1 },
     ]);
     expect(claimed.map((c) => c.id)).not.toContain((await mine(s.b.orgId, 'evt_later'))[0]!.id);
     expect([a!.attempts, a!.lastAttemptAt, a!.nextAttemptAt]).toEqual([1, at, at + 4 * MIN]);
