@@ -56,7 +56,9 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
     const check = checkScreenAlerts(env, email, now);
     const results = await Promise.allSettled([
       check,
-      check.catch(() => undefined).then(() => deliverAlerts(env, email, { now })),
+      // Claimed at the time it claims: the check may have taken minutes, and a lease counted from the
+      // schedule could run out before the sends do, letting the next run send them again.
+      check.catch(() => undefined).then(() => deliverAlerts(env, email, { now: Date.now() })),
       ...(daily ? [expireAuditRows(env.DB, now), expireIdempotencyKeys(env.DB, now), expireAlertDeliveries(env.DB, now)] : []),
     ]);
     const audit = results[2];

@@ -305,39 +305,57 @@ describe('when the delivery queue cannot be written', () => {
 });
 
 describe('the five-minute Cron Trigger', () => {
-  it('sends the deliveries that are due once the alert check has run', async () => {
+  /** An email test delivery to the org's owner, due at `due`, with `message` as its subject's end. */
+  async function emailDue(message: string, due: number) {
     const { org } = await orgWithChannels();
     const o = scoped(env.DB, org.id);
     const outbox = emailSenderFor(env);
     if (!(outbox instanceof RecordingEmailSender)) throw new Error('dev should send through the recorder');
     const [member] = await orgMembers(env.DB, org.id);
-    const now = Date.now();
+    const now = due;
     await o.commit(
       o.alertDeliveries.stage.insert({
         channel: 'email',
-        eventId: 'evt_cron_test',
+        eventId: `evt_${message.replace(/\W/g, '_')}`,
         eventType: 'test',
         eventJson: JSON.stringify({
           type: 'test',
-          id: 'evt_cron_test',
+          id: `evt_${message.replace(/\W/g, '_')}`,
           occurredAt: new Date(now).toISOString(),
           org: { id: org.id, name: org.name },
-          data: { message: 'Cron test' },
+          data: { message },
         }),
         toUserId: member!.userId,
         nextAttemptAt: now,
         giveUpAt: now,
       }).writes,
     );
+    const sent = () => outbox.messages.filter((m) => m.subject === `SignForge: ${message}`).map((m) => m.to);
+    return { o, member: member!, sent };
+  }
 
-    const run = async (cron: string) => {
-      const ctx = createExecutionContext();
-      await worker.scheduled(createScheduledController({ scheduledTime: now, cron }), env, ctx);
-      await waitOnExecutionContext(ctx);
-    };
-    await run('* * * * *');
-    expect(outbox.messages.some((m) => m.subject === 'SignForge: Cron test')).toBe(false);
-    await run('*/5 * * * *');
-    expect(outbox.messages.filter((m) => m.subject === 'SignForge: Cron test').map((m) => m.to)).toEqual([member!.email]);
+  const run = async (cron: string, scheduledTime: number) => {
+    const ctx = createExecutionContext();
+    await worker.scheduled(createScheduledController({ scheduledTime, cron }), env, ctx);
+    await waitOnExecutionContext(ctx);
+  };
+
+  it('sends the deliveries that are due once the alert check has run', async () => {
+    const now = Date.now();
+    const { member, sent } = await emailDue('Cron test', now);
+    await run('* * * * *', now);
+    expect(sent()).toEqual([]);
+    await run('*/5 * * * *', now);
+    expect(sent()).toEqual([member.email]);
+  });
+
+  it("claims at the time it claims, not the run's scheduled time, so a late run holds its lease in full", async () => {
+    const claimedAfter = Date.now();
+    const { o, member, sent } = await emailDue('Late run', claimedAfter);
+    // A run scheduled 10 minutes ago (its check took that long): the delivery, due now, is still claimed and sent.
+    await run('*/5 * * * *', claimedAfter - 10 * MIN);
+    expect(sent()).toEqual([member.email]);
+    const [row] = await o.alertDeliveries.list({ take: 1 });
+    expect(row!.lastAttemptAt).toBeGreaterThanOrEqual(claimedAfter);
   });
 });
