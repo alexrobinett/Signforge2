@@ -1,6 +1,6 @@
 {
   "id": "clock",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "name": "Clock",
   "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
   "fields": {
