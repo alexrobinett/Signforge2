@@ -555,7 +555,11 @@ describe('the publish tools (M3-18)', () => {
     return { call: (name: string, input: unknown) => dispatch(registry, name, input, caller), told, locked: () => locked };
   }
   const editDeal = (org: OrgScope, title: string) => org.spots.update(x('deal'), { dataJson: JSON.stringify({ title }) });
-  type Out = { publish: { id: string; revision: number; screens: number } | null; promoted: unknown[]; screens: { screenId: string; outcome: string }[] };
+  type Out = {
+    publish: { id: string; revision: number; screens: number; previousId: string | null } | null;
+    promoted: unknown[];
+    screens: { screenId: string; outcome: string }[];
+  };
 
   it('publishes every changed draft, stores each manifest, switches the screens in one batch and tells them', async () => {
     const { org, lobby, hall } = await seedSmallOrg('tool-pub');
@@ -672,13 +676,15 @@ describe('the publish tools (M3-18)', () => {
     const p = publisher(org);
     const first = (await ok(p.call('publish', {}))) as unknown as Out;
     const v1 = (await org.screens.get(lobby.id))!.desiredManifestId;
+    expect(first.publish!.previousId).toBeNull();
     await editDeal(org, 'Three for $5');
-    await ok(p.call('publish', {}));
+    const second = (await ok(p.call('publish', {}))) as unknown as Out;
+    expect(second.publish!.previousId).toBe(first.publish!.id);
     const v2 = (await org.screens.get(lobby.id))!.desiredManifestId;
     expect(v2).not.toBe(v1);
 
     const back = (await ok(p.call('roll_back_publish', { publishId: first.publish!.id }))) as unknown as Out;
-    expect(back.publish).toMatchObject({ revision: 3, screens: 2 });
+    expect(back.publish).toMatchObject({ revision: 3, screens: 2, previousId: second.publish!.id });
     expect((await org.screens.get(lobby.id))!).toMatchObject({ desiredManifestId: v1, previousManifestId: v2 });
     expect((await org.publishes.get(back.publish!.id))!.restoresId).toBe(first.publish!.id);
     expect(p.told.at(-1)).toContainEqual({ screenId: lobby.id, manifestId: v1 });

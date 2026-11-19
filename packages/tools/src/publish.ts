@@ -66,6 +66,7 @@ const madeOutput = z
     id: z.string(),
     revision: z.number().int().describe('The publish number people see, v1, v2, …: the org has one sequence'),
     screens: z.number().int().describe('Screens it switched'),
+    previousId: z.string().nullable().describe('The publish before it: roll back to it (roll_back_publish) to undo this one; null for the first'),
   })
   .nullable()
   .describe('The publish made, or null when nothing changed: then nothing was written and no screen was touched');
@@ -74,18 +75,19 @@ const madeOutput = z
  * Stage a publish's record and its screens' switches, and queue telling the screens: the part of
  * a publish and a roll back that is the same. The caller has staged the move of the revision.
  */
-function switchScreens(
+async function switchScreens(
   ctx: Pick<ToolContext<unknown>, 'org' | 'actor' | 'write' | 'notify'>,
   revision: number,
   rows: { screenId: string; manifestId: string }[],
   restoresId?: string,
 ) {
   const { org, actor, write, notify } = ctx;
+  const [previous] = await org.publishes.history({ limit: 1 });
   const made = write(org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId }));
   write(org.publishes.stage.addScreens(made.id, rows));
   for (const r of rows) write(org.screens.stage.setDesiredManifest(r.screenId, r.manifestId));
   if (rows.length) notify((screens) => screens.manifests(rows));
-  return { id: made.id, revision, screens: rows.length };
+  return { id: made.id, revision, screens: rows.length, previousId: previous?.id ?? null };
 }
 
 const publish = defineTool({
@@ -130,7 +132,7 @@ const publish = defineTool({
     const changed = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.manifest] : []));
     if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report };
     write({ row: undefined, writes: result.writes });
-    const made = switchScreens(
+    const made = await switchScreens(
       ctx,
       result.revision + 1,
       changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id })),
@@ -167,7 +169,7 @@ const rollBackPublish = defineTool({
     const rows = then.filter((r) => desired.has(r.screenId) && desired.get(r.screenId) !== r.manifestId);
     if (!rows.length) return { publish: null };
     write(org.publishes.stage.advance(revision));
-    return { publish: switchScreens(ctx, revision + 1, rows, target.id) };
+    return { publish: await switchScreens(ctx, revision + 1, rows, target.id) };
   },
 });
 
