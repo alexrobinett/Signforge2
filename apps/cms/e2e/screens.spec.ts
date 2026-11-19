@@ -286,7 +286,7 @@ test('a screen that stops syncing turns unreachable on the open Screens page, wi
 });
 
 test('the Screens page says when its poll fails, until a good one, and an expired session goes to sign-in', async ({ page, request }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   await page.goto('/sign-in');
   await hydrated(page);
   // Its own address: this spec's other tests use up ADDRESS's sign-in budget.
@@ -302,15 +302,25 @@ test('the Screens page says when its poll fails, until a good one, and an expire
   expect(claimed.status(), await claimed.text()).toBe(200);
   await sync(request, await pairing.credential());
 
+  // The API does not answer the page's polls (every server function, which only the poll calls
+  // while the page sits open), from the first: the notice comes, and holds through the next tries.
+  const refuse = () => page.route('**/_serverFn/**', (route) => route.abort('connectionrefused'));
+  await refuse();
   await page.goto('/screens');
   await hydrated(page);
   const notice = page.getByRole('status').filter({ hasText: 'Status is not current.' });
   await expect(page.getByRole('link', { name: 'Counter' })).toBeVisible();
-
-  // The API stops answering the poll (every server function, which only the poll calls while the page sits open).
-  await page.route('**/_serverFn/**', (route) => route.abort('connectionrefused'));
-  await expect(notice).toBeVisible({ timeout: 40_000 });
+  await expect(notice).toBeVisible({ timeout: 20_000 });
   await expect(notice).toContainText(/SignForge has not answered since \d{1,2}\D\d{2}/);
+  // Sampled in the page every 100 ms: each time the notice is missing, counted on the body.
+  await page.evaluate(() => {
+    let gone = 0;
+    setInterval(() => {
+      if (!document.body.textContent.includes('Status is not current.')) document.body.dataset.noticeGone = String(++gone);
+    }, 100);
+  });
+  await page.waitForTimeout(17_000);
+  expect(await page.evaluate(() => document.body.dataset.noticeGone)).toBeUndefined();
   await axe(page);
   await shots(page, '20-screens-status-not-current');
   await page.setViewportSize({ width: 412, height: 915 });
@@ -322,6 +332,12 @@ test('the Screens page says when its poll fails, until a good one, and an expire
   await page.unroute('**/_serverFn/**');
   await expect(notice).toBeHidden({ timeout: 30_000 });
   await expect(page.getByRole('link', { name: 'Counter' })).toBeVisible();
+
+  // It stops answering after a good poll: the notice comes back, and goes with the next good one.
+  await refuse();
+  await expect(notice).toBeVisible({ timeout: 40_000 });
+  await page.unroute('**/_serverFn/**');
+  await expect(notice).toBeHidden({ timeout: 30_000 });
 
   // The session ends while the page is open: the next poll goes to sign-in, which comes back here after it.
   await page.context().clearCookies();

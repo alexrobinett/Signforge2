@@ -55,7 +55,9 @@ export const Route = createFileRoute('/_app/screens/')({
 function ScreensPage() {
   const orgId = useOrgId();
   const { data } = useSuspenseQuery(screensQuery(orgId));
-  const { data: live, isError: pollFailing } = useQuery(screenStatusQuery(orgId));
+  const { data: live, errorUpdatedAt, dataUpdatedAt } = useQuery(screenStatusQuery(orgId));
+  // Not `isError`: a query with no data yet goes back to pending on each retry, so the notice would blink.
+  const pollFailing = errorUpdatedAt > dataUpdatedAt;
   const { groups } = data;
   const screens = withStatus(data.screens, data.at, live);
   const search = Route.useSearch();
