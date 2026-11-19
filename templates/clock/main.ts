@@ -28,7 +28,8 @@ defineTemplate({
     const accent = String(ctx.data.accent);
     root.style.setProperty('--accent', accent);
     // The greeting is the accent on the background: amber, for one, does not read on a light kit.
-    root.style.setProperty('--accent-text', readableOn(getComputedStyle(root).getPropertyValue('--bg'), accent));
+    // It is large text at 1080p (5vmin, 54 px), where 3:1 reads.
+    root.style.setProperty('--accent-text', readableOn(getComputedStyle(root).getPropertyValue('--bg'), accent, { large: true }));
     render(ctx);
   },
   play(ctx) {

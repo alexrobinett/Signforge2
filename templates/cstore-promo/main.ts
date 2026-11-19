@@ -13,10 +13,12 @@ defineTemplate({
       // The promo line is the kit's accent on the copy panel: amber, for one, does not read on a
       // light kit. The panel is the surface at 88% over the stage, which runs from the primary
       // mixed 70% into the background out to the background: measured over both ends.
+      // It is large text at 1080p (5.2vmin, bold), where 3:1 reads.
+      const large = { large: true };
       const bg = kit.getPropertyValue('--sf-bg');
       const surface = kit.getPropertyValue('--sf-surface');
-      const accent = readableOn(painted(bg, [surface, 0.88]), kit.getPropertyValue('--sf-accent'));
-      kit.setProperty('--accent-text', readableOn(painted(bg, [primary, 0.7], [surface, 0.88]), accent));
+      const accent = readableOn(painted(bg, [surface, 0.88]), kit.getPropertyValue('--sf-accent'), large);
+      kit.setProperty('--accent-text', readableOn(painted(bg, [primary, 0.7], [surface, 0.88]), accent, large));
     }
     // A line that is wider than the panel allows (a long name, or a wide brand font) is set
     // smaller to fit rather than cut off. One layout per line.

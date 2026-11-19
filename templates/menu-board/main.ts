@@ -34,7 +34,8 @@ defineTemplate({
     });
     // Prices are the accent on a card, which is lighter than the theme's background, or darker in
     // the light theme: amber, for one, does not read on a light one. Every card is the same colour.
+    // Prices are large text at 1080p (3.7vmin, bold), where 3:1 reads.
     const card = list.firstElementChild;
-    if (card) stage.style.setProperty('--accent-text', readableOn(painted(style.getPropertyValue('--bg'), getComputedStyle(card).backgroundColor), accent));
+    if (card) stage.style.setProperty('--accent-text', readableOn(painted(style.getPropertyValue('--bg'), getComputedStyle(card).backgroundColor), accent, { large: true }));
   },
 });

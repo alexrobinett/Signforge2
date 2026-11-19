@@ -19,10 +19,12 @@ defineTemplate({
     root.style.setProperty('--accent', accent);
     // Accent text must read where it sits (amber, for one, does not on a light kit): the date on
     // the background and on the surface its gradient starts from.
+    // The date (3.2vmin) and the day labels (2.2vmin, bold) are large text at 1080p, where 3:1 reads.
+    const large = { large: true };
     const style = getComputedStyle(root);
     const bg = style.getPropertyValue('--bg');
     const surface = style.getPropertyValue('--surface');
-    root.style.setProperty('--accent-text', readableOn(surface, readableOn(bg, accent)));
+    root.style.setProperty('--accent-text', readableOn(surface, readableOn(bg, accent, large), large));
     const now = clockNow();
     const today = dayKey(ctx, now);
     const tomorrow = dayKey(ctx, new Date(now.getTime() + 864e5));
@@ -67,7 +69,7 @@ defineTemplate({
     const days = new Map<string, string>();
     for (const li of list.children) {
       const card = getComputedStyle(li).backgroundColor;
-      if (!days.has(card)) days.set(card, readableOn(painted(surface, card), readableOn(painted(bg, card), accent)));
+      if (!days.has(card)) days.set(card, readableOn(painted(surface, card), readableOn(painted(bg, card), accent, large), large));
       (li as HTMLElement).style.setProperty('--day-text', days.get(card)!);
     }
   },
