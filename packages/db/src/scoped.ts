@@ -9,15 +9,27 @@
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
 import type { ScreenKind } from '@signforge/contract';
-import { and, asc, desc, eq, getTableName, gt, inArray, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
+import { type AttemptResult, settleStatement } from './deliveries';
 import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
+type AlertChannel = typeof s.alertChannels.$inferSelect;
+type AlertChannelKind = AlertChannel['kind'];
+/** What a channel's owner sets; the rest is the repository's. */
+type AlertChannelValues = Omit<AlertChannel, 'orgId' | 'kind' | 'rowVersion' | 'createdAt' | 'updatedAt'>;
+type AlertDelivery = typeof s.alertDeliveries.$inferSelect;
+/** An alert to queue: the event as a webhook receives it, the channels it goes to, and when to stop retrying it. */
+export interface QueuedAlert {
+  event: { id: string; type: string; json: string };
+  channels: readonly AlertDelivery['channel'][];
+  giveUpAt: number;
+}
 type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
 
 /** Writing a row that refers to something the org cannot see. */
@@ -383,6 +395,35 @@ export function scoped(d1: D1Database, orgId: string) {
   const m = s.screenGroupMembers;
   const os = s.orgSettings;
   const inc = s.screenIncidents;
+  const ac = s.alertChannels;
+  const ad = s.alertDeliveries;
+  const alertDeliveries = entity(db, orgId, ad, 'dlv');
+  /**
+   * The statements that queue `alert` for each of its channels when `when` holds as they run; an
+   * event already queued for a channel is left as it is. INSERT ... SELECT, so the condition is
+   * read in the same batch as the rest.
+   */
+  const queueAlert = ({ event, channels, giveUpAt }: QueuedAlert, now: number, when: SQL) =>
+    channels.map((channel) => {
+      const row = fullRow(ad, {
+        id: newId('dlv'),
+        orgId,
+        channel,
+        eventId: event.id,
+        eventType: event.type,
+        eventJson: event.json,
+        nextAttemptAt: now,
+        giveUpAt,
+        createdAt: now,
+        updatedAt: now,
+      });
+      // Every column, in the table's order, as INSERT ... SELECT takes them.
+      const values = Object.keys(getTableColumns(ad)).map((key) => sql`${row[key]}`);
+      return db
+        .insert(ad)
+        .select(sql`SELECT ${sql.join(values, sql`, `)} WHERE ${when}`)
+        .onConflictDoNothing();
+    });
 
   type Group = typeof s.screenGroups.$inferSelect;
   /** The screens, once each. Throws `NotInOrgError` if any is not the org's. */
@@ -1011,23 +1052,143 @@ export function scoped(d1: D1Database, orgId: string) {
      * whether it was the one that made the change, so two overlapping checks alert once.
      */
     incidents: {
-      /** Open an offline incident; false if the screen already has one open. */
-      open: async (screenId: string, lastSeenAt: number, now: number): Promise<boolean> => {
-        const rows = await db
-          .insert(inc)
-          .values({ id: newId('inc'), orgId, screenId, kind: 'offline', lastSeenAt, openedAt: now })
-          .onConflictDoNothing()
-          .returning({ id: inc.id });
-        return rows.length === 1;
+      /**
+       * Open an offline incident and queue its alert (`alert`, given the incident's id), in one
+       * batch: both are written or neither, and the deliveries only by the call that opened the
+       * incident, so two overlapping checks queue it once. The incident's id, or undefined if the
+       * screen already had one open. Without `alert`, the incident alone: for when the queue cannot
+       * be written, so the email still goes once.
+       */
+      open: async (screenId: string, lastSeenAt: number, now: number, alert?: (incidentId: string) => QueuedAlert): Promise<string | undefined> => {
+        const id = newId('inc');
+        const ours = sql`EXISTS (SELECT 1 FROM ${inc} WHERE ${inc.orgId} = ${orgId} AND ${inc.id} = ${id})`;
+        const [opened] = await db.batch([
+          db.insert(inc).values({ id, orgId, screenId, kind: 'offline', lastSeenAt, openedAt: now }).onConflictDoNothing().returning({ id: inc.id }),
+          ...(alert ? queueAlert(alert(id), now, ours) : []),
+        ]);
+        return opened.length ? id : undefined;
       },
-      /** Close an open incident; false if it was closed already. */
-      clear: async (incidentId: string, now: number): Promise<boolean> => {
-        const rows = await db
-          .update(inc)
-          .set({ clearedAt: now })
-          .where(and(eq(inc.orgId, orgId), eq(inc.id, incidentId), isNull(inc.clearedAt)))
-          .returning({ id: inc.id });
-        return rows.length === 1;
+      /**
+       * Close an open incident and queue its alert, in one batch; false if it was closed already
+       * (by a check that queued the same event, which is queued once). Without `alert`, as `open`.
+       */
+      clear: async (incidentId: string, now: number, alert?: QueuedAlert): Promise<boolean> => {
+        const [cleared] = await db.batch([
+          db
+            .update(inc)
+            .set({ clearedAt: now })
+            .where(and(eq(inc.orgId, orgId), eq(inc.id, incidentId), isNull(inc.clearedAt)))
+            .returning({ id: inc.id }),
+          ...(alert ? queueAlert(alert, now, sql`1`) : []),
+        ]);
+        return cleared.length === 1;
+      },
+    },
+
+    /** The org's name, as alerts name it. */
+    name: async (): Promise<string> => {
+      const org = await db.select({ name: s.organization.name }).from(s.organization).where(eq(s.organization.id, orgId)).get();
+      if (!org) throw new Error(`organization ${orgId} does not exist`);
+      return org.name;
+    },
+
+    /** Where alerts go besides email (#88): one Slack webhook and one outgoing webhook at most. */
+    alertChannels: {
+      get: (kind: AlertChannelKind) =>
+        db
+          .select()
+          .from(ac)
+          .where(and(eq(ac.orgId, orgId), eq(ac.kind, kind)))
+          .get(),
+      list: () => db.select().from(ac).where(eq(ac.orgId, orgId)).orderBy(asc(ac.kind)).all(),
+      stage: {
+        /**
+         * Put the channel's fields, making it if absent, and move its version on (an absent
+         * channel is at 0). With `ifVersion`, refused (`StaleVersionError`) unless it is still
+         * that version, checked now and again in the batch, as `stage.update` is.
+         */
+        put: async (kind: AlertChannelKind, values: AlertChannelValues, ifVersion?: number): Promise<Staged<AlertChannel>> => {
+          const mine = and(eq(ac.orgId, orgId), eq(ac.kind, kind));
+          const current = await db.select().from(ac).where(mine).get();
+          const version = current?.rowVersion ?? 0;
+          if (ifVersion !== undefined && version !== ifVersion) throw new StaleVersionError(`${kind} channel`, version);
+          const at = Date.now();
+          const row: AlertChannel = { ...values, orgId, kind, rowVersion: version + 1, createdAt: current?.createdAt ?? at, updatedAt: at };
+          const upsert = staged(
+            row,
+            db
+              .insert(ac)
+              .values(row)
+              .onConflictDoUpdate({ target: [ac.orgId, ac.kind], set: { ...values, rowVersion: sql`${ac.rowVersion} + 1`, updatedAt: at } }),
+          );
+          if (ifVersion === undefined) return upsert;
+          const now = sql`COALESCE((SELECT ${ac.rowVersion} FROM ${ac} WHERE ${mine}), 0)`;
+          const stale = async () => {
+            const v = (await db.select({ v: ac.rowVersion }).from(ac).where(mine).get())?.v ?? 0;
+            return v === ifVersion ? undefined : v;
+          };
+          // json() of text that is not JSON raises an error, which aborts the batch.
+          const check = db
+            .select({ ok: sql`json(CASE WHEN ${now} = ${ifVersion} THEN '1' ELSE 'stale version' END)` })
+            .from(s.organization)
+            .where(eq(s.organization.id, orgId));
+          return { row, writes: [guard(check, { id: `${kind} channel`, version: ifVersion, stale }), ...upsert.writes] };
+        },
+        remove: (kind: AlertChannelKind): Staged => staged(undefined, db.delete(ac).where(and(eq(ac.orgId, orgId), eq(ac.kind, kind)))),
+      },
+    },
+
+    /**
+     * The alert delivery log and queue (#88). The alert check queues through `incidents` and the delivery
+     * run claims and settles, writing directly; a tool stages (a test send, a retry).
+     */
+    alertDeliveries: {
+      get: alertDeliveries.get,
+      /** Newest first, `after` the key `[createdAt, id]` of the last row of the page before. */
+      list: ({ after, take }: { after?: readonly (string | number)[]; take: number }) => {
+        const [at, id] = after ?? [];
+        const where: SQL[] = [eq(ad.orgId, orgId)];
+        if (typeof at === 'number' && typeof id === 'string') where.push(or(lt(ad.createdAt, at), and(eq(ad.createdAt, at), lt(ad.id, id)))!);
+        return db
+          .select()
+          .from(ad)
+          .where(and(...where))
+          .orderBy(desc(ad.createdAt), desc(ad.id))
+          .limit(take)
+          .all();
+      },
+      /**
+       * Take one pending delivery that is due for an attempt now, as `claimDueAlertDeliveries`
+       * (./deliveries.ts) does across orgs; undefined if it is not pending and due.
+       */
+      claim: (id: string, now: number, leaseMs: number) =>
+        db
+          .update(ad)
+          .set({ attempts: sql`${ad.attempts} + 1`, lastAttemptAt: now, nextAttemptAt: now + leaseMs, leasedUntil: now + leaseMs, updatedAt: now })
+          .where(and(eq(ad.orgId, orgId), eq(ad.id, id), eq(ad.status, 'pending'), lte(ad.nextAttemptAt, now)))
+          .returning()
+          .get(),
+      /** What attempt `attempt` came to, as `settleAlertDeliveries` (./deliveries.ts) records a run's. */
+      settle: async (id: string, attempt: number, now: number, result: AttemptResult) => {
+        await settleStatement(db, orgId, id, attempt, now, result).run();
+      },
+      stage: {
+        insert: alertDeliveries.stage.insert,
+        /**
+         * Make a delivery due now; one that was given up on gets at least this one more attempt.
+         * Changes nothing if an attempt holds it, or it was delivered, by the time it runs (check
+         * `leasedUntil` and `status` first, to say so).
+         */
+        retry: (current: AlertDelivery, now: number): Staged<AlertDelivery> => {
+          const set = { status: 'pending' as const, nextAttemptAt: now, giveUpAt: Math.max(current.giveUpAt, now), updatedAt: now };
+          return staged(
+            { ...current, ...set },
+            db
+              .update(ad)
+              .set(set)
+              .where(and(eq(ad.orgId, orgId), eq(ad.id, current.id), ne(ad.status, 'delivered'), or(isNull(ad.leasedUntil), lte(ad.leasedUntil, now))!)),
+          );
+        },
       },
     },
 
@@ -1198,6 +1359,15 @@ export function scoped(d1: D1Database, orgId: string) {
         dataSourceIds.length
           ? db
               .select({ dataSourceId: snap.dataSourceId, version: snap.version, fetchedAt: snap.fetchedAt, checkedAt: snap.checkedAt, dataJson: snap.dataJson })
+              .from(snap)
+              .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
+              .all()
+          : [],
+      /** When each source's latest snapshot was last confirmed, without its data (up to 64 kB each). */
+      checkedTimes: async (dataSourceIds: readonly string[]) =>
+        dataSourceIds.length
+          ? db
+              .select({ dataSourceId: snap.dataSourceId, checkedAt: snap.checkedAt })
               .from(snap)
               .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
               .all()

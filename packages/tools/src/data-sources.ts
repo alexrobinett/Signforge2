@@ -126,24 +126,54 @@ function readerOf(tables: TableReader | undefined): TableReader {
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+/** The source ids a spot's stored bindings name. */
+function sourcesBound(json: string | null | undefined): string[] {
+  if (json == null) return [];
+  const bindings: unknown = JSON.parse(json);
+  if (!isObject(bindings)) return [];
+  return Object.values(bindings).flatMap((b) => (isObject(b) && typeof b.source === 'string' ? [b.source] : []));
+}
+
 const calendarOnly = (f: string, days: number | null | undefined) => days == null || f === 'ical';
 const jsonTableOnly = (f: string, path: string | null | undefined) => path == null || f === 'json-table';
 const HORIZON_ONLY_ICAL = 'horizonDays is for ical sources only';
 
 const target = (input: { dataSourceId: string }) => ({ kind: 'data_source', id: input.dataSourceId });
 
+const listedSourceOutput = dataSourceOutput.extend({
+  lastCheckedAt: z.number().nullable().describe('When a poll last found the feed still saying it: its last good check'),
+  spots: z.array(z.object({ id: z.string(), name: z.string() })).describe('The spots that bind it, as drafted or as published'),
+});
+
 const listDataSources = defineTool({
   name: 'list_data_sources',
-  description: "List the organization's data sources (feeds that spots can bind to), ordered by id, a page at a time. Returns { dataSources, next }.",
+  description:
+    "List the organization's data sources (feeds that spots can bind to), ordered by id, a page at a time, each with its last good check and the spots that bind it. Returns { dataSources, next }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ dataSources: z.array(dataSourceOutput), next: nextOutput }),
+  output: z.object({ dataSources: z.array(listedSourceOutput), next: nextOutput }),
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = page(await org.dataSources.list(), (d) => [d.id], input);
-    return { dataSources: rows.map(viewOf), next };
+    const [snapshots, spots] = await Promise.all([org.dataSources.checkedTimes(rows.map((d) => d.id)), org.spots.list()]);
+    const bound = spots.map((s) => ({
+      id: s.id,
+      name: s.name,
+      sources: new Set([...sourcesBound(s.bindingsJson), ...sourcesBound(published(s)?.bindingsJson)]),
+    }));
+    return {
+      dataSources: rows.map((d) => {
+        const snap = snapshots.find((x) => x.dataSourceId === d.id);
+        return {
+          ...viewOf(d),
+          lastCheckedAt: snap?.checkedAt ?? null,
+          spots: bound.filter((s) => s.sources.has(d.id)).map(({ id, name }) => ({ id, name })),
+        };
+      }),
+      next,
+    };
   },
 });
 
@@ -275,12 +305,9 @@ const updateDataSource = defineTool({
 
 /** Spots whose draft or published version binds a field to `dataSourceId`. */
 async function spotsBinding(org: OrgScope, dataSourceId: string): Promise<string[]> {
-  const binds = (json: string | null | undefined) => {
-    if (json == null) return false;
-    const bindings: unknown = JSON.parse(json);
-    return isObject(bindings) && Object.values(bindings).some((b) => isObject(b) && b.source === dataSourceId);
-  };
-  return (await org.spots.list()).filter((s) => binds(s.bindingsJson) || binds(published(s)?.bindingsJson)).map((s) => s.id);
+  return (await org.spots.list())
+    .filter((s) => sourcesBound(s.bindingsJson).includes(dataSourceId) || sourcesBound(published(s)?.bindingsJson).includes(dataSourceId))
+    .map((s) => s.id);
 }
 
 const deleteDataSource = defineTool({

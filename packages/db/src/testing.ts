@@ -37,6 +37,8 @@ export interface SeededOrg {
   scheduleEntry: string;
   publish: string;
   dataSource: string;
+  /** A webhook delivery that was given up on, so it can be retried. */
+  alertDelivery: string;
   /** A connected account, with its sealed credentials stand-in. */
   connection: string;
   auditEntry: string;
@@ -161,6 +163,20 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
     createdBy: id('user'),
   });
 
+  const delivery = o.alertDeliveries.stage.insert({
+    channel: 'webhook',
+    eventId: id('event'),
+    eventType: 'screen.offline',
+    eventJson: '{}',
+    status: 'failed',
+    attempts: 16,
+    nextAttemptAt: SEED_HOUR,
+    giveUpAt: SEED_HOUR,
+    lastHttpStatus: 500,
+    lastError: 'http-status',
+  });
+  await o.commit(delivery.writes);
+
   const auditEntry = await o.auditLog.append({ id: id('audit'), actorKind: 'system', actorId: 'seed', action: 'seed', at: SEED_HOUR });
   const kit = await o.brandKits.insert({
     name: `${orgId} brand`,
@@ -188,6 +204,7 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
     scheduleEntry: scheduleEntry.id,
     publish: publish.id,
     dataSource: dataSource.id,
+    alertDelivery: delivery.row.id,
     connection: connection.id,
     auditEntry: auditEntry.id,
     brandKit: kit.id,

@@ -16,6 +16,8 @@ export {
   type AgentLimit,
   type AgentLimiter,
   type AgentLimitWindow,
+  type AlertDeliverer,
+  type AlertSecretSealer,
   type AnyTool,
   type Connectors,
   type DataScope,
@@ -35,6 +37,7 @@ export {
 } from './tool';
 export { dispatch, describeTools, effectiveScopes, grantOf, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
 export { setOutputChecks } from './output';
+export { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
 export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
 export { platformRegistry, PLATFORM_TOOLS, registry, TOOLS } from './registry';
 export { baseBlobKey, manifestKey, orgBlobKey, uploadKey } from './r2';

@@ -23,7 +23,7 @@ import { ago } from './screen-status';
 export interface DataSourceView {
   id: string;
   name: string;
-  format: 'json' | 'ical' | 'rss' | TableFormat;
+  format: 'json' | 'ical' | 'rss' | TableFormat | 'provider';
   /** A json-table source: the path to its list of objects. */
   rowsPath: string | null;
   refreshS: number;

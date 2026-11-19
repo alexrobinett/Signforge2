@@ -6,6 +6,7 @@
  * no org (base templates). It is never served on `/api`, so no org member can reach it.
  */
 import type { PlatformScope } from '@signforge/db';
+import { alertChannelTools } from './alert-channels';
 import { assetTools } from './assets';
 import { brandTools } from './brand';
 import { connectionTools } from './connections';
@@ -33,6 +34,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...dataSourceTools,
   ...connectionTools,
   ...settingsTools,
+  ...alertChannelTools,
   ...spotTools,
   ...playlistTools,
 ];

@@ -236,7 +236,8 @@ describe('POST /api/tools/:name', () => {
     const names = async (c: Client) => ((await (await c.get('/api/tools')).json()) as { tools: { name: string }[] }).tools.map((x) => x.name);
     expect(await names(owner)).toHaveLength(registry.size);
     // A viewer gets the tools a viewer may run: the read tools (packages/tools test/dispatch.test.ts names them).
-    const reads = [...registry.values()].filter((t) => t.minRole === 'viewer').map((t) => t.name);
+    const reads = [...registry.values()].filter((t) => t.minRole === 'viewer' && t.scope === 'content:read').map((t) => t.name);
+    expect(reads.length).toBeGreaterThan(10);
     expect((await names(viewer)).sort()).toEqual(reads.sort());
   });
 });
