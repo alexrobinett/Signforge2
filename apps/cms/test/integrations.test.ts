@@ -8,6 +8,7 @@ const source = (over: Partial<ListedSource> = {}): ListedSource => ({
   id: 'break-room',
   name: 'Break room',
   format: 'ical',
+  connectionId: null,
   refreshS: 300,
   horizonDays: null,
   nextPollAt: NOW + 60_000,

@@ -9,6 +9,8 @@ export interface ListedSource {
   id: string;
   name: string;
   format: SourceFormat;
+  /** A provider source: the connection it reads through. */
+  connectionId: string | null;
   refreshS: number;
   horizonDays: number | null;
   nextPollAt: number;
@@ -23,7 +25,19 @@ export interface ListedSource {
   spots: { id: string; name: string }[];
 }
 
-type SourceFormat = 'json' | 'ical' | 'rss';
+export type SourceFormat = 'json' | 'ical' | 'rss' | 'provider';
+
+/** An account the org connected at a provider, as `list_connections` lists it; never its credentials. */
+export interface ConnectionView {
+  id: string;
+  provider: string;
+  account: string;
+  status: 'active' | 'needs_reconnect' | 'disconnected';
+  lastError: string | null;
+}
+
+/** A provider's name as people write it: `google` is Google. */
+export const providerName = (provider: string) => provider.charAt(0).toUpperCase() + provider.slice(1);
 
 export type ConnectorState = 'built' | 'planned' | 'later';
 
@@ -131,9 +145,14 @@ export function shows(c: Connector, show: Show, q: string, sources: readonly Lis
  * JSON feed the CMS offers (a CSV or JSON URL connector is planned), and agents that add another
  * see it named so too.
  */
-export const KIND_WORD: Record<SourceFormat, string> = { rss: 'RSS', json: 'Weather', ical: 'iCal' };
+export const KIND_WORD: Record<SourceFormat, string> = { rss: 'RSS', json: 'Weather', ical: 'iCal', provider: 'Account' };
 
-const NOUN: Record<SourceFormat, [one: string, many: string]> = { rss: ['feed', 'feeds'], json: ['place', 'places'], ical: ['calendar', 'calendars'] };
+const NOUN: Record<SourceFormat, [one: string, many: string]> = {
+  rss: ['feed', 'feeds'],
+  json: ['place', 'places'],
+  ical: ['calendar', 'calendars'],
+  provider: ['source', 'sources'],
+};
 
 /** "2 feeds", "1 calendar · failing": a built connector's sources, counted. */
 export function connectedWords(format: SourceFormat, sources: readonly ListedSource[]): string {
@@ -166,8 +185,16 @@ function failureWords(code: string | null): string {
       return 'is not a feed SignForge can read';
     case 'unfit':
       return 'sends data that does not fit the spots using it';
+    case 'sealed-url':
+      return 'has an address SignForge can no longer read';
+    case 'needs-reconnect':
+      return 'needs its account connected again';
+    case 'disconnected':
+      return 'reads through an account that was disconnected';
+    case null:
+      return 'fails its check';
     default:
-      return `fails its check (${code ?? 'unknown'})`;
+      return `fails its check (${code})`;
   }
 }
 
@@ -200,9 +227,34 @@ export function failingWords(s: ListedSource, clock: Clock): string {
   const what = `The ${s.name} ${NOUN[s.format][0]} ${failureWords(s.lastError)}`;
   const checks = s.failures === 1 ? 'at its last check' : `at its last ${s.failures} checks`;
   const meanwhile =
-    s.lastCheckedAt === null ? 'Its spots show their fallback values until a check succeeds.' : `Its screens show the ${clockTime(s.lastCheckedAt, clock)} copy.`;
+    s.lastCheckedAt === null
+      ? 'Its spots show their fallback values until a check succeeds.'
+      : `Its screens show the ${clockTime(s.lastCheckedAt, clock)} copy.`;
   return `${what} ${checks}. ${meanwhile}`;
 }
 
 /** What fixing a failing source is called: its address is what an editor can change. */
-export const FIX_WORD: Record<SourceFormat, string> = { rss: 'Fix the feed URL', json: 'Fix the weather URL', ical: 'Fix the iCal URL' };
+export const FIX_WORD: Record<Exclude<SourceFormat, 'provider'>, string> = { rss: 'Fix the feed URL', json: 'Fix the weather URL', ical: 'Fix the iCal URL' };
+
+/** Where the page came back from a provider's consent (the API's callback), in words; null for none. */
+export function connectionNotice(search: { connected?: string; connectionError?: string }, connections: readonly ConnectionView[]): string | null {
+  if (search.connected) {
+    const c = connections.find((x) => x.id === search.connected);
+    return c ? `Connected ${c.account} at ${providerName(c.provider)}.` : 'Connected.';
+  }
+  switch (search.connectionError) {
+    case undefined:
+      return null;
+    case 'denied':
+      return 'Not connected: the provider says you did not approve it.';
+    case 'signed_out':
+      return 'Not connected: you were signed out when the provider sent you back. Connect again.';
+    case 'not_found':
+      return 'Not connected: that attempt ran out or was used already. Connect again.';
+    case 'provider':
+    case 'invalid_input':
+      return 'Not connected: the provider did not grant it. Connect again.';
+    default:
+      return `Not connected (${search.connectionError}). Connect again.`;
+  }
+}

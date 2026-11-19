@@ -14,6 +14,7 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAccountRouteImport } from './routes/_app/account'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
+import { Route as AppIntegrationsRouteImport } from './routes/_app/integrations'
 import { Route as AppPlaylistsRouteImport } from './routes/_app/playlists'
 import { Route as AppScheduleRouteImport } from './routes/_app/schedule'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
@@ -52,6 +53,11 @@ const AppAccountRoute = AppAccountRouteImport.update({
 const AppAssetsRoute = AppAssetsRouteImport.update({
   id: '/assets',
   path: '/assets',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPlaylistsRoute = AppPlaylistsRouteImport.update({
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/account': typeof AppAccountRoute
   '/assets': typeof AppAssetsRoute
+  '/integrations': typeof AppIntegrationsRoute
   '/playlists': typeof AppPlaylistsRoute
   '/schedule': typeof AppScheduleRoute
   '/settings': typeof AppSettingsRouteWithChildren
@@ -157,6 +164,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/account': typeof AppAccountRoute
   '/assets': typeof AppAssetsRoute
+  '/integrations': typeof AppIntegrationsRoute
   '/playlists': typeof AppPlaylistsRoute
   '/schedule': typeof AppScheduleRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
@@ -179,6 +187,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/_app/account': typeof AppAccountRoute
   '/_app/assets': typeof AppAssetsRoute
+  '/_app/integrations': typeof AppIntegrationsRoute
   '/_app/playlists': typeof AppPlaylistsRoute
   '/_app/schedule': typeof AppScheduleRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
@@ -203,6 +212,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/account'
     | '/assets'
+    | '/integrations'
     | '/playlists'
     | '/schedule'
     | '/settings'
@@ -223,6 +233,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/account'
     | '/assets'
+    | '/integrations'
     | '/playlists'
     | '/schedule'
     | '/accept-invitation/$invitationId'
@@ -244,6 +255,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/_app/account'
     | '/_app/assets'
+    | '/_app/integrations'
     | '/_app/playlists'
     | '/_app/schedule'
     | '/_app/settings'
@@ -305,6 +317,13 @@ declare module '@tanstack/react-router' {
       path: '/assets'
       fullPath: '/assets'
       preLoaderRoute: typeof AppAssetsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/integrations': {
+      id: '/_app/integrations'
+      path: '/integrations'
+      fullPath: '/integrations'
+      preLoaderRoute: typeof AppIntegrationsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/playlists': {
@@ -438,6 +457,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 interface AppRouteChildren {
   AppAccountRoute: typeof AppAccountRoute
   AppAssetsRoute: typeof AppAssetsRoute
+  AppIntegrationsRoute: typeof AppIntegrationsRoute
   AppPlaylistsRoute: typeof AppPlaylistsRoute
   AppScheduleRoute: typeof AppScheduleRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
@@ -451,6 +471,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAccountRoute: AppAccountRoute,
   AppAssetsRoute: AppAssetsRoute,
+  AppIntegrationsRoute: AppIntegrationsRoute,
   AppPlaylistsRoute: AppPlaylistsRoute,
   AppScheduleRoute: AppScheduleRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,

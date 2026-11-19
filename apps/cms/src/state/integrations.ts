@@ -1,0 +1,174 @@
+/**
+ * The Integrations page (issue #80): the sources dialog of one kind (add a feed, change a
+ * source's URL, delete one) and connecting accounts at a provider. The sources and connections
+ * themselves are Query data (src/queries/integrations.ts); each action invalidates what it changed.
+ * The page's filter and search are in its URL.
+ */
+import type { ListedSource, SourceFormat } from '~/lib/integrations';
+import { callTool, isStale, toolMessage } from '~/lib/tools';
+import { integrationKeys } from '~/queries/integrations';
+import type { SliceCreator } from './store';
+
+/** A new calendar's look-ahead, as `create_data_source` defaults it. */
+const DEFAULT_HORIZON_DAYS = 30;
+
+/** What the add form makes: feeds by address. Weather is made from a place, in the spot editor (#79). */
+type AddableFormat = Extract<SourceFormat, 'rss' | 'ical'>;
+
+interface NewSource {
+  name: string;
+  feedUrl: string;
+  horizonDays: number;
+}
+
+interface IntegrationsState {
+  /** The kind whose sources the dialog shows; null while it is closed. */
+  dialog: SourceFormat | null;
+  /** The add form is open in the dialog. */
+  adding: boolean;
+  newSource: NewSource;
+  /** The source whose URL is being changed, and the URL typed. */
+  editing: string | null;
+  feedUrl: string;
+  pending: boolean;
+  error: string | null;
+  /** The connection being connected, reconnected or disconnected (a provider's name for a new one). */
+  connecting: string | null;
+  connectError: string | null;
+}
+
+export interface IntegrationsSlice {
+  integrations: IntegrationsState;
+  /** Opens the dialog over one kind's sources, on the add form (`adding`) or a source's URL (`editing`); null closes it. */
+  openSources: (format: SourceFormat | null, open?: { adding?: boolean; editing?: string }) => void;
+  openAddSource: (open: boolean) => void;
+  editNewSource: (change: Partial<NewSource>) => void;
+  addSource: (orgId: string, format: AddableFormat) => Promise<void>;
+  /** Opens the form that changes one source's URL; null closes it. */
+  editSourceUrl: (sourceId: string | null) => void;
+  typeSourceUrl: (feedUrl: string) => void;
+  /** Sends the new URL with the version the page read; the poller reads it afresh within a minute. */
+  changeSourceUrl: (orgId: string, source: ListedSource) => Promise<void>;
+  /** Refused while a spot binds it: the refusal says which. */
+  deleteSource: (orgId: string, source: ListedSource) => Promise<void>;
+  /** Sends the browser to the provider's consent page; it comes back to this page through the API's callback. */
+  connect: (provider: string, connectionId?: string) => Promise<void>;
+  disconnect: (orgId: string, connectionId: string) => Promise<void>;
+}
+
+const initialNewSource: NewSource = { name: '', feedUrl: '', horizonDays: DEFAULT_HORIZON_DAYS };
+
+const initial: IntegrationsState = {
+  dialog: null,
+  adding: false,
+  newSource: initialNewSource,
+  editing: null,
+  feedUrl: '',
+  pending: false,
+  error: null,
+  connecting: null,
+  connectError: null,
+};
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** The consent page in a `start_connection` output. */
+function authorizeUrlOf(output: unknown): string {
+  if (isRecord(output) && typeof output.authorizeUrl === 'string') return output.authorizeUrl;
+  throw new Error('SignForge answered without the provider’s page. Try again.');
+}
+
+/** The names of the spots a refused delete names (`details.spotIds`), from the page's list. */
+function blockedBy(err: unknown, source: ListedSource): string | null {
+  if (!(err instanceof Error) || !('details' in err) || !isRecord(err.details) || !Array.isArray(err.details.spotIds)) return null;
+  const names = source.spots.map((s) => s.name);
+  return `${source.name} is used by ${names.length ? names.join(', ') : `${err.details.spotIds.length} spots`}. Choose another source in those spots first.`;
+}
+
+export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, get, { queryClient }) => {
+  const integrations = (change: (s: IntegrationsState) => IntegrationsState) => set((s) => ({ integrations: change(s.integrations) }));
+  const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: integrationKeys.dataSources(orgId), exact: true });
+
+  async function attempt(run: () => Promise<void>, refused: (err: unknown) => string = toolMessage) {
+    integrations((s) => ({ ...s, pending: true, error: null }));
+    try {
+      await run();
+    } catch (err) {
+      integrations((s) => ({ ...s, pending: false, error: refused(err) }));
+    }
+  }
+
+  return {
+    integrations: initial,
+
+    openSources: (dialog, open = {}) => integrations(() => ({ ...initial, dialog, adding: open.adding ?? false, editing: open.editing ?? null })),
+
+    openAddSource: (adding) => integrations((s) => ({ ...s, adding, editing: null, newSource: initialNewSource, error: null })),
+
+    editNewSource: (change) => integrations((s) => ({ ...s, newSource: { ...s.newSource, ...change }, error: null })),
+
+    addSource: (orgId, format) =>
+      attempt(async () => {
+        const { name, feedUrl, horizonDays } = get().integrations.newSource;
+        const url = feedUrl.trim();
+        await callTool('create_data_source', {
+          // Never the address itself: a private calendar's is a secret, and the name is shown.
+          name: name.trim() || (URL.canParse(url) ? new URL(url).hostname : 'Feed'),
+          format,
+          feedUrl: url,
+          ...(format === 'ical' ? { horizonDays } : {}),
+          idempotencyKey: crypto.randomUUID(),
+        });
+        await refresh(orgId);
+        integrations((s) => ({ ...s, adding: false, newSource: initialNewSource, pending: false }));
+      }),
+
+    editSourceUrl: (editing) => integrations((s) => ({ ...s, editing, adding: false, feedUrl: '', error: null })),
+
+    typeSourceUrl: (feedUrl) => integrations((s) => ({ ...s, feedUrl, error: null })),
+
+    changeSourceUrl: (orgId, source) =>
+      attempt(
+        async () => {
+          await callTool('update_data_source', { dataSourceId: source.id, feedUrl: get().integrations.feedUrl.trim(), ifVersion: source.version });
+          await refresh(orgId);
+          integrations((s) => ({ ...s, editing: null, feedUrl: '', pending: false }));
+        },
+        (err) => (isStale(err) ? 'This changed since you opened it. Close this and open it again to see it.' : toolMessage(err)),
+      ),
+
+    deleteSource: (orgId, source) =>
+      attempt(
+        async () => {
+          await callTool('delete_data_source', { dataSourceId: source.id });
+          await refresh(orgId);
+          integrations((s) => ({ ...s, pending: false }));
+        },
+        (err) => blockedBy(err, source) ?? toolMessage(err),
+      ),
+
+    async connect(provider, connectionId) {
+      integrations((s) => ({ ...s, connecting: connectionId ?? provider, connectError: null }));
+      try {
+        window.location.assign(authorizeUrlOf(await callTool('start_connection', { provider, ...(connectionId ? { connectionId } : {}) })));
+      } catch (err) {
+        integrations((s) => ({ ...s, connecting: null, connectError: toolMessage(err) }));
+      }
+    },
+
+    async disconnect(orgId, connectionId) {
+      integrations((s) => ({ ...s, connecting: connectionId, connectError: null }));
+      try {
+        await callTool('disconnect', { connectionId });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: integrationKeys.connections(orgId), exact: true }),
+          // Its sources now fail as disconnected.
+          refresh(orgId),
+        ]);
+        integrations((s) => ({ ...s, connecting: null }));
+      } catch (err) {
+        integrations((s) => ({ ...s, connecting: null, connectError: toolMessage(err) }));
+      }
+    },
+  };
+};

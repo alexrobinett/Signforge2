@@ -1,7 +1,17 @@
-import { CalendarClockIcon, ImagesIcon, LayersIcon, LayoutDashboardIcon, ListVideoIcon, MonitorIcon, SettingsIcon, type LucideIcon } from 'lucide-react';
+import {
+  CalendarClockIcon,
+  ImagesIcon,
+  LayersIcon,
+  LayoutDashboardIcon,
+  ListVideoIcon,
+  MonitorIcon,
+  PlugIcon,
+  SettingsIcon,
+  type LucideIcon,
+} from 'lucide-react';
 
 export interface Section {
-  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/assets' | '/settings';
+  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/assets' | '/integrations' | '/settings';
   label: string;
   icon: LucideIcon;
   description: string;
@@ -51,6 +61,14 @@ export const SECTIONS: Section[] = [
     icon: ImagesIcon,
     description: 'Images and video uploaded for your spots.',
     empty: { title: 'No assets yet', body: 'Uploaded images and video, checked for the screens they will play on, will be kept here.' },
+  },
+  {
+    to: '/integrations',
+    label: 'Integrations',
+    icon: PlugIcon,
+    description:
+      'Data reaches screens through our server, never directly: each source is fetched, checked and baked into the next version, so screens keep the last good copy when a source is down.',
+    empty: { title: 'No data sources yet', body: 'Feeds, calendars and weather your spots read will be listed here with their health.' },
   },
   {
     to: '/settings',
