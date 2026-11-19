@@ -10,7 +10,7 @@ import { readPath, type LiveData, type TemplateManifest, type WEATHER_UNITS } fr
 export interface DataSourceView {
   id: string;
   name: string;
-  format: 'json' | 'ical' | 'rss';
+  format: 'json' | 'ical' | 'rss' | 'provider';
   refreshS: number;
   horizonDays: number | null;
   failures: number;

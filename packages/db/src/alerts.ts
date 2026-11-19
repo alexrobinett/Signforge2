@@ -67,11 +67,13 @@ export async function findAlertWork(d1: D1Database, now: number, defaultUnreacha
 }
 
 /**
- * Mark finished, at `now`, every publish in any org whose rollout is over: each screen it switched
- * reports playing its manifest, or was moved on by a later publish. One statement; the
- * `publish_finished` alert is sent for what it returns.
+ * Publishes in any org whose rollout is over but not yet marked finished: each screen it switched
+ * reports playing its manifest, or was moved on by a later publish. Ids, names, times and counts
+ * only; each is marked, with its alert, through its org's scope (`publishes.finish`).
  */
-export async function finishPublishes(d1: D1Database, now: number): Promise<{ orgId: string; id: string; revision: number }[]> {
+export async function findFinishedRollouts(
+  d1: D1Database,
+): Promise<{ orgId: string; orgName: string; id: string; revision: number; createdAt: number; screens: number }[]> {
   const db = drizzle(d1);
   const p = s.publishes;
   const ps = s.publishScreens;
@@ -86,9 +88,16 @@ export async function finishPublishes(d1: D1Database, now: number): Promise<{ or
       ),
   );
   return db
-    .update(p)
-    .set({ finishedAt: now })
+    .select({
+      orgId: p.orgId,
+      orgName: s.organization.name,
+      id: p.id,
+      revision: p.revision,
+      createdAt: p.createdAt,
+      screens: sql<number>`(SELECT count(*) FROM ${ps} WHERE ${ps.orgId} = ${p.orgId} AND ${ps.publishId} = ${p.id})`.mapWith(Number),
+    })
+    .from(p)
+    .innerJoin(s.organization, eq(s.organization.id, p.orgId))
     .where(and(isNull(p.finishedAt), eq(p.status, 'published'), not(waiting)))
-    .returning({ orgId: p.orgId, id: p.id, revision: p.revision })
     .all();
 }

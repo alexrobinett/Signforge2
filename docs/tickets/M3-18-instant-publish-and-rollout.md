@@ -21,7 +21,7 @@ Publish compiles every affected screen, stores manifests, nudges screens, and sh
 - Per-org publish serialised: the org's Durable Object (`OrgObject`) holds a lease lock (`Caller.publishLock`).
 - Respect the editors-publish setting (Q7, #54): `publish` and `roll_back_publish` are `content:publish`, so an editor of an org where only owners publish is refused, and the CMS shows Publish only to a member whose tool list has it.
 - Leftover data sources (from the #98 re-check): the spot editor deletes a weather source it made when a save stops binding it, but `delete_data_source` refuses while a published version still binds it, and nothing retried. A publish now deletes, in its batch and the org's scope, every editor-made source no draft and no published version binds once it commits (`packages/tools/test/publishing.test.ts`, `packages/db/test/data-sources.test.ts`; `apps/cms/test/registry/editor-sources.test.ts` keeps the CMS's and the server's idea of an editor-made source the same).
-- `publish.finished`: the alert queue (#94) has not merged, so the five-minute cron marks finished rollouts (`finishPublishes`) and `finishRollouts` in `apps/api/src/alerts.ts` is the hook where the event is to be enqueued.
+- `publish.finished` through the alert queue (#94): the five-minute check marks a finished rollout and queues its event for Slack and the webhook in one batch, and emails the rule's members (`finishRollouts` in `apps/api/src/alerts.ts`; `apps/api/test/alert-deliveries.test.ts`).
 
 - **From the design canvas (2026-11-17).** Design: the design canvas (https://claude.ai/artifact/JUMHm7PCsat6RV8yDXNb3H), `docs/proposals/cms-ui.md` and `docs/research/cms-ux.md`.
   - The rollout bar says why each waiting screen waits: downloading (with `filesMissing`), asleep until a time, unreachable since a time.
@@ -44,7 +44,7 @@ Publish compiles every affected screen, stores manifests, nudges screens, and sh
 
 ## Notes
 
-- Migration `0024_publish_history` (`publishes.revision`, unique per org, and `publishes.restores_id`). It may need renumbering at merge.
+- Migration `0025_publish_history` (`publishes.revision`, unique per org, and `publishes.restores_id`). It may need renumbering at merge.
 - Deploying needs the queue first: `wrangler queues create signforge-publish-notices-<env>`; the Durable Object migration `v3` adds `OrgObject`.
 - No contract change: nothing a screen sees changed.
 - `/admin/screens/*` and `sf push` stay until #34 removes them.

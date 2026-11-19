@@ -13,7 +13,9 @@ import type { Context, Hono } from 'hono';
 import { type ConnectorDeps, connectorDeps, connectorsFor } from '../connectors';
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
-import { feedUrlSealer } from '../data/cipher';
+import { alertSecretSealer, feedUrlSealer } from '../data/cipher';
+import { deliverAlert } from '../deliveries';
+import { emailSenderFor, type EmailSender } from '../email';
 import { openMeteoPlaces } from '../data/places';
 import { publishLock } from '../publish';
 import { templateCheckAllowed, templateChecker } from '../template-check';
@@ -42,8 +44,11 @@ const CMS_CLIENT_ID = 'cms';
 /** The path the providers send the browser back to (./connections.ts), registered with each provider's OAuth client. */
 export const CALLBACK_PATH = '/api/connections/callback';
 
-/** The session's member as a tool caller, through the cms client. */
-export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefined): Caller {
+/**
+ * The session's member as a tool caller, through the cms client. `email` sends test alerts by
+ * email; it defaults to `emailSenderFor(env)`, and tests pass a recorder.
+ */
+export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefined, email?: EmailSender): Caller {
   return {
     org: c.var.org,
     role: c.var.role,
@@ -51,6 +56,14 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     blobs: c.env.BLOBS,
     uploads: uploadSigner(c.env, c.req.url),
     feedUrls: feedUrlSealer(c.env),
+    alertSecrets: alertSecretSealer(c.env),
+    // After the response: a receiver's 5 seconds are not the caller's to wait for.
+    deliveries: {
+      now: (id) =>
+        c.executionCtx.waitUntil(
+          deliverAlert(c.env, email ?? emailSenderFor(c.env), c.var.orgId, id).catch((err: unknown) => console.error('alert delivery failed', err)),
+        ),
+    },
     places: openMeteoPlaces(c.env),
     connectors: connectorsFor(c.env, connectors ?? connectorDeps(c.env), new URL(CALLBACK_PATH, c.req.url).href),
     templateCheck: templateChecker(c.env),
@@ -67,7 +80,7 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
   };
 }
 
-export function mountTools(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined) {
+export function mountTools(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined, email?: EmailSender) {
   api.get('/tools', async (c) => c.json({ tools: describeTools(registry, await grantOf({ org: c.var.org, role: c.var.role })) }));
 
   api.post('/tools/:name', async (c) => {
@@ -84,7 +97,7 @@ export function mountTools(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefi
         return c.json({ error: 'invalid_input', message: 'the body is not JSON' }, 400);
       }
     }
-    const result = await dispatch(registry, c.req.param('name'), input, cmsCaller(c, connectors));
+    const result = await dispatch(registry, c.req.param('name'), input, cmsCaller(c, connectors, email));
     if (result.ok) return c.json(result.output as object);
     const { error, message, details } = result;
     return c.json({ error, message, ...(details === undefined ? {} : { details }) }, STATUS[error]);

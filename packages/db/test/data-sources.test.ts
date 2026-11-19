@@ -53,6 +53,8 @@ describe('a poll saved', () => {
     expect(await o.dataSources.snapshots([a.dataSource])).toEqual([
       { dataSourceId: a.dataSource, version: 'h2', fetchedAt: NOW, checkedAt: NOW + 300_000, dataJson: '{"t":13}' },
     ]);
+    // Without the data: what a list of sources needs.
+    expect(await o.dataSources.checkedTimes([a.dataSource])).toEqual([{ dataSourceId: a.dataSource, checkedAt: NOW + 300_000 }]);
   });
 
   it("leaves the source's version alone, so a person's edit made meanwhile is not stale", async () => {

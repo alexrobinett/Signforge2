@@ -47,6 +47,8 @@ import {
   type RateLimiter,
   type Connectors,
   type FeedUrlSealer,
+  type AlertDeliverer,
+  type AlertSecretSealer,
   type PlaceFinder,
   type ScreenNotifier,
   type TemplateChecker,
@@ -67,6 +69,10 @@ export interface Caller<D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Seals feed URLs. The data source tools that take a URL need it. */
   feedUrls?: FeedUrlSealer;
+  /** Seals alert channels' URLs and secrets. The tools that set a channel need it. */
+  alertSecrets?: AlertSecretSealer;
+  /** Sends a test or a retry at once. Without it, they go at the next delivery run. */
+  deliveries?: AlertDeliverer;
   /** Looks places up by name. `find_places` needs it. */
   places?: PlaceFinder;
   /** The runtime check of uploaded templates. Registering an org template needs it. */
@@ -113,7 +119,7 @@ export async function grantOf(caller: Pick<Caller<DataScope>, 'org' | 'role' | '
 }
 
 const SECRET_KEY =
-  /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|pairing_?code|oauth_?state|^code$|^resource$/i;
+  /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|webhook_?url|pairing_?code|oauth_?state|^code$|^resource$/i;
 const REDACTED = '[redacted]';
 
 /**
@@ -195,6 +201,11 @@ export async function dispatch<D extends DataScope>(
     if (!screens || !(writes.length || tool.alwaysAudited)) return;
     await Promise.all(notices.map((send) => send(screens).catch((err: unknown) => console.warn(`[tools] ${tool.name}: could not tell the screen`, err))));
   };
+  const soon: string[] = [];
+  const deliverNow = (deliveryId: string) => {
+    if (!tool.mutates) throw new Error(`${tool.name} is a read and cannot deliver`);
+    soon.push(deliveryId);
+  };
   const write = <T>(change: Staged<T>): T => {
     if (!tool.mutates) throw new Error(`${tool.name} is a read and cannot write`);
     writes.push(...change.writes);
@@ -239,11 +250,13 @@ export async function dispatch<D extends DataScope>(
         blobs: caller.blobs,
         uploads: caller.uploads,
         feedUrls: caller.feedUrls,
+        alertSecrets: caller.alertSecrets,
         places: caller.places,
         templateCheck: caller.templateCheck,
         connectors: caller.connectors,
         write,
         notify,
+        deliverNow,
         onDiscard,
         rateLimit: caller.rateLimit,
       });
@@ -283,6 +296,7 @@ export async function dispatch<D extends DataScope>(
       throw err;
     }
     await tell();
+    if (writes.length) for (const id of soon) caller.deliveries?.now(id);
     return { ok: true, output };
   };
 

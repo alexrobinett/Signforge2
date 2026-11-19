@@ -10,21 +10,32 @@
  * or `?connectionError=<code>` (`denied` when the person refused at the provider, `provider` for
  * another error the provider sent, else the tool's refusal: `not_found`, `invalid_input`, ...).
  *
- * A signed-out browser gets `requireSession`'s 401 JSON, as on every `/api` route: nothing is
- * used up and the code goes nowhere, but it is a poor page to land on. With the Integrations page
- * (#80), send it to `/integrations?connectionError=signed_out` instead, carrying neither code nor state.
+ * A signed-out browser goes to `/integrations?connectionError=signed_out`, carrying neither code
+ * nor state, instead of the 401 JSON every other `/api` route answers: nothing is used up, and the
+ * member can sign in and finish it from the same consent within its 10 minutes.
  */
 import { dispatch, registry } from '@signforge/tools';
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import type { ConnectorDeps } from '../connectors';
 import type { ApiEnv } from './index';
 import { CALLBACK_PATH, cmsCaller } from './tools';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+const integrations = (c: Context<ApiEnv>, params: Record<string, string>) =>
+  c.redirect(`${c.env.CMS_ORIGIN ?? ''}/integrations?${new URLSearchParams(params)}`, 303);
+
+/** Before the session check: a signed-out browser goes to the Integrations page, which sends it to sign-in. */
+export function mountSignedOutCallback(api: Hono<ApiEnv>) {
+  api.get(CALLBACK_PATH.slice('/api'.length), async (c, next) => {
+    if (await c.var.auth.api.getSession({ headers: c.req.raw.headers })) return next();
+    return integrations(c, { connectionError: 'signed_out' });
+  });
+}
+
 export function mountConnectionCallback(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined) {
   api.get(CALLBACK_PATH.slice('/api'.length), async (c) => {
-    const back = (params: Record<string, string>) => c.redirect(`${c.env.CMS_ORIGIN ?? ''}/integrations?${new URLSearchParams(params)}`, 303);
+    const back = (params: Record<string, string>) => integrations(c, params);
     const { state = '', code = '', error } = c.req.query();
     if (error) return back({ connectionError: error === 'access_denied' ? 'denied' : 'provider' });
     const result = await dispatch(registry, 'finish_connection', { oauthState: state, code }, cmsCaller(c, connectors));

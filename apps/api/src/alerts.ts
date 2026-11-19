@@ -1,12 +1,17 @@
 /**
- * Offline alerts (M3-42), run by the Cron Trigger every 5 minutes, the screens' sync interval.
- * A screen unheard from past its org's threshold opens an incident and emails the members the
- * org's `screen_offline` rule names; the screen's next sync clears it, with one more email. The
- * incident row is written before the email, and only by the check that wrote it, so an alert is
- * sent at most once per incident however the runs overlap.
+ * Offline and rollout alerts (M3-42, M3-18), run by the Cron Trigger every 5 minutes, the screens' sync interval.
+ * A screen unheard from past its org's threshold opens an incident, emails the members the org's
+ * `screen_offline` rule names, and queues a `screen.offline` event for the Slack channel and the
+ * webhook if the rule sends it there (#88); the screen's next sync clears it, with one more of
+ * each (`screen.back`). The incident row and its queued events are written in one batch, and only
+ * by the check that wrote the incident, so an alert is sent at most once per incident however the
+ * runs overlap; the email follows. Queued events are sent by ./deliveries.ts, after this check, so
+ * a slow receiver never holds it up. A publish whose every screen plays it, or moved on, is marked
+ * finished the same way, with a `publish.finished` event and an email to whom the org's
+ * `publish_finished` rule names (`finishRollouts`).
  */
-import { findAlertWork, finishPublishes, orgMembers, scoped } from '@signforge/db';
-import { orgSettings, UNREACHABLE_AFTER_MS, type Audience } from '@signforge/tools';
+import { findAlertWork, findFinishedRollouts, orgMembers, scoped } from '@signforge/db';
+import { ALERT_RETRY_MS, type AlertEvent, orgSettings, UNREACHABLE_AFTER_MS, type Audience } from '@signforge/tools';
 import type { EmailMessage, EmailSender } from './email';
 
 const AUDIENCE_ROLES: Record<Audience, readonly string[]> = {
@@ -17,12 +22,18 @@ const AUDIENCE_ROLES: Record<Audience, readonly string[]> = {
 
 interface OrgContext {
   recipients: string[];
+  /** The channels besides email the rule sends to, of those the org has set. */
+  channels: ('slack' | 'webhook')[];
   time: (ms: number) => string;
 }
 
-async function orgContext(db: D1Database, orgId: string): Promise<OrgContext> {
-  const [settings, members] = await Promise.all([orgSettings(scoped(db, orgId)), orgMembers(db, orgId)]);
-  const rule = settings.alerts.screen_offline;
+/** The alerts these checks send, by the org setting's rule name. */
+type CheckedAlert = 'screen_offline' | 'publish_finished';
+
+async function orgContext(db: D1Database, orgId: string, kind: CheckedAlert): Promise<OrgContext> {
+  const org = scoped(db, orgId);
+  const [settings, members, set] = await Promise.all([orgSettings(org), orgMembers(db, orgId), org.alertChannels.list()]);
+  const rule = settings.alerts[kind];
   const roles = AUDIENCE_ROLES[rule.who];
   const format = new Intl.DateTimeFormat(settings.locale ?? 'en-US', {
     timeZone: settings.timezone ?? 'UTC',
@@ -34,6 +45,7 @@ async function orgContext(db: D1Database, orgId: string): Promise<OrgContext> {
   });
   return {
     recipients: rule.email ? members.filter((m) => roles.includes(m.role)).map((m) => m.email) : [],
+    channels: set.map((c) => c.kind).filter((kind) => rule[kind]),
     time: (ms) => format.format(ms),
   };
 }
@@ -48,18 +60,63 @@ async function sendAll(email: EmailSender, to: string[], message: Omit<EmailMess
   for (const r of sent) if (r.status === 'rejected') console.error('alert email failed', r.reason);
 }
 
-export async function checkScreenAlerts(env: Pick<Env, 'DB'>, email: EmailSender, now: number): Promise<void> {
-  const work = await findAlertWork(env.DB, now, UNREACHABLE_AFTER_MS);
-  const contexts = new Map<string, Promise<OrgContext>>();
-  const contextFor = (orgId: string) => {
-    let c = contexts.get(orgId);
-    if (!c) contexts.set(orgId, (c = orgContext(env.DB, orgId)));
+const iso = (ms: number) => new Date(ms).toISOString();
+
+/** Each org's context for one kind of alert, read once per run. */
+function contexts(db: D1Database, kind: CheckedAlert) {
+  const read = new Map<string, Promise<OrgContext>>();
+  return (orgId: string) => {
+    let c = read.get(orgId);
+    if (!c) read.set(orgId, (c = orgContext(db, orgId, kind)));
     return c;
   };
+}
+
+const alertOf = (now: number, channels: OrgContext['channels'], event: AlertEvent) => ({
+  event: { id: event.id, type: event.type, json: JSON.stringify(event) },
+  channels,
+  giveUpAt: now + ALERT_RETRY_MS,
+});
+
+/**
+ * A write with its alert queued in the same batch; if that batch fails, the write alone, so the
+ * email still goes once and later checks do not alert again. Slack and the webhook miss that
+ * alert, which is logged.
+ */
+async function orAlone<T>(withAlert: () => Promise<T>, alone: () => Promise<T>): Promise<T> {
+  try {
+    return await withAlert();
+  } catch (err) {
+    console.error('alert deliveries could not be queued: sending the email only', err);
+    return alone();
+  }
+}
+
+export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email: EmailSender, now: number): Promise<void> {
+  const work = await findAlertWork(env.DB, now, UNREACHABLE_AFTER_MS);
+  const contextFor = contexts(env.DB, 'screen_offline');
+  // Without CMS_ORIGIN the API does not know where the CMS is (dev, or one origin for both), so alerts carry no link.
+  const screenOf = (s: { screenId: string; screenName: string }) => ({
+    id: s.screenId,
+    name: s.screenName,
+    url: env.CMS_ORIGIN ? `${env.CMS_ORIGIN}/screens/${s.screenId}` : null,
+  });
 
   for (const s of work.offline) {
-    if (!(await scoped(env.DB, s.orgId).incidents.open(s.screenId, s.lastSeenAt, now))) continue;
-    const { recipients, time } = await contextFor(s.orgId);
+    const org = scoped(env.DB, s.orgId);
+    const { recipients, channels, time } = await contextFor(s.orgId);
+    const offline = (incidentId: string): AlertEvent => ({
+      type: 'screen.offline',
+      id: `evt_${incidentId}_offline`,
+      occurredAt: iso(now),
+      org: { id: s.orgId, name: s.orgName },
+      data: { screen: screenOf(s), lastSeenAt: iso(s.lastSeenAt) },
+    });
+    const incidentId = await orAlone(
+      () => org.incidents.open(s.screenId, s.lastSeenAt, now, (id) => alertOf(now, channels, offline(id))),
+      () => org.incidents.open(s.screenId, s.lastSeenAt, now),
+    );
+    if (!incidentId) continue;
     await sendAll(email, recipients, {
       subject: `${s.screenName} is offline`,
       text:
@@ -69,8 +126,20 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB'>, email: EmailSender
     });
   }
   for (const s of work.back) {
-    if (!(await scoped(env.DB, s.orgId).incidents.clear(s.incidentId, now))) continue;
-    const { recipients, time } = await contextFor(s.orgId);
+    const org = scoped(env.DB, s.orgId);
+    const { recipients, channels, time } = await contextFor(s.orgId);
+    const back = alertOf(now, channels, {
+      type: 'screen.back',
+      id: `evt_${s.incidentId}_back`,
+      occurredAt: iso(now),
+      org: { id: s.orgId, name: s.orgName },
+      data: { screen: screenOf(s), lastSeenAt: iso(s.lastSeenAt), offlineSince: iso(s.since) },
+    });
+    const cleared = await orAlone(
+      () => org.incidents.clear(s.incidentId, now, back),
+      () => org.incidents.clear(s.incidentId, now),
+    );
+    if (!cleared) continue;
     await sendAll(email, recipients, {
       subject: `${s.screenName} is back`,
       text: `${s.screenName} in ${s.orgName} is back at ${time(s.lastSeenAt)}, after ${minutes(s.lastSeenAt - s.since)} without a heartbeat.`,
@@ -79,12 +148,41 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB'>, email: EmailSender
 }
 
 /**
- * Mark finished every publish whose rollout is over (`finishPublishes`), in the same five-minute
- * run. This is where the `publish_finished` alert is to be sent: once the alert queue lands (#94,
- * gh-88), build a `publish.finished` event for each publish returned and enqueue it with
- * `org.alertDeliveries.enqueue` to the channels the org's rule names, as its notes describe.
+ * Mark finished every publish whose rollout is over: each screen it switched plays it, or a later
+ * publish moved it on. The mark and its `publish.finished` event are written in one batch, by the
+ * check that made the mark, so the alert goes once; the email follows. A publish that switched no
+ * screen is marked with no alert: nothing reached anyone.
  */
-export async function finishRollouts(env: Pick<Env, 'DB'>, now: number): Promise<void> {
-  const finished = await finishPublishes(env.DB, now);
-  if (finished.length) console.log(`[publish] ${finished.length} rollouts finished`);
+export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email: EmailSender, now: number): Promise<void> {
+  const contextFor = contexts(env.DB, 'publish_finished');
+  for (const p of await findFinishedRollouts(env.DB)) {
+    const org = scoped(env.DB, p.orgId);
+    if (!p.screens) {
+      await org.publishes.finish(p.id, now);
+      continue;
+    }
+    const { recipients, channels, time } = await contextFor(p.orgId);
+    const finished = alertOf(now, channels, {
+      type: 'publish.finished',
+      id: `evt_${p.id}_finished`,
+      occurredAt: iso(now),
+      org: { id: p.orgId, name: p.orgName },
+      data: {
+        publish: { id: p.id, revision: p.revision, url: env.CMS_ORIGIN ? `${env.CMS_ORIGIN}/publishes?id=${p.id}` : null, publishedAt: iso(p.createdAt) },
+        screens: p.screens,
+      },
+    });
+    const marked = await orAlone(
+      () => org.publishes.finish(p.id, now, finished),
+      () => org.publishes.finish(p.id, now),
+    );
+    if (!marked) continue;
+    const screens = p.screens === 1 ? 'its screen' : `all ${p.screens} screens it changed`;
+    await sendAll(email, recipients, {
+      subject: `v${p.revision} reached every screen`,
+      text:
+        `v${p.revision} in ${p.orgName}, published ${time(p.createdAt)}, is now playing on ${screens}, or a later publish replaced it there.\n\n` +
+        `Who gets these is in Settings, Notifications.`,
+    });
+  }
 }

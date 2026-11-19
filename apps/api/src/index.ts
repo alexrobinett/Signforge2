@@ -4,8 +4,9 @@
  * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. `/admin` takes
  * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
  * A queue consumer tells the screens a publish switched (src/publish.ts).
- * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts),
- * whose first run each UTC day also expires old idempotency keys and audit rows (packages/db retention.ts).
+ * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
+ * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
+ * keys, audit rows and alert deliveries (packages/db retention.ts).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.
@@ -15,8 +16,9 @@ import { MANIFEST_SCHEMA } from '@signforge/contract';
 import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
-import { AUDIT_ROWS_PER_RUN, expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
+import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
+import { deliverAlerts } from './deliveries';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
 import { emailSenderFor } from './email';
@@ -45,18 +47,24 @@ const DAY_MS = 24 * 60 * 60_000;
 const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // The data-source poller, every minute.
   '* * * * *': (env, now) => pollDataSources(env, { now }),
-  // The offline alert check, every 5 minutes: screens sync that often, so a shorter period finds nothing new.
-  // The 00:00 UTC run also expires idempotency keys and audit rows: a daily job with no trigger of its
-  // own, since the Free plan allows five Cron Triggers per account and demo and prod use four.
+  // The offline alert check and the finished rollouts (src/alerts.ts), every 5 minutes: screens sync that
+  // often, so a shorter period finds nothing new. Then the alert deliveries to Slack and webhooks (src/deliveries.ts), the new ones and the retries due,
+  // started once the check has queued its alerts and whether or not it failed, so neither holds up the other.
+  // The 00:00 UTC run also expires idempotency keys, audit rows and the delivery log: a daily job with no
+  // trigger of its own, since the Free plan allows five Cron Triggers per account and demo and prod use four.
   // Settled, not raced: a failed retention delete must not end the run before an alert's email goes.
   '*/5 * * * *': async (env, now) => {
     const daily = now % DAY_MS < FIVE_MIN_MS;
+    const email = emailSenderFor(env);
+    const checks = [checkScreenAlerts(env, email, now), finishRollouts(env, email, now)];
     const results = await Promise.allSettled([
-      checkScreenAlerts(env, emailSenderFor(env), now),
-      finishRollouts(env, now),
-      ...(daily ? [expireIdempotencyKeys(env.DB, now), expireAuditRows(env.DB, now)] : []),
+      ...checks,
+      // Claimed at the time it claims: the checks may have taken minutes, and a lease counted from the
+      // schedule could run out before the sends do, letting the next run send them again.
+      Promise.allSettled(checks).then(() => deliverAlerts(env, email, { now: Date.now() })),
+      ...(daily ? [expireAuditRows(env.DB, now), expireIdempotencyKeys(env.DB, now), expireAlertDeliveries(env.DB, now)] : []),
     ]);
-    const audit = results[3];
+    const audit = results[checks.length + 1];
     if (audit?.status === 'fulfilled' && audit.value === AUDIT_ROWS_PER_RUN)
       console.warn(`audit retention hit its cap of ${AUDIT_ROWS_PER_RUN} rows: a backlog is left for the next runs`);
     const failed = results.filter((r) => r.status === 'rejected').map((r) => r.reason);

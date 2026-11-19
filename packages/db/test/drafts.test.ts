@@ -2,7 +2,7 @@
 // published version. See docs/backend-plan.md#publishing.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { draftChanged, finishPublishes, NotInOrgError, published, scoped, StaleVersionError } from '../src/index';
+import { draftChanged, findFinishedRollouts, NotInOrgError, published, scoped, StaleVersionError } from '../src/index';
 import { seedOrg, type SeededOrg } from '../src/testing';
 
 let o: SeededOrg;
@@ -314,7 +314,7 @@ describe('publish history', () => {
     expect(await org.publishes.asOf(4)).toContainEqual({ screenId: p.screen, manifestId: m('3') });
   });
 
-  it('marks a publish finished once every screen it switched plays its manifest or moved on', async () => {
+  it('finds a rollout once every screen it switched plays its manifest or moved on, and marks it finished with its alert once', async () => {
     const p = await seedOrg(env.DB, 'history-finish');
     const org = scoped(env.DB, p.orgId);
     const two = await org.screens.insert({ name: 'Two', timezone: 'UTC', orientation: 'landscape' });
@@ -324,14 +324,23 @@ describe('publish history', () => {
       { screenId: p.screen, manifestId: m('1') },
       { screenId: two.id, manifestId: m('2') },
     ]);
-    const mine = async (now: number) => (await finishPublishes(env.DB, now)).filter((f) => f.orgId === p.orgId);
-    expect(await mine(10)).toEqual([{ orgId: p.orgId, id: p.publish, revision: 0 }]);
+    const due = async () => (await findFinishedRollouts(env.DB)).filter((f) => f.orgId === p.orgId).map((f) => [f.id, f.revision, f.screens]);
+    expect(await due()).toEqual([[p.publish, 0, 1]]);
+    expect(await org.publishes.finish(p.publish, 10)).toBe(true);
     await org.screens.reportManifest(p.screen, m('1'), { arrivedAt: 2 });
-    expect(await mine(20)).toEqual([]);
+    expect(await due()).toEqual([]);
     await publishAt(org, 3, [{ screenId: two.id, manifestId: m('3') }]);
-    expect(await mine(30)).toEqual([{ orgId: p.orgId, id: v2.id, revision: 2 }]);
+    expect(await due()).toEqual([[v2.id, 2, 2]]);
+
+    const alert = { event: { id: `evt_${v2.id}_finished`, type: 'publish.finished', json: '{}' }, channels: ['webhook' as const], giveUpAt: 99 };
+    expect(await org.publishes.finish(v2.id, 30, alert)).toBe(true);
+    // A second check marks nothing, and the event is queued once.
+    expect(await org.publishes.finish(v2.id, 40, alert)).toBe(false);
     expect((await org.publishes.get(v2.id))!.finishedAt).toBe(30);
-    expect(await mine(40)).toEqual([]);
+    expect((await org.alertDeliveries.list({ take: 50 })).filter((d) => d.eventId === alert.event.id)).toHaveLength(1);
+    expect(await due()).toEqual([]);
+    // Another org's publish is not theirs to mark.
+    expect(await scoped(env.DB, 'drafts-org').publishes.finish(v2.id, 50)).toBe(false);
   });
 });
 

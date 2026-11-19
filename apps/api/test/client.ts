@@ -3,6 +3,7 @@
  * the way a browser does. With the session cookie cache on, a client must take every cookie a
  * response sets (notably `setActiveOrganization`'s), or the server still sees the old cache.
  */
+import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { expect } from 'vitest';
@@ -27,6 +28,8 @@ export const nextIp = () => `10.9.${Math.floor(++ipCounter / 250)}.${(ipCounter 
 
 export class Client {
   readonly jar = new Map<string, string>();
+  /** Each request's context, so `settled` can wait for the work it left running (`waitUntil`). */
+  private readonly contexts: ExecutionContext[] = [];
   constructor(
     public t: App,
     readonly ip = nextIp(),
@@ -41,7 +44,14 @@ export class Client {
     const headers = new Headers({ 'cf-connecting-ip': this.ip, origin: ORIGIN, ...extra });
     if (this.jar.size) headers.set('cookie', this.cookie);
     if (body !== undefined) headers.set('content-type', 'application/json');
-    const res = await this.t.app.request(`${ORIGIN}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }, this.bindings);
+    const ctx = createExecutionContext();
+    this.contexts.push(ctx);
+    const res = await this.t.app.request(
+      `${ORIGIN}${path}`,
+      { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
+      this.bindings,
+      ctx,
+    );
     for (const c of res.headers.getSetCookie()) {
       const [pair = '', ...attrs] = c.split(';');
       const eq = pair.indexOf('=');
@@ -51,6 +61,11 @@ export class Client {
       else this.jar.set(name, value);
     }
     return res;
+  }
+
+  /** Wait for what this client's requests left running after their responses. */
+  async settled() {
+    await Promise.all(this.contexts.splice(0).map(waitOnExecutionContext));
   }
 
   get = (path: string, extra?: Record<string, string>) => this.request('GET', path, undefined, extra);

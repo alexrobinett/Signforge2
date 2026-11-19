@@ -40,6 +40,7 @@ export const getSpotPreview = createServerFn(read)
   .validator((input: PreviewRequest) => input)
   .handler(({ data }) => tool<SpotPreview>('get_spot_preview', data));
 
+/** The org's sources, with their health and the spots that read them: the spot editor's pickers and the Integrations page. */
 export const getDataSources = createServerFn(read).handler(async () => ({
   dataSources: await inOrg(() => all('list_data_sources', (p) => p.dataSources), []),
 }));

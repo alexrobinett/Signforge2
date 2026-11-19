@@ -7,10 +7,42 @@ import type { Role } from '~/server/shell.functions';
 
 export type Audience = 'owners' | 'editors' | 'everyone';
 export type AlertKind = 'screen_offline' | 'publish_finished' | 'agent_refused';
+/** `who` is for email; Slack and the webhook post to one place each (#88). */
 export interface AlertRule {
   who: Audience;
   email: boolean;
+  slack: boolean;
+  webhook: boolean;
 }
+
+/** `get_alert_channels`' view of a channel: its host, never its URL or secret. */
+export interface AlertChannel {
+  kind: 'slack' | 'webhook';
+  host: string;
+  /** A user id, or an agent grant id. */
+  connectedBy: string;
+  secretSetAt: number | null;
+  version: number;
+  updatedAt: number;
+}
+
+/** One row of `list_alert_deliveries`. */
+export interface AlertDelivery {
+  id: string;
+  channel: 'email' | 'slack' | 'webhook';
+  eventType: string;
+  status: 'pending' | 'delivered' | 'failed';
+  attempts: number;
+  lastAttemptAt: number | null;
+  lastHttpStatus: number | null;
+  lastError: string | null;
+  createdAt: number;
+}
+
+export const CHANNEL_LABELS: Record<AlertDelivery['channel'], string> = { email: 'Email', slack: 'Slack', webhook: 'Webhook' };
+
+/** The events a delivery carries, as the log names them. */
+export const EVENT_LABELS: Record<string, string> = { 'screen.offline': 'Screen offline', 'screen.back': 'Screen back', test: 'Test' };
 
 export interface OrgSettings {
   timezone: string | null;
@@ -70,7 +102,7 @@ export const isAudience = (v: unknown): v is Audience => AUDIENCES.some((a) => a
 /** The alerts, in the order the Notifications page lists them, and whether anything sends them yet. */
 export const ALERTS: { kind: AlertKind; when: string; note: string }[] = [
   { kind: 'screen_offline', when: 'A screen goes offline, and when it is back', note: '' },
-  { kind: 'publish_finished', when: 'A publish reaches every screen', note: 'Not sent yet: it comes with Slack and webhook alerts' },
+  { kind: 'publish_finished', when: 'A publish reaches every screen', note: 'Once every screen it switched plays it, checked every 5 minutes' },
   { kind: 'agent_refused', when: 'An agent is refused', note: 'Sent once agents can connect' },
 ];
 
