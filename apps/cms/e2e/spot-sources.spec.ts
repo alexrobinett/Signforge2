@@ -70,6 +70,8 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
   for (const label of ['Temperature', "Today's high", 'WMO weather code', 'Humidity %']) await expect(form.getByLabel(label, { exact: true })).toBeHidden();
 
   await form.getByLabel('Temperature in').selectOption('°F');
+  // The status region is there before the first search, so its first message is announced.
+  await expect(form.getByRole('status')).toHaveCount(1);
   await form.getByLabel('Place').fill('Atl');
   const places = form.getByRole('list', { name: 'Places found' });
   await expect(places.getByRole('button')).toHaveText(['Atlanta, Georgia, United States', 'Atlanta, Alabama, United States']);
@@ -117,6 +119,12 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
   await expect(high).toBeVisible();
   await expect(high).toBeFocused();
   await expect(high).toHaveValue('8');
+  // A click while an invalid value holds it open does not close it on the next valid keystroke.
+  await high.fill('');
+  await form.getByRole('button', { name: 'If the source is down' }).click();
+  await high.pressSequentially('7');
+  await expect(high).toBeVisible();
+  await expect(high).toHaveValue('7');
   await stage.getByRole('button', { name: 'Live data' }).click();
   await expect.poll(() => stageShows(page, '91°'), { timeout: 10_000 }).toBe(true);
 });

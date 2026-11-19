@@ -256,7 +256,8 @@ function PlacePicker({ target, draft, bound }: { target: SourceTarget; draft: Sp
         {unitSelect('temperature', 'Temperature in')}
         {unitSelect('wind', 'Wind in')}
       </div>
-      <p role="status" className="text-sm text-muted-foreground empty:hidden">
+      {/* Kept in the accessibility tree while empty (hidden from sight only), so its first message is announced. */}
+      <p role="status" className="text-sm text-muted-foreground empty:sr-only">
         {st.searching ? 'Looking…' : searchWords(st.places)}
       </p>
       {!st.searching && st.places && st.places.length > 0 && (
@@ -462,7 +463,7 @@ export function SourceSection({
           type="button"
           aria-expanded={fallbackShown}
           aria-controls="source-fallback"
-          onClick={() => toggleFallback(spot.id, !fallbackShown)}
+          onClick={() => toggleFallback(spot.id, fallbackBad || !fallbackShown)}
           className="flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-3 py-2.5 text-left text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <ChevronRightIcon className={cn('size-4 text-muted-foreground transition-transform', fallbackShown && 'rotate-90')} aria-hidden />

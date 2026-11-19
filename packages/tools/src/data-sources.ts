@@ -304,7 +304,8 @@ const findPlaces = defineTool({
   example: { query: 'Atlanta' },
   handler: async ({ input, places, rateLimit }) => {
     // Unlimited, one member could use up the geocoder's free allowance for every org.
-    if (!rateLimit || !(await rateLimit('place_search'))) throw new ToolError('rate_limited', 'too many place searches; wait a minute and try again');
+    if (!rateLimit) throw new ToolError('forbidden', 'find_places needs a rate limit, and this caller has none');
+    if (!(await rateLimit('place_search'))) throw new ToolError('rate_limited', 'too many place searches; wait a minute and try again');
     return { places: await finderOf(places).search(input.query) };
   },
 });

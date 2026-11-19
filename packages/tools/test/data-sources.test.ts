@@ -122,7 +122,7 @@ describe('find_places', () => {
     expect(await dispatch(registry, 'find_places', { query: 'Nowhere' }, { ...owner, places, rateLimit })).toEqual({ ok: true, output: { places: [] } });
   });
 
-  it('counts each search against the caller, and refuses one over its limit, or from a caller with none, without asking the geocoder', async () => {
+  it('counts each search against the caller, and refuses one over its limit, and refuses a caller with none, without asking the geocoder', async () => {
     let asked = 0;
     const counting: PlaceFinder = { search: async () => (asked++, [atlanta]) };
     counted.length = 0;
@@ -132,7 +132,8 @@ describe('find_places', () => {
       ok: false,
       error: 'rate_limited',
     });
-    expect(await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting })).toMatchObject({ ok: false, error: 'rate_limited' });
+    // No limiter is no rate to wait out: refused as claim_screen refuses it.
+    expect(await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting })).toMatchObject({ ok: false, error: 'forbidden' });
     expect(asked).toBe(1);
   });
 
