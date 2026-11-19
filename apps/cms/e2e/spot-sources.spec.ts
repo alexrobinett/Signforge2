@@ -105,7 +105,14 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
   await expect(page).toHaveURL(/[?&]data=fallback/);
   await expect.poll(() => stageShows(page, '78°'), { timeout: 10_000 }).toBe(true);
   await page.getByText('If the source is down').click();
-  await expect(form.getByLabel("Today's high", { exact: true })).toHaveValue('78');
+  const high = form.getByLabel("Today's high", { exact: true });
+  await expect(high).toHaveValue('78');
+  // Retyping a fallback passes through an empty box, which is invalid: the section stays open, focus in the box.
+  await high.fill('');
+  await high.pressSequentially('8');
+  await expect(high).toBeVisible();
+  await expect(high).toBeFocused();
+  await expect(high).toHaveValue('8');
   await stage.getByRole('button', { name: 'Live data' }).click();
   await expect.poll(() => stageShows(page, '91°'), { timeout: 10_000 }).toBe(true);
 });

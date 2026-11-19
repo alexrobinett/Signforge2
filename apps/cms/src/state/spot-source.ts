@@ -33,6 +33,8 @@ interface SpotSourceState {
   units: WeatherUnits | null;
   /** The form that adds a feed by its address. */
   adding: boolean;
+  /** "If the source is down" is open, as the person left it: a re-render never closes it under someone typing. */
+  fallbackOpen: boolean;
   feedUrl: string;
   feedName: string;
   horizonDays: number;
@@ -60,6 +62,8 @@ export interface SpotSourceSlice {
   /** Binds the live fields to one of the org's sources. */
   connectSource: (target: SourceTarget, dataSourceId: string) => Promise<void>;
   openFeedForm: (spotId: string, open: boolean) => void;
+  /** The fallback section opened or closed, as the person toggled it. */
+  toggleFallback: (spotId: string, open: boolean) => void;
   editFeed: (spotId: string, change: Partial<Pick<SpotSourceState, 'feedUrl' | 'feedName' | 'horizonDays'>>) => void;
   /** Adds the feed in the form as a source and binds the live fields to it. */
   addFeed: (target: SourceTarget) => Promise<void>;
@@ -73,6 +77,7 @@ const initial: SpotSourceState = {
   searching: false,
   units: null,
   adding: false,
+  fallbackOpen: false,
   feedUrl: '',
   feedName: '',
   horizonDays: DEFAULT_HORIZON_DAYS,
@@ -136,7 +141,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
       queryClient.invalidateQueries({ queryKey: ['org', t.orgId, 'spotPreview'] }),
     ]);
     get().editSpot(t.spot, (d) => ({ ...d, data: { ...d.data, ...data }, bindings: bindAll(t.live, d.bindings, dataSourceId) }));
-    source(t.spot.id, (s) => ({ ...initial, units: s.units }));
+    source(t.spot.id, (s) => ({ ...initial, units: s.units, fallbackOpen: s.fallbackOpen }));
   }
 
   /** Makes a source, or finds the one made with the same id meanwhile. */
@@ -161,7 +166,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
     spotSource: initial,
 
     changeSource(spotId, changing, placeQuery) {
-      source(spotId, () => ({ ...initial, changing }));
+      source(spotId, (s) => ({ ...initial, changing, fallbackOpen: s.fallbackOpen }));
       if (changing && placeQuery) get().typePlace(spotId, placeQuery);
     },
 
@@ -191,6 +196,8 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
     connectSource: (t, dataSourceId) => attempt(t.spot.id, () => bind(t, dataSourceId, {})),
 
     openFeedForm: (spotId, adding) => source(spotId, (s) => ({ ...s, adding, error: null })),
+
+    toggleFallback: (spotId, fallbackOpen) => source(spotId, (s) => ({ ...s, fallbackOpen })),
 
     editFeed: (spotId, change) => source(spotId, (s) => ({ ...s, ...change, error: null })),
 

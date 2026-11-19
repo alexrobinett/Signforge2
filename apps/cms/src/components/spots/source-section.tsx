@@ -387,10 +387,13 @@ export function SourceSection({
   const changing = useAppStore((s) => sourceStateOf(s.spotSource, spot.id).changing);
   const error = useAppStore((s) => sourceStateOf(s.spotSource, spot.id).error);
   const changeSource = useAppStore((s) => s.changeSource);
+  const fallbackOpen = useAppStore((s) => sourceStateOf(s.spotSource, spot.id).fallbackOpen);
+  const toggleFallback = useAppStore((s) => s.toggleFallback);
   const boundId = boundSource(live, draft.bindings);
   const target: SourceTarget = { orgId, spot, manifest, live };
   const fallback = liveFields(manifest, live);
   const fallbackBad = [...fieldProblems(fallback, draft).keys()].length > 0;
+  const fallbackShown = fallbackOpen || fallbackBad;
   const place = live.place ? draft.data[live.place] : undefined;
   return (
     <div className="flex flex-col gap-4">
@@ -418,16 +421,23 @@ export function SourceSection({
           {error}
         </p>
       )}
-      <details className="group rounded-[10px] border" open={fallbackBad || undefined}>
-        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-[10px] px-3 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden">
-          <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden />
+      {/* A disclosure the store controls: open while the person has it open, and while a fallback value is invalid. */}
+      <div className="rounded-[10px] border">
+        <button
+          type="button"
+          aria-expanded={fallbackShown}
+          aria-controls="source-fallback"
+          onClick={() => toggleFallback(spot.id, !fallbackShown)}
+          className="flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-3 py-2.5 text-left text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <ChevronRightIcon className={cn('size-4 text-muted-foreground transition-transform', fallbackShown && 'rotate-90')} aria-hidden />
           If the source is down
-        </summary>
-        <div className="flex flex-col gap-4 px-3 pb-4">
+        </button>
+        <div id="source-fallback" hidden={!fallbackShown} className="flex flex-col gap-4 px-3 pb-4">
           <p className="text-sm text-muted-foreground">What screens show while the source has no fresh data. They start as the template's own values.</p>
           <FieldForm fields={fallback} draft={draft} assets={assets} onChange={onChange} />
         </div>
-      </details>
+      </div>
     </div>
   );
 }
