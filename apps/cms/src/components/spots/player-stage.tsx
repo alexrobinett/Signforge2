@@ -9,15 +9,14 @@ import { TriangleAlertIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { NativeSelect } from '~/components/ui/select';
 import { useHydrated } from '~/lib/hydrated';
-import type { BrandKitView } from '~/lib/spots';
+import { PLAYER_URL } from '~/lib/preview';
+import type { BrandKitView } from '~/lib/brand-kits';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 import type { StageTarget } from '~/state/spot-editor';
 
 type Orientation = 'landscape' | 'portrait';
 type Scale = 'fit' | 'actual';
-
-const PLAYER_URL = '/player/index.html?source=preview';
 
 function Toggle<T extends string>({
   label,

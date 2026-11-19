@@ -13,6 +13,7 @@
  * component hands them over with `attachStage` from its ref callback.
  */
 import { PREVIEW_PROTOCOL, safeUrl } from '@signforge/contract';
+import { playerMessage } from '~/lib/preview';
 import { assetsQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
 import { callTool, isStale, spotOf, toolMessage } from '~/lib/tools';
@@ -289,12 +290,3 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     },
   };
 };
-
-/** What the player says over the preview channel (contract `PreviewPlayerMessage`), read field by field. */
-function playerMessage(data: unknown): { type: 'listening' } | { type: 'playing' } | { type: 'error'; message: string } | undefined {
-  if (typeof data !== 'object' || data === null || !('sfPreview' in data) || data.sfPreview !== PREVIEW_PROTOCOL || !('type' in data)) return undefined;
-  if (data.type === 'listening' || data.type === 'playing') return { type: data.type };
-  if (data.type === 'error')
-    return { type: 'error', message: 'message' in data && typeof data.message === 'string' ? data.message : 'The player could not show it.' };
-  return undefined;
-}
