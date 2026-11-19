@@ -10,6 +10,7 @@ import { CloudOffIcon, LayoutGridIcon, PlusIcon, SearchIcon, TableIcon } from 'l
 import { useMemo } from 'react';
 import { PageHeader } from '~/components/page';
 import { EmptyFleet } from '~/components/screens/empty-fleet';
+import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { PairScreenForm } from '~/components/screens/pair-screen-form';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
 import { KIND_WORD, ScreenStatus, StatusWord, toneOf } from '~/components/screens/status';
@@ -23,6 +24,8 @@ import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKi
 import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
+import { byWord, versionName } from '~/lib/publishes';
+import { publishQuery } from '~/queries/publishes';
 import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
 
@@ -99,6 +102,7 @@ function ScreensPage() {
       <PageHeader title="Screens">{canManage && <PairDialog groups={groups} />}</PageHeader>
       <Summary screens={screens} />
       <NotCurrent failing={pollFailing} heardAt={heardAt} now={now} />
+      <LatestPublish orgId={orgId} now={now} />
 
       {groups.length > 0 && <Locations groups={groups} screens={screens} onPick={(group) => set({ group })} />}
 
@@ -177,6 +181,31 @@ function ScreensPage() {
         <ScreenTable screens={shown} groupsOf={groupsOf} now={now} />
       )}
     </div>
+  );
+}
+
+/** The latest publish and how its rollout stands (board Screens A), linking to its reasons. */
+function LatestPublish({ orgId, now }: { orgId: string; now: number }) {
+  const { data } = useQuery(publishQuery(orgId, null));
+  const publish = data?.publish;
+  if (!publish || !data.screens.length) return null;
+  const at = new Date(publish.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return (
+    <section aria-label="Latest publish" className="flex flex-col gap-3.5 rounded-[14px] border bg-card px-5 py-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+        <p className="text-[15px]">
+          <strong className="font-semibold">{versionName(publish)}</strong>{' '}
+          <span className="text-muted-foreground">
+            · {publish.restoresId ? 'rolled back' : 'published'} {at} by {byWord(publish)}
+          </span>
+        </p>
+        <Link to="/publishes" className="py-1.5 text-sm text-primary underline-offset-4 hover:underline">
+          View rollout
+        </Link>
+      </div>
+      <RolloutBar publish={publish} screens={data.screens} now={now} />
+      <RolloutLegend publish={publish} screens={data.screens} now={now} />
+    </section>
   );
 }
 

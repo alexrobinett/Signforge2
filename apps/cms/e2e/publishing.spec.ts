@@ -1,0 +1,132 @@
+import { expect, test, type Page } from '@playwright/test';
+import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
+
+/** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
+const ADDRESS = '192.0.2.51';
+
+test.describe.configure({ mode: 'serial' });
+
+let page: Page;
+/** A test screen in its own tab: the real player, paired to the org. */
+let screen: Page;
+let spotId = '';
+let playlistId = '';
+
+/** What the player in the tab says it plays (`window.__sf`). */
+const playing = (tab: Page) =>
+  tab.evaluate(() => {
+    const s = (window as Window & { __sf?: { pairing: string; manifestId: string; played: number } }).__sf;
+    return s ? { pairing: s.pairing, manifestId: s.manifestId, played: s.played } : undefined;
+  });
+
+test.beforeAll(async ({ browser }) => {
+  page = await (await browser.newContext()).newPage();
+  await signInAs(page, `e2e-publishing-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Northside Market');
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
+  ({
+    spot: { id: spotId },
+  } = await tool(page, 'create_spot', { name: 'Deal', kind: 'template', templateVersionId: clock, durationMs: 10_000, data: { message: 'Two for $4' } }));
+  ({
+    playlist: { id: playlistId },
+  } = await tool(page, 'create_playlist', { name: 'Main', transition: { type: 'cut' }, spotIds: [spotId] }));
+
+  // A test screen, paired by its code as the Screens page pairs one.
+  screen = await (await browser.newContext()).newPage();
+  await screen.goto('/test-screen/?kind=browser&content=/v1/device');
+  await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
+  const code = (await playing(screen))!.pairing;
+  await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
+  await expect.poll(async () => (await playing(screen))?.pairing, { timeout: 20_000 }).toBe('');
+});
+
+test.afterAll(async () => {
+  await screen.context().close();
+  await page.context().close();
+});
+
+/** The toast saying `title`. */
+const toastSays = (title: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: title });
+
+test('a playlist reaches no screen until it is the default, then publishes from its editor and plays', async () => {
+  test.setTimeout(120_000);
+  await page.goto(`/playlists/${playlistId}`);
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  // Its drafts are published, but with no default playlist no screen can play anything.
+  await expect(toastSays('Published v1')).toContainText('choose a default playlist');
+
+  await page.getByRole('button', { name: 'Play on every screen' }).click();
+  await expect(toastSays('Main plays on every screen')).toBeVisible();
+  await expect(page.getByText('The default playlist: every screen plays it')).toBeVisible();
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(toastSays('Published v2 to 1 screen')).toBeVisible();
+  await axe(page);
+  await shots(page, '50-playlist-published');
+  await expect.poll(() => stageShows(screen, 'Two for $4'), { timeout: 30_000 }).toBe(true);
+  expect((await tool(page, 'get_playlist', { playlistId })).playlist).toMatchObject({ published: true, draftChanged: false });
+
+  // Publishing again with nothing changed touches no screen.
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(toastSays('Nothing to publish')).toBeVisible();
+  expect((await tool(page, 'list_publishes', {})).publishes).toHaveLength(2);
+});
+
+test('an edit to a spot, published from the spot editor, is on the screen in seconds, and Undo takes it back', async () => {
+  test.setTimeout(120_000);
+  const before = (await playing(screen))!.manifestId;
+  await page.goto(`/spots/${spotId}`);
+  await hydrated(page);
+  await page.getByLabel('Message').fill('Three for $5');
+  const started = Date.now();
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(toastSays('Published v3 to 1 screen')).toBeVisible();
+  await expect.poll(() => stageShows(screen, 'Three for $5'), { timeout: 20_000, intervals: [100] }).toBe(true);
+  const seconds = (Date.now() - started) / 1000;
+  console.info(`publishing: edit saved, published and on the test screen in ${seconds.toFixed(1)} s`);
+  expect(seconds).toBeLessThan(10);
+  await shots(page, '51-spot-published-toast');
+
+  // Undo: the screen goes back to the manifest it had, with nothing compiled again.
+  await toastSays('Published v3').getByRole('button', { name: 'Undo' }).click();
+  await expect(toastSays('Screens pointed back at v2')).toBeVisible();
+  await expect.poll(async () => (await playing(screen))?.manifestId, { timeout: 20_000 }).toBe(before);
+  await expect.poll(() => stageShows(screen, 'Two for $4'), { timeout: 20_000 }).toBe(true);
+});
+
+test('the Screens page shows the latest rollout, and the Publishes page why each screen waits, with the history to roll back to', async () => {
+  test.setTimeout(120_000);
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
+  await hydrated(page);
+  const latest = page.getByRole('region', { name: 'Latest publish' });
+  await expect(latest).toContainText('v4');
+  await expect(latest.getByRole('img', { name: /^Rollout of v4: 1 playing v4/ })).toBeVisible({ timeout: 30_000 });
+  await axe(page);
+  await shots(page, '52-screens-latest-publish');
+
+  await latest.getByRole('link', { name: 'View rollout' }).click();
+  await expect(page.getByRole('heading', { name: 'Rolling back to v2 (v4)' })).toBeVisible();
+  await expect(page.getByText('1 playing v4')).toBeVisible();
+  const history = page.getByRole('list').filter({ hasText: 'v3' });
+  await expect(history.getByRole('listitem')).toHaveCount(4);
+  await axe(page);
+  await shots(page, '53-publishes');
+
+  // Roll forward to v3 from the history: the screen plays the newer spot again.
+  await history.getByRole('button', { name: 'Roll back to v3' }).click();
+  await expect(toastSays('Screens pointed back at v3')).toBeVisible();
+  await expect.poll(() => stageShows(screen, 'Three for $5'), { timeout: 20_000 }).toBe(true);
+  await expect(page.getByRole('heading', { name: 'Rolling back to v3 (v5)' })).toBeVisible();
+
+  await page.setViewportSize({ width: 412, height: 915 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
+  await shots(page, '54-phone-publishes');
+  await page.goto('/screens');
+  await hydrated(page);
+  await expect(page.getByRole('region', { name: 'Latest publish' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await shots(page, '55-phone-screens-latest-publish');
+  await page.setViewportSize({ width: 1280, height: 720 });
+});

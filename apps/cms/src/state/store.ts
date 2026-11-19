@@ -13,6 +13,7 @@ import { connectUi, createUiSlice, type UiSlice } from './ui';
 import { createAssetsSlice, type AssetsSlice } from './assets';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
+import { createPublishingSlice, type PublishingSlice } from './publishing';
 import { createScreensSlice, type ScreensSlice } from './screens';
 import { createSettingsSlice, type SettingsSlice } from './settings';
 import { createSignInSlice, type SignInSlice } from './sign-in';
@@ -26,7 +27,8 @@ export type AppState = UiSlice &
   CommandMenuSlice &
   SettingsSlice &
   SpotEditorSlice &
-  PlaylistEditorSlice;
+  PlaylistEditorSlice &
+  PublishingSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -50,6 +52,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createSettingsSlice(set, get, deps),
     ...createSpotEditorSlice(set, get, deps),
     ...createPlaylistEditorSlice(set, get, deps),
+    ...createPublishingSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);

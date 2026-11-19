@@ -1,6 +1,6 @@
 /**
  * What the spot and playlist editors share (canvas board Spot editor A): the header with the
- * back link, the name and the save state; the alert for a refused save; the form's sections.
+ * back link, the name and the save state; the alert for a refused save; the form's sections; Publish.
  */
 import { Link } from '@tanstack/react-router';
 import { ChevronLeftIcon } from 'lucide-react';
@@ -76,6 +76,15 @@ export function SaveDraftButton({ status, stale, onSave }: { status: Parameters<
   return (
     <Button variant="outline" disabled={status === 'saved' || status === 'saving' || stale} onClick={onSave}>
       Save draft
+    </Button>
+  );
+}
+
+/** Publishes what the editor has open; while one is on its way, says so. */
+export function PublishButton({ pending, disabled, onPublish }: { pending: boolean; disabled: boolean; onPublish: () => void }) {
+  return (
+    <Button disabled={pending || disabled} onClick={onPublish}>
+      {pending ? 'Publishing…' : 'Publish'}
     </Button>
   );
 }

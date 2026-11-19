@@ -9,10 +9,10 @@
 import type { Transition } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
-import { ArrowDownIcon, ArrowUpIcon, GripVerticalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
-import { EditorHeader, EditorSection, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
   AlertDialog,
@@ -26,7 +26,7 @@ import {
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
-import { useCanManage, useOrgId } from '~/lib/live';
+import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
 import { clockLength, loopMs, playlistDraftOf, playlistPublishWord, rowKeys, type PlaylistView } from '~/lib/playlists';
 import { seconds, spotWhat, versionsById } from '~/lib/spots';
 import { cn } from '~/lib/utils';
@@ -75,6 +75,7 @@ function PlaylistEditor() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
+  const canPublish = useCanPublish();
   const playlist: PlaylistView | null = useSuspenseQuery(playlistQuery(orgId, playlistId)).data;
   const { spots } = useSuspenseQuery(spotsQuery(orgId)).data;
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
@@ -114,6 +115,9 @@ function PlaylistEditor() {
   const reload = useAppStore((s) => s.reloadPlaylist);
   const askDelete = useAppStore((s) => s.askDeletePlaylist);
   const deletePlaylist = useAppStore((s) => s.deletePlaylist);
+  const publishing = useAppStore((s) => s.publishing.pending);
+  const publish = useAppStore((s) => s.publishPlaylist);
+  const makeDefault = useAppStore((s) => s.makeDefaultPlaylist);
 
   if (!playlist) return null;
   const draft = editing ?? playlistDraftOf(playlist);
@@ -147,6 +151,7 @@ function PlaylistEditor() {
             </Button>
           </>
         )}
+        {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload()} />
       {gone && (
@@ -281,6 +286,25 @@ function PlaylistEditor() {
                 </Button>
               )}
               <SpotPicker spots={spots} versions={versions} counts={counts} onAdd={(s) => add(orgId, playlist, s.id)} />
+            </EditorSection>
+            <EditorSection title="Where it plays">
+              {playlist.isDefault ? (
+                <p className="flex items-start gap-2 text-sm">
+                  <CheckIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+                  The default playlist: every screen plays it when no schedule says otherwise.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Screens play the default playlist when no schedule says otherwise. Until there is one, publishing reaches no screen.
+                  </p>
+                  {canManage && (
+                    <Button type="button" variant="outline" className="self-start" disabled={publishing} onClick={() => void makeDefault(orgId, playlist.id)}>
+                      Play on every screen
+                    </Button>
+                  )}
+                </>
+              )}
             </EditorSection>
             <EditorSection title="Transition">
               <div className="flex flex-col gap-2">
