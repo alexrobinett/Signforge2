@@ -88,7 +88,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "80cbdf69297f8d69e70789bb7a042f9cbf87759a65968da254e133e955221359",
+  "id": "561eddc3d9e1848c3db73a629a0eb0af556bc8a8dc72a2b40ae6540c8cd7449d",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -331,7 +331,7 @@
       "id": "menu",
       "kind": "template",
       "name": "Coffee menu",
-      "template": "base/menu-board@1.2.2"
+      "template": "base/menu-board@1.3.0"
     },
     "news": {
       "assets": {},
@@ -762,7 +762,7 @@
         "version": "1.2.3"
       }
     },
-    "base/menu-board@1.2.2": {
+    "base/menu-board@1.3.0": {
       "html": "8e1319646ed2f74e48a12b76b5b51e5c4bd4b61d054a29b450d6a064fd73515a",
       "manifest": {
         "background": "#14110f",
@@ -843,6 +843,12 @@
           }
         },
         "id": "menu-board",
+        "live": {
+          "fields": {
+            "items": "rows"
+          },
+          "source": "table"
+        },
         "name": "Menu Board",
         "orientations": [
           "landscape",
@@ -850,7 +856,7 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.2"
+        "version": "1.3.0"
       }
     },
     "base/news@1.4.0": {

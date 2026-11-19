@@ -1,6 +1,6 @@
 {
   "id": "menu-board",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "name": "Menu Board",
   "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
   "fields": {
@@ -24,5 +24,6 @@
   "duration": { "defaultMs": 12000, "minMs": 5000, "maxMs": 3600000 },
   "orientations": ["landscape", "portrait"],
   "uses": [],
-  "background": "#14110f"
+  "background": "#14110f",
+  "live": { "source": "table", "fields": { "items": "rows" } }
 }
