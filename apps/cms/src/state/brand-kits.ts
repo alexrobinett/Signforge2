@@ -112,13 +112,7 @@ interface PreviewLink {
   target: KitPreviewTarget;
   /** Counts redraws, so a slow compile never posts over a newer one. */
   seq: number;
-  /**
-   * Whether a posted draft is not answered yet. The player updates the spot on screen for each
-   * draft and two updates can finish out of order (Slot.update awaits the theme's fonts), leaving
-   * the older kit on screen; so one draft at a time, and edits meanwhile send only the newest.
-   */
-  busy: ReturnType<typeof setTimeout> | null;
-  /** The newest draft compiled while one was unanswered. */
+  /** The newest draft compiled while the player had one unanswered: sent when it answers. */
   next: ScreenManifest | null;
 }
 
@@ -129,6 +123,10 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
   // A player says it is listening once per load. Its frame can be attached again for another kit
   // (the route stays mounted after Duplicate), so the frames that said it are kept, not the links.
   const heard = new WeakSet<Window>();
+  // Players with a draft not answered yet. Two updates can finish out of order (Slot.update awaits
+  // fonts), leaving the older kit on screen: one draft at a time per frame, kit switches included.
+  // A queued draft stays on its link, so a left kit's is never sent.
+  const busy = new Map<Window, ReturnType<typeof setTimeout>>();
   // Duplicate's key per kit and version being copied, until the copy is made: a retry must not make
   // a second, and copying the kit after it changed is a new creation with a new key.
   const duplicateKeys = new Map<string, string>();
@@ -163,21 +161,27 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
   }
 
   function post(link: PreviewLink, manifest: ScreenManifest) {
-    if (link.busy) {
+    const frame = link.target.frame;
+    if (busy.has(frame)) {
       link.next = manifest;
       return;
     }
-    link.target.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest }, location.origin);
-    link.busy = setTimeout(() => answered(link), DRAFT_ANSWER_MS);
+    frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest }, location.origin);
+    busy.set(
+      frame,
+      setTimeout(() => answered(frame), DRAFT_ANSWER_MS),
+    );
   }
 
-  /** The player answered (or did not in time): the newest draft waiting, if any, goes now. */
-  function answered(link: PreviewLink) {
-    if (link.busy) clearTimeout(link.busy);
-    link.busy = null;
-    const next = link.next;
+  /** `frame`'s player answered (or did not in time): the newest draft waiting for it, if any, goes now. */
+  function answered(frame: Window) {
+    clearTimeout(busy.get(frame));
+    busy.delete(frame);
+    const link = [...links.values()].find((l) => l.target.frame === frame);
+    const next = link?.next;
+    if (!link || !next) return;
     link.next = null;
-    if (next && links.get(link.target.spotId) === link) post(link, next);
+    post(link, next);
   }
 
   const redrawAll = () => {
@@ -197,12 +201,13 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     if (msg.type === 'listening') {
       heard.add(link.target.frame);
       // A player that has just loaded has no draft in hand.
-      if (link.busy) clearTimeout(link.busy);
-      link.busy = null;
+      clearTimeout(busy.get(link.target.frame));
+      busy.delete(link.target.frame);
+      link.next = null;
       void redraw(link);
       return;
     }
-    answered(link);
+    answered(link.target.frame);
     kits((k) => ({
       ...k,
       previews: { ...k.previews, [spotId]: msg.type === 'playing' ? { playing: true, error: null } : { playing: false, error: msg.message } },
@@ -328,7 +333,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       }
       const was = links.get(spotId)?.target;
       if (was?.frame === target.frame && was.kitId === target.kitId) return;
-      const link: PreviewLink = { target, seq: 0, busy: null, next: null };
+      const link: PreviewLink = { target, seq: 0, next: null };
       links.set(spotId, link);
       kits((k) => ({ ...k, previews: { ...k.previews, [spotId]: { playing: false, error: null } } }));
       // A frame already listening (the same player, now for another kit) is posted its spot at once.

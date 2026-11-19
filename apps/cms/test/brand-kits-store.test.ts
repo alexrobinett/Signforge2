@@ -132,6 +132,7 @@ describe("the kit page's previews (review of #103)", () => {
     attach(a.id);
     listening();
     await vi.waitFor(() => expect(posted).toEqual(['#2563eb']));
+    playing();
 
     // The route stays mounted on another kit: the frame's ref callback runs its cleanup, then attaches again.
     store.getState().attachKitPreview(spot.id, null);
@@ -178,5 +179,41 @@ describe('drafts to one player (re-check of #103)', () => {
     expect(posted).toEqual(['#2563eb']);
     playing();
     await vi.waitFor(() => expect(posted).toEqual(['#2563eb', '#0f766e']));
+  });
+});
+
+describe('drafts to one player across a kit switch and a reload (re-check of #103, optional 1 and 2)', () => {
+  it("waits for the player's answer to the old kit's draft before sending the new kit's, and drops the old kit's queued edit", async () => {
+    const [a, b] = [kit('bk_a', '#2563eb'), kit('bk_b', '#7a3e1d')];
+    const { store, posted, attach, listening, playing } = page([a, b]);
+    attach(a.id);
+    listening();
+    await vi.waitFor(() => expect(posted).toEqual(['#2563eb']));
+    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
+    await vi.advanceTimersByTimeAsync(100);
+    // The route stays mounted on kit B (Duplicate) while A's draft is still being applied.
+    store.getState().attachKitPreview(spot.id, null);
+    attach(b.id);
+    await vi.advanceTimersByTimeAsync(100);
+    await new Promise((r) => setImmediate(r));
+    expect(posted).toEqual(['#2563eb']);
+    playing();
+    await vi.waitFor(() => expect(posted).toEqual(['#2563eb', '#7a3e1d']));
+  });
+
+  it('a player that loads again gets the newest draft once, not again when it answers', async () => {
+    const a = kit('bk_a', '#2563eb');
+    const { store, posted, attach, listening, playing } = page([a]);
+    attach(a.id);
+    listening();
+    await vi.waitFor(() => expect(posted).toEqual(['#2563eb']));
+    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#111111' } }));
+    await vi.advanceTimersByTimeAsync(100);
+    listening();
+    await vi.waitFor(() => expect(posted).toEqual(['#2563eb', '#111111']));
+    playing();
+    await vi.advanceTimersByTimeAsync(100);
+    await new Promise((r) => setImmediate(r));
+    expect(posted).toEqual(['#2563eb', '#111111']);
   });
 });

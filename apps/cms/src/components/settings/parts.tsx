@@ -1,5 +1,5 @@
 /**
- * Pieces every settings page uses (canvas row 6): the settings navigation, a titled section, and
+ * Pieces every settings page uses (canvas row 6): the settings navigation (the Audit log page has it too), a titled section, and
  * the save row with its error.
  */
 import { Link } from '@tanstack/react-router';
@@ -30,6 +30,12 @@ export function SettingsNav() {
             {label}
           </Link>
         ))}
+      </div>
+      <div className="flex flex-wrap gap-1 lg:flex-col lg:gap-0.5">
+        <span className="hidden px-3 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase lg:block">Admin</span>
+        <Link to="/audit" className={LINK}>
+          Audit log
+        </Link>
       </div>
       <div className="flex gap-1 lg:flex-col lg:gap-0.5 lg:border-t lg:pt-3">
         <Link to="/account" className={LINK}>

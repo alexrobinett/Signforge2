@@ -11,6 +11,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import { connectCommandMenu, createCommandMenuSlice, type CommandMenuSlice } from './command-menu';
 import { connectUi, createUiSlice, type UiSlice } from './ui';
 import { createAssetsSlice, type AssetsSlice } from './assets';
+import { createAuditSlice, type AuditSlice } from './audit';
 import { createBrandKitsSlice, type BrandKitsSlice } from './brand-kits';
 import { createIntegrationsSlice, type IntegrationsSlice } from './integrations';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
@@ -32,6 +33,7 @@ export type AppState = UiSlice &
   PlaylistEditorSlice &
   SpotSourceSlice &
   IntegrationsSlice &
+  AuditSlice &
   BrandKitsSlice;
 export type AppStore = StoreApi<AppState>;
 
@@ -59,6 +61,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createPlaylistEditorSlice(set, get, deps),
     ...createBrandKitsSlice(set, get, deps),
     ...createIntegrationsSlice(set, get, deps),
+    ...createAuditSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);

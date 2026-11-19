@@ -8,6 +8,7 @@
 import type { PlatformScope } from '@signforge/db';
 import { alertChannelTools } from './alert-channels';
 import { assetTools } from './assets';
+import { auditTools } from './audit';
 import { brandTools } from './brand';
 import { connectionTools } from './connections';
 import { dataSourceTools } from './data-sources';
@@ -37,6 +38,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...alertChannelTools,
   ...spotTools,
   ...playlistTools,
+  ...auditTools,
 ];
 export const PLATFORM_TOOLS: readonly AnyTool<PlatformScope>[] = [...platformTemplateTools];
 
