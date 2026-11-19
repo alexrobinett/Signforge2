@@ -42,6 +42,7 @@ The build (`sf build`) bundles these into one self-contained HTML file with the 
 - `orientations`: `landscape`, `portrait` or both.
 - `uses`: list `canvas`, `webgl` or `audio` if the template needs them.
 - `background`: the colour shown around the template when it is letterboxed on an orientation it does not support.
+- `live` (optional): the fields a data source fills. See [Live data](#live-data).
 - `protocol` is added by the build: the frame protocol of the SDK it bundled. A rebuilt template speaks the current protocol (2), so it needs a new version; published bundles keep the protocol they were built with, and the player speaks every protocol in `SUPPORTED_PROTOCOLS` (1 and 2).
 
 ## Lifecycle
@@ -100,6 +101,24 @@ A colour field may default to a brand token, `"$brand.<colour>"` with one of the
 ## Live data
 
 Any non-image field can be bound to a data source instead of a fixed value. The spot names the source and a dot path into it (`current.temperature_2m`, `daily.temperature_2m_max.0`, `events`). The static value is the fallback: it shows until the first data arrives, and whenever the live value does not fit the field. Before a bound value replaces it, the player checks it against the field's definition (type, `maxLength`, `min`/`max`/`step`, `options`, a list's `maxItems` and row fields); a value that is missing at its path or fails is ignored for that spot and counted against its source. So a template can trust its data to have the shape its fields declare, live or not. The check is `validateBoundValue` in `packages/contract`, which the server also runs before it stores or sends a snapshot. Data the server has not confirmed for a day is stale, and the static value shows again (`SNAPSHOT_STALE_MS`). A news feed's `language` is always present (`''` when the feed declares none), so the news template binds it to write headline ages in the feed's language.
+
+**Declaring live fields.** A template whose fields come from a feed says so in `live`, so the CMS shows a Source section for them instead of inputs: people choose where the data comes from (a place, a news feed, a calendar), never the values. Each field keeps its definition and default, which are the fallback.
+
+```json
+"live": {
+  "source": "open-meteo",
+  "fields": { "temp": "current.temperature_2m", "high": "daily.temperature_2m_max.0", "code": "current.weather_code" },
+  "place": "city",
+  "units": { "temperature": "unit", "wind": "windUnit" }
+}
+```
+
+- `source`: the kind of feed. `open-meteo` is an Open-Meteo forecast (a JSON source; the CMS asks for the `current=` and `daily=` variables the paths read, in the place's time zone, with `timeformat=unixtime`). `rss` is a news feed and `ical` a calendar, which the server converts to `NewsFeed` and `CalendarFeed`, so their paths are those shapes' (`items`, `language`, `events`).
+- `fields`: each live field's path in the snapshot, as a binding names it (`BINDING_PATH`). Not an image field.
+- `place` (Open-Meteo only): a text field that starts as the name of the place picked. People may still change it.
+- `units` (Open-Meteo only): the select fields that choose the units the forecast is fetched in, `temperature` with options from `°F`, `°C` and `wind` from `mph`, `km/h` (`WEATHER_UNITS`). The CMS sets them with the place, so the numbers and the unit shown always agree.
+
+`validateTemplateManifest` checks all of it. A template with no `live` is typed by people; a list a connector could fill later (a menu's items) can be declared once a source of that kind exists. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda (`ical`: `events`). A spot may still bind any field to any source with the tools (`bindings` on `create_spot` and `update_spot`); `live` is what the editor offers.
 
 The server fetches feeds, never the screen. JSON feeds pass through; calendar (iCal) and news (RSS or Atom) feeds are converted to fixed shapes, `CalendarFeed` and `NewsFeed` in `packages/contract`, so a template binds to the same paths whichever service the data came from. A spot reads the latest data when it starts; data does not change during a play.
 
