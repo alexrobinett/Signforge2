@@ -169,7 +169,14 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     const t = stage.target;
     if (!t || stage.listening !== t.frame) return;
     const seq = ++stage.seq;
-    const result = 'playlistId' in t ? await get().playlistStageDraft(t) : await spotDraft(t);
+    let result: Awaited<ReturnType<typeof spotDraft>>;
+    try {
+      result = 'playlistId' in t ? await get().playlistStageDraft(t) : await spotDraft(t);
+    } catch (err) {
+      // A playlist's previews are read here, not in its loader: one that fails is said on the stage.
+      if (seq === stage.seq) editor((x) => ({ ...x, stageError: `what it needs did not load (${toolMessage(err)})` }));
+      return;
+    }
     if (!result || seq !== stage.seq || stage.target?.frame !== t.frame) return;
     if (!result.manifest) {
       editor((x) => ({ ...x, holding: true }));

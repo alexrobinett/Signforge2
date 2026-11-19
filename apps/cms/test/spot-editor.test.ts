@@ -1,5 +1,6 @@
 // The spot editor's store slice: a save's answer belongs to the spot it was made for. Tool calls go
 // through a stubbed `fetch`, held open until the test answers.
+import { PREVIEW_PROTOCOL } from '@signforge/contract';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
@@ -65,5 +66,22 @@ describe('spot saves belong to the spot they were made for (review of #97, 2)', 
     answers[0]!({ spot: { ...a, name: 'A, renamed', version: 5 } });
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().spotEditor).toMatchObject({ spotId: 'spt_b', version: 1, status: 'unsaved', saveError: null, stale: false });
+  });
+});
+
+describe('the stage (review of #97)', () => {
+  it("says so when what a playlist's preview needs cannot be loaded, instead of waiting for the player", async () => {
+    const queryClient = new QueryClient();
+    let hear: (e: unknown) => void = () => {};
+    vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
+    const store = createStore<SpotEditorSlice & { playlistStageDraft: () => Promise<never> }>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never),
+      playlistStageDraft: () => Promise.reject(new Error('get_spot_preview failed: 500')),
+    }));
+    const frame: Window = { postMessage: () => {} } as never;
+    store.getState().attachStage({ frame, orgId: ORG, playlistId: 'pls_a', orientation: 'landscape' });
+    hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, type: 'listening' } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().spotEditor.stageError).toBe('what it needs did not load (get_spot_preview failed: 500)');
   });
 });
