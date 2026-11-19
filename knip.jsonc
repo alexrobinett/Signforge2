@@ -25,6 +25,12 @@
     // The fixture template is bundled by the browser tests' global setup; sw.js is served as is.
     // templates.test.ts plays every template from templates/: declared as for apps/api.
     "packages/player": { "entry": ["browser/fixtures/template.ts", "public/sw.js"], "ignoreDependencies": ["@signforge/template-(?!sdk).*"] },
+    // The hostile fixture is built by the runner's tests, which check every template in templates/:
+    // declared as for apps/api. src/runner/main.ts is the container's entry, bundled by build.ts.
+    "apps/template-check": {
+      "entry": ["test/fixtures/hostile/main.ts", "src/runner/main.ts"],
+      "ignoreDependencies": ["@signforge/template-.*"]
+    },
     // templates.test.ts builds every template from templates/: declared as for apps/api.
     "packages/cli": { "ignoreDependencies": ["@signforge/template-.*"] },
     // Bundled into a Worker by the upload e2e test.
