@@ -154,4 +154,55 @@ describe('playlist tools racing another commit (review of #97)', () => {
       [3, [o.imageSpot]],
     ]).toContainEqual([listed.version, listed.spotIds]);
   });
+
+  it('refuses a delete with conflict, not a fault, when the playlist is made the default or scheduled between its check and its commit', async () => {
+    const { o, org } = await setup('pl-race-delete');
+    await org.scheduleEntries.delete(o.scheduleEntry);
+    const uses = {
+      default: async () => org.commit((await org.settings.stage.set({ defaultPlaylistId: o.playlist })).writes),
+      'schedule entry': async () => {
+        await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+        await org.scheduleEntries.insert({ id: 'pl-race-entry', playlistId: o.playlist, target: 'org', priority: 1 });
+      },
+    };
+    for (const [what, use] of Object.entries(uses)) {
+      let used = false;
+      const racing = {
+        ...org,
+        scheduleEntries: {
+          ...org.scheduleEntries,
+          list: async () => {
+            const rows = await org.scheduleEntries.list();
+            if (!used) {
+              used = true;
+              await use();
+            }
+            return rows;
+          },
+        },
+      };
+      expect(await editorCalls(racing)('delete_playlist', { playlistId: o.playlist }), what).toMatchObject({ ok: false, error: 'conflict' });
+      expect(await org.playlists.get(o.playlist), what).toBeDefined();
+    }
+  });
+
+  it('refuses an order with not_found, not a fault, when the playlist is deleted between its read and its commit', async () => {
+    const { o, org } = await setup('pl-race-update');
+    await org.scheduleEntries.delete(o.scheduleEntry);
+    const racing = {
+      ...org,
+      playlists: {
+        ...org.playlists,
+        stage: {
+          ...org.playlists.stage,
+          update: async (...args: Parameters<typeof org.playlists.stage.update>) => {
+            const staged = await org.playlists.stage.update(...args);
+            await org.commit(org.playlists.stage.delete(o.playlist).writes);
+            return staged;
+          },
+        },
+      },
+    };
+    expect(await editorCalls(racing)('update_playlist', { playlistId: o.playlist, spotIds: [o.imageSpot] })).toMatchObject({ ok: false, error: 'not_found' });
+  });
 });

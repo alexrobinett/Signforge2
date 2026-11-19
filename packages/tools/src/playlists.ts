@@ -132,7 +132,18 @@ const updatePlaylist = defineTool({
     const row = write(await org.playlists.stage.update(current, patch, input.ifVersion, input.spotIds));
     return { playlist: playlistView(row, input.spotIds ?? (await org.playlists.items(row.id))) };
   },
+  // The order's rows name the playlist: deleted between the read and the commit, they fail the batch.
+  refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
 });
+
+/** Why a playlist cannot be deleted now (it is the default, or a schedule entry plays it), or undefined. */
+async function inUse(org: OrgScope, playlistId: string): Promise<ToolError | undefined> {
+  if ((await org.settings.get())?.defaultPlaylistId === playlistId)
+    return new ToolError('conflict', `playlist ${playlistId} is the default playlist; choose another default first`);
+  const entries = (await org.scheduleEntries.list()).filter((e) => e.playlistId === playlistId || published(e)?.playlistId === playlistId).map((e) => e.id);
+  if (entries.length) return new ToolError('conflict', `playlist ${playlistId} is played by ${entries.length} schedule entries`, { scheduleEntryIds: entries });
+  return undefined;
+}
 
 const deletePlaylist = defineTool({
   name: 'delete_playlist',
@@ -147,16 +158,13 @@ const deletePlaylist = defineTool({
   target,
   handler: async ({ org, input, write }) => {
     await requirePlaylist(org, input.playlistId);
-    if ((await org.settings.get())?.defaultPlaylistId === input.playlistId)
-      throw new ToolError('conflict', `playlist ${input.playlistId} is the default playlist; choose another default first`);
-    const entries = (await org.scheduleEntries.list())
-      .filter((e) => e.playlistId === input.playlistId || published(e)?.playlistId === input.playlistId)
-      .map((e) => e.id);
-    if (entries.length)
-      throw new ToolError('conflict', `playlist ${input.playlistId} is played by ${entries.length} schedule entries`, { scheduleEntryIds: entries });
+    const used = await inUse(org, input.playlistId);
+    if (used) throw used;
     write(org.playlists.stage.delete(input.playlistId));
     return { deleted: input.playlistId };
   },
+  // Made the default or scheduled since the check, the foreign keys fail the batch: the same refusal.
+  refuseFailedCommit: async ({ org, input }) => inUse(org, input.playlistId),
 });
 
 export const playlistTools = [listPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist];
