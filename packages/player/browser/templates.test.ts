@@ -307,8 +307,11 @@ describe('text on a brand colour (#57, #69)', () => {
   const menu = { items: [{ name: 'Soup', description: 'Hot', price: '$4', tag: 'New' }] };
   /** Each template's spot, given the accent `$brand.accent` resolves to. */
   const spots = (accent: string): [template: string, data: Data][] => [
-    ['news', { accent }],
+    ['news', { accent, items: [{ title: 'Story', published: at(-1), source: 'Wire' }] }],
+    ['agenda', { accent, events: [...(cases.agenda!.b.events as unknown[]), ...(cases.agenda!.a.events as unknown[])] }],
+    ['clock', { accent }],
     ['cstore-promo', {}],
+    // No photo: the photo is the spot's own, and the copy's shade is the kit's background.
     ['photo-promo', {}],
     ['menu-board', { accent, ...menu }],
     ['menu-board', { accent, ...menu, theme: 'light' }],
@@ -321,27 +324,72 @@ describe('text on a brand colour (#57, #69)', () => {
     ['photo-promo', '.tag', '.tag', 4.5],
     ['menu-board', '.items .tag', '.items .tag', 4.5],
   ];
+  // Accent-coloured text on whatever is behind it: 4.5:1, or 3:1 for text that is large on a
+  // 720p panel and up (WCAG: 24 px, or 18.7 px bold).
+  const onBackdrop: [template: string, text: string, min: number][] = [
+    ['news', '.age', 4.5],
+    ['agenda', '.today', 4.5],
+    ['agenda', '.now .mon', 4.5],
+    ['agenda', '.event:not(.now) .mon', 4.5],
+    ['clock', '.greeting', 3],
+    ['cstore-promo', '.l1', 3],
+    ['photo-promo', '.eyebrow', 3],
+    ['menu-board', '.price', 3],
+  ];
 
-  /** Open every spot of `spots(accent)` under `theme`, each in a frame of its own, ready. */
-  async function openAll(theme: FrameTheme | undefined, accent: string) {
+  /** Run `check` on each spot of `spots(accent)` under `theme`, in a frame of its own, ready and on top. */
+  async function eachSpot(theme: FrameTheme | undefined, accent: string, check: (name: string, f: Frame, page: Page) => Promise<void>) {
     const hst = await host();
-    const frames: [string, Frame][] = [];
     for (const [i, [name, data]] of spots(accent).entries()) {
       const t = built.get(name)!;
       const frame = `f${i}`;
       await hst.open(frame, t.html);
       await hst.init(frame, spotData(t.manifest, data), {}, NOW, theme);
       await hst.waitFor(frame, 'ready', 1);
-      frames.push([`${name}${data.theme ? ` (${data.theme})` : ''}`, hst.page.mainFrame().childFrames()[i]!]);
+      await check(`${name}${data.theme ? ` (${data.theme})` : ''}`, hst.page.mainFrame().childFrames()[i]!, hst.page);
+      // The frames overlap: the next one is measured on top.
+      await hst.page.evaluate((frame) => {
+        (window as unknown as { frames_: Record<string, HTMLIFrameElement> }).frames_[frame]!.style.visibility = 'hidden';
+      }, frame);
     }
-    return { hst, frames };
   }
 
-  for (const [label, theme, accent] of kits)
+  /**
+   * The text colour of `sel`'s first match and the pixel behind its text that it reads worst on:
+   * the intros run to their end, the text (and its shadow) hidden, and the page screenshotted.
+   */
+  async function textOnBackdrop(f: Frame, page: Page, sel: string): Promise<[string, string]> {
+    const { color, clip } = await f.evaluate((sel) => {
+      for (const a of document.getAnimations()) a.currentTime = 2000;
+      const el = document.querySelector<HTMLElement>(sel)!;
+      const color = getComputedStyle(el).color;
+      el.style.color = 'transparent';
+      el.style.textShadow = 'none';
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const r = range.getBoundingClientRect();
+      return { color, clip: { x: Math.ceil(r.x), y: Math.ceil(r.y), width: Math.floor(r.width), height: Math.floor(r.height) } };
+    }, sel);
+    const png = (await page.screenshot({ clip })).toString('base64');
+    const pixels = await page.evaluate(async (png) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${png}`;
+      await img.decode();
+      const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, img.width, img.height).data;
+      const out = new Set<string>();
+      for (let i = 0; i < d.length; i += 4) out.add(`rgb(${d[i]}, ${d[i + 1]}, ${d[i + 2]})`);
+      return [...out];
+    }, png);
+    const worst = pixels.reduce((a, b) => (contrast(color, b) < contrast(color, a) ? b : a));
+    return [color, worst];
+  }
+
+  for (const [label, theme, accent] of kits) {
     it(`text on a fill reads under ${label}`, async () => {
-      const { frames } = await openAll(theme, accent);
       const found: string[] = [];
-      for (const [name, f] of frames)
+      await eachSpot(theme, accent, async (name, f) => {
         for (const [, text, fill, min] of onFill.filter(([n]) => name.startsWith(n))) {
           const [fg, bg] = await f.evaluate(
             ({ text, fill }) => [getComputedStyle(document.querySelector(text)!).color, getComputedStyle(document.querySelector(fill)!).backgroundColor],
@@ -350,6 +398,20 @@ describe('text on a brand colour (#57, #69)', () => {
           const ratio = contrast(fg!, bg!);
           if (ratio < min) found.push(`${name} ${text}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, below ${min}:1`);
         }
+      });
       expect(found).toEqual([]);
     });
+
+    it(`accent text reads on its backdrop under ${label}`, async () => {
+      const found: string[] = [];
+      await eachSpot(theme, accent, async (name, f, page) => {
+        for (const [, text, min] of onBackdrop.filter(([n]) => name.startsWith(n))) {
+          const [fg, bg] = await textOnBackdrop(f, page, text);
+          const ratio = contrast(fg, bg);
+          if (ratio < min) found.push(`${name} ${text}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, below ${min}:1`);
+        }
+      });
+      expect(found).toEqual([]);
+    });
+  }
 });
