@@ -65,6 +65,25 @@ export interface FeedUrlSealer {
   seal(source: { orgId: string; id: string }, url: string): Promise<string>;
 }
 
+/** A place a weather source can be made for: Open-Meteo's geocoding result, as the forecast URL needs it. */
+export interface Place {
+  /** The geocoder's own id for the place (a GeoNames id). */
+  id: number;
+  name: string;
+  /** The first-level region (state, province), or `''`. */
+  region: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+  /** IANA time zone: the forecast's daily values are for days there. */
+  timezone: string;
+}
+
+/** Looks places up by name. Implemented by the API with Open-Meteo's geocoding; absent where none runs (most tests). */
+export interface PlaceFinder {
+  search(query: string): Promise<Place[]>;
+}
+
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
 export interface ToolContext<I, D extends DataScope = OrgScope> {
   org: D;
@@ -76,6 +95,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Seals feed URLs (./data-sources.ts). Undefined where no data source tool runs. */
   feedUrls?: FeedUrlSealer;
+  /** Looks places up (`find_places`). Undefined where no geocoder is configured. */
+  places?: PlaceFinder;
   /**
    * Add a staged change (a repository's `stage.*`) to this call's writes, and get its row back.
    * A tool never writes to D1 itself: the dispatcher runs the writes and the audit row in one

@@ -56,6 +56,8 @@ async function setup(orgId: string) {
     ['portrait', 'd'],
   ] as const)
     await org.assets.renditions.insert({ assetId: asset.id, orientation, sha256: sha(c), type: 'image/png', size: 10, width: 1920, height: 1080 });
+  await org.dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'enc:w', refreshS: 300 });
+  await org.dataSources.insert({ id: 'news', name: 'News', format: 'rss', urlEncrypted: 'enc:n', refreshS: 300 });
   const caller: Caller = { org, role: 'editor', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS };
   const call = (name: string, input: unknown) => dispatch(registry, name, input, caller);
   return { org, version: v.id, asset: asset.id, call };
@@ -126,6 +128,61 @@ describe('spot drafts', () => {
     expect(await ok(call('update_spot', { spotId, url: 'https://example.com/other', durationMs: 20_000 }))).toMatchObject({
       spot: { url: 'https://example.com/other', durationMs: 20_000, version: 2 },
     });
+  });
+});
+
+describe('spot bindings', () => {
+  it("binds fields to the org's data sources, keeping the data as the fallback, and reads them back", async () => {
+    const { call, version } = await setup('spots-bind');
+    const bindings = { headline: { dataSourceId: 'news', path: 'items.0.title' }, items: { dataSourceId: 'news', path: 'items' } };
+    const { spot } = await ok(call('create_spot', { name: 'Headlines', kind: 'template', templateVersionId: version, data: { headline: 'Fresh' }, bindings }));
+    expect(spot).toMatchObject({ data: { headline: 'Fresh' }, bindings });
+    const spotId = (spot as { id: string }).id;
+    expect(await ok(call('get_spot', { spotId }))).toMatchObject({ spot: { bindings } });
+
+    const moved = await ok(call('update_spot', { spotId, bindings: { headline: { dataSourceId: 'weather', path: 'current.summary' } }, ifVersion: 1 }));
+    expect(moved).toMatchObject({ spot: { bindings: { headline: { dataSourceId: 'weather', path: 'current.summary' } }, version: 2 } });
+    expect(await call('update_spot', { spotId, bindings: {}, ifVersion: 1 })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await ok(call('update_spot', { spotId, bindings: {}, ifVersion: 2 }))).toMatchObject({ spot: { bindings: null } });
+    // Edits that leave bindings out keep them.
+    await ok(call('update_spot', { spotId, bindings: { items: { dataSourceId: 'news', path: 'items' } } }));
+    expect(await ok(call('update_spot', { spotId, name: 'Renamed' }))).toMatchObject({
+      spot: { bindings: { items: { dataSourceId: 'news', path: 'items' } } },
+    });
+  });
+
+  it('refuses a source the org does not have', async () => {
+    const { call, version } = await setup('spots-bind-missing');
+    expect(
+      await call('create_spot', { name: 'x', kind: 'template', templateVersionId: version, bindings: { headline: { dataSourceId: 'gone', path: 'a' } } }),
+    ).toMatchObject({ ok: false, error: 'not_found', message: 'data source gone not found' });
+  });
+
+  it("refuses a field the template cannot bind, and a path the source's feed does not have", async () => {
+    const { call, version } = await setup('spots-bind-invalid');
+    const { spot } = await ok(call('create_spot', { name: 'x', kind: 'template', templateVersionId: version }));
+    const spotId = (spot as { id: string }).id;
+    const refused: [unknown, string][] = [
+      [{ photo: { dataSourceId: 'weather', path: 'url' } }, 'image field "photo" cannot be bound to live data'],
+      [{ nope: { dataSourceId: 'weather', path: 'a' } }, 'binding for unknown field "nope"'],
+      [{ headline: { dataSourceId: 'news', path: 'entries.0.title' } }, 'news is a news feed, which has no entries.0.title (it has title, language, items)'],
+      [{ headline: { dataSourceId: 'news', path: 'items.0.body' } }, 'news is a news feed, which has no items.0.body (it has title, language, items)'],
+    ];
+    for (const [bindings, message] of refused)
+      expect(await call('update_spot', { spotId, bindings }), JSON.stringify(bindings)).toMatchObject({
+        ok: false,
+        error: 'invalid_input',
+        details: [{ path: 'bindings', message }],
+      });
+    expect(await call('update_spot', { spotId, bindings: { headline: { dataSourceId: 'weather', path: 'a..b' } } })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+    });
+  });
+
+  it('refuses bindings on a spot that is not a template', async () => {
+    const { call, asset } = await setup('spots-bind-image');
+    expect(await call('create_spot', { name: 'x', kind: 'image', assetId: asset, bindings: {} })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 });
 

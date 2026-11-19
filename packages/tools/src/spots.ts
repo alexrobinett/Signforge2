@@ -8,7 +8,7 @@
  * holds it back until then.
  */
 import { spotProblems } from '@signforge/compiler';
-import { safeUrl, templateKey, type FieldDef, type TemplateManifest } from '@signforge/contract';
+import { BINDING_PATH, readPath, safeUrl, templateKey, type Binding, type FieldDef, type TemplateManifest } from '@signforge/contract';
 import { draftChanged, type OrgScope, type SpotRow } from '@signforge/db';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name, orientation, version } from './fields';
@@ -32,6 +32,19 @@ const data = z
   .describe("The template's field values by field name: the whole set, replacing the draft's. A field left out takes its default");
 const assets = z.record(z.string(), id('asset')).describe("Image fields to verified asset ids, by field name: the whole set, replacing the draft's");
 const url = z.string().refine(safeUrl, 'must be an https URL').describe('An https page on another origin');
+const binding = z.object({
+  dataSourceId: id('data source'),
+  path: z
+    .string()
+    .max(200)
+    .regex(BINDING_PATH, 'must be a dot path such as current.temperature_2m')
+    .describe("A dot path into the source's snapshot; numbers index arrays: daily.temperature_2m_max.0, items"),
+});
+const bindings = z
+  .record(z.string(), binding)
+  .describe(
+    "Template fields that take their value from one of the organization's data sources, by field name: the whole set, replacing the draft's ({} unbinds every field). The field's value in data stays as the fallback a screen shows without fresh data. A template's manifest says which fields are live (live.fields) and their usual paths",
+  );
 
 const spotOutput = z.object({
   id: z.string(),
@@ -42,9 +55,9 @@ const spotOutput = z.object({
   data: z.record(z.string(), z.unknown()).nullable().describe('Template spots: field values by field name'),
   assets: z.record(z.string(), z.string()).nullable().describe('Template spots: image fields to asset ids'),
   bindings: z
-    .record(z.string(), z.object({ source: z.string(), path: z.string() }))
+    .record(z.string(), z.object({ dataSourceId: z.string(), path: z.string() }))
     .nullable()
-    .describe('Template spots: fields bound to a data source'),
+    .describe('Template spots: fields bound to a data source, as update_spot takes them'),
   assetId: z.string().nullable().describe('Image and video spots'),
   fit: z.enum(FITS).nullable().describe('Image and video spots'),
   url: z.string().nullable().describe('URL spots'),
@@ -65,6 +78,12 @@ function parsed<T>(text: string | null): T | null {
   return value;
 }
 
+/** Bindings as tools take them, from the contract's `Binding`s stored on the row. */
+function bindingsView(json: string | null): SpotView['bindings'] {
+  const stored = parsed<Record<string, Binding>>(json);
+  return stored && Object.fromEntries(Object.entries(stored).map(([field, b]) => [field, { dataSourceId: b.source, path: b.path }]));
+}
+
 const spotView = (row: SpotRow): SpotView => ({
   id: row.id,
   name: row.name,
@@ -73,7 +92,7 @@ const spotView = (row: SpotRow): SpotView => ({
   templateVersionId: row.templateVersionId,
   data: parsed(row.dataJson),
   assets: parsed(row.assetMapJson),
-  bindings: parsed(row.bindingsJson),
+  bindings: bindingsView(row.bindingsJson),
   assetId: row.assetId,
   fit: row.fit,
   url: row.url,
@@ -112,24 +131,70 @@ const invalid = (path: string, problems: string[]) =>
  */
 function checkTemplateDraft(
   t: { key: string; manifest: TemplateManifest; html: string },
-  draft: { durationMs: number; data: Record<string, unknown>; assets: Record<string, string> },
+  draft: { durationMs: number; data: Record<string, unknown>; assets: Record<string, string>; bindings: Record<string, Binding> },
 ) {
   const fields: Record<string, FieldDef> = Object.fromEntries(
-    Object.entries(t.manifest.fields).filter(([name, def]) => def.type !== 'image' || name in draft.assets),
+    Object.entries(t.manifest.fields).filter(([name, def]) => def.type !== 'image' || name in draft.assets || name in draft.bindings),
   );
   for (const name of Object.keys(draft.assets))
     if (t.manifest.fields[name]?.type !== 'image') throw invalid('assets', [`"${name}" is not an image field of ${t.key}`]);
   const problems = spotProblems(
-    { id: 'draft', name: 'draft', kind: 'template', template: t.key, durationMs: draft.durationMs, data: draft.data, assets: draft.assets },
+    {
+      id: 'draft',
+      name: 'draft',
+      kind: 'template',
+      template: t.key,
+      durationMs: draft.durationMs,
+      data: draft.data,
+      assets: draft.assets,
+      bindings: draft.bindings,
+    },
     { [t.key]: { manifest: { ...t.manifest, fields }, html: t.html } },
   );
   const range = problems.filter((p) => p.startsWith('duration'));
   if (range.length) throw invalid('durationMs', range);
+  const bound = problems.filter((p) => p.startsWith('binding') || p.endsWith('cannot be bound to live data'));
+  if (bound.length) throw invalid('bindings', bound);
   if (problems.length) throw invalid('data', problems);
 }
 
+/**
+ * What a news (`rss`) or calendar (`ical`) source's snapshot holds, one row of each list: the
+ * server converts those feeds to the contract's `NewsFeed` and `CalendarFeed`, so a path either
+ * shape lacks never finds a value. A JSON source's shape is its feed's, unknown until it is polled.
+ */
+const FEED_SHAPES = {
+  rss: { what: 'a news feed', shape: { title: '', language: '', items: [{ title: '', published: '', source: '' }] } },
+  ical: { what: 'a calendar feed', shape: { events: [{ title: '', start: '', end: '', allDay: false, location: '' }] } },
+} as const;
+
+/** Whether `path` reaches a value in `shape`, whose lists hold one row: any index reads that row. */
+const reaches = (shape: unknown, path: string) => readPath(shape, path.replace(/(^|\.)\d+(?=\.|$)/g, '$10')) !== undefined;
+
+/**
+ * The input's bindings as the contract's, each source one of the org's (`not_found` otherwise)
+ * and each path one its feed's shape has. Undefined when the input has none.
+ */
+async function bindingsOf(org: OrgScope, input: z.infer<typeof bindings> | undefined): Promise<Record<string, Binding> | undefined> {
+  if (!input) return undefined;
+  const ids = [...new Set(Object.values(input).map((b) => b.dataSourceId))];
+  const sources = new Map((await Promise.all(ids.map((i) => org.dataSources.get(i)))).flatMap((d) => (d ? [[d.id, d] as const] : [])));
+  const missing = ids.find((i) => !sources.has(i));
+  if (missing) throw notFound('data source', missing);
+  const problems = Object.values(input).flatMap(({ dataSourceId, path }) => {
+    const format = sources.get(dataSourceId)?.format;
+    const feed = format === 'rss' || format === 'ical' ? FEED_SHAPES[format] : undefined;
+    return feed && !reaches(feed.shape, path) ? [`${dataSourceId} is ${feed.what}, which has no ${path} (it has ${Object.keys(feed.shape).join(', ')})`] : [];
+  });
+  if (problems.length) throw invalid('bindings', problems);
+  return Object.fromEntries(Object.entries(input).map(([field, b]) => [field, { source: b.dataSourceId, path: b.path }]));
+}
+
+/** Bindings for the row: none is stored as no bindings at all. */
+const bindingsJson = (b: Record<string, Binding>) => (Object.keys(b).length ? JSON.stringify(b) : null);
+
 /** Fields that belong to one kind of spot only. */
-const KIND_FIELDS = { template: ['data', 'assets'], image: ['assetId', 'fit'], video: ['assetId', 'fit'], url: ['url'] } as const;
+const KIND_FIELDS = { template: ['data', 'assets', 'bindings'], image: ['assetId', 'fit'], video: ['assetId', 'fit'], url: ['url'] } as const;
 
 function refuseOtherKinds(kind: SpotRow['kind'], input: Record<string, unknown>) {
   const mine = new Set<string>(KIND_FIELDS[kind]);
@@ -194,6 +259,7 @@ const createSpot = defineTool({
     templateVersionId: id('template version').optional(),
     data: data.optional(),
     assets: assets.optional(),
+    bindings: bindings.optional(),
     assetId: id('asset').optional(),
     fit: z.enum(FITS).optional(),
     url: url.optional(),
@@ -207,7 +273,8 @@ const createSpot = defineTool({
     if (input.kind === 'template') {
       if (!input.templateVersionId) throw invalid('templateVersionId', ['a template spot needs a templateVersionId']);
       const t = await requireVersion(org, input.templateVersionId);
-      const draft = { durationMs: input.durationMs ?? t.manifest.duration.defaultMs, data: input.data ?? {}, assets: input.assets ?? {} };
+      const bound = (await bindingsOf(org, input.bindings)) ?? {};
+      const draft = { durationMs: input.durationMs ?? t.manifest.duration.defaultMs, data: input.data ?? {}, assets: input.assets ?? {}, bindings: bound };
       checkTemplateDraft(t, draft);
       const row = write(
         await org.spots.stage.insert({
@@ -217,6 +284,7 @@ const createSpot = defineTool({
           templateVersionId: input.templateVersionId,
           dataJson: JSON.stringify(draft.data),
           assetMapJson: JSON.stringify(draft.assets),
+          bindingsJson: bindingsJson(bound),
         }),
       );
       return { spot: spotView(row) };
@@ -250,6 +318,7 @@ const updateSpot = defineTool({
     durationMs: durationMs.optional(),
     data: data.optional(),
     assets: assets.optional(),
+    bindings: bindings.optional(),
     assetId: id('asset').optional(),
     fit: z.enum(FITS).optional(),
     url: url.optional(),
@@ -261,12 +330,14 @@ const updateSpot = defineTool({
   handler: async ({ org, input, write }) => {
     const row = await requireSpot(org, input.spotId);
     refuseOtherKinds(row.kind, input);
+    const bound = await bindingsOf(org, input.bindings);
     if (row.kind === 'template' && row.templateVersionId) {
       const t = await requireVersion(org, row.templateVersionId);
       checkTemplateDraft(t, {
         durationMs: input.durationMs ?? row.durationMs,
         data: input.data ?? parsed(row.dataJson) ?? {},
         assets: input.assets ?? parsed(row.assetMapJson) ?? {},
+        bindings: bound ?? parsed(row.bindingsJson) ?? {},
       });
     }
     if ((row.kind === 'image' || row.kind === 'video') && input.assetId) await checkMedia(org, row.kind, input.assetId);
@@ -275,6 +346,7 @@ const updateSpot = defineTool({
       durationMs: input.durationMs,
       dataJson: input.data && JSON.stringify(input.data),
       assetMapJson: input.assets && JSON.stringify(input.assets),
+      bindingsJson: bound && bindingsJson(bound),
       assetId: input.assetId,
       fit: input.fit,
       url: input.url,

@@ -19,6 +19,8 @@ export {
   type AnyTool,
   type DataScope,
   type FeedUrlSealer,
+  type Place,
+  type PlaceFinder,
   type Role,
   type Scope,
   type RateLimitBucket,

@@ -3,7 +3,7 @@ import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { dispatch, registry, type Caller, type FeedUrlSealer } from '../src';
+import { dispatch, registry, type Caller, type FeedUrlSealer, type PlaceFinder } from '../src';
 
 let o: SeededOrg;
 let owner: Caller;
@@ -95,5 +95,28 @@ describe('data sources', () => {
     await owner.org.spots.update(o.templateSpot, { bindingsJson: null });
     expect(await call('delete_data_source', { dataSourceId: 'holidays' })).toEqual({ deleted: 'holidays' });
     expect(await owner.org.dataSources.snapshot('holidays')).toBeUndefined();
+  });
+});
+
+describe('find_places', () => {
+  const atlanta = {
+    id: 4180439,
+    name: 'Atlanta',
+    region: 'Georgia',
+    country: 'United States',
+    latitude: 33.749,
+    longitude: -84.38798,
+    timezone: 'America/New_York',
+  };
+  const places: PlaceFinder = { search: async (query) => (query.trim().toLowerCase() === 'atlanta' ? [atlanta] : []) };
+
+  it('finds places by name, with what a weather source needs: coordinates and time zone', async () => {
+    const r = await dispatch(registry, 'find_places', { query: '  Atlanta ' }, { ...owner, role: 'viewer', places });
+    expect(r).toEqual({ ok: true, output: { places: [atlanta] } });
+    expect(await dispatch(registry, 'find_places', { query: 'Nowhere' }, { ...owner, places })).toEqual({ ok: true, output: { places: [] } });
+  });
+
+  it('refuses a query too short to mean a place', async () => {
+    expect(await dispatch(registry, 'find_places', { query: ' a ' }, { ...owner, places })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 });

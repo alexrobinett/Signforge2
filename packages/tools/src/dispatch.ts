@@ -42,6 +42,7 @@ import {
   type Scope,
   type RateLimiter,
   type FeedUrlSealer,
+  type PlaceFinder,
   type ScreenNotifier,
   type ToolErrorCode,
 } from './tool';
@@ -60,6 +61,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Seals feed URLs. The data source tools that take a URL need it. */
   feedUrls?: FeedUrlSealer;
+  /** Looks places up by name. `find_places` needs it. */
+  places?: PlaceFinder;
   /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
   screens?: ScreenNotifier;
   /** Counts attempts against the caller's rate limits. `claim_screen` refuses without one. */
@@ -202,6 +205,7 @@ export async function dispatch<D extends DataScope>(
       blobs: caller.blobs,
       uploads: caller.uploads,
       feedUrls: caller.feedUrls,
+      places: caller.places,
       write,
       notify,
       rateLimit: caller.rateLimit,

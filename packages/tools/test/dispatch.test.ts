@@ -68,6 +68,7 @@ describe('the registry', () => {
       'delete_group',
       'finalize_asset',
       'finalize_video_upload',
+      'find_places',
       'get_asset',
       'get_brand_kit',
       'get_data_source',
@@ -179,6 +180,7 @@ describe('roles and scopes', () => {
   it('decide what GET /api/tools lists', () => {
     const names = (role: Role, scopes?: Scope[]) => describeTools(registry, { role, scopes, editorsPublish: true }).map((t) => t.name);
     expect(names('viewer').sort()).toEqual([
+      'find_places',
       'get_asset',
       'get_brand_kit',
       'get_data_source',
