@@ -4,12 +4,11 @@
  */
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { ChevronRightIcon } from 'lucide-react';
-import { EmptyState, PageHeader } from '~/components/page';
+import { EmptyState, PageHeader, ROW_LINK, RowText } from '~/components/page';
 import { NewSpotDialog } from '~/components/spots/new-spot-dialog';
 import { useCanManage, useOrgId } from '~/lib/live';
 import { sectionFor } from '~/lib/sections';
-import { publishWord, versionsById, type SpotView, type TemplateVersionView } from '~/lib/spots';
+import { publishWord, spotWhat, versionsById } from '~/lib/spots';
 import { assetsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 
 const section = sectionFor('/spots');
@@ -23,12 +22,6 @@ export const Route = createFileRoute('/_app/spots/')({
   head: () => ({ meta: [{ title: `${section.label} · SignForge` }] }),
   component: SpotsPage,
 });
-
-const KIND_WORD = { image: 'Image', video: 'Video', url: 'Web page' } as const;
-
-/** What the spot is, in a few words. */
-const what = (s: SpotView, versions: Map<string, TemplateVersionView>) =>
-  s.kind === 'template' ? (versions.get(s.templateVersionId ?? '')?.manifest.name ?? 'Template') : KIND_WORD[s.kind];
 
 function SpotsPage() {
   const orgId = useOrgId();
@@ -46,18 +39,10 @@ function SpotsPage() {
         <ul className="divide-y overflow-hidden rounded-xl border bg-card">
           {spots.map((s) => (
             <li key={s.id}>
-              <Link
-                to="/spots/$spotId"
-                params={{ spotId: s.id }}
-                className="flex items-center gap-3 px-4 py-3 outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{s.name}</span>
-                  <span className="block truncate text-sm text-muted-foreground">
-                    {what(s, versions)} · {publishWord(s)}
-                  </span>
-                </span>
-                <ChevronRightIcon className="size-4 text-muted-foreground" aria-hidden />
+              <Link to="/spots/$spotId" params={{ spotId: s.id }} className={ROW_LINK}>
+                <RowText title={s.name}>
+                  {spotWhat(s, versions)} · {publishWord(s)}
+                </RowText>
               </Link>
             </li>
           ))}

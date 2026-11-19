@@ -3,7 +3,7 @@
 // under `wrangler dev` and the feeds are not real, so the test writes into the run's local D1 what
 // a poll would have written.
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { axe, d1, fillUntilEnabled, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, shots, signInAs, tool } from './helpers';
 import { CMS_URL } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -29,11 +29,9 @@ const pollsFailed = (orgId: string, sourceId: string, n: number) =>
     `UPDATE data_sources SET failures = ${n}, last_error = 'http-status', next_poll_at = ${Date.now() + 10 * MINUTE} WHERE org_id = '${orgId}' AND id = '${sourceId}'`,
   );
 
+/** Make an org and return its id, for SQL on the run's D1. */
 async function newOrg(page: Page, name: string): Promise<string> {
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', name, 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+  await createOrg(page, name);
   const session = await page.request.get('/api/session');
   return (await session.json()).organization.id;
 }

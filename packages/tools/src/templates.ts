@@ -10,6 +10,10 @@
  * the forbidden-code list on the author's sources. These are a lint. The template sandbox and its
  * no-network policy are the guarantee; the bundle carries the SDK, which itself calls
  * `parent.postMessage`, so the code list cannot run on it.
+ *
+ * An org's new version is then rendered by the runtime check (`apps/template-check`, through
+ * `templateCheck`), which sees what the lint cannot: a request, a navigation, an error, no ready.
+ * Base templates skip it here; CI checks every one, so a failure there fails a build, not a seed.
  */
 import {
   canonicalJson,
@@ -19,6 +23,7 @@ import {
   templateKey,
   type TemplateCheckReport,
   type TemplateManifest,
+  type TemplateRuntimeReport,
 } from '@signforge/contract';
 import type { Template, TemplateVersion } from '@signforge/db';
 import { z } from 'zod';
@@ -52,6 +57,25 @@ const checkReportOutput = z.object({
   bundleBytes: z.number(),
   checks: z.array(z.object({ check: z.enum(TEMPLATE_CHECKS), ok: z.boolean(), problems: z.array(z.string()) })),
   warnings: z.array(z.string()).optional().describe('Findings that do not stop the version: colour literals outside a var(--sf-*) fallback'),
+  runtime: z
+    .object({
+      ok: z.boolean(),
+      problems: z.array(z.string()),
+      runner: z.object({ image: z.string(), browser: z.string() }),
+      renders: z.array(
+        z.object({
+          orientation: z.enum(['landscape', 'portrait']),
+          viewport: z.object({ width: z.number(), height: z.number() }),
+          readyMs: z.number().nullable(),
+          frames: z.object({ count: z.number(), longestMs: z.number() }).nullable(),
+        }),
+      ),
+      cost: z.object({ startMs: z.number(), checkMs: z.number() }),
+    })
+    .optional()
+    .describe(
+      "The runtime check: the bundle rendered headless in the player's sandbox, with no network, in each orientation; ms to ready and the first second's frames per render. Org versions only",
+    ),
   checkedAt: z.number(),
   sourcesSha256: z.string(),
 });
@@ -157,7 +181,7 @@ const sourcesSchema = z.record(z.string(), z.string());
 const registerTemplateVersion = defineSharedTool({
   name: 'register_template_version',
   description:
-    "Register a built template version whose bundle and sources are already uploaded (`sf template push` does both). The server lints them as `sf build` does: the manifest, forbidden CSS (backdrop-filter), the 600 kB size budget and network references on the bundle, and forbidden code (fetch, navigation) on the author's sources. Colour literals in the CSS outside a var(--sf-*) fallback are reported as warnings in the check report and do not stop the version. A version that fails is refused with each problem and nothing is stored. Versions are immutable: registering an existing version with the same bundle and manifest changes nothing, and with different ones is refused; bump the version instead. A new version is a draft. Returns { template, version, changed }.",
+    "Register a built template version whose bundle and sources are already uploaded (`sf template push` does both). The server lints them as `sf build` does: the manifest, forbidden CSS (backdrop-filter), the 600 kB size budget and network references on the bundle, and forbidden code (fetch, navigation) on the author's sources. An org's new version is then rendered headless in the player's sandbox, with no network, in each orientation it supports (a few seconds): any request, navigation, uncaught error, failed prepare or no ready within 2 s refuses it. Colour literals in the CSS outside a var(--sf-*) fallback are reported as warnings in the check report and do not stop the version. A version that fails is refused with each problem and nothing is stored. Versions are immutable: registering an existing version with the same bundle and manifest changes nothing, and with different ones is refused; bump the version instead. A new version is a draft. Returns { template, version, changed }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -183,7 +207,7 @@ const registerTemplateVersion = defineSharedTool({
     sourcesId: '1'.repeat(64),
   },
   target: (_input, output) => ({ kind: 'template_version', id: output.version.id }),
-  handler: async ({ org, blobs, input, write }) => {
+  handler: async ({ org, blobs, input, write, templateCheck, rateLimit }) => {
     const [bundle, sourcesObj] = await Promise.all([blobs.get(blobKey(org, input.bundleId)), blobs.get(blobKey(org, input.sourcesId))]);
     if (!bundle) throw new ToolError('not_found', `bundle ${input.bundleId} has not been uploaded`);
     if (!sourcesObj) throw new ToolError('not_found', `sources ${input.sourcesId} have not been uploaded`);
@@ -231,11 +255,28 @@ const registerTemplateVersion = defineSharedTool({
       }
     }
 
+    let runtime: TemplateRuntimeReport | undefined;
+    if (org.orgId !== null) {
+      if (!templateCheck || !rateLimit) throw new Error('registering an org template needs the runtime check and a rate limit, and the caller lacks one');
+      // An org's checks share its one container: a push loop is slowed here, before it reaches it.
+      if (!(await rateLimit('template_check'))) {
+        throw new ToolError('rate_limited', 'too many template checks for this org; wait a minute and try again', { retryAfterSeconds: 60 });
+      }
+      runtime = await templateCheck({ orgId: org.orgId, manifest, html });
+      if (!runtime.ok) {
+        throw new ToolError(
+          'invalid_input',
+          `the template failed its runtime check: ${runtime.problems.join('; ')}`,
+          runtime.problems.map((message) => ({ path: 'runtime', message })),
+        );
+      }
+    }
+
     // A new template and its first version are written together.
     const template = existing
       ? write(org.templates.stage.update(existing, { name: manifest.name }))
       : write(org.templates.stage.insert({ key: manifest.id, name: manifest.name }));
-    const stored: StoredCheckReport = { ...report, checkedAt: Date.now(), sourcesSha256: input.sourcesId };
+    const stored: StoredCheckReport = { ...report, ...(runtime ? { runtime } : {}), checkedAt: Date.now(), sourcesSha256: input.sourcesId };
     const version = write(
       org.templates.versions.stage.insert({
         templateId: template.id,

@@ -1,0 +1,36 @@
+{
+  "id": "hostile",
+  "version": "1.0.0",
+  "name": "Hostile",
+  "description": "Test fixture: each mode does one thing the runtime check must refuse.",
+  "fields": {
+    "mode": {
+      "type": "select",
+      "label": "What it tries",
+      "options": [
+        "ok",
+        "hash",
+        "flood",
+        "long-error",
+        "fetch",
+        "apostrophe",
+        "media",
+        "navigate-top",
+        "navigate-self",
+        "no-ready",
+        "spin",
+        "throw",
+        "uncaught",
+        "webrtc",
+        "image",
+        "on-play"
+      ],
+      "default": "ok"
+    },
+    "photo": { "type": "image", "label": "Photo" }
+  },
+  "duration": { "defaultMs": 8000, "minMs": 4000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#000"
+}

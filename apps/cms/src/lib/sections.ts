@@ -46,7 +46,7 @@ export const SECTIONS: Section[] = [
     label: 'Playlists',
     icon: ListVideoIcon,
     description: 'Ordered spots that play in a loop.',
-    empty: { title: 'No playlists yet', body: 'Playlists put spots in order and set how long each one plays.' },
+    empty: { title: 'No playlists yet', body: 'A playlist puts spots in order and sets how one gives way to the next. Make one, then add spots to it.' },
   },
   {
     to: '/schedule',
