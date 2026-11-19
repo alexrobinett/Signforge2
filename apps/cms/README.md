@@ -51,17 +51,20 @@ The CMS's `API` binding finds the API's `wrangler dev` through Wrangler's local 
 src/routes/__root.tsx     document, theme script, fonts
 src/routes/sign-in.tsx    email code, and GitHub when the API offers it
 src/routes/_app.tsx       signed-in layout: redirects signed-out visitors, picks or creates an org
-src/routes/_app/*.tsx     Overview, Playlists, Schedule (placeholders); Assets, the image library
+src/routes/_app/*.tsx     Overview, Schedule (placeholders); Assets, the image library
 src/routes/_app/spots/    Spots: the list, and one spot's editor (the form beside the live stage)
+src/routes/_app/playlists/ Playlists: the list, and one playlist's editor (its spots in order and its transition beside the stage, which plays the loop)
 src/routes/_app/screens/  Screens: tile wall or table (?view=table), and one screen's page
 src/routes/_app/settings/ Settings: General, Members & roles, Screens & groups, Notifications (owners change them; others read)
 src/routes/_app/account.tsx  Your account: name, sign-in methods, sessions, theme
 src/routes/accept-invitation.$invitationId.tsx  where an invitation email's link lands; outside the org gate
 src/components/screens/   status shapes and pills, thumbnails, pairing, display hours
 src/components/assets/    asset tiles, search, uploading images, and AssetPicker (the library in a dialog)
-src/components/spots/     FieldForm (a template's fields as a form), PlayerStage (the real player in an iframe), the new-spot dialog
+src/components/spots/     FieldForm (a template's fields as a form), PlayerStage (the real player in an iframe, for a spot or a playlist), the new-spot dialog
+src/components/playlists/ the new-playlist dialog, and SpotPicker (the org's spots in a dialog, to add to a playlist)
 src/queries/              server data as TanStack Query options: keys and the tool reads behind them
-src/lib/spots.ts          the spot tools' outputs, and a draft compiled in the browser for the stage
+src/lib/spots.ts          the spot tools' outputs, and a draft (a spot's, or a playlist's) compiled in the browser for the stage
+src/lib/playlists.ts      the playlist tools' outputs, a loop's length, a transition in words
 src/components/command-menu.tsx  ⌘K: go to a section, or run a tool (entries from src/lib/command-menu.ts)
 src/lib/screen-status.ts  a screen's state in words (the state itself comes from the screen tools)
 src/lib/fleet-status.ts   how the Screens page's poll joins the list it loaded, and when the list is out of date
@@ -120,7 +123,7 @@ To add a slice:
 
 1. Make `src/state/<area>.ts` with its state under one key (`ui`, `signIn`, `orgs`, `screens`) and its actions, typed as `SliceCreator<YourSlice>`.
 2. Name actions as verbs on the domain (`openDrawer`, `startSignIn`, `createOrg`) and write each transition inside them with `set((s) => ...)`. Do not add a generic `patch` or `setField` action: that is `useState` under another name.
-3. Actions that call the API use the helpers in `src/lib/`, and the router and Query client from the store's deps (`router.invalidate()` after a change to loader data; `queryClient.setQueryData` or `invalidateQueries` after a change to Query data). An edit of a row sends the version it opened with as `ifVersion` (`packages/tools` README, Conditional updates); when `isStale(err)`, the action says "This changed since you opened it" and offers a reload (`saveScreenSettings` in `state/screens.ts`). A change to a list uses the tool's add and remove forms, never a replace built from what the page loaded.
+3. Actions that call the API use the helpers in `src/lib/`, and the router and Query client from the store's deps (`router.invalidate()` after a change to loader data; `queryClient.setQueryData` or `invalidateQueries` after a change to Query data). An edit of a row sends the version it opened with as `ifVersion` (`packages/tools` README, Conditional updates); when `isStale(err)`, the action says "This changed since you opened it" and offers a reload (`saveScreenSettings` in `state/screens.ts`). A change to a list uses the tool's add and remove forms, never a replace built from what the page loaded; an ordered list a tool takes whole, a playlist's spots, is sent with the `ifVersion` it was read at, so a replace from an old read is refused.
 4. Add the slice to `AppState` and `createAppStore` in `src/state/store.ts`. If it must start from browser state, set that in a browser-only hook like `connectUi`, which changes the current state but not the initial one, so hydration still matches the server.
 
 ## Deploying
