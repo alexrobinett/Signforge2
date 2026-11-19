@@ -8,6 +8,7 @@ import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { defineTool, dispatch, manifestKey, r2Presigner, TOOLS, uploadKey, type AnyTool, type Caller } from '../src';
+import { connectors, pendingFor } from './connectors-stub';
 
 const WRITE_SQL = /^\s*(insert|update|delete|replace)\b/i;
 
@@ -62,6 +63,7 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   logoOnLightAsset: (o) => o.asset,
   dataSource: (o) => o.dataSource,
   alertDelivery: (o) => o.alertDelivery,
+  connection: (o) => o.connection,
   // An R2 multipart upload's id, not a row.
   upload: () => 'upload-id',
   // Catalogue ids, the same for every org.
@@ -88,6 +90,8 @@ function withOwnIds(example: unknown, o: SeededOrg): unknown {
 
 /** Clear what would make a tool's example refuse before it writes. */
 const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
+  // Its example state, pending for the caller.
+  finish_connection: (o) => pendingFor(o.orgId, 'user-g'),
   // Its example code, open to claim.
   claim_screen: () => startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() }),
   delete_group: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
@@ -137,6 +141,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
     rateLimit: async () => true,
     feedUrls: { seal: async (_source, url) => `sealed:${url}` },
     alertSecrets: { seal: async (_channel, _field, value) => `sealed:${value}` },
+    connectors,
   };
   const reg = new Map([[tool.name, tool]]);
   const result = await dispatch(reg, tool.name, input ?? withOwnIds(tool.example, o), caller);

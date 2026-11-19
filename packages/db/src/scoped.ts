@@ -345,6 +345,8 @@ export function scoped(d1: D1Database, orgId: string) {
   const scheduleEntries = drafts(db, orgId, s.scheduleEntries, 'sch');
   const publishes = entity(db, orgId, s.publishes, 'pub');
   const dataSources = entity(db, orgId, s.dataSources, 'src', 'content');
+  const connectionRows = entity(db, orgId, s.connections, 'con');
+  const authorizations = entity(db, orgId, s.connectionAuthorizations, 'oas');
   const audit = entity(db, orgId, s.auditLog, 'aud');
   const brandKitRows = entity(db, orgId, s.brandKits, 'bk');
 
@@ -365,6 +367,23 @@ export function scoped(d1: D1Database, orgId: string) {
     await checkAssetMap(v.assetMapJson);
     if (v.assetId != null && !(await assets.get(v.assetId))) throw new NotInOrgError('asset', v.assetId);
   };
+
+  /** A provider source's connection, or a reconnect's, must be the org's: the column has no foreign key (./schema.ts). */
+  const checkConnection = async (id: string | null | undefined) => {
+    if (id != null && !(await connectionRows.get(id))) throw new NotInOrgError('connection', id);
+  };
+  const cn = s.connections;
+  const cna = s.connectionAuthorizations;
+  /** A poll's change to a connection, made only while it still holds the grant the poll read (`from`). Whether it wrote. */
+  const changeGrant = async (id: string, from: string, set: RowPatch<typeof s.connections>) =>
+    (
+      await db
+        .update(cn)
+        .set(updateSet(cn, set))
+        .where(and(eq(cn.orgId, orgId), eq(cn.id, id), eq(cn.credentialsSealed, from)))
+        .returning({ id: cn.id })
+        .all()
+    ).length > 0;
 
   const m = s.screenGroupMembers;
   const os = s.orgSettings;
@@ -1244,6 +1263,45 @@ export function scoped(d1: D1Database, orgId: string) {
 
     dataSources: {
       ...dataSources,
+      insert: async (values: NewRow<typeof s.dataSources>) => {
+        await checkConnection(values.connectionId);
+        return dataSources.insert(values);
+      },
+      update: async (id: string, patch: RowPatch<typeof s.dataSources>) => {
+        await checkConnection(patch.connectionId);
+        return dataSources.update(id, patch);
+      },
+      stage: {
+        ...dataSources.stage,
+        insert: async (values: NewRow<typeof s.dataSources>) => {
+          await checkConnection(values.connectionId);
+          return dataSources.stage.insert(values);
+        },
+        update: async (current: typeof s.dataSources.$inferSelect, patch: RowPatch<typeof s.dataSources>, ifVersion?: number) => {
+          await checkConnection(patch.connectionId);
+          return dataSources.stage.update(current, patch, ifVersion);
+        },
+        /**
+         * The sources reading through `connectionId` polled again at once, their failures and backoff
+         * gone: for a connection reconnected. Their versions stay, as with a poll.
+         */
+        pollAgain: (connectionId: string): Staged =>
+          staged(
+            undefined,
+            db
+              .update(s.dataSources)
+              .set(updateSet(s.dataSources, { nextPollAt: 0, failures: 0, lastError: null }))
+              .where(and(eq(s.dataSources.orgId, orgId), eq(s.dataSources.connectionId, connectionId))),
+          ),
+      },
+      /** The sources that read through `connectionId`. */
+      usingConnection: (connectionId: string) =>
+        db
+          .select()
+          .from(s.dataSources)
+          .where(and(eq(s.dataSources.orgId, orgId), eq(s.dataSources.connectionId, connectionId)))
+          .orderBy(asc(s.dataSources.id))
+          .all(),
       snapshot: async (dataSourceId: string) =>
         db
           .select()
@@ -1300,6 +1358,56 @@ export function scoped(d1: D1Database, orgId: string) {
           );
         else if (poll.checkedAt !== undefined) writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(mineSnap)).writes);
         await commit(db, writes);
+      },
+    },
+
+    connections: {
+      ...connectionRows,
+      /**
+       * The poller refreshed the grant: stored only over the one it refreshed (another run may have
+       * refreshed it first, or a person reconnected), and active again, since a racing run whose
+       * rotated-out token was refused may have marked it `needs_reconnect` first. A disconnected
+       * connection has no grant to match, so this never revives one.
+       */
+      saveGrant: (id: string, from: string, grant: { credentialsSealed: string; expiresAt: number | null }) =>
+        changeGrant(id, from, { ...grant, status: 'active', lastError: null }),
+      /** The provider refused the grant the poller read: a person must connect it again. */
+      markNeedsReconnect: (id: string, from: string, lastError: string) => changeGrant(id, from, { status: 'needs_reconnect', lastError }),
+      authorizations: {
+        ...authorizations,
+        insert: async (values: NewRow<typeof s.connectionAuthorizations>) => {
+          await checkConnection(values.connectionId);
+          return authorizations.insert(values);
+        },
+        /** The live authorization whose state hashes to `stateHash`, in this org. */
+        byState: (stateHash: string, now: number) =>
+          db
+            .select()
+            .from(cna)
+            .where(and(eq(cna.orgId, orgId), eq(cna.stateHash, stateHash), gt(cna.expiresAt, now)))
+            .get(),
+        stage: {
+          insert: async (values: NewRow<typeof s.connectionAuthorizations>) => {
+            await checkConnection(values.connectionId);
+            return authorizations.stage.insert(values);
+          },
+          /**
+           * Use it up: deleted, and the batch fails, writing nothing, unless this delete is the
+           * one that removed it. Of two finishes of one state, one commits.
+           */
+          consume: (id: string): Staged =>
+            staged(
+              undefined,
+              db.delete(cna).where(and(eq(cna.orgId, orgId), eq(cna.id, id))),
+              // json() of text that is not JSON raises an error, which aborts the batch.
+              db
+                .select({ ok: sql`json(CASE WHEN changes() = 1 THEN '1' ELSE 'authorization is not pending' END)` })
+                .from(s.organization)
+                .where(eq(s.organization.id, orgId)),
+            ),
+          /** The org's authorizations that ran out unfinished. */
+          deleteExpired: (now: number): Staged => staged(undefined, db.delete(cna).where(and(eq(cna.orgId, orgId), lte(cna.expiresAt, now)))),
+        },
       },
     },
 

@@ -19,6 +19,7 @@ export {
   type AlertDeliverer,
   type AlertSecretSealer,
   type AnyTool,
+  type Connectors,
   type DataScope,
   type FeedUrlSealer,
   type Role,

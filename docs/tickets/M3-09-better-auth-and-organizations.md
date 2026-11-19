@@ -64,7 +64,8 @@ Nothing has been created on Cloudflare. Before the first deploy of each environm
    - Then run `wrangler secret put GITHUB_CLIENT_ID --env <env>` and `wrangler secret put GITHUB_CLIENT_SECRET --env <env>`.
    - GitHub sign-in is offered only when both secrets are set.
 4. **CMS origin.** If the CMS is served from a different origin than the API, set `CMS_ORIGIN` as a var or secret. It is trusted for auth requests and used for invitation links. M3-10 plans the same hostname, so it can stay unset.
-5. **Local dev.** Needs nothing. Sign-in codes are printed in the `wrangler dev` terminal, and a fixed dev secret is used. To try GitHub locally, put `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `apps/api/.dev.vars`.
+5. **Connections key (since #83).** Run `wrangler secret put CONNECTION_KEY --env <env>` with 32+ random bytes, as for the auth secret. It seals connected accounts' credentials (docs/backend-plan.md, Connectors); the Worker refuses to connect an account without it outside dev, and changing it means reconnecting every account.
+6. **Local dev.** Needs nothing. Sign-in codes are printed in the `wrangler dev` terminal, and a fixed dev secret is used. To try GitHub locally, put `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in `apps/api/.dev.vars`.
 
 ## Notes
 

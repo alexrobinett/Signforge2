@@ -39,6 +39,8 @@ export interface SeededOrg {
   dataSource: string;
   /** A webhook delivery that was given up on, so it can be retried. */
   alertDelivery: string;
+  /** A connected account, with its sealed credentials stand-in. */
+  connection: string;
   auditEntry: string;
   /** A brand kit, the org's default. Its id is the server's. */
   brandKit: string;
@@ -152,6 +154,14 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
 
   const dataSource = await o.dataSources.insert({ id: id('source'), name: 'Weather', format: 'json', urlEncrypted: 'enc:xyz', refreshS: 300 });
   await o.dataSources.putSnapshot(dataSource.id, { version: 'v1', fetchedAt: SEED_HOUR, checkedAt: SEED_HOUR, dataJson: '{"t":12}' });
+  const connection = await o.connections.insert({
+    provider: 'fake',
+    account: `facilities@${orgId}.test`,
+    scopesJson: '["read"]',
+    status: 'active',
+    credentialsSealed: 'sealed:grant',
+    createdBy: id('user'),
+  });
 
   const delivery = o.alertDeliveries.stage.insert({
     channel: 'webhook',
@@ -195,6 +205,7 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
     publish: publish.id,
     dataSource: dataSource.id,
     alertDelivery: delivery.row.id,
+    connection: connection.id,
     auditEntry: auditEntry.id,
     brandKit: kit.id,
     hour: SEED_HOUR,

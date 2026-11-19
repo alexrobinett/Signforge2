@@ -84,6 +84,34 @@ export interface AlertDeliverer {
   now(deliveryId: string): void;
 }
 
+/**
+ * What the connection tools need from the API (apps/api/src/connectors): each provider's OAuth
+ * and the CONNECTION_KEY that seals credentials. Tokens never leave it: a tool handles only
+ * sealed values, the account's name and the scopes granted.
+ */
+export interface Connectors {
+  /** The providers this deployment can connect. */
+  providers: readonly string[];
+  /**
+   * The URL to send the person to for a new authorization: the provider's authorize endpoint
+   * with `state` and a fresh PKCE challenge (S256). Also its code verifier, sealed for the
+   * authorization (the org and the state's SHA-256), to store until it is finished.
+   */
+  begin(provider: string, authorization: { orgId: string; stateHash: string }, state: string): Promise<{ authorizeUrl: string; verifierSealed: string }>;
+  /**
+   * Exchange the provider's authorization code, with the authorization's verifier, for a grant,
+   * sealed for `connection`. A provider's refusal is a `ToolError`.
+   */
+  finish(
+    provider: string,
+    authorization: { orgId: string; stateHash: string; verifierSealed: string },
+    code: string,
+    connection: { orgId: string; id: string },
+  ): Promise<{ credentialsSealed: string; account: string; scopes: string[]; expiresAt: number | null }>;
+  /** Revoke the sealed grant at the provider, where it can. A failure there is logged, not thrown: the credentials are deleted anyway. */
+  revoke(provider: string, connection: { orgId: string; id: string }, credentialsSealed: string): Promise<void>;
+}
+
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
 export interface ToolContext<I, D extends DataScope = OrgScope> {
   org: D;
@@ -93,10 +121,12 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   blobs: R2Bucket;
   /** Signs direct uploads to that bucket (./upload.ts). Undefined where uploads are not configured. */
   uploads?: UploadSigner;
-  /** Seals feed URLs (./data-sources.ts). Undefined where no data source tool runs. */
+  /** Seals feed URLs and provider resources (./data-sources.ts). Undefined where no data source tool runs. */
   feedUrls?: FeedUrlSealer;
   /** Seals alert channels' URLs and secrets (./alert-channels.ts). Undefined where no channel tool runs. */
   alertSecrets?: AlertSecretSealer;
+  /** Providers' OAuth (./connections.ts). Undefined where no connection tool runs. */
+  connectors?: Connectors;
   /**
    * Add a staged change (a repository's `stage.*`) to this call's writes, and get its row back.
    * A tool never writes to D1 itself: the dispatcher runs the writes and the audit row in one
@@ -110,6 +140,11 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   notify: (send: (screens: ScreenNotifier) => Promise<void>) => void;
   /** Send a delivery this call queues as soon as its writes are committed (`AlertDeliverer`). */
   deliverNow: (deliveryId: string) => void;
+  /**
+   * Undo, if this call does not succeed, something the handler did outside the batch (a grant a
+   * provider issued). Run after the refusal or failure, its own failure logged: best effort.
+   */
+  onDiscard: (undo: () => Promise<void>) => void;
   /** The caller's rate limits. A tool that guards a guessable secret refuses without it. */
   rateLimit?: RateLimiter;
 }
@@ -208,8 +243,12 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
   output: R;
   /** A valid input, shown to agents and used by the generated tests. Id fields name their kind (`screenId`, `groupIds`). */
   example: z.input<S>;
-  /** What the change was made to, for the audit log. */
-  target?: (input: z.output<S>, output: NoInfer<z.output<R>>) => { kind: string; id: string };
+  /**
+   * What the change was made to, for the audit log. A refusal that changed something (`ToolError`'s
+   * `changed`) has no output: a tool that refuses so either names its target from the input, or
+   * takes the output as possibly undefined and returns undefined for no target.
+   */
+  target?: (input: z.output<S>, output: NoInfer<z.output<R>>) => { kind: string; id: string } | undefined;
   handler: (ctx: ToolContext<z.output<S>, D>) => Promise<NoInfer<z.output<R>>>;
   /**
    * For a tool whose writes carry a guard (a statement that fails the batch when what the handler

@@ -28,7 +28,16 @@ interface DataSourceSettings {
   /** Encrypts feed URLs and alert channels' URLs and signing secrets at rest (src/data/cipher.ts), 32+ random bytes. Required outside dev; changing it loses every stored URL and secret. */
   DATA_SOURCE_KEY?: string;
 }
-interface Env extends AuthSettings, UploadSettings, DataSourceSettings {}
+/** Connected accounts (src/connectors). */
+interface ConnectorSettings {
+  /**
+   * Encrypts connections' credentials (OAuth grants, API keys) and pending PKCE verifiers at rest
+   * (src/connectors/vault.ts), 32+ random bytes, separate from DATA_SOURCE_KEY. Required outside dev;
+   * changing it loses every connection's credentials (each then needs reconnecting).
+   */
+  CONNECTION_KEY?: string;
+}
+interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings {}
 declare namespace Cloudflare {
-  interface Env extends AuthSettings, UploadSettings, DataSourceSettings {}
+  interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings {}
 }

@@ -8,13 +8,17 @@
  * - Every other route runs behind `requireOrg`, which re-checks membership of the active org
  *   on every request and hands handlers `c.var.org`, a `scoped(db, orgId)`.
  * - `/api/tools` serves the tool registry (./tools.ts). It is the only route here that changes
- *   data; test/routes.test.ts fails if another one does.
+ *   data, but for the OAuth callback (./connections.ts), a GET because a provider redirects the
+ *   browser to it, which changes data only by running `finish_connection` through the
+ *   dispatcher; test/routes.test.ts fails if another one does.
  */
 import { Hono, type MiddlewareHandler } from 'hono';
 import { findMembership, scoped, type OrgScope } from '@signforge/db';
 import { createAuth, ROLES, type Auth, type AuthSession, type Role } from '../auth';
 import { emailSenderFor, type EmailSender } from '../email';
+import type { ConnectorDeps } from '../connectors';
 import { mountBlobs } from './blobs';
+import { mountConnectionCallback } from './connections';
 import { mountTools } from './tools';
 
 interface ApiVars {
@@ -30,6 +34,8 @@ export type ApiEnv = { Bindings: Env; Variables: ApiVars };
 export interface ApiDeps {
   /** Defaults to `emailSenderFor(env)`. Tests pass a recorder. */
   email?: EmailSender;
+  /** Defaults to `connectorDeps(env)`, this deployment's providers. Tests pass a fake provider. */
+  connectors?: ConnectorDeps;
 }
 
 const error = (code: string) => ({ error: code });
@@ -98,7 +104,8 @@ export function createApi(deps: ApiDeps = {}) {
   });
 
   api.use('*', requireSession, requireOrg);
-  mountTools(api, deps.email);
+  mountTools(api, deps.connectors, deps.email);
+  mountConnectionCallback(api, deps.connectors);
   mountBlobs(api);
   return api;
 }

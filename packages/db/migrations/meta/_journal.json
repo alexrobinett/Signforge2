@@ -166,8 +166,15 @@
     {
       "idx": 23,
       "version": "6",
-      "when": 1795057304404,
-      "tag": "0023_alert_channels",
+      "when": 1795054878868,
+      "tag": "0023_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795090547310,
+      "tag": "0024_alert_channels",
       "breakpoints": true
     }
   ]
