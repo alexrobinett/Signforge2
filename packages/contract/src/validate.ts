@@ -224,7 +224,7 @@ export function validateTemplateManifest(m: unknown): string[] {
   }
   if (!Array.isArray(m.orientations) || !m.orientations.length || m.orientations.some((o) => o !== 'landscape' && o !== 'portrait')) {
     errors.push('orientations must list landscape and/or portrait');
-  }
+  } else if (new Set(m.orientations).size !== m.orientations.length) errors.push('orientations must not repeat');
   if (!Array.isArray(m.uses)) errors.push('uses must be an array (it may be empty)');
   else if (m.uses.some((u) => u !== 'canvas' && u !== 'webgl' && u !== 'audio')) errors.push('uses may list only canvas, webgl and audio');
   if (!isText(m.background)) errors.push('background is required');

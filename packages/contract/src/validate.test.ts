@@ -341,6 +341,12 @@ describe('validateTemplateRuntimeReport', () => {
 });
 
 describe('validateTemplateManifest', () => {
+  it('lists each orientation once: a repeat would be rendered again by every check of the template', () => {
+    expect(validateTemplateManifest({ ...structuredClone(template), orientations: ['landscape', 'landscape', 'portrait'] })).toEqual([
+      'orientations must not repeat',
+    ]);
+  });
+
   it('checks each field definition, so the spot check can trust it', () => {
     const bad = structuredClone(template) as unknown as { fields: Record<string, unknown> };
     bad.fields.price = { type: 'number', label: 'Price', min: 10, max: 1, step: 0 };
