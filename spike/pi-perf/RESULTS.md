@@ -421,6 +421,15 @@ Frames: the full 16-spot `examples/stress` playlist, cut, 120 s per run after 10
 
 `containedFrames` itself, timed in a tab of the same Chromium on a 79 kB stress bundle, 30 times: 0.9 ms median, 0.4 ms at best, 11.6 ms on the first (cold) call. That is well inside the spread between runs: the previous session of this issue had master higher (0.60, 0.37% against 0.39, 0.39%), and both builds here have one prepare over 500 ms. Nothing was skipped.
 
+After the second re-check the guard goes right after the exact `"use strict";` every bundle script starts with, with no prologue matching (`cea6a31`). One more round, same method, master `50c0dfe` against the branch, master/branch/branch/master; `webrtc` sent 9 datagrams and 3 TURN connections on master and nothing on the branch:
+
+| Build | Overall | Playing | Loading next | Worst frame | Prepares, median and max (13 each) |
+| --- | --- | --- | --- | --- | --- |
+| Master | 0.62, 0.36% | 0.14, 0.10% | 17.6, 10.2% | 300, 100 ms | 235 / 660, 249 / 345 ms |
+| This branch | 0.39, 0.37% | 0.14, 0.13% | 9.1, 9.2% | 100, 117 ms | 236 / 534, 242 / 380 ms |
+
+No cost; the 300 ms frame was again in master's first run after the cache was cleared. Nothing was skipped.
+
 ## Accent text measured on its real backdrop, 3:1 for large text (issue #92, 2026-11-19)
 
 agenda 1.2.3 (shipped as 1.3.1 after #98, the same bundle), menu-board 1.2.3 and cstore-promo 1.2.4 measure accent-coloured text against what it sits on, resolved with the SDK's `painted` on a 1x1 canvas: menu-board reads its card's style once after the rows are in, agenda paints each kind of card (ordinary, happening now) over both ends of its gradient, four reads at most instead of one per row, and cstore-promo paints the kit's surface over both ends of its stage. Every template with accent text passes `{ large: true }` to `readableOn` (news 1.3.4, shipped as 1.4.1 with the same bundle, clock 1.2.3 and photo-promo 1.2.3 change only that). Same method as #69: this branch's player at a subdirectory of the rig on its own origin (`http://localhost:8090`, so the kiosk's caches are untouched), `examples/stress` built from master's templates (before) and this branch's (after), with no kit and with the demo kit's colours (a scratch copy with a `brand.json`). Cut, 60 s per run after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Two playlists: sport-drinks, energy, menu, clock; and meeting-room, holidays, news, photo-berries. Order alternated (before, after, after, before), then menu's playlist again for the variants below. The supervisor was stopped during the runs: its liveness check restarts the kiosk 30 s after the kiosk's player stops beating, which it does as soon as the page is navigated away.
