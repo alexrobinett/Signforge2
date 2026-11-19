@@ -319,7 +319,80 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
     expect(seen).toEqual([['day'], ['day', 'dusk'], ['dusk', 'night'], ['night']]);
   });
 
-  it('every text reads on its card (AA) at every time of day, in every condition, with and without a kit', async () => {
+  /**
+   * Each text in the forecast card that reads below AA (4.5:1, 3:1 for large text), measured from what
+   * is painted: the card screenshotted with its text and again with the text hidden, at rest. Each
+   * glyph pixel is compared with the pixel under it, so opacity on the text or a parent, and anything
+   * drawn over the card, count. A text's ratio is its 90th-percentile pixel: the cores of its strokes,
+   * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1.
+   */
+  async function paintedContrast(page: Page, f: Frame): Promise<string[]> {
+    const { card, texts } = await f.evaluate(() => {
+      for (const a of document.getAnimations()) a.currentTime = 2000;
+      const box = document.querySelector('.info')!.getBoundingClientRect();
+      const texts = [];
+      for (const el of document.querySelectorAll<HTMLElement>('.info, .info *')) {
+        const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
+        if (!own.length) continue;
+        const range = document.createRange();
+        range.selectNode(own[0]!);
+        range.setEndAfter(own.at(-1)!);
+        const r = range.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        const size = Number.parseFloat(s.fontSize);
+        texts.push({
+          name: el.id || el.className || el.tagName,
+          rect: { x: Math.round(r.x - box.x), y: Math.round(r.y - box.y), w: Math.round(r.width), h: Math.round(r.height) },
+          min: size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700) ? 3 : 4.5,
+        });
+      }
+      return { card: { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) }, texts };
+    });
+    const withText = (await page.screenshot({ clip: card })).toString('base64');
+    await f.evaluate(() => {
+      const hide = document.createElement('style');
+      hide.id = 'sf-test-hide';
+      hide.textContent = '.info, .info * { color: transparent !important; text-shadow: none !important; }';
+      document.head.append(hide);
+    });
+    const without = (await page.screenshot({ clip: card })).toString('base64');
+    await f.evaluate(() => document.getElementById('sf-test-hide')!.remove());
+    return page.evaluate(
+      async ({ withText, without, texts }) => {
+        const read = async (png: string) => {
+          const img = new Image();
+          img.src = `data:image/png;base64,${png}`;
+          await img.decode();
+          const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
+          g.drawImage(img, 0, 0);
+          return { w: img.width, d: g.getImageData(0, 0, img.width, img.height).data };
+        };
+        const [a, b] = [await read(withText), await read(without)];
+        const lum = (d: Uint8ClampedArray, i: number) => {
+          const [r, g, bl] = [d[i]!, d[i + 1]!, d[i + 2]!].map((v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+          return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
+        };
+        const out: string[] = [];
+        for (const t of texts) {
+          const ratios: number[] = [];
+          for (let y = t.rect.y; y < t.rect.y + t.rect.h; y++)
+            for (let x = t.rect.x; x < t.rect.x + t.rect.w; x++) {
+              const i = (y * a.w + x) * 4;
+              if (a.d[i] === b.d[i] && a.d[i + 1] === b.d[i + 1] && a.d[i + 2] === b.d[i + 2]) continue;
+              const [hi, lo] = [lum(a.d, i), lum(b.d, i)].sort((p, q) => q - p);
+              ratios.push((hi! + 0.05) / (lo! + 0.05));
+            }
+          ratios.sort((p, q) => p - q);
+          const ratio = ratios.length ? ratios[Math.floor(ratios.length * 0.9)]! : 1;
+          if (ratio < t.min) out.push(`${t.name}: ${ratio.toFixed(2)}:1, below ${t.min}:1`);
+        }
+        return out;
+      },
+      { withText, without, texts },
+    );
+  }
+
+  it('every text in the forecast card reads (AA) as painted, at every time of day, in every condition, with and without a kit', async () => {
     const t = built.get('weather')!;
     const hst = await host();
     await hst.open('fresh', t.html);
@@ -354,37 +427,7 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
         for (const code of codes) {
           await hst.init('fresh', spotData(t.manifest, { ...data, code }), {}, clock(at), theme);
           await hst.waitFor('fresh', 'ready', ++inits);
-          const low = await hst.page
-            .mainFrame()
-            .childFrames()[0]!
-            .evaluate(() => {
-              // At rest: after the intro, before the outro.
-              for (const a of document.getAnimations()) a.currentTime = 2000;
-              // rgb()/rgba() in 0-255; a color-mix with transparent computes to color(srgb r g b / a), in 0-1.
-              const rgba = (c: string) => {
-                const v = c.match(/[\d.]+/g)!.map(Number);
-                return c.startsWith('color(srgb') ? [...v.slice(0, 3).map((x) => x * 255), ...v.slice(3)] : v;
-              };
-              const lum = (c: number[]) => {
-                const [r, g, b] = c.slice(0, 3).map((v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-                return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
-              };
-              const card = rgba(getComputedStyle(document.querySelector('.info')!).backgroundColor);
-              const out: string[] = [];
-              for (const el of document.querySelectorAll<HTMLElement>('.info, .info *')) {
-                if (![...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim())) continue;
-                const s = getComputedStyle(el);
-                // Text colour with its alpha, over the card's opaque colour.
-                const [r, g, b, a = 1] = rgba(s.color);
-                const fg = [r!, g!, b!].map((v, i) => v * a + card[i]! * (1 - a));
-                const [hi, lo] = [lum(fg), lum(card)].sort((x, y) => y - x);
-                const ratio = (hi! + 0.05) / (lo! + 0.05);
-                const size = Number.parseFloat(s.fontSize);
-                const large = size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700);
-                if (ratio < (large ? 3 : 4.5)) out.push(`${el.id || el.className || el.tagName}: ${ratio.toFixed(2)}:1`);
-              }
-              return out;
-            });
+          const low = await paintedContrast(hst.page, hst.page.mainFrame().childFrames()[0]!);
           for (const l of low) found.push(`${kit}, ${phase}, code ${code}: ${l}`);
         }
     expect(found).toEqual([]);
