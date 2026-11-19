@@ -28,7 +28,7 @@ import {
 import { chooseBrandKit, DEFAULT_BRAND_COLORS, isBrandColor, tokenName, type BrandChoice } from './brand';
 
 export * from './brand';
-export { FONTS, fontById, fontFilePath, isCatalogueFontFile, MAX_FONT_FAMILY_BYTES, type CatalogueFont } from './fonts';
+export { brandFont, FONTS, fontById, fontFilePath, isCatalogueFontFile, MAX_FONT_FAMILY_BYTES, type CatalogueFont } from './fonts';
 
 /** A schedule entry as the org stores it: its target level plus which group or screen it targets. */
 export type TargetedEntry = ScheduleEntry & {

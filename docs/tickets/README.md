@@ -71,7 +71,7 @@ M3-00, M3-01 and M3-22 have no dependencies and can run in parallel. The first P
 | [M3-38](M3-38-brand-kits.md) | Brand kits | M | M3-32, M3-33, M3-34 |
 | [M3-39](M3-39-brand-in-the-player.md) | Brand in the player and SDK | M | M3-32, M3-28, M3-38 |
 | [M3-25](M3-25-brand-tokens-and-template-polish.md) | Brand tokens and template polish | L | M3-38, M3-39 |
-| [M3-40](M3-40-cms-brand-kits.md) | CMS: brand kits | S | M3-38, M3-36, CMS design |
+| [M3-40](M3-40-cms-brand-kits.md) | CMS: brand kits | S | M3-38, M3-36, CMS design; its Pi box M3-18 |
 | [M3-41](M3-41-browser-test-screen.md) | Browser test screen | M | M3-08, M3-11 |
 | [M3-42](M3-42-org-settings-and-alerts.md) | Org settings, members and alerts | M | M3-11 |
 | [M3-43](M3-43-command-menu.md) | Command menu | S | M3-11 |
