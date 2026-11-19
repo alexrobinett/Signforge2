@@ -8,7 +8,7 @@ import { ToolError, type TemplateChecker } from '@signforge/tools';
  */
 const CHECK_TIMEOUT_MS = 120_000;
 
-/** Counts one check against the org's limit (TEMPLATE_CHECK_LIMIT, 10 a minute); false over it. */
+/** Counts one check against the org's limit (TEMPLATE_CHECK_LIMIT, 10 a minute per Cloudflare location); false over it. */
 export const templateCheckAllowed = async (env: Pick<Env, 'TEMPLATE_CHECK_LIMIT'>, orgId: string) =>
   (await env.TEMPLATE_CHECK_LIMIT.limit({ key: `org:${orgId}` })).success;
 
