@@ -39,7 +39,8 @@ defineTemplate({
     set('low', `${n('low')}°`);
     set('wind', `${n('wind')} ${String(data.windUnit)}`);
     set('humidity', `${n('humidity')}%`);
-    if (cycle?.night && (condition === 'clear' || condition === 'partly')) stars(0.85 * (1 - day!));
+    // From nothing at sunset to full in the dark, and back by sunrise.
+    if (cycle?.night && (condition === 'clear' || condition === 'partly')) stars(0.85 * (1 - day! / skyDay(0)));
     // Rain and snow are decoration: if drawing them fails, show the forecast without them.
     return precipitation(condition, viewport).catch((err) => console.warn('[weather] no precipitation', err));
   },
@@ -92,18 +93,23 @@ function moonPhase(at: number): number {
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
+/** How much of the day sky shows, 0 to 1, `minutes` from the nearer sunrise or sunset (negative: the sun is down). */
+function skyDay(minutes: number): number {
+  const x = clamp01((minutes + 40) / 90);
+  return x * x * (3 - 2 * x);
+}
+
 /**
  * Set the stage's scene from the cycle, once per play: style.css places the orb on its arc from
  * `--p`, mixes the day and night skies by `--day`, and fades in the dawn or dusk glow by `--glow`.
  * Returns `--day`, 0 at night to 1 by day.
  */
 function showCycle(stage: HTMLElement, c: Cycle): number {
-  const daylight = clamp01((c.minutes + 40) / 90);
   // Brightest just after sunset and just before sunrise; gone an hour either side.
   const glow = clamp01(1 - Math.abs(c.minutes + 5) / 70);
   stage.classList.add('arc');
   if (glow > 0) stage.classList.add(c.morning ? 'dawn' : 'dusk');
-  const day = daylight * daylight * (3 - 2 * daylight);
+  const day = skyDay(c.minutes);
   stage.style.setProperty('--p', c.progress.toFixed(4));
   stage.style.setProperty('--day', day.toFixed(3));
   stage.style.setProperty('--glow', glow.toFixed(3));

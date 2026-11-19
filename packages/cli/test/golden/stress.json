@@ -75,20 +75,20 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "c7b0f3112b1b2ea510a2e5bdd7410304f033fed72544bc52b4e29ca22ae4b31b": {
-      "size": 85266,
-      "type": "text/html"
-    },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
       "size": 182996,
       "type": "image/jpeg"
+    },
+    "d7019943c39a4aded5c0a91144a20908b328084bc434e81aa630ecf619268f24": {
+      "size": 85303,
+      "type": "text/html"
     },
     "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688": {
       "size": 421529,
       "type": "image/jpeg"
     }
   },
-  "id": "869a5868edf94f282562e76f0a4cc304e40ba7065a535a5e5e0454692deeb08b",
+  "id": "12f796604301a9eb35e7028dfa1ab0d7a9e5fd07f32056cf3248567731fbc8b1",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -989,7 +989,7 @@
       }
     },
     "base/weather@1.3.0": {
-      "html": "c7b0f3112b1b2ea510a2e5bdd7410304f033fed72544bc52b4e29ca22ae4b31b",
+      "html": "d7019943c39a4aded5c0a91144a20908b328084bc434e81aa630ecf619268f24",
       "manifest": {
         "background": "#0b1a33",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
