@@ -284,3 +284,42 @@ test('a screen that stops syncing turns unreachable on the open Screens page, wi
   await axe(page);
   await shots(page, '19-phone-screens-went-unreachable');
 });
+
+test('the open Screens page says when its status is not current, and clears on the next good poll', async ({ page, request }) => {
+  test.setTimeout(120_000);
+  await page.goto('/sign-in');
+  await hydrated(page);
+  // Its own address: this spec's other tests use up ADDRESS's sign-in budget.
+  await signInAs(page, `e2e-poll-${Date.now()}@example.com`, '192.0.2.15');
+  await page.goto('/');
+  await fillUntilEnabled(page, 'Organization name', 'Eastside Deli', 'Create organization');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page.getByRole('heading', { name: 'Eastside Deli', level: 1 })).toBeVisible();
+  const pairing = await startPairing(request);
+  const claimed = await page.request.post('/api/tools/claim_screen', {
+    data: { code: pairing.code, name: 'Counter', timezone: 'UTC', orientation: 'landscape' },
+  });
+  expect(claimed.status(), await claimed.text()).toBe(200);
+  await sync(request, await pairing.credential());
+
+  await page.goto('/screens');
+  await hydrated(page);
+  const notice = page.getByRole('status').filter({ hasText: 'Status is not current.' });
+  await expect(page.getByRole('link', { name: 'Counter' })).toBeVisible();
+
+  // The API stops answering the poll (every server function, which only the poll calls while the page sits open).
+  await page.route('**/_serverFn/**', (route) => route.abort('connectionrefused'));
+  await expect(notice).toBeVisible({ timeout: 40_000 });
+  await expect(notice).toContainText(/SignForge has not answered since \d{1,2}\D\d{2}/);
+  await axe(page);
+  await shots(page, '20-screens-status-not-current');
+  await page.setViewportSize({ width: 412, height: 915 });
+  await axe(page);
+  await shots(page, '21-phone-screens-status-not-current');
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  // It answers again: the next good poll clears the notice.
+  await page.unroute('**/_serverFn/**');
+  await expect(notice).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByRole('link', { name: 'Counter' })).toBeVisible();
+});
