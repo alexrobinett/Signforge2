@@ -7,13 +7,14 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { expect } from 'vitest';
 import { createApi } from '../src/api';
+import type { ConnectorDeps } from '../src/connectors';
 import { RecordingEmailSender } from '../src/email';
 
 const ORIGIN = 'https://api.test';
 
-/** A fresh `/api` app, as a new isolate would build it. */
-export function testApp({ outbox = new RecordingEmailSender() }: { outbox?: RecordingEmailSender } = {}) {
-  const api = createApi({ email: outbox });
+/** A fresh `/api` app, as a new isolate would build it; with `connectors`, reaching those providers (test/fake-provider.ts). */
+export function testApp({ outbox = new RecordingEmailSender(), connectors }: { outbox?: RecordingEmailSender; connectors?: ConnectorDeps } = {}) {
+  const api = createApi({ email: outbox, connectors });
   const app = new Hono<{ Bindings: Env }>().route('/api', api);
   return { app, outbox };
 }
