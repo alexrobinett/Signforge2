@@ -1,7 +1,7 @@
 /**
  * Retention (F13, #41): cross-org deletes by age, run daily from the API's Cron Trigger. They
- * read no row and name no org: idempotency keys go after 7 days, audit rows after each org's
- * `org_settings.audit_retention_days`.
+ * read no row and name no org: idempotency keys and alert deliveries (the delivery log, #88) go
+ * after 7 days, audit rows after each org's `org_settings.audit_retention_days`.
  */
 import { lt, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -17,6 +17,16 @@ export async function expireIdempotencyKeys(d1: D1Database, now: number): Promis
   await drizzle(d1)
     .delete(s.idempotencyKeys)
     .where(lt(s.idempotencyKeys.createdAt, now - IDEMPOTENCY_KEY_TTL_MS));
+}
+
+/** The delivery log shows 7 days; a delivery is retried for 24 hours, so none older is still pending. */
+const ALERT_DELIVERY_TTL_MS = 7 * DAY_MS;
+
+/** Delete every org's alert deliveries made more than 7 days before `now`. */
+export async function expireAlertDeliveries(d1: D1Database, now: number): Promise<void> {
+  await drizzle(d1)
+    .delete(s.alertDeliveries)
+    .where(lt(s.alertDeliveries.createdAt, now - ALERT_DELIVERY_TTL_MS));
 }
 
 /** An org with no setting keeps its audit rows a year (owner decision, 2026-11-18). */

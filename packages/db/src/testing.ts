@@ -37,6 +37,8 @@ export interface SeededOrg {
   scheduleEntry: string;
   publish: string;
   dataSource: string;
+  /** A webhook delivery that was given up on, so it can be retried. */
+  alertDelivery: string;
   auditEntry: string;
   /** A brand kit, the org's default. Its id is the server's. */
   brandKit: string;
@@ -151,6 +153,20 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   const dataSource = await o.dataSources.insert({ id: id('source'), name: 'Weather', format: 'json', urlEncrypted: 'enc:xyz', refreshS: 300 });
   await o.dataSources.putSnapshot(dataSource.id, { version: 'v1', fetchedAt: SEED_HOUR, checkedAt: SEED_HOUR, dataJson: '{"t":12}' });
 
+  const delivery = o.alertDeliveries.stage.insert({
+    channel: 'webhook',
+    eventId: id('event'),
+    eventType: 'screen.offline',
+    eventJson: '{}',
+    status: 'failed',
+    attempts: 16,
+    nextAttemptAt: SEED_HOUR,
+    giveUpAt: SEED_HOUR,
+    lastHttpStatus: 500,
+    lastError: 'http-status',
+  });
+  await o.commit(delivery.writes);
+
   const auditEntry = await o.auditLog.append({ id: id('audit'), actorKind: 'system', actorId: 'seed', action: 'seed', at: SEED_HOUR });
   const kit = await o.brandKits.insert({
     name: `${orgId} brand`,
@@ -178,6 +194,7 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
     scheduleEntry: scheduleEntry.id,
     publish: publish.id,
     dataSource: dataSource.id,
+    alertDelivery: delivery.row.id,
     auditEntry: auditEntry.id,
     brandKit: kit.id,
     hour: SEED_HOUR,

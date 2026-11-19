@@ -8,8 +8,8 @@ const AUTH_TABLES = ['account', 'invitation', 'member', 'organization', 'rateLim
 const NOT_TENANT = new Set(['pairing_codes', 'platform_audit_log', ...AUTH_TABLES]);
 /** Tables where a null org means a base row shared by every org. */
 const NULLABLE_ORG = new Set(['templates', 'template_versions']);
-/** Indexes that deliberately do not lead with org_id. */
-const INDEX_EXCEPTIONS = new Set(['templates_base_key_uq', 'template_versions_base_version_uq']);
+/** Indexes that deliberately do not lead with org_id. The due deliveries are found across orgs, from pending rows only. */
+const INDEX_EXCEPTIONS = new Set(['templates_base_key_uq', 'template_versions_base_version_uq', 'alert_deliveries_due_idx']);
 /** Foreign keys that deliberately do not include org_id. */
 const FK_EXCEPTIONS = new Set(['spots.template_version_id']);
 
@@ -30,6 +30,8 @@ describe('schema', () => {
 
   it('has the tables in the plan', async () => {
     expect(await tables()).toEqual([
+      'alert_channels',
+      'alert_deliveries',
       'asset_renditions',
       'assets',
       'audit_log',

@@ -16,7 +16,8 @@ export { claimDueDataSources } from './poller';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
 export { findMembership, organizationExists, orgMembers } from './members';
 export { findAlertWork, type AlertWork } from './alerts';
-export { AUDIT_ROWS_PER_RUN, DEFAULT_AUDIT_RETENTION_DAYS, expireAuditRows, expireIdempotencyKeys } from './retention';
+export { AUDIT_ROWS_PER_RUN, DEFAULT_AUDIT_RETENTION_DAYS, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from './retention';
+export { claimDueAlertDeliveries } from './deliveries';
 
 // Row shapes, as types only.
 export type Screen = typeof s.screens.$inferSelect;
@@ -38,3 +39,5 @@ export type PlayCountRow = typeof s.playCounts.$inferSelect;
 export type OrgSettings = typeof s.orgSettings.$inferSelect;
 export type BrandKitRow = typeof s.brandKits.$inferSelect;
 export type BrandAssignment = typeof s.brandAssignments.$inferSelect;
+export type AlertChannelRow = typeof s.alertChannels.$inferSelect;
+export type AlertDeliveryRow = typeof s.alertDeliveries.$inferSelect;
