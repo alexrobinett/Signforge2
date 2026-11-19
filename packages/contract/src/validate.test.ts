@@ -660,6 +660,23 @@ describe('brand colour lint', () => {
   });
 });
 
+describe('forbidden code lint', () => {
+  const problems = (sources: Record<string, string>) =>
+    checkTemplateBundle({ manifest: template, html: '<p>', sources: { 'main.ts': '', ...sources } }).checks.find((c) => c.check === 'source-code')?.problems;
+
+  it('refuses inline event handlers and javascript: URLs, which the policy does not run', () => {
+    const handler = ['inline event handlers do not run in a template; use addEventListener'];
+    expect(problems({ 'index.html': '<img src="a.png"\n  onerror="x()">' })).toEqual(handler);
+    expect(problems({ 'main.ts': 'box.innerHTML = `<b onclick="go()">`;' })).toEqual(handler);
+    expect(problems({ 'main.ts': "el.setAttribute('onload', 'x')" })).toEqual(handler);
+    expect(problems({ 'index.html': '<a href="javascript:go()">' })).toEqual(['`javascript:` URLs do not run in a template']);
+  });
+
+  it('passes handlers set as properties or with addEventListener', () => {
+    expect(problems({ 'main.ts': "img.onload = () => done();\nel.addEventListener('click', f);\nconst ok = a < b && c.onx === 1;" })).toEqual([]);
+  });
+});
+
 describe('validatePairStartRequest', () => {
   it('takes an empty body as a device, and a known kind', () => {
     expect(validatePairStartRequest({})).toEqual([]);

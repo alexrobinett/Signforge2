@@ -208,6 +208,13 @@ export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
   },
   { pattern: /@import\b/, reason: 'stylesheets must be bundled, not imported at run time' },
   { pattern: /["'(=]\s*(?:https?:)?\/\/[a-z0-9]/i, reason: 'a template may not refer to anything on the network' },
+  // The player's policy runs only the bundle's own scripts (Template containment in docs/architecture.md).
+  {
+    // An `on…=` attribute in markup, in a file or in a string, or set with setAttribute; not a property such as `img.onload = f`.
+    pattern: /<[a-z][^>]*\son[a-z]+\s*=|\bsetAttribute\(\s*["'`]on[a-z]/i,
+    reason: 'inline event handlers do not run in a template; use addEventListener',
+  },
+  { pattern: /\bjavascript:/i, reason: '`javascript:` URLs do not run in a template' },
 ];
 
 /** CSS a template may not ship. Each entry was measured as too slow on the baseline device. */
