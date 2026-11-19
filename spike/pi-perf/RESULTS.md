@@ -412,6 +412,17 @@ Prepares (ms, median before / after, over both kits): meeting-room (agenda) 185 
 
 No cost in frames: the ranges overlap and nothing was skipped. Agenda's meeting room is about 7 ms faster than master and gives back about a third of #69's 20 ms, now that a card is read once per kind and not per row. Menu-board prepares about 11 ms slower (before 167-201, after 197-229, 14 prepares each), well within 500 ms. Four variants did not move it, so it is not the canvas: `willReadFrequently: true` (200 ms), compositing the colours arithmetically with no canvas (204), reading the first card before the other rows are in (202, 234), and a registered `@property --card` read from the stage's style with no row's style read at all (193-221). cstore-promo's two prepares move in opposite directions, run-to-run noise.
 
+Review fixes (PR #104): clock 1.2.3 now measures its greeting over its accent glow, one more 1x1 canvas read in `prepare` (`painted(bg, [accent, 0.12])`), and photo-promo's eyebrow keeps 4.5:1 (no canvas). Same method, 2026-11-19 07:49, master's templates (clock 1.2.2) against this branch's, no kit and the demo kit, before, after, after, before; playlists sport-drinks, energy, menu, clock and clock, photo-berries, photo-river; 60 s each.
+
+| Content | Build | Runs | Overall | Playing | Loading next | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- |
+| stress, no kit | before | 4 | 0.11-0.39% | 0.00-0.03% | 5.2-13.7% | 67 ms |
+| | after | 4 | 0.28-0.36% | 0.00-0.03% | 10.7-12.5% | 83 ms |
+| stress, demo kit | before | 4 | 0.17-0.25% | 0.00% | 8.1-9.4% | 67 ms |
+| | after | 4 | 0.08-0.33% | 0.00-0.03% | 2.7-12.9% | 83 ms |
+
+Clock prepares 182 / 180.5 ms (median before / after, 20 each, 144-268 / 146-266): the canvas read costs nothing measurable. photo-berries 215.5 / 216.5, photo-river 233 / 231.5. menu (menu-board) 200 / 217, the same gap as above. The rig was slower than in the night's runs for every spot (energy 298 ms against 225), so compare within this table only. Frames while playing are unchanged; the 83 ms frames are within what earlier sections record from run to run.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
