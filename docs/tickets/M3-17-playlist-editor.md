@@ -35,6 +35,10 @@ Order spots into playlists with a transition.
 - Removing a spot is optimistic with an Undo toast; deleting the playlist asks first (docs/research/cms-ux.md).
 - There is no playlist board on the canvas; the editor follows Spot editor A's layout (header, form, dark stage). A review sub-agent compared the screenshots with EditorA, IdeaStage and the app nav board; its findings that applied were fixed (the stage stays in view beside a long form, the playing spot is marked by its row's border, an amber note for a spot left out, a quieter Delete).
 
+## Follow-up
+
+- An update tool called without `ifVersion` after its row was deleted answers `ok` with the row as it was (and audits it), since the update matches no row (`entity.stage.update`, every update tool). Found in the review of #97; to fix for all update tools at once.
+
 ## Done when
 
 - [x] A playlist built in the CMS matches `examples/stress/playlists/stress.json` when compiled. `packages/tools/test/publishing.test.ts`, "compiles a playlist built with the playlist tools, as the CMS builds it, to the one sf build makes for examples/stress (M3-17)": the stress spots seeded, the playlist made with `create_playlist` and edited with `update_playlist` (spots added, reordered, transition set, each with `ifVersion`), as the editor does, then published and compiled: the manifest's playlist equals the golden's (its id aside) and its spots equal the golden's. The CMS side of the same calls is `apps/cms/e2e/playlists.spec.ts`, which checks with `get_playlist` that the order and transition the editor saved are the ones on screen.
