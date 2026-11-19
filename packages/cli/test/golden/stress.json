@@ -15,6 +15,10 @@
   },
   "defaultPlaylist": "stress",
   "files": {
+    "04456a985e7ff087f6713b44d104e65ba72fb665a231ffd4b8539c4ae839275d": {
+      "size": 72527,
+      "type": "text/html"
+    },
     "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
       "size": 203915,
       "type": "image/jpeg"
@@ -29,10 +33,6 @@
     },
     "1a4020bbad33d42b78a5bc6a531ef7115d4295c59317935eff06618f7fe384e7": {
       "size": 77514,
-      "type": "text/html"
-    },
-    "29443f55bbf6ae15a18d0e0fdb908d57899f77202e4507d4ae1203b3412ad2e2": {
-      "size": 73174,
       "type": "text/html"
     },
     "2ab42d80861eae3aa89e8fb4c422c0b26df924e41f6e6eb5125d8b399a28274a": {
@@ -59,6 +59,10 @@
       "size": 9600472,
       "type": "video/mp4"
     },
+    "913346150e69dde5d0918b465704b2f98527779f51467b9b62706390d7936306": {
+      "size": 73465,
+      "type": "text/html"
+    },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
@@ -79,16 +83,12 @@
       "size": 182996,
       "type": "image/jpeg"
     },
-    "eb02db352bf0cd6fc3df0420a494cfe120754982964a9f7c4eea482033753cbd": {
-      "size": 72538,
-      "type": "text/html"
-    },
     "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688": {
       "size": 421529,
       "type": "image/jpeg"
     }
   },
-  "id": "4c9195fb25f3dd575e7ad87c614b2bd7f5bccdfeefdc12bc51e1eef09e185dc9",
+  "id": "f21561d41858024c037a94aa8980b01d3d9c1269704c1cbce4fb5877309764b3",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -630,7 +630,7 @@
       }
     },
     "base/clock@1.2.3": {
-      "html": "29443f55bbf6ae15a18d0e0fdb908d57899f77202e4507d4ae1203b3412ad2e2",
+      "html": "913346150e69dde5d0918b465704b2f98527779f51467b9b62706390d7936306",
       "manifest": {
         "background": "#05070d",
         "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
@@ -924,7 +924,7 @@
       }
     },
     "base/photo-promo@1.2.3": {
-      "html": "eb02db352bf0cd6fc3df0420a494cfe120754982964a9f7c4eea482033753cbd",
+      "html": "04456a985e7ff087f6713b44d104e65ba72fb665a231ffd4b8539c4ae839275d",
       "manifest": {
         "background": "#000000",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
