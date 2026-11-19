@@ -338,6 +338,60 @@ describe('validateTemplateManifest', () => {
     bad.fields.price = { type: 'number', label: 'Price', max: 10, default: 50 };
     expect(validateTemplateManifest(bad)).toEqual(['field "price" default: field "price" must be at most 10']);
   });
+
+  const weather = (): TemplateManifest => ({
+    ...structuredClone(template),
+    fields: {
+      city: { type: 'text', label: 'City', default: 'Atlanta' },
+      temp: { type: 'number', label: 'Temperature', default: 72 },
+      high: { type: 'number', label: 'High', default: 78 },
+      unit: { type: 'select', label: 'Unit', options: ['°F', '°C'], default: '°F' },
+      windUnit: { type: 'select', label: 'Wind unit', options: ['mph', 'km/h'], default: 'mph' },
+      photo: { type: 'image', label: 'Photo' },
+    },
+    live: {
+      source: 'open-meteo',
+      fields: { temp: 'current.temperature_2m', high: 'daily.temperature_2m_max.0' },
+      place: 'city',
+      units: { temperature: 'unit', wind: 'windUnit' },
+    },
+  });
+
+  totalOn('validateTemplateManifest with a live declaration', mutated(weather), validateTemplateManifest);
+
+  it('takes a declaration of the fields a data source fills, with their default paths', () => {
+    expect(validateTemplateManifest(weather())).toEqual([]);
+    expect(validateTemplateManifest({ ...structuredClone(template), live: { source: 'rss', fields: { items: 'items' } } })).toEqual([]);
+  });
+
+  it('holds the declaration to fields the template has, that can take live data, at paths a binding can name', () => {
+    const bad = weather();
+    bad.live = { source: 'open-meteo', fields: { temp: 'current..temperature_2m', photo: 'url', gone: 'x', high: '' } };
+    expect(validateTemplateManifest(bad)).toEqual([
+      'live: field "temp": "current..temperature_2m" is not a dot path such as current.temperature_2m',
+      'live: field "photo" is an image, which cannot take live data',
+      'live: field "gone" is not a field of the template',
+      'live: field "high": "" is not a dot path such as current.temperature_2m',
+    ]);
+    expect(validateTemplateManifest({ ...weather(), live: { source: 'weather.com', fields: {} } })).toEqual([
+      'live: source must be one of open-meteo, rss, ical',
+      'live: fields must name at least one field',
+    ]);
+  });
+
+  it('names the place and unit fields of an Open-Meteo template only, each the right kind of field with options the forecast offers', () => {
+    const m = weather();
+    m.fields.unit = { type: 'select', label: 'Unit', options: ['°F', 'K'], default: '°F' };
+    m.live = { source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'temp', units: { temperature: 'unit', wind: 'city' } };
+    expect(validateTemplateManifest(m)).toEqual([
+      'live: place "temp" must be a text field the source does not fill',
+      'live: units.temperature "unit" must be a select field with options from °F, °C',
+      'live: units.wind "city" must be a select field with options from mph, km/h',
+    ]);
+    expect(validateTemplateManifest({ ...weather(), live: { source: 'rss', fields: { temp: 'items' }, place: 'city' } })).toEqual([
+      'live: place and units are for open-meteo sources only',
+    ]);
+  });
 });
 
 describe('validateSpotData limits', () => {
