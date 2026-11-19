@@ -10,7 +10,7 @@
  */
 import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { Page } from 'playwright';
+import type { Frame, Page } from 'playwright';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { PROTOCOL_VERSION, type BrandColors, type FieldDef, type FrameTheme, type TemplateManifest } from '@signforge/contract';
 import { buildTemplate } from '@signforge/cli/template';
@@ -465,36 +465,116 @@ function contrast(a: string, b: string): number {
   return (hi! + 0.05) / (lo! + 0.05);
 }
 
-describe('text on a brand colour (#57)', () => {
+describe('text on a brand colour (#57, #69)', () => {
   const demo = DEMO_KIT;
   // A kit may set its on-colours by hand; the brand tools only warn when a pair fails.
   const poor: BrandColors = { ...demo, onPrimary: '#2563eb', onAccent: '#ffffff' };
+  // A light kit whose accent is the default palette's amber, which reads on dark only.
+  const light: BrandColors = {
+    primary: '#1d4ed8',
+    onPrimary: '#ffffff',
+    accent: '#f59e0b',
+    onAccent: '#000000',
+    background: '#ffffff',
+    surface: '#f1f5f9',
+    text: '#0f172a',
+    muted: '#475569',
+  };
   const kit = (colors: BrandColors): FrameTheme => ({ colors, shape: 'soft', fonts: {} });
   // `$brand.accent` as the compiler resolves it: the kit's accent, else DEFAULT_BRAND_COLORS.accent.
   const kits: [string, FrameTheme | undefined, string][] = [
     ['no kit', undefined, '#f59e0b'],
     ['the demo kit', kit(demo), demo.accent],
     ['a kit with poor on-colours', kit(poor), poor.accent],
+    ['a light kit', kit(light), light.accent],
   ];
-  // The badge's own text (axe, 4.5:1), and cstore-promo's large points figure (3:1).
-  const pairs: [template: string, text: string, fill: string, min: number][] = [
+  const menu = { items: [{ name: 'Soup', description: 'Hot', price: '$4', tag: 'New' }] };
+  /** Each template's spot, given the accent `$brand.accent` resolves to. */
+  const spots = (accent: string): [template: string, data: Data][] => [
+    ['news', { accent, items: [{ title: 'Story', published: at(-1), source: 'Wire' }] }],
+    ['agenda', { accent, events: [...(cases.agenda!.b.events as unknown[]), ...(cases.agenda!.a.events as unknown[])] }],
+    ['clock', { accent }],
+    ['cstore-promo', {}],
+    // No photo: the photo is the spot's own, and the copy's shade is the kit's background.
+    ['photo-promo', {}],
+    ['menu-board', { accent, ...menu }],
+    ['menu-board', { accent, ...menu, theme: 'light' }],
+  ];
+  // Text on a fill: 4.5:1 as axe checks it, 3:1 for cstore-promo's large points figure.
+  const onFill: [template: string, text: string, fill: string, min: number][] = [
     ['news', '.badge', '.badge', 4.5],
     ['cstore-promo', '.badge small', '.badge .disc', 4.5],
     ['cstore-promo', '.badge b', '.badge .disc', 3],
+    ['photo-promo', '.tag', '.tag', 4.5],
+    ['menu-board', '.items .tag', '.items .tag', 4.5],
+  ];
+  // Accent-coloured text on whatever is behind it: 4.5:1, or 3:1 for text that is large on a
+  // 720p panel and up (WCAG: 24 px, or 18.7 px bold).
+  const onBackdrop: [template: string, text: string, min: number][] = [
+    ['news', '.age', 4.5],
+    ['agenda', '.today', 4.5],
+    ['agenda', '.now .mon', 4.5],
+    ['agenda', '.event:not(.now) .mon', 4.5],
+    ['clock', '.greeting', 3],
+    ['cstore-promo', '.l1', 3],
+    ['photo-promo', '.eyebrow', 3],
+    ['menu-board', '.price', 3],
   ];
 
-  for (const [label, theme, accent] of kits)
-    it(`news and cstore-promo badges read under ${label}`, async () => {
-      const hst = await host();
+  /** Run `check` on each spot of `spots(accent)` under `theme`, in a frame of its own, ready and on top. */
+  async function eachSpot(theme: FrameTheme | undefined, accent: string, check: (name: string, f: Frame, page: Page) => Promise<void>) {
+    const hst = await host();
+    for (const [i, [name, data]] of spots(accent).entries()) {
+      const t = built.get(name)!;
+      const frame = `f${i}`;
+      await hst.open(frame, t.html);
+      await hst.init(frame, spotData(t.manifest, data), {}, NOW, theme);
+      await hst.waitFor(frame, 'ready', 1);
+      await check(`${name}${data.theme ? ` (${data.theme})` : ''}`, hst.page.mainFrame().childFrames()[i]!, hst.page);
+      // The frames overlap: the next one is measured on top.
+      await hst.page.evaluate((frame) => {
+        (window as unknown as { frames_: Record<string, HTMLIFrameElement> }).frames_[frame]!.style.visibility = 'hidden';
+      }, frame);
+    }
+  }
+
+  /**
+   * The text colour of `sel`'s first match and the pixel behind its text that it reads worst on:
+   * the intros run to their end, the text (and its shadow) hidden, and the page screenshotted.
+   */
+  async function textOnBackdrop(f: Frame, page: Page, sel: string): Promise<[string, string]> {
+    const { color, clip } = await f.evaluate((sel) => {
+      for (const a of document.getAnimations()) a.currentTime = 2000;
+      const el = document.querySelector<HTMLElement>(sel)!;
+      const color = getComputedStyle(el).color;
+      el.style.color = 'transparent';
+      el.style.textShadow = 'none';
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const r = range.getBoundingClientRect();
+      return { color, clip: { x: Math.ceil(r.x), y: Math.ceil(r.y), width: Math.floor(r.width), height: Math.floor(r.height) } };
+    }, sel);
+    const png = (await page.screenshot({ clip })).toString('base64');
+    const pixels = await page.evaluate(async (png) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${png}`;
+      await img.decode();
+      const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, img.width, img.height).data;
+      const out = new Set<string>();
+      for (let i = 0; i < d.length; i += 4) out.add(`rgb(${d[i]}, ${d[i + 1]}, ${d[i + 2]})`);
+      return [...out];
+    }, png);
+    const worst = pixels.reduce((a, b) => (contrast(color, b) < contrast(color, a) ? b : a));
+    return [color, worst];
+  }
+
+  for (const [label, theme, accent] of kits) {
+    it(`text on a fill reads under ${label}`, async () => {
       const found: string[] = [];
-      for (const [i, name] of ['news', 'cstore-promo'].entries()) {
-        const t = built.get(name)!;
-        const frame = ['fresh', 'reset'][i]!;
-        await hst.open(frame, t.html);
-        await hst.init(frame, spotData(t.manifest, name === 'news' ? { accent } : {}), {}, NOW, theme);
-        await hst.waitFor(frame, 'ready', 1);
-        const f = hst.page.mainFrame().childFrames()[i]!;
-        for (const [, text, fill, min] of pairs.filter(([n]) => n === name)) {
+      await eachSpot(theme, accent, async (name, f) => {
+        for (const [, text, fill, min] of onFill.filter(([n]) => name.startsWith(n))) {
           const [fg, bg] = await f.evaluate(
             ({ text, fill }) => [getComputedStyle(document.querySelector(text)!).color, getComputedStyle(document.querySelector(fill)!).backgroundColor],
             { text, fill },
@@ -502,7 +582,20 @@ describe('text on a brand colour (#57)', () => {
           const ratio = contrast(fg!, bg!);
           if (ratio < min) found.push(`${name} ${text}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, below ${min}:1`);
         }
-      }
+      });
       expect(found).toEqual([]);
     });
+
+    it(`accent text reads on its backdrop under ${label}`, async () => {
+      const found: string[] = [];
+      await eachSpot(theme, accent, async (name, f, page) => {
+        for (const [, text, min] of onBackdrop.filter(([n]) => name.startsWith(n))) {
+          const [fg, bg] = await textOnBackdrop(f, page, text);
+          const ratio = contrast(fg, bg);
+          if (ratio < min) found.push(`${name} ${text}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, below ${min}:1`);
+        }
+      });
+      expect(found).toEqual([]);
+    });
+  }
 });

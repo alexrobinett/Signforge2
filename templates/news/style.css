@@ -92,7 +92,7 @@ main > * {
 .age {
   font-size: calc(var(--u) * 3.2);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   animation-delay: 0.15s, var(--out);
 }
 .lead {
