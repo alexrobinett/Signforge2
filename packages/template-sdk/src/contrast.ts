@@ -1,15 +1,16 @@
 /**
- * The text colour for a fill: `text` when it reaches 4.5:1 on `fill` (WCAG AA), else black or
- * white, whichever reads better (one of them always reaches 4.5:1). For a fill the template does
- * not choose: a kit may set an on-colour by hand that fails its pair (the brand tools only warn),
- * and a colour field holds whatever the spot sets. Colours are `#rgb` or `#rrggbb`, as kits and
- * the editor's colour fields give them; a fill in any other form cannot be measured and keeps `text`.
+ * The text colour for a fill: `text` when it reaches 4.5:1 on `fill` (WCAG AA), or 3:1 when it is
+ * `large` (WCAG: 24 px, or 18.66 px bold, on the screen), else black or white, whichever reads
+ * better (one of them always reaches 4.5:1). For a fill the template does not choose: a kit may
+ * set an on-colour by hand that fails its pair (the brand tools only warn), and a colour field
+ * holds whatever the spot sets. Colours are `#rgb` or `#rrggbb`, as kits and the editor's colour
+ * fields give them; a fill in any other form cannot be measured and keeps `text`.
  */
-export function readableOn(fill: string, text: string): string {
+export function readableOn(fill: string, text: string, { large = false } = {}): string {
   const f = luminance(fill);
   if (f === undefined) return text;
   const t = luminance(text);
-  if (t !== undefined && (Math.max(f, t) + 0.05) / (Math.min(f, t) + 0.05) >= 4.5) return text;
+  if (t !== undefined && (Math.max(f, t) + 0.05) / (Math.min(f, t) + 0.05) >= (large ? 3 : 4.5)) return text;
   return (f + 0.05) / 0.05 > 1.05 / (f + 0.05) ? '#000000' : '#ffffff';
 }
 
