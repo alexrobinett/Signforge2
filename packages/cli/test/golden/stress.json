@@ -15,37 +15,37 @@
   },
   "defaultPlaylist": "stress",
   "files": {
-    "015df84cf4139364c4f968d55724156f6dc874a3108311e89473907659ef9537": {
-      "size": 92703,
-      "type": "text/html"
-    },
     "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
       "size": 203915,
       "type": "image/jpeg"
-    },
-    "0e86390ae69181c27ac76a976fe065cb86ac8194f5ce7b71446e6aa909dacd08": {
-      "size": 101172,
-      "type": "text/html"
     },
     "13e5b4d30ef207fd89c1cc9f8ce8f23781e9a6d71deb9f0dacf8550ce315a17b": {
       "size": 320263,
       "type": "image/jpeg"
     },
+    "19f93988c7682e3fd3bdcbd4248b4bfde6f6527a61d2c902671213f2bcb7e9b3": {
+      "size": 81026,
+      "type": "text/html"
+    },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
     },
+    "3a1c2be9a3e2f7f700e1bfc8e1c2d71d6cc6020ee300e9befb3cf2af7b69c1bd": {
+      "size": 71800,
+      "type": "text/html"
+    },
+    "401eb524f0e3a48e093ff6abb58e3376e25f38f8b99c6e05132f0e074e280304": {
+      "size": 75201,
+      "type": "text/html"
+    },
+    "44d29f9431411aab372f7a77ade3afa38f4e66f76877481c81fbbab0d5b34406": {
+      "size": 76309,
+      "type": "text/html"
+    },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
-    },
-    "72b463d2a9d8774e040acb75cad03e9378f0cec91ac5cb6b29ec79baabca1db7": {
-      "size": 93718,
-      "type": "text/html"
-    },
-    "8060e873162c7a22f21d6037995d259bb4b368c15348b43aafa36deec9f60c41": {
-      "size": 91905,
-      "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
@@ -54,10 +54,6 @@
     "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
       "size": 9600472,
       "type": "video/mp4"
-    },
-    "91322c5805dd786e62fc5e10c2f01c8e26ec6b7b8defbc93df9cfcdd995ffae8": {
-      "size": 95317,
-      "type": "text/html"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
@@ -71,8 +67,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "b1d59b6314bbf9a3904756d4447f2412bb56cf8945299346ba036f039366a4d9": {
-      "size": 97145,
+    "bf95013ac1d31c52b5dc75640b9cc11d55c972e5f5fb458a174e6c3ec9e89e69": {
+      "size": 72582,
       "type": "text/html"
     },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
@@ -83,12 +79,16 @@
       "size": 421529,
       "type": "image/jpeg"
     },
-    "f3ceb7edd047160ccb73f20e5f240e8dbdb685127e249a0e89a2869e3502b6af": {
-      "size": 96430,
+    "eb16dfac26ea0fe1939b5f007d28727e78c7f1e9ea6e0bce6e1ef30e667bebc8": {
+      "size": 77035,
+      "type": "text/html"
+    },
+    "f6ff3b3ef02e46803b38c08ca2e6cfe7a153c1771990e00381839e9878d71d9f": {
+      "size": 73613,
       "type": "text/html"
     }
   },
-  "id": "b1a74b2c4230ae0e6a1429b09e46f0bd40f5e1658ba2a7c480d28e52d5522656",
+  "id": "22f0914160ce4165de7bc29ebaa02387f2fb7593f1019b1f4025377452fbb22c",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -171,7 +171,7 @@
       "id": "clock",
       "kind": "template",
       "name": "Clock",
-      "template": "base/clock@1.2.0"
+      "template": "base/clock@1.2.1"
     },
     "energy": {
       "assets": {
@@ -192,7 +192,7 @@
       "id": "energy",
       "kind": "template",
       "name": "Energy drinks 3 for $7",
-      "template": "base/cstore-promo@1.2.1"
+      "template": "base/cstore-promo@1.2.2"
     },
     "holidays": {
       "assets": {},
@@ -214,7 +214,7 @@
       "id": "holidays",
       "kind": "template",
       "name": "US holidays (Google Calendar)",
-      "template": "base/agenda@1.2.0"
+      "template": "base/agenda@1.2.1"
     },
     "meeting-room": {
       "assets": {},
@@ -266,7 +266,7 @@
       "id": "meeting-room",
       "kind": "template",
       "name": "Meeting room (fixed data)",
-      "template": "base/agenda@1.2.0"
+      "template": "base/agenda@1.2.1"
     },
     "menu": {
       "assets": {},
@@ -331,7 +331,7 @@
       "id": "menu",
       "kind": "template",
       "name": "Coffee menu",
-      "template": "base/menu-board@1.2.0"
+      "template": "base/menu-board@1.2.1"
     },
     "news": {
       "assets": {},
@@ -357,7 +357,7 @@
       "id": "news",
       "kind": "template",
       "name": "NPR headlines",
-      "template": "base/news@1.3.1"
+      "template": "base/news@1.3.2"
     },
     "photo-berries": {
       "assets": {
@@ -373,7 +373,7 @@
       "id": "photo-berries",
       "kind": "template",
       "name": "Photo promo, 1080p photo",
-      "template": "base/photo-promo@1.2.0"
+      "template": "base/photo-promo@1.2.1"
     },
     "photo-kitchen": {
       "assets": {
@@ -389,7 +389,7 @@
       "id": "photo-kitchen",
       "kind": "template",
       "name": "Photo promo, 4K photo 2",
-      "template": "base/photo-promo@1.2.0"
+      "template": "base/photo-promo@1.2.1"
     },
     "photo-river": {
       "assets": {
@@ -405,7 +405,7 @@
       "id": "photo-river",
       "kind": "template",
       "name": "Photo promo, 4K photo",
-      "template": "base/photo-promo@1.2.0"
+      "template": "base/photo-promo@1.2.1"
     },
     "sport-drinks": {
       "assets": {
@@ -426,7 +426,7 @@
       "id": "sport-drinks",
       "kind": "template",
       "name": "Sport drinks 2 for $4",
-      "template": "base/cstore-promo@1.2.1"
+      "template": "base/cstore-promo@1.2.2"
     },
     "still-snow": {
       "durationMs": 5000,
@@ -500,7 +500,7 @@
       "id": "weather-live",
       "kind": "template",
       "name": "Weather, live",
-      "template": "base/weather@1.2.0"
+      "template": "base/weather@1.2.1"
     },
     "weather-rain": {
       "assets": {},
@@ -520,7 +520,7 @@
       "id": "weather-rain",
       "kind": "template",
       "name": "Weather, rain (fixed data)",
-      "template": "base/weather@1.2.0"
+      "template": "base/weather@1.2.1"
     },
     "weather-snow": {
       "assets": {},
@@ -540,12 +540,12 @@
       "id": "weather-snow",
       "kind": "template",
       "name": "Weather, snow (fixed data)",
-      "template": "base/weather@1.2.0"
+      "template": "base/weather@1.2.1"
     }
   },
   "templates": {
-    "base/agenda@1.2.0": {
-      "html": "91322c5805dd786e62fc5e10c2f01c8e26ec6b7b8defbc93df9cfcdd995ffae8",
+    "base/agenda@1.2.1": {
+      "html": "401eb524f0e3a48e093ff6abb58e3376e25f38f8b99c6e05132f0e074e280304",
       "manifest": {
         "background": "#0d1117",
         "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
@@ -626,11 +626,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.0"
+        "version": "1.2.1"
       }
     },
-    "base/clock@1.2.0": {
-      "html": "015df84cf4139364c4f968d55724156f6dc874a3108311e89473907659ef9537",
+    "base/clock@1.2.1": {
+      "html": "bf95013ac1d31c52b5dc75640b9cc11d55c972e5f5fb458a174e6c3ec9e89e69",
       "manifest": {
         "background": "#05070d",
         "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
@@ -676,11 +676,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.0"
+        "version": "1.2.1"
       }
     },
-    "base/cstore-promo@1.2.1": {
-      "html": "b1d59b6314bbf9a3904756d4447f2412bb56cf8945299346ba036f039366a4d9",
+    "base/cstore-promo@1.2.2": {
+      "html": "eb16dfac26ea0fe1939b5f007d28727e78c7f1e9ea6e0bce6e1ef30e667bebc8",
       "manifest": {
         "background": "#06122b",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
@@ -753,11 +753,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.1"
+        "version": "1.2.2"
       }
     },
-    "base/menu-board@1.2.0": {
-      "html": "72b463d2a9d8774e040acb75cad03e9378f0cec91ac5cb6b29ec79baabca1db7",
+    "base/menu-board@1.2.1": {
+      "html": "f6ff3b3ef02e46803b38c08ca2e6cfe7a153c1771990e00381839e9878d71d9f",
       "manifest": {
         "background": "#14110f",
         "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
@@ -844,11 +844,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.0"
+        "version": "1.2.1"
       }
     },
-    "base/news@1.3.1": {
-      "html": "f3ceb7edd047160ccb73f20e5f240e8dbdb685127e249a0e89a2869e3502b6af",
+    "base/news@1.3.2": {
+      "html": "44d29f9431411aab372f7a77ade3afa38f4e66f76877481c81fbbab0d5b34406",
       "manifest": {
         "background": "#0b0d12",
         "description": "The top story large, the next few below, and every headline in a crawl along the bottom. Bind items to an RSS data source.",
@@ -920,11 +920,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.3.1"
+        "version": "1.3.2"
       }
     },
-    "base/photo-promo@1.2.0": {
-      "html": "8060e873162c7a22f21d6037995d259bb4b368c15348b43aafa36deec9f60c41",
+    "base/photo-promo@1.2.1": {
+      "html": "3a1c2be9a3e2f7f700e1bfc8e1c2d71d6cc6020ee300e9befb3cf2af7b69c1bd",
       "manifest": {
         "background": "#000000",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
@@ -971,11 +971,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.0"
+        "version": "1.2.1"
       }
     },
-    "base/weather@1.2.0": {
-      "html": "0e86390ae69181c27ac76a976fe065cb86ac8194f5ce7b71446e6aa909dacd08",
+    "base/weather@1.2.1": {
+      "html": "19f93988c7682e3fd3bdcbd4248b4bfde6f6527a61d2c902671213f2bcb7e9b3",
       "manifest": {
         "background": "#0b1a33",
         "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source.",
@@ -1055,7 +1055,7 @@
         "uses": [
           "canvas"
         ],
-        "version": "1.2.0"
+        "version": "1.2.1"
       }
     }
   }

@@ -23,7 +23,7 @@ A lockfile change affects only the packages whose dependencies changed.
 
 Turbo decides what is affected from the package graph alone. It ignores a task's `inputs` that point outside its package. So a test that reads another package's files has to declare that package as a dependency, or a change there will not run the test:
 - The CMS e2e starts the API, so `apps/cms` has `@signforge/api` as a devDependency.
-- The API's tests build every template with the SDK, and the player's browser tests play every template. So `apps/api` and `packages/player` list each `templates/*` package (and the API lists `@signforge/template-sdk`) as devDependencies. **A new template goes into both lists**: the repo-wide step `scripts/check-template-deps.sh` fails until it does.
+- The cli's and the API's tests build every template with the SDK (the cli's also check that no bundle changed without a new version: [template-spec.md](template-spec.md#rules)), and the player's browser tests play every template. So `packages/cli`, `apps/api` and `packages/player` list each `templates/*` package and `@signforge/template-sdk` as devDependencies. **A new template goes into all three lists**: the repo-wide step `scripts/check-template-deps.sh` fails until it does.
 
 knip lists these dependencies as ones it cannot see used.
 
