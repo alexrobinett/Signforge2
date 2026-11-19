@@ -257,6 +257,23 @@ describe('alerts to Slack and webhooks', () => {
     expect(entries.find((d) => d.channel === 'slack')).toMatchObject({ status: 'failed', lastError: 'no-channel' });
   });
 
+  it('retries, rather than gives up, while the key that opens the channels is missing', async () => {
+    const { owner, org, slackUrl, webhookUrl, outbox } = await orgWithChannels();
+    const start = Date.now();
+    await pairedScreen(org.id, 'No key yet', start);
+    const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
+    await checkScreenAlerts(env, outbox, start + 16 * MIN);
+    // A deploy without the secret: outside dev there is no fallback key.
+    await deliverAlerts({ ...env, ENVIRONMENT: 'demo', DATA_SOURCE_KEY: undefined }, outbox, { now: start + 16 * MIN, guards });
+    expect([to(slackUrl), to(webhookUrl)]).toEqual([[], []]);
+    for (const d of (await log(owner)).filter((x) => x.eventType === 'screen.offline'))
+      expect(d).toMatchObject({ status: 'pending', lastError: 'no-key', lastHttpStatus: null });
+
+    // Set again: the next try goes.
+    await deliverAlerts(env, outbox, { now: start + 21 * MIN, guards });
+    expect([to(slackUrl).length, to(webhookUrl).length]).toEqual([1, 1]);
+  });
+
   it('sends a test email to the owner who asks, at once', async () => {
     const { owner, outbox } = await orgWithChannels();
     const sent = await owner.ok<{ delivery: { status: string } }>('/api/tools/test_alert_channel', { channel: 'email' });

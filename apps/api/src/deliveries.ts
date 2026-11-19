@@ -24,7 +24,7 @@ import {
   settleAlertDeliveries,
 } from '@signforge/db';
 import type { AlertEvent } from '@signforge/tools';
-import { openAlertSecret } from './data/cipher';
+import { MissingKey, openAlertSecret } from './data/cipher';
 import { dohResolver, FetchError, type FetchGuards, guardedPost } from './data/fetch';
 import type { EmailSender } from './email';
 
@@ -122,9 +122,11 @@ async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards
         ? { error: e.code, httpStatus: null, final: true }
         : e instanceof FetchError
           ? { error: e.code, httpStatus: e.status ?? null, final: false }
-          : row.channel === 'email'
-            ? { error: 'email', httpStatus: null, final: false }
-            : undefined;
+          : e instanceof MissingKey
+            ? { error: 'no-key', httpStatus: null, final: false }
+            : row.channel === 'email'
+              ? { error: 'email', httpStatus: null, final: false }
+              : undefined;
     if (!failure) throw e;
     const retryAt = now + retryDelay(row.attempts);
     return { ok: false, httpStatus: failure.httpStatus, error: failure.error, ...(failure.final || retryAt > row.giveUpAt ? {} : { retryAt }) };
