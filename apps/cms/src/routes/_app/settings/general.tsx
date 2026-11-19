@@ -1,6 +1,7 @@
 /**
- * Settings, General (canvas board SettingsGeneral): the org's name, and the time zone, locale
- * and display hours new screens start with. Owners change them; everyone else reads them.
+ * Settings, General (canvas board SettingsGeneral): the org's name, the time zone, locale
+ * and display hours new screens start with, and how long the audit log is kept. Owners change
+ * them; everyone else reads them.
  */
 import { createFileRoute, getRouteApi } from '@tanstack/react-router';
 import { useId, type SubmitEvent } from 'react';
@@ -54,7 +55,11 @@ function GeneralSettings() {
       const v = form.get(key);
       return typeof v === 'string' && v ? v : null;
     };
-    void saveGeneral(org, { name: text('name') ?? '', timezone: text('timezone'), locale: text('locale') }, settings.version);
+    void saveGeneral(
+      org,
+      { name: text('name') ?? '', timezone: text('timezone'), locale: text('locale'), auditRetentionDays: Number(text('auditRetentionDays')) },
+      settings.version,
+    );
   }
 
   return (
@@ -107,6 +112,32 @@ function GeneralSettings() {
         description="New screens start with these. Outside them a screen turns its panel off and keeps syncing."
       >
         {canEdit ? <DisplayHoursEditor value={hours} onChange={editDefaultHours} /> : <p className="text-sm">{describeHours(settings.displayHours)}</p>}
+      </SettingsSection>
+
+      <SettingsSection
+        id={`${id}-audit`}
+        title="Audit log"
+        description="Every change by a person, agent or screen is recorded. Entries older than this are deleted each night at 00:00 UTC."
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Label htmlFor={`${id}-retention`}>Keep entries for</Label>
+          <Input
+            id={`${id}-retention`}
+            name="auditRetentionDays"
+            type="number"
+            min={30}
+            max={3650}
+            step={1}
+            inputMode="numeric"
+            defaultValue={settings.auditRetentionDays}
+            disabled={!canEdit}
+            className="w-24"
+            aria-describedby={`${id}-retention-unit`}
+          />
+          <span id={`${id}-retention-unit`} className="text-sm">
+            days, 30 to 3,650
+          </span>
+        </div>
       </SettingsSection>
 
       <SaveRow at="general" canEdit={canEdit} />

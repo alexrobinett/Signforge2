@@ -98,8 +98,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "b3490a29ab380214e36fa80ae89150171a879b96bb550e95d018f346ccee09e5": {
-      "size": 97378,
+    "eb16dfac26ea0fe1939b5f007d28727e78c7f1e9ea6e0bce6e1ef30e667bebc8": {
+      "size": 77035,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
@@ -107,7 +107,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "a37f183567bdd29d8319337da84037a7419f3342eb1b1fd7f154ed22fc062346",
+  "id": "5d45f150f61bc1fa68b88b880520d4012c523865ad68939e25b68bd47d236932",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -253,7 +253,7 @@
   },
   "templates": {
     "base/cstore-promo@1.2.2": {
-      "html": "b3490a29ab380214e36fa80ae89150171a879b96bb550e95d018f346ccee09e5",
+      "html": "eb16dfac26ea0fe1939b5f007d28727e78c7f1e9ea6e0bce6e1ef30e667bebc8",
       "manifest": {
         "background": "#06122b",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",

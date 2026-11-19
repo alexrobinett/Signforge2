@@ -152,4 +152,18 @@ describe('the Cron Triggers', () => {
     await runCron('*/5 * * * *', midnight(8));
     expect(await scope.idempotency.get('k-retention')).toBeUndefined();
   });
+
+  it("delete audit rows past the org's retention (365 days by default) on the first five-minute run of each UTC day", async () => {
+    const { org } = await orgWithTeam();
+    const scope = scoped(env.DB, org.id);
+    const day = Math.ceil(Date.now() / DAY) * DAY + 400 * DAY;
+    for (const age of [364, 366]) await scope.auditLog.append({ actorKind: 'system', actorId: 'test', action: `aged-${age}`, at: day - age * DAY });
+    const aged = async () => (await scope.auditLog.list()).map((r) => r.action).filter((a) => a.startsWith('aged-'));
+
+    await runCron('*/5 * * * *', day + 5 * MIN);
+    await runCron('* * * * *', day);
+    expect(await aged()).toEqual(['aged-364', 'aged-366']);
+    await runCron('*/5 * * * *', day);
+    expect(await aged()).toEqual(['aged-364']);
+  });
 });
