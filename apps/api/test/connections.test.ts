@@ -125,6 +125,18 @@ describe('connecting an account', () => {
     expect(new URL(replay.headers.get('location') ?? '', 'https://x').searchParams.get('connectionError')).toBe('not_found');
   });
 
+  it('sends a signed-out browser to the Integrations page, carrying neither code nor state, and uses nothing up', async () => {
+    const { authorizeUrl } = await json(await owner.tool('start_connection', { provider: 'fake' }));
+    const back = fake.consent(authorizeUrl);
+    const res = await new Client(t).get(`${back.pathname}${back.search}`);
+    expect(res.status).toBe(303);
+    const to = new URL(res.headers.get('location') ?? '', 'https://x');
+    expect(to.pathname + to.search).toBe('/integrations?connectionError=signed_out');
+    // The member who started it can still finish it.
+    const mine = await owner.get(`${back.pathname}${back.search}`);
+    expect(new URL(mine.headers.get('location') ?? '', 'https://x').searchParams.get('connected')).toMatch(/^con_/);
+  });
+
   it("refuses a callback for another org's authorization, which its member can still finish", async () => {
     const { authorizeUrl } = await json(await owner.tool('start_connection', { provider: 'fake' }));
     const back = fake.consent(authorizeUrl);
