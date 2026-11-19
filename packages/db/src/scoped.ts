@@ -9,7 +9,7 @@
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
 import type { ScreenKind } from '@signforge/contract';
-import { and, asc, desc, eq, getTableName, gt, inArray, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
@@ -23,6 +23,12 @@ type AlertChannelKind = AlertChannel['kind'];
 /** What a channel's owner sets; the rest is the repository's. */
 type AlertChannelValues = Omit<AlertChannel, 'orgId' | 'kind' | 'rowVersion' | 'createdAt' | 'updatedAt'>;
 type AlertDelivery = typeof s.alertDeliveries.$inferSelect;
+/** An alert to queue: the event as a webhook receives it, the channels it goes to, and when to stop retrying it. */
+export interface QueuedAlert {
+  event: { id: string; type: string; json: string };
+  channels: readonly AlertDelivery['channel'][];
+  giveUpAt: number;
+}
 type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
 
 /** Writing a row that refers to something the org cannot see. */
@@ -365,6 +371,32 @@ export function scoped(d1: D1Database, orgId: string) {
   const ac = s.alertChannels;
   const ad = s.alertDeliveries;
   const alertDeliveries = entity(db, orgId, ad, 'dlv');
+  /**
+   * The statements that queue `alert` for each of its channels when `when` holds as they run; an
+   * event already queued for a channel is left as it is. INSERT ... SELECT, so the condition is
+   * read in the same batch as the rest.
+   */
+  const queueAlert = ({ event, channels, giveUpAt }: QueuedAlert, now: number, when: SQL) =>
+    channels.map((channel) => {
+      const row = fullRow(ad, {
+        id: newId('dlv'),
+        orgId,
+        channel,
+        eventId: event.id,
+        eventType: event.type,
+        eventJson: event.json,
+        nextAttemptAt: now,
+        giveUpAt,
+        createdAt: now,
+        updatedAt: now,
+      });
+      // Every column, in the table's order, as INSERT ... SELECT takes them.
+      const values = Object.keys(getTableColumns(ad)).map((key) => sql`${row[key]}`);
+      return db
+        .insert(ad)
+        .select(sql`SELECT ${sql.join(values, sql`, `)} WHERE ${when}`)
+        .onConflictDoNothing();
+    });
 
   type Group = typeof s.screenGroups.$inferSelect;
   /** The screens, once each. Throws `NotInOrgError` if any is not the org's. */
@@ -955,23 +987,36 @@ export function scoped(d1: D1Database, orgId: string) {
      * whether it was the one that made the change, so two overlapping checks alert once.
      */
     incidents: {
-      /** Open an offline incident; its id, or undefined if the screen already has one open. */
-      open: async (screenId: string, lastSeenAt: number, now: number): Promise<string | undefined> => {
-        const rows = await db
-          .insert(inc)
-          .values({ id: newId('inc'), orgId, screenId, kind: 'offline', lastSeenAt, openedAt: now })
-          .onConflictDoNothing()
-          .returning({ id: inc.id });
-        return rows[0]?.id;
+      /**
+       * Open an offline incident and queue its alert (`alert`, given the incident's id), in one
+       * batch: both are written or neither, and the deliveries only by the call that opened the
+       * incident, so two overlapping checks queue it once. The incident's id, or undefined if the
+       * screen already had one open. Without `alert`, the incident alone: for when the queue cannot
+       * be written, so the email still goes once.
+       */
+      open: async (screenId: string, lastSeenAt: number, now: number, alert?: (incidentId: string) => QueuedAlert): Promise<string | undefined> => {
+        const id = newId('inc');
+        const ours = sql`EXISTS (SELECT 1 FROM ${inc} WHERE ${inc.orgId} = ${orgId} AND ${inc.id} = ${id})`;
+        const [opened] = await db.batch([
+          db.insert(inc).values({ id, orgId, screenId, kind: 'offline', lastSeenAt, openedAt: now }).onConflictDoNothing().returning({ id: inc.id }),
+          ...(alert ? queueAlert(alert(id), now, ours) : []),
+        ]);
+        return opened.length ? id : undefined;
       },
-      /** Close an open incident; false if it was closed already. */
-      clear: async (incidentId: string, now: number): Promise<boolean> => {
-        const rows = await db
-          .update(inc)
-          .set({ clearedAt: now })
-          .where(and(eq(inc.orgId, orgId), eq(inc.id, incidentId), isNull(inc.clearedAt)))
-          .returning({ id: inc.id });
-        return rows.length === 1;
+      /**
+       * Close an open incident and queue its alert, in one batch; false if it was closed already
+       * (by a check that queued the same event, which is queued once). Without `alert`, as `open`.
+       */
+      clear: async (incidentId: string, now: number, alert?: QueuedAlert): Promise<boolean> => {
+        const [cleared] = await db.batch([
+          db
+            .update(inc)
+            .set({ clearedAt: now })
+            .where(and(eq(inc.orgId, orgId), eq(inc.id, incidentId), isNull(inc.clearedAt)))
+            .returning({ id: inc.id }),
+          ...(alert ? queueAlert(alert, now, sql`1`) : []),
+        ]);
+        return cleared.length === 1;
       },
     },
 
@@ -1029,7 +1074,7 @@ export function scoped(d1: D1Database, orgId: string) {
     },
 
     /**
-     * The alert delivery log and queue (#88). The alert check queues with `enqueue` and the delivery
+     * The alert delivery log and queue (#88). The alert check queues through `incidents` and the delivery
      * run claims and settles, writing directly; a tool stages (a test send, a retry).
      */
     alertDeliveries: {
@@ -1046,28 +1091,6 @@ export function scoped(d1: D1Database, orgId: string) {
           .orderBy(desc(ad.createdAt), desc(ad.id))
           .limit(take)
           .all();
-      },
-      /** Queue an event for each channel given; one already queued for that channel is left as it is. */
-      enqueue: async (event: { id: string; type: string; json: string }, channels: readonly AlertDelivery['channel'][], now: number, giveUpAt: number) => {
-        if (!channels.length) return;
-        await db
-          .insert(ad)
-          .values(
-            channels.map((channel) => ({
-              id: newId('dlv'),
-              orgId,
-              channel,
-              eventId: event.id,
-              eventType: event.type,
-              eventJson: event.json,
-              nextAttemptAt: now,
-              giveUpAt,
-              createdAt: now,
-              updatedAt: now,
-            })),
-          )
-          .onConflictDoNothing()
-          .run();
       },
       /**
        * Take one pending delivery that is due for an attempt now, as `claimDueAlertDeliveries`

@@ -12,6 +12,45 @@ import { emailSenderFor, RecordingEmailSender } from '../src/email';
 import worker from '../src/index';
 import { Client, email, testApp } from './client';
 
+/**
+ * `real` as the Worker sees it, counting each query and batch (each is one query against the
+ * per-invocation limit), and failing any statement whose SQL matches `fail`, alone or in a batch.
+ */
+function watchedD1(real: D1Database, fail?: RegExp) {
+  const seen = { queries: 0 };
+  const refuse = (sql: string) => {
+    if (fail?.test(sql)) throw new Error(`D1_ERROR: refused for the test: ${sql.slice(0, 60)}`);
+  };
+  type Wrapped = D1PreparedStatement & { real: D1PreparedStatement; sql: string };
+  const wrap = (stmt: D1PreparedStatement, sql: string): Wrapped => {
+    const call =
+      (method: 'run' | 'all' | 'raw' | 'first') =>
+      (...args: unknown[]) => {
+        seen.queries++;
+        refuse(sql);
+        return (stmt[method] as (...a: unknown[]) => unknown).apply(stmt, args);
+      };
+    return {
+      real: stmt,
+      sql,
+      bind: (...v: unknown[]) => wrap(stmt.bind(...v), sql),
+      run: call('run'),
+      all: call('all'),
+      raw: call('raw'),
+      first: call('first'),
+    } as unknown as Wrapped;
+  };
+  const db = {
+    prepare: (sql: string) => wrap(real.prepare(sql), sql),
+    batch: async (stmts: Wrapped[]) => {
+      seen.queries++;
+      for (const s of stmts) refuse(s.sql);
+      return real.batch(stmts.map((s) => s.real));
+    },
+  };
+  return { db: db as unknown as D1Database, seen };
+}
+
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const SECRET = 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD';
@@ -218,6 +257,36 @@ describe('alerts to Slack and webhooks', () => {
     const o = scoped(env.DB, org.id);
     const stored = JSON.stringify([await o.alertChannels.list(), await o.auditLog.list({ limit: 100 })]);
     for (const secret of [slackUrl, 'secretpart', webhookUrl, 'key=k', SECRET]) expect(stored).not.toContain(secret);
+  });
+});
+
+describe('when the delivery queue cannot be written', () => {
+  it('still emails the alert, opens the incident once, and alerts no more on the next check', async () => {
+    const { org, outbox } = await orgWithChannels();
+    const start = Date.now();
+    await pairedScreen(org.id, 'Queue down', start);
+    const broken = watchedD1(env.DB, /insert into "alert_deliveries"/i);
+    const sent = () => outbox.messages.filter((m) => m.subject === 'Queue down is offline');
+
+    await checkScreenAlerts({ ...env, DB: broken.db }, outbox, start + 16 * MIN);
+    expect(sent()).toHaveLength(1);
+    // The next check, healthy, finds the incident open and sends nothing more.
+    await checkScreenAlerts(env, outbox, start + 21 * MIN);
+    expect(sent()).toHaveLength(1);
+  });
+
+  it('queues the alert once when two checks overlap', async () => {
+    const { owner, org, outbox } = await orgWithChannels();
+    const start = Date.now();
+    await pairedScreen(org.id, 'Twice', start);
+    await Promise.all([checkScreenAlerts(env, outbox, start + 16 * MIN), checkScreenAlerts(env, outbox, start + 16 * MIN)]);
+    expect(
+      (await log(owner))
+        .filter((d) => d.eventType === 'screen.offline')
+        .map((d) => d.channel)
+        .sort(),
+    ).toEqual(['slack', 'webhook']);
+    expect(outbox.messages.filter((m) => m.subject === 'Twice is offline')).toHaveLength(1);
   });
 });
 

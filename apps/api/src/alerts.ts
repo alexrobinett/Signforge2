@@ -3,9 +3,10 @@
  * A screen unheard from past its org's threshold opens an incident, emails the members the org's
  * `screen_offline` rule names, and queues a `screen.offline` event for the Slack channel and the
  * webhook if the rule sends it there (#88); the screen's next sync clears it, with one more of
- * each (`screen.back`). The incident row is written first, and only by the check that wrote it,
- * so an alert is sent at most once per incident however the runs overlap. Queued events are sent
- * by ./deliveries.ts, after this check, so a slow receiver never holds it up.
+ * each (`screen.back`). The incident row and its queued events are written in one batch, and only
+ * by the check that wrote the incident, so an alert is sent at most once per incident however the
+ * runs overlap; the email follows. Queued events are sent by ./deliveries.ts, after this check, so
+ * a slow receiver never holds it up.
  */
 import { findAlertWork, orgMembers, scoped } from '@signforge/db';
 import { ALERT_RETRY_MS, type AlertEvent, orgSettings, UNREACHABLE_AFTER_MS, type Audience } from '@signforge/tools';
@@ -70,20 +71,40 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, ema
     name: s.screenName,
     url: env.CMS_ORIGIN ? `${env.CMS_ORIGIN}/screens/${s.screenId}` : null,
   });
-  const queue = async (orgId: string, channels: OrgContext['channels'], event: AlertEvent) =>
-    scoped(env.DB, orgId).alertDeliveries.enqueue({ id: event.id, type: event.type, json: JSON.stringify(event) }, channels, now, now + ALERT_RETRY_MS);
+  const alertOf = (channels: OrgContext['channels'], event: AlertEvent) => ({
+    event: { id: event.id, type: event.type, json: JSON.stringify(event) },
+    channels,
+    giveUpAt: now + ALERT_RETRY_MS,
+  });
+  /**
+   * The incident's write with its alert queued in the same batch; if that batch fails, the write
+   * alone, so the email still goes once and later checks do not alert again. Slack and the webhook
+   * miss that alert, which is logged.
+   */
+  const orAlone = async <T>(withAlert: () => Promise<T>, alone: () => Promise<T>): Promise<T> => {
+    try {
+      return await withAlert();
+    } catch (err) {
+      console.error('alert deliveries could not be queued: sending the email only', err);
+      return alone();
+    }
+  };
 
   for (const s of work.offline) {
-    const incidentId = await scoped(env.DB, s.orgId).incidents.open(s.screenId, s.lastSeenAt, now);
-    if (!incidentId) continue;
+    const org = scoped(env.DB, s.orgId);
     const { recipients, channels, time } = await contextFor(s.orgId);
-    await queue(s.orgId, channels, {
+    const offline = (incidentId: string): AlertEvent => ({
       type: 'screen.offline',
       id: `evt_${incidentId}_offline`,
       occurredAt: iso(now),
       org: { id: s.orgId, name: s.orgName },
       data: { screen: screenOf(s), lastSeenAt: iso(s.lastSeenAt) },
     });
+    const incidentId = await orAlone(
+      () => org.incidents.open(s.screenId, s.lastSeenAt, now, (id) => alertOf(channels, offline(id))),
+      () => org.incidents.open(s.screenId, s.lastSeenAt, now),
+    );
+    if (!incidentId) continue;
     await sendAll(email, recipients, {
       subject: `${s.screenName} is offline`,
       text:
@@ -93,15 +114,20 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, ema
     });
   }
   for (const s of work.back) {
-    if (!(await scoped(env.DB, s.orgId).incidents.clear(s.incidentId, now))) continue;
+    const org = scoped(env.DB, s.orgId);
     const { recipients, channels, time } = await contextFor(s.orgId);
-    await queue(s.orgId, channels, {
+    const back = alertOf(channels, {
       type: 'screen.back',
       id: `evt_${s.incidentId}_back`,
       occurredAt: iso(now),
       org: { id: s.orgId, name: s.orgName },
       data: { screen: screenOf(s), lastSeenAt: iso(s.lastSeenAt), offlineSince: iso(s.since) },
     });
+    const cleared = await orAlone(
+      () => org.incidents.clear(s.incidentId, now, back),
+      () => org.incidents.clear(s.incidentId, now),
+    );
+    if (!cleared) continue;
     await sendAll(email, recipients, {
       subject: `${s.screenName} is back`,
       text: `${s.screenName} in ${s.orgName} is back at ${time(s.lastSeenAt)}, after ${minutes(s.lastSeenAt - s.since)} without a heartbeat.`,

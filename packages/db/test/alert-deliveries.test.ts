@@ -15,24 +15,45 @@ beforeAll(async () => {
 });
 
 const event = (id: string) => ({ id, type: 'screen.offline', json: JSON.stringify({ id }) });
+/** Queue `eventId` for `channels` at `at`, as rows straight in the table. */
+async function queue(orgId: string, eventId: string, channels: ('slack' | 'webhook')[], at: number, giveUpAt: number) {
+  const o = scoped(env.DB, orgId);
+  const e = event(eventId);
+  await o.commit(
+    channels.flatMap(
+      (channel) => o.alertDeliveries.stage.insert({ channel, eventId: e.id, eventType: e.type, eventJson: e.json, nextAttemptAt: at, giveUpAt }).writes,
+    ),
+  );
+  // Made at `at`: a caller never sets `created_at`.
+  await env.DB.prepare('UPDATE alert_deliveries SET created_at = ? WHERE event_id = ?').bind(at, eventId).run();
+}
 const mine = async (orgId: string, eventId: string) => (await scoped(env.DB, orgId).alertDeliveries.list({ take: 100 })).filter((d) => d.eventId === eventId);
 
 describe('alert deliveries', () => {
-  it('queues an event once per channel, however often it is queued', async () => {
+  it('writes an incident with its alert, once however often it is opened or cleared', async () => {
     const a = scoped(env.DB, s.a.orgId);
-    await a.alertDeliveries.enqueue(event('evt_once'), ['slack', 'webhook'], now, now + DAY);
-    await a.alertDeliveries.enqueue(event('evt_once'), ['slack', 'webhook'], now + MIN, now + DAY);
-    expect((await mine(s.a.orgId, 'evt_once')).map((d) => [d.channel, d.status, d.nextAttemptAt]).sort()).toEqual([
+    const alert = (id: string) => ({ event: event(id), channels: ['slack', 'webhook'] as const, giveUpAt: now + DAY });
+    const [first, second] = await Promise.all([
+      a.incidents.open(s.a.screen, now - DAY, now, (inc) => alert(`evt_${inc}_offline`)),
+      a.incidents.open(s.a.screen, now - DAY, now, (inc) => alert(`evt_${inc}_offline`)),
+    ]);
+    const incident = first ?? second;
+    expect([first, second].filter(Boolean)).toEqual([incident]);
+    expect((await mine(s.a.orgId, `evt_${incident}_offline`)).map((d) => [d.channel, d.status, d.nextAttemptAt]).sort()).toEqual([
       ['slack', 'pending', now],
       ['webhook', 'pending', now],
     ]);
+
+    expect(await a.incidents.clear(incident!, now + MIN, alert(`evt_${incident}_back`))).toBe(true);
+    expect(await a.incidents.clear(incident!, now + 2 * MIN, alert(`evt_${incident}_back`))).toBe(false);
+    expect(await mine(s.a.orgId, `evt_${incident}_back`)).toHaveLength(2);
   });
 
   it('lets one run claim each due attempt, in every org, and none before its time', async () => {
     const at = now + 10 * DAY;
-    await scoped(env.DB, s.a.orgId).alertDeliveries.enqueue(event('evt_claim_a'), ['webhook'], at, at + DAY);
-    await scoped(env.DB, s.b.orgId).alertDeliveries.enqueue(event('evt_claim_b'), ['webhook'], at, at + DAY);
-    await scoped(env.DB, s.b.orgId).alertDeliveries.enqueue(event('evt_later'), ['webhook'], at + MIN, at + DAY);
+    await queue(s.a.orgId, 'evt_claim_a', ['webhook'], at, at + DAY);
+    await queue(s.b.orgId, 'evt_claim_b', ['webhook'], at, at + DAY);
+    await queue(s.b.orgId, 'evt_later', ['webhook'], at + MIN, at + DAY);
 
     const [first, second] = await Promise.all([
       claimDueAlertDeliveries(env.DB, at, { limit: 50, leaseMs: 4 * MIN }),
@@ -59,7 +80,7 @@ describe('alert deliveries', () => {
   it('settles an attempt as delivered, to retry, or given up, and claims none of those early', async () => {
     const a = scoped(env.DB, s.a.orgId);
     const at = now + 20 * DAY;
-    await a.alertDeliveries.enqueue(event('evt_settle'), ['slack', 'webhook'], at, at + DAY);
+    await queue(s.a.orgId, 'evt_settle', ['slack', 'webhook'], at, at + DAY);
     const [slack, webhook] = (await mine(s.a.orgId, 'evt_settle')).sort((x, y) => x.channel.localeCompare(y.channel));
     await a.alertDeliveries.settle(slack!.id, at, { ok: true, httpStatus: 200 });
     await a.alertDeliveries.settle(webhook!.id, at, { ok: false, httpStatus: 500, error: 'http-status', retryAt: at + 5 * MIN });
@@ -80,8 +101,8 @@ describe('alert deliveries', () => {
 
   it("deletes each org's deliveries once they are 7 days old", async () => {
     const at = now + 40 * DAY;
-    await scoped(env.DB, s.a.orgId).alertDeliveries.enqueue(event('evt_old'), ['webhook'], at - 8 * DAY, at);
-    await scoped(env.DB, s.b.orgId).alertDeliveries.enqueue(event('evt_recent'), ['webhook'], at - 6 * DAY, at);
+    await queue(s.a.orgId, 'evt_old', ['webhook'], at - 8 * DAY, at);
+    await queue(s.b.orgId, 'evt_recent', ['webhook'], at - 6 * DAY, at);
     await expireAlertDeliveries(env.DB, at);
     expect(await mine(s.a.orgId, 'evt_old')).toEqual([]);
     expect(await mine(s.b.orgId, 'evt_recent')).toHaveLength(1);
