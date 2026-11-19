@@ -332,6 +332,8 @@ test('the Screens page says when its poll fails, until a good one, and an expire
   await page.unroute('**/_serverFn/**');
   await expect(notice).toBeHidden({ timeout: 30_000 });
   await expect(page.getByRole('link', { name: 'Counter' })).toBeVisible();
+  // Its live region stays in the accessibility tree while empty, beside the summary's, so the next notice is announced.
+  await expect(page.getByRole('main').getByRole('status')).toHaveCount(2);
 
   // It stops answering after a good poll: the notice comes back, and goes with the next good one.
   await refuse();

@@ -199,11 +199,12 @@ function Summary({ screens }: { screens: ScreenView[] }) {
 
 /**
  * While the poll fails, the states on the page are the last ones heard, so it says so and since
- * when; the next good poll clears it. The live region is always there, so the notice is announced.
+ * when; the next good poll clears it. The live region stays in the accessibility tree while empty
+ * (visually hidden, not `display: none`), so the notice is announced when it comes.
  */
 function NotCurrent({ failing, heardAt, now }: { failing: boolean; heardAt: number; now: number }) {
   return (
-    <div role="status" className="empty:hidden">
+    <div role="status" className="empty:sr-only">
       {failing && (
         <p className="flex items-start gap-3 rounded-xl border bg-card px-4 py-3.5 text-[15px] leading-normal">
           <CloudOffIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
