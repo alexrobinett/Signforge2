@@ -60,6 +60,26 @@ describe('a runner with no network', () => {
   });
 });
 
+describe('a runner whose org has checks waiting', () => {
+  it('refuses one more than it may hold, at once and to retry, and runs the rest', async () => {
+    const free = createServer();
+    const closed = await listening(free);
+    await close(free);
+    const runner = await startRunner({ port: 0, image: 'test-image', probeUrl: `${closed}/probe`, maxPending: 2 });
+    try {
+      const url = `http://127.0.0.1:${(runner.address() as AddressInfo).port}`;
+      const send = () => fetch(`${url}/check`, { method: 'POST', body: JSON.stringify(clock) });
+      const [first, second, third] = await Promise.all([send(), send(), send()]);
+      expect([first.status, second.status]).toEqual([200, 200]);
+      expect(third.status).toBe(503);
+      expect(third.headers.get('retry-after')).toBe('30');
+      expect((await third.json()).error).toBe("2 checks are already queued in this org's container; try again shortly");
+    } finally {
+      await close(runner);
+    }
+  });
+});
+
 describe('a runner that can reach the network', () => {
   it('refuses every check', async () => {
     const outside = createServer((_req, res) => res.end('hello'));

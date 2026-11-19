@@ -21,6 +21,8 @@ export interface RunnerOptions {
   image: string;
   /** An outside URL the container must not reach. */
   probeUrl: string;
+  /** Checks it holds at once, running and waiting; one more is refused to retry. Default 4. */
+  maxPending?: number;
 }
 
 /** Room for a bundle at its budget, JSON-escaped, and its manifest. */
@@ -64,6 +66,9 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
   ];
   // One check at a time: two 1080p renders at once would slow both past the ready limit.
   let queue: Promise<unknown> = Promise.resolve();
+  // This container is one org's, so only that org's pushes wait here; a few is plenty.
+  const maxPending = opts.maxPending ?? 4;
+  let pending = 0;
 
   async function check(req: IncomingMessage, res: ServerResponse) {
     if (unavailable.length) return send(res, 503, { error: unavailable.join('; ') });
@@ -78,7 +83,12 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
     const manifest = parseTemplateManifest(Reflect.get(Object(body), 'manifest'));
     const html: unknown = Reflect.get(Object(body), 'html');
     if (!manifest.ok || typeof html !== 'string') return send(res, 400, { error: 'send { manifest, html }: a template manifest and its built HTML' });
+    if (pending >= maxPending) {
+      res.setHeader('retry-after', '30');
+      return send(res, 503, { error: `${maxPending} checks are already queued in this org's container; try again shortly` });
+    }
     const startMs = Number(new URL(req.url ?? '/', 'http://runner').searchParams.get('startMs') ?? 0);
+    pending++;
     const run = queue.then(async () => {
       const started = performance.now();
       const { problems, renders } = await checkTemplate(browser, manifest.value, html);
@@ -92,7 +102,11 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
       return report;
     });
     queue = run.catch(() => undefined);
-    send(res, 200, await run);
+    try {
+      send(res, 200, await run);
+    } finally {
+      pending--;
+    }
   }
 
   const boot = randomUUID();

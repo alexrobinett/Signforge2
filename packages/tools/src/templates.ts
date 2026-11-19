@@ -207,7 +207,7 @@ const registerTemplateVersion = defineSharedTool({
     sourcesId: '1'.repeat(64),
   },
   target: (_input, output) => ({ kind: 'template_version', id: output.version.id }),
-  handler: async ({ org, blobs, input, write, templateCheck }) => {
+  handler: async ({ org, blobs, input, write, templateCheck, rateLimit }) => {
     const [bundle, sourcesObj] = await Promise.all([blobs.get(blobKey(org, input.bundleId)), blobs.get(blobKey(org, input.sourcesId))]);
     if (!bundle) throw new ToolError('not_found', `bundle ${input.bundleId} has not been uploaded`);
     if (!sourcesObj) throw new ToolError('not_found', `sources ${input.sourcesId} have not been uploaded`);
@@ -257,7 +257,11 @@ const registerTemplateVersion = defineSharedTool({
 
     let runtime: TemplateRuntimeReport | undefined;
     if (org.orgId !== null) {
-      if (!templateCheck) throw new Error('registering an org template needs the runtime check, and the caller has none');
+      if (!templateCheck || !rateLimit) throw new Error('registering an org template needs the runtime check and a rate limit, and the caller lacks one');
+      // An org's checks share its one container: a push loop is slowed here, before it reaches it.
+      if (!(await rateLimit('template_check'))) {
+        throw new ToolError('rate_limited', 'too many template checks for this org; wait a minute and try again', { retryAfterSeconds: 60 });
+      }
       runtime = await templateCheck({ orgId: org.orgId, manifest, html });
       if (!runtime.ok) {
         throw new ToolError(

@@ -45,7 +45,7 @@ import {
 import { Hono, type Context } from 'hono';
 import { screenNotifier } from '../device/screens';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
-import { templateChecker } from '../template-check';
+import { templateCheckAllowed, templateChecker } from '../template-check';
 import { adminAuth, type AdminEnv } from './auth';
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -174,6 +174,8 @@ const templateCaller = <D extends DataScope>(c: Context<AdminEnv>, org: D): Call
   actor: { kind: 'system', id: SF_PUSH, clientId: SF_PUSH },
   blobs: c.env.BLOBS,
   templateCheck: templateChecker(c.env),
+  // Only an org's registration asks, for its template checks.
+  rateLimit: async (bucket) => bucket === 'template_check' && org.orgId !== null && templateCheckAllowed(c.env, org.orgId),
 });
 
 const STATUS = { invalid_input: 400, not_found: 404, conflict: 409, rate_limited: 429, forbidden: 500, unknown_tool: 500 } as const;

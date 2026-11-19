@@ -106,8 +106,9 @@ export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'no
 /**
  * What the adapter counts against a rate limit, keyed by what it knows of the caller (the API: the
  * member and the address). `pairing_claim`: every claim of a pairing code, right or wrong.
+ * `template_check`: every runtime check of an org's template, keyed by the org, whose container it uses.
  */
-export type RateLimitBucket = 'pairing_claim';
+export type RateLimitBucket = 'pairing_claim' | 'template_check';
 /** Counts one attempt in `bucket`; false once the caller is over its limit. */
 export type RateLimiter = (bucket: RateLimitBucket) => Promise<boolean>;
 

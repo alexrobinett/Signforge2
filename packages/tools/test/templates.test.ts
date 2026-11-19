@@ -70,6 +70,7 @@ beforeAll(async () => {
     actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
     blobs: env.BLOBS,
     templateCheck: passing,
+    rateLimit: async () => true,
   };
   system = {
     org: platform(env.DB),
@@ -176,6 +177,27 @@ describe('the runtime check', () => {
       ],
     });
     expect(await scoped(env.DB, o.orgId).templates.ownByKey('leaky')).toBeUndefined();
+  });
+
+  it("counts against the org's rate limit, and over it is refused before the check runs", async () => {
+    const ids = await orgUpload(html('h1{color:coral}'));
+    const buckets: string[] = [];
+    const over: Caller = {
+      ...owner,
+      rateLimit: async (bucket) => {
+        buckets.push(bucket);
+        return false;
+      },
+    };
+    const before = checked.length;
+    expect(await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'busy' }), ...ids }, over)).toMatchObject({
+      ok: false,
+      error: 'rate_limited',
+      message: 'too many template checks for this org; wait a minute and try again',
+      details: { retryAfterSeconds: 60 },
+    });
+    expect(buckets).toEqual(['template_check']);
+    expect(checked.length).toBe(before);
   });
 
   it('does not run again for a version already registered', async () => {

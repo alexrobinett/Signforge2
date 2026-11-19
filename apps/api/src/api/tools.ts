@@ -13,7 +13,7 @@ import type { Hono } from 'hono';
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
 import { feedUrlSealer } from '../data/cipher';
-import { templateChecker } from '../template-check';
+import { templateCheckAllowed, templateChecker } from '../template-check';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
 
@@ -56,7 +56,9 @@ export function mountTools(api: Hono<ApiEnv>) {
       templateCheck: templateChecker(c.env),
       screens: screenNotifier(c.env),
       // A claim counts against the member and against the address, so many accounts on one address share a limit.
-      rateLimit: async () => {
+      // A template check counts against the org, whose one container it uses.
+      rateLimit: async (bucket) => {
+        if (bucket === 'template_check') return templateCheckAllowed(c.env, c.var.org.orgId);
         const [user, ip] = await Promise.all([
           c.env.PAIR_CLAIM_LIMIT.limit({ key: `user:${c.var.session.user.id}` }),
           c.env.PAIR_CLAIM_LIMIT.limit({ key: `ip:${clientIp(c)}` }),

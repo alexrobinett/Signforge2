@@ -175,6 +175,15 @@ describe('org templates', () => {
     expect(((await res.json()) as { message: string }).message).toMatch(/^the template failed its runtime check: requested/);
   });
 
+  it('are checked at most 10 times a minute per org: the next push is refused before the check', async () => {
+    const busy = (await member.createOrg('Busy templates')).id;
+    for (let i = 0; i < 10; i++) await push(card({ id: 'busy-card', version: `1.0.${i}` }), { owner: { org: busy } });
+    const message = await rejection(push(card({ id: 'busy-card', version: '1.0.10' }), { owner: { org: busy } }));
+    expect(message).toMatch(/429\ntoo many template checks for this org; wait a minute and try again/);
+    // Another org's limit is its own.
+    expect((await push(card({ id: 'calm-card' }), { owner: { org: orgId } })).changed).toBe(true);
+  });
+
   it('need an org that exists', async () => {
     expect(await rejection(push(card({ id: 'nobody' }), { owner: { org: 'org-nobody' } }))).toMatch(/404/);
   });
