@@ -1,13 +1,12 @@
 // list_audit_log (#82): the org's audit rows newest first, a page at a time, filtered.
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
-import { member } from './member';
+import { member, seededMembers } from './member';
 
-let o: SeededOrg;
-const as = (role: Caller['role']) => member(o.orgId, role);
+const { o, as } = seededMembers('audit-org');
 
 interface Entry {
   at: number;
@@ -38,7 +37,6 @@ async function all(input: Record<string, unknown>, role: Caller['role'] = 'viewe
 const T = Date.UTC(2026, 10, 18, 9);
 
 beforeAll(async () => {
-  o = await seedOrg(env.DB, 'audit-org');
   const log = scoped(env.DB, o.orgId).auditLog;
   // Three rows in one millisecond, so paging must break ties; and an agent's limit refusal, whose id is long (#77).
   for (const [i, name] of ['First', 'Second', 'Third'].entries())

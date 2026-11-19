@@ -25,6 +25,16 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   const { screen } = (await tool(page, 'claim_screen', { code, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' })) as { screen: { id: string } };
   for (let i = 1; i <= 55; i++) await tool(page, 'rename_screen', { screenId: screen.id, name: `Lobby ${i}` });
 
+  /** Narrow the log to the screen from its first row's target link. */
+  const onlyTheScreen = async () => {
+    await rows
+      .first()
+      .getByRole('link', { name: `Only screen ${screen.id}` })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`targetId=${screen.id}`));
+    await expect(page.getByText(`Only Screen ${screen.id}.`)).toBeVisible();
+  };
+
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Audit log' }).click();
   await expect(page).toHaveURL(/\/audit$/);
   await hydrated(page);
@@ -67,12 +77,7 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
 
   // One target: the screen's own history.
   await page.getByLabel('Who').selectOption('people');
-  await rows
-    .first()
-    .getByRole('link', { name: `Only screen ${screen.id}` })
-    .click();
-  await expect(page).toHaveURL(new RegExp(`targetId=${screen.id}`));
-  await expect(page.getByText(`Only Screen ${screen.id}.`)).toBeVisible();
+  await onlyTheScreen();
 
   // Export what the filters match: the screen's 56 entries, its code still redacted.
   await page.getByRole('link', { name: 'Show every screen' }).click();
@@ -100,12 +105,7 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   await shots(page, '51-audit-log-phone');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   // One target from a phone: its link is in the line folded under What.
-  await rows
-    .first()
-    .getByRole('link', { name: `Only screen ${screen.id}` })
-    .click();
-  await expect(page).toHaveURL(new RegExp(`targetId=${screen.id}`));
-  await expect(page.getByText(`Only Screen ${screen.id}.`)).toBeVisible();
+  await onlyTheScreen();
 
   // Hand-edited URLs: a name every object has, blank text, or an id without its kind filter nothing and break nothing.
   for (const search of ['when=constructor', 'q=%20', 'targetId=x']) {
