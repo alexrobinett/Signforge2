@@ -176,13 +176,25 @@ describe('org templates', () => {
 
   it('are refused to retry, not registered, when the check is not available', async () => {
     const message = await rejection(push(card({ id: 'down-card', css: '/* sf-runtime-down */' }), { owner: { org: orgId } }));
-    expect(message).toMatch(/503\nthe template check is not available \(it answered 503: .*did not start.*\); try again in a minute/);
+    // Its answer says why to the operator's logs, not to the member or agent.
+    expect(message).toMatch(/503\nthe template check is not available \(it answered 503\); try again in a minute$/);
     expect(await scoped(env.DB, orgId).templates.ownByKey('down-card')).toBeUndefined();
 
     const res = await registerFromCms(card({ id: 'down-cms-card', css: '/* sf-runtime-down */' }));
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ error: 'unavailable', details: { retryAfterSeconds: 60 } });
   });
+
+  for (const [marker, why] of [
+    ['sf-runtime-not-json', 'its answer could not be read'],
+    ['sf-runtime-cut', 'its answer could not be read'],
+  ]) {
+    it(`are refused to retry when the check answers 200 but its body fails: ${marker}`, async () => {
+      const message = await rejection(push(card({ id: `${marker}-card`, css: `/* ${marker} */` }), { owner: { org: orgId } }));
+      expect(message).toMatch(new RegExp(`503\\nthe template check is not available \\(${why}\\); try again in a minute$`));
+      expect(await scoped(env.DB, orgId).templates.ownByKey(`${marker}-card`)).toBeUndefined();
+    });
+  }
 
   it('are checked when registered from the CMS too', async () => {
     const res = await registerFromCms(card({ id: 'cms-card', css: '/* sf-runtime-fail */' }));

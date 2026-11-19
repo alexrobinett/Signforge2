@@ -25,8 +25,9 @@ async function templateBuilds() {
 
 // TEMPLATE_CHECK: the check Worker (apps/template-check), replaced here by a stand-in in Node that
 // passes every template except one whose bundle holds `sf-runtime-fail` (refused with a request) or
-// `sf-runtime-garbage` (answered with a report the contract refuses) or `sf-runtime-down` (a 503,
-// as when its container cannot start or is over its limit). Its runner image names the
+// `sf-runtime-garbage` (answered with a report the contract refuses), `sf-runtime-down` (a 503,
+// as when its container cannot start or is over its limit), `sf-runtime-not-json` (a 200 whose body
+// is not JSON) or `sf-runtime-cut` (a 200 whose body breaks off). Its runner image names the
 // org path it was called on, as the check Worker picks the org's container by it. The real runner's
 // tests are apps/template-check's.
 async function templateCheck(request: Request): Promise<Response> {
@@ -34,6 +35,16 @@ async function templateCheck(request: Request): Promise<Response> {
   const { manifest, html }: { manifest: { orientations: ('landscape' | 'portrait')[] }; html: string } = await request.json();
   if (html.includes('sf-runtime-garbage')) return Response.json({ ok: 'yes' });
   if (html.includes('sf-runtime-down')) return Response.json({ error: 'the check container did not start' }, { status: 503 });
+  if (html.includes('sf-runtime-not-json')) return new Response('<html>Bad gateway</html>');
+  if (html.includes('sf-runtime-cut')) {
+    const body = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('{"ok":'));
+        c.error(new Error('the connection was lost'));
+      },
+    });
+    return new Response(body, { headers: { 'content-type': 'application/json' } });
+  }
   const problems = html.includes('sf-runtime-fail') ? ['requested https://example.com/leak (blocked)'] : [];
   return Response.json({
     ok: !problems.length,
