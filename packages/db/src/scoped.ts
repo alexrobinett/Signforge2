@@ -9,7 +9,7 @@
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
 import type { ScreenKind } from '@signforge/contract';
-import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
@@ -1131,7 +1131,8 @@ export function scoped(d1: D1Database, orgId: string) {
         insert: alertDeliveries.stage.insert,
         /**
          * Make a delivery due now; one that was given up on gets at least this one more attempt.
-         * Changes nothing if an attempt holds it by the time it runs (check `leasedUntil` first, to say so).
+         * Changes nothing if an attempt holds it, or it was delivered, by the time it runs (check
+         * `leasedUntil` and `status` first, to say so).
          */
         retry: (current: AlertDelivery, now: number): Staged<AlertDelivery> => {
           const set = { status: 'pending' as const, nextAttemptAt: now, giveUpAt: Math.max(current.giveUpAt, now), updatedAt: now };
@@ -1140,7 +1141,7 @@ export function scoped(d1: D1Database, orgId: string) {
             db
               .update(ad)
               .set(set)
-              .where(and(eq(ad.orgId, orgId), eq(ad.id, current.id), or(isNull(ad.leasedUntil), lte(ad.leasedUntil, now))!)),
+              .where(and(eq(ad.orgId, orgId), eq(ad.id, current.id), ne(ad.status, 'delivered'), or(isNull(ad.leasedUntil), lte(ad.leasedUntil, now))!)),
           );
         },
       },

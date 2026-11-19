@@ -105,6 +105,19 @@ describe('alert deliveries', () => {
     expect(due.map((d) => d.id)).not.toEqual(expect.arrayContaining([webhook!.id]));
   });
 
+  it('leaves a delivery delivered when a retry staged before its delivery commits after it', async () => {
+    const a = scoped(env.DB, s.a.orgId);
+    const at = now + 30 * DAY;
+    await queue(s.a.orgId, 'evt_retry_race', ['webhook'], at, at + DAY);
+    const [read] = await mine(s.a.orgId, 'evt_retry_race');
+    const retry = a.alertDeliveries.stage.retry(read!, at);
+    // Delivered between the read and the commit.
+    await a.alertDeliveries.claim(read!.id, at, MIN);
+    await a.alertDeliveries.settle(read!.id, 1, at, { ok: true, httpStatus: 200 });
+    await a.commit(retry.writes);
+    expect(await a.alertDeliveries.get(read!.id)).toMatchObject({ status: 'delivered', lastHttpStatus: 200 });
+  });
+
   it("deletes each org's deliveries once they are 7 days old", async () => {
     const at = now + 40 * DAY;
     await queue(s.a.orgId, 'evt_old', ['webhook'], at - 8 * DAY, at);
