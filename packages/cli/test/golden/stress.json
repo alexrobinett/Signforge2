@@ -19,10 +19,6 @@
       "size": 203915,
       "type": "image/jpeg"
     },
-    "13b1494d404b0e75d71400ab7a19c5586e74822483edf3f3c721cad9bc63c1a9": {
-      "size": 77124,
-      "type": "text/html"
-    },
     "13e5b4d30ef207fd89c1cc9f8ce8f23781e9a6d71deb9f0dacf8550ce315a17b": {
       "size": 320263,
       "type": "image/jpeg"
@@ -31,33 +27,33 @@
       "size": 81026,
       "type": "text/html"
     },
+    "1a4020bbad33d42b78a5bc6a531ef7115d4295c59317935eff06618f7fe384e7": {
+      "size": 77514,
+      "type": "text/html"
+    },
+    "29443f55bbf6ae15a18d0e0fdb908d57899f77202e4507d4ae1203b3412ad2e2": {
+      "size": 73174,
+      "type": "text/html"
+    },
+    "2ab42d80861eae3aa89e8fb4c422c0b26df924e41f6e6eb5125d8b399a28274a": {
+      "size": 76424,
+      "type": "text/html"
+    },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "479f77409dda317adc0dcd0163323b66540804f64c9c183207aeca8f5e6e4f42": {
-      "size": 76391,
-      "type": "text/html"
-    },
-    "4d15f33bd516fdb8ca00d389d19872e2c7eb0e191f3bfad7aae396ddc442b217": {
-      "size": 76218,
-      "type": "text/html"
     },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
     },
-    "5863e25699d425bf73d47076fe6361042469eda28417b91f76eb9129cf1bf1a5": {
-      "size": 72505,
+    "602553161103ff1ca6352b992c69e18d04d98c1e9d673433dba2db2615e1ccfd": {
+      "size": 76320,
       "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "8e1319646ed2f74e48a12b76b5b51e5c4bd4b61d054a29b450d6a064fd73515a": {
-      "size": 74276,
-      "type": "text/html"
     },
     "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
       "size": 9600472,
@@ -66,10 +62,6 @@
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "a26323a4266ee3bf7a26eeaadd66d802e4f804459ef3bc4026ac782b2f418ed2": {
-      "size": 73141,
-      "type": "text/html"
     },
     "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2": {
       "size": 639,
@@ -83,12 +75,20 @@
       "size": 182996,
       "type": "image/jpeg"
     },
+    "dae7a4d67b9bdf92f5b847ac0f1b61320572c2015464d575238b9779d548a2f2": {
+      "size": 74649,
+      "type": "text/html"
+    },
+    "eb02db352bf0cd6fc3df0420a494cfe120754982964a9f7c4eea482033753cbd": {
+      "size": 72538,
+      "type": "text/html"
+    },
     "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688": {
       "size": 421529,
       "type": "image/jpeg"
     }
   },
-  "id": "a1c7247e59ff72014ede7eb8c9a37049b16c3634f97c836cfd11f53ecb62d36d",
+  "id": "3a239fca13760f0e98aa258ec1f31075fe0a7692b31b80d35946b6f081d1390f",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -171,7 +171,7 @@
       "id": "clock",
       "kind": "template",
       "name": "Clock",
-      "template": "base/clock@1.2.2"
+      "template": "base/clock@1.2.3"
     },
     "energy": {
       "assets": {
@@ -192,7 +192,7 @@
       "id": "energy",
       "kind": "template",
       "name": "Energy drinks 3 for $7",
-      "template": "base/cstore-promo@1.2.3"
+      "template": "base/cstore-promo@1.2.4"
     },
     "holidays": {
       "assets": {},
@@ -214,7 +214,7 @@
       "id": "holidays",
       "kind": "template",
       "name": "US holidays (Google Calendar)",
-      "template": "base/agenda@1.2.2"
+      "template": "base/agenda@1.2.3"
     },
     "meeting-room": {
       "assets": {},
@@ -266,7 +266,7 @@
       "id": "meeting-room",
       "kind": "template",
       "name": "Meeting room (fixed data)",
-      "template": "base/agenda@1.2.2"
+      "template": "base/agenda@1.2.3"
     },
     "menu": {
       "assets": {},
@@ -331,7 +331,7 @@
       "id": "menu",
       "kind": "template",
       "name": "Coffee menu",
-      "template": "base/menu-board@1.2.2"
+      "template": "base/menu-board@1.2.3"
     },
     "news": {
       "assets": {},
@@ -357,7 +357,7 @@
       "id": "news",
       "kind": "template",
       "name": "NPR headlines",
-      "template": "base/news@1.3.3"
+      "template": "base/news@1.3.4"
     },
     "photo-berries": {
       "assets": {
@@ -373,7 +373,7 @@
       "id": "photo-berries",
       "kind": "template",
       "name": "Photo promo, 1080p photo",
-      "template": "base/photo-promo@1.2.2"
+      "template": "base/photo-promo@1.2.3"
     },
     "photo-kitchen": {
       "assets": {
@@ -389,7 +389,7 @@
       "id": "photo-kitchen",
       "kind": "template",
       "name": "Photo promo, 4K photo 2",
-      "template": "base/photo-promo@1.2.2"
+      "template": "base/photo-promo@1.2.3"
     },
     "photo-river": {
       "assets": {
@@ -405,7 +405,7 @@
       "id": "photo-river",
       "kind": "template",
       "name": "Photo promo, 4K photo",
-      "template": "base/photo-promo@1.2.2"
+      "template": "base/photo-promo@1.2.3"
     },
     "sport-drinks": {
       "assets": {
@@ -426,7 +426,7 @@
       "id": "sport-drinks",
       "kind": "template",
       "name": "Sport drinks 2 for $4",
-      "template": "base/cstore-promo@1.2.3"
+      "template": "base/cstore-promo@1.2.4"
     },
     "still-snow": {
       "durationMs": 5000,
@@ -544,8 +544,8 @@
     }
   },
   "templates": {
-    "base/agenda@1.2.2": {
-      "html": "4d15f33bd516fdb8ca00d389d19872e2c7eb0e191f3bfad7aae396ddc442b217",
+    "base/agenda@1.2.3": {
+      "html": "602553161103ff1ca6352b992c69e18d04d98c1e9d673433dba2db2615e1ccfd",
       "manifest": {
         "background": "#0d1117",
         "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
@@ -626,11 +626,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.2"
+        "version": "1.2.3"
       }
     },
-    "base/clock@1.2.2": {
-      "html": "a26323a4266ee3bf7a26eeaadd66d802e4f804459ef3bc4026ac782b2f418ed2",
+    "base/clock@1.2.3": {
+      "html": "29443f55bbf6ae15a18d0e0fdb908d57899f77202e4507d4ae1203b3412ad2e2",
       "manifest": {
         "background": "#05070d",
         "description": "Large live clock and date with a greeting. Good as a welcome screen or a break between ads.",
@@ -676,11 +676,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.2"
+        "version": "1.2.3"
       }
     },
-    "base/cstore-promo@1.2.3": {
-      "html": "13b1494d404b0e75d71400ab7a19c5586e74822483edf3f3c721cad9bc63c1a9",
+    "base/cstore-promo@1.2.4": {
+      "html": "1a4020bbad33d42b78a5bc6a531ef7115d4295c59317935eff06618f7fe384e7",
       "manifest": {
         "background": "#06122b",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
@@ -753,11 +753,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.3"
+        "version": "1.2.4"
       }
     },
-    "base/menu-board@1.2.2": {
-      "html": "8e1319646ed2f74e48a12b76b5b51e5c4bd4b61d054a29b450d6a064fd73515a",
+    "base/menu-board@1.2.3": {
+      "html": "dae7a4d67b9bdf92f5b847ac0f1b61320572c2015464d575238b9779d548a2f2",
       "manifest": {
         "background": "#14110f",
         "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
@@ -844,11 +844,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.2"
+        "version": "1.2.3"
       }
     },
-    "base/news@1.3.3": {
-      "html": "479f77409dda317adc0dcd0163323b66540804f64c9c183207aeca8f5e6e4f42",
+    "base/news@1.3.4": {
+      "html": "2ab42d80861eae3aa89e8fb4c422c0b26df924e41f6e6eb5125d8b399a28274a",
       "manifest": {
         "background": "#0b0d12",
         "description": "The top story large, the next few below, and every headline in a crawl along the bottom. Bind items to an RSS data source.",
@@ -920,11 +920,11 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.3.3"
+        "version": "1.3.4"
       }
     },
-    "base/photo-promo@1.2.2": {
-      "html": "5863e25699d425bf73d47076fe6361042469eda28417b91f76eb9129cf1bf1a5",
+    "base/photo-promo@1.2.3": {
+      "html": "eb02db352bf0cd6fc3df0420a494cfe120754982964a9f7c4eea482033753cbd",
       "manifest": {
         "background": "#000000",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
@@ -971,7 +971,7 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.2"
+        "version": "1.2.3"
       }
     },
     "base/weather@1.2.1": {

@@ -1,6 +1,6 @@
 {
   "id": "news",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "name": "News",
   "description": "The top story large, the next few below, and every headline in a crawl along the bottom. Bind items to an RSS data source.",
   "fields": {
