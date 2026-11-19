@@ -30,6 +30,7 @@ describe('org settings', () => {
           updateWindow: { from: '02:00', to: '04:00' },
           unreachableAfterMinutes: 15,
           editorsPublish: true,
+          auditRetentionDays: 365,
           alerts: {
             screen_offline: { who: 'editors', email: true },
             publish_finished: { who: 'editors', email: true },
@@ -85,12 +86,24 @@ describe('org settings', () => {
     expect(on).toMatchObject({ ok: true, output: { settings: { editorsPublish: true } } });
   });
 
+  it('lets an owner choose how long audit rows are kept', async () => {
+    const set = await dispatch(registry, 'update_org_settings', { auditRetentionDays: 30 }, as('owner'));
+    expect(set).toMatchObject({ ok: true, output: { settings: { auditRetentionDays: 30, timezone: 'Europe/London' } } });
+    expect(await dispatch(registry, 'get_org_settings', {}, as('viewer'))).toMatchObject({ output: { settings: { auditRetentionDays: 30 } } });
+    expect(await dispatch(registry, 'update_org_settings', { auditRetentionDays: 3650 }, as('editor'))).toMatchObject({ ok: false, error: 'forbidden' });
+    const back = await dispatch(registry, 'update_org_settings', { auditRetentionDays: 365 }, as('owner'));
+    expect(back).toMatchObject({ ok: true, output: { settings: { auditRetentionDays: 365 } } });
+  });
+
   it('refuses editors and viewers, and bad values', async () => {
     for (const role of ['editor', 'viewer'] as const) {
       expect(await dispatch(registry, 'update_org_settings', { timezone: 'UTC' }, as(role))).toMatchObject({ ok: false, error: 'forbidden' });
     }
     for (const bad of [
       { unreachableAfterMinutes: 2 },
+      { auditRetentionDays: 29 },
+      { auditRetentionDays: 3651 },
+      { auditRetentionDays: 90.5 },
       { updateWindow: { from: '25:00', to: '04:00' } },
       { updateWindow: { from: '02:00', to: '02:00' } },
       { timezone: 'Mars/Olympus' },

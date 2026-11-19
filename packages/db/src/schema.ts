@@ -563,6 +563,8 @@ export const orgSettings = sqliteTable(
     alertsJson: text('alerts_json'),
     /** Whether editors may publish, or only owners (owner decision Q7). */
     editorsPublish: integer('editors_publish', { mode: 'boolean' }).notNull().default(true),
+    /** Days the org's audit rows are kept, then deleted by the daily job (./retention.ts). Null for the default (365). */
+    auditRetentionDays: integer('audit_retention_days'),
     /** An org with no row has every default, at version 1; each `settings.stage.set` moves it on. */
     rowVersion: rowVersion(),
     /**
