@@ -102,6 +102,30 @@ export type RateLimitBucket = 'pairing_claim';
 export type RateLimiter = (bucket: RateLimitBucket) => Promise<boolean>;
 
 /**
+ * What an agent grant may do (owner decision on #39): enough for an agent working through a task,
+ * while a runaway loop is stopped within a minute and changes at most 2,000 things a day.
+ * Constants, not settings: no org has asked for its own. A person is never counted.
+ * A write is a call to a tool that `mutates`, counted when it is made, whether or not it changes anything.
+ */
+export const AGENT_LIMITS = { calls_per_minute: 120, writes_per_minute: 30, writes_per_day: 2000 } as const;
+export type AgentLimit = keyof typeof AGENT_LIMITS;
+
+/**
+ * Whether an agent grant's call is within its limits. Over one, `retryAfterSeconds` is when its
+ * window (the minute, or the UTC day) ends, and `first` is true for the first call refused by that
+ * limit in that window, which the dispatcher records in the audit log.
+ */
+export type AgentAllowance = { ok: true } | { ok: false; limit: AgentLimit; retryAfterSeconds: number; first: boolean };
+
+/**
+ * Counts an agent grant's calls against `AGENT_LIMITS`, one counter per grant wherever the call
+ * lands (the API: a Durable Object per grant). A call within the limits is counted, a refused one is not.
+ */
+export interface AgentLimiter {
+  take(grantId: string, write: boolean): Promise<AgentAllowance>;
+}
+
+/**
  * A refusal a handler means to return. Anything else a handler throws is a bug and propagates.
  * Either way nothing the handler staged is written, unless the refusal sets `changed`: then what
  * it staged before refusing (`finalize_asset` marks a bad upload rejected) is committed and

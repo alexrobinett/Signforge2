@@ -15,6 +15,8 @@ import {
   registry,
   ROLES,
   TOOLS,
+  type AgentAllowance,
+  type AgentLimiter,
   type Caller,
   type Role,
   type Scope,
@@ -22,12 +24,15 @@ import {
 } from '../src';
 
 let o: SeededOrg;
+/** An agent's limiter that always allows: these tests are about something else. */
+const unlimited: AgentLimiter = { take: async () => ({ ok: true }) };
 const caller = (role: Role, scopes?: Scope[], actor: Caller['actor'] = { kind: 'user', id: 'user-1', clientId: 'cms' }): Caller => ({
   org: scoped(env.DB, o.orgId),
   role,
   scopes,
   actor,
   blobs: env.BLOBS,
+  agentLimiter: unlimited,
 });
 
 beforeAll(async () => {
@@ -210,6 +215,7 @@ describe('whether editors publish (Q7, an org setting)', () => {
     scopes,
     actor,
     blobs: env.BLOBS,
+    agentLimiter: unlimited,
   });
   const editorsAgent = () => as('editor', ['content:read', 'content:draft', 'content:publish'], { kind: 'agent', id: 'grant-q7', clientId: 'agent-app' });
   // Past the role and scope check, the manifest was never uploaded: not_found means the call was allowed.
@@ -373,6 +379,93 @@ describe('write safety', () => {
     const r = await dispatch(registry, 'create_group', input, { ...caller('editor'), org: scoped(env.DB, other.orgId) });
     expect(r).toMatchObject({ ok: true });
     expect(await scoped(env.DB, other.orgId).screenGroups.list()).toContainEqual(expect.objectContaining({ name: 'Keyed' }));
+  });
+});
+
+describe("an agent grant's limits", () => {
+  const agent: Caller['actor'] = { kind: 'agent', id: 'grant-limits', clientId: 'agent-app' };
+  /** A limiter that answers what the test says and records what it was asked. */
+  const scripted = (answer: () => AgentAllowance) => {
+    const asked: { grantId: string; write: boolean }[] = [];
+    const agentLimiter: AgentLimiter = {
+      take: async (grantId, write) => {
+        asked.push({ grantId, write });
+        return answer();
+      },
+    };
+    return { asked, agentLimiter };
+  };
+  const audits = () => scoped(env.DB, o.orgId).auditLog.list({ limit: 1000 });
+
+  it('refuse a call over a limit before the handler runs, writing nothing and leaving its key unused', async () => {
+    let over = true;
+    const { agentLimiter } = scripted(() => (over ? { ok: false, limit: 'writes_per_minute', retryAfterSeconds: 12, first: false } : { ok: true }));
+    const input = { name: 'Limited', idempotencyKey: 'limited-key-1' };
+    const n = (await audits()).length;
+    const refused = await dispatch(registry, 'create_group', input, { ...caller('editor', undefined, agent), agentLimiter });
+    expect(refused).toEqual({
+      ok: false,
+      error: 'rate_limited',
+      message: 'this agent grant made 30 changes this minute, its limit; try again in 12 s',
+      details: { limit: 'writes_per_minute', retryAfterSeconds: 12 },
+    });
+    expect((await scoped(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Limited')).toHaveLength(0);
+    expect(await audits()).toHaveLength(n);
+    // After the reset, the same key creates.
+    over = false;
+    expect(await dispatch(registry, 'create_group', input, { ...caller('editor', undefined, agent), agentLimiter })).toMatchObject({ ok: true });
+    expect((await scoped(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Limited')).toHaveLength(1);
+  });
+
+  it('record the first refusal of a window, once', async () => {
+    let first = true;
+    const { agentLimiter } = scripted(() => {
+      const answer: AgentAllowance = { ok: false, limit: 'writes_per_day', retryAfterSeconds: 3600, first };
+      first = false;
+      return answer;
+    });
+    const before = (await audits()).length;
+    for (let i = 0; i < 3; i++) {
+      expect(await dispatch(registry, 'rename_group', { groupId: o.group, name: 'Over' }, { ...caller('editor', undefined, agent), agentLimiter })).toMatchObject({
+        ok: false,
+        error: 'rate_limited',
+        message: 'this agent grant made 2000 changes today (UTC), its limit; try again in 3600 s',
+      });
+    }
+    const all = await audits();
+    expect(all).toHaveLength(before + 1);
+    expect(all[0]).toMatchObject({ actorKind: 'agent', actorId: 'grant-limits', clientId: 'agent-app', action: 'rename_group', targetKind: null });
+    expect(JSON.parse(all[0]!.detailJson!)).toEqual({
+      refused: {
+        error: 'rate_limited',
+        message: 'this agent grant made 2000 changes today (UTC), its limit; try again in 3600 s',
+        details: { limit: 'writes_per_day', retryAfterSeconds: 3600 },
+      },
+    });
+  });
+
+  it('count every call by its grant, and a changing tool as a write', async () => {
+    const { asked, agentLimiter } = scripted(() => ({ ok: true }));
+    const as = { ...caller('editor', undefined, agent), agentLimiter };
+    await dispatch(registry, 'list_screens', {}, as);
+    await dispatch(registry, 'rename_group', { groupId: o.group, name: 'Counted' }, as);
+    await dispatch(registry, 'identify_screen', { screenId: o.screen }, as);
+    expect(asked).toEqual([
+      { grantId: 'grant-limits', write: false },
+      { grantId: 'grant-limits', write: true },
+      { grantId: 'grant-limits', write: true },
+    ]);
+  });
+
+  it('never count a person', async () => {
+    const { asked, agentLimiter } = scripted(() => ({ ok: false, limit: 'calls_per_minute', retryAfterSeconds: 1, first: true }));
+    expect(await dispatch(registry, 'rename_group', { groupId: o.group, name: 'By a person' }, { ...caller('editor'), agentLimiter })).toMatchObject({ ok: true });
+    expect(asked).toEqual([]);
+  });
+
+  it('refuse to run an agent without its limiter', async () => {
+    const { agentLimiter: _, ...noLimiter } = caller('editor', undefined, agent);
+    await expect(dispatch(registry, 'list_screens', {}, noLimiter)).rejects.toThrow(/limiter/);
   });
 });
 
