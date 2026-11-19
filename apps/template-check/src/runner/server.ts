@@ -2,12 +2,14 @@
  * The runner's HTTP API, inside the container. Only the check Worker's Durable Object reaches it.
  *
  *   GET  /health  { image, browser, network, canary }; it listens only once the browser is up
- * Every answer has `x-runner-boot`, this process's id: two orgs' checks never share one.
  *   POST /check   { manifest, html } -> TemplateRuntimeReport; `?startMs=` is the container's start, which the Worker timed
  *
+ * Every answer has `x-runner-boot`, this process's id: two orgs' checks never share one.
+ *
  * Two things must hold or every check is refused (503), so a broken container never passes a template:
- * - the network is closed: it probes an outside host, which must not answer;
- * - the check still sees a blocked request: its canary (./check.ts) must be reported.
+ * - the network is closed: it probes outside hosts, by name and by address, at start and again every
+ *   minute, and none may answer;
+ * - the check still sees a blocked request: its canary (./check.ts) must be reported, at start.
  */
 import { parseTemplateManifest, TEMPLATE_BUDGET, type TemplateRuntimeReport } from '@signforge/contract';
 import { randomUUID } from 'node:crypto';
@@ -19,8 +21,10 @@ export interface RunnerOptions {
   port: number;
   /** The image this runs in, for the report: the Worker passes its digest-pinned reference. */
   image: string;
-  /** An outside URL the container must not reach. */
-  probeUrl: string;
+  /** Outside URLs the container must not reach: one by name, one by IP address (no DNS needed). */
+  probeUrls: string[];
+  /** How often the network is probed again. Default a minute. */
+  probeEveryMs?: number;
   /** Checks it holds at once, running and waiting; one more is refused to retry. Default 4. */
   maxPending?: number;
 }
@@ -37,6 +41,13 @@ async function probe(url: string): Promise<{ closed: boolean; detail: string }> 
     const cause = e instanceof Error && e.cause instanceof Error ? `: ${e.cause.message}` : '';
     return { closed: true, detail: `${url} could not be reached (${e instanceof Error ? e.message : String(e)}${cause})` };
   }
+}
+
+/** Closed only when no probe answers: a name that does not resolve must not hide an address that does. */
+async function probeAll(urls: string[]): Promise<{ closed: boolean; detail: string }> {
+  const results = await Promise.all(urls.map(probe));
+  const open = results.filter((r) => !r.closed);
+  return { closed: !open.length, detail: (open.length ? open : results).map((r) => r.detail).join('; ') };
 }
 
 async function readBody(req: IncomingMessage): Promise<string | undefined> {
@@ -58,9 +69,12 @@ const send = (res: ServerResponse, status: number, body: unknown) => {
 
 export async function startRunner(opts: RunnerOptions): Promise<Server> {
   const browser = await launchBrowser();
-  const [network, canaryResult] = await Promise.all([probe(opts.probeUrl), canary(browser)]);
+  let [network, canaryResult] = await Promise.all([probeAll(opts.probeUrls), canary(browser)]);
+  // A network that comes up after start is found within a minute.
+  const reprobe = setInterval(() => void probeAll(opts.probeUrls).then((r) => (network = r)), opts.probeEveryMs ?? 60_000);
+  reprobe.unref();
   const runner = { image: opts.image, browser: `Chromium ${browser.version()}` };
-  const unavailable = [
+  const unavailable = () => [
     ...(network.closed ? [] : [`the check container can reach the network (${network.detail}); it must not`]),
     ...(canaryResult.ok ? [] : [`the check did not see its canary's blocked request (it saw: ${canaryResult.problems.join('; ') || 'nothing'})`]),
   ];
@@ -71,7 +85,8 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
   let pending = 0;
 
   async function check(req: IncomingMessage, res: ServerResponse) {
-    if (unavailable.length) return send(res, 503, { error: unavailable.join('; ') });
+    const reasons = unavailable();
+    if (reasons.length) return send(res, 503, { error: reasons.join('; ') });
     const text = await readBody(req);
     if (text === undefined) return send(res, 413, { error: `the body is over ${MAX_BODY_BYTES} bytes` });
     let body: unknown;
@@ -127,6 +142,7 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
   });
   server.on('close', () => {
     closing = true;
+    clearInterval(reprobe);
     void browser.close();
   });
   await new Promise<void>((resolve) => server.listen(opts.port, resolve));

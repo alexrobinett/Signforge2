@@ -28,7 +28,7 @@ describe('a runner with no network', () => {
     const free = createServer();
     const closed = await listening(free);
     await close(free);
-    runner = await startRunner({ port: 0, image: 'test-image', probeUrl: `${closed}/probe` });
+    runner = await startRunner({ port: 0, image: 'test-image', probeUrls: [`${closed}/probe`] });
     url = `http://127.0.0.1:${(runner.address() as AddressInfo).port}`;
   });
   afterAll(() => close(runner));
@@ -65,7 +65,7 @@ describe('a runner whose org has checks waiting', () => {
     const free = createServer();
     const closed = await listening(free);
     await close(free);
-    const runner = await startRunner({ port: 0, image: 'test-image', probeUrl: `${closed}/probe`, maxPending: 2 });
+    const runner = await startRunner({ port: 0, image: 'test-image', probeUrls: [`${closed}/probe`], maxPending: 2 });
     try {
       const url = `http://127.0.0.1:${(runner.address() as AddressInfo).port}`;
       const send = () => fetch(`${url}/check`, { method: 'POST', body: JSON.stringify(clock) });
@@ -80,11 +80,50 @@ describe('a runner whose org has checks waiting', () => {
   });
 });
 
+/** A local port with nothing listening on it. */
+async function closedPort() {
+  const free = createServer();
+  const url = await listening(free);
+  await close(free);
+  return url;
+}
+
 describe('a runner that can reach the network', () => {
+  it('is open when any probe answers: a name that does not resolve does not hide an address that does', async () => {
+    const outside = createServer((_req, res) => res.end('hello'));
+    const address = `${await listening(outside)}/probe`;
+    const runner = await startRunner({ port: 0, image: 'test-image', probeUrls: [`${await closedPort()}/name`, address] });
+    try {
+      const url = `http://127.0.0.1:${(runner.address() as AddressInfo).port}`;
+      expect((await fetch(`${url}/check`, { method: 'POST', body: JSON.stringify(clock) })).status).toBe(503);
+    } finally {
+      await close(runner);
+      await close(outside);
+    }
+  });
+
+  it('is found open later too: the probe runs again, and checks are refused once it answers', async () => {
+    const later = await closedPort();
+    const runner = await startRunner({ port: 0, image: 'test-image', probeUrls: [`${later}/probe`], probeEveryMs: 200 });
+    const outside = createServer((_req, res) => res.end('hello'));
+    try {
+      const url = `http://127.0.0.1:${(runner.address() as AddressInfo).port}`;
+      expect((await (await fetch(`${url}/health`)).json()).network.closed).toBe(true);
+      await new Promise<void>((resolve) => outside.listen(Number(new URL(later).port), '127.0.0.1', resolve));
+      await new Promise((r) => setTimeout(r, 600));
+      const res = await fetch(`${url}/check`, { method: 'POST', body: JSON.stringify(clock) });
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toMatch(/can reach the network/);
+    } finally {
+      await close(runner);
+      await close(outside);
+    }
+  });
+
   it('refuses every check', async () => {
     const outside = createServer((_req, res) => res.end('hello'));
     const probeUrl = `${await listening(outside)}/probe`;
-    const runner = await startRunner({ port: 0, image: 'test-image', probeUrl });
+    const runner = await startRunner({ port: 0, image: 'test-image', probeUrls: [probeUrl] });
     try {
       const url = `http://127.0.0.1:${(runner.address() as AddressInfo).port}`;
       const res = await fetch(`${url}/check`, { method: 'POST', body: JSON.stringify(clock) });

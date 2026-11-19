@@ -4,6 +4,6 @@ import { startRunner } from './server';
 await startRunner({
   port: Number(process.env.PORT ?? 8080),
   image: process.env.RUNNER_IMAGE ?? 'local',
-  probeUrl: process.env.NETWORK_PROBE_URL ?? 'https://www.cloudflare.com/cdn-cgi/trace',
+  probeUrls: ['https://www.cloudflare.com/cdn-cgi/trace', 'https://1.1.1.1/cdn-cgi/trace'],
 });
 console.log('template-check runner listening');
