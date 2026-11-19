@@ -3,7 +3,7 @@
 import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { dispatch, registry, type Caller } from '@signforge/tools';
-import { evictDurableObject } from 'cloudflare:test';
+import { abortAllDurableObjects } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { agentLimiter } from '../src/agents/grant-object';
@@ -78,8 +78,8 @@ describe("an agent grant's writes", () => {
       at(MIDNIGHT + Math.floor(i / 30) * MINUTE);
       expect(await (i % 2 ? here : there).take('grant-day', true), `write ${i + 1}`).toEqual({ ok: true });
     }
-    // The object is evicted, as one is when idle or redeployed: the day's count is in its storage.
-    await evictDurableObject(env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName('grant-day')));
+    // The object restarts, as on a deploy: the day's count is in its storage.
+    await abortAllDurableObjects();
 
     at(MIDNIGHT + 20 * 60 * MINUTE);
     const a = agent('grant-day');
@@ -116,5 +116,22 @@ describe("an agent grant's writes", () => {
     for (let i = 0; i < 30; i++) await write(a, `Audited again ${i}`);
     await write(a);
     expect(await refusals()).toHaveLength(2);
+  });
+});
+
+describe('a pause mid-minute', () => {
+  // Real time: an object with nothing pending is hibernated after about 10 s without a call, and loses its memory.
+  it("keeps the minute's calls and writes through 12 s without a call, and its writes through a restart", { timeout: 30_000 }, async () => {
+    at(MIDNIGHT + 5 * DAY + 1000);
+    const reader = agent('grant-pause-reads');
+    const writer = agent('grant-pause-writes');
+    for (let i = 0; i < 120; i++) expect((await read(reader)).ok, `call ${i + 1}`).toBe(true);
+    for (let i = 0; i < 30; i++) expect((await write(writer, `Paused ${i}`)).ok, `write ${i + 1}`).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 12_000));
+    expect(await read(reader)).toMatchObject({ ok: false, details: { limit: 'calls_per_minute' } });
+    expect(await write(writer)).toMatchObject({ ok: false, details: { limit: 'writes_per_minute' } });
+    // A restart (a deploy) forgets the minute's calls, never its writes: those are stored with the day's.
+    await abortAllDurableObjects();
+    expect(await write(writer)).toMatchObject({ ok: false, details: { limit: 'writes_per_minute' } });
   });
 });
