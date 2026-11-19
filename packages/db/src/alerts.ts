@@ -65,3 +65,28 @@ export async function findAlertWork(d1: D1Database, now: number, defaultUnreacha
   ]);
   return { offline, back };
 }
+
+/**
+ * Mark finished, at `now`, every publish in any org whose rollout is over: each screen it switched
+ * reports playing its manifest, or was moved on by a later publish. One statement; the
+ * `publish_finished` alert is sent for what it returns.
+ */
+export async function finishPublishes(d1: D1Database, now: number): Promise<{ orgId: string; id: string; revision: number }[]> {
+  const db = drizzle(d1);
+  const p = s.publishes;
+  const ps = s.publishScreens;
+  const sc = s.screens;
+  const waiting = exists(
+    db
+      .select({ one: sql`1` })
+      .from(ps)
+      .innerJoin(sc, and(eq(sc.orgId, ps.orgId), eq(sc.id, ps.screenId)))
+      .where(and(eq(ps.orgId, p.orgId), eq(ps.publishId, p.id), eq(sc.desiredManifestId, ps.manifestId), sql`${sc.reportedManifestId} IS NOT ${ps.manifestId}`)),
+  );
+  return db
+    .update(p)
+    .set({ finishedAt: now })
+    .where(and(isNull(p.finishedAt), eq(p.status, 'published'), not(waiting)))
+    .returning({ orgId: p.orgId, id: p.id, revision: p.revision })
+    .all();
+}

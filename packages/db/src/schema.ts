@@ -682,10 +682,19 @@ export const publishes = sqliteTable(
     publishAt: integer('publish_at'),
     actorKind: text('actor_kind', { enum: ['user', 'agent', 'device', 'system'] }).notNull(),
     actorId: text('actor_id').notNull(),
+    /** The org's publish revision this publish moved it to (`org_settings.publish_revision`): the "v15" people see. */
+    revision: integer('revision').notNull(),
+    /** A roll back: the publish whose screens it put back. Null for a publish of content. */
+    restoresId: text('restores_id'),
     createdAt: created(),
+    /** When every screen it switched reported playing its manifest, or moved on to a later one. */
     finishedAt: integer('finished_at'),
   },
-  (t) => [uniqueIndex('publishes_org_id_uq').on(t.orgId, t.id), index('publishes_org_created_idx').on(t.orgId, t.createdAt)],
+  (t) => [
+    uniqueIndex('publishes_org_id_uq').on(t.orgId, t.id),
+    index('publishes_org_created_idx').on(t.orgId, t.createdAt),
+    uniqueIndex('publishes_org_revision_uq').on(t.orgId, t.revision),
+  ],
 );
 
 /** Which manifest each screen got from a publish. Rollout is a join against `screens.reported_manifest_id`. */

@@ -2,7 +2,7 @@
 // published version. See docs/backend-plan.md#publishing.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { draftChanged, NotInOrgError, published, scoped, StaleVersionError } from '../src/index';
+import { draftChanged, finishPublishes, NotInOrgError, published, scoped, StaleVersionError } from '../src/index';
 import { seedOrg, type SeededOrg } from '../src/testing';
 
 let o: SeededOrg;
@@ -209,7 +209,7 @@ describe('rollout history in the publish batch (review 5)', () => {
     const org = scoped(env.DB, p.orgId);
     const manifestId = 'a'.repeat(64);
     const stage = async (revision: number) => {
-      const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1' });
+      const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision: revision + 1 });
       const rollout = await org.publishes.stage.addScreens(publish.row.id, [{ screenId: p.screen, manifestId }]);
       return {
         id: publish.row.id,
@@ -239,6 +239,96 @@ describe('rollout history in the publish batch (review 5)', () => {
     const p = await seedOrg(env.DB, 'drafts-rollout-foreign');
     const org = scoped(env.DB, p.orgId);
     await expect(org.publishes.stage.addScreens(p.publish, [{ screenId: 'scr_not_mine', manifestId: 'a'.repeat(64) }])).rejects.toBeInstanceOf(NotInOrgError);
+  });
+
+  it('fails the batch as a stale read when a screen is deleted between the read and the commit (#52)', async () => {
+    const p = await seedOrg(env.DB, 'drafts-rollout-deleted');
+    const org = scoped(env.DB, p.orgId);
+    const other = await org.screens.insert({ name: 'Other', timezone: 'UTC', orientation: 'landscape' });
+    const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision: 2 });
+    const rollout = await org.publishes.stage.addScreens(publish.row.id, [
+      { screenId: p.screen, manifestId: 'a'.repeat(64) },
+      { screenId: other.id, manifestId: 'b'.repeat(64) },
+    ]);
+    await org.screens.delete(other.id);
+    await expect(org.commit([...publish.writes, ...rollout.writes])).rejects.toMatchObject({ name: 'StaleVersionError', id: 'screens' });
+    expect(await org.publishes.get(publish.row.id)).toBeUndefined();
+  });
+});
+
+describe('publish history', () => {
+  /** Commit a publish at `revision` switching each screen to its manifest, as the publish tool does. */
+  const publishAt = async (org: ReturnType<typeof scoped>, revision: number, rows: { screenId: string; manifestId: string }[], restoresId?: string) => {
+    const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision, restoresId });
+    const rollout = await org.publishes.stage.addScreens(publish.row.id, rows);
+    await org.commit([...publish.writes, ...rollout.writes, ...rows.flatMap((r) => org.screens.stage.setDesiredManifest(r.screenId, r.manifestId).writes)]);
+    return publish.row;
+  };
+  const m = (c: string) => c.repeat(64);
+
+  it('lists publishes newest first with how each rollout stands, and pages by revision', async () => {
+    const p = await seedOrg(env.DB, 'history-list');
+    const org = scoped(env.DB, p.orgId);
+    const two = await org.screens.insert({ name: 'Two', timezone: 'UTC', orientation: 'landscape' });
+    const v2 = await publishAt(org, 2, [
+      { screenId: p.screen, manifestId: m('1') },
+      { screenId: two.id, manifestId: m('2') },
+    ]);
+    await org.screens.reportManifest(p.screen, m('1'), { arrivedAt: Date.now() });
+    expect(await org.publishes.history({ limit: 1 })).toEqual([
+      expect.objectContaining({ id: v2.id, revision: 2, restoresId: null, actorName: null, screens: 2, applied: 1, replaced: 0 }),
+    ]);
+    const v3 = await publishAt(org, 3, [{ screenId: two.id, manifestId: m('3') }]);
+    const all = await org.publishes.history({ limit: 10 });
+    expect(all.map((h) => [h.id, h.screens, h.applied, h.replaced])).toEqual([
+      [v3.id, 1, 0, 0],
+      [v2.id, 2, 1, 1],
+      [p.publish, 1, 0, 1],
+    ]);
+    expect((await org.publishes.history({ beforeRevision: 3, limit: 10 })).map((h) => h.id)).toEqual([v2.id, p.publish]);
+    expect(await scoped(env.DB, 'drafts-org').publishes.history({ limit: 10 })).not.toContainEqual(expect.objectContaining({ id: v2.id }));
+  });
+
+  it("reads a publish's rollout with each screen's state, and what each screen had as of a revision", async () => {
+    const p = await seedOrg(env.DB, 'history-rollout');
+    const org = scoped(env.DB, p.orgId);
+    const late = await org.screens.insert({ name: 'Annex', timezone: 'UTC', orientation: 'landscape' });
+    const v2 = await publishAt(org, 2, [{ screenId: p.screen, manifestId: m('1') }]);
+    await publishAt(org, 3, [{ screenId: late.id, manifestId: m('2') }]);
+    await publishAt(org, 4, [{ screenId: p.screen, manifestId: m('3') }]);
+    expect(await org.publishes.rollout(v2.id)).toEqual([
+      expect.objectContaining({ id: p.screen, manifestId: m('1'), desiredManifestId: m('3'), reportedManifestId: null, credentialsRevoked: false }),
+    ]);
+    // Seeded at revision 0 with manifest d…d.
+    expect(await org.publishes.asOf(1)).toEqual([{ screenId: p.screen, manifestId: m('d') }]);
+    expect(await org.publishes.asOf(2)).toEqual([{ screenId: p.screen, manifestId: m('1') }]);
+    expect(new Set(await org.publishes.asOf(3))).toEqual(
+      new Set([
+        { screenId: p.screen, manifestId: m('1') },
+        { screenId: late.id, manifestId: m('2') },
+      ]),
+    );
+    expect(await org.publishes.asOf(4)).toContainEqual({ screenId: p.screen, manifestId: m('3') });
+  });
+
+  it('marks a publish finished once every screen it switched plays its manifest or moved on', async () => {
+    const p = await seedOrg(env.DB, 'history-finish');
+    const org = scoped(env.DB, p.orgId);
+    const two = await org.screens.insert({ name: 'Two', timezone: 'UTC', orientation: 'landscape' });
+    // The seeded publish's screen never reported its manifest.
+    await org.screens.reportManifest(p.screen, m('d'), { arrivedAt: 1 });
+    const v2 = await publishAt(org, 2, [
+      { screenId: p.screen, manifestId: m('1') },
+      { screenId: two.id, manifestId: m('2') },
+    ]);
+    const mine = async (now: number) => (await finishPublishes(env.DB, now)).filter((f) => f.orgId === p.orgId);
+    expect(await mine(10)).toEqual([{ orgId: p.orgId, id: p.publish, revision: 0 }]);
+    await org.screens.reportManifest(p.screen, m('1'), { arrivedAt: 2 });
+    expect(await mine(20)).toEqual([]);
+    await publishAt(org, 3, [{ screenId: two.id, manifestId: m('3') }]);
+    expect(await mine(30)).toEqual([{ orgId: p.orgId, id: v2.id, revision: 2 }]);
+    expect((await org.publishes.get(v2.id))!.finishedAt).toBe(30);
+    expect(await mine(40)).toEqual([]);
   });
 });
 
