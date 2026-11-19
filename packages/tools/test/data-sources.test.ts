@@ -109,14 +109,34 @@ describe('find_places', () => {
     timezone: 'America/New_York',
   };
   const places: PlaceFinder = { search: async (query) => (query.trim().toLowerCase() === 'atlanta' ? [atlanta] : []) };
+  /** Every search the caller is let make, and the buckets it was counted in. */
+  const counted: string[] = [];
+  const rateLimit = async (bucket: string) => {
+    counted.push(bucket);
+    return true;
+  };
 
   it('finds places by name, with what a weather source needs: coordinates and time zone', async () => {
-    const r = await dispatch(registry, 'find_places', { query: '  Atlanta ' }, { ...owner, role: 'viewer', places });
+    const r = await dispatch(registry, 'find_places', { query: '  Atlanta ' }, { ...owner, role: 'viewer', places, rateLimit });
     expect(r).toEqual({ ok: true, output: { places: [atlanta] } });
-    expect(await dispatch(registry, 'find_places', { query: 'Nowhere' }, { ...owner, places })).toEqual({ ok: true, output: { places: [] } });
+    expect(await dispatch(registry, 'find_places', { query: 'Nowhere' }, { ...owner, places, rateLimit })).toEqual({ ok: true, output: { places: [] } });
+  });
+
+  it('counts each search against the caller, and refuses one over its limit, or from a caller with none, without asking the geocoder', async () => {
+    let asked = 0;
+    const counting: PlaceFinder = { search: async () => (asked++, [atlanta]) };
+    counted.length = 0;
+    await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting, rateLimit });
+    expect(counted).toEqual(['place_search']);
+    expect(await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting, rateLimit: async () => false })).toMatchObject({
+      ok: false,
+      error: 'rate_limited',
+    });
+    expect(await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting })).toMatchObject({ ok: false, error: 'rate_limited' });
+    expect(asked).toBe(1);
   });
 
   it('refuses a query too short to mean a place', async () => {
-    expect(await dispatch(registry, 'find_places', { query: ' a ' }, { ...owner, places })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await dispatch(registry, 'find_places', { query: ' a ' }, { ...owner, places, rateLimit })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 });

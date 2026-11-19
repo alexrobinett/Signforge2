@@ -152,8 +152,9 @@ export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'no
 /**
  * What the adapter counts against a rate limit, keyed by what it knows of the caller (the API: the
  * member and the address). `pairing_claim`: every claim of a pairing code, right or wrong.
+ * `place_search`: every `find_places`, each a request to a third party's free service.
  */
-export type RateLimitBucket = 'pairing_claim';
+export type RateLimitBucket = 'pairing_claim' | 'place_search';
 /** Counts one attempt in `bucket`; false once the caller is over its limit. */
 export type RateLimiter = (bucket: RateLimitBucket) => Promise<boolean>;
 

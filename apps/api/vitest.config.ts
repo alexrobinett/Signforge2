@@ -37,6 +37,8 @@ export default defineConfig({
       miniflare: {
         bindings: {
           ADMIN_TOKEN: 'test-admin-token',
+          // find_places's geocoder: a closed port, so no test reaches Open-Meteo.
+          GEOCODING_URL: 'http://127.0.0.1:9/v1/search',
           TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname),
           TEMPLATE_BUILDS: await templateBuilds(),
           FONT_FILES: fontFiles(),

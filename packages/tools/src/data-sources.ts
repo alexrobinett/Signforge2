@@ -295,14 +295,18 @@ const placeOutput = z.object({
 const findPlaces = defineTool({
   name: 'find_places',
   description:
-    "Look places up by name with Open-Meteo's geocoding, best match first, for a weather data source: its forecast URL (https://api.open-meteo.com/v1/forecast) takes the latitude, longitude and timezone. Returns { places }.",
+    "Look places up by name with Open-Meteo's geocoding, best match first, for a weather data source: its forecast URL (https://api.open-meteo.com/v1/forecast) takes the latitude, longitude and timezone. Each search counts against the caller's rate limit; over it, rate_limited. Returns { places }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
   input: z.object({ query: z.string().trim().min(2, 'type at least 2 letters of the place').max(100).describe('A place name, such as Atlanta') }),
   output: z.object({ places: z.array(placeOutput) }),
   example: { query: 'Atlanta' },
-  handler: async ({ input, places }) => ({ places: await finderOf(places).search(input.query) }),
+  handler: async ({ input, places, rateLimit }) => {
+    // Unlimited, one member could use up the geocoder's free allowance for every org.
+    if (!rateLimit || !(await rateLimit('place_search'))) throw new ToolError('rate_limited', 'too many place searches; wait a minute and try again');
+    return { places: await finderOf(places).search(input.query) };
+  },
 });
 
 export const dataSourceTools = [listDataSources, getDataSource, createDataSource, updateDataSource, deleteDataSource, findPlaces];
