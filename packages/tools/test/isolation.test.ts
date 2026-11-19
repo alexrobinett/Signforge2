@@ -118,7 +118,6 @@ function oneForeignId(tool: AnyTool, fields: IdField[], field: IdField, s: Seede
  */
 const IGNORES_UNKNOWN = new Set(['remove_group_members.screenIds']);
 
-/** Fields whose foreign id is refused by the check of another field, which the tool makes first. */
 /**
  * Tools that list what org B's own calls were given, which this test fills with org A's ids: the
  * audit log. Each must list exactly org B's own rows instead.
@@ -127,6 +126,7 @@ const LISTS_CALLS: Record<string, (out: unknown) => unknown> = {
   list_audit_log: (out) => (out as { entries: { at: number; action: string; actor: { id: string } }[] }).entries.map((e) => [e.at, e.action, e.actor.id]),
 };
 
+/** Fields whose foreign id is refused by the check of another field, which the tool makes first. */
 const REFUSED_BY_ANOTHER = new Set([
   // The credential is looked up first and must belong to the screen named.
   'revoke_screen_credential.screenId',
