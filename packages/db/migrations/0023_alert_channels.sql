@@ -26,6 +26,7 @@ CREATE TABLE `alert_deliveries` (
 	`next_attempt_at` integer NOT NULL,
 	`give_up_at` integer NOT NULL,
 	`last_attempt_at` integer,
+	`leased_until` integer,
 	`last_http_status` integer,
 	`last_error` text,
 	`created_at` integer NOT NULL,

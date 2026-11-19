@@ -78,7 +78,7 @@ async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards
   const event: AlertEvent = JSON.parse(row.eventJson);
   try {
     const httpStatus = await send(env, email, guards, org, row, event);
-    await org.alertDeliveries.settle(row.id, now, { ok: true, httpStatus });
+    await org.alertDeliveries.settle(row.id, row.attempts, now, { ok: true, httpStatus });
   } catch (e) {
     const failure =
       e instanceof Undeliverable
@@ -90,7 +90,7 @@ async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards
             : undefined;
     if (!failure) throw e;
     const retryAt = now + retryDelay(row.attempts);
-    await org.alertDeliveries.settle(row.id, now, {
+    await org.alertDeliveries.settle(row.id, row.attempts, now, {
       ok: false,
       httpStatus: failure.httpStatus,
       error: failure.error,

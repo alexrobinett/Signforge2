@@ -82,9 +82,14 @@ describe('alert deliveries', () => {
     const at = now + 20 * DAY;
     await queue(s.a.orgId, 'evt_settle', ['slack', 'webhook'], at, at + DAY);
     const [slack, webhook] = (await mine(s.a.orgId, 'evt_settle')).sort((x, y) => x.channel.localeCompare(y.channel));
-    await a.alertDeliveries.settle(slack!.id, at, { ok: true, httpStatus: 200 });
-    await a.alertDeliveries.settle(webhook!.id, at, { ok: false, httpStatus: 500, error: 'http-status', retryAt: at + 5 * MIN });
-    expect(await a.alertDeliveries.get(slack!.id)).toMatchObject({ status: 'delivered', lastHttpStatus: 200, lastError: null });
+    await a.alertDeliveries.claim(slack!.id, at, MIN);
+    await a.alertDeliveries.claim(webhook!.id, at, MIN);
+    // An attempt that is not the latest settles nothing.
+    await a.alertDeliveries.settle(slack!.id, 0, at, { ok: false, httpStatus: 500, error: 'http-status' });
+    expect(await a.alertDeliveries.get(slack!.id)).toMatchObject({ status: 'pending', lastError: null, leasedUntil: at + MIN });
+    await a.alertDeliveries.settle(slack!.id, 1, at, { ok: true, httpStatus: 200 });
+    await a.alertDeliveries.settle(webhook!.id, 1, at, { ok: false, httpStatus: 500, error: 'http-status', retryAt: at + 5 * MIN });
+    expect(await a.alertDeliveries.get(slack!.id)).toMatchObject({ status: 'delivered', lastHttpStatus: 200, lastError: null, leasedUntil: null });
     expect(await a.alertDeliveries.get(webhook!.id)).toMatchObject({
       status: 'pending',
       lastHttpStatus: 500,
@@ -92,7 +97,8 @@ describe('alert deliveries', () => {
       nextAttemptAt: at + 5 * MIN,
     });
 
-    await a.alertDeliveries.settle(webhook!.id, at, { ok: false, httpStatus: 500, error: 'http-status' });
+    await a.alertDeliveries.claim(webhook!.id, at + 5 * MIN, MIN);
+    await a.alertDeliveries.settle(webhook!.id, 2, at + 5 * MIN, { ok: false, httpStatus: 500, error: 'http-status' });
     expect(await a.alertDeliveries.get(webhook!.id)).toMatchObject({ status: 'failed' });
     const due = await claimDueAlertDeliveries(env.DB, at + DAY, { limit: 50, leaseMs: MIN });
     expect(due.map((d) => d.id)).not.toEqual(expect.arrayContaining([slack!.id]));

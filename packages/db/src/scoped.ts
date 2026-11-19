@@ -1099,13 +1099,18 @@ export function scoped(d1: D1Database, orgId: string) {
       claim: (id: string, now: number, leaseMs: number) =>
         db
           .update(ad)
-          .set({ attempts: sql`${ad.attempts} + 1`, lastAttemptAt: now, nextAttemptAt: now + leaseMs, updatedAt: now })
+          .set({ attempts: sql`${ad.attempts} + 1`, lastAttemptAt: now, nextAttemptAt: now + leaseMs, leasedUntil: now + leaseMs, updatedAt: now })
           .where(and(eq(ad.orgId, orgId), eq(ad.id, id), eq(ad.status, 'pending'), lte(ad.nextAttemptAt, now)))
           .returning()
           .get(),
-      /** What an attempt came to: delivered, to be tried again at `retryAt`, or given up on (no `retryAt`). */
+      /**
+       * What attempt `attempt` (its `attempts` once claimed) came to: delivered, to be tried again at
+       * `retryAt`, or given up on (no `retryAt`). It ends the claim. An attempt that is no longer
+       * the latest settles nothing, so a late answer cannot overwrite a newer one.
+       */
       settle: async (
         id: string,
+        attempt: number,
         now: number,
         result: { ok: true; httpStatus: number | null } | { ok: false; httpStatus: number | null; error: string; retryAt?: number },
       ) => {
@@ -1116,15 +1121,26 @@ export function scoped(d1: D1Database, orgId: string) {
             : { nextAttemptAt: result.retryAt, lastHttpStatus: result.httpStatus, lastError: result.error };
         await db
           .update(ad)
-          .set({ ...set, updatedAt: now })
-          .where(and(eq(ad.orgId, orgId), eq(ad.id, id)))
+          .set({ ...set, leasedUntil: null, updatedAt: now })
+          .where(and(eq(ad.orgId, orgId), eq(ad.id, id), eq(ad.attempts, attempt), eq(ad.status, 'pending')))
           .run();
       },
       stage: {
         insert: alertDeliveries.stage.insert,
-        /** Make a delivery due now; one that was given up on gets at least this one more attempt. */
-        retry: (current: AlertDelivery, now: number) =>
-          alertDeliveries.stage.update(current, { status: 'pending', nextAttemptAt: now, giveUpAt: Math.max(current.giveUpAt, now) }),
+        /**
+         * Make a delivery due now; one that was given up on gets at least this one more attempt.
+         * Changes nothing if an attempt holds it by the time it runs (check `leasedUntil` first, to say so).
+         */
+        retry: (current: AlertDelivery, now: number): Staged<AlertDelivery> => {
+          const set = { status: 'pending' as const, nextAttemptAt: now, giveUpAt: Math.max(current.giveUpAt, now), updatedAt: now };
+          return staged(
+            { ...current, ...set },
+            db
+              .update(ad)
+              .set(set)
+              .where(and(eq(ad.orgId, orgId), eq(ad.id, current.id), or(isNull(ad.leasedUntil), lte(ad.leasedUntil, now))!)),
+          );
+        },
       },
     },
 

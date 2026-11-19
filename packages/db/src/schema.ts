@@ -651,6 +651,8 @@ export const alertDeliveries = sqliteTable(
     nextAttemptAt: integer('next_attempt_at').notNull(),
     giveUpAt: integer('give_up_at').notNull(),
     lastAttemptAt: integer('last_attempt_at'),
+    /** While an attempt is being sent: until when its claim holds. Null once it is settled. A retry is refused while it holds. */
+    leasedUntil: integer('leased_until'),
     /** The receiver's HTTP status on the last attempt; null for none (no answer, or email). */
     lastHttpStatus: integer('last_http_status'),
     /** Why the last attempt failed, as a category; never the receiver's body. */

@@ -18,7 +18,7 @@ export async function claimDueAlertDeliveries(d1: D1Database, now: number, { lim
   const col = (c: { name: string }) => sql.identifier(c.name);
   return drizzle(d1).all<{ orgId: string; id: string }>(sql`
     UPDATE ${t} SET ${col(t.attempts)} = ${col(t.attempts)} + 1, ${col(t.lastAttemptAt)} = ${now},
-      ${col(t.nextAttemptAt)} = ${now + leaseMs}, ${col(t.updatedAt)} = ${now}
+      ${col(t.nextAttemptAt)} = ${now + leaseMs}, ${col(t.leasedUntil)} = ${now + leaseMs}, ${col(t.updatedAt)} = ${now}
     WHERE ${col(t.id)} IN (
       SELECT ${col(t.id)} FROM ${t}
       WHERE ${col(t.status)} = 'pending' AND ${col(t.nextAttemptAt)} <= ${now}

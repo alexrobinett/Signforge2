@@ -278,7 +278,7 @@ const listAlertDeliveries = defineTool({
 const retryAlertDelivery = defineTool({
   name: 'retry_alert_delivery',
   description:
-    'Try a pending or failed delivery again now, rather than at its next retry; one given up on gets one more try. Owners only. Returns { delivery }.',
+    'Try a pending or failed delivery again now, rather than at its next retry; one given up on gets one more try. Refused while an attempt is being sent. Owners only. Returns { delivery }.',
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
@@ -290,7 +290,11 @@ const retryAlertDelivery = defineTool({
     const current = await org.alertDeliveries.get(input.alertDeliveryId);
     if (!current) throw notFound('alert delivery', input.alertDeliveryId);
     if (current.status === 'delivered') throw new ToolError('conflict', `alert delivery ${current.id} was delivered`);
-    const row = write(org.alertDeliveries.stage.retry(current, Date.now()));
+    const now = Date.now();
+    // A retry now would send it a second time beside the attempt under way, whose answer is still to come.
+    if (current.leasedUntil !== null && current.leasedUntil > now)
+      throw new ToolError('conflict', `alert delivery ${current.id} is being sent now; see how it went before retrying`);
+    const row = write(org.alertDeliveries.stage.retry(current, now));
     deliverNow(row.id);
     return { delivery: deliveryOf(row) };
   },

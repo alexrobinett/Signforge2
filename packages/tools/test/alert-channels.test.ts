@@ -120,9 +120,24 @@ describe('alert channels', () => {
     expect(row!.giveUpAt).toBeGreaterThanOrEqual(row!.nextAttemptAt);
 
     const org = scoped(env.DB, o.orgId);
-    await org.alertDeliveries.settle(o.alertDelivery, Date.now(), { ok: true, httpStatus: 200 });
+    await org.alertDeliveries.settle(o.alertDelivery, 16, Date.now(), { ok: true, httpStatus: 200 });
     expect(await call('retry_alert_delivery', { alertDeliveryId: o.alertDelivery })).toMatchObject({ ok: false, error: 'conflict' });
     expect(await call('retry_alert_delivery', { alertDeliveryId: 'dlv_nothere' })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('refuses to retry a delivery while an attempt holds it, and retries it once that attempt is settled', async () => {
+    const org = scoped(env.DB, o.orgId);
+    const test = await call('test_alert_channel', { channel: 'email' });
+    if (!test.ok) throw new Error(test.message);
+    const { id } = (test.output as { delivery: { id: string } }).delivery;
+    const now = Date.now();
+    const claimed = await org.alertDeliveries.claim(id, now, 4 * 60_000);
+    expect(claimed?.attempts).toBe(1);
+
+    expect(await call('retry_alert_delivery', { alertDeliveryId: id })).toMatchObject({ ok: false, error: 'conflict' });
+    await org.alertDeliveries.settle(id, 1, now, { ok: false, httpStatus: null, error: 'email' });
+    expect(await org.alertDeliveries.get(id)).toMatchObject({ status: 'failed', lastError: 'email' });
+    expect(await call('retry_alert_delivery', { alertDeliveryId: id })).toMatchObject({ ok: true, output: { delivery: { status: 'pending' } } });
   });
 
   it('removes a channel, and refuses to test one that is not set', async () => {

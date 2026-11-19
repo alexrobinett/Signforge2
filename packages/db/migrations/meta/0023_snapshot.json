@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9ae81c7e-0a37-4e1a-8232-c81a0f3a55d4",
+  "id": "88e86da8-fd34-461f-beec-eaae3d807131",
   "prevId": "853667a4-86d2-400a-a0aa-e307e0f96764",
   "tables": {
     "account": {
@@ -301,6 +301,13 @@
         },
         "last_attempt_at": {
           "name": "last_attempt_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "leased_until": {
+          "name": "leased_until",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
