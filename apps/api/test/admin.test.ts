@@ -40,7 +40,7 @@ async function build(seed: string): Promise<Build> {
     protocol: 1,
   };
   const body: Omit<ScreenManifest, 'id' | 'generatedAt'> = {
-    schema: 2,
+    schema: 3,
     screen: { id: 'local', name: 'Local', timezone: 'UTC', orientation: 'landscape' },
     files: { [htmlSha]: { size: html.byteLength, type: 'text/html' }, [imageSha]: { size: image.byteLength, type: 'image/png' } },
     templates: { 'base/card@1.0.0': { manifest: tm, html: htmlSha } },

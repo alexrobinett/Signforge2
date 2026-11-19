@@ -15,7 +15,7 @@ const sha = (c: string) => c.repeat(64);
 /** Enough of a manifest for the routes: they read its files, templates and data sources. */
 function manifest(id: string, files: string[], extra: Partial<ScreenManifest> = {}): ScreenManifest {
   return {
-    schema: 2,
+    schema: 3,
     id,
     generatedAt: '2026-11-17T00:00:00.000Z',
     screen: { id: 'x', name: 'x', timezone: 'UTC', orientation: 'landscape' },
