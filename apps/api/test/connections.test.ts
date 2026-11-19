@@ -46,6 +46,20 @@ async function everythingShown(who: Client, id: string) {
   ]);
 }
 
+/** A new org with one provider source, connected at a fake provider that rotates refresh tokens. */
+async function rotatingSource(sourceId: string) {
+  const rotating = fakeProvider({ rotateRefreshTokens: true });
+  const who = new Client(testApp({ connectors: { adapters: [rotating.adapter], fetch: rotating.fetch } }));
+  await who.signIn(email(sourceId));
+  const id = (await who.createOrg(`Rotating ${sourceId}`)).id;
+  const o = scoped(env.DB, id);
+  const { authorizeUrl } = await json(await who.tool('start_connection', { provider: 'fake' }));
+  const back = rotating.consent(authorizeUrl);
+  const conn = new URL((await who.get(`${back.pathname}${back.search}`)).headers.get('location') ?? '', 'https://x').searchParams.get('connected') ?? '';
+  await json(await who.tool('create_data_source', { id: sourceId, name: sourceId, format: 'provider', connectionId: conn, resource: 'rooms' }));
+  return { rotating, id, o, conn, expiry: (await o.connections.get(conn))?.expiresAt ?? 0 };
+}
+
 beforeAll(async () => {
   await owner.signIn(email('connector-owner'));
   orgId = (await owner.createOrg('Connectors')).id;
@@ -268,16 +282,7 @@ describe('a provider data source', () => {
   });
 
   it('uses the grant another run refreshed when a rotating provider refuses the old refresh token', async () => {
-    const rotating = fakeProvider({ rotateRefreshTokens: true });
-    const who = new Client(testApp({ connectors: { adapters: [rotating.adapter], fetch: rotating.fetch } }));
-    await who.signIn(email('rotating'));
-    const id = (await who.createOrg('Rotating')).id;
-    const o = scoped(env.DB, id);
-    const { authorizeUrl } = await json(await who.tool('start_connection', { provider: 'fake' }));
-    const back = rotating.consent(authorizeUrl);
-    const conn = new URL((await who.get(`${back.pathname}${back.search}`)).headers.get('location') ?? '', 'https://x').searchParams.get('connected') ?? '';
-    await json(await who.tool('create_data_source', { id: 'rot', name: 'rot', format: 'provider', connectionId: conn, resource: 'rooms' }));
-    const expiry = (await o.connections.get(conn))?.expiresAt ?? 0;
+    const { rotating, id, o, conn, expiry } = await rotatingSource('rot');
 
     // Only this source is due.
     for (const other of ['rooms-a', 'rooms-b']) await org().dataSources.update(other, { nextPollAt: Number.MAX_SAFE_INTEGER });
@@ -304,16 +309,7 @@ describe('a provider data source', () => {
   });
 
   it('stores the second refresh of a run over the first, keeping the rotated refresh token', async () => {
-    const rotating = fakeProvider({ rotateRefreshTokens: true });
-    const who = new Client(testApp({ connectors: { adapters: [rotating.adapter], fetch: rotating.fetch } }));
-    await who.signIn(email('twice'));
-    const id = (await who.createOrg('Twice')).id;
-    const o = scoped(env.DB, id);
-    const { authorizeUrl } = await json(await who.tool('start_connection', { provider: 'fake' }));
-    const back = rotating.consent(authorizeUrl);
-    const conn = new URL((await who.get(`${back.pathname}${back.search}`)).headers.get('location') ?? '', 'https://x').searchParams.get('connected') ?? '';
-    await json(await who.tool('create_data_source', { id: 'twice', name: 'twice', format: 'provider', connectionId: conn, resource: 'rooms' }));
-    const expiry = (await o.connections.get(conn))?.expiresAt ?? 0;
+    const { rotating, id, o, conn, expiry } = await rotatingSource('twice');
     for (const other of ['rooms-a', 'rooms-b']) await org().dataSources.update(other, { nextPollAt: Number.MAX_SAFE_INTEGER });
 
     // The access token the first refresh brings is refused at once: the run refreshes a second time.
