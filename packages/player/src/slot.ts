@@ -395,6 +395,7 @@ export class Slot {
     if (target.protocol !== 'https:' || target.origin === location.origin) throw new Error('URL spots must be https pages on another site');
     const frame = document.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+    frame.title = spot.name;
     frame.style.cssText = 'width:100%;height:100%';
     const loaded = new Promise<void>((resolve) => frame.addEventListener('load', () => resolve(), { once: true, signal }));
     frame.src = target.href;
