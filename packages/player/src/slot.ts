@@ -78,6 +78,24 @@ function brandTheme(manifest: ScreenManifest): Promise<FrameTheme | undefined> {
   return themeCache.theme;
 }
 
+/**
+ * `containedFrames` for each bundle of the manifest last prepared, by bundle hash. Reading a bundle
+ * with the HTML parser takes about 12 ms on a Pi 4 (90 ms the first time): once per bundle, not per play.
+ */
+let framesCache: { manifest: string; frames: Map<string, ReturnType<typeof containedFrames>> } | undefined;
+
+async function framesFor(manifest: ScreenManifest, sha: string): Promise<ReturnType<typeof containedFrames>> {
+  if (framesCache?.manifest !== manifest.id) {
+    const bundles = new Set(Object.values(manifest.templates).map((t) => t.html));
+    const kept = [...(framesCache?.frames ?? [])].filter(([k]) => bundles.has(k));
+    framesCache = { manifest: manifest.id, frames: new Map(kept) };
+  }
+  const cache = framesCache;
+  let frames = cache.frames.get(sha);
+  if (!frames) cache.frames.set(sha, (frames = containedFrames(await (await getFile(sha)).text())));
+  return frames;
+}
+
 async function loadTheme({ brand }: ScreenManifest): Promise<FrameTheme | undefined> {
   if (!brand) return undefined;
   const font = async (f: NonNullable<typeof brand.fonts.body>): Promise<FrameFont> => ({
@@ -196,7 +214,7 @@ export class Slot {
     // Speak the protocol the bundle was built against: published bundles never change.
     const protocol = t.manifest.protocol ?? 1;
     if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
-    const { wrapper: wrapperHtml, template: templateHtml } = containedFrames(await (await getFile(t.html)).text());
+    const { wrapper: wrapperHtml, template: templateHtml } = await framesFor(manifest, t.html);
     const assets = await spotAssets(spot);
     // Protocol 1 bundles predate the theme.
     const theme = protocol >= 2 ? await brandTheme(manifest) : undefined;
