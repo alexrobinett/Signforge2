@@ -8,7 +8,7 @@ import { resolveSpotData } from '@signforge/player-core';
 import { ToolError } from '@signforge/tools';
 import { env } from 'cloudflare:workers';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import menuBoard from '../../../templates/menu-board/template.json';
+import menuBoard from '@signforge/template-menu-board/template.json';
 import { feedUrlSealer } from '../src/data/cipher';
 import { feedGuards, type FetchGuards } from '../src/data/fetch';
 import { pollDataSources } from '../src/data/poller';
