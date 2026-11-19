@@ -11,14 +11,13 @@ import { TriangleAlertIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { NativeSelect } from '~/components/ui/select';
 import { useHydrated } from '~/lib/hydrated';
-import type { BrandKitView } from '~/lib/spots';
+import { PLAYER_URL } from '~/lib/preview';
+import type { BrandKitView } from '~/lib/brand-kits';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 import type { StageShows } from '~/state/spot-editor';
 
 type Scale = 'fit' | 'actual';
-
-const PLAYER_URL = '/player/index.html?source=preview';
 
 /** The stage's settings in an editor's URL: `?o=portrait&scale=actual&kit=<id>&data=fallback`. */
 export interface StageSearch {

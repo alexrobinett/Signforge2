@@ -19,6 +19,7 @@
  * the draft is compiled without its bindings, so the stage shows the fallback values.
  */
 import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } from '@signforge/contract';
+import { playerMessage } from '~/lib/preview';
 import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
 import { madeByEditor } from '~/lib/live-data';
@@ -358,13 +359,3 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     },
   };
 };
-
-/** What the player says over the preview channel (contract `PreviewPlayerMessage`), read field by field. */
-function playerMessage(data: unknown): { type: 'listening' } | { type: 'playing'; spot: string | null } | { type: 'error'; message: string } | undefined {
-  if (typeof data !== 'object' || data === null || !('sfPreview' in data) || data.sfPreview !== PREVIEW_PROTOCOL || !('type' in data)) return undefined;
-  if (data.type === 'listening') return { type: 'listening' };
-  if (data.type === 'playing') return { type: 'playing', spot: 'spot' in data && typeof data.spot === 'string' ? data.spot : null };
-  if (data.type === 'error')
-    return { type: 'error', message: 'message' in data && typeof data.message === 'string' ? data.message : 'The player could not show it.' };
-  return undefined;
-}
