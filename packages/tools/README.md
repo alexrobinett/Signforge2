@@ -78,13 +78,13 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `update_brand_kit` | content:draft | editor | `{ brandKitId, name?, colors?, shape?, displayFontId?, bodyFontId?, logoOnDarkAssetId?, logoOnLightAssetId?, ifVersion? }` | `{ brandKit }` |
 | `set_default_brand_kit` | content:draft | editor | `{ brandKitId }` | `{ brandKit }` |
 | `assign_brand_kit` | content:draft | editor | `{ brandKitId \| null, screenId? \| groupId? }` | `{ brandKit \| null }` |
-| `list_data_sources` | content:read | viewer | `{ limit?, cursor? }` | `{ dataSources: DataSource[], next }`, by id |
+| `list_data_sources` | content:read | viewer | `{ limit?, cursor? }` | `{ dataSources: DataSource[], next }`, by id; each with `lastCheckedAt` (its last good poll, null before one) and the `spots` that bind it, as drafted or as published |
 | `get_data_source` | content:read | viewer | `{ dataSourceId }` | `{ dataSource, snapshot \| null }` |
 | `create_data_source` | content:draft | editor | `{ id?, name, format, feedUrl? \| connectionId? and resource?, refreshS?, horizonDays?, idempotencyKey? }` | `{ dataSource }`; 409 past 10 per org |
 | `update_data_source` | content:draft | editor | `{ dataSourceId, name?, feedUrl? \| resource?, refreshS?, horizonDays? \| null, ifVersion? }` | `{ dataSource }` |
 | `delete_data_source` | content:draft | editor | `{ dataSourceId }` | `{ deleted }`, or 409 while a spot binds it |
 | `find_places` | content:read | viewer | `{ query }` | `{ places: { id, name, region, country, latitude, longitude, timezone }[] }`, best match first |
-| `list_connections` | content:read | viewer | `{ limit?, cursor? }` | `{ connections: Connection[], next }`, by id |
+| `list_connections` | content:read | viewer | `{ limit?, cursor? }` | `{ connections: Connection[], providers, next }`, by id; `providers`: what `start_connection` takes in this deployment |
 | `start_connection` | content:draft | editor | `{ provider, connectionId? }` | `{ authorizationId, authorizeUrl, expiresAt }` |
 | `finish_connection` | content:draft | editor | `{ oauthState, code }` | `{ connection }`; 404 for a state that is not pending for the caller |
 | `disconnect` | content:draft | editor | `{ connectionId }` | `{ deleted, dataSourceIds }` |

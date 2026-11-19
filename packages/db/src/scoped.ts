@@ -1363,6 +1363,15 @@ export function scoped(d1: D1Database, orgId: string) {
               .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
               .all()
           : [],
+      /** When each source's latest snapshot was last confirmed, without its data (up to 64 kB each). */
+      checkedTimes: async (dataSourceIds: readonly string[]) =>
+        dataSourceIds.length
+          ? db
+              .select({ dataSourceId: snap.dataSourceId, checkedAt: snap.checkedAt })
+              .from(snap)
+              .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
+              .all()
+          : [],
       putSnapshot: async (dataSourceId: string, v: Snapshot) => {
         if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId);
         await db

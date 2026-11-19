@@ -61,6 +61,7 @@ describe("a call made for org B with org A's ids", () => {
       ['dataSources.usingConnection', () => b.dataSources.usingConnection(a.connection)],
       ['connections.get', () => b.connections.get(a.connection)],
       ['dataSources.snapshots', () => b.dataSources.snapshots([a.dataSource])],
+      ['dataSources.checkedTimes', () => b.dataSources.checkedTimes([a.dataSource])],
       ['playCounts.list', () => b.playCounts.list({ from: a.hour, to: a.hour + 3_600_000, screenId: a.screen })],
       ['brandKits.get', () => b.brandKits.get(a.brandKit)],
     ];

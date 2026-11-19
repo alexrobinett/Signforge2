@@ -18,7 +18,7 @@ import { createAuth, ROLES, type Auth, type AuthSession, type Role } from '../au
 import { emailSenderFor, type EmailSender } from '../email';
 import type { ConnectorDeps } from '../connectors';
 import { mountBlobs } from './blobs';
-import { mountConnectionCallback } from './connections';
+import { mountConnectionCallback, mountSignedOutCallback } from './connections';
 import { mountTools } from './tools';
 
 interface ApiVars {
@@ -103,6 +103,7 @@ export function createApi(deps: ApiDeps = {}) {
     });
   });
 
+  mountSignedOutCallback(api);
   api.use('*', requireSession, requireOrg);
   mountTools(api, deps.connectors, deps.email);
   mountConnectionCallback(api, deps.connectors);
