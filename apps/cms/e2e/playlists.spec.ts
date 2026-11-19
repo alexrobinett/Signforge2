@@ -134,11 +134,57 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
   await expect(page.getByText(/Saved \d/)).toBeVisible();
 });
 
+test('a change someone else made while the editor was open is not overwritten', async () => {
+  const { playlist } = await tool(page, 'get_playlist', { playlistId });
+  // Stands in for an agent: a reorder lands after the page read the playlist.
+  await tool(page, 'update_playlist', { playlistId, spotIds: [spots.Closing], ifVersion: playlist.version });
+  await page.getByRole('radio', { name: /^Cut/ }).check();
+  await expect(page.getByText('This changed since you opened it.')).toBeVisible();
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByRole('list', { name: 'Spots in play order' }).getByRole('listitem')).toHaveCount(1);
+  await expect(page.getByRole('radio', { name: /^Crossfade/ })).toBeChecked();
+});
+
+test('the list shows each playlist, and a playlist can be deleted', async () => {
+  await page.getByRole('link', { name: 'Playlists' }).first().click();
+  await hydrated(page);
+  const row = page.getByRole('link', { name: /Lunch loop/ });
+  await expect(row).toContainText('1 spot · 4 s loop · Crossfade 0.8 s · Draft, never published');
+  await axe(page);
+  await shots(page, '45-playlists');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shots(page, '46-playlists-phone');
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await row.click();
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('alertdialog')).toContainText('Delete Lunch loop?');
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByRole('heading', { name: 'No playlists yet' })).toBeVisible();
+});
+
 test('axe reads the stage only once a fade between spots is over (#95)', async () => {
   test.setTimeout(90_000);
-  await page.getByRole('radio', { name: /^Fade/ }).check();
-  await page.getByRole('spinbutton', { name: 'Length' }).fill('2');
-  await expect(page.getByText(/Saved \d/)).toBeVisible();
+  // A loop of its own: two 8 s clocks and a 2 s fade leave the stage still for most of each loop,
+  // longer than an analysis on CI. In a loop of 4 s clocks the next prepare and the fade leave less.
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key.endsWith('/clock') || t.key === 'clock').versions.at(-1).id;
+  const spotIds: string[] = [];
+  for (const greeting of ['Doors open', 'Doors close'])
+    spotIds.push(
+      (await tool(page, 'create_spot', { name: greeting, kind: 'template', templateVersionId: clock, durationMs: 8000, data: { greeting } })).spot.id,
+    );
+  const { playlist } = await tool(page, 'create_playlist', {
+    name: 'Fade check',
+    transition: { type: 'fade', ms: 2000 },
+    spotIds,
+    idempotencyKey: `fade-check-${Date.now()}`,
+  });
+  await page.goto(`/playlists/${playlist.id}`);
+  await hydrated(page);
+  await expect(page.getByRole('region', { name: 'Live preview' }).getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   // The player's own document on the stage: the frame that holds the slots.
   let stage: Frame | undefined;
   await expect
@@ -176,8 +222,7 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
       },
     });
   });
-  // Catch a fade as it starts: 1 s out, then 1 s in, longer than both analyses together. Its 4 s
-  // clocks leave the stage still for about 2 s a loop.
+  // Catch a fade as it starts: 1 s out, then 1 s in, longer than both analyses together.
   await expect
     .poll(
       () =>
@@ -203,39 +248,4 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
     ).toBe(true);
     expect(opacities, `slot opacities during a scan: ${scan}`).toContain(1);
   }
-  // Back to the 0.8 s crossfade the next test expects.
-  await page.getByRole('radio', { name: /^Crossfade/ }).check();
-  await page.getByRole('spinbutton', { name: 'Length' }).fill('0.8');
-  await expect(page.getByText(/Saved \d/)).toBeVisible();
-});
-
-test('a change someone else made while the editor was open is not overwritten', async () => {
-  const { playlist } = await tool(page, 'get_playlist', { playlistId });
-  // Stands in for an agent: a reorder lands after the page read the playlist.
-  await tool(page, 'update_playlist', { playlistId, spotIds: [spots.Closing], ifVersion: playlist.version });
-  await page.getByRole('radio', { name: /^Cut/ }).check();
-  await expect(page.getByText('This changed since you opened it.')).toBeVisible();
-  await page.getByRole('button', { name: 'Reload' }).click();
-  await expect(page.getByRole('list', { name: 'Spots in play order' }).getByRole('listitem')).toHaveCount(1);
-  await expect(page.getByRole('radio', { name: /^Crossfade/ })).toBeChecked();
-});
-
-test('the list shows each playlist, and a playlist can be deleted', async () => {
-  await page.getByRole('link', { name: 'Playlists' }).first().click();
-  await hydrated(page);
-  const row = page.getByRole('link', { name: /Lunch loop/ });
-  await expect(row).toContainText('1 spot · 4 s loop · Crossfade 0.8 s · Draft, never published');
-  await axe(page);
-  await shots(page, '45-playlists');
-  await page.setViewportSize({ width: 390, height: 844 });
-  await shots(page, '46-playlists-phone');
-  await page.setViewportSize({ width: 1280, height: 720 });
-
-  await row.click();
-  await hydrated(page);
-  await page.getByRole('button', { name: 'Delete' }).click();
-  await expect(page.getByRole('alertdialog')).toContainText('Delete Lunch loop?');
-  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
-  await expect(page).toHaveURL(/\/playlists$/);
-  await expect(page.getByRole('heading', { name: 'No playlists yet' })).toBeVisible();
 });
