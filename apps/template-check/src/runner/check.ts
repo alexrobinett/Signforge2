@@ -38,15 +38,20 @@ export interface CheckResult {
 
 const shortUrl = (url: string) => (url.length > 200 ? `${url.slice(0, 197)}...` : url);
 
-/** Chromium's console lines for an attempt it blocked, as problems. */
+/**
+ * Chromium's console lines for an attempt it blocked, as problems. Chromium quotes the URL in '...'
+ * without escaping it, so the URL runs to the last quote before the fixed words after it.
+ */
 const BLOCKED: [RegExp, (url: string) => string][] = [
-  [/^Framing '([^']*)' violates the following Content Security Policy/, (u) => `tried to open ${u} in a frame (blocked)`],
-  [/^Blocked opening '([^']*)' in a new window/, (u) => `tried to open ${u} in a new window (blocked)`],
-  [/^Blocked form submission to '([^']*)'/, (u) => `tried to submit a form to ${u} (blocked)`],
+  [/^Framing '(.*)' violates the following Content Security Policy directive/, (u) => `tried to open ${u} in a frame (blocked)`],
+  [/^Blocked opening '(.*)' in a new window/, (u) => `tried to open ${u} in a new window (blocked)`],
+  [/^Blocked form submission to '(.*)' because/, (u) => `tried to submit a form to ${u} (blocked)`],
   [/^Unsafe attempt to initiate navigation for frame()/, () => 'tried to navigate the page around it (blocked)'],
-  // fetch, XHR, WebSocket, beacon, images, fonts, media, prefetch, workers: Chromium names each kind.
-  [/^[A-Z][a-z]+(?: [a-z]+)* '([^']*)' violates the following Content Security Policy/, (u) => `requested ${u} (blocked)`],
+  // fetch, XHR, WebSocket, beacon, images, fonts, media, prefetch, workers: whatever Chromium calls it.
+  [/'(.*)' violates the following Content Security Policy directive/, (u) => `requested ${u} (blocked)`],
 ];
+/** Any other line with these words is something the policy stopped (eval, say): also a problem. */
+const CSP_VIOLATION = 'violates the following Content Security Policy directive';
 /** Logged by the init script below; a template cannot remove that script's hold on the constructor. */
 const WEBRTC = '[sf-check] RTCPeerConnection';
 
@@ -56,6 +61,7 @@ function consoleProblem(text: string): string | undefined {
     const m = pattern.exec(text);
     if (m) return problem(shortUrl(m[1] ?? ''));
   }
+  if (text.includes(CSP_VIOLATION)) return `did something the screen's policy blocks: ${shortUrl(text)}`;
   return undefined;
 }
 

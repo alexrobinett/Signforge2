@@ -59,6 +59,8 @@ describe('a template that misbehaves', () => {
   const cases: [string, string[]][] = [
     ['fetch', ['requested https://example.com/leak (blocked)']],
     ['image', ['requested https://example.com/leak (blocked)']],
+    ['apostrophe', ["requested https://example.com/leak/a'b (blocked)", "requested https://example.com/leak/a'b.png (blocked)"]],
+    ['media', ['requested https://example.com/leak.mp4 (blocked)']],
     ['navigate-top', ['tried to navigate the page around it (blocked)']],
     // Chromium names only the origin of a frame it refused to load.
     ['navigate-self', ['tried to open https://example.com/ in a frame (blocked)', 'navigated its own frame (blocked)']],

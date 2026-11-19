@@ -11,6 +11,17 @@ const forever = () => new Promise<never>(() => {});
 
 const attempts: Record<string, () => unknown> = {
   fetch: () => (reach(['fe', 'tch'].join('')) as (u: string) => Promise<unknown>)(TARGET).catch(() => undefined),
+  // Chromium quotes the URL in '...' without escaping, so a quote in it must not end the URL.
+  apostrophe: () => {
+    (reach(['fe', 'tch'].join('')) as (u: string) => Promise<unknown>)(`${TARGET}/a'b`).catch(() => undefined);
+    new Image().src = `${TARGET}/a'b.png`;
+  },
+  // Chromium logs this one as "Loading media from  '...'", with two spaces.
+  media: () => {
+    const v = document.createElement('video');
+    v.src = `${TARGET}.mp4`;
+    document.body.appendChild(v);
+  },
   'navigate-top': () => {
     try {
       top!.location.href = TARGET;
