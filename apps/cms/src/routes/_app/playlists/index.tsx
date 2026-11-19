@@ -5,8 +5,7 @@
  */
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { ChevronRightIcon } from 'lucide-react';
-import { EmptyState, PageHeader } from '~/components/page';
+import { EmptyState, PageHeader, ROW_LINK, RowText } from '~/components/page';
 import { NewPlaylistDialog } from '~/components/playlists/new-playlist-dialog';
 import { useCanManage, useOrgId } from '~/lib/live';
 import { clockLength, loopMs, playlistPublishWord, transitionWord } from '~/lib/playlists';
@@ -42,19 +41,11 @@ function PlaylistsPage() {
         <ul className="divide-y overflow-hidden rounded-xl border bg-card">
           {playlists.map((p) => (
             <li key={p.id}>
-              <Link
-                to="/playlists/$playlistId"
-                params={{ playlistId: p.id }}
-                className="flex items-center gap-3 px-4 py-3 outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{p.name}</span>
-                  <span className="block text-sm text-muted-foreground sm:truncate">
-                    {p.spotIds.length === 1 ? '1 spot' : `${p.spotIds.length} spots`} · {clockLength(loopMs(p.spotIds, byId))} loop ·{' '}
-                    {transitionWord(p.transition)} · {playlistPublishWord(p)}
-                  </span>
-                </span>
-                <ChevronRightIcon className="size-4 text-muted-foreground" aria-hidden />
+              <Link to="/playlists/$playlistId" params={{ playlistId: p.id }} className={ROW_LINK}>
+                <RowText title={p.name}>
+                  {p.spotIds.length === 1 ? '1 spot' : `${p.spotIds.length} spots`} · {clockLength(loopMs(p.spotIds, byId))} loop ·{' '}
+                  {transitionWord(p.transition)} · {playlistPublishWord(p)}
+                </RowText>
               </Link>
             </li>
           ))}

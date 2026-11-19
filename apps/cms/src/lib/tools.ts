@@ -56,6 +56,10 @@ export const isStale = (err: unknown) =>
 /** A tool's refusal as a sentence for the page. */
 export const toolMessage = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');
 
+/** An editor's state after a refused save: `stale` when someone else changed the row since, which the editor offers to reload. */
+export const saveRefused = (err: unknown) =>
+  isStale(err) ? { stale: true, saveError: 'This changed since you opened it.' } : { stale: false, saveError: toolMessage(err) };
+
 /** The spot in a `{ spot }` output, such as `update_spot`'s, for the Query cache. */
 export function spotOf(output: unknown): SpotView {
   if (isRecord(output) && isSpot(output.spot)) return output.spot;

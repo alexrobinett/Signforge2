@@ -11,7 +11,7 @@
 import type { Transition } from '@signforge/contract';
 import { draftChanged, published, type OrgScope, type PlaylistRow } from '@signforge/db';
 import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name, version } from './fields';
+import { draftOutput, id, idempotencyKey, ifVersion, name, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
 
@@ -32,11 +32,7 @@ const playlistOutput = z.object({
   transition,
   spotIds: z.array(z.string()).describe('The spots in play order'),
   version: version.describe('Moves on with every edit of the draft, its spots too; pass it as ifVersion to update only what you read'),
-  published: z.boolean().describe('Whether a version of it has been published'),
-  draftChanged: z.boolean().describe('Whether the draft differs from what is published (always, before the first publish)'),
-  publishedAt: z.number().nullable(),
-  createdAt: z.number(),
-  updatedAt: z.number(),
+  ...draftOutput,
 });
 type PlaylistView = z.infer<typeof playlistOutput>;
 const playlistResult = z.object({ playlist: playlistOutput });

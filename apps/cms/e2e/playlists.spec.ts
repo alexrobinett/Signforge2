@@ -1,27 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.41';
-
-/** Whether any frame on the page (the player's template frames included) shows `text`. */
-async function stageShows(page: Page, text: string) {
-  for (const frame of page.frames())
-    if (
-      (await frame
-        .getByText(text, { exact: false })
-        .count()
-        .catch(() => 0)) > 0
-    )
-      return true;
-  return false;
-}
-
-async function tool(page: Page, name: string, input: unknown) {
-  const res = await page.request.post(`/api/tools/${name}`, { data: input });
-  expect(res.status(), await res.text()).toBe(200);
-  return res.json();
-}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -33,10 +14,7 @@ let playlistId = '';
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-playlists-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Northside Market', level: 1 })).toBeVisible();
+  await createOrg(page, 'Northside Market');
   // Spots to put in order: three short clocks, and a photo promo with no photo yet.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const version = (key: string) => templates.find((t: { key: string }) => t.key.endsWith(`/${key}`) || t.key === key).versions.at(-1).id;

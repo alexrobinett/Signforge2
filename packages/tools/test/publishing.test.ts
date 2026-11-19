@@ -7,7 +7,7 @@ import { seedOrganization, seedScreen } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import stressGolden from '@signforge/cli/golden/stress.json';
-import { dispatch, registry, type Caller } from '../src';
+import { editorCalls, ok } from './calls';
 import { loadCompileInput, loadOrg, publishOrg } from '../src/publishing';
 
 const hash = async (text: string) =>
@@ -485,12 +485,8 @@ describe('loadCompileInput', () => {
 
   it('compiles a playlist built with the playlist tools, as the CMS builds it, to the one sf build makes for examples/stress (M3-17)', async () => {
     const { org } = await seedStress('stress-tools', { playlists: false, screenId: 'stress-tools-screen' });
-    const caller: Caller = { org, role: 'editor', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS };
-    const call = async (name: string, input: unknown) => {
-      const r = await dispatch(registry, name, input, caller);
-      if (!r.ok) throw new Error(JSON.stringify(r));
-      return (r.output as { playlist: { id: string; version: number } }).playlist;
-    };
+    const tool = editorCalls(org);
+    const call = async (name: string, input: unknown) => (await ok(tool(name, input))).playlist as { id: string; version: number };
     // The editor's path: make it empty, then add the spots and pick the transition, each an edit.
     const want = golden.playlists[golden.defaultPlaylist]!;
     const made = await call('create_playlist', { name: want.name, transition: { type: 'cut' } });

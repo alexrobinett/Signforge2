@@ -14,7 +14,7 @@ import type { ScreenManifest } from '@signforge/contract';
 import { toast } from 'sonner';
 import { playlistDraftOf, type PlaylistDraft, type PlaylistView } from '~/lib/playlists';
 import { compilePlaylistPreview, versionsById, type SpotPreview } from '~/lib/spots';
-import { callTool, isStale, playlistOf, toolMessage } from '~/lib/tools';
+import { callTool, playlistOf, saveRefused, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery } from '~/queries/playlists';
 import { assetsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { StageTarget } from './spot-editor';
@@ -181,11 +181,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
         void queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
         editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === draft ? 'saved' : 'unsaved' }));
       } catch (err) {
-        editor((e) =>
-          isStale(err)
-            ? { ...e, status: 'unsaved', stale: true, saveError: 'This changed since you opened it.' }
-            : { ...e, status: 'unsaved', saveError: toolMessage(err) },
-        );
+        editor((e) => ({ ...e, status: 'unsaved', ...saveRefused(err) }));
       } finally {
         saving = false;
       }

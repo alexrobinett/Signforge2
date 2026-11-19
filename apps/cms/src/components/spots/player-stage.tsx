@@ -15,10 +15,23 @@ import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 import type { StageShows } from '~/state/spot-editor';
 
-type Orientation = 'landscape' | 'portrait';
 type Scale = 'fit' | 'actual';
 
 const PLAYER_URL = '/player/index.html?source=preview';
+
+/** The stage's settings in an editor's URL: `?o=portrait&scale=actual&kit=<id>`. */
+export interface StageSearch {
+  o?: 'portrait';
+  scale?: 'actual';
+  kit?: string;
+}
+
+/** An editor route's `validateSearch`: the stage's settings, anything else dropped. */
+export const stageSearch = (s: Record<string, unknown>): StageSearch => ({
+  ...(s.o === 'portrait' ? { o: 'portrait' as const } : {}),
+  ...(s.scale === 'actual' ? { scale: 'actual' as const } : {}),
+  ...(typeof s.kit === 'string' && s.kit ? { kit: s.kit } : {}),
+});
 
 function Toggle<T extends string>({
   label,
@@ -54,20 +67,17 @@ function Toggle<T extends string>({
 
 export function PlayerStage({
   target,
-  scale,
   kits,
   kitId,
-  onOrientation,
-  onScale,
-  onKit,
+  search,
+  onSearch,
 }: {
   target: StageShows;
-  scale: Scale;
   kits: BrandKitView[];
   kitId: string | null;
-  onOrientation: (o: Orientation) => void;
-  onScale: (s: Scale) => void;
-  onKit: (id: string) => void;
+  /** The stage's settings, from the editor's URL; `onSearch` changes them there. */
+  search: StageSearch;
+  onSearch: (next: Partial<StageSearch>) => void;
 }) {
   const attach = useAppStore((s) => s.attachStage);
   const measure = useAppStore((s) => s.measureStage);
@@ -83,6 +93,7 @@ export function PlayerStage({
   const playlistId = 'playlistId' in target ? target.playlistId : undefined;
   const size = SCREEN_BOX[orientation];
   const fit = box ? Math.min(box.w / size.w, box.h / size.h, 1) : 0;
+  const scale: Scale = search.scale ?? 'fit';
   const shown = scale === 'fit' ? fit : 1;
 
   // The frame and what it shows, handed to the store whenever either changes.
@@ -117,7 +128,7 @@ export function PlayerStage({
             { value: 'landscape', label: 'Landscape' },
             { value: 'portrait', label: 'Portrait' },
           ]}
-          onChange={onOrientation}
+          onChange={(o) => onSearch({ o: o === 'portrait' ? 'portrait' : undefined })}
         />
         <Toggle
           label="Scale"
@@ -126,12 +137,17 @@ export function PlayerStage({
             { value: 'fit', label: 'Fit' },
             { value: 'actual', label: '100%' },
           ]}
-          onChange={onScale}
+          onChange={(v) => onSearch({ scale: v === 'actual' ? 'actual' : undefined })}
         />
         {kits.length > 0 && (
           <span className="flex items-center gap-2 text-sm text-[#d4d4d4]">
             <label htmlFor="stage-kit">Brand kit</label>
-            <NativeSelect id="stage-kit" value={kitId ?? ''} onChange={(e) => onKit(e.target.value)} className="min-w-40 text-[#101828] dark:text-foreground">
+            <NativeSelect
+              id="stage-kit"
+              value={kitId ?? ''}
+              onChange={(e) => onSearch({ kit: e.target.value })}
+              className="min-w-40 text-[#101828] dark:text-foreground"
+            >
               {kits.map((k) => (
                 <option key={k.id} value={k.id}>
                   {k.name}

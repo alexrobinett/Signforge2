@@ -5,21 +5,14 @@ import { seedOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
+import { editorCalls, ok } from './calls';
 
 async function setup(orgId: string) {
   const o = await seedOrg(env.DB, orgId);
   const org = scoped(env.DB, orgId);
-  const caller: Caller = { org, role: 'editor', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS };
-  const call = (name: string, input: unknown) => dispatch(registry, name, input, caller);
-  return { o, org, call };
+  return { o, org, call: editorCalls(org) };
 }
 
-/** The output of a call that must succeed. */
-const ok = async (p: Promise<{ ok: boolean }>) => {
-  const r = await p;
-  if (!r.ok) throw new Error(JSON.stringify(r));
-  return (r as unknown as { output: Record<string, unknown> }).output;
-};
 const idOf = (out: Record<string, unknown>) => (out.playlist as { id: string }).id;
 
 describe('playlist drafts', () => {

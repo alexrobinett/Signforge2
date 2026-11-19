@@ -4,8 +4,7 @@
  */
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { ChevronRightIcon } from 'lucide-react';
-import { EmptyState, PageHeader } from '~/components/page';
+import { EmptyState, PageHeader, ROW_LINK, RowText } from '~/components/page';
 import { NewSpotDialog } from '~/components/spots/new-spot-dialog';
 import { useCanManage, useOrgId } from '~/lib/live';
 import { sectionFor } from '~/lib/sections';
@@ -40,18 +39,10 @@ function SpotsPage() {
         <ul className="divide-y overflow-hidden rounded-xl border bg-card">
           {spots.map((s) => (
             <li key={s.id}>
-              <Link
-                to="/spots/$spotId"
-                params={{ spotId: s.id }}
-                className="flex items-center gap-3 px-4 py-3 outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{s.name}</span>
-                  <span className="block truncate text-sm text-muted-foreground">
-                    {spotWhat(s, versions)} · {publishWord(s)}
-                  </span>
-                </span>
-                <ChevronRightIcon className="size-4 text-muted-foreground" aria-hidden />
+              <Link to="/spots/$spotId" params={{ spotId: s.id }} className={ROW_LINK}>
+                <RowText title={s.name}>
+                  {spotWhat(s, versions)} · {publishWord(s)}
+                </RowText>
               </Link>
             </li>
           ))}

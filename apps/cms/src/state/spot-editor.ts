@@ -17,7 +17,7 @@
 import { PREVIEW_PROTOCOL, safeUrl } from '@signforge/contract';
 import { assetsQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
-import { callTool, isStale, spotOf, toolMessage } from '~/lib/tools';
+import { callTool, saveRefused, spotOf, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 
 /** How long typing pauses before the stage redraws, and before the draft is saved. */
@@ -241,11 +241,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(t.orgId), exact: true });
         editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === draft ? 'saved' : 'unsaved' }));
       } catch (err) {
-        editor((e) =>
-          isStale(err)
-            ? { ...e, status: 'unsaved', stale: true, saveError: 'This changed since you opened it.' }
-            : { ...e, status: 'unsaved', saveError: toolMessage(err) },
-        );
+        editor((e) => ({ ...e, status: 'unsaved', ...saveRefused(err) }));
       } finally {
         saving = false;
       }

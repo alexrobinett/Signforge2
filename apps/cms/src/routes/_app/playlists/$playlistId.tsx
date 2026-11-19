@@ -8,12 +8,11 @@
  */
 import type { Transition } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, Link, notFound } from '@tanstack/react-router';
-import { ArrowDownIcon, ArrowUpIcon, ChevronLeftIcon, GripVerticalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { createFileRoute, notFound } from '@tanstack/react-router';
+import { ArrowDownIcon, ArrowUpIcon, GripVerticalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
-import { PlayerStage } from '~/components/spots/player-stage';
-import { Alert, AlertDescription } from '~/components/ui/alert';
+import { EditorHeader, EditorSection, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -33,18 +32,8 @@ import { playlistQuery } from '~/queries/playlists';
 import { assetsQuery, brandKitsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 
-interface Search {
-  o?: 'portrait';
-  scale?: 'actual';
-  kit?: string;
-}
-
 export const Route = createFileRoute('/_app/playlists/$playlistId')({
-  validateSearch: (s: Record<string, unknown>): Search => ({
-    ...(s.o === 'portrait' ? { o: 'portrait' as const } : {}),
-    ...(s.scale === 'actual' ? { scale: 'actual' as const } : {}),
-    ...(typeof s.kit === 'string' && s.kit ? { kit: s.kit } : {}),
-  }),
+  validateSearch: stageSearch,
   loader: async ({ context: { queryClient }, params, parentMatchPromise }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;
@@ -60,23 +49,6 @@ export const Route = createFileRoute('/_app/playlists/$playlistId')({
   head: () => ({ meta: [{ title: 'Playlist · SignForge' }] }),
   component: PlaylistEditor,
 });
-
-/** How the save is going, in the header's words. */
-function saveWord(status: string, savedAt: number | null) {
-  if (status === 'saving') return 'Saving…';
-  if (status === 'invalid') return 'Not saved: fix the marked field';
-  if (status === 'unsaved') return 'Unsaved changes';
-  return savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'No changes yet';
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <fieldset className="flex min-w-0 flex-col gap-3.5">
-      <legend className="mb-3 text-xs font-semibold tracking-[0.06em] text-muted-foreground uppercase">{title}</legend>
-      {children}
-    </fieldset>
-  );
-}
 
 /** A new transition of `type`, keeping the length of a fade or crossfade it replaces. */
 function transitionOf(type: Transition['type'], was: Transition): Transition {
@@ -138,48 +110,29 @@ function PlaylistEditor() {
   const t = draft.transition;
   const msBad = t.type !== 'cut' && !(t.ms >= 1 && t.ms <= 10_000);
   const change = (patch: Partial<typeof draft>) => edit(orgId, playlist, (d) => ({ ...d, ...patch }));
-  const setSearch = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
+  const setSearch = (next: Partial<StageSearch>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
   const count = draft.spotIds.length === 1 ? '1 spot' : `${draft.spotIds.length} spots`;
   const loop = clockLength(loopMs(draft.spotIds, byId));
   const kitId = search.kit ?? brandKits.find((k) => k.isDefault)?.id ?? null;
 
   return (
     <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-clip rounded-xl border">
-      <header className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b bg-card px-4 py-2.5 sm:px-6">
-        <Link to="/playlists" className="flex items-center gap-1.5 py-2.5 text-muted-foreground hover:text-foreground">
-          <ChevronLeftIcon className="size-4" aria-hidden />
-          Playlists
-        </Link>
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <h1 className="truncate text-[17px] font-semibold">{draft.name || playlist.name}</h1>
-          <p className="text-xs text-muted-foreground" aria-live="polite">
-            {count} · {loop} loop · {saveWord(status, savedAt)} · {playlistPublishWord(playlist)}
-          </p>
-        </div>
+      <EditorHeader
+        back={{ to: '/playlists', label: 'Playlists' }}
+        title={draft.name || playlist.name}
+        about={`${count} · ${loop} loop · ${saveWord(status, savedAt)} · ${playlistPublishWord(playlist)}`}
+      >
         {canManage && (
-          <div className="ml-auto flex gap-2">
-            <Button variant="outline" disabled={status === 'saved' || status === 'saving' || stale} onClick={() => void save()}>
-              Save draft
-            </Button>
+          <>
+            <SaveDraftButton status={status} stale={stale} onSave={() => void save()} />
             <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => askDelete(true)}>
               <Trash2Icon aria-hidden />
               Delete
             </Button>
-          </div>
+          </>
         )}
-      </header>
-      {(stale || saveError) && (
-        <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
-          <AlertDescription className="flex flex-wrap items-center gap-3">
-            {saveError}
-            {stale && (
-              <Button size="sm" variant="outline" onClick={() => void reload()}>
-                Reload
-              </Button>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
+      </EditorHeader>
+      <SaveAlert error={saveError} stale={stale} onReload={() => void reload()} />
       <div className="flex flex-1 flex-wrap items-stretch">
         <form
           aria-label="Playlist"
@@ -199,7 +152,7 @@ function PlaylistEditor() {
                 aria-invalid={!draft.name.trim() || undefined}
               />
             </div>
-            <Section title="Spots">
+            <EditorSection title="Spots">
               <p className="text-sm text-muted-foreground">Each plays for its own duration, then the loop starts again. The spot on the stage is marked.</p>
               {draft.spotIds.length > 0 && (
                 <ol aria-label="Spots in play order" className="flex flex-col gap-1.5">
@@ -243,7 +196,7 @@ function PlaylistEditor() {
                           {why && (
                             <span className="flex items-start gap-1.5 text-sm text-[#b54708] dark:text-[#fdb022]">
                               <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                              <span className="line-clamp-2">Not in the preview yet: {why.join('; ')}</span>
+                              <span>Not in the preview yet: {why.join('; ')}</span>
                             </span>
                           )}
                         </span>
@@ -295,8 +248,8 @@ function PlaylistEditor() {
                 </Button>
               )}
               <SpotPicker spots={spots} versions={versions} counts={counts} onAdd={(s) => add(orgId, playlist, s.id)} />
-            </Section>
-            <Section title="Transition">
+            </EditorSection>
+            <EditorSection title="Transition">
               <div className="flex flex-col gap-2">
                 {TRANSITIONS.map((o) => (
                   <label key={o.type} className="flex gap-3 rounded-lg border p-3 has-checked:border-primary has-checked:bg-accent">
@@ -348,7 +301,7 @@ function PlaylistEditor() {
                   </p>
                 </div>
               )}
-            </Section>
+            </EditorSection>
           </fieldset>
         </form>
         {/* The form can be far longer than a spot's, so the stage stays in view beside it as it scrolls. */}
@@ -356,12 +309,10 @@ function PlaylistEditor() {
           {draft.spotIds.length ? (
             <PlayerStage
               target={{ orgId, playlistId, orientation: search.o ?? 'landscape', brandKitId: search.kit }}
-              scale={search.scale ?? 'fit'}
               kits={brandKits}
               kitId={kitId}
-              onOrientation={(o) => setSearch({ o: o === 'portrait' ? 'portrait' : undefined })}
-              onScale={(s) => setSearch({ scale: s === 'actual' ? 'actual' : undefined })}
-              onKit={(kit) => setSearch({ kit })}
+              search={search}
+              onSearch={setSearch}
             />
           ) : (
             <section aria-label="Live preview" className="flex flex-1 items-center justify-center bg-[#18181a] p-8 text-center text-[#c8c8c8]">
