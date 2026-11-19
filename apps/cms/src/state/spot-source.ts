@@ -7,9 +7,14 @@
  *
  * A weather source follows from the place, the units and the template's variables
  * (`weatherSource` in src/lib/live-data.ts), so a second spot for the same place and units reuses it.
+ *
+ * A table template's list fields (issue #84) come from a CSV or JSON link: `read_table` shows its
+ * columns and first rows, then the link becomes a `csv` or `json-table` source and the fields are
+ * bound with a guessed mapping the person then adjusts. What was read is kept (`readTables`) for
+ * the stage to play until the source's first poll.
  */
-import type { LiveData, TemplateManifest } from '@signforge/contract';
-import { bindAll, type PlaceView, SOURCE_FORMAT, weatherSource, type WeatherUnits } from '~/lib/live-data';
+import { type LiveData, readPath, type TableFeed, type TemplateManifest } from '@signforge/contract';
+import { bindAll, type PlaceView, type TableFormat, weatherSource, type WeatherUnits } from '~/lib/live-data';
 import type { SpotView } from '~/lib/spots';
 import { callTool, toolMessage } from '~/lib/tools';
 import { dataSourceKeys, dataSourceQuery, dataSourcesQuery } from '~/queries/spots';
@@ -42,9 +47,20 @@ interface SpotSourceState {
   feedUrl: string;
   feedName: string;
   horizonDays: number;
+  /** The "From a CSV or JSON link" form. */
+  tableUrl: string;
+  tableFormat: TableFormat;
+  /** JSON only: where the list of objects is, such as data.items; empty for the whole file. */
+  rowsPath: string;
+  tableName: string;
+  /** What `read_table` read from the form's link; null before a read, and after the form changes. */
+  table: TableFeed | null;
+  reading: boolean;
   pending: boolean;
   error: string | null;
 }
+
+type TableForm = Pick<SpotSourceState, 'tableUrl' | 'tableFormat' | 'rowsPath' | 'tableName'>;
 
 /** What the source actions need of the open spot. */
 export interface SourceTarget {
@@ -56,6 +72,8 @@ export interface SourceTarget {
 
 export interface SpotSourceSlice {
   spotSource: SpotSourceState;
+  /** By source id, the table `read_table` read when the editor added it: the stage plays it until the first poll. */
+  readTables: Partial<Record<string, TableFeed>>;
   /** Opens or closes the picker over a bound source; a weather picker opens looking up `placeQuery` (the spot's place). */
   changeSource: (spotId: string, open: boolean, placeQuery?: string) => void;
   /** The place being typed; looked up a moment after typing stops. */
@@ -73,7 +91,13 @@ export interface SpotSourceSlice {
   focusedChange: (spotId: string) => void;
   editFeed: (spotId: string, change: Partial<Pick<SpotSourceState, 'feedUrl' | 'feedName' | 'horizonDays'>>) => void;
   /** Adds the feed in the form as a source and binds the live fields to it. */
-  addFeed: (target: SourceTarget) => Promise<void>;
+  addFeed: (target: SourceTarget, format: 'rss' | 'ical') => Promise<void>;
+  /** The table form changed; what was read from the old link no longer shows, unless only the name changed. */
+  editTable: (spotId: string, change: Partial<TableForm>) => void;
+  /** Reads the form's link now (`read_table`), to show its columns and first rows. */
+  readTable: (spotId: string) => Promise<void>;
+  /** Adds the link that was read as a source and binds the table fields to it, with a guessed mapping. */
+  addTable: (target: SourceTarget) => Promise<void>;
 }
 
 const initial: SpotSourceState = {
@@ -90,6 +114,12 @@ const initial: SpotSourceState = {
   feedUrl: '',
   feedName: '',
   horizonDays: DEFAULT_HORIZON_DAYS,
+  tableUrl: '',
+  tableFormat: 'csv',
+  rowsPath: '',
+  tableName: '',
+  table: null,
+  reading: false,
   pending: false,
   error: null,
 };
@@ -114,6 +144,17 @@ function placesOf(output: unknown): PlaceView[] {
       ? [{ id: p.id, name: p.name, region: p.region, country: p.country, latitude: p.latitude, longitude: p.longitude, timezone: p.timezone }]
       : [],
   );
+}
+
+/** `read_table`'s table, read cell by cell. */
+function tableOf(output: unknown): TableFeed {
+  const t = isRecord(output) ? output.table : undefined;
+  const columns = isRecord(t) && Array.isArray(t.columns) ? t.columns.filter((c: unknown) => typeof c === 'string') : [];
+  const rows = isRecord(t) && Array.isArray(t.rows) ? t.rows.filter((r: unknown) => Array.isArray(r)) : [];
+  return {
+    columns,
+    rows: rows.map((r: unknown[]) => columns.map((_, i) => (typeof r[i] === 'string' || typeof r[i] === 'number' ? r[i] : ''))),
+  };
 }
 
 /** The id of the source in a `{ dataSource }` output. */
@@ -145,11 +186,14 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
    * read first; another spot's source stays as it is.
    */
   async function bind(t: SourceTarget, dataSourceId: string, data: Record<string, unknown>) {
-    await Promise.all([
+    const [read] = await Promise.all([
       queryClient.query(dataSourceQuery(t.orgId, dataSourceId)),
       queryClient.invalidateQueries({ queryKey: ['org', t.orgId, 'spotPreview'] }),
     ]);
-    get().editSpot(t.spot, (d) => ({ ...d, data: { ...d.data, ...data }, bindings: bindAll(t.live, d.bindings, dataSourceId) }));
+    // A table's mapping is guessed from its columns: the latest snapshot's, or what was just read.
+    const known = readPath(read?.snapshot?.data, 'columns');
+    const columns = Array.isArray(known) ? known : (get().readTables[dataSourceId]?.columns ?? []);
+    get().editSpot(t.spot, (d) => ({ ...d, data: { ...d.data, ...data }, bindings: bindAll(t.manifest, t.live, d.bindings, dataSourceId, columns) }));
     source(t.spot.id, (s) => ({ ...initial, units: s.units, fallbackOpen: s.fallbackOpen, focusChange: true }));
   }
 
@@ -176,6 +220,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
 
   return {
     spotSource: initial,
+    readTables: {},
 
     changeSource(spotId, changing, placeQuery) {
       source(spotId, (s) => ({ ...initial, changing, fallbackOpen: s.fallbackOpen }));
@@ -217,10 +262,44 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
 
     editFeed: (spotId, change) => source(spotId, (s) => ({ ...s, ...change, error: null })),
 
-    addFeed: (t) =>
+    // A new address, format or path makes what was read stale; a new name does not.
+    editTable: (spotId, change) =>
+      source(spotId, (s) => ({ ...s, ...change, table: Object.keys(change).every((k) => k === 'tableName') ? s.table : null, error: null })),
+
+    async readTable(spotId) {
+      const { tableUrl, tableFormat, rowsPath } = sourceStateOf(get().spotSource, spotId);
+      source(spotId, (s) => ({ ...s, reading: true, table: null, error: null }));
+      try {
+        const output = await callTool('read_table', {
+          feedUrl: tableUrl.trim(),
+          format: tableFormat,
+          ...(tableFormat === 'json-table' && rowsPath.trim() ? { rowsPath: rowsPath.trim() } : {}),
+        });
+        source(spotId, (s) => ({ ...s, reading: false, table: tableOf(output) }));
+      } catch (err) {
+        source(spotId, (s) => ({ ...s, reading: false, error: toolMessage(err) }));
+      }
+    },
+
+    addTable: (t) =>
+      attempt(t.spot.id, async () => {
+        const { tableUrl, tableFormat, rowsPath, tableName, table } = get().spotSource;
+        if (!table) return;
+        const url = tableUrl.trim();
+        const id = await create(t.orgId, {
+          // Never the address itself, as for a feed: it may be a secret.
+          name: tableName.trim() || (URL.canParse(url) ? new URL(url).hostname : 'Table'),
+          format: tableFormat,
+          feedUrl: url,
+          ...(tableFormat === 'json-table' && rowsPath.trim() ? { rowsPath: rowsPath.trim() } : {}),
+        });
+        set((s) => ({ readTables: { ...s.readTables, [id]: table } }));
+        await bind(t, id, {});
+      }),
+
+    addFeed: (t, format) =>
       attempt(t.spot.id, async () => {
         const { feedUrl, feedName, horizonDays } = get().spotSource;
-        const format = SOURCE_FORMAT[t.live.source];
         const id = await create(t.orgId, {
           // Never the address itself: a private calendar's is a secret, and the name is shown.
           name: feedName.trim() || (URL.canParse(feedUrl.trim()) ? new URL(feedUrl.trim()).hostname : 'Feed'),
