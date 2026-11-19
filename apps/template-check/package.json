@@ -1,0 +1,36 @@
+{
+  "name": "@signforge/template-check",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.ts",
+    "dev": "wrangler dev",
+    "types": "wrangler types --strict-vars=false",
+    "typecheck": "wrangler types --strict-vars=false >/dev/null && tsc -p . && tsc -p src/worker",
+    "test": "vitest run",
+    "test:container": "vitest run -c vitest.container.config.ts"
+  },
+  "dependencies": {
+    "@signforge/compiler": "workspace:*",
+    "@signforge/contract": "workspace:*",
+    "@signforge/player-core": "workspace:*",
+    "playwright-core": "^1.65.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261117.1",
+    "@signforge/cli": "workspace:*",
+    "@signforge/template-agenda": "workspace:*",
+    "@signforge/template-clock": "workspace:*",
+    "@signforge/template-cstore-promo": "workspace:*",
+    "@signforge/template-menu-board": "workspace:*",
+    "@signforge/template-news": "workspace:*",
+    "@signforge/template-photo-promo": "workspace:*",
+    "@signforge/template-sdk": "workspace:*",
+    "@signforge/template-weather": "workspace:*",
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.164.0"
+  }
+}
