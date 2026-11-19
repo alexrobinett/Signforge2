@@ -151,13 +151,13 @@ These checks are a lint, not a security boundary: string matching can be evaded.
 
 **The runtime check.** The server then renders an org's new version before registering it (`apps/template-check`; docs/architecture.md, Runtime check): headless Chromium in a container with no network, in the player's own frame and policy, with each field's default (a small image for each image field), at 1920x1080 in each orientation you list. It plays for a second after `ready`. The version is refused with each of these it sees, one sentence each:
 
-- a request of any kind (`requested https://example.com/x (blocked)`), including images, fonts, workers and beacons;
+- a request of any kind (`requested https://example.com/x (blocked)`), including images, fonts, media, workers and beacons, and anything else the policy blocks (`eval`);
 - navigating its own frame, the page around it, a new window or a form;
 - WebRTC (`RTCPeerConnection`): the screen's policy cannot block it, so a template may not use it;
 - an uncaught error, or a `prepare` that rejects;
 - no `ready` within 2 seconds, the player's limit.
 
-A pass is stored on the version with its timings (ms from `init` to `ready`, and the first second's frames, per orientation); they are information, not a gate, since the budgets are measured on the Pi. Base templates in `templates/` go through the same runner in CI (`apps/template-check/test/check.test.ts`). Test yours with `sf template push` to an org.
+It runs in your org's own container, which no other org's template shares. A check that could not run (the container busy or not started) refuses the push as `unavailable`: try again. An org may run 10 checks a minute. A pass is stored on the version with its timings (ms from `init` to `ready`, and the first second's frames, per orientation); they are information, not a gate, since the budgets are measured on the Pi. Base templates in `templates/` go through the same runner in CI (`apps/template-check/test/check.test.ts`). Test yours with `sf template push` to an org.
 
 A registered version is immutable: pushing the same version with different bytes is refused, and pushing identical bytes changes nothing. A version is a draft, approved or retired; only approved versions are offered for new spots. The time and frame budgets are measured on the device with `scripts/pi-measure.sh`; automated checks for them are part of Milestone 4. The runtime check only refuses a template that is not ready within 2 seconds.
 
