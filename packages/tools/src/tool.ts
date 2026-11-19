@@ -85,6 +85,25 @@ export interface PlaceFinder {
 }
 
 /**
+ * Seals an alert channel's URL or signing secret for storage (`alert_channels`, #88), bound to the
+ * org, the channel and the field, so a sealed value copied elsewhere does not open. Implemented by
+ * the API with its key; only the delivery run unseals.
+ */
+export interface AlertSecretSealer {
+  seal(channel: { orgId: string; kind: 'slack' | 'webhook' }, field: 'url' | 'secret', value: string): Promise<string>;
+}
+
+/**
+ * Sends a queued alert delivery now rather than at the next delivery run (a test send, a retry).
+ * Implemented by the API, which sends it after the response; absent in tests and scripts, where it
+ * waits for the run.
+ */
+export interface AlertDeliverer {
+  /** The delivery, in the caller's org. */
+  now(deliveryId: string): void;
+}
+
+/**
  * Runs the runtime check on a built template: a headless render in a container with no network
  * (`apps/template-check`), the org's own, so one org's template never shares a browser with
  * another's. `orgId` is the scope's, never the input's. Implemented by the API with the check
@@ -131,6 +150,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Seals feed URLs and provider resources (./data-sources.ts). Undefined where no data source tool runs. */
   feedUrls?: FeedUrlSealer;
+  /** Seals alert channels' URLs and secrets (./alert-channels.ts). Undefined where no channel tool runs. */
+  alertSecrets?: AlertSecretSealer;
   /** Looks places up (`find_places`). Undefined where no geocoder is configured. */
   places?: PlaceFinder;
   /** The runtime check (./templates.ts). Registering an org template refuses to run without it. */
@@ -148,6 +169,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
    * writes are committed, so a screen never hears of a change that was rolled back.
    */
   notify: (send: (screens: ScreenNotifier) => Promise<void>) => void;
+  /** Send a delivery this call queues as soon as its writes are committed (`AlertDeliverer`). */
+  deliverNow: (deliveryId: string) => void;
   /**
    * Undo, if this call does not succeed, something the handler did outside the batch (a grant a
    * provider issued). Run after the refusal or failure, its own failure logged: best effort.

@@ -509,7 +509,7 @@ function contrast(a: string, b: string): number {
   return (hi! + 0.05) / (lo! + 0.05);
 }
 
-describe('text on a brand colour (#57, #69)', () => {
+describe('text on a brand colour (#57, #69, #92)', () => {
   const demo = DEMO_KIT;
   // A kit may set its on-colours by hand; the brand tools only warn when a pair fails.
   const poor: BrandColors = { ...demo, onPrimary: '#2563eb', onAccent: '#ffffff' };
@@ -524,6 +524,17 @@ describe('text on a brand colour (#57, #69)', () => {
     text: '#0f172a',
     muted: '#475569',
   };
+  // An accent that just reaches 4.5:1 on the demo kit's background (4.69:1) and so passed when
+  // measured there, where the text sits on something lighter: menu-board's card (2.94:1), the
+  // tint of agenda's row happening now, cstore-promo's copy panel.
+  const borderline: BrandColors = { ...demo, accent: '#d9531e' };
+  // Mid-tone accents, which reach 3:1 but not 4.5:1 on the page: green on white (3.30:1) and blue
+  // on the demo kit's dark background (3.66:1).
+  const green: BrandColors = { ...light, accent: '#16a34a', surface: '#f8fafc' };
+  const blue: BrandColors = { ...demo, accent: '#2563eb', onAccent: '#ffffff' };
+  // An accent just over 3:1 on its background (3.05:1), which clock's glow, the accent itself,
+  // pulls under 3:1 behind the greeting.
+  const teal: BrandColors = { ...demo, accent: '#0f685b', onAccent: '#ffffff', background: '#0e020c' };
   const kit = (colors: BrandColors): FrameTheme => ({ colors, shape: 'soft', fonts: {} });
   // `$brand.accent` as the compiler resolves it: the kit's accent, else DEFAULT_BRAND_COLORS.accent.
   const kits: [string, FrameTheme | undefined, string][] = [
@@ -531,16 +542,21 @@ describe('text on a brand colour (#57, #69)', () => {
     ['the demo kit', kit(demo), demo.accent],
     ['a kit with poor on-colours', kit(poor), poor.accent],
     ['a light kit', kit(light), light.accent],
+    ['a kit with a borderline accent', kit(borderline), borderline.accent],
+    ['a light kit with a green accent', kit(green), green.accent],
+    ['a dark kit with a blue accent', kit(blue), blue.accent],
+    ['a kit whose accent just reaches 3:1 on its background', kit(teal), teal.accent],
   ];
   const menu = { items: [{ name: 'Soup', description: 'Hot', price: '$4', tag: 'New' }] };
   /** Each template's spot, given the accent `$brand.accent` resolves to. */
-  const spots = (accent: string): [template: string, data: Data][] => [
+  const spots = (accent: string): [template: string, data: Data, photo?: string][] => [
     ['news', { accent, items: [{ title: 'Story', published: at(-1), source: 'Wire' }] }],
     ['agenda', { accent, events: [...(cases.agenda!.b.events as unknown[]), ...(cases.agenda!.a.events as unknown[])] }],
     ['clock', { accent }],
     ['cstore-promo', {}],
-    // No photo: the photo is the spot's own, and the copy's shade is the kit's background.
-    ['photo-promo', {}],
+    // The copy sits on a shade of the kit's background over the photo, whatever the photo is.
+    ['photo-promo', {}, '#ffffff'],
+    ['photo-promo', {}, '#000000'],
     ['menu-board', { accent, ...menu }],
     ['menu-board', { accent, ...menu, theme: 'light' }],
   ];
@@ -552,29 +568,30 @@ describe('text on a brand colour (#57, #69)', () => {
     ['photo-promo', '.tag', '.tag', 4.5],
     ['menu-board', '.items .tag', '.items .tag', 4.5],
   ];
-  // Accent-coloured text on whatever is behind it: 4.5:1, or 3:1 for text that is large on a
-  // 720p panel and up (WCAG: 24 px, or 18.7 px bold).
-  const onBackdrop: [template: string, text: string, min: number][] = [
-    ['news', '.age', 4.5],
-    ['agenda', '.today', 4.5],
-    ['agenda', '.now .mon', 4.5],
-    ['agenda', '.event:not(.now) .mon', 4.5],
-    ['clock', '.greeting', 3],
-    ['cstore-promo', '.l1', 3],
-    ['photo-promo', '.eyebrow', 3],
-    ['menu-board', '.price', 3],
+  // Accent-coloured text on whatever is behind it, and the contrast the template asks of the
+  // accent when that is more than the text's size needs: photo-promo measures its eyebrow on the
+  // kit's background, not on the photo it is painted over, so it keeps 4.5:1 there (#124).
+  const onBackdrop: [template: string, text: string, asks?: number][] = [
+    ['news', '.age'],
+    ['agenda', '.today'],
+    ['agenda', '.now .mon'],
+    ['agenda', '.event:not(.now) .mon'],
+    ['clock', '.greeting'],
+    ['cstore-promo', '.l1'],
+    ['photo-promo', '.eyebrow', 4.5],
+    ['menu-board', '.price'],
   ];
 
   /** Run `check` on each spot of `spots(accent)` under `theme`, in a frame of its own, ready and on top. */
   async function eachSpot(theme: FrameTheme | undefined, accent: string, check: (name: string, f: Frame, page: Page) => Promise<void>) {
     const hst = await host();
-    for (const [i, [name, data]] of spots(accent).entries()) {
+    for (const [i, [name, data, photo]] of spots(accent).entries()) {
       const t = built.get(name)!;
       const frame = `f${i}`;
       await hst.open(frame, t.html);
-      await hst.init(frame, spotData(t.manifest, data), {}, NOW, theme);
+      await hst.init(frame, spotData(t.manifest, data), photo ? { photo } : {}, NOW, theme);
       await hst.waitFor(frame, 'ready', 1);
-      await check(`${name}${data.theme ? ` (${data.theme})` : ''}`, hst.page.mainFrame().childFrames()[i]!, hst.page);
+      await check(`${name}${data.theme ? ` (${data.theme})` : ''}${photo ? ` (photo ${photo})` : ''}`, hst.page.mainFrame().childFrames()[i]!, hst.page);
       // The frames overlap: the next one is measured on top.
       await hst.page.evaluate((frame) => {
         (window as unknown as { frames_: Record<string, HTMLIFrameElement> }).frames_[frame]!.style.visibility = 'hidden';
@@ -583,20 +600,23 @@ describe('text on a brand colour (#57, #69)', () => {
   }
 
   /**
-   * The text colour of `sel`'s first match and the pixel behind its text that it reads worst on:
-   * the intros run to their end, the text (and its shadow) hidden, and the page screenshotted.
+   * The text colour of `sel`'s first match, the pixels behind its text (the intros run to their
+   * end, the text and its shadow hidden, the page screenshotted), and whether it is large text on
+   * a 1080p screen, twice the test frame's size (WCAG: 24 px, or 18.66 px bold).
    */
-  async function textOnBackdrop(f: Frame, page: Page, sel: string): Promise<[string, string]> {
-    const { color, clip } = await f.evaluate((sel) => {
+  async function textOnBackdrop(f: Frame, page: Page, sel: string): Promise<{ color: string; pixels: string[]; large: boolean }> {
+    const { color, clip, px, weight } = await f.evaluate((sel) => {
       for (const a of document.getAnimations()) a.currentTime = 2000;
       const el = document.querySelector<HTMLElement>(sel)!;
-      const color = getComputedStyle(el).color;
+      const style = getComputedStyle(el);
+      const color = style.color;
       el.style.color = 'transparent';
       el.style.textShadow = 'none';
       const range = document.createRange();
       range.selectNodeContents(el);
       const r = range.getBoundingClientRect();
-      return { color, clip: { x: Math.ceil(r.x), y: Math.ceil(r.y), width: Math.floor(r.width), height: Math.floor(r.height) } };
+      const clip = { x: Math.ceil(r.x), y: Math.ceil(r.y), width: Math.floor(r.width), height: Math.floor(r.height) };
+      return { color, clip, px: parseFloat(style.fontSize), weight: Number(style.fontWeight) };
     }, sel);
     const png = (await page.screenshot({ clip })).toString('base64');
     const pixels = await page.evaluate(async (png) => {
@@ -610,9 +630,13 @@ describe('text on a brand colour (#57, #69)', () => {
       for (let i = 0; i < d.length; i += 4) out.add(`rgb(${d[i]}, ${d[i + 1]}, ${d[i + 2]})`);
       return [...out];
     }, png);
-    const worst = pixels.reduce((a, b) => (contrast(color, b) < contrast(color, a) ? b : a));
-    return [color, worst];
+    const at1080 = px * (1080 / 540);
+    return { color, pixels, large: at1080 >= 24 || (at1080 >= 18.66 && weight >= 700) };
   }
+
+  /** `color`'s lowest contrast on any of `pixels`. */
+  const worst = (color: string, pixels: string[]) => Math.min(...pixels.map((p) => contrast(color, p)));
+  const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 
   for (const [label, theme, accent] of kits) {
     it(`text on a fill reads under ${label}`, async () => {
@@ -630,13 +654,23 @@ describe('text on a brand colour (#57, #69)', () => {
       expect(found).toEqual([]);
     });
 
-    it(`accent text reads on its backdrop under ${label}`, async () => {
+    // A kit's accent is kept wherever it reads (4.5:1, 3:1 on large text, or what the template
+    // asks), and gives way to black or white where it does not. With no kit, cstore-promo's and
+    // photo-promo's text is their own. 0.1 to spare: a template measures the ends of a gradient,
+    // this test the pixels in the box.
+    it(`accent text reads on its backdrop under ${label}, in the accent where that reads`, async () => {
       const found: string[] = [];
       await eachSpot(theme, accent, async (name, f, page) => {
-        for (const [, text, min] of onBackdrop.filter(([n]) => name.startsWith(n))) {
-          const [fg, bg] = await textOnBackdrop(f, page, text);
-          const ratio = contrast(fg, bg);
-          if (ratio < min) found.push(`${name} ${text}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, below ${min}:1`);
+        for (const [, text, asks] of onBackdrop.filter(([n]) => name.startsWith(n))) {
+          const { color, pixels, large } = await textOnBackdrop(f, page, text);
+          const min = large ? 3 : 4.5;
+          const ratio = worst(color, pixels);
+          // #124: photo-promo keeps an accent that reads 4.5:1 on the kit's background, over any photo.
+          const known = name.startsWith('photo-promo') && theme && color === rgb(accent) && contrast(color, rgb(theme.colors.background)) >= 4.5;
+          if (ratio < min && !known) found.push(`${name} ${text}: ${color} is ${ratio.toFixed(2)}:1 on its backdrop, below ${min}:1`);
+          const reads = worst(rgb(accent), pixels);
+          if (theme && color !== rgb(accent) && reads >= (asks ?? min) + 0.1)
+            found.push(`${name} ${text}: ${color}, not the accent, which reads at ${reads.toFixed(2)}:1`);
         }
       });
       expect(found).toEqual([]);

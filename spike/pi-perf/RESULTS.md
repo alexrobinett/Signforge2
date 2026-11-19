@@ -416,6 +416,32 @@ No extra dropped frames and no longer frames. Nothing was skipped. ¹ One of 8 p
 
 The first version drew the stars as twelve full-screen repeating `radial-gradient` layers, and the stars and glow through `opacity`. In portrait it played dusk and night with a 167-200 ms frame at every play (1.4-1.9% dropped, against 0.3-0.6%), and landscape dusk dropped 0.94% while playing (0.00%). Those layers are rastered as the frame comes on screen. Stars as 60 small dots, and the glow's strength in its gradient stops' alpha, removed it (the table).
 
+## Accent text measured on its real backdrop, 3:1 for large text (issue #92, 2026-11-19)
+
+agenda 1.2.3 (shipped as 1.3.1 after #98, the same bundle), menu-board 1.2.3 and cstore-promo 1.2.4 measure accent-coloured text against what it sits on, resolved with the SDK's `painted` on a 1x1 canvas: menu-board reads its card's style once after the rows are in, agenda paints each kind of card (ordinary, happening now) over both ends of its gradient, four reads at most instead of one per row, and cstore-promo paints the kit's surface over both ends of its stage. Every template with accent text passes `{ large: true }` to `readableOn` (news 1.3.4, shipped as 1.4.1 with the same bundle, clock 1.2.3 and photo-promo 1.2.3 change only that). Same method as #69: this branch's player at a subdirectory of the rig on its own origin (`http://localhost:8090`, so the kiosk's caches are untouched), `examples/stress` built from master's templates (before) and this branch's (after), with no kit and with the demo kit's colours (a scratch copy with a `brand.json`). Cut, 60 s per run after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Two playlists: sport-drinks, energy, menu, clock; and meeting-room, holidays, news, photo-berries. Order alternated (before, after, after, before), then menu's playlist again for the variants below. The supervisor was stopped during the runs: its liveness check restarts the kiosk 30 s after the kiosk's player stops beating, which it does as soon as the page is navigated away.
+
+| Content | Build | Runs | Overall | Playing | Loading next | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- |
+| stress, no kit | before | 6 | 0.06-0.22% | 0.00-0.03% | 1.6-11.1% | 50 ms |
+| | after | 7 | 0.06-0.33% | 0.00-0.09% | 0.0-17.1% | 67 ms |
+| stress, demo kit | before | 5 | 0.06-0.22% | 0.00-0.06% | 1.6-11.4% | 50 ms |
+| | after | 4 | 0.06-0.25% | 0.00% | 3.1-12.2% | 67 ms |
+
+Prepares (ms, median before / after, over both kits): meeting-room (agenda) 185 / 178, holidays (agenda) 150 / 146, menu (menu-board) 192 / 203, sport-drinks (cstore-promo) 220 / 211, energy (cstore-promo) 225 / 234, clock 167 / 167, news 151 / 149, photo-berries 199 / 198.
+
+No cost in frames: the ranges overlap and nothing was skipped. Agenda's meeting room is about 7 ms faster than master and gives back about a third of #69's 20 ms, now that a card is read once per kind and not per row. Menu-board prepares about 11 ms slower (before 167-201, after 197-229, 14 prepares each), well within 500 ms. Four variants did not move it, so it is not the canvas: `willReadFrequently: true` (200 ms), compositing the colours arithmetically with no canvas (204), reading the first card before the other rows are in (202, 234), and a registered `@property --card` read from the stage's style with no row's style read at all (193-221). cstore-promo's two prepares move in opposite directions, run-to-run noise.
+
+Review fixes (PR #104): clock 1.2.3 now measures its greeting over its accent glow, one more 1x1 canvas read in `prepare` (`painted(bg, [accent, 0.12])`), and photo-promo's eyebrow keeps 4.5:1 (no canvas). Same method, 2026-11-19 07:49, master's templates (clock 1.2.2) against this branch's, no kit and the demo kit, before, after, after, before; playlists sport-drinks, energy, menu, clock and clock, photo-berries, photo-river; 60 s each.
+
+| Content | Build | Runs | Overall | Playing | Loading next | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- |
+| stress, no kit | before | 4 | 0.11-0.39% | 0.00-0.03% | 5.2-13.7% | 67 ms |
+| | after | 4 | 0.28-0.36% | 0.00-0.03% | 10.7-12.5% | 83 ms |
+| stress, demo kit | before | 4 | 0.17-0.25% | 0.00% | 8.1-9.4% | 67 ms |
+| | after | 4 | 0.08-0.33% | 0.00-0.03% | 2.7-12.9% | 83 ms |
+
+Clock prepares 182 / 180.5 ms (median before / after, 20 each, 144-268 / 146-266): the canvas read costs nothing measurable. photo-berries 215.5 / 216.5, photo-river 233 / 231.5. menu (menu-board) 200 / 217, the same gap as above. The rig was slower than in the night's runs for every spot (energy 298 ms against 225), so compare within this table only. Frames while playing are unchanged; the 83 ms frames are within what earlier sections record from run to run.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
