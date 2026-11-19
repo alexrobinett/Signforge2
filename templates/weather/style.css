@@ -82,86 +82,56 @@ body {
   inset: 0;
   background: linear-gradient(170deg, var(--sky-a) 0%, var(--sky-b) 100%);
 }
-/* Stars on a clear night, fading in as the sky darkens. Each layer is one star per tile, tiles of
-   different sizes, so the pattern does not read as a grid. Static: drawn once, like the sky. */
+/* Stars on a clear night: dots main.ts scatters, in the kit's text colour (its background on a
+   light kit), each as bright as its --a. */
 .stars {
   position: absolute;
   inset: 0;
-  opacity: 0;
   --star: var(--sf-text, #fff);
-  background-image:
-    radial-gradient(circle at 20% 42%, color-mix(in srgb, var(--star) 60%, transparent) 0.18vmin, transparent 0.4vmin),
-    radial-gradient(circle at 22% 46%, var(--star) 0.1vmin, transparent 0.22vmin),
-    radial-gradient(circle at 91% 91%, var(--star) 0.22vmin, transparent 0.48vmin),
-    radial-gradient(circle at 90% 57%, var(--star) 0.18vmin, transparent 0.4vmin),
-    radial-gradient(circle at 56% 88%, color-mix(in srgb, var(--star) 80%, transparent) 0.1vmin, transparent 0.22vmin),
-    radial-gradient(circle at 40% 53%, var(--star) 0.18vmin, transparent 0.4vmin),
-    radial-gradient(circle at 16% 9%, color-mix(in srgb, var(--star) 80%, transparent) 0.18vmin, transparent 0.4vmin),
-    radial-gradient(circle at 41% 22%, color-mix(in srgb, var(--star) 80%, transparent) 0.1vmin, transparent 0.22vmin),
-    radial-gradient(circle at 62% 20%, var(--star) 0.18vmin, transparent 0.4vmin),
-    radial-gradient(circle at 22% 50%, var(--star) 0.22vmin, transparent 0.48vmin),
-    radial-gradient(circle at 81% 15%, color-mix(in srgb, var(--star) 60%, transparent) 0.1vmin, transparent 0.22vmin),
-    radial-gradient(circle at 10% 44%, color-mix(in srgb, var(--star) 80%, transparent) 0.12vmin, transparent 0.26vmin);
-  background-size:
-    37vmin 29vmin,
-    53vmin 41vmin,
-    61vmin 47vmin,
-    71vmin 59vmin,
-    43vmin 67vmin,
-    89vmin 73vmin,
-    47vmin 31vmin,
-    79vmin 53vmin,
-    59vmin 83vmin,
-    97vmin 61vmin,
-    41vmin 43vmin,
-    67vmin 37vmin;
 }
 .light-kit .stars {
   --star: var(--sf-bg);
 }
-.arc.night:is(.clear, .partly) .stars {
-  opacity: calc((1 - var(--day)) * 0.85);
-}
-/* Dawn and dusk: a warm glow over the horizon where the sun rises or sets, faded in by --glow.
-   Clouds and rain mute it. */
-.glow {
+.stars i {
   position: absolute;
-  inset: 0;
-  opacity: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--star) var(--a), transparent);
 }
-.dawn .glow,
-.dusk .glow {
-  opacity: var(--glow);
-}
-/* From the kit's accent only, lightened with its light colour (its text, or its background on a
-   light kit): mixed with its primary, an accent went muddy. */
+/* Dawn and dusk: a warm glow over the horizon where the sun rises or sets, as strong as --glow
+   (muted by clouds and rain). The strength is in each stop's alpha, not in opacity: an opacity
+   below 1 draws the whole screen a second time. Only the accent, lightened with the kit's light
+   colour (its text, or its background on a light kit): mixed with its primary, it went muddy. */
 .stage {
   --glow-light: var(--sf-text);
+  --glow-k: calc(var(--glow) * 100%);
 }
 .light-kit {
   --glow-light: var(--sf-bg);
 }
+:is(.cloudy, .rain, .storm, .snow, .fog) {
+  --glow-k: calc(var(--glow) * 40%);
+}
+.glow {
+  position: absolute;
+  inset: 0;
+}
 .dawn .glow {
   background: radial-gradient(
     ellipse 75% 70% at var(--rise-x) var(--horizon),
-    color-mix(in srgb, var(--sf-accent, #ffc59a) 45%, var(--glow-light, #ffc59a)),
-    color-mix(in srgb, var(--sf-accent, #f39bb1) 70%, var(--glow-light, #f39bb1)) 35%,
-    color-mix(in srgb, var(--sf-accent, #8d7cc9) 35%, transparent) 70%,
+    color-mix(in srgb, color-mix(in srgb, var(--sf-accent, #ffc59a) 45%, var(--glow-light, #ffc59a)) var(--glow-k), transparent),
+    color-mix(in srgb, color-mix(in srgb, var(--sf-accent, #f39bb1) 70%, var(--glow-light, #f39bb1)) var(--glow-k), transparent) 35%,
+    color-mix(in srgb, color-mix(in srgb, var(--sf-accent, #8d7cc9) 35%, transparent) var(--glow-k), transparent) 70%,
     transparent
   );
 }
 .dusk .glow {
   background: radial-gradient(
     ellipse 80% 75% at var(--set-x) var(--horizon),
-    color-mix(in srgb, var(--sf-accent, #ffb04a) 85%, var(--glow-light, #ffb04a)),
-    var(--sf-accent, #f0603c) 30%,
-    color-mix(in srgb, var(--sf-accent, #9b3a78) 50%, transparent) 60%,
+    color-mix(in srgb, color-mix(in srgb, var(--sf-accent, #ffb04a) 85%, var(--glow-light, #ffb04a)) var(--glow-k), transparent),
+    color-mix(in srgb, var(--sf-accent, #f0603c) var(--glow-k), transparent) 30%,
+    color-mix(in srgb, color-mix(in srgb, var(--sf-accent, #9b3a78) 50%, transparent) var(--glow-k), transparent) 60%,
     transparent
   );
-}
-.dawn:is(.cloudy, .rain, .storm, .snow, .fog) .glow,
-.dusk:is(.cloudy, .rain, .storm, .snow, .fog) .glow {
-  opacity: calc(var(--glow) * 0.4);
 }
 .orb {
   position: absolute;

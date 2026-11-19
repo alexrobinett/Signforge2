@@ -260,7 +260,7 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
             y: (r.top + r.height / 2) / innerHeight,
             classes: [...stage.classList].filter((c) => ['day', 'night', 'dawn', 'dusk'].includes(c)).sort(),
             sun: getComputedStyle(document.querySelector('.orb .rays')!).display !== 'none',
-            glow: Number(getComputedStyle(document.querySelector('.glow')!).opacity),
+            glow: getComputedStyle(document.querySelector('.glow')!).backgroundImage !== 'none',
           };
         });
     };
@@ -283,9 +283,9 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
     expect(rise.classes).toEqual(['dawn', 'day']);
     expect(noon.classes).toEqual(['day']);
     expect(set.classes).toEqual(['day', 'dusk']);
-    expect(rise.glow).toBeGreaterThan(0.5);
-    expect(set.glow).toBeGreaterThan(0.5);
-    expect(noon.glow).toBe(0);
+    expect(rise.glow).toBe(true);
+    expect(set.glow).toBe(true);
+    expect(noon.glow).toBe(false);
   });
 
   it('carries the moon across the night, from sunset to the next sunrise', async () => {
@@ -400,7 +400,7 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
     expect(night.classes).toEqual(['night']);
     expect(night.sun).toBe(false);
     expect(day2).toEqual(day);
-    expect(day.glow).toBe(0);
+    expect(day.glow).toBe(false);
     // The sun's old fixed place: right of centre, halfway down.
     expect(day.x).toBeCloseTo(0.765, 2);
     expect(day.y).toBeCloseTo(0.5, 2);

@@ -28,7 +28,7 @@ defineTemplate({
     const cycle = sunCycle(Number(data.sunrise), Number(data.sunset), Math.floor(now().getTime() / 60_000) * 60_000);
     const night = cycle ? cycle.night : Number(data.isDay) === 0;
     stage.classList.add(condition, night ? 'night' : 'day');
-    if (cycle) showCycle(stage, cycle);
+    const day = cycle ? showCycle(stage, cycle) : undefined;
     // A light kit (light background, dark text): clouds, rain and snow are drawn in the kit's
     // background colour over a darker sky, not in its dark text colour.
     const bg = tokenRgb('--sf-bg');
@@ -39,6 +39,7 @@ defineTemplate({
     set('low', `${n('low')}°`);
     set('wind', `${n('wind')} ${String(data.windUnit)}`);
     set('humidity', `${n('humidity')}%`);
+    if (cycle?.night && (condition === 'clear' || condition === 'partly')) stars(0.85 * (1 - day!));
     // Rain and snow are decoration: if drawing them fails, show the forecast without them.
     return precipitation(condition, viewport).catch((err) => console.warn('[weather] no precipitation', err));
   },
@@ -94,19 +95,38 @@ const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 /**
  * Set the stage's scene from the cycle, once per play: style.css places the orb on its arc from
  * `--p`, mixes the day and night skies by `--day`, and fades in the dawn or dusk glow by `--glow`.
+ * Returns `--day`, 0 at night to 1 by day.
  */
-function showCycle(stage: HTMLElement, c: Cycle): void {
+function showCycle(stage: HTMLElement, c: Cycle): number {
   const daylight = clamp01((c.minutes + 40) / 90);
   // Brightest just after sunset and just before sunrise; gone an hour either side.
   const glow = clamp01(1 - Math.abs(c.minutes + 5) / 70);
   stage.classList.add('arc');
   if (glow > 0) stage.classList.add(c.morning ? 'dawn' : 'dusk');
+  const day = daylight * daylight * (3 - 2 * daylight);
   stage.style.setProperty('--p', c.progress.toFixed(4));
-  stage.style.setProperty('--day', (daylight * daylight * (3 - 2 * daylight)).toFixed(3));
+  stage.style.setProperty('--day', day.toFixed(3));
   stage.style.setProperty('--glow', glow.toFixed(3));
-  if (!c.night) return;
+  if (!c.night) return day;
   stage.style.setProperty('--lit', ((1 - Math.cos(2 * Math.PI * c.phase)) / 2).toFixed(3));
   document.querySelector<HTMLElement>('.orb .shade')!.style.clipPath = unlit(c.phase);
+  return day;
+}
+
+/**
+ * Stars, as bright as `alpha`: small fixed dots scattered over the sky, each its own brightness.
+ * Dots, not CSS gradients or image tiles: on the Pi, twelve full-screen gradient layers took
+ * 170-200 ms to raster as each play began, and a few dozen dots paint in next to nothing.
+ */
+function stars(alpha: number): void {
+  const rand = rng(70);
+  const sky = document.querySelector('.stars')!;
+  for (let i = 0; i < 60; i++) {
+    const star = document.createElement('i');
+    const size = 0.24 + rand() * 0.28;
+    star.style.cssText = `left:${(rand() * 100).toFixed(2)}%;top:${(rand() * 100).toFixed(2)}%;width:${size.toFixed(2)}vmin;height:${size.toFixed(2)}vmin;--a:${(100 * alpha * (0.55 + rand() * 0.45)).toFixed(1)}%`;
+    sky.append(star);
+  }
 }
 
 /**
