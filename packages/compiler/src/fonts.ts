@@ -11,7 +11,7 @@
  * where the device and preview blob routes serve them to any org (`isCatalogueFontFile`).
  * Adding a weight is adding its file there and its entry here; a test checks the two agree.
  */
-import type { Sha256 } from '@signforge/contract';
+import type { BrandFont, Sha256 } from '@signforge/contract';
 
 /** Brand fonts are decoded at `prepare` on the Pi; this keeps one family inside its budget (docs/template-spec.md). */
 export const MAX_FONT_FAMILY_BYTES = 150_000;
@@ -113,3 +113,14 @@ export const fontFilePath = (font: Pick<CatalogueFont, 'id'>, file: Pick<Catalog
 
 /** A catalogue font by id. Only `base` fonts exist for now. */
 export const fontById = (id: string): CatalogueFont | undefined => byId.get(id);
+
+/**
+ * A kit's font as a manifest carries it, its files added to `files` as WOFF2. Undefined for no
+ * font, or one whose files are not in the catalogue yet: screens then draw with the template's.
+ */
+export function brandFont(id: string | null, files: Record<Sha256, { size: number; type: string }>): BrandFont | undefined {
+  const f = id ? fontById(id) : undefined;
+  if (!f?.files.length) return undefined;
+  for (const x of f.files) files[x.file] = { size: x.size, type: 'font/woff2' };
+  return { id: f.id, family: f.family, files: f.files.map(({ weight, style, file }) => ({ weight, style, file })) };
+}

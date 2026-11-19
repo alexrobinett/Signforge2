@@ -1,6 +1,6 @@
 /**
  * Pieces every settings page uses (canvas row 6): the settings navigation (the Audit log page has it too), a titled section, and
- * the save row with its error. Brand kits is a slot until its page lands (M3-40).
+ * the save row with its error.
  */
 import { Link } from '@tanstack/react-router';
 import { LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
@@ -14,7 +14,7 @@ const LINK =
 const ORG_PAGES = [
   { to: '/settings/general', label: 'General' },
   { to: '/settings/members', label: 'Members & roles' },
-  { to: null, label: 'Brand kits' },
+  { to: '/settings/brand-kits', label: 'Brand kits' },
   { to: '/settings/screens', label: 'Screens & groups' },
   { to: '/settings/notifications', label: 'Notifications' },
 ] as const;
@@ -25,21 +25,11 @@ export function SettingsNav() {
     <nav aria-label="Settings" className="flex flex-wrap gap-1 lg:w-52 lg:shrink-0 lg:flex-col lg:flex-nowrap lg:gap-4">
       <div className="flex flex-wrap gap-1 lg:flex-col lg:gap-0.5">
         <span className="hidden px-3 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase lg:block">Organization</span>
-        {ORG_PAGES.map(({ to, label }) =>
-          to ? (
-            <Link key={label} to={to} className={LINK}>
-              {label}
-            </Link>
-          ) : (
-            <span
-              key={label}
-              className="flex min-h-10 shrink-0 items-center justify-between gap-2 px-3 text-sm whitespace-nowrap text-muted-foreground"
-              aria-disabled="true"
-            >
-              {label} <span className="sr-only text-xs lg:not-sr-only">Coming soon</span>
-            </span>
-          ),
-        )}
+        {ORG_PAGES.map(({ to, label }) => (
+          <Link key={label} to={to} className={LINK}>
+            {label}
+          </Link>
+        ))}
       </div>
       <div className="flex flex-wrap gap-1 lg:flex-col lg:gap-0.5">
         <span className="hidden px-3 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase lg:block">Admin</span>

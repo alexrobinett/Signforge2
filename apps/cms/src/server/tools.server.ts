@@ -6,9 +6,10 @@
 import { redirect } from '@tanstack/react-router';
 import { getRequest } from '@tanstack/react-start/server';
 import type { AssetView } from '~/lib/assets';
+import type { BrandKitView } from '~/lib/brand-kits';
 import type { ListedSource } from '~/lib/integrations';
 import { signInBack } from '~/lib/paths';
-import type { BrandKitView, SpotView, TemplateView } from '~/lib/spots';
+import type { SpotView, TemplateView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { callApi } from './api.server';
 
