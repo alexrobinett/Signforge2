@@ -86,7 +86,7 @@ describe('a kit draft', () => {
   });
 
   it('saves every field with the version it was read at, null for a derived on-colour or a cleared font', () => {
-    expect(updateInput(view, kitDraftOf(view))).toEqual({
+    expect(updateInput(view.id, kitDraftOf(view), 3)).toEqual({
       brandKitId: 'bk_1',
       name: 'Northside',
       colors: { ...northside, onAccent: null },

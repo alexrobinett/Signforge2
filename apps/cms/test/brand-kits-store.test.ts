@@ -140,3 +140,21 @@ describe("the kit page's previews (review of #103)", () => {
     await vi.waitFor(() => expect(posted.at(-1)).toBe('#0f766e'));
   });
 });
+
+describe('a kit save (re-check of #103)', () => {
+  it('sends the version its draft started from, so a change made since is refused rather than overwritten', async () => {
+    const calls: { name: string; input: { ifVersion?: number } }[] = [];
+    vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+      calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ error: 'conflict', message: 'stale', details: { version: 2 } }), { status: 409 });
+    });
+    const v1 = kit('bk_a', '#2563eb');
+    const { store } = page([v1]);
+    store.getState().editKit(v1, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
+    // Someone else saves; the page reads the kits again (after an assignment, say) and holds v2.
+    const v2 = { ...v1, shape: 'round' as const, version: 2 };
+    await store.getState().saveKit(ORG, v2);
+    expect(calls).toMatchObject([{ name: 'update_brand_kit', input: { brandKitId: 'bk_a', ifVersion: 1 } }]);
+    expect(store.getState().brandKits.edits.bk_a).toMatchObject({ stale: true, error: 'This kit changed since you opened it.' });
+  });
+});

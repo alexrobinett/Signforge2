@@ -269,7 +269,7 @@ function KitEditor() {
         </div>
       </header>
       {(saveError ?? actionError) && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" role="alert">
           <AlertDescription className="flex flex-wrap items-center gap-3">
             {saveError ?? actionError}
             {stale && (

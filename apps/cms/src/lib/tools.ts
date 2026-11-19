@@ -55,6 +55,12 @@ export function brandKitIdOf(output: unknown): string {
   throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
 }
 
+/** The version of the kit in a `{ brandKit }` output, such as `update_brand_kit`'s: what the next save sends as `ifVersion`. */
+export function brandKitVersionOf(output: unknown): number {
+  if (isRecord(output) && isRecord(output.brandKit) && typeof output.brandKit.version === 'number') return output.brandKit.version;
+  throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
+}
+
 /** Whether a refusal is an `ifVersion` conflict: someone changed the thing since the page read it. */
 export const isStale = (err: unknown) =>
   err instanceof ToolCallError && err.code === 'conflict' && isRecord(err.details) && typeof err.details.version === 'number';

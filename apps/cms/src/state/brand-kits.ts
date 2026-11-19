@@ -15,7 +15,7 @@ import { PREVIEW_PROTOCOL, type BrandColor } from '@signforge/contract';
 import { duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { playerMessage } from '~/lib/preview';
 import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/spots';
-import { brandKitIdOf, callTool, isStale, toolMessage } from '~/lib/tools';
+import { brandKitIdOf, brandKitVersionOf, callTool, isStale, toolMessage } from '~/lib/tools';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
@@ -41,10 +41,12 @@ export interface KitEdit {
   error: string | null;
   /** The last save was refused because someone else changed the kit: the editor offers a reload. */
   stale: boolean;
+  /** The kit's version the draft builds on: sent as `ifVersion`, moved on by each save. Null with no draft. */
+  version: number | null;
 }
 
 /** A kit with nothing edited yet; one object, so a selector that falls back to it re-renders nothing. */
-export const NO_EDIT: KitEdit = { draft: null, saving: false, savedAt: null, error: null, stale: false };
+export const NO_EDIT: KitEdit = { draft: null, saving: false, savedAt: null, error: null, stale: false, version: null };
 
 interface BrandKitsState {
   /** Each kit's edit, by kit id. */
@@ -113,7 +115,8 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
   // A player says it is listening once per load. Its frame can be attached again for another kit
   // (the route stays mounted after Duplicate), so the frames that said it are kept, not the links.
   const heard = new WeakSet<Window>();
-  // Duplicate's key per kit being copied, until the copy is made: a retry must not make a second.
+  // Duplicate's key per kit and version being copied, until the copy is made: a retry must not make
+  // a second, and copying the kit after it changed is a new creation with a new key.
   const duplicateKeys = new Map<string, string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let hearing = false;
@@ -187,7 +190,8 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     brandKits: initial,
 
     editKit(kit, change) {
-      edit(kit.id, (e) => ({ ...e, draft: change(e.draft ?? kitDraftOf(kit)) }));
+      // A new draft builds on the kit as the page holds it now; a later read of the kits does not move it.
+      edit(kit.id, (e) => (e.draft ? { ...e, draft: change(e.draft) } : { ...e, draft: change(kitDraftOf(kit)), version: kit.version }));
       redrawAll();
     },
 
@@ -198,22 +202,27 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     },
 
     discardKitDraft(kitId) {
-      edit(kitId, (e) => ({ ...e, draft: null, error: null, stale: false }));
+      edit(kitId, (e) => ({ ...e, draft: null, version: null, error: null, stale: false }));
       redrawAll();
     },
 
     async saveKit(orgId, kit) {
-      const draft = get().brandKits.edits[kit.id]?.draft;
-      if (!draft) return;
+      const { draft, version } = get().brandKits.edits[kit.id] ?? NO_EDIT;
+      if (!draft || version === null) return;
       edit(kit.id, (e) => ({ ...e, saving: true, error: null }));
       try {
-        await callTool('update_brand_kit', updateInput(kit, draft));
+        const saved = brandKitVersionOf(await callTool('update_brand_kit', updateInput(kit.id, draft, version)));
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true }),
           // The spot editor's stage wears saved kits.
           queryClient.invalidateQueries({ queryKey: ['org', orgId, 'spotPreview'] }),
         ]);
-        edit(kit.id, (e) => ({ ...e, saving: false, savedAt: Date.now(), draft: e.draft === draft ? null : e.draft }));
+        // A draft edited while it saved builds on the version just saved.
+        edit(kit.id, (e) =>
+          e.draft === draft
+            ? { ...e, saving: false, savedAt: Date.now(), draft: null, version: null }
+            : { ...e, saving: false, savedAt: Date.now(), version: saved },
+        );
       } catch (err) {
         edit(kit.id, (e) =>
           isStale(err)
@@ -224,7 +233,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     },
 
     async reloadKit(orgId, kitId) {
-      edit(kitId, (e) => ({ ...e, draft: null, error: null, stale: false }));
+      edit(kitId, (e) => ({ ...e, draft: null, version: null, error: null, stale: false }));
       await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
       redrawAll();
     },
@@ -248,14 +257,15 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     },
 
     async duplicateKit(orgId, kit) {
-      const key = duplicateKeys.get(kit.id) ?? crypto.randomUUID();
-      duplicateKeys.set(kit.id, key);
+      const of = `${kit.id}:${kit.version}`;
+      const key = duplicateKeys.get(of) ?? crypto.randomUUID();
+      duplicateKeys.set(of, key);
       let kitId: string | undefined;
       const done = await act(orgId, kit.id, `duplicate:${kit.id}`, async () => {
         kitId = brandKitIdOf(await callTool('create_brand_kit', duplicateInput(kit, key)));
       });
       if (!done || !kitId) return;
-      duplicateKeys.delete(kit.id);
+      duplicateKeys.delete(of);
       await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId } });
     },
 

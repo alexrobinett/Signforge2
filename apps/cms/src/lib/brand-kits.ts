@@ -88,9 +88,9 @@ export function shownColors(d: KitDraft, saved: BrandColors): BrandColors {
   };
 }
 
-/** `update_brand_kit`'s input for saving the draft over `kit`, with the version it was read at. */
-export const updateInput = (kit: BrandKitView, d: KitDraft) => ({
-  brandKitId: kit.id,
+/** `update_brand_kit`'s input for saving the draft, with the version the draft started from as `ifVersion`. */
+export const updateInput = (brandKitId: string, d: KitDraft, ifVersion: number) => ({
+  brandKitId,
   name: d.name.trim(),
   colors: d.colors,
   shape: d.shape,
@@ -98,7 +98,7 @@ export const updateInput = (kit: BrandKitView, d: KitDraft) => ({
   bodyFontId: d.bodyFontId,
   logoOnDarkAssetId: d.logoOnDarkAssetId,
   logoOnLightAssetId: d.logoOnLightAssetId,
-  ifVersion: kit.version,
+  ifVersion,
 });
 
 /** `create_brand_kit`'s input for a copy of `kit`: it takes no nulls, so what is derived or unset is left out. */

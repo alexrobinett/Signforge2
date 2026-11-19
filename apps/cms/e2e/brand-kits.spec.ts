@@ -149,3 +149,30 @@ test('duplicate a kit, give it to a group, make it the default, and see the warn
   await expect(page.getByRole('heading', { name: 'Hearth Café copy', level: 1 })).toBeVisible();
   await shots(page, '55-brand-kit-phone');
 });
+
+test('a change someone else made while the kit was open is not overwritten, even after the page reads the kits again', async () => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/settings/brand-kits');
+  await hydrated(page);
+  await page.getByRole('link', { name: 'Edit Hearth Café', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Hearth Café', level: 1 })).toBeVisible();
+  await hydrated(page);
+  const kitId = new URL(page.url()).pathname.split('/').at(-1);
+  await page.getByLabel('Primary', { exact: true }).fill('#c8102e');
+
+  // Stands in for someone else: rounder corners land after the page read the kit.
+  await tool(page, 'update_brand_kit', { brandKitId: kitId, shape: 'round' });
+  // Away and back: the page reads the kits again, and the draft is kept.
+  await page.getByRole('link', { name: 'Brand kits' }).first().click();
+  await hydrated(page);
+  await page.getByRole('link', { name: 'Edit Hearth Café', exact: true }).click();
+  await hydrated(page);
+  await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#c8102e');
+
+  await page.getByRole('button', { name: 'Save kit' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'This kit changed since you opened it.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#7a3e1d');
+  await expect(page.getByRole('radio', { name: 'Round' })).toBeChecked();
+});
