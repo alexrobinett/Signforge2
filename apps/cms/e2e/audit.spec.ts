@@ -75,7 +75,10 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
 
   // One target: the screen's own history.
   await page.getByLabel('Who').selectOption('people');
-  await rows.first().getByRole('link', { name: `Only screen ${screen.id}` }).click();
+  await rows
+    .first()
+    .getByRole('link', { name: `Only screen ${screen.id}` })
+    .click();
   await expect(page).toHaveURL(new RegExp(`targetId=${screen.id}`));
   await expect(page.getByText(`Only Screen ${screen.id}.`)).toBeVisible();
 
