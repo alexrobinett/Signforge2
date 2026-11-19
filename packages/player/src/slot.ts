@@ -13,14 +13,11 @@ import {
   type Spot,
   type TemplateMessage,
 } from '@signforge/contract';
-import { resolveSpotData } from '@signforge/player-core';
+import { READY_TIMEOUT_MS, resolveSpotData, TEMPLATE_SANDBOX } from '@signforge/player-core';
 import { clock, now } from './clock';
 import { containedFrames } from './contain';
 import { liveData, reportRejected } from './data';
 import { getFile } from './source';
-
-/** A spot that has not reported ready by this point is skipped. */
-const READY_TIMEOUT_MS = 2000;
 
 type WrapperWindow = Window & { relay: (to: Window, m: HostMessage) => void };
 
@@ -242,7 +239,7 @@ export class Slot {
     const frame = wrapper.document.createElement('iframe');
     // Scripts only: an opaque origin, so no access to the player, the wrapper or their storage;
     // no popups, forms, or navigating any frame but its own.
-    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.setAttribute('sandbox', TEMPLATE_SANDBOX);
     frame.title = spot.name;
     frame.srcdoc = templateHtml;
 

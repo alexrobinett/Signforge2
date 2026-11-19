@@ -6,7 +6,7 @@ import { scoped } from '@signforge/db';
 import { seedOrganization } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { dispatch, registry, type Caller } from '../src';
+import { editorCalls, ok } from './calls';
 
 const sha = (c: string) => c.repeat(64);
 const hash = async (text: string) =>
@@ -56,17 +56,8 @@ async function setup(orgId: string) {
     ['portrait', 'd'],
   ] as const)
     await org.assets.renditions.insert({ assetId: asset.id, orientation, sha256: sha(c), type: 'image/png', size: 10, width: 1920, height: 1080 });
-  const caller: Caller = { org, role: 'editor', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS };
-  const call = (name: string, input: unknown) => dispatch(registry, name, input, caller);
-  return { org, version: v.id, asset: asset.id, call };
+  return { org, version: v.id, asset: asset.id, call: editorCalls(org) };
 }
-
-/** The output of a call that must succeed. */
-const ok = async (p: Promise<{ ok: boolean }>) => {
-  const r = await p;
-  if (!r.ok) throw new Error(JSON.stringify(r));
-  return (r as unknown as { output: Record<string, unknown> }).output;
-};
 
 describe('spot drafts', () => {
   it('creates a template spot with the template duration, and reads it back', async () => {

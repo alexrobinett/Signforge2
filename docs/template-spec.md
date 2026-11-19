@@ -61,7 +61,7 @@ A template that has not reported `ready` within 2 seconds is skipped.
 - Look elements up inside the hooks, not once at the top of `main.ts`: a reset replaces them.
 - Clear any state kept outside the DOM (a timer, a module variable) in `stop`.
 
-`packages/player/browser/templates.test.ts` checks every template in `templates/`: new data after the first `init` must leave the same document as a fresh load. A protocol-1 bundle has no `reset`; the player reloads its frame instead. A new template goes into the devDependencies of `packages/player` and `apps/api`, whose tests build every template, so CI reruns them when it changes ([`ci.md`](ci.md#what-affected-means)).
+`packages/player/browser/templates.test.ts` checks every template in `templates/`: new data after the first `init` must leave the same document as a fresh load. A protocol-1 bundle has no `reset`; the player reloads its frame instead. A new template goes into the devDependencies of `packages/cli`, `packages/player`, `apps/api` and `apps/template-check`, whose tests build every template, so CI reruns them when it changes ([`ci.md`](ci.md#what-affected-means)).
 
 ## What the SDK gives you
 
@@ -131,6 +131,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 - No network. The template runs in a sandboxed frame under a policy that blocks every request, including navigating its own frame: a template that tries is stopped and its spot is skipped. There is no WebRTC either: `RTCPeerConnection` is undefined in the frame. Scripts and styles must be inline after the build, and images arrive from the player.
 - Only the bundle's own scripts run. Inline event handlers (`onclick="…"`, `setAttribute('onload', …)`) and `javascript:` URLs do not: use `addEventListener` or a property (`img.onload = …`). Nor do `eval` and `new Function`.
 - No storage, cookies or access to anything outside its own frame.
+- No WebRTC. The policy does not cover it, so the runtime check refuses any use of `RTCPeerConnection`.
 - Fonts ship inside the bundle. Reference a font file from `style.css` and the build inlines it. Use a font you are licensed to redistribute. Brand fonts are the exception: they come with the theme (see Brand), from the curated catalogue in `fonts/`.
 - Data is fixed for one play. New values arrive with the next `init`, from a clean document (see Lifecycle).
 - Decoration must not fail the spot. If an optional effect cannot be drawn, catch the error and show the content without it; a template that rejects in `prepare` is skipped.
@@ -149,7 +150,17 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 
 These checks are a lint, not a security boundary: string matching can be evaded. What keeps a screen safe is the sandbox the template runs in and its policy that blocks every request.
 
-A registered version is immutable: pushing the same version with different bytes is refused, and pushing identical bytes changes nothing. A version is a draft, approved or retired; only approved versions are offered for new spots. The time and frame budgets are measured on the device with `scripts/pi-measure.sh`; automated checks for them are part of Milestone 4.
+**The runtime check.** The server then renders an org's new version before registering it (`apps/template-check`; docs/architecture.md, Runtime check): headless Chromium in a container with no network, in the player's own frame and policy, with each field's default (a small image for each image field), at 1920x1080 in each orientation you list. It plays for a second after `ready`. The version is refused with each of these it sees, one sentence each:
+
+- a request of any kind (`requested https://example.com/x (blocked)`), including images, fonts, media, workers and beacons, and anything else the policy blocks (`eval`);
+- navigating its own frame, the page around it, a new window or a form;
+- WebRTC (`RTCPeerConnection`): the screen's policy cannot block it, so a template may not use it;
+- an uncaught error, or a `prepare` that rejects;
+- no `ready` within 2 seconds, the player's limit.
+
+It runs in your org's own container, which no other org's template shares. A check that could not run (the container busy or not started) refuses the push as `unavailable`: try again. An org may run about 10 checks a minute (the count is kept per Cloudflare location). A pass is stored on the version with its timings (ms from `init` to `ready`, and the first second's frames, per orientation); they are information, not a gate, since the budgets are measured on the Pi. Base templates in `templates/` go through the same runner in CI (`apps/template-check/test/check.test.ts`). Test yours with `sf template push` to an org.
+
+A registered version is immutable: pushing the same version with different bytes is refused, and pushing identical bytes changes nothing. A version is a draft, approved or retired; only approved versions are offered for new spots. The time and frame budgets are measured on the device with `scripts/pi-measure.sh`; automated checks for them are part of Milestone 4. The runtime check only refuses a template that is not ready within 2 seconds.
 
 So a shipped template's bundle must not change under its version, or `sf template seed` refuses it on the next deploy. A bundle holds the template's own files, the SDK, and from the contract only `@signforge/contract/frame` (the protocol version and the brand variables), so a change to the rest of the contract (the API's, the sync's or the screen's checks) leaves every bundle byte for byte. `packages/cli/test/templates.test.ts` builds every template in `templates/` and compares each bundle's sha256 with `packages/cli/test/golden/template-bundles.json`, by template key: it fails when a bundle changed, whatever changed it. Then bump the version in the template's `template.json` and `package.json`, put the new key and hash in that file (the failure shows both), and regenerate the goldens. A change to the SDK's index can change every bundle, even of templates that do not use the new code (an unused export changed six of seven; a comment-only edit changed none), because the minifier renames symbols across the whole bundle: SDK code only some templates use goes in its own entry point, as `readableOn` does. An esbuild or bundled-font upgrade turns the test red for every template the same way.
 
@@ -157,7 +168,7 @@ So a shipped template's bundle must not change under its version, or `sf templat
 
 For a human approving an agent-built template:
 
-1. `sf build` passes with no problems reported.
+1. `sf build` passes with no problems reported, and the version registered, so the runtime check passed (its report is on the version).
 2. It looks right in both orientations it lists, at the shortest and longest duration in its range.
 3. Long field values do not overflow or overlap (try each text field at its `maxLength`).
 4. On the Pi, `device/pi/isolate.py 30 cut <spot>` reports under 1% dropped frames while playing, and no frame over 50 ms.

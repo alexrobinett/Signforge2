@@ -18,6 +18,7 @@ import type {
   SyncRequest,
   SyncResponse,
   TemplateManifest,
+  TemplateRuntimeReport,
 } from './shapes.ts';
 import {
   displayHoursProblems,
@@ -34,6 +35,7 @@ import {
   validateSyncRequest,
   validateSyncResponse,
   validateTemplateManifest,
+  validateTemplateRuntimeReport,
 } from './validate.ts';
 
 /** The input itself, typed, when it passes; otherwise the validator's problems. */
@@ -60,3 +62,4 @@ export const parseSyncResponse = parser<SyncResponse>(validateSyncResponse);
 export const parseServerSocketMessage = parser<ServerSocketMessage>(validateServerSocketMessage);
 export const parseDeviceSocketMessage = parser<DeviceSocketMessage>(validateDeviceSocketMessage);
 export const parsePreviewHostMessage = parser<PreviewHostMessage>(validatePreviewHostMessage);
+export const parseTemplateRuntimeReport = parser<TemplateRuntimeReport>(validateTemplateRuntimeReport);
