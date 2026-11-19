@@ -11,11 +11,15 @@ import { RUN_DIR } from './servers';
 const ADDRESS = '192.0.2.33';
 
 function sql(command: string) {
-  const run = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'dev', '--persist-to', `${RUN_DIR}state`, '--command', command], {
-    cwd: fileURLToPath(new URL('../../api/', import.meta.url)),
-    env: { ...process.env, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' },
-    encoding: 'utf8',
-  });
+  const run = spawnSync(
+    'pnpm',
+    ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'dev', '--persist-to', `${RUN_DIR}state`, '--command', command],
+    {
+      cwd: fileURLToPath(new URL('../../api/', import.meta.url)),
+      env: { ...process.env, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' },
+      encoding: 'utf8',
+    },
+  );
   expect(run.status, run.stderr).toBe(0);
 }
 
@@ -159,7 +163,10 @@ test('a second spot for the same place and units shares the source; moving it le
   const { dataSources } = await tool(page, 'list_data_sources', {});
   expect(dataSources.map((d: { id: string }) => d.id.split('-').slice(0, 3).join('-')).sort()).toEqual(['weather-3413829-c', 'weather-4180439-f']);
   const reykjavik: string = dataSources.find((d: { id: string }) => d.id.startsWith('weather-3413829')).id;
-  expect((await tool(page, 'get_spot', { spotId })).spot).toMatchObject({ data: { unit: '°C', city: 'Reykjavík' }, bindings: { temp: { dataSourceId: reykjavik } } });
+  expect((await tool(page, 'get_spot', { spotId })).spot).toMatchObject({
+    data: { unit: '°C', city: 'Reykjavík' },
+    bindings: { temp: { dataSourceId: reykjavik } },
+  });
   expect((await tool(page, 'get_spot', { spotId: first })).spot.bindings.temp.dataSourceId).toMatch(/^weather-4180439-f-mph-/);
 
   // A failing source: the editor says so, and the stage shows the fallback, as a screen would.
