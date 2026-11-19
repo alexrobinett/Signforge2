@@ -4,7 +4,7 @@
  * themselves are Query data (src/queries/integrations.ts); each action invalidates what it changed.
  * The page's filter and search are in its URL.
  */
-import type { ListedSource, SourceFormat } from '~/lib/integrations';
+import type { ConnectionView, ListedSource, SourceFormat } from '~/lib/integrations';
 import { callTool, isStale, toolMessage } from '~/lib/tools';
 import { integrationKeys } from '~/queries/integrations';
 import type { SliceCreator } from './store';
@@ -18,7 +18,8 @@ type AddableFormat = Extract<SourceFormat, 'rss' | 'ical'>;
 interface NewSource {
   name: string;
   feedUrl: string;
-  horizonDays: number;
+  /** Null while the field is empty. */
+  horizonDays: number | null;
 }
 
 interface IntegrationsState {
@@ -32,8 +33,12 @@ interface IntegrationsState {
   feedUrl: string;
   pending: boolean;
   error: string | null;
-  /** The connection being connected, reconnected or disconnected (a provider's name for a new one). */
-  connecting: string | null;
+  /** The source whose deletion is being confirmed: its address is sealed, so it cannot be had back. */
+  deleting: ListedSource | null;
+  /** The connection whose disconnection is being confirmed: getting it back needs the provider's consent again. */
+  disconnecting: ConnectionView | null;
+  /** What is happening to which connection (a provider's name for a new one). */
+  connecting: { id: string; doing: 'connect' | 'disconnect' } | null;
   connectError: string | null;
 }
 
@@ -49,11 +54,16 @@ export interface IntegrationsSlice {
   typeSourceUrl: (feedUrl: string) => void;
   /** Sends the new URL with the version the page read; the poller reads it afresh within a minute. */
   changeSourceUrl: (orgId: string, source: ListedSource) => Promise<void>;
-  /** Refused while a spot binds it: the refusal says which. */
-  deleteSource: (orgId: string, source: ListedSource) => Promise<void>;
+  /** Opens the confirmation for one source; null closes it. */
+  askToDeleteSource: (source: ListedSource | null) => void;
+  /** Deletes the source being confirmed. Refused while a spot binds it: the refusal says which. */
+  deleteSource: (orgId: string) => Promise<void>;
   /** Sends the browser to the provider's consent page; it comes back to this page through the API's callback. */
   connect: (provider: string, connectionId?: string) => Promise<void>;
-  disconnect: (orgId: string, connectionId: string) => Promise<void>;
+  /** Opens the confirmation for one connection; null closes it. */
+  askToDisconnect: (connection: ConnectionView | null) => void;
+  /** Disconnects the connection being confirmed. */
+  disconnect: (orgId: string) => Promise<void>;
 }
 
 const initialNewSource: NewSource = { name: '', feedUrl: '', horizonDays: DEFAULT_HORIZON_DAYS };
@@ -66,6 +76,8 @@ const initial: IntegrationsState = {
   feedUrl: '',
   pending: false,
   error: null,
+  deleting: null,
+  disconnecting: null,
   connecting: null,
   connectError: null,
 };
@@ -116,7 +128,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
           name: name.trim() || (URL.canParse(url) ? new URL(url).hostname : 'Feed'),
           format,
           feedUrl: url,
-          ...(format === 'ical' ? { horizonDays } : {}),
+          ...(format === 'ical' && horizonDays !== null ? { horizonDays } : {}),
           idempotencyKey: crypto.randomUUID(),
         });
         await refresh(orgId);
@@ -137,18 +149,23 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
         (err) => (isStale(err) ? 'This changed since you opened it. Close this and open it again to see it.' : toolMessage(err)),
       ),
 
-    deleteSource: (orgId, source) =>
-      attempt(
+    askToDeleteSource: (deleting) => integrations((s) => ({ ...s, deleting, error: null })),
+
+    async deleteSource(orgId) {
+      const source = get().integrations.deleting;
+      if (!source) return;
+      await attempt(
         async () => {
           await callTool('delete_data_source', { dataSourceId: source.id });
           await refresh(orgId);
-          integrations((s) => ({ ...s, pending: false }));
+          integrations((s) => ({ ...s, deleting: null, pending: false }));
         },
         (err) => blockedBy(err, source) ?? toolMessage(err),
-      ),
+      );
+    },
 
     async connect(provider, connectionId) {
-      integrations((s) => ({ ...s, connecting: connectionId ?? provider, connectError: null }));
+      integrations((s) => ({ ...s, connecting: { id: connectionId ?? provider, doing: 'connect' }, connectError: null }));
       try {
         window.location.assign(authorizeUrlOf(await callTool('start_connection', { provider, ...(connectionId ? { connectionId } : {}) })));
       } catch (err) {
@@ -156,16 +173,20 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       }
     },
 
-    async disconnect(orgId, connectionId) {
-      integrations((s) => ({ ...s, connecting: connectionId, connectError: null }));
+    askToDisconnect: (disconnecting) => integrations((s) => ({ ...s, disconnecting, connectError: null })),
+
+    async disconnect(orgId) {
+      const connection = get().integrations.disconnecting;
+      if (!connection) return;
+      integrations((s) => ({ ...s, connecting: { id: connection.id, doing: 'disconnect' }, connectError: null }));
       try {
-        await callTool('disconnect', { connectionId });
+        await callTool('disconnect', { connectionId: connection.id });
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: integrationKeys.connections(orgId), exact: true }),
           // Its sources now fail as disconnected.
           refresh(orgId),
         ]);
-        integrations((s) => ({ ...s, connecting: null }));
+        integrations((s) => ({ ...s, connecting: null, disconnecting: null }));
       } catch (err) {
         integrations((s) => ({ ...s, connecting: null, connectError: toolMessage(err) }));
       }

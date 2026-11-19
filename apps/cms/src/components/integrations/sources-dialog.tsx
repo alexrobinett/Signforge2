@@ -4,11 +4,20 @@
  */
 import { safeUrl } from '@signforge/contract';
 import type { SubmitEvent } from 'react';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { type Clock, failingWords, type ListedSource, type SourceFormat, sourceState } from '~/lib/integrations';
+import { type Clock, failingWords, hasAddress, type ListedSource, type SourceFormat, sourceState } from '~/lib/integrations';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 
@@ -52,8 +61,9 @@ export function SourcesDialog({ orgId, sources, clock, canManage }: { orgId: str
             )}
             {canManage && isAddable(format) && s.editing === null && <AddSource orgId={orgId} format={format} />}
             <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
-              {s.error}
+              {s.deleting ? null : s.error}
             </p>
+            <ConfirmDelete orgId={orgId} />
           </>
         )}
       </DialogContent>
@@ -68,7 +78,7 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
   const editSourceUrl = useAppStore((st) => st.editSourceUrl);
   const typeSourceUrl = useAppStore((st) => st.typeSourceUrl);
   const changeSourceUrl = useAppStore((st) => st.changeSourceUrl);
-  const deleteSource = useAppStore((st) => st.deleteSource);
+  const askToDeleteSource = useAppStore((st) => st.askToDeleteSource);
   const state = sourceState(source, clock);
   const inputId = `source-url-${source.id}`;
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
@@ -87,9 +97,12 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
       {state.tone === 'failing' && <p className="text-sm">{failingWords(source, clock)}</p>}
       {state.tone === 'waiting' && <p className="text-sm text-muted-foreground">Its first check of this address runs within a minute.</p>}
       <p className="text-sm text-muted-foreground">{source.spots.length ? `Used by ${source.spots.map((x) => x.name).join(', ')}.` : 'No spot uses it yet.'}</p>
+      {source.format === 'json' && state.tone === 'failing' && (
+        <p className="text-sm text-muted-foreground">To fix it, choose the place again in a weather spot that uses it.</p>
+      )}
       {canManage &&
         source.format !== 'provider' &&
-        (editing ? (
+        (editing && hasAddress(source) ? (
           <form onSubmit={submit} className="space-y-2">
             <Label htmlFor={inputId}>New address for {source.name}</Label>
             <Input
@@ -113,15 +126,17 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
           </form>
         ) : (
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => editSourceUrl(source.id)} aria-label={`Change the URL of ${source.name}`}>
-              Change URL
-            </Button>
+            {hasAddress(source) && (
+              <Button type="button" variant="outline" size="sm" onClick={() => editSourceUrl(source.id)} aria-label={`Change the URL of ${source.name}`}>
+                Change URL
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
               size="sm"
               disabled={pending}
-              onClick={() => void deleteSource(orgId, source)}
+              onClick={() => askToDeleteSource(source)}
               aria-label={`Delete ${source.name}`}
               className="text-destructive"
             >
@@ -179,14 +194,14 @@ function AddSource({ orgId, format }: { orgId: string; format: keyof typeof ADD 
             type="number"
             min={1}
             max={366}
-            value={d.horizonDays}
-            onChange={(e) => edit({ horizonDays: e.target.valueAsNumber })}
+            value={d.horizonDays ?? ''}
+            onChange={(e) => edit({ horizonDays: Number.isNaN(e.target.valueAsNumber) ? null : e.target.valueAsNumber })}
             className="w-28"
           />
         </div>
       )}
       <div className="flex gap-2">
-        <Button type="submit" disabled={!safeUrl(d.feedUrl.trim()) || pending}>
+        <Button type="submit" disabled={!safeUrl(d.feedUrl.trim()) || (format === 'ical' && d.horizonDays === null) || pending}>
           {pending ? 'Adding…' : `Add ${noun}`}
         </Button>
         <Button type="button" variant="ghost" onClick={() => openAddSource(false)}>
@@ -194,6 +209,36 @@ function AddSource({ orgId, format }: { orgId: string; format: keyof typeof ADD 
         </Button>
       </div>
     </form>
+  );
+}
+
+/** Deleting cannot be undone, and the address is never shown again, so it asks first (as Assets does). */
+function ConfirmDelete({ orgId }: { orgId: string }) {
+  const deleting = useAppStore((st) => st.integrations.deleting);
+  const pending = useAppStore((st) => st.integrations.pending);
+  const error = useAppStore((st) => st.integrations.error);
+  const ask = useAppStore((st) => st.askToDeleteSource);
+  const deleteSource = useAppStore((st) => st.deleteSource);
+  return (
+    <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && ask(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="break-words">Delete {deleting?.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            SignForge never shows a source's address, so to use it again you must type its address again. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+          {error}
+        </p>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button variant="destructive" disabled={pending} onClick={() => void deleteSource(orgId)}>
+            {pending ? 'Deleting…' : 'Delete source'}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

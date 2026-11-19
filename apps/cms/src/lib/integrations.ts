@@ -3,6 +3,9 @@
  * `list_data_sources` shows them, a failing one in words, and the catalogue of connectors with
  * what is built and what is planned. Only the built ones do anything; the roadmap is #81.
  */
+import { SNAPSHOT_STALE_MS } from '@signforge/contract';
+
+const DAY_MS = 86_400_000;
 
 /** One data source as `list_data_sources` lists it. Its feed URL is sealed and never shown. */
 export interface ListedSource {
@@ -19,8 +22,7 @@ export interface ListedSource {
   /** The poller's category for the last failure (`PollError` in apps/api). */
   lastError: string | null;
   version: number;
-  /** The data screens have now: when it was fetched, and when a poll last found it still current. Null before a good poll. */
-  lastFetchedAt: number | null;
+  /** When a poll last found the data screens have still current; null before a good poll. */
   lastCheckedAt: number | null;
   spots: { id: string; name: string }[];
 }
@@ -198,17 +200,20 @@ function failureWords(code: string | null): string {
   }
 }
 
-/** How the page writes times: in the org's zone and locale, "9:40 AM" today and "Tue 9:40 AM" before. */
+/** How the page writes times: in the org's zone and locale, "9:40 AM" today, "Tue 9:40 AM" this week, "Nov 9, 9:40 AM" before. */
 export interface Clock {
   timezone: string;
   locale: string;
   now: number;
 }
 
-function clockTime(at: number, { timezone, locale, now }: Clock): string {
+export function clockTime(at: number, { timezone, locale, now }: Clock): string {
   const day = (t: number) => new Date(t).toLocaleDateString('en-CA', { timeZone: timezone });
   const time = new Date(at).toLocaleTimeString(locale, { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
-  return day(at) === day(now) ? time : `${new Date(at).toLocaleDateString(locale, { timeZone: timezone, weekday: 'short' })} ${time}`;
+  if (day(at) === day(now)) return time;
+  // A weekday more than 6 days back reads as this week's.
+  if (now - at > 6 * DAY_MS) return `${new Date(at).toLocaleDateString(locale, { timeZone: timezone, month: 'short', day: 'numeric' })}, ${time}`;
+  return `${new Date(at).toLocaleDateString(locale, { timeZone: timezone, weekday: 'short' })} ${time}`;
 }
 
 /** The source's state in a few words, for its row: its last good time, or that it is waiting or failing. */
@@ -220,27 +225,38 @@ export function sourceState(s: ListedSource, clock: Clock): { word: string; tone
 
 /**
  * A failing source in plain words: what its feed does, for how many checks, and what screens show
- * meanwhile ("The Break room calendar answers with an error at its last 2 checks. Its screens show
- * the 7:05 AM copy.").
+ * meanwhile ("The Break room calendar answers with an error: its last 2 checks failed. Its screens
+ * show the 7:05 AM copy."). A screen drops a copy not confirmed for SNAPSHOT_STALE_MS and plays the
+ * spots' fallback values, and so does the sentence.
  */
 export function failingWords(s: ListedSource, clock: Clock): string {
-  const what = `The ${s.name} ${NOUN[s.format][0]} ${failureWords(s.lastError)}`;
-  const checks = s.failures === 1 ? 'at its last check' : `at each of its last ${s.failures} checks`;
+  const what = `The ${s.name} ${s.format === 'json' ? 'forecast' : NOUN[s.format][0]} ${failureWords(s.lastError)}`;
+  const checks = s.failures === 1 ? 'its last check failed' : `its last ${s.failures} checks failed`;
   const meanwhile =
     s.lastCheckedAt === null
       ? 'Its spots show their fallback values until a check succeeds.'
-      : `Its screens show the ${clockTime(s.lastCheckedAt, clock)} copy.`;
-  return `${what} ${checks}. ${meanwhile}`;
+      : clock.now - s.lastCheckedAt > SNAPSHOT_STALE_MS
+        ? `Its spots show their fallback values: the last good copy, from ${clockTime(s.lastCheckedAt, clock)}, is more than a day old.`
+        : `Its screens show the ${clockTime(s.lastCheckedAt, clock)} copy.`;
+  return `${what}: ${checks}. ${meanwhile}`;
 }
 
 /** What fixing a failing source is called: its address is what an editor can change. */
-export const FIX_WORD: Record<Exclude<SourceFormat, 'provider'>, string> = { rss: 'Fix the feed URL', json: 'Fix the weather URL', ical: 'Fix the iCal URL' };
+export const FIX_WORD = { rss: 'Fix the feed URL', ical: 'Fix the iCal URL' } as const;
+
+/**
+ * The sources whose address a person types. A weather source is made from a place and its units
+ * in the spot editor, which names and reuses it by them, so a typed address would make it serve
+ * another place: its fix is choosing the place again there.
+ */
+export const hasAddress = (s: Pick<ListedSource, 'format'>): s is { format: keyof typeof FIX_WORD } => s.format === 'rss' || s.format === 'ical';
 
 /** Where the page came back from a provider's consent (the API's callback), in words; null for none. */
 export function connectionNotice(search: { connected?: string; connectionError?: string }, connections: readonly ConnectionView[]): string | null {
   if (search.connected) {
     const c = connections.find((x) => x.id === search.connected);
-    return c ? `Connected ${c.account} at ${providerName(c.provider)}.` : 'Connected.';
+    // Only one the org has: the address bar is anyone's to write.
+    return c ? `Connected ${c.account} at ${providerName(c.provider)}.` : null;
   }
   switch (search.connectionError) {
     case undefined:
@@ -255,6 +271,6 @@ export function connectionNotice(search: { connected?: string; connectionError?:
     case 'invalid_input':
       return 'Not connected: the provider did not grant it. Connect again.';
     default:
-      return `Not connected (${search.connectionError}). Connect again.`;
+      return 'Not connected. Connect again.';
   }
 }

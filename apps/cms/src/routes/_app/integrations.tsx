@@ -6,20 +6,31 @@
  */
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { XIcon } from 'lucide-react';
+import { CloudOffIcon, XIcon } from 'lucide-react';
 import { SourcesDialog } from '~/components/integrations/sources-dialog';
 import { PageHeader } from '~/components/page';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import {
   CATALOGUE,
   type Clock,
+  clockTime,
   type Connector,
   type ConnectionView,
   connectedWords,
   connectionNotice,
   FIX_WORD,
   failingWords,
+  hasAddress,
   isShow,
   KIND_WORD,
   type ListedSource,
@@ -88,7 +99,9 @@ function IntegrationsPage() {
   const { timezone, locale } = Route.useLoaderData();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { data, dataUpdatedAt } = useSuspenseQuery(dataSourcesQuery(orgId));
+  const { data, dataUpdatedAt, errorUpdatedAt } = useSuspenseQuery(dataSourcesQuery(orgId));
+  // Not `isError`, which goes back to pending on each retry: the notice would blink (as on Screens).
+  const notCurrent = errorUpdatedAt > dataUpdatedAt;
   const { connections, providers } = useSuspenseQuery(connectionsQuery(orgId)).data;
   const sources = data.dataSources;
   const clock: Clock = { timezone, locale, now: useNow(dataUpdatedAt) };
@@ -125,8 +138,10 @@ function IntegrationsPage() {
       {/* Sources first and "Missing one?" last on a phone; beside the catalogue on a wide screen (the board). */}
       <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:grid-rows-[auto_1fr]">
         <aside aria-label="Sources and accounts" className="flex flex-col gap-3.5 lg:col-start-2 lg:row-start-1">
-          <FeedingNow sources={sources} clock={clock} canManage={canManage} />
-          {(connections.length > 0 || providers.length > 0) && <Accounts orgId={orgId} connections={connections} providers={providers} canManage={canManage} />}
+          <FeedingNow sources={sources} clock={clock} canManage={canManage} notCurrent={notCurrent} heardAt={dataUpdatedAt} />
+          {(connections.length > 0 || providers.length > 0) && (
+            <Accounts orgId={orgId} connections={connections} providers={providers} sources={sources} canManage={canManage} />
+          )}
         </aside>
 
         <div className="flex min-w-0 flex-col gap-6 lg:col-start-1 lg:row-span-2 lg:row-start-1">
@@ -242,7 +257,20 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
 }
 
 /** The board's "Feeding screens now": every source, its last good check, and a failing one in words with its fix. */
-function FeedingNow({ sources, clock, canManage }: { sources: ListedSource[]; clock: Clock; canManage: boolean }) {
+function FeedingNow({
+  sources,
+  clock,
+  canManage,
+  notCurrent,
+  heardAt,
+}: {
+  sources: ListedSource[];
+  clock: Clock;
+  canManage: boolean;
+  /** The page's poll is failing: what it shows is what SignForge last said, at `heardAt`. */
+  notCurrent: boolean;
+  heardAt: number;
+}) {
   const openSources = useAppStore((s) => s.openSources);
   const failing = sources.filter((s) => s.failures > 0);
   return (
@@ -250,6 +278,17 @@ function FeedingNow({ sources, clock, canManage }: { sources: ListedSource[]; cl
       <h2 id="now-h" className="text-lg font-semibold tracking-tight">
         Feeding screens now
       </h2>
+      {/* In the accessibility tree while empty, so the notice is announced when it comes. */}
+      <div role="status" className="empty:sr-only">
+        {notCurrent && (
+          <p className="flex items-start gap-2 text-sm">
+            <CloudOffIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span>
+              <strong className="font-semibold">Not current.</strong> SignForge has not answered since {clockTime(heardAt, clock)}. This page keeps trying.
+            </span>
+          </p>
+        )}
+      </div>
       {sources.length ? (
         <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 text-[15px]">
           {sources.map((s) => {
@@ -275,7 +314,8 @@ function FeedingNow({ sources, clock, canManage }: { sources: ListedSource[]; cl
             {failingWords(s, clock)}
             {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
           </p>
-          {canManage && s.format !== 'provider' && (
+          {s.format === 'json' && <p className="text-sm text-muted-foreground">To fix it, choose the place again in a weather spot that uses it.</p>}
+          {canManage && hasAddress(s) && (
             <button
               type="button"
               className="inline-flex min-h-10 items-center self-start text-[15px] text-primary underline underline-offset-4"
@@ -298,11 +338,24 @@ const STATUS_WORD: Record<ConnectionView['status'], string> = {
 };
 
 /** Accounts connected at providers, with Connect for each provider this deployment offers. */
-function Accounts({ orgId, connections, providers, canManage }: { orgId: string; connections: ConnectionView[]; providers: string[]; canManage: boolean }) {
+function Accounts({
+  orgId,
+  connections,
+  providers,
+  sources,
+  canManage,
+}: {
+  orgId: string;
+  connections: ConnectionView[];
+  providers: string[];
+  sources: ListedSource[];
+  canManage: boolean;
+}) {
   const connecting = useAppStore((s) => s.integrations.connecting);
   const error = useAppStore((s) => s.integrations.connectError);
   const connect = useAppStore((s) => s.connect);
-  const disconnect = useAppStore((s) => s.disconnect);
+  const askToDisconnect = useAppStore((s) => s.askToDisconnect);
+  const busy = (id: string, doing: 'connect' | 'disconnect') => connecting?.id === id && connecting.doing === doing;
 
   return (
     <section aria-labelledby="accounts-h" className="flex flex-col gap-2.5 rounded-[14px] border bg-card p-4">
@@ -325,17 +378,12 @@ function Accounts({ orgId, connections, providers, canManage }: { orgId: string;
                 <span className="flex flex-wrap gap-2">
                   {c.status !== 'active' && (
                     <Button disabled={connecting !== null} onClick={() => void connect(c.provider, c.id)} aria-label={`Reconnect ${c.account}`}>
-                      Reconnect
+                      {busy(c.id, 'connect') ? 'Opening…' : 'Reconnect'}
                     </Button>
                   )}
                   {c.status !== 'disconnected' && (
-                    <Button
-                      variant="outline"
-                      disabled={connecting !== null}
-                      onClick={() => void disconnect(orgId, c.id)}
-                      aria-label={`Disconnect ${c.account}`}
-                    >
-                      {connecting === c.id ? 'Disconnecting…' : 'Disconnect'}
+                    <Button variant="outline" disabled={connecting !== null} onClick={() => askToDisconnect(c)} aria-label={`Disconnect ${c.account}`}>
+                      Disconnect
                     </Button>
                   )}
                 </span>
@@ -349,12 +397,47 @@ function Accounts({ orgId, connections, providers, canManage }: { orgId: string;
       {canManage &&
         providers.map((p) => (
           <Button key={p} variant="outline" className="self-start" disabled={connecting !== null} onClick={() => void connect(p)}>
-            {connecting === p ? 'Opening…' : `Connect ${providerName(p)}`}
+            {busy(p, 'connect') ? 'Opening…' : `Connect ${providerName(p)}`}
           </Button>
         ))}
       <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
         {error}
       </p>
+      <ConfirmDisconnect orgId={orgId} sources={sources} />
     </section>
+  );
+}
+
+/** Disconnecting revokes the grant at the provider, and only someone who can sign in to the account there gets it back, so it asks first. */
+function ConfirmDisconnect({ orgId, sources }: { orgId: string; sources: ListedSource[] }) {
+  const c = useAppStore((s) => s.integrations.disconnecting);
+  const pending = useAppStore((s) => s.integrations.connecting?.doing === 'disconnect');
+  const error = useAppStore((s) => s.integrations.connectError);
+  const ask = useAppStore((s) => s.askToDisconnect);
+  const disconnect = useAppStore((s) => s.disconnect);
+  const reading = c ? sources.filter((s) => s.connectionId === c.id).map((s) => s.name) : [];
+  return (
+    <AlertDialog open={c !== null} onOpenChange={(open) => !open && ask(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="break-words">Disconnect {c?.account}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {reading.length
+              ? `Sources that read through it stop updating: ${reading.join(', ')}. Their spots show the last copy for a day, then their fallback values.`
+              : 'Sources that read through it stop updating; none do now.'}{' '}
+            Connecting it again needs someone who can sign in to this account at {c ? providerName(c.provider) : 'the provider'}.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+          {error}
+        </p>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button variant="destructive" disabled={pending} onClick={() => void disconnect(orgId)}>
+            {pending ? 'Disconnecting…' : 'Disconnect'}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

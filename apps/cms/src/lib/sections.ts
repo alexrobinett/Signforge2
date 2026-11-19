@@ -67,7 +67,7 @@ export const SECTIONS: Section[] = [
     label: 'Integrations',
     icon: PlugIcon,
     description:
-      'Data reaches screens through our server, never directly: each source is fetched, checked and baked into the next version, so screens keep the last good copy when a source is down.',
+      'Data reaches screens through our server, never directly: each source is fetched and checked there, and screens get the new copy with their next sync. When a source is down, they keep the last good copy for a day.',
     empty: { title: 'No data sources yet', body: 'Feeds, calendars and weather your spots read will be listed here with their health.' },
   },
   {

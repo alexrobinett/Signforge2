@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CATALOGUE, connectedWords, failingWords, type ListedSource, shows, sourceState } from '../src/lib/integrations';
+import { CATALOGUE, type ConnectionView, connectedWords, connectionNotice, failingWords, type ListedSource, shows, sourceState } from '../src/lib/integrations';
 
 const NOW = Date.parse('2026-11-18T17:40:00Z'); // Wed 9:40 AM in Portland
 const clock = { timezone: 'America/Los_Angeles', locale: 'en-US', now: NOW };
@@ -15,7 +15,6 @@ const source = (over: Partial<ListedSource> = {}): ListedSource => ({
   failures: 0,
   lastError: null,
   version: 1,
-  lastFetchedAt: Date.parse('2026-11-18T14:00:00Z'),
   lastCheckedAt: Date.parse('2026-11-18T15:05:00Z'),
   spots: [],
   ...over,
@@ -30,19 +29,62 @@ describe('a source in words', () => {
   it('says a failing source failed, and what its feed does and what screens show meanwhile', () => {
     const failing = source({ failures: 2, lastError: 'http-status' });
     expect(sourceState(failing, clock)).toEqual({ word: 'failed 2×', tone: 'failing' });
-    expect(failingWords(failing, clock)).toBe('The Break room calendar answers with an error at each of its last 2 checks. Its screens show the 7:05 AM copy.');
+    expect(failingWords(failing, clock)).toBe('The Break room calendar answers with an error: its last 2 checks failed. Its screens show the 7:05 AM copy.');
   });
 
   it('says a source that never had a good check leaves spots on their fallback', () => {
-    const never = source({ format: 'rss', name: 'Northside blog', failures: 1, lastError: 'timeout', lastCheckedAt: null, lastFetchedAt: null });
+    const never = source({ format: 'rss', name: 'Northside blog', failures: 1, lastError: 'timeout', lastCheckedAt: null });
     expect(failingWords(never, clock)).toBe(
-      'The Northside blog feed takes too long to answer at its last check. Its spots show their fallback values until a check succeeds.',
+      'The Northside blog feed takes too long to answer: its last check failed. Its spots show their fallback values until a check succeeds.',
     );
+  });
+
+  it('says spots fall back once the last good copy is more than a day old, as screens do (SNAPSHOT_STALE_MS)', () => {
+    const lastMonday = source({ failures: 9, lastError: 'http-status', lastCheckedAt: Date.parse('2026-11-16T17:40:00Z') });
+    expect(failingWords(lastMonday, clock)).toBe(
+      'The Break room calendar answers with an error: its last 9 checks failed. Its spots show their fallback values: the last good copy, from Mon 9:40 AM, is more than a day old.',
+    );
+    // Within the day, screens still show it.
+    expect(failingWords(source({ failures: 2, lastError: 'http-status', lastCheckedAt: NOW - 23 * 3_600_000 }), clock)).toContain(
+      'Its screens show the Tue 10:40 AM copy.',
+    );
+  });
+
+  it('gives a time more than 6 days back its date, not a weekday that reads as this week', () => {
+    const nineDays = source({ lastCheckedAt: Date.parse('2026-11-09T17:40:00Z') });
+    expect(sourceState(nineDays, clock).word).toBe('Nov 9, 9:40 AM');
+    expect(failingWords({ ...nineDays, failures: 3, lastError: 'timeout' }, clock)).toContain('from Nov 9, 9:40 AM, is more than a day old');
+    expect(sourceState(source({ lastCheckedAt: Date.parse('2026-11-12T17:40:00Z') }), clock).word).toBe('Thu 9:40 AM');
+  });
+
+  it('calls a weather source a forecast, not a place', () => {
+    expect(failingWords(source({ format: 'json', name: 'Weather, Portland', failures: 1, lastError: 'timeout' }), clock)).toMatch(
+      /^The Weather, Portland forecast takes too long to answer: its last check failed\./,
+    );
+  });
+
+  it("words a provider source's failure as what to do about its account", () => {
+    const rooms = source({ format: 'provider', name: 'Rooms', connectionId: 'con_1', failures: 3, lastError: 'needs-reconnect' });
+    expect(failingWords(rooms, clock)).toBe('The Rooms source needs its account connected again: its last 3 checks failed. Its screens show the 7:05 AM copy.');
   });
 
   it('says a source with a new address is being checked, until its next poll', () => {
     expect(sourceState(source({ nextPollAt: 0 }), clock)).toEqual({ word: 'checking', tone: 'waiting' });
-    expect(sourceState(source({ lastCheckedAt: null, lastFetchedAt: null }), clock).tone).toBe('waiting');
+    expect(sourceState(source({ lastCheckedAt: null }), clock).tone).toBe('waiting');
+  });
+});
+
+describe('what the connection callback sent back', () => {
+  const google: ConnectionView = { id: 'con_1', provider: 'google', account: 'facilities@example.com', status: 'active', lastError: null };
+
+  it('says connected only for a connection the org has', () => {
+    expect(connectionNotice({ connected: 'con_1' }, [google])).toBe('Connected facilities@example.com at Google.');
+    expect(connectionNotice({ connected: 'bogus' }, [google])).toBeNull();
+  });
+
+  it('never repeats an error code it does not know', () => {
+    expect(connectionNotice({ connectionError: 'denied' }, [])).toBe('Not connected: the provider says you did not approve it.');
+    expect(connectionNotice({ connectionError: 'your account is locked; call 555-0100' }, [])).toBe('Not connected. Connect again.');
   });
 });
 

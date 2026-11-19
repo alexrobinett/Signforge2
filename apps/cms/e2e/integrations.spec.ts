@@ -100,7 +100,7 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await expect(now.getByText('iCal · Break room')).toBeVisible();
   await expect(now.getByText('failed 2×')).toBeVisible();
   await expect(now).toContainText(
-    /The Break room calendar answers with an error at each of its last 2 checks\. Its screens show the \d+:\d\d [AP]M copy\. It feeds the spot Break room agenda\./,
+    /The Break room calendar answers with an error: its last 2 checks failed\. Its screens show the \d+:\d\d [AP]M copy\. It feeds the spot Break room agenda\./,
   );
   await expect(now.getByText('RSS · Northside blog')).toBeVisible();
   await expect(owner.getByText('1 calendar · failing')).toBeVisible();
@@ -146,19 +146,47 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   await expect(now).not.toContainText('answers with an error');
   await expect(owner.getByText('1 calendar', { exact: true })).toBeVisible();
 
-  // A source a spot reads is not deleted; one no spot reads is.
+  // Delete asks first, saying the address must be typed again; a source a spot reads is not deleted, one no spot reads is.
   await owner.getByRole('button', { name: 'Manage iCal URL' }).click();
   await dialog.getByRole('button', { name: 'Delete Break room' }).click();
-  await expect(dialog.getByRole('alert')).toHaveText('Break room is used by Break room agenda. Choose another source in those spots first.');
+  const confirm = owner.getByRole('alertdialog', { name: 'Delete Break room?' });
+  await expect(confirm).toContainText('type its address again');
+  await axe(owner);
+  await shots(owner, '64-integrations-delete');
+  await confirm.getByRole('button', { name: 'Delete source' }).click();
+  await expect(confirm.getByRole('alert')).toHaveText('Break room is used by Break room agenda. Choose another source in those spots first.');
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
   await owner.keyboard.press('Escape');
   await owner.getByRole('button', { name: 'Manage RSS / Atom' }).click();
-  await owner.getByRole('dialog', { name: 'RSS / Atom feeds' }).getByRole('button', { name: 'Delete Northside blog' }).click();
-  await expect(owner.getByRole('dialog', { name: 'RSS / Atom feeds' }).getByText('None yet.')).toBeVisible();
+  const feeds = owner.getByRole('dialog', { name: 'RSS / Atom feeds' });
+  await feeds.getByRole('button', { name: 'Delete Northside blog' }).click();
+  await owner.getByRole('alertdialog', { name: 'Delete Northside blog?' }).getByRole('button', { name: 'Delete source' }).click();
+  await expect(feeds.getByText('None yet.')).toBeVisible();
   await owner.keyboard.press('Escape');
   await expect(now.getByText('RSS · Northside blog')).toHaveCount(0);
+
+  // A weather source is named and reused by its place and units (the spot editor's): no address is typed for it here.
+  const { dataSource: weather } = await tool(owner, 'create_data_source', {
+    name: 'Weather, Portland',
+    format: 'json',
+    feedUrl: 'https://api.open-meteo.com/v1/forecast?latitude=45.52&longitude=-122.68&current=temperature_2m',
+    idempotencyKey: crypto.randomUUID(),
+  });
+  pollFound(orgId, weather.id, 60 * MINUTE);
+  pollsFailed(orgId, weather.id, 1);
+  await owner.reload();
+  await hydrated(owner);
+  await expect(now).toContainText('To fix it, choose the place again in a weather spot that uses it.');
+  await expect(now.getByRole('button', { name: /for Weather, Portland$/ })).toHaveCount(0);
+  await owner.getByRole('button', { name: 'Manage Weather' }).click();
+  const forecasts = owner.getByRole('dialog', { name: 'Weather' });
+  await expect(forecasts.getByRole('button', { name: 'Delete Weather, Portland' })).toBeVisible();
+  await expect(forecasts.getByRole('button', { name: 'Change the URL of Weather, Portland' })).toHaveCount(0);
+  await owner.keyboard.press('Escape');
 });
 
-test('connected accounts: reconnect and disconnect, and what the provider callback sends back', async ({ browser }) => {
+test('connected accounts: reconnect and disconnect, a failing read, and what the provider callback sends back', async ({ browser }) => {
+  test.setTimeout(150_000);
   // No provider is configured in dev (each connector ticket adds its own), so the account is put in the run's D1.
   const at = Date.now();
   d1(
@@ -172,13 +200,35 @@ test('connected accounts: reconnect and disconnect, and what the provider callba
   await expect(accounts.getByText('Needs reconnecting')).toBeVisible();
   await axe(owner);
   await shots(owner, '63-integrations-accounts');
-  // Reconnect asks the API for the provider's page; this deployment connects none, and says so.
+  // Reconnect asks the API for the provider's page (held here a moment, as a slow answer would be),
+  // saying so on its own button; this deployment connects none, and says so.
+  await owner.route('**/api/tools/start_connection', async (route) => {
+    await new Promise((r) => setTimeout(r, 1_500));
+    await route.continue();
+  });
   await accounts.getByRole('button', { name: 'Reconnect facilities@example.com' }).click();
+  await expect(accounts.getByRole('button', { name: 'Reconnect facilities@example.com' })).toHaveText('Opening…');
+  await expect(accounts.getByRole('button', { name: 'Disconnect facilities@example.com' })).toHaveText('Disconnect');
   await expect(accounts.getByRole('alert')).toContainText('cannot be connected here');
+  await owner.unroute('**/api/tools/start_connection');
+  // Disconnect asks first, saying what stops working.
   await accounts.getByRole('button', { name: 'Disconnect facilities@example.com' }).click();
+  const confirm = owner.getByRole('alertdialog', { name: 'Disconnect facilities@example.com?' });
+  await expect(confirm).toContainText('Sources that read through it stop updating');
+  await confirm.getByRole('button', { name: 'Disconnect' }).click();
   // Its last account gone and no provider to connect here, the card goes.
   await expect(accounts).toHaveCount(0);
   expect((await tool(owner, 'list_connections', {})).connections).toEqual([]);
+
+  // The page's 30-second read fails (no server function answers): it says its sources are not current, until a good read.
+  const refuse = '**/_serverFn/**';
+  await owner.route(refuse, (route) => route.abort('connectionrefused'));
+  const stale = owner.getByRole('region', { name: 'Feeding screens now' }).getByRole('status');
+  await expect(stale).toContainText(/Not current\. SignForge has not answered since \d+:\d\d [AP]M\./, { timeout: 45_000 });
+  await axe(owner);
+  await shots(owner, '65-integrations-not-current');
+  await owner.unroute(refuse);
+  await expect(stale).toBeEmpty({ timeout: 45_000 });
 
   // Back from a provider that refused: the page says so until dismissed.
   await owner.goto('/integrations?connectionError=denied');

@@ -13,9 +13,10 @@ export const integrationKeys = {
 
 /**
  * The org's data sources, with their health and the spots that bind them. Read again every 30
- * seconds while the page is open, so a poll's result (a fixed URL's first good check) shows.
+ * seconds while the page is open, so a poll's result (a fixed URL's first good check) shows. A
+ * read fails when two tries in a row do, and the page then says it is not current (as Screens).
  */
 export const dataSourcesQuery = (orgId: string) =>
-  queryOptions({ queryKey: integrationKeys.dataSources(orgId), queryFn: () => getDataSources(), refetchInterval: 30_000 });
+  queryOptions({ queryKey: integrationKeys.dataSources(orgId), queryFn: () => getDataSources(), refetchInterval: 30_000, retry: 1 });
 
 export const connectionsQuery = (orgId: string) => queryOptions({ queryKey: integrationKeys.connections(orgId), queryFn: () => getConnections() });
