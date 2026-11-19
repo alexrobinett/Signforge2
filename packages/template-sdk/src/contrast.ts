@@ -1,16 +1,34 @@
 /**
- * The text colour for a fill: `text` when it reaches 4.5:1 on `fill` (WCAG AA), else black or
- * white, whichever reads better (one of them always reaches 4.5:1). For a fill the template does
- * not choose: a kit may set an on-colour by hand that fails its pair (the brand tools only warn),
- * and a colour field holds whatever the spot sets. Colours are `#rgb` or `#rrggbb`, as kits and
- * the editor's colour fields give them; a fill in any other form cannot be measured and keeps `text`.
+ * The text colour for a fill: `text` when it reaches 4.5:1 on `fill` (WCAG AA), or 3:1 when it is
+ * `large` (WCAG: 24 px, or 18.66 px bold, on the screen), else black or white, whichever reads
+ * better (one of them always reaches 4.5:1). For a fill the template does not choose: a kit may
+ * set an on-colour by hand that fails its pair (the brand tools only warn), and a colour field
+ * holds whatever the spot sets. Colours are `#rgb` or `#rrggbb`, as kits and the editor's colour
+ * fields give them; a fill in any other form cannot be measured and keeps `text`.
  */
-export function readableOn(fill: string, text: string): string {
+export function readableOn(fill: string, text: string, { large = false } = {}): string {
   const f = luminance(fill);
   if (f === undefined) return text;
   const t = luminance(text);
-  if (t !== undefined && (Math.max(f, t) + 0.05) / (Math.min(f, t) + 0.05) >= 4.5) return text;
+  if (t !== undefined && (Math.max(f, t) + 0.05) / (Math.min(f, t) + 0.05) >= (large ? 3 : 4.5)) return text;
   return (f + 0.05) / 0.05 > 1.05 / (f + 0.05) ? '#000000' : '#ffffff';
+}
+
+/**
+ * The colour `layers` paint one over another, bottom first, as `#rrggbb`: text over a translucent
+ * card or panel sits on that, not on the page, and `readableOn` measures only hex. A layer is a CSS
+ * colour (a computed `color-mix` comes back as `color(srgb …)`), or a colour and the opacity it is
+ * mixed in at. One 1×1 canvas read, so call it once per backdrop, not per element.
+ */
+export function painted(...layers: (string | [color: string, alpha: number])[]): string {
+  const g = new OffscreenCanvas(1, 1).getContext('2d')!;
+  for (const layer of layers) {
+    const [color, alpha] = typeof layer === 'string' ? [layer, 1] : layer;
+    g.globalAlpha = alpha;
+    g.fillStyle = color;
+    g.fillRect(0, 0, 1, 1);
+  }
+  return `#${[...g.getImageData(0, 0, 1, 1).data.slice(0, 3)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
 }
 
 /**
