@@ -1,5 +1,6 @@
 // Org settings (M3-42): defaults until set, only owners change them, and the screen state follows the threshold.
 import { scoped } from '@signforge/db';
+import { seedOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { dispatch, registry } from '../src';
