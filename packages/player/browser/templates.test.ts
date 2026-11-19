@@ -10,7 +10,7 @@
  */
 import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { Page } from 'playwright';
+import type { Frame, Page } from 'playwright';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { PROTOCOL_VERSION, type BrandColors, type FieldDef, type FrameTheme, type TemplateManifest } from '@signforge/contract';
 import { buildTemplate } from '@signforge/cli/template';
@@ -271,7 +271,7 @@ function contrast(a: string, b: string): number {
   return (hi! + 0.05) / (lo! + 0.05);
 }
 
-describe('text on a brand colour (#57)', () => {
+describe('text on a brand colour (#57, #69)', () => {
   /** examples/demo/brand.json, with the on-colours the brand tools derive for it. */
   const demo: BrandColors = {
     primary: '#1d4ed8',
@@ -285,32 +285,64 @@ describe('text on a brand colour (#57)', () => {
   };
   // A kit may set its on-colours by hand; the brand tools only warn when a pair fails.
   const poor: BrandColors = { ...demo, onPrimary: '#2563eb', onAccent: '#ffffff' };
+  // A light kit whose accent is the default palette's amber, which reads on dark only.
+  const light: BrandColors = {
+    primary: '#1d4ed8',
+    onPrimary: '#ffffff',
+    accent: '#f59e0b',
+    onAccent: '#000000',
+    background: '#ffffff',
+    surface: '#f1f5f9',
+    text: '#0f172a',
+    muted: '#475569',
+  };
   const kit = (colors: BrandColors): FrameTheme => ({ colors, shape: 'soft', fonts: {} });
   // `$brand.accent` as the compiler resolves it: the kit's accent, else DEFAULT_BRAND_COLORS.accent.
   const kits: [string, FrameTheme | undefined, string][] = [
     ['no kit', undefined, '#f59e0b'],
     ['the demo kit', kit(demo), demo.accent],
     ['a kit with poor on-colours', kit(poor), poor.accent],
+    ['a light kit', kit(light), light.accent],
   ];
-  // The badge's own text (axe, 4.5:1), and cstore-promo's large points figure (3:1).
-  const pairs: [template: string, text: string, fill: string, min: number][] = [
+  const menu = { items: [{ name: 'Soup', description: 'Hot', price: '$4', tag: 'New' }] };
+  /** Each template's spot, given the accent `$brand.accent` resolves to. */
+  const spots = (accent: string): [template: string, data: Data][] => [
+    ['news', { accent }],
+    ['cstore-promo', {}],
+    ['photo-promo', {}],
+    ['menu-board', { accent, ...menu }],
+    ['menu-board', { accent, ...menu, theme: 'light' }],
+  ];
+  // Text on a fill: 4.5:1 as axe checks it, 3:1 for cstore-promo's large points figure.
+  const onFill: [template: string, text: string, fill: string, min: number][] = [
     ['news', '.badge', '.badge', 4.5],
     ['cstore-promo', '.badge small', '.badge .disc', 4.5],
     ['cstore-promo', '.badge b', '.badge .disc', 3],
+    ['photo-promo', '.tag', '.tag', 4.5],
+    ['menu-board', '.items .tag', '.items .tag', 4.5],
   ];
 
+  /** Open every spot of `spots(accent)` under `theme`, each in a frame of its own, ready. */
+  async function openAll(theme: FrameTheme | undefined, accent: string) {
+    const hst = await host();
+    const frames: [string, Frame][] = [];
+    for (const [i, [name, data]] of spots(accent).entries()) {
+      const t = built.get(name)!;
+      const frame = `f${i}`;
+      await hst.open(frame, t.html);
+      await hst.init(frame, spotData(t.manifest, data), {}, NOW, theme);
+      await hst.waitFor(frame, 'ready', 1);
+      frames.push([`${name}${data.theme ? ` (${data.theme})` : ''}`, hst.page.mainFrame().childFrames()[i]!]);
+    }
+    return { hst, frames };
+  }
+
   for (const [label, theme, accent] of kits)
-    it(`news and cstore-promo badges read under ${label}`, async () => {
-      const hst = await host();
+    it(`text on a fill reads under ${label}`, async () => {
+      const { frames } = await openAll(theme, accent);
       const found: string[] = [];
-      for (const [i, name] of ['news', 'cstore-promo'].entries()) {
-        const t = built.get(name)!;
-        const frame = ['fresh', 'reset'][i]!;
-        await hst.open(frame, t.html);
-        await hst.init(frame, spotData(t.manifest, name === 'news' ? { accent } : {}), {}, NOW, theme);
-        await hst.waitFor(frame, 'ready', 1);
-        const f = hst.page.mainFrame().childFrames()[i]!;
-        for (const [, text, fill, min] of pairs.filter(([n]) => n === name)) {
+      for (const [name, f] of frames)
+        for (const [, text, fill, min] of onFill.filter(([n]) => name.startsWith(n))) {
           const [fg, bg] = await f.evaluate(
             ({ text, fill }) => [getComputedStyle(document.querySelector(text)!).color, getComputedStyle(document.querySelector(fill)!).backgroundColor],
             { text, fill },
@@ -318,7 +350,6 @@ describe('text on a brand colour (#57)', () => {
           const ratio = contrast(fg!, bg!);
           if (ratio < min) found.push(`${name} ${text}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, below ${min}:1`);
         }
-      }
       expect(found).toEqual([]);
     });
 });
