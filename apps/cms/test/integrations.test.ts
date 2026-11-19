@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { CATALOGUE, type ConnectionView, connectedWords, connectionNotice, failingWords, type ListedSource, shows, sourceState } from '../src/lib/integrations';
+import {
+  CATALOGUE,
+  type ConnectionView,
+  connectedWords,
+  connectionNotice,
+  failingWords,
+  type ListedSource,
+  shows,
+  sourceState,
+  weatherFixWords,
+} from '../src/lib/integrations';
 
 const NOW = Date.parse('2026-11-18T17:40:00Z'); // Wed 9:40 AM in Portland
 const clock = { timezone: 'America/Los_Angeles', locale: 'en-US', now: NOW };
@@ -61,6 +71,14 @@ describe('a source in words', () => {
     expect(failingWords(source({ format: 'json', name: 'Weather, Portland', failures: 1, lastError: 'timeout' }), clock)).toMatch(
       /^The Weather, Portland forecast takes too long to answer: its last check failed\./,
     );
+  });
+
+  it("says the spot editor's weather source is the forecast service's to fix, and another place's to choose again", () => {
+    // The spot editor names a forecast by its place and units and reuses it by that id: choosing the place again binds the same one.
+    expect(weatherFixWords({ id: 'weather-5746545-f-mph-a1b2c3' })).toBe(
+      'The forecast service is not answering. SignForge keeps checking it; there is nothing to change here.',
+    );
+    expect(weatherFixWords({ id: 'src_hand_made' })).toBe('To fix it, choose the place again in a weather spot that uses it.');
   });
 
   it("words a provider source's failure as what to do about its account", () => {

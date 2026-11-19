@@ -31,6 +31,7 @@ import {
   FIX_WORD,
   failingWords,
   hasAddress,
+  weatherFixWords,
   isShow,
   KIND_WORD,
   type ListedSource,
@@ -314,7 +315,7 @@ function FeedingNow({
             {failingWords(s, clock)}
             {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
           </p>
-          {s.format === 'json' && <p className="text-sm text-muted-foreground">To fix it, choose the place again in a weather spot that uses it.</p>}
+          {s.format === 'json' && <p className="text-sm text-muted-foreground">{weatherFixWords(s)}</p>}
           {canManage && hasAddress(s) && (
             <button
               type="button"
@@ -355,6 +356,8 @@ function Accounts({
   const error = useAppStore((s) => s.integrations.connectError);
   const connect = useAppStore((s) => s.connect);
   const askToDisconnect = useAppStore((s) => s.askToDisconnect);
+  // The confirm says a refused disconnect itself.
+  const disconnecting = useAppStore((s) => s.integrations.disconnecting !== null);
   const busy = (id: string, doing: 'connect' | 'disconnect') => connecting?.id === id && connecting.doing === doing;
 
   return (
@@ -401,7 +404,7 @@ function Accounts({
           </Button>
         ))}
       <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
-        {error}
+        {disconnecting ? null : error}
       </p>
       <ConfirmDisconnect orgId={orgId} sources={sources} />
     </section>

@@ -247,7 +247,7 @@ export const FIX_WORD = { rss: 'Fix the feed URL', ical: 'Fix the iCal URL' } as
 /**
  * The sources whose address a person types. A weather source is made from a place and its units
  * in the spot editor, which names and reuses it by them, so a typed address would make it serve
- * another place: its fix is choosing the place again there.
+ * another place.
  */
 export const hasAddress = (s: Pick<ListedSource, 'format'>): s is { format: keyof typeof FIX_WORD } => s.format === 'rss' || s.format === 'ical';
 
@@ -274,3 +274,13 @@ export function connectionNotice(search: { connected?: string; connectionError?:
       return 'Not connected. Connect again.';
   }
 }
+
+/**
+ * What to do about a failing weather source. The spot editor builds a forecast's address itself
+ * and reuses the source by its id (`weather-<place>-<units>-…`), so choosing the place again binds
+ * the same one: its failures are the forecast service's. Another JSON source is a place picked again.
+ */
+export const weatherFixWords = (s: Pick<ListedSource, 'id'>) =>
+  s.id.startsWith('weather-')
+    ? 'The forecast service is not answering. SignForge keeps checking it; there is nothing to change here.'
+    : 'To fix it, choose the place again in a weather spot that uses it.';

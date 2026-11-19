@@ -17,7 +17,7 @@ import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { type Clock, failingWords, hasAddress, type ListedSource, type SourceFormat, sourceState } from '~/lib/integrations';
+import { type Clock, failingWords, hasAddress, type ListedSource, type SourceFormat, sourceState, weatherFixWords } from '~/lib/integrations';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 
@@ -97,9 +97,7 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
       {state.tone === 'failing' && <p className="text-sm">{failingWords(source, clock)}</p>}
       {state.tone === 'waiting' && <p className="text-sm text-muted-foreground">Its first check of this address runs within a minute.</p>}
       <p className="text-sm text-muted-foreground">{source.spots.length ? `Used by ${source.spots.map((x) => x.name).join(', ')}.` : 'No spot uses it yet.'}</p>
-      {source.format === 'json' && state.tone === 'failing' && (
-        <p className="text-sm text-muted-foreground">To fix it, choose the place again in a weather spot that uses it.</p>
-      )}
+      {source.format === 'json' && state.tone === 'failing' && <p className="text-sm text-muted-foreground">{weatherFixWords(source)}</p>}
       {canManage &&
         source.format !== 'provider' &&
         (editing && hasAddress(source) ? (
@@ -225,7 +223,9 @@ function ConfirmDelete({ orgId }: { orgId: string }) {
         <AlertDialogHeader>
           <AlertDialogTitle className="break-words">Delete {deleting?.name}?</AlertDialogTitle>
           <AlertDialogDescription>
-            SignForge never shows a source's address, so to use it again you must type its address again. This cannot be undone.
+            {deleting && !hasAddress(deleting)
+              ? 'A weather source is made from a place: to use it again, choose the place again in a weather spot. This cannot be undone.'
+              : "SignForge never shows a source's address, so to use it again you must type its address again. This cannot be undone."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <p role="alert" className="text-sm font-medium text-destructive empty:hidden">

@@ -163,8 +163,10 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   await owner.keyboard.press('Escape');
   await expect(now.getByText('RSS · Northside blog')).toHaveCount(0);
 
-  // A weather source is named and reused by its place and units (the spot editor's): no address is typed for it here.
+  // A weather source is named and reused by its place and units (the spot editor's): no address is typed for it here,
+  // and a failing one is the forecast service's.
   const { dataSource: weather } = await tool(owner, 'create_data_source', {
+    id: 'weather-5746545-f-mph-e2e001',
     name: 'Weather, Portland',
     format: 'json',
     feedUrl: 'https://api.open-meteo.com/v1/forecast?latitude=45.52&longitude=-122.68&current=temperature_2m',
@@ -174,12 +176,17 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   pollsFailed(orgId, weather.id, 1);
   await owner.reload();
   await hydrated(owner);
-  await expect(now).toContainText('To fix it, choose the place again in a weather spot that uses it.');
+  await expect(now).toContainText('The forecast service is not answering. SignForge keeps checking it; there is nothing to change here.');
   await expect(now.getByRole('button', { name: /for Weather, Portland$/ })).toHaveCount(0);
   await owner.getByRole('button', { name: 'Manage Weather' }).click();
   const forecasts = owner.getByRole('dialog', { name: 'Weather' });
   await expect(forecasts.getByRole('button', { name: 'Delete Weather, Portland' })).toBeVisible();
   await expect(forecasts.getByRole('button', { name: 'Change the URL of Weather, Portland' })).toHaveCount(0);
+  await forecasts.getByRole('button', { name: 'Delete Weather, Portland' }).click();
+  const confirmWeather = owner.getByRole('alertdialog', { name: 'Delete Weather, Portland?' });
+  await expect(confirmWeather).toContainText('choose the place again in a weather spot');
+  await expect(confirmWeather).not.toContainText('address');
+  await confirmWeather.getByRole('button', { name: 'Cancel' }).click();
   await owner.keyboard.press('Escape');
 });
 
@@ -209,10 +216,17 @@ test('connected accounts: reconnect and disconnect, a failing read, and what the
   await expect(accounts.getByRole('button', { name: 'Disconnect facilities@example.com' })).toHaveText('Disconnect');
   await expect(accounts.getByRole('alert')).toContainText('cannot be connected here');
   await owner.unroute('**/api/tools/start_connection');
-  // Disconnect asks first, saying what stops working.
+  // Disconnect asks first, saying what stops working; a refusal is said once, in the confirm.
   await accounts.getByRole('button', { name: 'Disconnect facilities@example.com' }).click();
   const confirm = owner.getByRole('alertdialog', { name: 'Disconnect facilities@example.com?' });
   await expect(confirm).toContainText('Sources that read through it stop updating');
+  await owner.route('**/api/tools/disconnect', (route) =>
+    route.fulfill({ status: 503, json: { error: 'unavailable', message: 'The provider did not answer. Try again.' } }),
+  );
+  await confirm.getByRole('button', { name: 'Disconnect' }).click();
+  await expect(confirm.getByRole('alert')).toHaveText('The provider did not answer. Try again.');
+  await expect(owner.getByText('The provider did not answer. Try again.')).toHaveCount(1);
+  await owner.unroute('**/api/tools/disconnect');
   await confirm.getByRole('button', { name: 'Disconnect' }).click();
   // Its last account gone and no provider to connect here, the card goes.
   await expect(accounts).toHaveCount(0);
