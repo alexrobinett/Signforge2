@@ -119,7 +119,6 @@ const HORIZON_ONLY_ICAL = 'horizonDays is for ical sources only';
 const target = (input: { dataSourceId: string }) => ({ kind: 'data_source', id: input.dataSourceId });
 
 const listedSourceOutput = dataSourceOutput.extend({
-  lastFetchedAt: z.number().nullable().describe('When the data screens have now was fetched; null until a poll succeeds'),
   lastCheckedAt: z.number().nullable().describe('When a poll last found the feed still saying it: its last good check'),
   spots: z.array(z.object({ id: z.string(), name: z.string() })).describe('The spots that bind it, as drafted or as published'),
 });
@@ -136,7 +135,7 @@ const listDataSources = defineTool({
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = page(await org.dataSources.list(), (d) => [d.id], input);
-    const [snapshots, spots] = await Promise.all([org.dataSources.snapshots(rows.map((d) => d.id)), org.spots.list()]);
+    const [snapshots, spots] = await Promise.all([org.dataSources.checkedTimes(rows.map((d) => d.id)), org.spots.list()]);
     const bound = spots.map((s) => ({
       id: s.id,
       name: s.name,
@@ -147,7 +146,6 @@ const listDataSources = defineTool({
         const snap = snapshots.find((x) => x.dataSourceId === d.id);
         return {
           ...viewOf(d),
-          lastFetchedAt: snap?.fetchedAt ?? null,
           lastCheckedAt: snap?.checkedAt ?? null,
           spots: bound.filter((s) => s.sources.has(d.id)).map(({ id, name }) => ({ id, name })),
         };

@@ -55,10 +55,10 @@ describe('data sources', () => {
     await owner.org.spots.update(o.templateSpot, { bindingsJson: JSON.stringify({ title: { source: 'holidays', path: 'events.0.title' } }) });
     const { dataSources } = await call('list_data_sources', {});
     const holidays = dataSources.find((d: { id: string }) => d.id === 'holidays');
-    expect(holidays).toMatchObject({ lastFetchedAt: 1000, lastCheckedAt: 2000, spots: [{ id: o.templateSpot, name: expect.any(String) }] });
+    expect(holidays).toMatchObject({ lastCheckedAt: 2000, spots: [{ id: o.templateSpot, name: expect.any(String) }] });
+    expect(holidays).not.toHaveProperty('lastFetchedAt');
     const unpolled = await call('create_data_source', { id: 'unpolled', name: 'Not polled yet', format: 'rss', feedUrl: 'https://news.example.com/rss' });
     expect((await call('list_data_sources', {})).dataSources.find((d: { id: string }) => d.id === unpolled.dataSource.id)).toMatchObject({
-      lastFetchedAt: null,
       lastCheckedAt: null,
       spots: [],
     });
