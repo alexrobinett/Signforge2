@@ -83,7 +83,7 @@ body {
 .greeting {
   font-size: calc(var(--u) * 5);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   letter-spacing: 0.02em;
   animation-delay: 0.1s, var(--out);
 }

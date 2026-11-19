@@ -27,6 +27,14 @@ describe('playback loop', () => {
       .toBe(true);
   });
 
+  it('titles a URL spot frame with the spot name (#69)', async () => {
+    const content = h.content([{ id: 'lunch-menu', url: 'https://menu.test/', durationMs: 4000 }]);
+    const p = await h.openPlayer((s) => s.publish(content));
+    await p.page.context().route(/^https:\/\/menu\.test\//, (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Menu</title>' }));
+    await p.until((s) => s.spot === 'lunch-menu');
+    expect(await p.page.locator('.slot iframe[src^="https://menu.test/"]').first().getAttribute('title')).toBe('lunch-menu');
+  });
+
   // Chromium sends a frame that has drawn nothing for more than 3 frames one frame a second, and
   // a frame an opaque one covers completely is never drawn: the next spot, loading underneath,
   // then took over a second to reach ready on the Pi. So the black behind a spot leaves a 1 px

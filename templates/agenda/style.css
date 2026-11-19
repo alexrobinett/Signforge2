@@ -24,6 +24,7 @@ body {
 :root {
   --accent: var(--sf-accent, #ffb547);
   --bg: var(--sf-bg, #0d1117);
+  --surface: var(--sf-surface, #161c27);
   --text: var(--sf-text, #fff);
   --muted: var(--sf-muted, color-mix(in srgb, var(--text) 60%, transparent));
 }
@@ -40,7 +41,7 @@ body {
   padding: calc(var(--u) * 7) calc(var(--u) * 8);
   display: flex;
   flex-direction: column;
-  background: linear-gradient(160deg, var(--sf-surface, #161c27) 0%, var(--bg) 55%);
+  background: linear-gradient(160deg, var(--surface) 0%, var(--bg) 55%);
 }
 header {
   display: flex;
@@ -74,7 +75,7 @@ h1 {
 .today {
   font-size: calc(var(--u) * 3.2);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   white-space: nowrap;
 }
 .events {
@@ -119,7 +120,7 @@ h1 {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--day-text);
 }
 .num {
   display: block;
