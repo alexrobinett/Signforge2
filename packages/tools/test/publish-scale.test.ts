@@ -78,7 +78,8 @@ async function seedFleet(orgId: string) {
 }
 
 describe('a 1,000-screen org', () => {
-  it('publishes inside the Worker limits, and then publishes nothing when nothing changed', async () => {
+  // Seeding and publishing 1,000 screens take several seconds on a CI runner.
+  it('publishes inside the Worker limits, and then publishes nothing when nothing changed', { timeout: 60_000 }, async () => {
     const orgId = 'scale-1000';
     await seedFleet(orgId);
     const d1 = countingD1(env.DB);
