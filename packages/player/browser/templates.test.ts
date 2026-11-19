@@ -304,6 +304,9 @@ describe('text on a brand colour (#57, #69, #92)', () => {
   // on the demo kit's dark background (3.66:1).
   const green: BrandColors = { ...light, accent: '#16a34a', surface: '#f8fafc' };
   const blue: BrandColors = { ...demo, accent: '#2563eb', onAccent: '#ffffff' };
+  // An accent just over 3:1 on its background (3.05:1), which clock's glow, the accent itself,
+  // pulls under 3:1 behind the greeting.
+  const teal: BrandColors = { ...demo, accent: '#0f685b', onAccent: '#ffffff', background: '#0e020c' };
   const kit = (colors: BrandColors): FrameTheme => ({ colors, shape: 'soft', fonts: {} });
   // `$brand.accent` as the compiler resolves it: the kit's accent, else DEFAULT_BRAND_COLORS.accent.
   const kits: [string, FrameTheme | undefined, string][] = [
@@ -314,6 +317,7 @@ describe('text on a brand colour (#57, #69, #92)', () => {
     ['a kit with a borderline accent', kit(borderline), borderline.accent],
     ['a light kit with a green accent', kit(green), green.accent],
     ['a dark kit with a blue accent', kit(blue), blue.accent],
+    ['a kit whose accent just reaches 3:1 on its background', kit(teal), teal.accent],
   ];
   const menu = { items: [{ name: 'Soup', description: 'Hot', price: '$4', tag: 'New' }] };
   /** Each template's spot, given the accent `$brand.accent` resolves to. */
