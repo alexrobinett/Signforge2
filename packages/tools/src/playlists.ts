@@ -70,7 +70,10 @@ const listPlaylists = defineTool({
   output: z.object({ playlists: z.array(playlistOutput), next: nextOutput }),
   example: {},
   handler: async ({ org, input }) => {
-    const [rows, items] = await Promise.all([org.playlists.list(), org.playlists.allItems()]);
+    // Rows before items: an edit of the order moves its playlist's version on, so items read after
+    // a version are never older than it, and an edit made from this listing's version is safe.
+    const rows = await org.playlists.list();
+    const items = await org.playlists.allItems();
     const { rows: shown, next } = page(rows, (p) => [-p.updatedAt, p.id], input);
     return { playlists: shown.map((p) => playlistView(p, items.get(p.id) ?? [])), next };
   },
