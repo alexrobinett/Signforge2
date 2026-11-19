@@ -109,7 +109,14 @@ describe('alert deliveries', () => {
     const at = now + 40 * DAY;
     await queue(s.a.orgId, 'evt_old', ['webhook'], at - 8 * DAY, at);
     await queue(s.b.orgId, 'evt_recent', ['webhook'], at - 6 * DAY, at);
-    await expireAlertDeliveries(env.DB, at);
+    await queue(s.b.orgId, 'evt_old_b', ['slack', 'webhook'], at - 9 * DAY, at);
+    // Org by org, in batches, as audit rows go; it says how many went.
+    const old = await env.DB.prepare('SELECT count(*) AS n FROM alert_deliveries WHERE created_at < ?')
+      .bind(at - 7 * DAY)
+      .first<{ n: number }>();
+    expect(old!.n).toBeGreaterThanOrEqual(3);
+    expect(await expireAlertDeliveries(env.DB, at)).toBe(old!.n);
+    expect(await mine(s.b.orgId, 'evt_old_b')).toEqual([]);
     expect(await mine(s.a.orgId, 'evt_old')).toEqual([]);
     expect(await mine(s.b.orgId, 'evt_recent')).toHaveLength(1);
   });

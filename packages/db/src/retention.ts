@@ -3,7 +3,7 @@
  * read no row and name no org: idempotency keys and alert deliveries (the delivery log, #88) go
  * after 7 days, audit rows after each org's `org_settings.audit_retention_days`.
  */
-import { lt, sql } from 'drizzle-orm';
+import { lt, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as s from './schema';
 
@@ -22,11 +22,21 @@ export async function expireIdempotencyKeys(d1: D1Database, now: number): Promis
 /** The delivery log shows 7 days; a delivery is retried for 24 hours, so none older is still pending. */
 const ALERT_DELIVERY_TTL_MS = 7 * DAY_MS;
 
-/** Delete every org's alert deliveries made more than 7 days before `now`. */
-export async function expireAlertDeliveries(d1: D1Database, now: number): Promise<void> {
-  await drizzle(d1)
-    .delete(s.alertDeliveries)
-    .where(lt(s.alertDeliveries.createdAt, now - ALERT_DELIVERY_TTL_MS));
+/**
+ * Delete every org's alert deliveries made more than 7 days before `now`, as audit rows go: org by
+ * org through `alert_deliveries_org_created_idx`, in batches, at most `AUDIT_ROWS_PER_RUN` a run.
+ * Returns how many went.
+ */
+export async function expireAlertDeliveries(d1: D1Database, now: number): Promise<number> {
+  const d = s.alertDeliveries;
+  const o = s.organization;
+  return deleteInBatches(
+    drizzle(d1),
+    sql`DELETE FROM ${d} WHERE rowid IN (
+    SELECT ${d}.rowid FROM ${o} CROSS JOIN ${d}
+    WHERE ${d.orgId} = ${o.id} AND ${d.createdAt} < ${now - ALERT_DELIVERY_TTL_MS}
+    LIMIT ${AUDIT_BATCH})`,
+  );
 }
 
 /** An org with no setting keeps its audit rows a year (owner decision, 2026-11-18). */
@@ -56,6 +66,11 @@ export async function expireAuditRows(d1: D1Database, now: number): Promise<numb
     CROSS JOIN ${a}
     WHERE ${a.orgId} = ${o.id} AND ${a.at} < ${now} - COALESCE(${os.auditRetentionDays}, ${DEFAULT_AUDIT_RETENTION_DAYS}) * ${DAY_MS}
     LIMIT ${AUDIT_BATCH})`;
+  return deleteInBatches(db, batch);
+}
+
+/** Run `batch`, a DELETE of at most AUDIT_BATCH rows, until it deletes fewer or AUDIT_BATCHES have run; how many went. */
+async function deleteInBatches(db: ReturnType<typeof drizzle>, batch: SQL): Promise<number> {
   let deleted = 0;
   for (let i = 0; i < AUDIT_BATCHES; i++) {
     const { meta } = await db.run(batch);
