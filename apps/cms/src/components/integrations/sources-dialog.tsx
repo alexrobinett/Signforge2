@@ -50,7 +50,7 @@ export function SourcesDialog({ orgId, sources, clock, canManage }: { orgId: str
             ) : (
               <p className="text-sm text-muted-foreground">None yet.</p>
             )}
-            {canManage && isAddable(format) && <AddSource orgId={orgId} format={format} />}
+            {canManage && isAddable(format) && s.editing === null && <AddSource orgId={orgId} format={format} />}
             <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
               {s.error}
             </p>
@@ -77,7 +77,7 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
   };
 
   return (
-    <li className="space-y-2 p-3">
+    <li className="space-y-3 p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <strong className="font-semibold">{source.name}</strong>
         <span className={cn('font-mono text-[13px]', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
@@ -148,7 +148,7 @@ function AddSource({ orgId, format }: { orgId: string; format: keyof typeof ADD 
 
   if (!adding)
     return (
-      <Button type="button" variant="outline" onClick={() => openAddSource(true)}>
+      <Button type="button" variant="outline" className="justify-self-start" onClick={() => openAddSource(true)}>
         {button}
       </Button>
     );

@@ -122,24 +122,14 @@ function IntegrationsPage() {
           </Button>
         </div>
       )}
-      <div className="flex flex-wrap items-start gap-7">
-        <aside
-          aria-label="Sources and accounts"
-          className="order-first flex w-full flex-col gap-3.5 lg:order-last lg:w-auto lg:max-w-[340px] lg:flex-[1_1_280px]"
-        >
+      {/* Sources first and "Missing one?" last on a phone; beside the catalogue on a wide screen (the board). */}
+      <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:grid-rows-[auto_1fr]">
+        <aside aria-label="Sources and accounts" className="flex flex-col gap-3.5 lg:col-start-2 lg:row-start-1">
           <FeedingNow sources={sources} clock={clock} canManage={canManage} />
           {(connections.length > 0 || providers.length > 0) && <Accounts orgId={orgId} connections={connections} providers={providers} canManage={canManage} />}
-          <section aria-labelledby="missing-h" className="flex flex-col gap-2 rounded-[14px] border bg-card p-4 text-[15px]">
-            <h2 id="missing-h" className="text-lg font-semibold tracking-tight">
-              Missing one?
-            </h2>
-            <p className="text-muted-foreground">
-              Most systems publish an RSS feed or an .ics calendar link. Agents can also edit spots through the MCP server.
-            </p>
-          </section>
         </aside>
 
-        <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-6 lg:col-start-1 lg:row-span-2 lg:row-start-1">
           <div className="flex flex-wrap items-center gap-2">
             {/* biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the board draws it; a fieldset would need a legend shown. */}
             <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-[15px]">
@@ -168,7 +158,7 @@ function IntegrationsPage() {
               placeholder="Find an integration"
               defaultValue={q}
               onChange={(e) => set({ q: e.target.value || undefined })}
-              className="w-full sm:w-56"
+              className="w-full sm:w-56 md:text-[15px]"
             />
           </div>
 
@@ -192,6 +182,15 @@ function IntegrationsPage() {
             <p className="text-muted-foreground">No integration matches.</p>
           )}
         </div>
+        <section
+          aria-labelledby="missing-h"
+          className="lg:col-start-2 lg:row-start-2 flex flex-col gap-2 self-start rounded-[14px] border bg-card p-4 text-[15px]"
+        >
+          <h2 id="missing-h" className="text-lg font-semibold tracking-tight">
+            Missing one?
+          </h2>
+          <p className="text-muted-foreground">Most systems publish an RSS feed or an .ics calendar link. Agents can also edit spots through the MCP server.</p>
+        </section>
       </div>
       <SourcesDialog orgId={orgId} sources={sources} clock={clock} canManage={canManage} />
     </div>
@@ -274,12 +273,12 @@ function FeedingNow({ sources, clock, canManage }: { sources: ListedSource[]; cl
         <div key={s.id} className="flex flex-col gap-1.5">
           <p className="text-sm text-muted-foreground">
             {failingWords(s, clock)}
-            {s.spots.length > 0 && ` It feeds ${s.spots.map((x) => x.name).join(', ')}.`}
+            {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
           </p>
           {canManage && s.format !== 'provider' && (
             <button
               type="button"
-              className="self-start text-[15px] text-primary underline-offset-4 hover:underline"
+              className="inline-flex min-h-10 items-center self-start text-[15px] text-primary underline underline-offset-4"
               onClick={() => openSources(s.format, { editing: s.id })}
             >
               {FIX_WORD[s.format]}
@@ -325,13 +324,12 @@ function Accounts({ orgId, connections, providers, canManage }: { orgId: string;
               {canManage && (
                 <span className="flex flex-wrap gap-2">
                   {c.status !== 'active' && (
-                    <Button size="sm" disabled={connecting !== null} onClick={() => void connect(c.provider, c.id)} aria-label={`Reconnect ${c.account}`}>
+                    <Button disabled={connecting !== null} onClick={() => void connect(c.provider, c.id)} aria-label={`Reconnect ${c.account}`}>
                       Reconnect
                     </Button>
                   )}
                   {c.status !== 'disconnected' && (
                     <Button
-                      size="sm"
                       variant="outline"
                       disabled={connecting !== null}
                       onClick={() => void disconnect(orgId, c.id)}

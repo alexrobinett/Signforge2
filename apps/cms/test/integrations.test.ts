@@ -30,7 +30,7 @@ describe('a source in words', () => {
   it('says a failing source failed, and what its feed does and what screens show meanwhile', () => {
     const failing = source({ failures: 2, lastError: 'http-status' });
     expect(sourceState(failing, clock)).toEqual({ word: 'failed 2×', tone: 'failing' });
-    expect(failingWords(failing, clock)).toBe('The Break room calendar answers with an error at its last 2 checks. Its screens show the 7:05 AM copy.');
+    expect(failingWords(failing, clock)).toBe('The Break room calendar answers with an error at each of its last 2 checks. Its screens show the 7:05 AM copy.');
   });
 
   it('says a source that never had a good check leaves spots on their fallback', () => {

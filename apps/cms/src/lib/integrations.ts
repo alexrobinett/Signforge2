@@ -225,7 +225,7 @@ export function sourceState(s: ListedSource, clock: Clock): { word: string; tone
  */
 export function failingWords(s: ListedSource, clock: Clock): string {
   const what = `The ${s.name} ${NOUN[s.format][0]} ${failureWords(s.lastError)}`;
-  const checks = s.failures === 1 ? 'at its last check' : `at its last ${s.failures} checks`;
+  const checks = s.failures === 1 ? 'at its last check' : `at each of its last ${s.failures} checks`;
   const meanwhile =
     s.lastCheckedAt === null
       ? 'Its spots show their fallback values until a check succeeds.'
