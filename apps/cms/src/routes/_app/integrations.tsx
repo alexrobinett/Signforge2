@@ -45,7 +45,8 @@ import {
 import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
-import { connectionsQuery, dataSourcesQuery } from '~/queries/integrations';
+import { connectionsQuery } from '~/queries/integrations';
+import { dataSourcesQuery } from '~/queries/spots';
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
 
@@ -100,7 +101,9 @@ function IntegrationsPage() {
   const { timezone, locale } = Route.useLoaderData();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { data, dataUpdatedAt, errorUpdatedAt } = useSuspenseQuery(dataSourcesQuery(orgId));
+  // Read again every 30 s while the page is open, so a poll's result (a fixed URL's first good
+  // check) shows; a read fails when two tries in a row do, and the page says it is not current.
+  const { data, dataUpdatedAt, errorUpdatedAt } = useSuspenseQuery({ ...dataSourcesQuery(orgId), refetchInterval: 30_000, retry: 1 });
   // Not `isError`, which goes back to pending on each retry: the notice would blink (as on Screens).
   const notCurrent = errorUpdatedAt > dataUpdatedAt;
   const { connections, providers } = useSuspenseQuery(connectionsQuery(orgId)).data;

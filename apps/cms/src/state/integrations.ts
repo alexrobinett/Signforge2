@@ -6,7 +6,8 @@
  */
 import type { ConnectionView, ListedSource, SourceFormat } from '~/lib/integrations';
 import { callTool, isStale, toolMessage } from '~/lib/tools';
-import { integrationKeys } from '~/queries/integrations';
+import { connectionKeys } from '~/queries/integrations';
+import { dataSourceKeys } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
 /** A new calendar's look-ahead, as `create_data_source` defaults it. */
@@ -99,7 +100,7 @@ function blockedBy(err: unknown, source: ListedSource): string | null {
 
 export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, get, { queryClient }) => {
   const integrations = (change: (s: IntegrationsState) => IntegrationsState) => set((s) => ({ integrations: change(s.integrations) }));
-  const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: integrationKeys.dataSources(orgId), exact: true });
+  const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: dataSourceKeys.all(orgId), exact: true });
 
   async function attempt(run: () => Promise<void>, refused: (err: unknown) => string = toolMessage) {
     integrations((s) => ({ ...s, pending: true, error: null }));
@@ -182,7 +183,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       try {
         await callTool('disconnect', { connectionId: connection.id });
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: integrationKeys.connections(orgId), exact: true }),
+          queryClient.invalidateQueries({ queryKey: connectionKeys.all(orgId), exact: true }),
           // Its sources now fail as disconnected.
           refresh(orgId),
         ]);

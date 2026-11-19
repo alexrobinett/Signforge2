@@ -1,15 +1,11 @@
 /**
- * The Integrations page's reads, through the tool registry as the signed-in member
- * (`list_data_sources`, `list_connections`). The query keys and options over them are in
- * src/queries/integrations.ts.
+ * The Integrations page's own read, through the tool registry as the signed-in member
+ * (`list_connections`); its data sources are the spot pages' read (`getDataSources` in
+ * spots.functions.ts). The query options over it are in src/queries/integrations.ts.
  */
 import { createServerFn } from '@tanstack/react-start';
-import type { ConnectionView, ListedSource } from '~/lib/integrations';
+import type { ConnectionView } from '~/lib/integrations';
 import { all, inOrg } from './tools.server';
-
-export const getDataSources = createServerFn({ method: 'GET' }).handler(async () => ({
-  dataSources: await inOrg(() => all<ListedSource, { next: string | null; dataSources: ListedSource[] }>('list_data_sources', (p) => p.dataSources), []),
-}));
 
 interface ConnectionsPage {
   next: string | null;

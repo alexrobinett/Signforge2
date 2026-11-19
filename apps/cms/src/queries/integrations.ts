@@ -1,22 +1,12 @@
 /**
- * Server data for the Integrations page, as TanStack Query options, keyed by org
- * (docs/research/cms-data-layer.md, Decision). The store's integration actions invalidate them
- * after a change (src/state/integrations.ts).
+ * The org's connected accounts as TanStack Query options, keyed by org
+ * (docs/research/cms-data-layer.md, Decision). Its data sources are `dataSourcesQuery` in
+ * src/queries/spots.ts, shared with the spot editor. The store's integration actions invalidate
+ * both after a change (src/state/integrations.ts).
  */
 import { queryOptions } from '@tanstack/react-query';
-import { getConnections, getDataSources } from '~/server/integrations.functions';
+import { getConnections } from '~/server/integrations.functions';
 
-export const integrationKeys = {
-  dataSources: (orgId: string) => ['org', orgId, 'dataSources'] as const,
-  connections: (orgId: string) => ['org', orgId, 'connections'] as const,
-};
+export const connectionKeys = { all: (orgId: string) => ['org', orgId, 'connections'] as const };
 
-/**
- * The org's data sources, with their health and the spots that bind them. Read again every 30
- * seconds while the page is open, so a poll's result (a fixed URL's first good check) shows. A
- * read fails when two tries in a row do, and the page then says it is not current (as Screens).
- */
-export const dataSourcesQuery = (orgId: string) =>
-  queryOptions({ queryKey: integrationKeys.dataSources(orgId), queryFn: () => getDataSources(), refetchInterval: 30_000, retry: 1 });
-
-export const connectionsQuery = (orgId: string) => queryOptions({ queryKey: integrationKeys.connections(orgId), queryFn: () => getConnections() });
+export const connectionsQuery = (orgId: string) => queryOptions({ queryKey: connectionKeys.all(orgId), queryFn: () => getConnections() });

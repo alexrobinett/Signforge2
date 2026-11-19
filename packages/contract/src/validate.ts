@@ -11,12 +11,14 @@
  * every plain object, and must not count as a field.
  */
 import {
+  BINDING_PATH,
   BRAND_COLORS,
   BRAND_SHAPES,
   brandColourWarnings,
   FORBIDDEN_CSS,
   FORBIDDEN_TEMPLATE_CODE,
   ID_PATTERN,
+  LIVE_SOURCES,
   MAX_IDENTIFY_SECONDS,
   MAX_SNAPSHOT_BYTES,
   MAX_SYNC_PLAY_COUNTS,
@@ -26,6 +28,7 @@ import {
   SUPPORTED_PROTOCOLS,
   TEMPLATE_BUDGET,
   templateKey,
+  WEATHER_UNITS,
   type BrandKit,
   type DisplayHours,
   type FieldDef,
@@ -229,7 +232,40 @@ export function validateTemplateManifest(m: unknown): string[] {
   else if (m.uses.some((u) => u !== 'canvas' && u !== 'webgl' && u !== 'audio')) errors.push('uses may list only canvas, webgl and audio');
   if (!isText(m.background)) errors.push('background is required');
   if (m.protocol !== undefined && !Number.isSafeInteger(m.protocol)) errors.push('protocol must be a whole number');
+  if (m.live !== undefined) errors.push(...prefix('live', liveProblems(m.live, isObj(m.fields) ? m.fields : {})));
   return errors;
+}
+
+/** What is wrong with a template's `live` declaration, given its fields. */
+function liveProblems(live: unknown, fields: Obj): string[] {
+  if (!isObj(live)) return ['must be an object'];
+  const out: string[] = [];
+  if (!LIVE_SOURCES.some((s) => s === live.source)) out.push(`source must be one of ${LIVE_SOURCES.join(', ')}`);
+  const bound = isObj(live.fields) ? live.fields : {};
+  if (!isObj(live.fields) || !Object.keys(bound).length) out.push('fields must name at least one field');
+  for (const [name, path] of Object.entries(bound)) {
+    const type = own(own(fields, name), 'type');
+    if (type === undefined) out.push(`field "${name}" is not a field of the template`);
+    else if (type === 'image') out.push(`field "${name}" is an image, which cannot take live data`);
+    else if (!isStr(path) || !BINDING_PATH.test(path)) out.push(`field "${name}": "${show(path)}" is not a dot path such as current.temperature_2m`);
+  }
+  if (live.place === undefined && live.units === undefined) return out;
+  if (live.source !== 'open-meteo') return [...out, 'place and units are for open-meteo sources only'];
+  // A field the declaration names must be one the source leaves to people, of the kind it says.
+  const free = (name: unknown) => isStr(name) && !Object.hasOwn(bound, name);
+  if (live.place !== undefined && !(free(live.place) && own(own(fields, live.place), 'type') === 'text'))
+    out.push(`place "${show(live.place)}" must be a text field the source does not fill`);
+  if (live.units === undefined) return out;
+  if (!isObj(live.units)) return [...out, 'units must be an object'];
+  for (const kind of ['temperature', 'wind'] as const) {
+    const name = live.units[kind];
+    if (name === undefined) continue;
+    const options = own(own(fields, name), 'options');
+    const allowed: readonly string[] = WEATHER_UNITS[kind];
+    if (!(free(name) && own(own(fields, name), 'type') === 'select' && Array.isArray(options) && options.every((o) => allowed.includes(o))))
+      out.push(`units.${kind} "${show(name)}" must be a select field with options from ${allowed.join(', ')}`);
+  }
+  return out;
 }
 
 /** Check one binding's shape. */

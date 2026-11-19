@@ -18,6 +18,7 @@ import { createScreensSlice, type ScreensSlice } from './screens';
 import { createSettingsSlice, type SettingsSlice } from './settings';
 import { createSignInSlice, type SignInSlice } from './sign-in';
 import { createSpotEditorSlice, type SpotEditorSlice } from './spot-editor';
+import { createSpotSourceSlice, type SpotSourceSlice } from './spot-source';
 
 export type AppState = UiSlice &
   SignInSlice &
@@ -28,6 +29,7 @@ export type AppState = UiSlice &
   SettingsSlice &
   SpotEditorSlice &
   PlaylistEditorSlice &
+  SpotSourceSlice &
   IntegrationsSlice;
 export type AppStore = StoreApi<AppState>;
 
@@ -51,6 +53,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createCommandMenuSlice(set, get, deps),
     ...createSettingsSlice(set, get, deps),
     ...createSpotEditorSlice(set, get, deps),
+    ...createSpotSourceSlice(set, get, deps),
     ...createPlaylistEditorSlice(set, get, deps),
     ...createIntegrationsSlice(set, get, deps),
   }));

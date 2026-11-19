@@ -11,7 +11,7 @@ import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
-import { defineTool, type FeedUrlSealer, notFound, ToolError } from './tool';
+import { defineTool, type FeedUrlSealer, notFound, type PlaceFinder, ToolError } from './tool';
 
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
 const MAX_DATA_SOURCES = 10;
@@ -101,6 +101,11 @@ async function requireSource(org: OrgScope, dataSourceId: string) {
 function sealerOf(feedUrls: FeedUrlSealer | undefined): FeedUrlSealer {
   if (!feedUrls) throw new Error('the data source tools need a feed URL sealer');
   return feedUrls;
+}
+
+function finderOf(places: PlaceFinder | undefined): PlaceFinder {
+  if (!places) throw new Error('find_places needs a place finder');
+  return places;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
@@ -304,4 +309,32 @@ const deleteDataSource = defineTool({
   },
 });
 
-export const dataSourceTools = [listDataSources, getDataSource, createDataSource, updateDataSource, deleteDataSource];
+const placeOutput = z.object({
+  id: z.number().describe("The geocoder's id for the place"),
+  name: z.string(),
+  region: z.string().describe("State or province, or ''"),
+  country: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
+  timezone: z.string().describe('IANA time zone'),
+});
+
+const findPlaces = defineTool({
+  name: 'find_places',
+  description:
+    "Look places up by name with Open-Meteo's geocoding, best match first, for a weather data source: its forecast URL (https://api.open-meteo.com/v1/forecast) takes the latitude, longitude and timezone. Each search counts against the caller's rate limit; over it, rate_limited. Returns { places }.",
+  scope: 'content:read',
+  minRole: 'viewer',
+  mutates: false,
+  input: z.object({ query: z.string().trim().min(2, 'type at least 2 letters of the place').max(100).describe('A place name, such as Atlanta') }),
+  output: z.object({ places: z.array(placeOutput) }),
+  example: { query: 'Atlanta' },
+  handler: async ({ input, places, rateLimit }) => {
+    // Unlimited, one member could use up the geocoder's free allowance for every org.
+    if (!rateLimit) throw new ToolError('forbidden', 'find_places needs a rate limit, and this caller has none');
+    if (!(await rateLimit('place_search'))) throw new ToolError('rate_limited', 'too many place searches; wait a minute and try again');
+    return { places: await finderOf(places).search(input.query) };
+  },
+});
+
+export const dataSourceTools = [listDataSources, getDataSource, createDataSource, updateDataSource, deleteDataSource, findPlaces];
