@@ -7,6 +7,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { listOutOfDate } from '~/lib/fleet-status';
 import { getScreenStatus, getScreens } from '~/server/screens.functions';
+import { retryUnlessRedirect } from './retry';
 
 /**
  * How often an open Screens page asks what the screens are doing. A screen syncs every 5 minutes
@@ -29,5 +30,5 @@ export const screenStatusQuery = (orgId: string) =>
     },
     refetchInterval: POLL_MS,
     // A poll fails when two tries in a row do, a second apart; the page then says its status is not current.
-    retry: 1,
+    retry: retryUnlessRedirect(1),
   });
