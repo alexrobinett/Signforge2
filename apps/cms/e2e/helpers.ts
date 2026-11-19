@@ -131,21 +131,23 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
  */
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
-  await holdTemplates(page);
   const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
   for (const dark of [false, true]) {
     await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), dark);
-    const analyze = async () => {
+    // A play that begins during an analysis restarts its frame's animations, and that analysis may
+    // have read it mid-intro: hold again and analyse again. A stage looping 4 s spots, with each
+    // edit sending it a new draft, can start a play during several analyses in a row.
+    let found: string[] = [];
+    let held = false;
+    for (let tries = 0; tries < 5 && !held; tries++) {
+      await holdTemplates(page);
       const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-      return violations.flatMap((v) =>
+      found = violations.flatMap((v) =>
         v.nodes.map((n) => `${dark ? 'dark' : 'light'} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`),
       );
-    };
-    let found = await analyze();
-    // A play that began during the analysis restarted its frame's animations: hold it and analyse
-    // again. Once is enough: a play is many times longer than an analysis.
-    if (!(await holdTemplates(page))) found = await analyze();
-    expect(await holdTemplates(page), 'a template frame restarted again during axe').toBe(true);
+      held = await holdTemplates(page);
+    }
+    expect(held, 'a template frame started a play during each of 5 analyses').toBe(true);
     expect(found, page.url()).toEqual([]);
   }
   await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
@@ -154,27 +156,55 @@ export async function axe(page: Page) {
 
 /**
  * Hold every template frame (a document with `--sf-duration`) at rest: its animations paused after
- * its intro and before its outro. True when every one already was. A frame the player removed in the
- * meantime is skipped: it is no longer on the page.
+ * its intro and before its outro. True when none was playing: a frame the SDK has just prepared is
+ * paused (at 0) and hidden until it plays, so it is moved to rest but does not count as playing. A
+ * frame the player removed in the meantime is skipped: it is no longer on the page.
  */
 async function holdTemplates(page: Page): Promise<boolean> {
   let held = true;
   for (const frame of page.frames()) {
-    const was = await frame
+    const still = await frame
       .evaluate(() => {
         const ms = Number.parseFloat(document.documentElement.style.getPropertyValue('--sf-duration'));
         if (!ms) return true;
-        const rest = ms - 1500;
         const animations = document.getAnimations();
-        const already = animations.every((a) => a.playState === 'paused' && a.currentTime === rest);
+        const playing = animations.some((a) => a.playState === 'running');
         for (const a of animations) {
           a.pause();
-          a.currentTime = rest;
+          a.currentTime = ms - 1500;
         }
-        return already;
+        return !playing;
       })
       .catch(() => true);
-    held &&= was;
+    held &&= still;
   }
   return held;
+}
+
+/** Whether any frame on the page (the player's template frames included) shows `text`. */
+export async function stageShows(page: Page, text: string) {
+  for (const frame of page.frames())
+    if (
+      (await frame
+        .getByText(text, { exact: false })
+        .count()
+        .catch(() => 0)) > 0
+    )
+      return true;
+  return false;
+}
+
+/** Call a tool as the signed-in member, as the CMS's pages do, and expect it to succeed. */
+export async function tool(page: Page, name: string, input: unknown) {
+  const res = await page.request.post(`/api/tools/${name}`, { data: input });
+  expect(res.status(), await res.text()).toBe(200);
+  return res.json();
+}
+
+/** As a member with no org yet: make one called `name`, as the first page asks, and land on it. */
+export async function createOrg(page: Page, name: string) {
+  await page.goto('/');
+  await fillUntilEnabled(page, 'Organization name', name, 'Create organization');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
 }

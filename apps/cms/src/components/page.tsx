@@ -1,3 +1,4 @@
+import { ChevronRightIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Section } from '~/lib/sections';
 
@@ -29,6 +30,23 @@ export function EmptyState({ icon: Icon, title, children, action }: { icon: Sect
       <p className="mt-1 max-w-md text-sm text-muted-foreground">{children}</p>
       {action && <div className="mt-4">{action}</div>}
     </section>
+  );
+}
+
+/** A list row that is all one link: put on the `Link`, around `RowText`. */
+export const ROW_LINK =
+  'flex items-center gap-3 px-4 py-3 outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset';
+
+/** A list row's name, a line about it (wrapping on a phone), and the chevron that says it opens. */
+export function RowText({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{title}</span>
+        <span className="block text-sm text-muted-foreground sm:truncate">{children}</span>
+      </span>
+      <ChevronRightIcon className="size-4 text-muted-foreground" aria-hidden />
+    </>
   );
 }
 

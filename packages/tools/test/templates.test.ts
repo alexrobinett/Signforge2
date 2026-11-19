@@ -4,8 +4,9 @@ import { platform, scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { baseBlobKey, dispatch, orgBlobKey, platformRegistry, registry, type Caller } from '../src';
+import { baseBlobKey, dispatch, orgBlobKey, platformRegistry, registry, type Caller, type TemplateChecker } from '../src';
 import type { PlatformScope } from '@signforge/db';
+import type { TemplateRuntimeReport } from '@signforge/contract';
 
 const encoder = new TextEncoder();
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -28,6 +29,21 @@ const html = (css = 'h1{color:red}', script = 'parent.postMessage({type:"loaded"
 const sources = (main = "import { defineTemplate } from '@signforge/template-sdk';\ndefineTemplate({});\n") =>
   JSON.stringify({ 'index.html': '<h1 data-sf="title"></h1>', 'style.css': 'h1 { color: red; }', 'main.ts': main });
 
+/** A runtime check's report: `problems` decides whether it passed. */
+const runtimeReport = (problems: string[] = []): TemplateRuntimeReport => ({
+  ok: !problems.length,
+  problems,
+  runner: { image: 'test-runner', browser: 'Chromium 159' },
+  renders: [{ orientation: 'landscape', viewport: { width: 1920, height: 1080 }, readyMs: 80, frames: { count: 60, longestMs: 17 } }],
+  cost: { startMs: 0, checkMs: 2800 },
+});
+/** The checks a fake runtime check was asked for, as `<org>/<template id>`. */
+const checked: string[] = [];
+const passing: TemplateChecker = async ({ orgId, manifest }) => {
+  checked.push(`${orgId}/${manifest.id}`);
+  return runtimeReport();
+};
+
 let o: SeededOrg;
 let owner: Caller;
 let system: Caller<PlatformScope>;
@@ -48,7 +64,14 @@ const call = async <T = any>(name: string, input: unknown, as: Caller = owner): 
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'tpl-org');
-  owner = { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS };
+  owner = {
+    org: scoped(env.DB, o.orgId),
+    role: 'owner',
+    actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
+    blobs: env.BLOBS,
+    templateCheck: passing,
+    rateLimit: async () => true,
+  };
   system = {
     org: platform(env.DB),
     role: 'owner',
@@ -120,6 +143,90 @@ describe('register_template_version', () => {
     expect(
       await dispatch(registry, 'register_template_version', { manifest: manifest(), bundleId: 'e'.repeat(64), sourcesId: 'e'.repeat(64) }, owner),
     ).toMatchObject({ ok: false, error: 'not_found' });
+  });
+});
+
+describe('the runtime check', () => {
+  it('runs on a new org version, and its report is stored with the version', async () => {
+    const ids = await orgUpload(html('h1{color:teal}'));
+    const out = await call('register_template_version', { manifest: manifest({ id: 'rendered' }), ...ids });
+    expect(checked).toContain(`${o.orgId}/rendered`);
+    expect(out.version.checkReport.runtime).toEqual(runtimeReport());
+  });
+
+  it("runs in the caller's org, from its scope, whatever the input names", async () => {
+    const other = await seedOrg(env.DB, 'tpl-other');
+    const as: Caller = { ...owner, org: scoped(env.DB, other.orgId) };
+    const ids = await upload((sha) => orgBlobKey(other.orgId, sha), html('h1{color:lime}'), sources());
+    await call('register_template_version', { manifest: manifest({ id: 'scoped' }), ...ids, orgId: o.orgId }, as);
+    expect(checked).toContain(`${other.orgId}/scoped`);
+    expect(checked).not.toContain(`${o.orgId}/scoped`);
+  });
+
+  it('refuses a version that fails it, with each problem, and stores nothing', async () => {
+    const ids = await orgUpload(html('h1{color:olive}'));
+    const failing: TemplateChecker = async () => runtimeReport(['requested https://example.com/x (blocked)', 'did not report ready within 2000 ms']);
+    const r = await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'leaky' }), ...ids }, { ...owner, templateCheck: failing });
+    expect(r).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      message: 'the template failed its runtime check: requested https://example.com/x (blocked); did not report ready within 2000 ms',
+      details: [
+        { path: 'runtime', message: 'requested https://example.com/x (blocked)' },
+        { path: 'runtime', message: 'did not report ready within 2000 ms' },
+      ],
+    });
+    expect(await scoped(env.DB, o.orgId).templates.ownByKey('leaky')).toBeUndefined();
+  });
+
+  it("counts against the org's rate limit, and over it is refused before the check runs", async () => {
+    const ids = await orgUpload(html('h1{color:coral}'));
+    const buckets: string[] = [];
+    const over: Caller = {
+      ...owner,
+      rateLimit: async (bucket) => {
+        buckets.push(bucket);
+        return false;
+      },
+    };
+    const before = checked.length;
+    expect(await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'busy' }), ...ids }, over)).toMatchObject({
+      ok: false,
+      error: 'rate_limited',
+      message: 'too many template checks for this org; wait a minute and try again',
+      details: { retryAfterSeconds: 60 },
+    });
+    expect(buckets).toEqual(['template_check']);
+    expect(checked.length).toBe(before);
+  });
+
+  it('does not run again for a version already registered', async () => {
+    const ids = await orgUpload(html('h1{color:navy}'));
+    await call('register_template_version', { manifest: manifest({ id: 'once' }), ...ids });
+    const before = checked.length;
+    expect((await call('register_template_version', { manifest: manifest({ id: 'once' }), ...ids })).changed).toBe(false);
+    expect(checked.length).toBe(before);
+  });
+
+  it('is required for an org template: without one, registering fails rather than skip it', async () => {
+    const ids = await orgUpload(html('h1{color:maroon}'));
+    const { templateCheck: _, ...unchecked } = owner;
+    await expect(dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'unchecked' }), ...ids }, unchecked)).rejects.toThrow(
+      /runtime check/,
+    );
+  });
+
+  it('does not run on base templates, which CI checks', async () => {
+    const ids = await upload(baseBlobKey, html('h1{color:gold}'), sources());
+    const never: TemplateChecker = () => Promise.reject(new Error('the runtime check ran on a base template'));
+    const reg = await dispatch(
+      platformRegistry,
+      'register_template_version',
+      { manifest: manifest({ id: 'base-unchecked' }), ...ids },
+      { ...system, templateCheck: never },
+    );
+    expect(reg).toMatchObject({ ok: true });
+    expect((reg as { output: { version: { checkReport: object } } }).output.version.checkReport).not.toHaveProperty('runtime');
   });
 });
 
