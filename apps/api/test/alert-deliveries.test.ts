@@ -165,6 +165,20 @@ describe('alerts to Slack and webhooks', () => {
     expect([to(slackUrl).length, to(webhookUrl).length]).toEqual([2, 2]);
   });
 
+  it("escapes a screen's name in Slack's notification text as in its blocks", async () => {
+    const { org, slackUrl, webhookUrl, outbox } = await orgWithChannels();
+    const start = Date.now();
+    await pairedScreen(org.id, '<!here> <https://evil.test|click> & co', start);
+    const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
+    await checkScreenAlerts(env, outbox, start + 16 * MIN);
+    await deliverAlerts(env, outbox, { now: start + 16 * MIN, guards });
+
+    const body = await to(slackUrl)[0]!.text();
+    expect(body).not.toContain('<!here>');
+    expect(body).not.toContain('<https://evil.test');
+    expect(JSON.parse(body).text).toBe(`&lt;!here&gt; &lt;https://evil.test|click&gt; &amp; co in ${org.name} is offline`);
+  });
+
   it('retries a receiver that answers 500, backing off, and the log shows each try', async () => {
     const { owner, org, slackUrl, webhookUrl, outbox } = await orgWithChannels();
     const start = Date.now();

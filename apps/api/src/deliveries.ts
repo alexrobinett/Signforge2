@@ -164,7 +164,7 @@ function slackMessage(event: AlertEvent) {
   const org = mrkdwn(`*Organization*\n${esc(event.org.name)}`);
   switch (event.type) {
     case 'test':
-      return { text: summary(event), blocks: [{ type: 'section', text: mrkdwn(esc(event.data.message)), fields: [org] }] };
+      return { text: esc(summary(event)), blocks: [{ type: 'section', text: mrkdwn(esc(event.data.message)), fields: [org] }] };
     case 'screen.offline':
     case 'screen.back': {
       const { screen } = event.data;
@@ -176,7 +176,7 @@ function slackMessage(event: AlertEvent) {
           : mrkdwn(`*Offline from*\n${slackTime(event.data.offlineSince)} to ${slackTime(event.data.lastSeenAt)}`);
       const blocks: object[] = [{ type: 'section', text: mrkdwn(state), fields: [org, since] }];
       if (screen.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${screen.url}|Open the screen in SignForge>`)] });
-      return { text: summary(event), blocks };
+      return { text: esc(summary(event)), blocks };
     }
   }
 }
