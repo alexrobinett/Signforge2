@@ -66,7 +66,7 @@ describe('a busy geocoder', () => {
         .search('Atlanta')
         .catch((err: unknown) => err);
       expect(refusal).toBeInstanceOf(ToolError);
-      expect(refusal).toMatchObject({ code: 'rate_limited', message: 'place search is busy; try again in a minute' });
+      expect(refusal).toMatchObject({ code: 'unavailable', message: 'place search is busy; try again in a minute', details: { retryAfterSeconds: 60 } });
     }
   });
 });

@@ -11,7 +11,7 @@ const TIMEOUT_MS = 5_000;
 const COUNT = 10;
 
 /** The geocoder is over its free allowance or slow: the caller may try again shortly. Not a failure of ours. */
-const busy = (cause?: unknown) => new ToolError('rate_limited', 'place search is busy; try again in a minute', undefined, false, { cause });
+const busy = (cause?: unknown) => new ToolError('unavailable', 'place search is busy; try again in a minute', { retryAfterSeconds: 60 }, false, { cause });
 
 /** workerd's `fetch` throws "Illegal invocation" when called as a method of another object. */
 const workerFetch: typeof fetch = (input, init) => fetch(input, init);
