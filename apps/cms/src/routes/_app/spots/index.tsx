@@ -9,7 +9,7 @@ import { EmptyState, PageHeader } from '~/components/page';
 import { NewSpotDialog } from '~/components/spots/new-spot-dialog';
 import { useCanManage, useOrgId } from '~/lib/live';
 import { sectionFor } from '~/lib/sections';
-import { publishWord, versionsById, type SpotView, type TemplateVersionView } from '~/lib/spots';
+import { publishWord, spotWhat, versionsById } from '~/lib/spots';
 import { assetsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 
 const section = sectionFor('/spots');
@@ -23,12 +23,6 @@ export const Route = createFileRoute('/_app/spots/')({
   head: () => ({ meta: [{ title: `${section.label} · SignForge` }] }),
   component: SpotsPage,
 });
-
-const KIND_WORD = { image: 'Image', video: 'Video', url: 'Web page' } as const;
-
-/** What the spot is, in a few words. */
-const what = (s: SpotView, versions: Map<string, TemplateVersionView>) =>
-  s.kind === 'template' ? (versions.get(s.templateVersionId ?? '')?.manifest.name ?? 'Template') : KIND_WORD[s.kind];
 
 function SpotsPage() {
   const orgId = useOrgId();
@@ -54,7 +48,7 @@ function SpotsPage() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{s.name}</span>
                   <span className="block truncate text-sm text-muted-foreground">
-                    {what(s, versions)} · {publishWord(s)}
+                    {spotWhat(s, versions)} · {publishWord(s)}
                   </span>
                 </span>
                 <ChevronRightIcon className="size-4 text-muted-foreground" aria-hidden />

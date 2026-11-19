@@ -3,6 +3,7 @@
  * (the API checks the session, the role and the input). A refusal throws `ToolCallError` with the
  * tool's own message, written to be shown as it is.
  */
+import type { PlaylistView } from './playlists';
 import type { SpotView } from './spots';
 
 class ToolCallError extends Error {
@@ -62,3 +63,11 @@ export function spotOf(output: unknown): SpotView {
 }
 
 const isSpot = (v: unknown): v is SpotView => isRecord(v) && typeof v.id === 'string' && typeof v.version === 'number' && typeof v.kind === 'string';
+
+/** The playlist in a `{ playlist }` output, such as `update_playlist`'s, for the Query cache. */
+export function playlistOf(output: unknown): PlaylistView {
+  if (isRecord(output) && isPlaylist(output.playlist)) return output.playlist;
+  throw new ToolCallError('error', 'SignForge answered without the playlist. Reload the page to see it.');
+}
+
+const isPlaylist = (v: unknown): v is PlaylistView => isRecord(v) && typeof v.id === 'string' && typeof v.version === 'number' && Array.isArray(v.spotIds);

@@ -2,7 +2,8 @@
  * `PlayerStage` (docs/proposals/cms-ui.md, canvas boards Spot editor A and "Stage is the player"):
  * the real player build in an iframe, at the screen's true resolution, scaled to fit or shown at
  * 100%. The CMS serves the build at /player/ (apps/cms README); the store's actions post it the
- * draft (src/state/spot-editor.ts). Orientation, scale and brand kit are in the URL.
+ * draft (src/state/spot-editor.ts): a spot's, or a playlist's from the playlist editor.
+ * Orientation, scale and brand kit are in the URL.
  */
 import { SCREEN_BOX } from '@signforge/contract';
 import { TriangleAlertIcon } from 'lucide-react';
@@ -12,7 +13,7 @@ import { useHydrated } from '~/lib/hydrated';
 import type { BrandKitView } from '~/lib/spots';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
-import type { StageTarget } from '~/state/spot-editor';
+import type { StageShows } from '~/state/spot-editor';
 
 type Orientation = 'landscape' | 'portrait';
 type Scale = 'fit' | 'actual';
@@ -60,7 +61,7 @@ export function PlayerStage({
   onScale,
   onKit,
 }: {
-  target: Omit<StageTarget, 'frame'>;
+  target: StageShows;
   scale: Scale;
   kits: BrandKitView[];
   kitId: string | null;
@@ -76,7 +77,10 @@ export function PlayerStage({
   const playing = useAppStore((s) => s.spotEditor.playing);
   // The player says once that it is listening; a frame in the server's HTML could say it before the store hears.
   const hydrated = useHydrated();
-  const { orgId, spotId, orientation, templateVersionId, brandKitId } = target;
+  const { orgId, orientation, brandKitId } = target;
+  const spotId = 'spotId' in target ? target.spotId : undefined;
+  const templateVersionId = 'spotId' in target ? target.templateVersionId : undefined;
+  const playlistId = 'playlistId' in target ? target.playlistId : undefined;
   const size = SCREEN_BOX[orientation];
   const fit = box ? Math.min(box.w / size.w, box.h / size.h, 1) : 0;
   const shown = scale === 'fit' ? fit : 1;
@@ -86,10 +90,11 @@ export function PlayerStage({
     (el: HTMLIFrameElement | null) => {
       const frame = el?.contentWindow;
       if (!frame) return;
-      attach({ frame, orgId, spotId, orientation, templateVersionId, brandKitId });
+      const shows = playlistId !== undefined ? { playlistId } : { spotId: spotId ?? '', templateVersionId };
+      attach({ frame, orgId, orientation, brandKitId, ...shows });
       return () => attach(null);
     },
-    [attach, orgId, spotId, orientation, templateVersionId, brandKitId],
+    [attach, orgId, spotId, playlistId, orientation, templateVersionId, brandKitId],
   );
   // The room the stage has, for scaling to fit.
   const roomRef = useCallback(
@@ -170,7 +175,7 @@ export function PlayerStage({
         {holding ? (
           <span className="inline-flex items-center gap-2">
             <TriangleAlertIcon className="size-3.5 text-[#fdb022]" aria-hidden />
-            Holding the last valid frame until the marked field is fixed.
+            {playlistId !== undefined ? 'Holding the last frame the player could show.' : 'Holding the last valid frame until the marked field is fixed.'}
           </span>
         ) : stageError ? (
           <span className="inline-flex items-center gap-2">
@@ -180,7 +185,7 @@ export function PlayerStage({
         ) : (
           <span>{playing ? 'Drawn by the player your screens run.' : 'Starting the player…'}</span>
         )}
-        <span>Updates as you type.</span>
+        <span>{playlistId !== undefined ? 'Plays the loop. Updates as you edit.' : 'Updates as you type.'}</span>
       </p>
     </section>
   );
