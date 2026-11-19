@@ -115,6 +115,22 @@ describe('register_template_version', () => {
     expect(await scoped(env.DB, o.orgId).templates.ownByKey('glass')).toBeUndefined();
   });
 
+  it('rejects scripts a template frame would not run, as the browser reads them', async () => {
+    const markup =
+      '<script type="&#109;odule">"use strict";m()</script><svg><script href="x.js"/></svg><script type="text/ecmascript">"use strict";e()</script>';
+    const ids = await orgUpload(html().replace('<body>', `<body>${markup}`));
+    const r = await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'scripts' }), ...ids }, owner);
+    expect(r).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [
+        { path: 'scripts', message: expect.stringMatching(/type "module" does not run/) },
+        { path: 'scripts', message: expect.stringMatching(/external script does not run/) },
+        { path: 'scripts', message: expect.stringMatching(/type "text\/ecmascript" does not run/) },
+      ],
+    });
+  });
+
   it("rejects sources that call fetch, though the bundle's SDK reaches its parent", async () => {
     const ids = await orgUpload(html(), sources("const r = await fetch('/data.json');\n"));
     const r = await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'fetcher' }), ...ids }, owner);

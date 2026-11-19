@@ -133,6 +133,29 @@ describe('a template that opens a peer connection', () => {
       expect(spotsPlayed(s)).toEqual(['a', 'b']);
     });
   }
+
+  // A hash allows a text whatever the script's type: the template copies one of its own classic
+  // scripts (which cannot run as one: it declares a global `window`) into a frame it adds, as a module,
+  // where `function window` would take a guard that named `window`.
+  it('gathers no candidate and sends nothing: a module copy of its own classic script, in a frame it adds', async () => {
+    await using ice = await iceServers();
+    const scripts =
+      `<script id="copied">"use strict";function window() {} var self, globalThis; ${childScript(ice.servers, 1)}</script>` +
+      `<script>"use strict";const f = document.createElement('iframe'); f.srcdoc = '<script type="module">' + document.getElementById('copied').textContent + '</scr' + 'ipt>'; document.body.appendChild(f);</script>`;
+    const { p } = await hostile('webrtc-markup', ice.servers, h.templateHtml.replace('<body>', `<body>${scripts}`));
+    // The driver ran: a frame below the template holds the module. Its run was reached: the guard
+    // throws there, `this` being undefined (checked last, so with no guard the packets fail the test).
+    await expect
+      .poll(async () => {
+        for (const f of p.page.frames()) if (await f.evaluate(() => !!document.querySelector('script[type=module]')).catch(() => false)) return true;
+        return false;
+      })
+      .toBe(true);
+    const s = await afterEvil(p);
+    expect(ice.sent()).toEqual({ datagrams: 0, connections: [] });
+    expect(p.console.some((l) => /pageerror: .*undefined/.test(l))).toBe(true);
+    expect(spotsPlayed(s)).toEqual(['a', 'b']);
+  });
 });
 
 describe('a template whose script tries to run before the guard, or shadows the names of the global object', () => {
@@ -142,11 +165,6 @@ describe('a template whose script tries to run before the guard, or shadows the 
     'classic, unwrapped': (s) => `<script>"use strict";var window, self; globalThis = {}; ${childScript(s, 0)}</script>`,
     'classic, wrapped': (s) => `<script>"use strict";(function (window, self, globalThis) { ${childScript(s, 0)} })({}, {}, {})</script>`,
     module: (s) => `<script type="module">function window() {} const self = {}, globalThis = {}; ${childScript(s, 0)}</script>`,
-    // A hash allows a text whatever the script's type: this copies one of the template's own classic
-    // scripts (which cannot run as one: it declares a global `window`) into a frame, as a module.
-    'module copy of its own classic script, in a frame it adds': (s) =>
-      `<script id="copied">"use strict";function window() {} var self, globalThis; ${childScript(s, 1)}</script>` +
-      `<script>const f = document.createElement('iframe'); f.srcdoc = '<script type="module">' + document.getElementById('copied').textContent + '</scr' + 'ipt>'; document.body.appendChild(f);</script>`,
     // JavaScript ends a line comment at U+2028 and U+2029 too: the peer connection is code, on the comment's line.
     'a line comment ended by U+2028': (s) => `<script>"use strict";// a note\u2028${childScript(s, 0).replaceAll('\n', ' ')}</script>`,
     'a line comment ended by U+2029': (s) => `<script>"use strict";// a note\u2029${childScript(s, 0).replaceAll('\n', ' ')}</script>`,
@@ -163,6 +181,19 @@ describe('a template whose script tries to run before the guard, or shadows the 
 });
 
 describe('the template frame', () => {
+  it('shows text that only looks like a script as written: a textarea holding one', async () => {
+    const example = '<script>"use strict";x()</script>';
+    const html = h.templateHtml.replace('<body>', `<body><textarea id="example">${example}</textarea>`);
+    const p = await h.openPlayer((server) => server.publish(buildContent(html, [{ id: 'a', durationMs: 5000 }])));
+    await p.until((s) => s.played >= 1);
+    const values: string[] = [];
+    for (const f of p.page.frames()) {
+      const v = await f.evaluate(() => (document.getElementById('example') as HTMLTextAreaElement | null)?.value).catch(() => undefined);
+      if (v !== undefined) values.push(v);
+    }
+    expect(values).toEqual([example]);
+  });
+
   it('keeps an opaque origin, so it cannot reach the player or its storage', async () => {
     const p = await h.openPlayer((server) => server.publish(h.content([{ id: 'a', durationMs: 5000 }])));
     await p.until((s) => s.played >= 1);

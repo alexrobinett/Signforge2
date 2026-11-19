@@ -66,4 +66,32 @@ describe('containedFrames', () => {
       expect(policiesOf(wrapper)[0]!.match(/'sha256-/g), JSON.stringify(text)).toHaveLength(1);
     }
   });
+
+  it('changes only real scripts: text that looks like one in a textarea or a comment stays as written', () => {
+    const inert = '<textarea><script>"use strict";x()</script></textarea><!-- <script>"use strict";y()</script> -->';
+    const { wrapper, template } = containedFrames(`${inert}<script>"use strict";z()</script>`);
+    expect(template).toBe(`${inert}<script>"use strict";${DISARM}z()</script>`);
+    expect(policiesOf(wrapper)[0]!.match(/'sha256-/g)).toHaveLength(2);
+  });
+
+  it('arms a script in SVG and in a template element, as the browser finds them', () => {
+    const { wrapper, template } = containedFrames('<svg><script>"use strict";a()</script></svg><template><script>"use strict";b()</script></template>');
+    expect(template).toBe(`<svg><script>"use strict";${DISARM}a()</script></svg><template><script>"use strict";${DISARM}b()</script></template>`);
+    for (const armed of scriptsOf(template)) expect(policiesOf(wrapper)[0]).toContain(hash(armed));
+  });
+
+  it('gives no hash to a module, an external script or another executable type, however its attributes are written', () => {
+    for (const html of [
+      '<script type="&#109;odule">"use strict";m()</script>',
+      '<script type=" MODULE ">"use strict";m()</script>',
+      '<script type="text/ecmascript">"use strict";e()</script>',
+      '<script language="javascript1.5">"use strict";l()</script>',
+      '<script src="x.js">"use strict";s()</script>',
+      '<svg><script href="x.js">"use strict";h()</script></svg>',
+    ]) {
+      const { wrapper, template } = containedFrames(html);
+      expect(template, html).toBe(html);
+      expect(policiesOf(wrapper)[0]!.match(/'sha256-/g), html).toHaveLength(1);
+    }
+  });
 });
