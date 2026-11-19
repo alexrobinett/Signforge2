@@ -397,25 +397,29 @@ Prepares over both sets and kits (ms, before / after): meeting-room (agenda) med
 
 No cost in frames: the ranges overlap run for run, and the one 83 ms frame was in set 1's second after run with no kit. Agenda's meeting room, the spot with the most rows, prepares about 20 ms slower, the canvas read per row; well within 500 ms. The other templates are within run-to-run noise. Nothing was skipped.
 
-## No WebRTC in template frames (issue #91, 2026-11-18)
+## No WebRTC in template frames (issue #91, 2026-11-19)
 
-The player puts one script first in each template's document that deletes `RTCPeerConnection` and `webkitRTCPeerConnection` (see Template containment in `docs/architecture.md`). Master's player (`535e172`) and this branch's (`564f386`) at subdirectories of the rig, served on `http://localhost:8090` so the kiosk's own origin and caches were not touched.
+The template's policy runs only the bundle's own scripts, by hash, each rewritten to delete `RTCPeerConnection` and `webkitRTCPeerConnection` first; the player builds the wrapper's policy and the rewritten bundle at every template load (`packages/player/src/contain.ts`; see Template containment in `docs/architecture.md`). Master's player (`966b319`) and this branch's (`9c618a8`) at subdirectories of the rig, served on `http://localhost:8090` so the kiosk's own origin and caches were not touched.
 
-WebRTC, in a new tab of the kiosk's Chromium 156: the browser tests' `webrtc` spot (the fixture template opening a peer connection to a STUN server on UDP 34780 and a TURN server on TCP 34781, both on the Pi's loopback), 14 s, so it came up three times.
+WebRTC, in a new tab of the kiosk's Chromium 156: each of the browser tests' WebRTC fixture modes (a peer connection to a STUN server on UDP 34780 and a TURN server on TCP 34781, both on the Pi's loopback), 14 s, so the spot came up three times.
 
-| Build | The spot's error | STUN datagrams | TURN connections |
-| --- | --- | --- | --- |
-| Master | `webrtc went through: gathered candidate:… udp … typ host` | 9 | 3 |
-| This branch | `webrtc was refused` | 0 | 0 |
+| Mode | Master | This branch |
+| --- | --- | --- |
+| `webrtc` (the template's own window) | gathered a host candidate; 9 datagrams, 3 TURN connections | refused; 0, 0 |
+| `webrtc-srcdoc` (a frame it adds runs its own script) | gathered; 9, 3 | refused; 0, 0 |
+| `webrtc-srcdoc-same-origin` (the same with `sandbox="allow-scripts allow-same-origin"`) | gathered; 9, 3 | refused; 0, 0 |
+| `webrtc-javascript-url` | gathered; 9, 3 | refused; 0, 0 |
+| `webrtc-grandchild` | gathered; 9, 3 | refused; 0, 0 |
+| `webrtc-markup` (the frame is in the bundle's markup, so every spot of it has one) | gathered; 25, 9 | refused; 0, 0 |
 
-Frames: the full 16-spot `examples/stress` playlist, cut, 120 s per run after 10 s to settle, HTTP cache cleared, the service worker bypassed and the origin's storage cleared before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order: master, branch, branch, master.
+Frames: the full 16-spot `examples/stress` playlist, cut, 120 s per run after 10 s to settle, HTTP cache cleared, the service worker bypassed and the origin's storage cleared before each run, the soak logger and the supervisor stopped (the kiosk page left the player's origin, so it did not beat), `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order: master, branch, branch, master.
 
 | Build | Overall | Playing | Loading next | Worst frame | Prepares, median and max (13 each) |
 | --- | --- | --- | --- | --- | --- |
-| Master | 0.62, 0.29% | 0.11, 0.11% | 17.9, 7.0% | 300, 100 ms | 243 / 635, 260 / 394 ms |
-| This branch | 0.33, 0.40% | 0.10, 0.14% | 9.2, 10.0% | 100, 100 ms | 232 / 383, 225 / 375 ms |
+| Master | 0.60, 0.37% | 0.13, 0.11% | 16.9, 10.3% | 300, 100 ms | 238 / 686, 246 / 336 ms |
+| This branch | 0.39, 0.39% | 0.11, 0.10% | 11.0, 11.2% | 100, 100 ms | 237 / 360, 241 / 374 ms |
 
-No cost: the ranges overlap, and the one 300 ms frame (a prepare) was in master's first run. Nothing was skipped.
+No cost: rewriting and hashing a 70-80 kB bundle at each load does not show in prepares or frames. The one 300 ms frame (a prepare) was in master's first run after the cache was cleared, as in the first measurement of this issue. Nothing was skipped.
 
 ## Baseline: the same player on a Mac (2026-11-17)
 
