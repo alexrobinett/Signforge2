@@ -912,6 +912,7 @@ export function scoped(d1: D1Database, orgId: string) {
             alertsJson: null,
             publishRevision: 0,
             editorsPublish: true,
+            auditRetentionDays: null,
             ...current,
             ...patch,
             rowVersion: version + 1,
