@@ -22,6 +22,7 @@ import {
   type Role,
   type Scope,
   type ScreenNotifier,
+  ToolError,
 } from '../src';
 
 let o: SeededOrg;
@@ -66,8 +67,10 @@ describe('the registry', () => {
       'delete_asset',
       'delete_data_source',
       'delete_group',
+      'disconnect',
       'finalize_asset',
       'finalize_video_upload',
+      'finish_connection',
       'get_asset',
       'get_brand_kit',
       'get_data_source',
@@ -79,6 +82,7 @@ describe('the registry', () => {
       'identify_screen',
       'list_assets',
       'list_brand_kits',
+      'list_connections',
       'list_data_sources',
       'list_fonts',
       'list_groups',
@@ -98,6 +102,7 @@ describe('the registry', () => {
       'set_display_override',
       'set_group_members',
       'set_template_version_status',
+      'start_connection',
       'update_brand_kit',
       'update_data_source',
       'update_org_settings',
@@ -189,6 +194,7 @@ describe('roles and scopes', () => {
       'get_template',
       'list_assets',
       'list_brand_kits',
+      'list_connections',
       'list_data_sources',
       'list_fonts',
       'list_groups',
@@ -324,7 +330,18 @@ describe('the audit log', () => {
 
   it('redact() knows the usual names', () => {
     expect(
-      redact({ password: 'p', secret: 's', code: '123456', pairingCode: 'ABC', authorization: 'Bearer x', urlEncrypted: 'e', name: 'n', screenIds: ['a'] }),
+      redact({
+        password: 'p',
+        secret: 's',
+        code: '123456',
+        pairingCode: 'ABC',
+        authorization: 'Bearer x',
+        urlEncrypted: 'e',
+        oauthState: 'st',
+        resource: 'sheet',
+        name: 'n',
+        screenIds: ['a'],
+      }),
     ).toEqual({
       password: '[redacted]',
       secret: '[redacted]',
@@ -332,6 +349,8 @@ describe('the audit log', () => {
       pairingCode: '[redacted]',
       authorization: '[redacted]',
       urlEncrypted: '[redacted]',
+      oauthState: '[redacted]',
+      resource: '[redacted]',
       name: 'n',
       screenIds: ['a'],
     });
@@ -339,6 +358,38 @@ describe('the audit log', () => {
 });
 
 describe('write safety', () => {
+  it('undoes what a handler did outside the batch when, and only when, the call does not succeed', async () => {
+    const undone: string[] = [];
+    const tool = (name: string, refuse: boolean) =>
+      defineTool({
+        name,
+        description: 'A test tool that does something outside the batch, then succeeds or refuses.',
+        scope: 'screens:manage',
+        minRole: 'editor',
+        mutates: true,
+        input: z.object({ groupId: z.string() }),
+        output: z.object({ ok: z.boolean() }),
+        example: { groupId: 'grp_example' },
+        handler: async ({ org, input, write, onDiscard }) => {
+          onDiscard(async () => {
+            undone.push(name);
+          });
+          if (refuse) throw new ToolError('conflict', 'refused after the outside effect');
+          const group = await org.screenGroups.get(input.groupId);
+          if (group) write(org.screenGroups.stage.update(group, { name: `${name} ran` }));
+          return { ok: true };
+        },
+      });
+    for (const [name, refuse] of [
+      ['outside_then_ok', false],
+      ['outside_then_refuse', true],
+    ] as const) {
+      const t = tool(name, refuse);
+      await dispatch(new Map([[t.name, t]]), t.name, { groupId: o.group }, caller('owner'));
+    }
+    expect(undone).toEqual(['outside_then_refuse']);
+  });
+
   it('rolls the change back when its audit row cannot be written', async () => {
     const org = scoped(env.DB, o.orgId);
     const before = await org.screenGroups.get(o.group);
