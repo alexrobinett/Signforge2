@@ -4,7 +4,8 @@
  * org and a row id) as additional data, so a sealed value copied into another row, or another
  * org, does not open. Stored as `v1.<iv>.<ciphertext>`, both base64url.
  *
- * Feed URLs are sealed under DATA_SOURCE_KEY.
+ * Feed URLs and provider resources are sealed under DATA_SOURCE_KEY; connections' credentials
+ * under CONNECTION_KEY (../connectors/vault.ts).
  */
 import type { FeedUrlSealer } from '@signforge/tools';
 
@@ -15,7 +16,7 @@ type KeyEnv = Pick<Env, 'DATA_SOURCE_KEY' | 'ENVIRONMENT'>;
 type Source = { orgId: string; id: string };
 
 const encoder = new TextEncoder();
-const b64url = (bytes: Uint8Array) =>
+export const b64url = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
@@ -30,10 +31,13 @@ export async function sealingKey(k: { secret: string | undefined; devSecret: str
   const secret = k.secret ?? (k.environment === 'dev' ? k.devSecret : undefined);
   if (!secret) throw new Error(`${k.name} is not set`);
   const base = await crypto.subtle.importKey('raw', encoder.encode(secret), 'HKDF', false, ['deriveKey']);
-  return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(), info: encoder.encode(k.info) }, base, { name: 'AES-GCM', length: 256 }, false, [
-    'encrypt',
-    'decrypt',
-  ]);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(), info: encoder.encode(k.info) },
+    base,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
 }
 
 /** `plain` sealed under `key`, bound to `aad`. */
@@ -55,7 +59,8 @@ export async function open(key: CryptoKey, aad: string, sealed: string): Promise
   }
 }
 
-const key = (env: KeyEnv) => sealingKey({ secret: env.DATA_SOURCE_KEY, devSecret: DEV_KEY, name: 'DATA_SOURCE_KEY', info: 'sf-feed-url.v1', environment: env.ENVIRONMENT });
+const key = (env: KeyEnv) =>
+  sealingKey({ secret: env.DATA_SOURCE_KEY, devSecret: DEV_KEY, name: 'DATA_SOURCE_KEY', info: 'sf-feed-url.v1', environment: env.ENVIRONMENT });
 const aad = (source: Source) => `${source.orgId}/${source.id}`;
 
 export function feedUrlSealer(env: KeyEnv): FeedUrlSealer {
