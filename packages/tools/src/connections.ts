@@ -76,16 +76,20 @@ const NOT_PENDING = 'no pending authorization has this state: it was finished al
 const listConnections = defineTool({
   name: 'list_connections',
   description:
-    "List the organization's connected accounts (Google, Square, ...), ordered by id, a page at a time. Credentials are never shown. Returns { connections, next }.",
+    "List the organization's connected accounts (Google, Square, ...), ordered by id, a page at a time, and the providers this deployment can connect. Credentials are never shown. Returns { connections, providers, next }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ connections: z.array(connectionOutput), next: nextOutput }),
+  output: z.object({
+    connections: z.array(connectionOutput),
+    providers: z.array(z.string()).describe('The providers start_connection takes here'),
+    next: nextOutput,
+  }),
   example: {},
-  handler: async ({ org, input }) => {
+  handler: async ({ org, input, connectors }) => {
     const { rows, next } = page(await org.connections.list(), (c) => [c.id], input);
-    return { connections: rows.map(viewOf), next };
+    return { connections: rows.map(viewOf), providers: [...connectorsOf(connectors).providers], next };
   },
 });
 

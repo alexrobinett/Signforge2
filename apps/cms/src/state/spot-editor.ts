@@ -13,11 +13,16 @@
  * component hands them over with `attachStage` from its ref callback. The playlist editor shows
  * its playlist on the same stage (a target with a `playlistId`): it compiles the draft
  * (`playlistStageDraft`, src/state/playlist-editor.ts) and asks for a redraw (`redrawStage`).
+ *
+ * A spot bound to data sources plays their latest snapshots, posted with the draft, as a screen
+ * would; a new snapshot in the Query cache redraws it. With `fallback` (the stage's Data switch)
+ * the draft is compiled without its bindings, so the stage shows the fallback values.
  */
-import { PREVIEW_PROTOCOL, safeUrl } from '@signforge/contract';
+import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } from '@signforge/contract';
 import { playerMessage } from '~/lib/preview';
-import { assetsQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
+import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
+import { madeByEditor } from '~/lib/live-data';
 import { callTool, saveRefused, spotOf, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 
@@ -32,7 +37,15 @@ export type StageShows = {
   orgId: string;
   orientation: 'landscape' | 'portrait';
   brandKitId?: string;
-} & ({ spotId: string; templateVersionId?: string } | { playlistId: string });
+} & (
+  | {
+      spotId: string;
+      templateVersionId?: string;
+      /** Play the spot's fallback values instead of its bound sources' data (the stage's Data switch). */
+      fallback?: boolean;
+    }
+  | { playlistId: string }
+);
 
 /** Where the stage is and what it shows. */
 export type StageTarget = StageShows & { frame: Window };
@@ -141,6 +154,23 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
 
   const savedSpot = (orgId: string, spotId: string) => queryClient.getQueryData(spotQuery(orgId, spotId).queryKey);
 
+  const sourcesOf = (s: SpotView) => new Set(Object.values(s.bindings ?? {}).map((b) => b.dataSourceId));
+
+  /**
+   * Deletes each weather source the editor made that the save stopped binding, so one nobody uses
+   * no longer counts against the org's ten or gets polled; picking the place again makes it again.
+   * A feed or calendar someone typed stays (`madeByEditor`). `delete_data_source` refuses one any
+   * other spot's draft or published version still binds; that refusal, or any other, leaves the
+   * source, which is all a failed cleanup costs.
+   */
+  async function dropUnbound(orgId: string, before: SpotView, after: SpotView) {
+    const kept = sourcesOf(after);
+    const dropped = [...sourcesOf(before)].filter((id) => !kept.has(id) && madeByEditor(id));
+    if (!dropped.length) return;
+    await Promise.allSettled(dropped.map((dataSourceId) => callTool('delete_data_source', { dataSourceId })));
+    await queryClient.invalidateQueries({ queryKey: dataSourceKeys.all(orgId), exact: true });
+  }
+
   /** Whether the server would refuse the draft (packages/tools `update_spot`): an empty image field is allowed. */
   const unsaveable = (spot: SpotView, d: SpotDraft, orgId: string) => {
     if (!d.name.trim()) return true;
@@ -154,7 +184,9 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   };
 
   /** The spot target's draft, compiled; undefined while what it needs is not loaded. */
-  async function spotDraft(t: StageTarget & { spotId: string }) {
+  async function spotDraft(
+    t: StageTarget & { spotId: string; fallback?: boolean },
+  ): Promise<{ manifest?: ScreenManifest; problems: string[]; data?: DataSnapshot[] } | undefined> {
     const spot = savedSpot(t.orgId, t.spotId);
     const preview = queryClient.getQueryData(spotPreviewQuery(t.orgId, t).queryKey);
     const templates = queryClient.getQueryData(templatesQuery(t.orgId).queryKey)?.templates;
@@ -163,7 +195,10 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     const e = get().spotEditor;
     const draft = e.spotId === spot.id && e.draft ? e.draft : draftOf(spot);
     const version = spot.templateVersionId ? versionsById(templates).get(spot.templateVersionId) : undefined;
-    return compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation });
+    const result = await compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation, live: !t.fallback });
+    const sources = !t.fallback ? [...new Set(Object.values(draft.bindings).map((b) => b.dataSourceId))] : [];
+    const read = await Promise.all(sources.map((id) => queryClient.query({ ...dataSourceQuery(t.orgId, id), staleTime: 'static' }).catch(() => null)));
+    return { ...result, data: read.flatMap((r) => (r?.snapshot ? [r.snapshot] : [])) };
   }
 
   async function redraw() {
@@ -183,7 +218,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       editor((x) => ({ ...x, holding: true }));
       return;
     }
-    t.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest: result.manifest }, location.origin);
+    t.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest: result.manifest, data: result.data ?? [] }, location.origin);
     editor((x) => ({ ...x, holding: false }));
   }
 
@@ -239,7 +274,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       const open = () => get().spotEditor.spotId === spotId;
       const kindFields =
         spot.kind === 'template'
-          ? { data: draft.data, assets: draft.assets }
+          ? { data: draft.data, assets: draft.assets, bindings: draft.bindings }
           : spot.kind === 'url'
             ? { url: draft.url }
             : { fit: draft.fit, ...(draft.assetId ? { assetId: draft.assetId } : {}) };
@@ -248,6 +283,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
           await callTool('update_spot', { spotId, name: draft.name.trim(), durationMs: draft.durationMs, ...kindFields, ifVersion: version }),
         );
         queryClient.setQueryData(spotKeys.one(t.orgId, spotId), saved);
+        void dropUnbound(t.orgId, spot, saved);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(t.orgId), exact: true });
         if (open()) editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === draft ? 'saved' : 'unsaved' }));
       } catch (err) {
@@ -273,6 +309,12 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       // Called from a ref callback, so only in the browser; the listener is added once.
       if (target && !hearing) {
         window.addEventListener('message', hear);
+        // A source's new snapshot (its query read again) redraws the stage with it.
+        queryClient.getQueryCache().subscribe((event) => {
+          const key = event.query.queryKey;
+          if (event.type === 'updated' && event.action.type === 'success' && key[2] === 'dataSources' && key.length === 4)
+            later('stage', STAGE_DELAY_MS, redraw);
+        });
         hearing = true;
       }
       const changed = stage.target?.frame !== target?.frame;

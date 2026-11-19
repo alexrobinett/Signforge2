@@ -3,7 +3,8 @@
  * the real player build in an iframe, at the screen's true resolution, scaled to fit or shown at
  * 100%. The CMS serves the build at /player/ (apps/cms README); the store's actions post it the
  * draft (src/state/spot-editor.ts): a spot's, or a playlist's from the playlist editor.
- * Orientation, scale and brand kit are in the URL.
+ * Orientation, scale, brand kit and, for a spot bound to data sources, live data or the fallback
+ * are in the URL.
  */
 import { SCREEN_BOX } from '@signforge/contract';
 import { TriangleAlertIcon } from 'lucide-react';
@@ -18,11 +19,13 @@ import type { StageShows } from '~/state/spot-editor';
 
 type Scale = 'fit' | 'actual';
 
-/** The stage's settings in an editor's URL: `?o=portrait&scale=actual&kit=<id>`. */
+/** The stage's settings in an editor's URL: `?o=portrait&scale=actual&kit=<id>&data=fallback`. */
 export interface StageSearch {
   o?: 'portrait';
   scale?: 'actual';
   kit?: string;
+  /** A spot's stage plays its fallback values instead of its sources' data. */
+  data?: 'fallback';
 }
 
 /** An editor route's `validateSearch`: the stage's settings, anything else dropped. */
@@ -30,6 +33,7 @@ export const stageSearch = (s: Record<string, unknown>): StageSearch => ({
   ...(s.o === 'portrait' ? { o: 'portrait' as const } : {}),
   ...(s.scale === 'actual' ? { scale: 'actual' as const } : {}),
   ...(typeof s.kit === 'string' && s.kit ? { kit: s.kit } : {}),
+  ...(s.data === 'fallback' ? { data: 'fallback' as const } : {}),
 });
 
 function Toggle<T extends string>({
@@ -70,6 +74,7 @@ export function PlayerStage({
   kitId,
   search,
   onSearch,
+  bound = false,
 }: {
   target: StageShows;
   kits: BrandKitView[];
@@ -77,6 +82,8 @@ export function PlayerStage({
   /** The stage's settings, from the editor's URL; `onSearch` changes them there. */
   search: StageSearch;
   onSearch: (next: Partial<StageSearch>) => void;
+  /** A spot bound to data sources: the stage offers its data or its fallback values. */
+  bound?: boolean;
 }) {
   const attach = useAppStore((s) => s.attachStage);
   const measure = useAppStore((s) => s.measureStage);
@@ -90,6 +97,7 @@ export function PlayerStage({
   const spotId = 'spotId' in target ? target.spotId : undefined;
   const templateVersionId = 'spotId' in target ? target.templateVersionId : undefined;
   const playlistId = 'playlistId' in target ? target.playlistId : undefined;
+  const fallback = search.data === 'fallback';
   const size = SCREEN_BOX[orientation];
   const fit = box ? Math.min(box.w / size.w, box.h / size.h, 1) : 0;
   const scale: Scale = search.scale ?? 'fit';
@@ -100,11 +108,11 @@ export function PlayerStage({
     (el: HTMLIFrameElement | null) => {
       const frame = el?.contentWindow;
       if (!frame) return;
-      const shows = playlistId !== undefined ? { playlistId } : { spotId: spotId ?? '', templateVersionId };
+      const shows = playlistId !== undefined ? { playlistId } : { spotId: spotId ?? '', templateVersionId, fallback };
       attach({ frame, orgId, orientation, brandKitId, ...shows });
       return () => attach(null);
     },
-    [attach, orgId, spotId, playlistId, orientation, templateVersionId, brandKitId],
+    [attach, orgId, spotId, playlistId, orientation, templateVersionId, brandKitId, fallback],
   );
   // The room the stage has, for scaling to fit.
   const roomRef = useCallback(
@@ -138,6 +146,17 @@ export function PlayerStage({
           ]}
           onChange={(v) => onSearch({ scale: v === 'actual' ? 'actual' : undefined })}
         />
+        {bound && (
+          <Toggle
+            label="Data"
+            value={fallback ? 'fallback' : 'live'}
+            options={[
+              { value: 'live', label: 'Live data' },
+              { value: 'fallback', label: 'Fallback' },
+            ]}
+            onChange={(v) => onSearch({ data: v === 'live' ? undefined : 'fallback' })}
+          />
+        )}
         {kits.length > 0 && (
           <span className="flex items-center gap-2 text-sm text-[#d4d4d4]">
             <label htmlFor="stage-kit">Brand kit</label>

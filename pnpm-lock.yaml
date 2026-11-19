@@ -351,6 +351,9 @@ importers:
       '@signforge/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@signforge/feeds':
+        specifier: workspace:*
+        version: link:../../packages/feeds
       '@signforge/player':
         specifier: workspace:*
         version: link:../../packages/player

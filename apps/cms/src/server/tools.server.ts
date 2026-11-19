@@ -7,6 +7,7 @@ import { redirect } from '@tanstack/react-router';
 import { getRequest } from '@tanstack/react-start/server';
 import type { AssetView } from '~/lib/assets';
 import type { BrandKitView } from '~/lib/brand-kits';
+import type { ListedSource } from '~/lib/integrations';
 import type { SpotView, TemplateView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { callApi } from './api.server';
@@ -57,6 +58,7 @@ interface ListPage {
   spots?: SpotView[];
   templates?: TemplateView[];
   brandKits?: BrandKitView[];
+  dataSources?: ListedSource[];
 }
 
 /** Every page of a list tool, the rows `rows` picks from each. A list whose rows are not `ListPage`'s names its page in `rows`. */

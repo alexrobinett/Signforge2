@@ -11,7 +11,7 @@ import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
-import { defineTool, type FeedUrlSealer, notFound, ToolError } from './tool';
+import { defineTool, type FeedUrlSealer, notFound, type PlaceFinder, ToolError } from './tool';
 
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
 const MAX_DATA_SOURCES = 10;
@@ -103,25 +103,60 @@ function sealerOf(feedUrls: FeedUrlSealer | undefined): FeedUrlSealer {
   return feedUrls;
 }
 
+function finderOf(places: PlaceFinder | undefined): PlaceFinder {
+  if (!places) throw new Error('find_places needs a place finder');
+  return places;
+}
+
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+/** The source ids a spot's stored bindings name. */
+function sourcesBound(json: string | null | undefined): string[] {
+  if (json == null) return [];
+  const bindings: unknown = JSON.parse(json);
+  if (!isObject(bindings)) return [];
+  return Object.values(bindings).flatMap((b) => (isObject(b) && typeof b.source === 'string' ? [b.source] : []));
+}
 
 const calendarOnly = (f: string, days: number | null | undefined) => days == null || f === 'ical';
 const HORIZON_ONLY_ICAL = 'horizonDays is for ical sources only';
 
 const target = (input: { dataSourceId: string }) => ({ kind: 'data_source', id: input.dataSourceId });
 
+const listedSourceOutput = dataSourceOutput.extend({
+  lastCheckedAt: z.number().nullable().describe('When a poll last found the feed still saying it: its last good check'),
+  spots: z.array(z.object({ id: z.string(), name: z.string() })).describe('The spots that bind it, as drafted or as published'),
+});
+
 const listDataSources = defineTool({
   name: 'list_data_sources',
-  description: "List the organization's data sources (feeds that spots can bind to), ordered by id, a page at a time. Returns { dataSources, next }.",
+  description:
+    "List the organization's data sources (feeds that spots can bind to), ordered by id, a page at a time, each with its last good check and the spots that bind it. Returns { dataSources, next }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ dataSources: z.array(dataSourceOutput), next: nextOutput }),
+  output: z.object({ dataSources: z.array(listedSourceOutput), next: nextOutput }),
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = page(await org.dataSources.list(), (d) => [d.id], input);
-    return { dataSources: rows.map(viewOf), next };
+    const [snapshots, spots] = await Promise.all([org.dataSources.checkedTimes(rows.map((d) => d.id)), org.spots.list()]);
+    const bound = spots.map((s) => ({
+      id: s.id,
+      name: s.name,
+      sources: new Set([...sourcesBound(s.bindingsJson), ...sourcesBound(published(s)?.bindingsJson)]),
+    }));
+    return {
+      dataSources: rows.map((d) => {
+        const snap = snapshots.find((x) => x.dataSourceId === d.id);
+        return {
+          ...viewOf(d),
+          lastCheckedAt: snap?.checkedAt ?? null,
+          spots: bound.filter((s) => s.sources.has(d.id)).map(({ id, name }) => ({ id, name })),
+        };
+      }),
+      next,
+    };
   },
 });
 
@@ -249,12 +284,9 @@ const updateDataSource = defineTool({
 
 /** Spots whose draft or published version binds a field to `dataSourceId`. */
 async function spotsBinding(org: OrgScope, dataSourceId: string): Promise<string[]> {
-  const binds = (json: string | null | undefined) => {
-    if (json == null) return false;
-    const bindings: unknown = JSON.parse(json);
-    return isObject(bindings) && Object.values(bindings).some((b) => isObject(b) && b.source === dataSourceId);
-  };
-  return (await org.spots.list()).filter((s) => binds(s.bindingsJson) || binds(published(s)?.bindingsJson)).map((s) => s.id);
+  return (await org.spots.list())
+    .filter((s) => sourcesBound(s.bindingsJson).includes(dataSourceId) || sourcesBound(published(s)?.bindingsJson).includes(dataSourceId))
+    .map((s) => s.id);
 }
 
 const deleteDataSource = defineTool({
@@ -277,4 +309,32 @@ const deleteDataSource = defineTool({
   },
 });
 
-export const dataSourceTools = [listDataSources, getDataSource, createDataSource, updateDataSource, deleteDataSource];
+const placeOutput = z.object({
+  id: z.number().describe("The geocoder's id for the place"),
+  name: z.string(),
+  region: z.string().describe("State or province, or ''"),
+  country: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
+  timezone: z.string().describe('IANA time zone'),
+});
+
+const findPlaces = defineTool({
+  name: 'find_places',
+  description:
+    "Look places up by name with Open-Meteo's geocoding, best match first, for a weather data source: its forecast URL (https://api.open-meteo.com/v1/forecast) takes the latitude, longitude and timezone. Each search counts against the caller's rate limit; over it, rate_limited. Returns { places }.",
+  scope: 'content:read',
+  minRole: 'viewer',
+  mutates: false,
+  input: z.object({ query: z.string().trim().min(2, 'type at least 2 letters of the place').max(100).describe('A place name, such as Atlanta') }),
+  output: z.object({ places: z.array(placeOutput) }),
+  example: { query: 'Atlanta' },
+  handler: async ({ input, places, rateLimit }) => {
+    // Unlimited, one member could use up the geocoder's free allowance for every org.
+    if (!rateLimit) throw new ToolError('forbidden', 'find_places needs a rate limit, and this caller has none');
+    if (!(await rateLimit('place_search'))) throw new ToolError('rate_limited', 'too many place searches; wait a minute and try again');
+    return { places: await finderOf(places).search(input.query) };
+  },
+});
+
+export const dataSourceTools = [listDataSources, getDataSource, createDataSource, updateDataSource, deleteDataSource, findPlaces];

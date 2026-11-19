@@ -3,7 +3,7 @@ import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { dispatch, registry, type Caller, type FeedUrlSealer } from '../src';
+import { dispatch, registry, type Caller, type FeedUrlSealer, type PlaceFinder } from '../src';
 
 let o: SeededOrg;
 let owner: Caller;
@@ -51,6 +51,21 @@ describe('data sources', () => {
     });
   });
 
+  it('lists each source with its last good check and the spots that bind it, as drafted or as published', async () => {
+    await owner.org.spots.update(o.templateSpot, { bindingsJson: JSON.stringify({ title: { source: 'holidays', path: 'events.0.title' } }) });
+    const { dataSources } = await call('list_data_sources', {});
+    const holidays = dataSources.find((d: { id: string }) => d.id === 'holidays');
+    expect(holidays).toMatchObject({ lastCheckedAt: 2000, spots: [{ id: o.templateSpot, name: expect.any(String) }] });
+    expect(holidays).not.toHaveProperty('lastFetchedAt');
+    const unpolled = await call('create_data_source', { id: 'unpolled', name: 'Not polled yet', format: 'rss', feedUrl: 'https://news.example.com/rss' });
+    expect((await call('list_data_sources', {})).dataSources.find((d: { id: string }) => d.id === unpolled.dataSource.id)).toMatchObject({
+      lastCheckedAt: null,
+      spots: [],
+    });
+    await owner.org.spots.update(o.templateSpot, { bindingsJson: null });
+    await call('delete_data_source', { dataSourceId: 'unpolled' });
+  });
+
   it('updates, polling a changed URL afresh', async () => {
     await owner.org.dataSources.update('holidays', { etag: '"old"', failures: 3, lastError: 'timeout', nextPollAt: 99 });
     const { dataSource } = await call('update_data_source', { dataSourceId: 'holidays', feedUrl: 'https://other.example.com/h.ics', horizonDays: null });
@@ -95,5 +110,49 @@ describe('data sources', () => {
     await owner.org.spots.update(o.templateSpot, { bindingsJson: null });
     expect(await call('delete_data_source', { dataSourceId: 'holidays' })).toEqual({ deleted: 'holidays' });
     expect(await owner.org.dataSources.snapshot('holidays')).toBeUndefined();
+  });
+});
+
+describe('find_places', () => {
+  const atlanta = {
+    id: 4180439,
+    name: 'Atlanta',
+    region: 'Georgia',
+    country: 'United States',
+    latitude: 33.749,
+    longitude: -84.38798,
+    timezone: 'America/New_York',
+  };
+  const places: PlaceFinder = { search: async (query) => (query.trim().toLowerCase() === 'atlanta' ? [atlanta] : []) };
+  /** Every search the caller is let make, and the buckets it was counted in. */
+  const counted: string[] = [];
+  const rateLimit = async (bucket: string) => {
+    counted.push(bucket);
+    return true;
+  };
+
+  it('finds places by name, with what a weather source needs: coordinates and time zone', async () => {
+    const r = await dispatch(registry, 'find_places', { query: '  Atlanta ' }, { ...owner, role: 'viewer', places, rateLimit });
+    expect(r).toEqual({ ok: true, output: { places: [atlanta] } });
+    expect(await dispatch(registry, 'find_places', { query: 'Nowhere' }, { ...owner, places, rateLimit })).toEqual({ ok: true, output: { places: [] } });
+  });
+
+  it('counts each search against the caller, and refuses one over its limit, and refuses a caller with none, without asking the geocoder', async () => {
+    let asked = 0;
+    const counting: PlaceFinder = { search: async () => (asked++, [atlanta]) };
+    counted.length = 0;
+    await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting, rateLimit });
+    expect(counted).toEqual(['place_search']);
+    expect(await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting, rateLimit: async () => false })).toMatchObject({
+      ok: false,
+      error: 'rate_limited',
+    });
+    // No limiter is no rate to wait out: refused as claim_screen refuses it.
+    expect(await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting })).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(asked).toBe(1);
+  });
+
+  it('refuses a query too short to mean a place', async () => {
+    expect(await dispatch(registry, 'find_places', { query: ' a ' }, { ...owner, places, rateLimit })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 });

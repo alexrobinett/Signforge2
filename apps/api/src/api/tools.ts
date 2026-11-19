@@ -8,12 +8,15 @@
  * Every route that changes data on `/api`, other than Better Auth's, is this one;
  * test/routes.test.ts fails if another appears. See packages/tools/README.md for the contract.
  */
-import { describeTools, dispatch, grantOf, registry, type Caller, type ToolErrorCode } from '@signforge/tools';
+import { describeTools, dispatch, grantOf, registry, type Caller, type RateLimitBucket, type ToolErrorCode } from '@signforge/tools';
 import type { Context, Hono } from 'hono';
 import { type ConnectorDeps, connectorDeps, connectorsFor } from '../connectors';
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
-import { feedUrlSealer } from '../data/cipher';
+import { alertSecretSealer, feedUrlSealer } from '../data/cipher';
+import { deliverAlert } from '../deliveries';
+import { emailSenderFor, type EmailSender } from '../email';
+import { openMeteoPlaces } from '../data/places';
 import { templateCheckAllowed, templateChecker } from '../template-check';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
@@ -28,14 +31,23 @@ const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = {
   unavailable: 503,
 };
 
+/** The Workers rate limit each bucket counts against (wrangler.jsonc). */
+const LIMITS: Record<Exclude<RateLimitBucket, 'template_check'>, (env: Env) => RateLimit> = {
+  pairing_claim: (env) => env.PAIR_CLAIM_LIMIT,
+  place_search: (env) => env.PLACE_SEARCH_LIMIT,
+};
+
 /** The CMS's client id in the audit log. */
 const CMS_CLIENT_ID = 'cms';
 
 /** The path the providers send the browser back to (./connections.ts), registered with each provider's OAuth client. */
 export const CALLBACK_PATH = '/api/connections/callback';
 
-/** The session's member as a tool caller, through the cms client. */
-export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefined): Caller {
+/**
+ * The session's member as a tool caller, through the cms client. `email` sends test alerts by
+ * email; it defaults to `emailSenderFor(env)`, and tests pass a recorder.
+ */
+export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefined, email?: EmailSender): Caller {
   return {
     org: c.var.org,
     role: c.var.role,
@@ -43,23 +55,30 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     blobs: c.env.BLOBS,
     uploads: uploadSigner(c.env, c.req.url),
     feedUrls: feedUrlSealer(c.env),
+    alertSecrets: alertSecretSealer(c.env),
+    // After the response: a receiver's 5 seconds are not the caller's to wait for.
+    deliveries: {
+      now: (id) =>
+        c.executionCtx.waitUntil(
+          deliverAlert(c.env, email ?? emailSenderFor(c.env), c.var.orgId, id).catch((err: unknown) => console.error('alert delivery failed', err)),
+        ),
+    },
+    places: openMeteoPlaces(c.env),
     connectors: connectorsFor(c.env, connectors ?? connectorDeps(c.env), new URL(CALLBACK_PATH, c.req.url).href),
     templateCheck: templateChecker(c.env),
     screens: screenNotifier(c.env),
-    // A claim counts against the member and against the address, so many accounts on one address share a limit.
-    // A template check counts against the org, whose one container it uses.
+    // A template check counts against the org, whose one container it uses. The others count against the
+    // member and against the address, so many accounts on one address share a limit.
     rateLimit: async (bucket) => {
       if (bucket === 'template_check') return templateCheckAllowed(c.env, c.var.org.orgId);
-      const [user, ip] = await Promise.all([
-        c.env.PAIR_CLAIM_LIMIT.limit({ key: `user:${c.var.session.user.id}` }),
-        c.env.PAIR_CLAIM_LIMIT.limit({ key: `ip:${clientIp(c)}` }),
-      ]);
+      const limit = LIMITS[bucket](c.env);
+      const [user, ip] = await Promise.all([limit.limit({ key: `user:${c.var.session.user.id}` }), limit.limit({ key: `ip:${clientIp(c)}` })]);
       return user.success && ip.success;
     },
   };
 }
 
-export function mountTools(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined) {
+export function mountTools(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined, email?: EmailSender) {
   api.get('/tools', async (c) => c.json({ tools: describeTools(registry, await grantOf({ org: c.var.org, role: c.var.role })) }));
 
   api.post('/tools/:name', async (c) => {
@@ -76,7 +95,7 @@ export function mountTools(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefi
         return c.json({ error: 'invalid_input', message: 'the body is not JSON' }, 400);
       }
     }
-    const result = await dispatch(registry, c.req.param('name'), input, cmsCaller(c, connectors));
+    const result = await dispatch(registry, c.req.param('name'), input, cmsCaller(c, connectors, email));
     if (result.ok) return c.json(result.output as object);
     const { error, message, details } = result;
     return c.json({ error, message, ...(details === undefined ? {} : { details }) }, STATUS[error]);
