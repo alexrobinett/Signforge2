@@ -11,17 +11,17 @@ const DISARM = "if(!(delete this.RTCPeerConnection&&delete this.webkitRTCPeerCon
 describe('containedFrames', () => {
   it('lets the wrapper and template run only their classic scripts, each disarmed first', () => {
     const { wrapper, template } = containedFrames(
-      '<!doctype html><p>x</p><script>"use strict";go()</script><script type="text/javascript">more()\r\n</script><script type="module">mod()</script>',
+      '<!doctype html><p>x</p><script>"use strict";go()</script><script type="text/javascript">"use strict";more()\r\n</script><script type="module">"use strict";mod()</script>',
     );
-    const [strict, plain, module] = scriptsOf(template);
-    // The prologue stays first, so the script keeps strict mode; CR LF reads as LF.
-    expect(strict).toBe(`"use strict";\n;${DISARM}go()`);
-    expect(plain).toBe(`\n;${DISARM}more()\n`);
+    const [classic, typed, module] = scriptsOf(template);
+    // The guard goes right after "use strict";, which stays first; CR LF reads as LF.
+    expect(classic).toBe(`"use strict";${DISARM}go()`);
+    expect(typed).toBe(`"use strict";${DISARM}more()\n`);
     // A module is left as it is, and not let run.
-    expect(module).toBe('mod()');
+    expect(module).toBe('"use strict";mod()');
     const [relay] = scriptsOf(wrapper);
     const [policy, inlineOnly] = policiesOf(wrapper);
-    expect(policy).toContain(`script-src ${[relay!, strict!, plain!].map(hash).join(' ')};`);
+    expect(policy).toContain(`script-src ${[relay!, classic!, typed!].map(hash).join(' ')};`);
     expect(/script-src [^;]*/.exec(policy!)![0]).not.toContain('unsafe');
     // The second policy allows no script URL, whatever `integrity` a script names.
     expect(inlineOnly).toBe("script-src 'unsafe-inline'");

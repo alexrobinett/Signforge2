@@ -24,7 +24,7 @@ const manifest = (over: Record<string, unknown> = {}) => ({
   protocol: 1,
   ...over,
 });
-const html = (css = 'h1{color:red}', script = 'parent.postMessage({type:"loaded"},"*")') =>
+const html = (css = 'h1{color:red}', script = '"use strict";parent.postMessage({type:"loaded"},"*")') =>
   `<!doctype html><html><head><style>${css}</style></head><body><h1 data-sf="title"></h1><script>${script}</script></body></html>`;
 const sources = (main = "import { defineTemplate } from '@signforge/template-sdk';\ndefineTemplate({});\n") =>
   JSON.stringify({ 'index.html': '<h1 data-sf="title"></h1>', 'style.css': 'h1 { color: red; }', 'main.ts': main });

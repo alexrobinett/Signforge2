@@ -139,8 +139,8 @@ describe('a template whose script tries to run before the guard, or shadows the 
   // Scripts added to the template's markup ahead of its own, which still plays. Each opens a peer
   // connection with `RTCPeerConnection` after binding `window`, `self` and `globalThis` itself.
   const shadowing: Record<string, (servers: string) => string> = {
-    'classic, unwrapped': (s) => `<script>var window, self; globalThis = {}; ${childScript(s, 0)}</script>`,
-    'classic, wrapped': (s) => `<script>(function (window, self, globalThis) { ${childScript(s, 0)} })({}, {}, {})</script>`,
+    'classic, unwrapped': (s) => `<script>"use strict";var window, self; globalThis = {}; ${childScript(s, 0)}</script>`,
+    'classic, wrapped': (s) => `<script>"use strict";(function (window, self, globalThis) { ${childScript(s, 0)} })({}, {}, {})</script>`,
     module: (s) => `<script type="module">function window() {} const self = {}, globalThis = {}; ${childScript(s, 0)}</script>`,
     // A hash allows a text whatever the script's type: this copies one of the template's own classic
     // scripts (which cannot run as one: it declares a global `window`) into a frame, as a module.

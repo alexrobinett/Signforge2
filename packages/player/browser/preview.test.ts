@@ -159,7 +159,7 @@ async function openPreview(origin: string, content?: Content, extra: Record<stri
  * A bundle that speaks frame protocol 1, as one built before M3-32 does: `loaded`, then `ready`
  * after `init`, and no `reset`. Shows the spot's label, as the fixture template does.
  */
-const PROTOCOL_1_HTML = `<!doctype html><body style="margin:0;background:#000;color:#fff"><div id="label"></div><script>
+const PROTOCOL_1_HTML = `<!doctype html><body style="margin:0;background:#000;color:#fff"><div id="label"></div><script>"use strict";
 addEventListener('message', (e) => {
   if (e.data?.sf !== 1) return;
   if (e.data.type === 'init') {

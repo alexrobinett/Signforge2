@@ -4,12 +4,14 @@
  * screens give it. See "Template containment" in docs/architecture.md.
  *
  * No policy directive covers WebRTC, so a peer connection would reach STUN and TURN servers. The
- * policy therefore runs only the bundle's classic scripts, by hash, and every one of them starts by
- * deleting the peer connection constructors from its realm. A frame the template adds, by script or
- * in its markup, can run nothing but those same scripts, so its realm is disarmed before anything
- * else in it runs. Inline modules, external scripts, inline event handlers and `javascript:` URLs do
- * not run at all.
+ * policy therefore runs only the bundle's classic scripts that start with exactly `"use strict";`
+ * (TEMPLATE_SCRIPT_START, which the bundle check requires), by hash, and each goes on, right after
+ * those bytes, by deleting the peer connection constructors from its realm. A frame the template
+ * adds, by script or in its markup, can run nothing but those same scripts, so its realm is disarmed
+ * before anything else in it runs. Inline modules, external scripts, inline event handlers and
+ * `javascript:` URLs do not run at all.
  */
+import { INLINE_SCRIPT, isClassicScript, TEMPLATE_SCRIPT_START } from '@signforge/contract';
 import { Sha256 } from './sha256';
 
 /** A spot that has not reported ready by this point is skipped. */
@@ -23,21 +25,6 @@ const DISARM = "if(!(delete this.RTCPeerConnection&&delete this.webkitRTCPeerCon
 // wrapper, and a message's source is the window whose code called postMessage, so the host posts
 // through this function of the wrapper.
 const RELAY = "relay=(w,m)=>w.postMessage(m,'*')";
-
-/** An inline script's start tag and its text, up to its end tag. */
-const SCRIPT = /(<script\b[^>]*>)([\s\S]*?)(?=<\/script[\s/>])/gi;
-/** A `type` attribute's value. Without one, or empty, or JavaScript's, a script is classic. */
-const TYPE = /\stype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))/i;
-const classic = (start: string): boolean => {
-  const m = TYPE.exec(start);
-  const type = (m?.[1] ?? m?.[2] ?? m?.[3] ?? '').trim().toLowerCase();
-  return type === '' || type === 'text/javascript' || type === 'application/javascript';
-};
-/**
- * The directive prologue: whitespace (a BOM too), comments and directives, each a string ending its
- * line or a `;`. It must stay first, or a "use strict" in it stops counting.
- */
-const PROLOGUE = /^(?:\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\/|(["'])(?:\\[\s\S]|(?!\1)[^\\\n])*\1(?:[ \t]|\/\*[^\n]*?\*\/)*(?:;|(?=\n)|$))*/;
 
 /** A CSP hash source. With our own SHA-256: WebCrypto exists only in a secure context, which a player framed from an http page is not. */
 const hashSource = (text: string): string =>
@@ -59,12 +46,11 @@ const hashSource = (text: string): string =>
 export function containedFrames(bundle: string): { wrapper: string; template: string } {
   const scripts = [RELAY];
   // The parser reads CR LF and CR as LF before a script's text is hashed.
-  const template = bundle.replace(/\r\n?/g, '\n').replace(SCRIPT, (_, start: string, text: string) => {
-    // Left as it is and not hashed, so it does not run: a module, or a data block.
-    if (!classic(start)) return start + text;
-    const prologue = PROLOGUE.exec(text)![0];
-    // On a line of its own: a prologue that ends in a line comment cannot swallow it.
-    const armed = `${prologue}\n;${DISARM}${text.slice(prologue.length)}`;
+  const template = bundle.replace(/\r\n?/g, '\n').replace(INLINE_SCRIPT, (_, start: string, text: string) => {
+    // Any other script keeps its text and gets no hash, so it does not run: the bundle check refuses
+    // it first. No parsing: the guard goes right after those exact bytes, a complete directive.
+    if (!isClassicScript(start) || !text.startsWith(TEMPLATE_SCRIPT_START)) return start + text;
+    const armed = TEMPLATE_SCRIPT_START + DISARM + text.slice(TEMPLATE_SCRIPT_START.length);
     scripts.push(armed);
     return start + armed;
   });

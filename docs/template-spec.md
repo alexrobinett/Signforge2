@@ -148,7 +148,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 
 **Isolation**
 - No network. The template runs in a sandboxed frame under a policy that blocks every request, including navigating its own frame: a template that tries is stopped and its spot is skipped. There is no WebRTC either: `RTCPeerConnection` is undefined in the template's frame and in any frame it adds, on screens and in the runtime check. Scripts and styles must be inline after the build, and images arrive from the player.
-- Only the bundle's own classic scripts run (`sf build` makes one). Inline modules, external scripts (none is ever requested), inline event handlers (`onclick="…"`, `setAttribute('onload', …)`) and `javascript:` URLs do not: use `addEventListener` or a property (`img.onload = …`). Nor do `eval` and `new Function`.
+- Only the bundle's own classic scripts run, and each must start with exactly `"use strict";` (`sf build` makes one such script: esbuild emits it for a strict TypeScript build). Inline modules, external scripts (none is ever requested), inline event handlers (`onclick="…"`, `setAttribute('onload', …)`) and `javascript:` URLs do not: use `addEventListener` or a property (`img.onload = …`). Nor do `eval` and `new Function`.
 - No storage, cookies or access to anything outside its own frame.
 - Fonts ship inside the bundle. Reference a font file from `style.css` and the build inlines it. Use a font you are licensed to redistribute. Brand fonts are the exception: they come with the theme (see Brand), from the curated catalogue in `fonts/`.
 - Data is fixed for one play. New values arrive with the next `init`, from a clean document (see Lifecycle).
@@ -164,7 +164,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 | Dropped frames over a play | 1% |
 | Longest single frame | 50 ms |
 
-`sf build` and `sf template push` enforce manifest validity, the forbidden-CSS list, bundle size, the no-network rule and the forbidden-code list (`checkTemplateBundle` in `packages/contract`; it refuses network calls, navigation, inline event handlers and `javascript:` URLs), and warn on colour literals (see Brand). The server repeats the same checks when a version is registered and stores the report on it: the first four on the uploaded bundle, the code list on the author's own `index.html`, `style.css` and `main.ts`, which are uploaded alongside it (the bundle holds the SDK, which itself calls `parent.postMessage`).
+`sf build` and `sf template push` enforce manifest validity, the forbidden-CSS list, bundle size, the no-network rule and the forbidden-code list (`checkTemplateBundle` in `packages/contract`; it refuses network calls, navigation, inline event handlers and `javascript:` URLs) and the script rule (each classic script starts with exactly `"use strict";`; no module or external script), and warn on colour literals (see Brand). The server repeats the same checks when a version is registered and stores the report on it: the first four on the uploaded bundle, the code list on the author's own `index.html`, `style.css` and `main.ts`, which are uploaded alongside it (the bundle holds the SDK, which itself calls `parent.postMessage`).
 
 These checks are a lint, not a security boundary: string matching can be evaded. What keeps a screen safe is the sandbox the template runs in and its policy that blocks every request.
 
