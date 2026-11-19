@@ -1,10 +1,10 @@
 /**
  * Org settings (M3-42): defaults for new screens, the update window, how long a screen may go
- * unheard from before it alerts, who gets which alert, and whether editors publish (Q7). One row per org (`org_settings`),
+ * unheard from before it alerts, who gets which alert, whether editors publish (Q7) and how long audit rows are kept (#41). One row per org (`org_settings`),
  * absent until an owner first sets something; every field reads as its default until then.
  */
 import type { DisplayHours } from '@signforge/contract';
-import type { OrgScope, OrgSettings } from '@signforge/db';
+import { DEFAULT_AUDIT_RETENTION_DAYS, type OrgScope, type OrgSettings } from '@signforge/db';
 import { z } from 'zod';
 import { displayHours, ifVersion, locale, timezone, version } from './fields';
 import { UNREACHABLE_AFTER_MS } from './screen-state';
@@ -40,6 +40,17 @@ const unreachableAfterMinutes = z.number().int().min(5).max(1440).describe('Minu
 
 const editorsPublish = z.boolean().describe('Whether editors may publish to screens; when false, only owners publish');
 
+/**
+ * At least a month, so an owner cannot clear the record of what was just done; at most ten years,
+ * so the log D1 holds stays bounded.
+ */
+const auditRetentionDays = z
+  .number()
+  .int()
+  .min(30)
+  .max(3650)
+  .describe('Days audit rows are kept before the daily job deletes them, 30 to 3650; 365 by default');
+
 const settingsView = z.object({
   timezone: z.string().nullable().describe('Default time zone for new screens; null for none set'),
   locale: z.string().nullable().describe('Default locale for new screens; null for the player default'),
@@ -47,6 +58,7 @@ const settingsView = z.object({
   updateWindow: z.object({ from: z.string(), to: z.string() }),
   unreachableAfterMinutes: z.number(),
   editorsPublish,
+  auditRetentionDays,
   alerts: z.object({ screen_offline: rule, publish_finished: rule, agent_refused: rule }),
   version: version.describe('1 until first set, then moves on with every change; pass it as ifVersion to update only what you read'),
   updatedAt: z.number().nullable(),
@@ -72,6 +84,7 @@ function settingsOf(row: OrgSettings | undefined): SettingsView {
     updateWindow: row?.updateWindowJson ? JSON.parse(row.updateWindowJson) : DEFAULT_UPDATE_WINDOW,
     unreachableAfterMinutes: (row?.unreachableAfterMs ?? UNREACHABLE_AFTER_MS) / 60_000,
     editorsPublish: row?.editorsPublish ?? true,
+    auditRetentionDays: row?.auditRetentionDays ?? DEFAULT_AUDIT_RETENTION_DAYS,
     alerts: { ...DEFAULT_ALERTS, ...stored },
     version: row?.rowVersion ?? 1,
     updatedAt: row?.updatedAt ?? null,
@@ -81,7 +94,7 @@ function settingsOf(row: OrgSettings | undefined): SettingsView {
 const getOrgSettings = defineTool({
   name: 'get_org_settings',
   description:
-    "Read the organization's settings: defaults for new screens (time zone, locale, display hours), the update window, how many minutes a screen may go without a heartbeat before it alerts, who gets each alert, and whether editors may publish. Returns { settings }.",
+    "Read the organization's settings: defaults for new screens (time zone, locale, display hours), the update window, how many minutes a screen may go without a heartbeat before it alerts, who gets each alert, whether editors may publish, and how many days audit rows are kept. Returns { settings }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -94,7 +107,7 @@ const getOrgSettings = defineTool({
 const updateOrgSettings = defineTool({
   name: 'update_org_settings',
   description:
-    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts sets the rule for each alert kind given. editorsPublish false lets only owners publish. Settings for new screens apply to screens paired afterwards. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { settings }.",
+    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts sets the rule for each alert kind given. editorsPublish false lets only owners publish. auditRetentionDays is how long audit rows are kept, 30 to 3650 days. Settings for new screens apply to screens paired afterwards. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { settings }.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
@@ -106,6 +119,7 @@ const updateOrgSettings = defineTool({
       updateWindow: updateWindow.optional(),
       unreachableAfterMinutes: unreachableAfterMinutes.optional(),
       editorsPublish: editorsPublish.optional(),
+      auditRetentionDays: auditRetentionDays.optional(),
       alerts: z.object({ screen_offline: rule.optional(), publish_finished: rule.optional(), agent_refused: rule.optional() }).optional(),
       ifVersion,
     })
@@ -124,6 +138,7 @@ const updateOrgSettings = defineTool({
           ...(input.updateWindow ? { updateWindowJson: JSON.stringify(input.updateWindow) } : {}),
           ...(input.unreachableAfterMinutes ? { unreachableAfterMs: input.unreachableAfterMinutes * 60_000 } : {}),
           ...(input.editorsPublish !== undefined ? { editorsPublish: input.editorsPublish } : {}),
+          ...(input.auditRetentionDays ? { auditRetentionDays: input.auditRetentionDays } : {}),
           ...(input.alerts ? { alertsJson: JSON.stringify({ ...settingsOf(current).alerts, ...input.alerts }) } : {}),
         },
         input.ifVersion,

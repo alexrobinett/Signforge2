@@ -500,6 +500,30 @@ importers:
         specifier: ^0.35.5
         version: 0.35.5(@types/node@26.6.6)
     devDependencies:
+      '@signforge/template-agenda':
+        specifier: workspace:*
+        version: link:../../templates/agenda
+      '@signforge/template-clock':
+        specifier: workspace:*
+        version: link:../../templates/clock
+      '@signforge/template-cstore-promo':
+        specifier: workspace:*
+        version: link:../../templates/cstore-promo
+      '@signforge/template-menu-board':
+        specifier: workspace:*
+        version: link:../../templates/menu-board
+      '@signforge/template-news':
+        specifier: workspace:*
+        version: link:../../templates/news
+      '@signforge/template-photo-promo':
+        specifier: workspace:*
+        version: link:../../templates/photo-promo
+      '@signforge/template-sdk':
+        specifier: workspace:*
+        version: link:../template-sdk
+      '@signforge/template-weather':
+        specifier: workspace:*
+        version: link:../../templates/weather
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6

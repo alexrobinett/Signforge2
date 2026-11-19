@@ -20,6 +20,8 @@ export interface OrgSettings {
   unreachableAfterMinutes: number;
   /** Whether editors publish, or only owners (owner decision Q7). */
   editorsPublish: boolean;
+  /** Days audit rows are kept before the nightly job deletes them (#41). */
+  auditRetentionDays: number;
   alerts: Record<AlertKind, AlertRule>;
   updatedAt: number | null;
   /** Moves on with every change; each save sends it back as `ifVersion`, so it cannot overwrite a newer one. */

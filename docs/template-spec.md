@@ -61,7 +61,7 @@ A template that has not reported `ready` within 2 seconds is skipped.
 - Look elements up inside the hooks, not once at the top of `main.ts`: a reset replaces them.
 - Clear any state kept outside the DOM (a timer, a module variable) in `stop`.
 
-`packages/player/browser/templates.test.ts` checks every template in `templates/`: new data after the first `init` must leave the same document as a fresh load. A protocol-1 bundle has no `reset`; the player reloads its frame instead. A new template goes into the devDependencies of `packages/player`, `apps/api` and `apps/template-check`, whose tests build every template, so CI reruns them when it changes ([`ci.md`](ci.md#what-affected-means)).
+`packages/player/browser/templates.test.ts` checks every template in `templates/`: new data after the first `init` must leave the same document as a fresh load. A protocol-1 bundle has no `reset`; the player reloads its frame instead. A new template goes into the devDependencies of `packages/cli`, `packages/player`, `apps/api` and `apps/template-check`, whose tests build every template, so CI reruns them when it changes ([`ci.md`](ci.md#what-affected-means)).
 
 ## What the SDK gives you
 
@@ -160,6 +160,8 @@ These checks are a lint, not a security boundary: string matching can be evaded.
 A pass is stored on the version with its timings (ms from `init` to `ready`, and the first second's frames, per orientation); they are information, not a gate, since the budgets are measured on the Pi. Base templates in `templates/` go through the same runner in CI (`apps/template-check/test/check.test.ts`). Test yours with `sf template push` to an org.
 
 A registered version is immutable: pushing the same version with different bytes is refused, and pushing identical bytes changes nothing. A version is a draft, approved or retired; only approved versions are offered for new spots. The time and frame budgets are measured on the device with `scripts/pi-measure.sh`; automated checks for them are part of Milestone 4. The runtime check only refuses a template that is not ready within 2 seconds.
+
+So a shipped template's bundle must not change under its version, or `sf template seed` refuses it on the next deploy. A bundle holds the template's own files, the SDK, and from the contract only `@signforge/contract/frame` (the protocol version and the brand variables), so a change to the rest of the contract (the API's, the sync's or the screen's checks) leaves every bundle byte for byte. `packages/cli/test/templates.test.ts` builds every template in `templates/` and compares each bundle's sha256 with `packages/cli/test/golden/template-bundles.json`, by template key: it fails when a bundle changed, whatever changed it. Then bump the version in the template's `template.json` and `package.json`, put the new key and hash in that file (the failure shows both), and regenerate the goldens. Any change to the SDK's index changes every bundle, even of templates that do not use the new code, because the minifier renames symbols across the whole bundle: SDK code only some templates use goes in its own entry point, as `readableOn` does.
 
 ## Review checklist
 
