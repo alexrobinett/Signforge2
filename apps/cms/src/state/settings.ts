@@ -6,7 +6,7 @@
  */
 import { toast } from 'sonner';
 import { authClient, authErrorMessage } from '~/lib/auth-client';
-import type { AlertKind, AlertRule, Member } from '~/lib/settings';
+import type { AlertChannel, AlertDelivery, AlertKind, AlertRule, Member } from '~/lib/settings';
 import type { DisplayHours } from '~/lib/screen-types';
 import { callTool, isStale, toolMessage } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
@@ -24,6 +24,13 @@ interface SettingsState {
   hours: { value: DisplayHours | null } | null;
   /** The member the remove dialog asks about. */
   removing: Member | null;
+  /** The alert channel the remove dialog asks about. */
+  removingChannel: AlertChannel['kind'] | null;
+  /**
+   * The webhook signing secret just set, shown until dismissed and never again: the page made it,
+   * and SignForge keeps it only sealed. Not kept anywhere else.
+   */
+  signingSecret: string | null;
 }
 
 export interface SettingsSlice {
@@ -43,6 +50,18 @@ export interface SettingsSlice {
   saveAlerts: (alerts: Record<AlertKind, AlertRule>, ifVersion: number) => Promise<void>;
   /** Whether editors publish, or only owners. */
   saveEditorsPublish: (editorsPublish: boolean, ifVersion: number) => Promise<void>;
+  /** Post alerts to Slack through an incoming-webhook URL; `ifVersion` when replacing one. */
+  connectSlack: (webhookUrl: string, ifVersion?: number) => Promise<void>;
+  /** Send alerts to a webhook. A new one gets a signing secret made here, shown once; changing the URL keeps the secret. */
+  setWebhook: (webhookUrl: string, ifVersion?: number) => Promise<void>;
+  /** A new signing secret for the webhook, shown once. */
+  rotateSigningSecret: (ifVersion: number) => Promise<void>;
+  dismissSigningSecret: () => void;
+  askToRemoveAlertChannel: (kind: AlertChannel['kind'] | null) => void;
+  removeAlertChannel: (kind: AlertChannel['kind']) => Promise<void>;
+  /** Send a test alert now; email goes to the member asking. */
+  testAlertChannel: (channel: AlertDelivery['channel']) => Promise<void>;
+  retryAlertDelivery: (deliveryId: string) => Promise<void>;
   /** After a stale save: reads the settings again, dropping what the form held. */
   reloadSettings: () => Promise<void>;
   /** True once every invite is sent, so the form can clear. */
@@ -67,6 +86,15 @@ async function auth<T extends { error: { message?: string; code?: string; status
   return res;
 }
 
+/** `whsec_` and 32 random bytes in base64url: what `set_webhook_alert_channel` asks for. */
+function newSigningSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return `whsec_${btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')}`;
+}
+
 export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { router }) => {
   const patch = (change: (s: SettingsState) => SettingsState) => set((s) => ({ settings: change(s.settings) }));
 
@@ -87,7 +115,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
   }
 
   return {
-    settings: { pending: null, error: null, hours: null, removing: null },
+    settings: { pending: null, error: null, hours: null, removing: null, removingChannel: null, signingSecret: null },
     editDefaultHours: (value) => patch((s) => ({ ...s, hours: { value } })),
 
     async saveGeneral(org, values, ifVersion) {
@@ -116,6 +144,37 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     saveAlerts: async (alerts, ifVersion) => void (await run('notifications', () => callTool('update_org_settings', { alerts, ifVersion }), 'Saved')),
     saveEditorsPublish: async (editorsPublish, ifVersion) =>
       void (await run('publishing', () => callTool('update_org_settings', { editorsPublish, ifVersion }), 'Saved')),
+    connectSlack: async (webhookUrl, ifVersion) =>
+      void (await run('slack', () => callTool('set_slack_alert_channel', { webhookUrl: webhookUrl.trim(), ifVersion }), 'Slack connected')),
+    async setWebhook(webhookUrl, ifVersion) {
+      const signingSecret = ifVersion === undefined ? newSigningSecret() : undefined;
+      const saved = await run(
+        'webhook',
+        () => callTool('set_webhook_alert_channel', { webhookUrl: webhookUrl.trim(), signingSecret, ifVersion }),
+        'Webhook saved',
+      );
+      if (saved && signingSecret) patch((s) => ({ ...s, signingSecret }));
+    },
+    async rotateSigningSecret(ifVersion) {
+      const signingSecret = newSigningSecret();
+      const saved = await run('webhook', () => callTool('set_webhook_alert_channel', { signingSecret, ifVersion }), 'New signing secret set');
+      if (saved) patch((s) => ({ ...s, signingSecret }));
+    },
+    dismissSigningSecret: () => patch((s) => ({ ...s, signingSecret: null })),
+    askToRemoveAlertChannel: (kind) => patch((s) => ({ ...s, removingChannel: kind, error: null })),
+    async removeAlertChannel(kind) {
+      const removed = await run(
+        `remove:${kind}`,
+        () => callTool('remove_alert_channel', { channel: kind }),
+        kind === 'slack' ? 'Slack removed' : 'Webhook removed',
+      );
+      if (removed) patch((s) => ({ ...s, removingChannel: null }));
+    },
+    testAlertChannel: async (channel) =>
+      void (await run(`test:${channel}`, () => callTool('test_alert_channel', { channel }), 'Test sent. How it went shows under Recent deliveries.')),
+    retryAlertDelivery: async (deliveryId) =>
+      void (await run(`retry:${deliveryId}`, () => callTool('retry_alert_delivery', { alertDeliveryId: deliveryId }), 'Sending it again')),
+
     async reloadSettings() {
       await router.invalidate();
       patch((s) => ({ ...s, error: null, hours: null }));
