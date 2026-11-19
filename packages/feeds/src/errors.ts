@@ -2,7 +2,7 @@
  * Why a feed could not be normalised. The poller reports these categories to the CMS and never
  * echoes the upstream body.
  */
-export type FeedErrorCode = 'too-large' | 'doctype' | 'malformed' | 'unknown-format';
+export type FeedErrorCode = 'too-large' | 'doctype' | 'malformed' | 'unknown-format' | 'not-a-table';
 
 export class FeedError extends Error {
   constructor(
