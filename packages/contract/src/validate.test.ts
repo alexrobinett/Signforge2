@@ -635,14 +635,12 @@ describe('validateManifest', () => {
 
 describe('versions', () => {
   it('plays the current manifest schema and the one before it', () => {
-    expect(MANIFEST_SCHEMA).toBe(3);
-    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([2, 3]);
-    const old = validManifest() as unknown as Record<string, unknown>;
-    old.schema = 2;
-    delete old.brand;
-    (old.schedule as unknown[]).pop();
-    expect(validateManifest(old)).toEqual([]);
-    expect(validateManifest({ ...validManifest(), schema: 1 })).toEqual(['manifest schema 1 is not one this player can play (2, 3)']);
+    expect(MANIFEST_SCHEMA).toBe(4);
+    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([3, 4]);
+    expect(validateManifest({ ...validManifest(), schema: 3 })).toEqual([]);
+    expect(validateManifest({ ...validManifest(), schema: 4 })).toEqual([]);
+    // A player that knows only schema 3 refuses a template declaring a table: the server tells it to reload (apps/api sync's canPlay).
+    expect(validateManifest({ ...validManifest(), schema: 2 })).toEqual(['manifest schema 2 is not one this player can play (3, 4)']);
   });
 
   it('drives protocol 1 and 2 bundles, and refuses a newer one', () => {

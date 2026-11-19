@@ -7,8 +7,11 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  *   1  pre-release; never deployed beyond the test rig
  *   2  template keys carry their owner: `<owner>/<id>@<version>`
  *   3  the screen's `brand`; schedule entries bounded by instants (`startsAt`, `endsAt`)
+ *   4  a template may declare a `table` live source, and a binding a `table` mapping (#84). A player
+ *      that knows only 3 refuses such a template, so it must not get one: it reports [2, 3], and
+ *      the server tells it to reload into a player that plays 4.
  */
-export const MANIFEST_SCHEMA = 3;
+export const MANIFEST_SCHEMA = 4;
 /** Manifest schemas this player can play: the current one and the one before it. */
 export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
@@ -567,7 +570,7 @@ export interface Binding {
   source: string;
   /** Dot path into the snapshot's data. Numbers index arrays: `daily.temperature_2m_max.0`. With `table`, `rows`. */
   path: string;
-  /** A list field filled from a `TableFeed`'s rows. Players before #84 ignore it, and their bound value does not fit: they show the fallback. */
+  /** A list field filled from a `TableFeed`'s rows. From manifest schema 4. */
   table?: TableMapping;
 }
 
