@@ -25,7 +25,23 @@ async function waitFor(url: string, timeoutMs = 90_000) {
   throw new Error(`${url} did not come up`);
 }
 
+/** True if something already answers on the port: another checkout's run, whose servers this run would otherwise use. */
+async function answers(url: string) {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(2_000) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default async function globalSetup() {
+  for (const [name, url] of [
+    ['E2E_API_PORT', `http://127.0.0.1:${API_PORT}/health`],
+    ['E2E_CMS_PORT', `http://127.0.0.1:${CMS_PORT}/`],
+  ] as const) {
+    if (await answers(url)) throw new Error(`${url} is already in use (another e2e run?): set ${name} to a free port`);
+  }
   rmSync(RUN_DIR, { recursive: true, force: true });
   mkdirSync(RUN_DIR, { recursive: true });
   const env = { ...process.env, CLOUDFLARE_DEV_REGISTRY_PATH: `${RUN_DIR}registry`, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' };
