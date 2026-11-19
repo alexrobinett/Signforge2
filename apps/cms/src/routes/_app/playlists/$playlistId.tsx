@@ -298,7 +298,7 @@ function PlaylistEditor() {
                   <p className="text-sm text-muted-foreground">
                     Screens play the default playlist when no schedule says otherwise. Until there is one, publishing reaches no screen.
                   </p>
-                  {canManage && (
+                  {canPublish && (
                     <Button type="button" variant="outline" className="self-start" disabled={publishing} onClick={() => void makeDefault(orgId, playlist.id)}>
                       Play on every screen
                     </Button>

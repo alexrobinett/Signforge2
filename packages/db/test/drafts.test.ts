@@ -329,7 +329,7 @@ describe('publish history', () => {
     expect(await org.publishes.finish(p.publish, 10)).toBe(true);
     await org.screens.reportManifest(p.screen, m('1'), { arrivedAt: 2 });
     expect(await due()).toEqual([]);
-    await publishAt(org, 3, [{ screenId: two.id, manifestId: m('3') }]);
+    const v3 = await publishAt(org, 3, [{ screenId: two.id, manifestId: m('3') }]);
     expect(await due()).toEqual([[v2.id, 2, 2]]);
 
     const alert = { event: { id: `evt_${v2.id}_finished`, type: 'publish.finished', json: '{}' }, channels: ['webhook' as const], giveUpAt: 99 };
@@ -341,6 +341,21 @@ describe('publish history', () => {
     expect(await due()).toEqual([]);
     // Another org's publish is not theirs to mark.
     expect(await scoped(env.DB, 'drafts-org').publishes.finish(v2.id, 50)).toBe(false);
+
+    // A screen whose credentials are all revoked never reports again: it does not hold a rollout open.
+    const cred = await org.screens.credentials.insert({ screenId: two.id, secretHash: '9'.repeat(64) });
+    const v4 = await publishAt(org, 4, [{ screenId: two.id, manifestId: m('4') }]);
+    // v3 is moved on by v4; v4 waits for its screen.
+    expect(await due()).toEqual([[v3.id, 3, 1]]);
+    await org.publishes.finish(v3.id, 55);
+    await org.screens.credentials.update(cred.id, { revokedAt: 60 });
+    const [found] = (await findFinishedRollouts(env.DB)).filter((f) => f.orgId === p.orgId);
+    expect(found).toMatchObject({ id: v4.id, screens: 1, playing: 0, replaced: 0 });
+  });
+
+  it('reads the unfinished rollouts through their partial index', async () => {
+    const plan = await env.DB.prepare("EXPLAIN QUERY PLAN SELECT id FROM publishes WHERE finished_at IS NULL AND status = 'published'").all();
+    expect(JSON.stringify(plan.results)).toContain('publishes_unfinished_idx');
   });
 });
 

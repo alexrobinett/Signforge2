@@ -60,6 +60,9 @@ const publishManifestToScreen = defineTool({
   },
 });
 
+/** How long a source the spot editor made is kept unbound: its autosave binds it a second or so later, longer while the draft cannot be saved. */
+const SOURCE_GRACE_MS = 15 * 60_000;
+
 /** The data source ids a spot's stored bindings (`bindings_json`) name. */
 function sourcesIn(json: string | null | undefined): string[] {
   if (!json) return [];
@@ -145,10 +148,16 @@ const publish = defineTool({
     const changed = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.manifest] : []));
     if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report, removedDataSources: [] };
     write({ row: undefined, writes: result.writes });
-    // The spot editor's weather sources that no spot binds once this commits, as drafted or as published.
-    const bound = new Set(result.graph.spots.flatMap((s) => [s.bindingsJson, published(s)?.bindingsJson].flatMap(sourcesIn)));
-    const removedDataSources = result.graph.dataSources.map((d) => d.id).filter((id) => madeBySpotEditor(id) && !bound.has(id));
-    write(org.dataSources.stage.deleteUnbound(removedDataSources));
+    // The spot editor's weather sources nothing binds: not as drafted, not as published once this
+    // commits, and not as published before it, which Undo sends screens back to (that one goes at
+    // the next publish). One made in the last minutes may be about to be bound by an autosave.
+    const bound = new Set([...result.read.spots, ...result.graph.spots].flatMap((s) => [s.bindingsJson, published(s)?.bindingsJson].flatMap(sourcesIn)));
+    const madeBefore = Date.now() - SOURCE_GRACE_MS;
+    const removedDataSources = (await org.dataSources.list())
+      .filter((d) => madeBySpotEditor(d.id) && !bound.has(d.id) && d.createdAt < madeBefore)
+      .map((d) => d.id)
+      .sort();
+    write(org.dataSources.stage.deleteUnbound(removedDataSources, madeBefore));
     const made = await switchScreens(
       ctx,
       result.revision + 1,
@@ -166,12 +175,15 @@ const publish = defineTool({
 const rollBackPublish = defineTool({
   name: 'roll_back_publish',
   description:
-    'Put screens back to what an earlier publish gave them: each screen goes back to the manifest it had right after that publish, with nothing compiled again. Screens no publish up to it reached keep what they play. Recorded as a new publish, which itself can be rolled back. Drafts and their published versions are not changed, so the next publish sends the current published content again. Returns { publish }, null when every screen already had it.',
+    "Put screens back to what an earlier publish gave them: each screen goes back to the manifest it had right after that publish, with nothing compiled again. Screens no publish up to it reached keep what they play. Recorded as a new publish, which itself can be rolled back. Drafts and their published versions are not changed, so the next publish sends the current published content again. A publish keeps the data sources and assets the one before it used, so undoing the latest publish finds them all; a roll back further than that can reach a manifest whose data source or asset has since been deleted, and a screen then shows that spot's last values, then its fallback. To undo a publish, pass it as ifLatest: refused with a conflict if a later publish has been made since, which a roll back would undo too. Returns { publish }, null when every screen already had it.",
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
   publishes: true,
-  input: z.object({ publishId: id('publish').describe('The publish to go back to') }),
+  input: z.object({
+    publishId: id('publish').describe('The publish to go back to'),
+    ifLatest: id('publish').optional().describe('For an undo: the publish being undone. Refused with a conflict unless it is still the latest'),
+  }),
   output: z.object({ publish: madeOutput }),
   example: { publishId: 'pub_example' },
   target: (input) => ({ kind: 'publish', id: input.publishId }),
@@ -181,6 +193,14 @@ const rollBackPublish = defineTool({
     const revision = (await org.settings.get())?.publishRevision ?? 0;
     const target = await org.publishes.get(input.publishId);
     if (!target) throw notFound('publish', input.publishId);
+    if (input.ifLatest) {
+      // Read after the revision: a publish made since fails the batch's guard, and the rerun lands here.
+      const [latest] = await org.publishes.history({ limit: 1 });
+      if (latest?.id !== input.ifLatest)
+        throw new ToolError('conflict', `publish ${input.ifLatest} is no longer the latest: ${latest ? `v${latest.revision}` : 'another'} was made since`, {
+          latestId: latest?.id ?? null,
+        });
+    }
     const [then, screens] = await Promise.all([org.publishes.asOf(target.revision), org.screens.list()]);
     const desired = new Map(screens.map((s) => [s.id, s.desiredManifestId]));
     const rows = then.filter((r) => desired.has(r.screenId) && desired.get(r.screenId) !== r.manifestId);

@@ -95,7 +95,7 @@ function PublishesPage() {
           {publishes.map((p) => {
             // Of the screens it switched, the share that played it: all of them once it finished; a
             // full grey bar once later publishes replaced them all.
-            const movedOn = !p.finishedAt && p.screens > 0 && p.replaced === p.screens;
+            const movedOn = p.screens > 0 && p.replaced === p.screens;
             const share = p.finishedAt || movedOn ? 100 : p.screens ? Math.round((p.playing / p.screens) * 100) : 0;
             return (
               <li key={p.id} className={cn('flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3', p.id === publish.id && 'bg-accent/60')}>

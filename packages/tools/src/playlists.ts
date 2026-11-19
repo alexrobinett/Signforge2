@@ -174,8 +174,8 @@ const deletePlaylist = defineTool({
 const setDefaultPlaylist = defineTool({
   name: 'set_default_playlist',
   description:
-    "Make a playlist the organization's default: what every screen plays when no schedule entry says otherwise. Until there is one, no screen can be published to. Takes effect at the next publish, which must also publish the playlist and its spots if they are drafts. Returns { playlist }.",
-  scope: 'content:draft',
+    "Make a playlist the organization's default: what every screen plays when no schedule entry says otherwise. Until there is one, no screen can be published to. It is not a draft: it takes effect at the next publish, whatever that publish pins, so it needs the right to publish (refused to editors where only owners publish). That publish must also publish the playlist and its spots if they are drafts. Returns { playlist }.",
+  scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
   input: z.object({ playlistId: id('playlist') }),

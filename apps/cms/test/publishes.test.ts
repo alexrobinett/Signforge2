@@ -1,6 +1,6 @@
 // A rollout in words: the parts of the bar, in order, each with why its screens wait.
 import { describe, expect, it } from 'vitest';
-import { publishResultOf, rolloutLabel, segments, type RolloutScreen } from '../src/lib/publishes';
+import { publishResultOf, rolloutLabel, segments, standing, type RolloutScreen } from '../src/lib/publishes';
 
 const NOW = Date.parse('2026-11-19T12:00:00Z');
 const screen = (name: string, outcome: RolloutScreen['outcome'], more: Partial<RolloutScreen> = {}): RolloutScreen => ({
@@ -63,5 +63,13 @@ describe('a rollout', () => {
     });
     expect(publishResultOf({ publish: null, held: [], screens: [] }).publish).toBeNull();
     expect(() => publishResultOf({ screens: [] })).toThrow();
+  });
+
+  it('calls a publish every screen of which a later one replaced "moved on", finished or not', () => {
+    const p = { id: 'pub_1', revision: 2, restoresId: null, restoresRevision: null, by: { kind: 'user', id: 'u', name: 'Maria' }, createdAt: 0, screens: 2 };
+    expect(standing({ ...p, finishedAt: 10, playing: 0, replaced: 2 })).toBe('moved on');
+    expect(standing({ ...p, finishedAt: 10, playing: 2, replaced: 0 })).toBe('complete');
+    expect(standing({ ...p, finishedAt: null, playing: 1, replaced: 0 })).toBe('1 of 2');
+    expect(standing({ ...p, screens: 0, finishedAt: 10, playing: 0, replaced: 0 })).toBe('reached no screen');
   });
 });

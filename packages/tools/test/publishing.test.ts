@@ -691,6 +691,19 @@ describe('the publish tools (M3-18)', () => {
     expect((await ok(editorCalls(org)('get_publish', {}))).publish).toMatchObject({ revision: 3, restoresId: first.publish!.id, restoresRevision: 1 });
     expect(p.told.at(-1)).toContainEqual({ screenId: lobby.id, manifestId: v1 });
     expect(await ok(p.call('roll_back_publish', { publishId: first.publish!.id }))).toEqual({ publish: null });
+
+    // Undo of the second publish after someone else published since: refused, so theirs stays on screen.
+    await editDeal(org, 'Four for $6');
+    const theirs = (await ok(p.call('publish', {}))) as unknown as Out;
+    const onScreen = (await org.screens.get(lobby.id))!.desiredManifestId;
+    expect(await p.call('roll_back_publish', { publishId: first.publish!.id, ifLatest: second.publish!.id })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { latestId: theirs.publish!.id },
+    });
+    expect((await org.screens.get(lobby.id))!.desiredManifestId).toBe(onScreen);
+    // Undo of the latest goes through.
+    expect(await ok(p.call('roll_back_publish', { publishId: back.publish!.id, ifLatest: theirs.publish!.id }))).toMatchObject({ publish: { revision: 5 } });
     expect(await p.call('roll_back_publish', { publishId: 'pub_gone' })).toMatchObject({ ok: false, error: 'not_found' });
   });
 
@@ -732,33 +745,54 @@ describe('the publish tools (M3-18)', () => {
     const out = (await ok(p.call('publish', {}))) as unknown as Out;
     expect(out.screens.map((s) => s.outcome)).toEqual(['updated', 'updated']);
     expect(await call('set_default_playlist', { playlistId: 'pls_gone' })).toMatchObject({ ok: false, error: 'not_found' });
+
+    // It decides what every screen plays at the next publish, so where only owners publish, an editor may not.
+    await org.commit((await org.settings.stage.set({ editorsPublish: false })).writes);
+    expect(await call('set_default_playlist', { playlistId: x('evenings') })).toMatchObject({ ok: false, error: 'forbidden' });
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
   });
 
-  it("deletes the spot editor's weather sources once no spot binds them, as drafted or as published (#98)", async () => {
+  it("deletes the spot editor's weather sources nothing binds, but not one a published version bound before the publish, nor one just made (#98)", async () => {
     const { org } = await seedSmallOrg('tool-pub-sources');
     const p = publisher(org);
     const call = editorCalls(org);
-    const [w1, w2, w3] = ['weather-1-c-kmh-aaaaaa', 'weather-2-f-mph-bbbbbb', 'weather-3-c-mph-cccccc'];
-    for (const id of [w1, w2, w3, 'news-typed'])
-      await org.dataSources.insert({ id, name: id, format: id.startsWith('news') ? 'rss' : 'json', urlEncrypted: `enc:${id}`, refreshS: 600 });
+    const [w1, w2, w3, w4] = ['weather-1-c-kmh-aaaaaa', 'weather-2-f-mph-bbbbbb', 'weather-3-c-mph-cccccc', 'weather-4-f-kmh-dddddd'];
+    const source = (id: string) =>
+      org.dataSources.insert({ id, name: id, format: id.startsWith('news') ? 'rss' : 'json', urlEncrypted: `enc:${id}`, refreshS: 600 });
+    // Made an hour ago: past the grace for one the editor has just made and not yet bound.
+    const age = (id: string) =>
+      env.DB.prepare('UPDATE data_sources SET created_at = ? WHERE id = ?')
+        .bind(Date.now() - 3_600_000, id)
+        .run();
+    for (const id of [w1, w2, 'news-typed']) {
+      await source(id);
+      await age(id);
+    }
+    // w3: the editor made it a moment ago, and its autosave has not bound it yet.
+    await source(w3);
     const bind = (id: string) => org.spots.update(x('deal'), { bindingsJson: JSON.stringify({ title: { source: id, path: 'current.title' } }) });
     const left = async () => new Set((await org.dataSources.list()).map((d) => d.id));
 
     await bind(w1);
-    const first = await ok(p.call('publish', {}));
-    // w2 and w3 are bound by nothing; a feed someone typed stays whatever binds it.
-    expect(first.removedDataSources).toEqual([w2, w3].sort());
-    const after = await left();
-    expect([w1, 'news-typed'].map((id) => after.has(id))).toEqual([true, true]);
-    expect([w2, w3].map((id) => after.has(id))).toEqual([false, false]);
+    const first = (await ok(p.call('publish', {}))) as unknown as Out & { removedDataSources: string[] };
+    expect(first.removedDataSources).toEqual([w2]);
+    expect([...(await left())].filter((id) => [w1, w2, w3, 'news-typed'].includes(id)).sort()).toEqual([w1, w3, 'news-typed'].sort());
 
-    // The editor moves the spot off w1: its delete is refused while the published version binds it.
-    await org.dataSources.insert({ id: w3, name: w3, format: 'json', urlEncrypted: `enc:${w3}`, refreshS: 600 });
-    await bind(w3);
+    // The editor moves the spot off w1: its delete is refused while the published version binds it,
+    // and the publish that unbinds it keeps it, so Undo goes back to a manifest whose source is there.
+    await source(w4);
+    await age(w4);
+    await bind(w4);
     expect(await call('delete_data_source', { dataSourceId: w1 })).toMatchObject({ ok: false, error: 'conflict' });
-    const second = await ok(p.call('publish', {}));
-    expect(second.removedDataSources).toEqual([w1]);
-    expect((await left()).has(w1)).toBe(false);
-    expect((await left()).has(w3)).toBe(true);
+    const second = (await ok(p.call('publish', {}))) as unknown as Out & { removedDataSources: string[] };
+    expect(second.removedDataSources).toEqual([]);
+    await ok(p.call('roll_back_publish', { publishId: first.publish!.id, ifLatest: second.publish!.id }));
+    expect((await left()).has(w1)).toBe(true);
+
+    // The next publish (sending w4's content again after the Undo) is when w1 goes; w3 ages and goes too.
+    await age(w3);
+    const third = (await ok(p.call('publish', {}))) as unknown as Out & { removedDataSources: string[] };
+    expect(third.removedDataSources).toEqual([w1, w3].sort());
+    expect([...(await left())].filter((id) => [w1, w3, w4].includes(id))).toEqual([w4]);
   });
 });

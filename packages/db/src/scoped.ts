@@ -1440,11 +1440,12 @@ export function scoped(d1: D1Database, orgId: string) {
           return dataSources.stage.update(current, patch, ifVersion);
         },
         /**
-         * Delete each of these sources, with its snapshot, that no spot binds when the batch runs: in
-         * its draft or its published version. The check is in the statement, so a spot bound to one
-         * since the caller looked keeps it, and staged after a publish's promotions it sees them.
+         * Delete each of these sources, with its snapshot, made before `madeBefore`, that no spot
+         * binds when the batch runs: in its draft or its published version. The check is in the
+         * statement, so a spot bound to one since the caller looked keeps it, and staged after a
+         * publish's promotions it sees them.
          */
-        deleteUnbound: (ids: readonly string[]): Staged => {
+        deleteUnbound: (ids: readonly string[], madeBefore: number): Staged => {
           if (!ids.length) return { row: undefined, writes: [] };
           const ds = s.dataSources;
           const sp = s.spots;
@@ -1457,6 +1458,7 @@ export function scoped(d1: D1Database, orgId: string) {
               .where(
                 and(
                   eq(ds.orgId, orgId),
+                  lt(ds.createdAt, madeBefore),
                   sql`${ds.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`,
                   sql`NOT ${binds(sql`${sp.bindingsJson}`)}`,
                   sql`NOT ${binds(sql`json_extract(${sp.publishedJson}, '$.bindingsJson')`)}`,

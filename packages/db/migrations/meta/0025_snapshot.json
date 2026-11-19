@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f02ba4de-4fd0-45c4-b565-ef32b8f2dac2",
+  "id": "0db7d08e-5ac6-4874-b8b6-a82da327bfd6",
   "prevId": "cd965c26-3c31-499d-989b-060849286f10",
   "tables": {
     "account": {
@@ -2484,6 +2484,12 @@
           "name": "publishes_org_revision_uq",
           "columns": ["org_id", "revision"],
           "isUnique": true
+        },
+        "publishes_unfinished_idx": {
+          "name": "publishes_unfinished_idx",
+          "columns": ["org_id"],
+          "isUnique": false,
+          "where": "\"publishes\".\"finished_at\" IS NULL"
         }
       },
       "foreignKeys": {

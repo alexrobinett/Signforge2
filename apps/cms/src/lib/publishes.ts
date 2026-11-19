@@ -79,8 +79,9 @@ export function publishResultOf(output: unknown): PublishResult {
 /** How a past publish's rollout stands, in a few words. */
 export function standing(p: PublishView): string {
   if (!p.screens) return 'reached no screen';
-  if (p.finishedAt) return 'complete';
+  // Before complete: one undone before any screen played it is finished too, but reached nobody.
   if (p.replaced === p.screens) return 'moved on';
+  if (p.finishedAt) return 'complete';
   return `${p.playing} of ${p.screens}`;
 }
 

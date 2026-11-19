@@ -150,14 +150,14 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, ema
 /**
  * Mark finished every publish whose rollout is over: each screen it switched plays it, or a later
  * publish moved it on. The mark and its `publish.finished` event are written in one batch, by the
- * check that made the mark, so the alert goes once; the email follows. A publish that switched no
- * screen is marked with no alert: nothing reached anyone.
+ * check that made the mark, so the alert goes once; the email follows. A publish no screen played
+ * (none switched, or undone before any got there) is marked with no alert: it reached nobody.
  */
 export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email: EmailSender, now: number): Promise<void> {
   const contextFor = contexts(env.DB, 'publish_finished');
   for (const p of await findFinishedRollouts(env.DB)) {
     const org = scoped(env.DB, p.orgId);
-    if (!p.screens) {
+    if (!p.playing) {
       await org.publishes.finish(p.id, now);
       continue;
     }
@@ -170,6 +170,8 @@ export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email:
       data: {
         publish: { id: p.id, revision: p.revision, url: env.CMS_ORIGIN ? `${env.CMS_ORIGIN}/publishes?id=${p.id}` : null, publishedAt: iso(p.createdAt) },
         screens: p.screens,
+        playing: p.playing,
+        replaced: p.replaced,
       },
     });
     const marked = await orAlone(
@@ -177,11 +179,16 @@ export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email:
       () => org.publishes.finish(p.id, now),
     );
     if (!marked) continue;
-    const screens = p.screens === 1 ? 'its screen' : `all ${p.screens} screens it changed`;
+    const every = p.playing === p.screens;
+    const where = every ? (p.screens === 1 ? 'its screen' : `all ${p.screens} screens it changed`) : `${p.playing} of the ${p.screens} screens it changed`;
+    const others = [
+      p.replaced && `a later publish reached ${p.replaced} first`,
+      p.screens - p.playing - p.replaced && `${p.screens - p.playing - p.replaced} revoked`,
+    ].filter(Boolean);
     await sendAll(email, recipients, {
-      subject: `v${p.revision} reached every screen`,
+      subject: every ? `v${p.revision} reached every screen` : `v${p.revision} finished, playing on ${p.playing} of ${p.screens} screens`,
       text:
-        `v${p.revision} in ${p.orgName}, published ${time(p.createdAt)}, is now playing on ${screens}, or a later publish replaced it there.\n\n` +
+        `v${p.revision} in ${p.orgName}, published ${time(p.createdAt)}, is now playing on ${where}${others.length ? ` (${others.join('; ')})` : ''}.\n\n` +
         `Who gets these is in Settings, Notifications.`,
     });
   }

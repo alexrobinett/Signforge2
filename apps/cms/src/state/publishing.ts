@@ -11,7 +11,7 @@
  */
 import { toast } from 'sonner';
 import { publishResultOf, madeOf, versionName, type PublishResult } from '~/lib/publishes';
-import { callTool, isStale, playlistOf, toolMessage } from '~/lib/tools';
+import { callTool, isConflict, isStale, playlistOf, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery } from '~/queries/playlists';
 import { spotQuery, spotsQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
@@ -33,8 +33,8 @@ export interface PublishingSlice {
   publishSpot: (orgId: string, spotId: string) => Promise<void>;
   /** Saves the open playlist's draft and publishes it with its changed spots. */
   publishPlaylist: (orgId: string, playlistId: string) => Promise<void>;
-  /** Points screens back at what `revision` gave them (`roll_back_publish`). */
-  rollBackTo: (orgId: string, publish: { id: string; revision: number }) => Promise<void>;
+  /** Points screens back at what `revision` gave them (`roll_back_publish`); an Undo names the publish it undoes, refused if a later one was made. */
+  rollBackTo: (orgId: string, publish: { id: string; revision: number }, undoing?: string) => Promise<void>;
   /** Makes the playlist the one every screen plays when no schedule says otherwise. */
   makeDefaultPlaylist: (orgId: string, playlistId: string) => Promise<void>;
 }
@@ -53,14 +53,19 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   function told(orgId: string, r: PublishResult) {
     const held = r.held.flatMap((h) => h.problems)[0];
     const noDefault = r.screens.some((s) => s.problems.includes('the organization has no default playlist'));
+    // Every screen refused it: say the screens' own reason, not a guess.
+    const allFailed = r.screens.length > 0 && r.screens.every((s) => s.outcome === 'failed');
+    const failure = r.screens.flatMap((s) => s.problems)[0];
     const reachesNone = noDefault
       ? 'No screen can play anything yet: choose a default playlist, with Play on every screen on a playlist.'
-      : r.screens.length
-        ? 'No screen plays it yet: add it to a playlist that screens play.'
-        : 'No screen is paired yet.';
+      : allFailed && failure
+        ? `Every screen keeps what it plays: ${failure}.`
+        : r.screens.length
+          ? 'No screen plays it yet: add it to a playlist that screens play.'
+          : 'No screen is paired yet.';
     if (!r.publish) {
       if (held) toast.error('Not published', { description: `It does not pass its checks: ${held}.` });
-      else if (noDefault) toast.error('No screen can play it yet', { description: reachesNone });
+      else if (noDefault || allFailed) toast.error('No screen can play it yet', { description: reachesNone });
       else toast('Nothing to publish', { description: 'Every screen already plays this.' });
       return;
     }
@@ -76,7 +81,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     toast.success(made.screens ? `Published ${v} to ${screensWord(made.screens)}` : `Published ${v}`, {
       description: notes.join(' '),
       ...(previous && made.screens
-        ? { action: { label: 'Undo', onClick: () => void get().rollBackTo(orgId, { id: previous, revision: made.revision - 1 }) } }
+        ? { action: { label: 'Undo', onClick: () => void get().rollBackTo(orgId, { id: previous, revision: made.revision - 1 }, made.id) } }
         : {}),
       cancel: viewRollout(made.id),
       duration: 10_000,
@@ -128,10 +133,10 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       await publish(orgId, [{ kind: 'playlist', id: playlist.id, version: playlist.version }, ...changed]);
     },
 
-    async rollBackTo(orgId, target) {
+    async rollBackTo(orgId, target, undoing) {
       pending(true);
       try {
-        const made = madeOf(await callTool('roll_back_publish', { publishId: target.id }));
+        const made = madeOf(await callTool('roll_back_publish', { publishId: target.id, ...(undoing ? { ifLatest: undoing } : {}) }));
         const v = versionName(target);
         // A new toast, not the publish toast updated: that one's Undo would go along with it.
         toast.dismiss(TOAST_ID);
@@ -144,7 +149,12 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
           });
         await refresh(orgId);
       } catch (err) {
-        toast.error('Not rolled back', { description: toolMessage(err) });
+        toast.error(undoing && isConflict(err) ? 'Not undone' : 'Not rolled back', {
+          description:
+            undoing && isConflict(err)
+              ? 'Someone published since, and an undo would take theirs back too. Roll back from Publishes if you mean to.'
+              : toolMessage(err),
+        });
       } finally {
         pending(false);
       }

@@ -202,6 +202,8 @@ describe('alerts to Slack and webhooks', () => {
       data: {
         publish: { id: made.row.id, revision: 1, url: `https://cms.test/publishes?id=${made.row.id}`, publishedAt: new Date(made.row.createdAt).toISOString() },
         screens: 2,
+        playing: 2,
+        replaced: 0,
       },
     });
     const slack = await to(slackUrl)[0]!.json<{ text: string; blocks: unknown[] }>();
@@ -213,6 +215,48 @@ describe('alerts to Slack and webhooks', () => {
     await finishRollouts(cms, outbox, start + 7 * MIN);
     await deliverAlerts(env, outbox, { now: start + 7 * MIN, guards });
     expect([finished().length, to(slackUrl).length, to(webhookUrl).length]).toEqual([1, 1, 1]);
+
+    // v2 undone by v3 before any screen played it: marked, with no alert, and its history row is not complete.
+    const publishTo = async (revision: number, manifests: string[]) => {
+      const p = o.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision });
+      const r = screens.map((screenId, i) => ({ screenId, manifestId: manifests[i]! }));
+      await o.commit([
+        ...p.writes,
+        ...o.publishes.stage.addScreens(p.row.id, r).writes,
+        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId).writes),
+      ]);
+      return p.row;
+    };
+    const v2 = await publishTo(2, ['a'.repeat(64), 'b'.repeat(64)]);
+    // v3 puts back what the screens still play, so it is finished at once, and says so.
+    await publishTo(
+      3,
+      rows.map((r) => r.manifestId),
+    );
+    await finishRollouts(cms, outbox, start + 12 * MIN);
+    await deliverAlerts(env, outbox, { now: start + 12 * MIN, guards });
+    expect((await o.publishes.get(v2.id))!.finishedAt).toBe(start + 12 * MIN);
+    expect(outbox.messages.filter((m) => m.subject.startsWith('v2 '))).toEqual([]);
+    expect(outbox.messages.filter((m) => m.subject === 'v3 reached every screen')).toHaveLength(1);
+    expect([to(slackUrl).length, to(webhookUrl).length]).toEqual([2, 2]);
+    const history = (await owner.ok<{ publishes: { revision: number; screens: number; playing: number; replaced: number }[] }>('/api/tools/list_publishes', {}))
+      .publishes;
+    expect(history.find((h) => h.revision === 2)).toMatchObject({ screens: 2, playing: 0, replaced: 2 });
+
+    // v4 reaches one screen while v5 replaces it on the other: played versus replaced, in words.
+    const v4 = await publishTo(4, ['c'.repeat(64), 'd'.repeat(64)]);
+    await o.screens.reportManifest(screens[0]!, 'c'.repeat(64), { arrivedAt: start + 13 * MIN });
+    const v5 = o.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision: 5 });
+    await o.commit([
+      ...v5.writes,
+      ...o.publishes.stage.addScreens(v5.row.id, [{ screenId: screens[1]!, manifestId: 'e'.repeat(64) }]).writes,
+      ...o.screens.stage.setDesiredManifest(screens[1]!, 'e'.repeat(64)).writes,
+    ]);
+    await finishRollouts(cms, outbox, start + 17 * MIN);
+    await deliverAlerts(env, outbox, { now: start + 17 * MIN, guards });
+    expect(outbox.messages.find((m) => m.subject.startsWith('v4 '))?.subject).toBe('v4 finished, playing on 1 of 2 screens');
+    expect(await to(webhookUrl)[2]!.json()).toMatchObject({ type: 'publish.finished', data: { publish: { id: v4.id }, screens: 2, playing: 1, replaced: 1 } });
+    expect((await to(slackUrl)[2]!.json<{ text: string }>()).text).toBe(`v4 finished in ${org.name}: playing on 1 of 2 screens`);
   });
 
   it("escapes a screen's name in Slack's notification text as in its blocks", async () => {
