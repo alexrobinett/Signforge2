@@ -14,7 +14,7 @@ import { MANIFEST_SCHEMA } from '@signforge/contract';
 import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
-import { expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
+import { AUDIT_ROWS_PER_RUN, expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
 import { checkScreenAlerts } from './alerts';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
@@ -45,11 +45,19 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // The offline alert check, every 5 minutes: screens sync that often, so a shorter period finds nothing new.
   // The 00:00 UTC run also expires idempotency keys and audit rows: a daily job with no trigger of its
   // own, since the Free plan allows five Cron Triggers per account and demo and prod use four.
-  '*/5 * * * *': (env, now) =>
-    Promise.all([
+  // Settled, not raced: a failed retention delete must not end the run before an alert's email goes.
+  '*/5 * * * *': async (env, now) => {
+    const daily = now % DAY_MS < FIVE_MIN_MS;
+    const results = await Promise.allSettled([
       checkScreenAlerts(env, emailSenderFor(env), now),
-      ...(now % DAY_MS < FIVE_MIN_MS ? [expireIdempotencyKeys(env.DB, now), expireAuditRows(env.DB, now)] : []),
-    ]),
+      ...(daily ? [expireIdempotencyKeys(env.DB, now), expireAuditRows(env.DB, now)] : []),
+    ]);
+    const audit = results[2];
+    if (audit?.status === 'fulfilled' && audit.value === AUDIT_ROWS_PER_RUN)
+      console.warn(`audit retention hit its cap of ${AUDIT_ROWS_PER_RUN} rows: a backlog is left for the next runs`);
+    const failed = results.filter((r) => r.status === 'rejected').map((r) => r.reason);
+    if (failed.length) throw new AggregateError(failed, 'five-minute cron job failed');
+  },
 };
 
 export default {

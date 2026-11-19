@@ -29,6 +29,8 @@ export const DEFAULT_AUDIT_RETENTION_DAYS = 365;
  */
 const AUDIT_BATCH = 1000;
 const AUDIT_BATCHES = 10;
+/** The most audit rows one run deletes; a run that deletes this many may have left a backlog. */
+export const AUDIT_ROWS_PER_RUN = AUDIT_BATCH * AUDIT_BATCHES;
 
 /** Delete every org's audit rows older than its retention at `now`; returns how many went. */
 export async function expireAuditRows(d1: D1Database, now: number): Promise<number> {
