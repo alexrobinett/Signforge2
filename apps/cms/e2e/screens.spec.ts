@@ -285,7 +285,7 @@ test('a screen that stops syncing turns unreachable on the open Screens page, wi
   await shots(page, '19-phone-screens-went-unreachable');
 });
 
-test('the open Screens page says when its status is not current, and clears on the next good poll', async ({ page, request }) => {
+test('the Screens page says when its poll fails, until a good one, and an expired session goes to sign-in', async ({ page, request }) => {
   test.setTimeout(120_000);
   await page.goto('/sign-in');
   await hydrated(page);
@@ -322,4 +322,8 @@ test('the open Screens page says when its status is not current, and clears on t
   await page.unroute('**/_serverFn/**');
   await expect(notice).toBeHidden({ timeout: 30_000 });
   await expect(page.getByRole('link', { name: 'Counter' })).toBeVisible();
+
+  // The session ends while the page is open: the next poll goes to sign-in, which comes back here after it.
+  await page.context().clearCookies();
+  await expect(page).toHaveURL(/\/sign-in\?redirect=%2Fscreens$/, { timeout: 40_000 });
 });

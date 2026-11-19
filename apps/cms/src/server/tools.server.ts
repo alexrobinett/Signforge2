@@ -3,17 +3,19 @@
  * Switching to a client cache later (docs/research/cms-data-layer.md) changes this and the
  * loaders, not the pages.
  */
+import { redirect } from '@tanstack/react-router';
 import type { AssetView } from '~/lib/assets';
 import type { BrandKitView, SpotView, TemplateView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { callApi } from './api.server';
 
-/** A tool's output, as the signed-in member; with `missing: 'null'`, null for a 404. */
+/** A tool's output, as the signed-in member; with `missing: 'null'`, null for a 404. A session that has ended goes to sign-in. */
 export async function tool<T>(name: string, input: unknown): Promise<T>;
 export async function tool<T>(name: string, input: unknown, opts: { missing: 'null' }): Promise<T | null>;
 export async function tool<T>(name: string, input: unknown, opts?: { missing: 'null' }): Promise<T | null> {
   const res = await callApi(`/api/tools/${name}`, input);
   if (res.status === 404 && opts?.missing === 'null') return null;
+  if (res.status === 401) throw redirect({ to: '/sign-in' });
   if (res.status === 403) {
     const refusal: { error?: string } = await res.clone().json();
     if (refusal.error === 'no_active_organization') throw new NoActiveOrg();
