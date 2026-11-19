@@ -31,3 +31,37 @@ export async function codeFor(email: string, timeoutMs = 10_000): Promise<string
   }
   throw new Error(`no code for ${email} in ${API_LOG}`);
 }
+
+/** What the geocoding stub knows (global-setup.ts), in Open-Meteo's own shape: two Atlantas, so the pick matters. */
+export const PLACES = [
+  {
+    id: 4180439,
+    name: 'Atlanta',
+    latitude: 33.749,
+    longitude: -84.38798,
+    timezone: 'America/New_York',
+    country: 'United States',
+    country_code: 'US',
+    admin1: 'Georgia',
+  },
+  {
+    id: 4830198,
+    name: 'Atlanta',
+    latitude: 34.17,
+    longitude: -86.06,
+    timezone: 'America/Chicago',
+    country: 'United States',
+    country_code: 'US',
+    admin1: 'Alabama',
+  },
+  {
+    id: 3413829,
+    name: 'Reykjavík',
+    latitude: 64.13548,
+    longitude: -21.89541,
+    timezone: 'Atlantic/Reykjavik',
+    country: 'Iceland',
+    country_code: 'IS',
+    admin1: 'Capital Region',
+  },
+];

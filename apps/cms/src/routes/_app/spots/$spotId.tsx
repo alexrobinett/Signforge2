@@ -1,8 +1,10 @@
 /**
  * The spot editor (canvas board Spot editor A): the form beside the live stage. The form is made
  * from the template's fields (or the image, video or web page settings); every change goes to the
- * stage at once and to the spot's draft a moment later (src/state/spot-editor.ts). The stage's
- * orientation, scale and brand kit are in the URL: `?o=portrait&scale=actual&kit=<id>`.
+ * stage at once and to the spot's draft a moment later (src/state/spot-editor.ts). A template
+ * with live fields gets a Source section instead of those fields (src/components/spots/source-section.tsx).
+ * The stage's orientation, scale, brand kit and data are in the URL:
+ * `?o=portrait&scale=actual&kit=<id>&data=fallback`.
  */
 import { safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
@@ -11,12 +13,14 @@ import { AssetPicker } from '~/components/assets/asset-picker';
 import { EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { FieldForm } from '~/components/spots/field-form';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { SourceSection } from '~/components/spots/source-section';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
+import { boundSource, typedFields } from '~/lib/live-data';
 import { draftOf, publishWord, seconds, versionsById, type SpotDraft, type SpotView } from '~/lib/spots';
-import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
+import { assetsQuery, brandKitsQuery, dataSourceQuery, dataSourcesQuery, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/_app/spots/$spotId')({
@@ -25,16 +29,22 @@ export const Route = createFileRoute('/_app/spots/$spotId')({
   loader: async ({ context: { queryClient }, params, deps, parentMatchPromise }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;
-    const [spot] = await Promise.all([
+    const [spot, { templates }] = await Promise.all([
       queryClient.query(spotQuery(orgId, params.spotId)),
       queryClient.query(templatesQuery(orgId)),
       queryClient.query(assetsQuery(orgId)),
       queryClient.query(brandKitsQuery(orgId)),
     ]);
     if (!spot) throw notFound();
-    await queryClient.query(
-      spotPreviewQuery(orgId, { orientation: deps.o ?? 'landscape', templateVersionId: spot.templateVersionId ?? undefined, brandKitId: deps.kit }),
-    );
+    const live = versionsById(templates).get(spot.templateVersionId ?? '')?.manifest.live;
+    const bound = live && boundSource(live, spot.bindings ?? {});
+    await Promise.all([
+      queryClient.query(
+        spotPreviewQuery(orgId, { orientation: deps.o ?? 'landscape', templateVersionId: spot.templateVersionId ?? undefined, brandKitId: deps.kit }),
+      ),
+      live && queryClient.query(dataSourcesQuery(orgId)),
+      bound && queryClient.query(dataSourceQuery(orgId, bound)),
+    ]);
   },
   head: () => ({ meta: [{ title: 'Spot · SignForge' }] }),
   component: SpotEditor,
@@ -109,10 +119,24 @@ function SpotEditor() {
                 aria-invalid={!draft.name.trim() || undefined}
               />
             </div>
+            {spot.kind === 'template' && version?.manifest.live && (
+              <EditorSection title="Source">
+                <SourceSection
+                  orgId={orgId}
+                  spot={spot}
+                  manifest={version.manifest}
+                  live={version.manifest.live}
+                  draft={draft}
+                  assets={assets}
+                  canManage={canManage}
+                  onChange={change}
+                />
+              </EditorSection>
+            )}
             {spot.kind === 'template' &&
               (version ? (
                 <EditorSection title="Content">
-                  <FieldForm fields={version.manifest.fields} draft={draft} assets={assets} onChange={change} />
+                  <FieldForm fields={typedFields(version.manifest)} draft={draft} assets={assets} onChange={change} />
                 </EditorSection>
               ) : (
                 <p className="text-sm text-muted-foreground">This spot's template is not available to this organization.</p>
@@ -200,6 +224,7 @@ function SpotEditor() {
             kitId={preview.brandKitId}
             search={search}
             onSearch={setSearch}
+            bound={Object.keys(draft.bindings).length > 0}
           />
         </div>
       </div>
