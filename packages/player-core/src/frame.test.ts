@@ -33,20 +33,37 @@ describe('containedFrames', () => {
     expect(policiesOf(wrapper)[0]).not.toContain(hash('{"a":1}'));
   });
 
-  it('keeps a script strict however its directive prologue starts, and a sloppy one sloppy', () => {
-    const probe = 'this.strict = (function () { return this === undefined; })();';
-    const strictness = (prologue: string) => {
-      const [armed] = scriptsOf(containedFrames(`<script>${prologue}${probe}</script>`).template);
-      const global = createContext({});
-      runInContext(armed!, global);
-      return runInContext('this.strict', global) as boolean;
-    };
-    expect(strictness('"use strict";')).toBe(true);
-    expect(strictness('/* licence */\n"use strict";\n')).toBe(true);
-    expect(strictness("// built by esbuild\n'use strict'\n")).toBe(true);
-    expect(strictness('\uFEFF"use strict";')).toBe(true);
-    expect(strictness('"a directive"; /* between */ "use strict";')).toBe(true);
-    expect(strictness('/* licence */\n')).toBe(false);
-    expect(strictness('')).toBe(false);
+  // A global with both constructors, as a template's frame has before the guard runs; then the script.
+  const run = (script: string) => {
+    const global = createContext({ RTCPeerConnection() {}, webkitRTCPeerConnection() {} });
+    runInContext(script, global);
+    return global as { seen?: boolean; r?: string };
+  };
+  const allowed = (bundle: string) => {
+    const { wrapper, template } = containedFrames(bundle);
+    const [armed] = scriptsOf(template);
+    return policiesOf(wrapper)[0]!.includes(hash(armed!)) ? armed! : undefined;
+  };
+
+  it('runs the guard before anything else in the script, however a comment in it ends', () => {
+    // U+2028 and U+2029 end a line comment in JavaScript; the parser reads CR LF as LF.
+    for (const end of ['\n', '\r\n', '\u2028', '\u2029']) {
+      const armed = allowed(`<script>"use strict";// a note${end}this.seen = 'RTCPeerConnection' in this;</script>`);
+      expect(armed, JSON.stringify(end)).toBeDefined();
+      expect(run(armed!).seen, JSON.stringify(end)).toBe(false);
+    }
+  });
+
+  it('keeps an expression that starts with a string on the next line whole', () => {
+    const armed = allowed('<script>"use strict";"abc"\n.concat(this.r = "ok");</script>');
+    expect(run(armed!).r).toBe('ok');
+  });
+
+  it('lets no script run that does not start with exactly "use strict";', () => {
+    for (const text of ['\uFEFF"use strict";x()', '/* licence */"use strict";x()', "'use strict';x()", '"use strict"\r\nx()', ' "use strict";x()', 'x()']) {
+      const { wrapper, template } = containedFrames(`<script>${text}</script>`);
+      expect(template, JSON.stringify(text)).toBe(`<script>${text.replace('\r\n', '\n')}</script>`);
+      expect(policiesOf(wrapper)[0]!.match(/'sha256-/g), JSON.stringify(text)).toHaveLength(1);
+    }
   });
 });

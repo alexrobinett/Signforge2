@@ -135,7 +135,7 @@ describe('a template that opens a peer connection', () => {
   }
 });
 
-describe('a template whose script shadows the names of the global object', () => {
+describe('a template whose script tries to run before the guard, or shadows the names of the global object', () => {
   // Scripts added to the template's markup ahead of its own, which still plays. Each opens a peer
   // connection with `RTCPeerConnection` after binding `window`, `self` and `globalThis` itself.
   const shadowing: Record<string, (servers: string) => string> = {
@@ -145,8 +145,11 @@ describe('a template whose script shadows the names of the global object', () =>
     // A hash allows a text whatever the script's type: this copies one of the template's own classic
     // scripts (which cannot run as one: it declares a global `window`) into a frame, as a module.
     'module copy of its own classic script, in a frame it adds': (s) =>
-      `<script id="copied">function window() {} var self, globalThis; ${childScript(s, 1)}</script>` +
+      `<script id="copied">"use strict";function window() {} var self, globalThis; ${childScript(s, 1)}</script>` +
       `<script>const f = document.createElement('iframe'); f.srcdoc = '<script type="module">' + document.getElementById('copied').textContent + '</scr' + 'ipt>'; document.body.appendChild(f);</script>`,
+    // JavaScript ends a line comment at U+2028 and U+2029 too: the peer connection is code, on the comment's line.
+    'a line comment ended by U+2028': (s) => `<script>"use strict";// a note\u2028${childScript(s, 0).replaceAll('\n', ' ')}</script>`,
+    'a line comment ended by U+2029': (s) => `<script>"use strict";// a note\u2029${childScript(s, 0).replaceAll('\n', ' ')}</script>`,
   };
   for (const [name, scripts] of Object.entries(shadowing)) {
     it(`gathers no candidate and sends nothing: ${name}`, async () => {
