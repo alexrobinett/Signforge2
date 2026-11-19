@@ -47,7 +47,7 @@ export function AssetPicker({
           <DialogTitle>{logos ? 'Choose a logo' : 'Choose an image'}</DialogTitle>
           <DialogDescription>
             {logos
-              ? 'An SVG or PNG image. Upload one here if it is not in the library yet.'
+              ? 'An SVG or PNG image. Upload one here if it is not in the library yet: a PNG both wider than 1920 and taller than 1080 pixels is turned into WebP on upload and cannot be a logo, so upload an SVG or a smaller PNG.'
               : 'Each image has a landscape and a portrait version, made when it was uploaded.'}
           </DialogDescription>
         </DialogHeader>

@@ -67,6 +67,27 @@ export function draftColors(d: KitDraft): BrandColors | null {
   return { ...fills, onPrimary: onPrimary ?? onColor(fills.primary), onAccent: onAccent ?? onColor(fills.accent) };
 }
 
+/**
+ * The colours the page judges and shows: the draft's, with a colour still being typed (not a hex
+ * colour yet) shown as it was saved, so the other verdicts and their fixes stay true meanwhile.
+ */
+export function shownColors(d: KitDraft, saved: BrandColors): BrandColors {
+  const shown = (name: BrandColor, typed: string) => (HEX_COLOR.test(typed) ? typed : saved[name]);
+  const fills = {
+    primary: shown('primary', d.colors.primary),
+    accent: shown('accent', d.colors.accent),
+    background: shown('background', d.colors.background),
+    surface: shown('surface', d.colors.surface),
+    text: shown('text', d.colors.text),
+    muted: shown('muted', d.colors.muted),
+  };
+  return {
+    ...fills,
+    onPrimary: d.colors.onPrimary === null ? onColor(fills.primary) : shown('onPrimary', d.colors.onPrimary),
+    onAccent: d.colors.onAccent === null ? onColor(fills.accent) : shown('onAccent', d.colors.onAccent),
+  };
+}
+
 /** `update_brand_kit`'s input for saving the draft over `kit`, with the version it was read at. */
 export const updateInput = (kit: BrandKitView, d: KitDraft) => ({
   brandKitId: kit.id,

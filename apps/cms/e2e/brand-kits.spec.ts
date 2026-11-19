@@ -77,7 +77,7 @@ test('make a kit, see it on the real player as you pick colours, fix a pair that
   await expect(contrast).toContainText('1.8:1 Fail');
   await expect.poll(() => themed(page, 'on-accent'), { timeout: 5_000 }).toEqual(['#ffffff']);
   await shots(page, '51-brand-kit-failing-pair');
-  await contrast.getByRole('button', { name: 'Use #000000 (11.5:1)' }).click();
+  await contrast.getByRole('button', { name: 'Fix On accent on accent: Use #000000 (11.5:1)' }).click();
   await expect(contrast).toContainText('11.5:1 Pass');
   await expect(page.getByText('Text on accent. Derived for 4.5:1 contrast')).toBeVisible();
   await expect.poll(() => themed(page, 'on-accent'), { timeout: 5_000 }).toEqual(['#000000']);
@@ -107,16 +107,26 @@ test('duplicate a kit, give it to a group, make it the default, and see the warn
   await expect(page.getByRole('status').filter({ hasText: 'screen' })).toHaveText(
     'No screen wears this kit yet. Edits reach screens once it is used and published.',
   );
+  // The same players, now for the copy, re-theme with its edits (review of #103, 2).
+  await page.getByLabel('Primary', { exact: true }).fill('#0f766e');
+  await expect.poll(() => themed(page, 'primary'), { timeout: 5_000 }).toEqual(['#0f766e']);
+  await page.getByRole('button', { name: 'Discard changes' }).click();
+  await expect.poll(() => themed(page, 'primary'), { timeout: 5_000 }).toEqual(['#7a3e1d']);
 
-  // Given to the group: its screen gets it at the next publish, over the default.
+  // Given to the group by keyboard: its screen gets it at the next publish, over the default, and
+  // the box keeps focus while the change is on its way (review of #103, 3).
   const use = page.getByRole('region', { name: 'Where it is used' });
-  await use.getByRole('checkbox', { name: /Café screens/ }).check();
+  const group = use.getByRole('checkbox', { name: /Café screens/ });
+  await group.focus();
+  await page.keyboard.press('Space');
   await expect(page.getByRole('status').filter({ hasText: 'Edits reach' })).toHaveText('Edits reach 1 screen at the next publish: Coffee bar.');
-  await expect(use.getByRole('checkbox', { name: /Café screens/ })).toBeChecked();
+  await expect(group).toBeChecked();
+  await expect(group).toBeFocused();
 
   // A muted colour too dark to read: a warning, not a refusal.
   await page.getByLabel('Muted', { exact: true }).fill('#3a3a3a');
   await expect(page.getByRole('listitem').filter({ hasText: 'Muted on background' })).toContainText('Fail');
+  await expect(page.getByRole('status').filter({ hasText: 'Below 4.5:1' })).toHaveText('Below 4.5:1: Muted on background.');
   await page.getByRole('button', { name: 'Save kit' }).click();
   await expect(page.getByText(/Brand kit · Saved \d/)).toBeVisible();
 

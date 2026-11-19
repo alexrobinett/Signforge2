@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { contrastRatio } from '@signforge/compiler';
 import type { AssetView } from '../src/lib/assets';
-import { type BrandKitView, draftColors, duplicateInput, kitDraftOf, kitPairs, pairFix, updateInput, withDraftKit } from '../src/lib/brand-kits';
+import { type BrandKitView, draftColors, duplicateInput, kitDraftOf, kitPairs, pairFix, shownColors, updateInput, withDraftKit } from '../src/lib/brand-kits';
 
 /** Northside's dark kit from the design boards, with the accent's text set by hand to white. */
 const northside = {
@@ -76,6 +76,13 @@ describe('a kit draft', () => {
   it('has no colours to draw while a hex is half typed', () => {
     const d = kitDraftOf(view);
     expect(draftColors({ ...d, colors: { ...d.colors, primary: '#1f3f' } })).toBeNull();
+  });
+
+  it('shows a colour still being typed as it was saved, and every other colour as drafted (review of #103)', () => {
+    const d = kitDraftOf(view);
+    const shown = shownColors({ ...d, colors: { ...d.colors, primary: '#1f3f', muted: '#6b7280' } }, view.colors);
+    expect(shown).toEqual({ ...view.colors, muted: '#6b7280' });
+    expect(kitPairs(shown).find((p) => p.fg === 'muted')?.verdict).toBe('Large text only');
   });
 
   it('saves every field with the version it was read at, null for a derived on-colour or a cleared font', () => {

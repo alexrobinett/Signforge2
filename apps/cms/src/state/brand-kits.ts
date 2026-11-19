@@ -7,13 +7,14 @@
  * the draft kit laid over its preview input (`withDraftKit`) and posted to its player, so a colour
  * re-themes the spots without a round trip. Kits have no drafts on the server: Save sends the whole
  * draft to `update_brand_kit` with the version it was read at, and screens get it at their next
- * publish. Kit and assignment changes invalidate the kit list, whose `reach` they change.
+ * publish. Each kit keeps its own draft and errors here, so moving to another kit loses nothing.
+ * Kit and assignment changes invalidate the kit list, whose `reach` they change.
  */
 import { DEFAULT_BRAND_COLORS } from '@signforge/compiler';
 import { PREVIEW_PROTOCOL, type BrandColor } from '@signforge/contract';
-import { draftColors, duplicateInput, kitDraftOf, pairFix, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
+import { duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { playerMessage } from '~/lib/preview';
-import { compilePreview, draftOf, versionsById } from '~/lib/spots';
+import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/spots';
 import { brandKitIdOf, callTool, isStale, toolMessage } from '~/lib/tools';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
@@ -32,19 +33,28 @@ export interface KitPreviewTarget {
   templateVersionId: string;
 }
 
-interface BrandKitsState {
-  /** The kit the draft belongs to; another kit's page starts from its own saved values. */
-  kitId: string | null;
+/** One kit's edit on this page: its draft until saved or discarded, and how its last save went. */
+export interface KitEdit {
   draft: KitDraft | null;
   saving: boolean;
   savedAt: number | null;
   error: string | null;
   /** The last save was refused because someone else changed the kit: the editor offers a reload. */
   stale: boolean;
+}
+
+/** A kit with nothing edited yet; one object, so a selector that falls back to it re-renders nothing. */
+export const NO_EDIT: KitEdit = { draft: null, saving: false, savedAt: null, error: null, stale: false };
+
+interface BrandKitsState {
+  /** Each kit's edit, by kit id. */
+  edits: Record<string, KitEdit>;
   /** Which logo's picker is open. */
   logoFor: 'dark' | 'light' | null;
-  /** The kit action running (`default`, `duplicate`, `assign:<id>`), or null. */
+  /** The kit action running (`default:<kit>`, `duplicate:<kit>`, `assign:<group or screen>`), or null. */
   pending: string | null;
+  /** Why the last kit action failed, for the kit whose page or row it was started from. */
+  actionError: { kitId: string; text: string } | null;
   newKit: { open: boolean; name: string; pending: boolean; error: string | null; key: string | null };
   /** What each preview's player last said, by spot id. */
   previews: Record<string, { playing: boolean; error: string | null }>;
@@ -54,23 +64,24 @@ interface BrandKitsState {
 
 export interface BrandKitsSlice {
   brandKits: BrandKitsState;
-  /** Changes the draft of `kit`, starting from its saved values if another kit was open. */
+  /** Changes the draft of `kit`, starting from its saved values. */
   editKit: (kit: BrandKitView, change: (d: KitDraft) => KitDraft) => void;
   /** Gives the foreground of a failing pair its fix: a derived on-colour, or text moved until it reads. */
   fixKitPair: (kit: BrandKitView, fg: BrandColor, bg: BrandColor) => void;
-  discardKitDraft: () => void;
+  discardKitDraft: (kitId: string) => void;
   saveKit: (orgId: string, kit: BrandKitView) => Promise<void>;
-  /** After a refused save: reads the kits again and drops the draft. */
-  reloadKit: (orgId: string) => Promise<void>;
+  /** After a refused save: reads the kits again and drops the kit's draft. */
+  reloadKit: (orgId: string, kitId: string) => Promise<void>;
   pickLogo: (which: 'dark' | 'light' | null) => void;
   openNewKit: (open: boolean) => void;
   nameNewKit: (name: string) => void;
   /** Creates a kit with the no-kit palette and opens it. */
   createKit: (orgId: string) => Promise<void>;
+  /** Makes a copy and opens it. A retry after a lost answer sends the same key, so it never makes two. */
   duplicateKit: (orgId: string, kit: BrandKitView) => Promise<void>;
   makeDefaultKit: (orgId: string, kitId: string) => Promise<void>;
-  /** Gives a group or a screen this kit, or with null takes its choice away. */
-  assignKit: (orgId: string, kitId: string | null, target: { groupId: string } | { screenId: string }) => Promise<void>;
+  /** Gives a group or a screen `kit` (`chosen`), or takes its choice away. */
+  assignKit: (orgId: string, kit: BrandKitView, chosen: boolean, target: { groupId: string } | { screenId: string }) => Promise<void>;
   /** A preview's iframe and what it plays; null when it unmounts. */
   attachKitPreview: (spotId: string, target: KitPreviewTarget | null) => void;
   measureKitPreview: (width: number) => void;
@@ -79,45 +90,53 @@ export interface BrandKitsSlice {
 const newKit = () => ({ open: false, name: '', pending: false, error: null, key: null });
 
 const initial: BrandKitsState = {
-  kitId: null,
-  draft: null,
-  saving: false,
-  savedAt: null,
-  error: null,
-  stale: false,
+  edits: {},
   logoFor: null,
   pending: null,
+  actionError: null,
   newKit: newKit(),
   previews: {},
   previewWidth: null,
 };
 
-/** One preview's player, and whether it has said it is listening. Outside state: not rendered. */
+/** One preview's player. Outside state: not rendered. */
 interface PreviewLink {
   target: KitPreviewTarget;
-  listening: boolean;
   /** Counts redraws, so a slow compile never posts over a newer one. */
   seq: number;
 }
 
 export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { router, queryClient }) => {
   const kits = (change: (k: BrandKitsState) => BrandKitsState) => set((s) => ({ brandKits: change(s.brandKits) }));
+  const edit = (kitId: string, change: (e: KitEdit) => KitEdit) => kits((k) => ({ ...k, edits: { ...k.edits, [kitId]: change(k.edits[kitId] ?? NO_EDIT) } }));
   const links = new Map<string, PreviewLink>();
+  // A player says it is listening once per load. Its frame can be attached again for another kit
+  // (the route stays mounted after Duplicate), so the frames that said it are kept, not the links.
+  const heard = new WeakSet<Window>();
+  // Duplicate's key per kit being copied, until the copy is made: a retry must not make a second.
+  const duplicateKeys = new Map<string, string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let hearing = false;
 
   async function redraw(link: PreviewLink) {
     const t = link.target;
-    if (!link.listening) return;
+    if (!heard.has(t.frame)) return;
     const seq = ++link.seq;
     const kit = queryClient.getQueryData(brandKitsQuery(t.orgId).queryKey)?.brandKits.find((k) => k.id === t.kitId);
     const spot = queryClient.getQueryData(spotsQuery(t.orgId).queryKey)?.spots.find((x) => x.id === t.spotId);
-    const preview = queryClient.getQueryData(spotPreviewQuery(t.orgId, previewKey(t)).queryKey);
     const templates = queryClient.getQueryData(templatesQuery(t.orgId).queryKey)?.templates;
     const assets = queryClient.getQueryData(assetsQuery(t.orgId).queryKey)?.assets;
-    if (!kit || !spot || !preview || !templates || !assets) return;
-    const e = get().brandKits;
-    const draft = e.kitId === kit.id && e.draft ? e.draft : kitDraftOf(kit);
+    if (!kit || !spot || !templates || !assets) return;
+    // The page observes the reads above. Nothing observes this one, so Query drops it after a while,
+    // and a save invalidates it: read it through the client, which fetches it again when it must.
+    let preview: SpotPreview;
+    try {
+      preview = await queryClient.query(spotPreviewQuery(t.orgId, previewKey(t)));
+    } catch (err) {
+      kits((k) => ({ ...k, previews: { ...k.previews, [t.spotId]: { playing: false, error: `what it needs did not load (${toolMessage(err)})` } } }));
+      return;
+    }
+    const draft = get().brandKits.edits[kit.id]?.draft ?? kitDraftOf(kit);
     const themed = withDraftKit({ preview: preview.preview, kitId: kit.id, draft, assets, orientation: 'landscape' });
     if (!themed) return;
     const version = versionsById(templates).get(t.templateVersionId);
@@ -141,7 +160,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     if (!link || !msg) return;
     const spotId = link.target.spotId;
     if (msg.type === 'listening') {
-      link.listening = true;
+      heard.add(link.target.frame);
       void redraw(link);
     } else
       kits((k) => ({
@@ -150,15 +169,17 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       }));
   };
 
-  /** Runs one kit action, marking it pending and showing its refusal, then reads the kits again. */
-  async function act(orgId: string, at: string, work: () => Promise<unknown>) {
-    kits((k) => ({ ...k, pending: at, error: null }));
+  /** Runs one kit action for `kitId`'s page or row, marking it pending and showing its refusal there, then reads the kits again. */
+  async function act(orgId: string, kitId: string, at: string, work: () => Promise<unknown>): Promise<boolean> {
+    kits((k) => ({ ...k, pending: at, actionError: null }));
     try {
       await work();
       await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
       kits((k) => ({ ...k, pending: null }));
+      return true;
     } catch (err) {
-      kits((k) => ({ ...k, pending: null, error: toolMessage(err) }));
+      kits((k) => ({ ...k, pending: null, actionError: { kitId, text: toolMessage(err) } }));
+      return false;
     }
   }
 
@@ -166,32 +187,25 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     brandKits: initial,
 
     editKit(kit, change) {
-      kits((k) => {
-        const fresh = k.kitId !== kit.id || !k.draft;
-        const base = fresh ? { ...initial, newKit: k.newKit, previews: k.previews, previewWidth: k.previewWidth, kitId: kit.id } : k;
-        return { ...base, draft: change(fresh ? kitDraftOf(kit) : (k.draft ?? kitDraftOf(kit))) };
-      });
+      edit(kit.id, (e) => ({ ...e, draft: change(e.draft ?? kitDraftOf(kit)) }));
       redrawAll();
     },
 
     fixKitPair(kit, fg, bg) {
-      const e = get().brandKits;
-      const draft = e.kitId === kit.id && e.draft ? e.draft : kitDraftOf(kit);
-      const colors = draftColors(draft);
-      if (!colors) return;
-      const value = fg === 'onPrimary' || fg === 'onAccent' ? null : pairFix(colors, fg, bg).hex;
+      const draft = get().brandKits.edits[kit.id]?.draft ?? kitDraftOf(kit);
+      const value = fg === 'onPrimary' || fg === 'onAccent' ? null : pairFix(shownColors(draft, kit.colors), fg, bg).hex;
       get().editKit(kit, (d) => ({ ...d, colors: { ...d.colors, [fg]: value } }));
     },
 
-    discardKitDraft() {
-      kits((k) => ({ ...k, draft: null, error: null, stale: false }));
+    discardKitDraft(kitId) {
+      edit(kitId, (e) => ({ ...e, draft: null, error: null, stale: false }));
       redrawAll();
     },
 
     async saveKit(orgId, kit) {
-      const { draft, kitId } = get().brandKits;
-      if (!draft || kitId !== kit.id) return;
-      kits((k) => ({ ...k, saving: true, error: null }));
+      const draft = get().brandKits.edits[kit.id]?.draft;
+      if (!draft) return;
+      edit(kit.id, (e) => ({ ...e, saving: true, error: null }));
       try {
         await callTool('update_brand_kit', updateInput(kit, draft));
         await Promise.all([
@@ -199,18 +213,18 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
           // The spot editor's stage wears saved kits.
           queryClient.invalidateQueries({ queryKey: ['org', orgId, 'spotPreview'] }),
         ]);
-        kits((k) => ({ ...k, saving: false, savedAt: Date.now(), draft: k.draft === draft ? null : k.draft }));
+        edit(kit.id, (e) => ({ ...e, saving: false, savedAt: Date.now(), draft: e.draft === draft ? null : e.draft }));
       } catch (err) {
-        kits((k) =>
+        edit(kit.id, (e) =>
           isStale(err)
-            ? { ...k, saving: false, stale: true, error: 'This kit changed since you opened it.' }
-            : { ...k, saving: false, error: toolMessage(err) },
+            ? { ...e, saving: false, stale: true, error: 'This kit changed since you opened it.' }
+            : { ...e, saving: false, error: toolMessage(err) },
         );
       }
     },
 
-    async reloadKit(orgId) {
-      kits((k) => ({ ...k, draft: null, error: null, stale: false }));
+    async reloadKit(orgId, kitId) {
+      edit(kitId, (e) => ({ ...e, draft: null, error: null, stale: false }));
       await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
       redrawAll();
     },
@@ -234,17 +248,26 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     },
 
     async duplicateKit(orgId, kit) {
+      const key = duplicateKeys.get(kit.id) ?? crypto.randomUUID();
+      duplicateKeys.set(kit.id, key);
       let kitId: string | undefined;
-      await act(orgId, `duplicate:${kit.id}`, async () => {
-        kitId = brandKitIdOf(await callTool('create_brand_kit', duplicateInput(kit, crypto.randomUUID())));
+      const done = await act(orgId, kit.id, `duplicate:${kit.id}`, async () => {
+        kitId = brandKitIdOf(await callTool('create_brand_kit', duplicateInput(kit, key)));
       });
-      if (kitId) await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId } });
+      if (!done || !kitId) return;
+      duplicateKeys.delete(kit.id);
+      await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId } });
     },
 
-    makeDefaultKit: (orgId, brandKitId) => act(orgId, 'default', () => callTool('set_default_brand_kit', { brandKitId })),
+    async makeDefaultKit(orgId, brandKitId) {
+      await act(orgId, brandKitId, `default:${brandKitId}`, () => callTool('set_default_brand_kit', { brandKitId }));
+    },
 
-    assignKit: (orgId, brandKitId, target) =>
-      act(orgId, `assign:${'groupId' in target ? target.groupId : target.screenId}`, () => callTool('assign_brand_kit', { brandKitId, ...target })),
+    async assignKit(orgId, kit, chosen, target) {
+      await act(orgId, kit.id, `assign:${'groupId' in target ? target.groupId : target.screenId}`, () =>
+        callTool('assign_brand_kit', { brandKitId: chosen ? kit.id : null, ...target }),
+      );
+    },
 
     attachKitPreview(spotId, target) {
       // Called from a ref callback, so only in the browser; the listener is added once.
@@ -256,9 +279,13 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
         links.delete(spotId);
         return;
       }
-      if (links.get(spotId)?.target.frame === target.frame) return;
-      links.set(spotId, { target, listening: false, seq: 0 });
+      const was = links.get(spotId)?.target;
+      if (was?.frame === target.frame && was.kitId === target.kitId) return;
+      const link = { target, seq: 0 };
+      links.set(spotId, link);
       kits((k) => ({ ...k, previews: { ...k.previews, [spotId]: { playing: false, error: null } } }));
+      // A frame already listening (the same player, now for another kit) is posted its spot at once.
+      void redraw(link);
     },
 
     measureKitPreview: (previewWidth) => kits((k) => (k.previewWidth === previewWidth ? k : { ...k, previewWidth })),

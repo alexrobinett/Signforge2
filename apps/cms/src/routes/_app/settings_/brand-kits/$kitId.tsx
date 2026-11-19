@@ -17,14 +17,14 @@ import { KitPreviews } from '~/components/brand/kit-previews';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
-import { draftColors, kitDraftOf, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
+import { draftColors, kitDraftOf, shownColors, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { useCanManage, useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { versionsById, type SpotView } from '~/lib/spots';
 import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
-import { previewKey } from '~/state/brand-kits';
+import { NO_EDIT, previewKey } from '~/state/brand-kits';
 
 /** How many of the org's template spots the page plays: each is a player on the page. */
 const PREVIEWS = 3;
@@ -100,8 +100,12 @@ function KitUse({
           <input
             type="checkbox"
             checked={chosen}
-            disabled={!canManage || pending !== null}
-            onChange={(e) => void assign(orgId, e.target.checked ? kit.id : null, target)}
+            // Not disabled while an action runs: a disabled box loses keyboard focus. A change then is ignored.
+            disabled={!canManage}
+            aria-disabled={pending !== null || undefined}
+            onChange={(e) => {
+              if (pending === null) void assign(orgId, kit, e.target.checked, target);
+            }}
             className="size-4 accent-primary"
           />
           <span className="min-w-0">
@@ -197,11 +201,8 @@ function KitEditor() {
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
 
-  const editing = useAppStore((s) => (s.brandKits.kitId === kitId ? s.brandKits.draft : null));
-  const saving = useAppStore((s) => s.brandKits.saving);
-  const savedAt = useAppStore((s) => (s.brandKits.kitId === kitId ? s.brandKits.savedAt : null));
-  const error = useAppStore((s) => s.brandKits.error);
-  const stale = useAppStore((s) => s.brandKits.stale);
+  const { draft: editing, saving, savedAt, error: saveError, stale } = useAppStore((s) => s.brandKits.edits[kitId] ?? NO_EDIT);
+  const actionError = useAppStore((s) => (s.brandKits.actionError?.kitId === kitId ? s.brandKits.actionError.text : null));
   const pending = useAppStore((s) => s.brandKits.pending);
   const logoFor = useAppStore((s) => s.brandKits.logoFor);
   const edit = useAppStore((s) => s.editKit);
@@ -215,7 +216,7 @@ function KitEditor() {
   const kit = brandKits.find((k) => k.id === kitId);
   if (!kit) return null;
   const draft = editing ?? kitDraftOf(kit);
-  const colors = draftColors(draft) ?? kit.colors;
+  const colors = shownColors(draft, kit.colors);
   const change = (c: (d: KitDraft) => KitDraft) => edit(kit, c);
   const set = (patch: Partial<KitDraft>) => change((d) => ({ ...d, ...patch }));
   const ready = editing !== null && draftColors(draft) !== null && draft.name.trim() !== '' && !saving && !stale;
@@ -257,7 +258,7 @@ function KitEditor() {
               <Button variant="outline" disabled={pending !== null} onClick={() => void duplicate(orgId, kit)}>
                 Duplicate
               </Button>
-              <Button variant="outline" disabled={!editing || saving} onClick={discard}>
+              <Button variant="outline" disabled={!editing || saving} onClick={() => discard(kit.id)}>
                 Discard changes
               </Button>
               <Button disabled={!ready} onClick={() => void save(orgId, kit)}>
@@ -267,12 +268,12 @@ function KitEditor() {
           )}
         </div>
       </header>
-      {error && (
+      {(saveError ?? actionError) && (
         <Alert variant="destructive">
           <AlertDescription className="flex flex-wrap items-center gap-3">
-            {error}
+            {saveError ?? actionError}
             {stale && (
-              <Button size="sm" variant="outline" onClick={() => void reload(orgId)}>
+              <Button size="sm" variant="outline" onClick={() => void reload(orgId, kit.id)}>
                 Reload
               </Button>
             )}

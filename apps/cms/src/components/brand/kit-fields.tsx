@@ -5,7 +5,7 @@
  * the corner shape and the two logos. Each field calls back with the change; the store keeps it.
  */
 import { BRAND_SHAPES, sessionBlobPath, type BrandColor, type BrandColors, type BrandShape } from '@signforge/contract';
-import { FONTS, fontById } from '@signforge/compiler';
+import { FONTS, fontById, HEX_COLOR } from '@signforge/compiler';
 import { WandSparklesIcon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { Button } from '~/components/ui/button';
@@ -13,7 +13,6 @@ import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import type { AssetView } from '~/lib/assets';
 import { kitPairs, pairFix, type KitDraft } from '~/lib/brand-kits';
-import { HEX_COLOR } from '@signforge/compiler';
 import { cn } from '~/lib/utils';
 
 /** Every catalogue font's faces, from the session blob route (the seed puts them there), so samples draw in them. */
@@ -91,6 +90,7 @@ export function ColourFields({
   onFix: (fg: BrandColor, bg: BrandColor) => void;
 }) {
   const pairs = kitPairs(shown);
+  const failing = pairs.filter((p) => p.verdict !== 'Pass').map((p) => p.label);
   return (
     <div className="space-y-2">
       <ul className="flex flex-col">
@@ -155,9 +155,20 @@ export function ColourFields({
                         {p.ratio} {p.verdict}
                       </span>
                       {fix && !disabled && (
-                        <Button type="button" variant="outline" size="sm" onClick={() => onFix(p.fg, p.bg)}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onFix(p.fg, p.bg)}
+                          aria-label={`Fix ${p.label}: Use ${fix.hex} (${fix.ratio})`}
+                        >
                           <WandSparklesIcon aria-hidden /> Use {fix.hex} ({fix.ratio})
                         </Button>
+                      )}
+                      {fix && (p.fg === 'onPrimary' || p.fg === 'onAccent') && (
+                        <span className="w-full text-muted-foreground">
+                          Templates draw this text in black or white instead, so screens stay readable, but not in your colour.
+                        </span>
                       )}
                     </p>
                   );
@@ -166,6 +177,10 @@ export function ColourFields({
           );
         })}
       </ul>
+      {/* One sentence for every verdict, said again only when which pairs fail changes, not on every ratio. */}
+      <p role="status" className="sr-only">
+        {failing.length ? `Below 4.5:1: ${failing.join(', ')}.` : 'Every pair reaches 4.5:1.'}
+      </p>
       <p className="text-[13px] text-muted-foreground">A pair below 4.5:1 is a warning: the kit still publishes, but its text is hard to read across a room.</p>
     </div>
   );

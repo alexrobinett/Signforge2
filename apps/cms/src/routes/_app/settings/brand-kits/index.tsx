@@ -96,7 +96,8 @@ function BrandKitsPage() {
   const { brandKits } = useSuspenseQuery(brandKitsQuery(orgId)).data;
   const { groups } = useSuspenseQuery(screensQuery(orgId)).data;
   const pending = useAppStore((s) => s.brandKits.pending);
-  const error = useAppStore((s) => s.brandKits.error);
+  const actionError = useAppStore((s) => s.brandKits.actionError);
+  const edits = useAppStore((s) => s.brandKits.edits);
   const duplicate = useAppStore((s) => s.duplicateKit);
   const makeDefault = useAppStore((s) => s.makeDefaultKit);
   const kits = brandKits.toSorted((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name));
@@ -107,9 +108,6 @@ function BrandKitsPage() {
       <PageHeader title="Brand kits" description={`${plural(kits.length, 'kit')} · a screen uses its own kit, else its group's, else the default.`}>
         {canManage && kits.length > 0 && <NewKitDialog orgId={orgId} />}
       </PageHeader>
-      <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
-        {error}
-      </p>
       {kits.length ? (
         <ul className="flex flex-col gap-3">
           {kits.map((k) => (
@@ -133,6 +131,11 @@ function BrandKitsPage() {
                   >
                     {k.isDefault ? 'Default' : plural(k.reach.length, 'screen')}
                   </span>
+                  {edits[k.id]?.draft && (
+                    <span className="rounded-xs bg-status-updating-muted px-2 py-0.5 text-sm font-semibold text-status-updating-foreground">
+                      Unsaved changes
+                    </span>
+                  )}
                 </span>
                 <span>{fontsText(k)}</span>
                 <span className="text-muted-foreground">{usedText(k, groups)}</span>
@@ -145,6 +148,10 @@ function BrandKitsPage() {
                   </span>
                 )}
                 <span className="text-sm text-muted-foreground">Edited {new Date(k.updatedAt).toLocaleDateString([], { day: 'numeric', month: 'short' })}</span>
+                {/* A refused Duplicate or Make default, by the kit it was for. */}
+                <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+                  {actionError?.kitId === k.id ? actionError.text : null}
+                </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline">
