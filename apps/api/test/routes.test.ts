@@ -219,6 +219,7 @@ describe('POST /api/tools/:name', () => {
     const names = async (c: Client) => ((await (await c.get('/api/tools')).json()) as { tools: { name: string }[] }).tools.map((x) => x.name);
     expect(await names(owner)).toHaveLength(registry.size);
     expect((await names(viewer)).sort()).toEqual([
+      'get_alert_channels',
       'get_asset',
       'get_brand_kit',
       'get_data_source',
@@ -227,6 +228,7 @@ describe('POST /api/tools/:name', () => {
       'get_spot',
       'get_spot_preview',
       'get_template',
+      'list_alert_deliveries',
       'list_assets',
       'list_brand_kits',
       'list_data_sources',

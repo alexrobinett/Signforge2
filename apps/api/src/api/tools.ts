@@ -12,7 +12,9 @@ import { describeTools, dispatch, grantOf, registry, type Caller, type ToolError
 import type { Hono } from 'hono';
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
-import { feedUrlSealer } from '../data/cipher';
+import { alertSecretSealer, feedUrlSealer } from '../data/cipher';
+import { deliverAlert } from '../deliveries';
+import { emailSenderFor, type EmailSender } from '../email';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
 
@@ -28,7 +30,8 @@ const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429> = {
 /** The CMS's client id in the audit log. */
 const CMS_CLIENT_ID = 'cms';
 
-export function mountTools(api: Hono<ApiEnv>) {
+/** `email` sends test alerts by email; it defaults to `emailSenderFor(env)`, and tests pass a recorder. */
+export function mountTools(api: Hono<ApiEnv>, email?: EmailSender) {
   api.get('/tools', async (c) => c.json({ tools: describeTools(registry, await grantOf({ org: c.var.org, role: c.var.role })) }));
 
   api.post('/tools/:name', async (c) => {
@@ -52,6 +55,14 @@ export function mountTools(api: Hono<ApiEnv>) {
       blobs: c.env.BLOBS,
       uploads: uploadSigner(c.env, c.req.url),
       feedUrls: feedUrlSealer(c.env),
+      alertSecrets: alertSecretSealer(c.env),
+      // After the response: a receiver's 5 seconds are not the caller's to wait for.
+      deliveries: {
+        now: (id) =>
+          c.executionCtx.waitUntil(
+            deliverAlert(c.env, email ?? emailSenderFor(c.env), c.var.orgId, id).catch((err: unknown) => console.error('alert delivery failed', err)),
+          ),
+      },
       screens: screenNotifier(c.env),
       // A claim counts against the member and against the address, so many accounts on one address share a limit.
       rateLimit: async () => {

@@ -98,7 +98,7 @@ export function createApi(deps: ApiDeps = {}) {
   });
 
   api.use('*', requireSession, requireOrg);
-  mountTools(api);
+  mountTools(api, deps.email);
   mountBlobs(api);
   return api;
 }
