@@ -224,7 +224,7 @@ export function validateTemplateManifest(m: unknown): string[] {
   }
   if (!Array.isArray(m.orientations) || !m.orientations.length || m.orientations.some((o) => o !== 'landscape' && o !== 'portrait')) {
     errors.push('orientations must list landscape and/or portrait');
-  }
+  } else if (new Set(m.orientations).size !== m.orientations.length) errors.push('orientations must not repeat');
   if (!Array.isArray(m.uses)) errors.push('uses must be an array (it may be empty)');
   else if (m.uses.some((u) => u !== 'canvas' && u !== 'webgl' && u !== 'audio')) errors.push('uses may list only canvas, webgl and audio');
   if (!isText(m.background)) errors.push('background is required');
@@ -827,4 +827,30 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
   ];
   for (const c of checks) c.ok = !c.problems.length;
   return { ok: checks.every((c) => c.ok), bundleBytes, checks, warnings: brandColourWarnings(sources) };
+}
+
+const isMs = (v: unknown) => isNum(v) && v >= 0;
+
+function renderProblems(r: unknown): string[] {
+  if (!isObj(r)) return ['is not an object'];
+  const errors: string[] = [];
+  if (r.orientation !== 'landscape' && r.orientation !== 'portrait') errors.push('orientation must be landscape or portrait');
+  if (!isCount(own(r.viewport, 'width')) || !isCount(own(r.viewport, 'height'))) errors.push('viewport must have a width and height in pixels');
+  if (r.readyMs !== null && !isMs(r.readyMs)) errors.push('readyMs must be a time in ms or null');
+  if (r.frames !== null && (!isCount(own(r.frames, 'count')) || !isMs(own(r.frames, 'longestMs'))))
+    errors.push('frames must be null or a count and the longest frame in ms');
+  return errors;
+}
+
+/** A runtime check's report, as the server receives it from the check Worker. */
+export function validateTemplateRuntimeReport(r: unknown): string[] {
+  if (!isObj(r)) return ['report is not an object'];
+  const errors: string[] = [];
+  if (typeof r.ok !== 'boolean') errors.push('ok must be true or false');
+  if (!Array.isArray(r.problems) || !r.problems.every(isText)) errors.push('problems must be a list of sentences');
+  else if (r.ok === r.problems.length > 0) errors.push('ok must be true exactly when there are no problems');
+  if (!isText(own(r.runner, 'image')) || !isText(own(r.runner, 'browser'))) errors.push('runner must name its image and browser');
+  errors.push(...list('render', r.renders, renderProblems));
+  if (!isMs(own(r.cost, 'startMs')) || !isMs(own(r.cost, 'checkMs'))) errors.push('cost must have startMs and checkMs');
+  return errors;
 }

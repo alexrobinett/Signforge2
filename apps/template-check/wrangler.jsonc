@@ -1,0 +1,52 @@
+{
+  // The runtime check of uploaded templates (#40). Reached only through the API's service binding
+  // (TEMPLATE_CHECK): no workers.dev URL, no preview URLs, no routes. It has no bindings but its
+  // container, so the untrusted template's container is next to nothing of the platform's.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "signforge-template-check",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+  // Bundles the runner into dist/runner.mjs and writes dist/package.json (build.ts), which the image copies.
+  "build": { "command": "pnpm build", "watch_dir": "src/runner" },
+  "containers": [
+    {
+      "class_name": "TemplateCheckContainer",
+      // The image and size are chosen in code at start (src/worker/index.ts), with no Internet access.
+      "scheduling_policy": "durable_object",
+      "images": { "runner": { "dockerfile": "./Dockerfile" } }
+    }
+  ],
+  // How many orgs' containers may run at once (src/worker/index.ts, CheckSlots). Past it, a new org's
+  // check is refused to retry.
+  "vars": { "MAX_CONTAINERS": "10" },
+  "durable_objects": {
+    "bindings": [{ "name": "TEMPLATE_CHECK", "class_name": "TemplateCheckContainer" }, { "name": "CHECK_SLOTS", "class_name": "CheckSlots" }]
+  },
+  "exports": {
+    "TemplateCheckContainer": { "type": "durable-object", "storage": "sqlite" },
+    "CheckSlots": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "env": {
+    // Local only, on an Apple Silicon Mac: `wrangler dev --env arm64`. Wrangler builds linux/amd64,
+    // which Chromium cannot run under Rosetta (it is killed for memory), so this builds the native
+    // image. Never deployed: Cloudflare runs linux/amd64.
+    "arm64": {
+      "name": "signforge-template-check",
+      "containers": [
+        {
+          "class_name": "TemplateCheckContainer",
+          "scheduling_policy": "durable_object",
+          "images": { "runner": { "dockerfile": "./Dockerfile", "build_vars": { "RUNNER_PLATFORM": "linux/arm64" } } }
+        }
+      ],
+      "vars": { "MAX_CONTAINERS": "10" },
+      "durable_objects": {
+        "bindings": [{ "name": "TEMPLATE_CHECK", "class_name": "TemplateCheckContainer" }, { "name": "CHECK_SLOTS", "class_name": "CheckSlots" }]
+      }
+    }
+  }
+}
