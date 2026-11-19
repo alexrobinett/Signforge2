@@ -140,6 +140,40 @@ describe('org templates', () => {
     expect(entry).toMatchObject({ actorKind: 'system', actorId: 'sf-push', action: 'register_template_version', targetId: r.templateVersionId });
   });
 
+  it('carry the runtime check in their check report', async () => {
+    const r = await push(card({ id: 'checked-card' }), { owner: { org: orgId } });
+    const version = await scoped(env.DB, orgId).templates.versions.get(r.templateVersionId);
+    expect(JSON.parse(version!.checkReportJson!).runtime).toMatchObject({
+      ok: true,
+      runner: { image: 'stand-in' },
+      renders: [{ orientation: 'landscape' }, { orientation: 'portrait' }],
+    });
+  });
+
+  it('are refused when the runtime check finds a problem, with the problem', async () => {
+    const message = await rejection(push(card({ id: 'leaky-card', css: '/* sf-runtime-fail */' }), { owner: { org: orgId } }));
+    expect(message).toMatch(/runtime: requested https:\/\/example\.com\/leak \(blocked\)/);
+    expect(await scoped(env.DB, orgId).templates.ownByKey('leaky-card')).toBeUndefined();
+  });
+
+  it('are not registered when the check answers with a report the contract refuses', async () => {
+    const message = await rejection(push(card({ id: 'garbled-card', css: '/* sf-runtime-garbage */' }), { owner: { org: orgId } }));
+    expect(message).toMatch(/500/);
+    expect(await scoped(env.DB, orgId).templates.ownByKey('garbled-card')).toBeUndefined();
+  });
+
+  it('are checked when registered from the CMS too', async () => {
+    const c = card({ id: 'cms-card', css: '/* sf-runtime-fail */' });
+    const hash = async (s: string) =>
+      [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    const sources = JSON.stringify(c.sources);
+    const [bundleId, sourcesId] = await Promise.all([hash(c.html), hash(sources)]);
+    await Promise.all([env.BLOBS.put(orgBlobKey(orgId, bundleId), c.html), env.BLOBS.put(orgBlobKey(orgId, sourcesId), sources)]);
+    const res = await member.tool('register_template_version', { manifest: c.manifest, bundleId, sourcesId });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toMatch(/^the template failed its runtime check: requested/);
+  });
+
   it('need an org that exists', async () => {
     expect(await rejection(push(card({ id: 'nobody' }), { owner: { org: 'org-nobody' } }))).toMatch(/404/);
   });

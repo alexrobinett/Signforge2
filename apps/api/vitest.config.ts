@@ -23,6 +23,28 @@ async function templateBuilds() {
   return JSON.stringify(builds);
 }
 
+// TEMPLATE_CHECK: the check Worker (apps/template-check), replaced here by a stand-in in Node that
+// passes every template except one whose bundle holds `sf-runtime-fail` (refused with a request) or
+// `sf-runtime-garbage` (answered with a report the contract refuses). The real runner's tests are
+// apps/template-check's.
+async function templateCheck(request: Request): Promise<Response> {
+  const { manifest, html }: { manifest: { orientations: ('landscape' | 'portrait')[] }; html: string } = await request.json();
+  if (html.includes('sf-runtime-garbage')) return Response.json({ ok: 'yes' });
+  const problems = html.includes('sf-runtime-fail') ? ['requested https://example.com/leak (blocked)'] : [];
+  return Response.json({
+    ok: !problems.length,
+    problems,
+    runner: { image: 'stand-in', browser: 'Chromium 159' },
+    renders: manifest.orientations.map((orientation) => ({
+      orientation,
+      viewport: orientation === 'landscape' ? { width: 1920, height: 1080 } : { width: 1080, height: 1920 },
+      readyMs: 80,
+      frames: { count: 60, longestMs: 17 },
+    })),
+    cost: { startMs: 0, checkMs: 2800 },
+  });
+}
+
 // FONT_FILES: the catalogue's WOFF2 files from fonts/, by repo path, base64, for `sf fonts push`.
 function fontFiles() {
   const root = new URL('../../', import.meta.url).pathname;
@@ -41,6 +63,7 @@ export default defineConfig({
           TEMPLATE_BUILDS: await templateBuilds(),
           FONT_FILES: fontFiles(),
         },
+        serviceBindings: { TEMPLATE_CHECK: templateCheck },
       },
     })),
   ],

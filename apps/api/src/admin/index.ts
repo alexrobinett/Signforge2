@@ -45,6 +45,7 @@ import {
 import { Hono, type Context } from 'hono';
 import { screenNotifier } from '../device/screens';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
+import { templateChecker } from '../template-check';
 import { adminAuth, type AdminEnv } from './auth';
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -165,13 +166,14 @@ admin.put('/orgs/:org/blobs/:sha256', async (c) => {
   return putBlob(c, orgBlobKey(org, sha), sha);
 });
 
-/** The system actor `sf-push`, with the owner's role and a grant for drafting and approving templates. */
+/** The system actor `sf-push`, with the owner's role and a grant for drafting and approving templates. Org templates get the runtime check. */
 const templateCaller = <D extends DataScope>(c: Context<AdminEnv>, org: D): Caller<D> => ({
   org,
   role: 'owner',
   scopes: ['content:draft', 'content:publish'],
   actor: { kind: 'system', id: SF_PUSH, clientId: SF_PUSH },
   blobs: c.env.BLOBS,
+  templateCheck: templateChecker(c.env),
 });
 
 const STATUS = { invalid_input: 400, not_found: 404, conflict: 409, rate_limited: 429, forbidden: 500, unknown_tool: 500 } as const;
