@@ -227,6 +227,8 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       }
       saving = true;
       editor((e) => ({ ...e, status: 'saving', saveError: null }));
+      // The answer belongs to this spot: another opened meanwhile has its own draft and version.
+      const open = () => get().spotEditor.spotId === spotId;
       const kindFields =
         spot.kind === 'template'
           ? { data: draft.data, assets: draft.assets }
@@ -239,13 +241,14 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         );
         queryClient.setQueryData(spotKeys.one(t.orgId, spotId), saved);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(t.orgId), exact: true });
-        editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === draft ? 'saved' : 'unsaved' }));
+        if (open()) editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === draft ? 'saved' : 'unsaved' }));
       } catch (err) {
-        editor((e) => ({ ...e, status: 'unsaved', ...saveRefused(err) }));
+        if (open()) editor((e) => ({ ...e, status: 'unsaved', ...saveRefused(err) }));
       } finally {
         saving = false;
       }
-      if (get().spotEditor.status === 'unsaved' && !get().spotEditor.saveError) later('save', SAVE_DELAY_MS, get().saveSpotDraft);
+      const after = get().spotEditor;
+      if (open() && after.status === 'unsaved' && !after.saveError) later('save', SAVE_DELAY_MS, get().saveSpotDraft);
     },
 
     async reloadSpot() {
