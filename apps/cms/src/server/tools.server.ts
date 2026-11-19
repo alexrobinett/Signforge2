@@ -29,7 +29,12 @@ export async function tool<T>(name: string, input: unknown, opts?: { missing: 'n
     const refusal: { error?: string } = await res.clone().json();
     if (refusal.error === 'no_active_organization') throw new NoActiveOrg();
   }
-  if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
+  if (!res.ok) {
+    // A refusal's own message, written to be shown (Load older shows it); anything else by its status.
+    const refusal: unknown = await res.json().catch(() => null);
+    const message = typeof refusal === 'object' && refusal !== null && 'message' in refusal && typeof refusal.message === 'string' ? refusal.message : null;
+    throw new Error(message ?? `${name} failed: ${res.status}`);
+  }
   // The tool's output, as its output schema in packages/tools says (checked there in tests).
   const output: T = await res.json();
   return output;

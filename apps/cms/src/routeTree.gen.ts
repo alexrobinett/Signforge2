@@ -14,6 +14,7 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAccountRouteImport } from './routes/_app/account'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
+import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppIntegrationsRouteImport } from './routes/_app/integrations'
 import { Route as AppPublishesRouteImport } from './routes/_app/publishes'
 import { Route as AppScheduleRouteImport } from './routes/_app/schedule'
@@ -55,6 +56,11 @@ const AppAccountRoute = AppAccountRouteImport.update({
 const AppAssetsRoute = AppAssetsRouteImport.update({
   id: '/assets',
   path: '/assets',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAuditRoute = AppAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => AppRoute,
 } as any)
 const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
@@ -155,6 +161,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/account': typeof AppAccountRoute
   '/assets': typeof AppAssetsRoute
+  '/audit': typeof AppAuditRoute
   '/integrations': typeof AppIntegrationsRoute
   '/publishes': typeof AppPublishesRoute
   '/schedule': typeof AppScheduleRoute
@@ -178,6 +185,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/account': typeof AppAccountRoute
   '/assets': typeof AppAssetsRoute
+  '/audit': typeof AppAuditRoute
   '/integrations': typeof AppIntegrationsRoute
   '/publishes': typeof AppPublishesRoute
   '/schedule': typeof AppScheduleRoute
@@ -203,6 +211,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/_app/account': typeof AppAccountRoute
   '/_app/assets': typeof AppAssetsRoute
+  '/_app/audit': typeof AppAuditRoute
   '/_app/integrations': typeof AppIntegrationsRoute
   '/_app/publishes': typeof AppPublishesRoute
   '/_app/schedule': typeof AppScheduleRoute
@@ -230,6 +239,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/account'
     | '/assets'
+    | '/audit'
     | '/integrations'
     | '/publishes'
     | '/schedule'
@@ -253,6 +263,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/account'
     | '/assets'
+    | '/audit'
     | '/integrations'
     | '/publishes'
     | '/schedule'
@@ -277,6 +288,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/_app/account'
     | '/_app/assets'
+    | '/_app/audit'
     | '/_app/integrations'
     | '/_app/publishes'
     | '/_app/schedule'
@@ -341,6 +353,13 @@ declare module '@tanstack/react-router' {
       path: '/assets'
       fullPath: '/assets'
       preLoaderRoute: typeof AppAssetsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/audit': {
+      id: '/_app/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AppAuditRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/integrations': {
@@ -495,6 +514,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 interface AppRouteChildren {
   AppAccountRoute: typeof AppAccountRoute
   AppAssetsRoute: typeof AppAssetsRoute
+  AppAuditRoute: typeof AppAuditRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
   AppPublishesRoute: typeof AppPublishesRoute
   AppScheduleRoute: typeof AppScheduleRoute
@@ -511,6 +531,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAccountRoute: AppAccountRoute,
   AppAssetsRoute: AppAssetsRoute,
+  AppAuditRoute: AppAuditRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
   AppPublishesRoute: AppPublishesRoute,
   AppScheduleRoute: AppScheduleRoute,

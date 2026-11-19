@@ -6,13 +6,14 @@ import {
   ListVideoIcon,
   MonitorIcon,
   PlugIcon,
+  ScrollTextIcon,
   SendIcon,
   SettingsIcon,
   type LucideIcon,
 } from 'lucide-react';
 
 export interface Section {
-  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/publishes' | '/assets' | '/integrations' | '/settings';
+  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/publishes' | '/assets' | '/integrations' | '/audit' | '/settings';
   label: string;
   icon: LucideIcon;
   description: string;
@@ -77,6 +78,13 @@ export const SECTIONS: Section[] = [
     description:
       'Data reaches screens through our server, never directly: each source is fetched and checked there, and screens get the new copy with their next sync. When a source is down, they keep the last good copy for a day.',
     empty: { title: 'No data sources yet', body: 'Feeds, calendars and weather your spots read will be listed here with their health.' },
+  },
+  {
+    to: '/audit',
+    label: 'Audit log',
+    icon: ScrollTextIcon,
+    description: 'Every change by a person, agent or screen.',
+    empty: { title: '', body: '' },
   },
   {
     to: '/settings',

@@ -246,6 +246,7 @@ export async function dispatch<D extends DataScope>(
       output = await tool.handler({
         org: caller.org,
         actor: caller.actor,
+        role: caller.role,
         input: parsed.data,
         blobs: caller.blobs,
         uploads: caller.uploads,
