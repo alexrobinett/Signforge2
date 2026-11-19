@@ -13,6 +13,7 @@ import type { Hono } from 'hono';
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
 import { feedUrlSealer } from '../data/cipher';
+import { openMeteoPlaces } from '../data/places';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
 
@@ -52,6 +53,7 @@ export function mountTools(api: Hono<ApiEnv>) {
       blobs: c.env.BLOBS,
       uploads: uploadSigner(c.env, c.req.url),
       feedUrls: feedUrlSealer(c.env),
+      places: openMeteoPlaces(c.env.GEOCODING_URL),
       screens: screenNotifier(c.env),
       // A claim counts against the member and against the address, so many accounts on one address share a limit.
       rateLimit: async () => {

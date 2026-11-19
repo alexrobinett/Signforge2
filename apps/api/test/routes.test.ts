@@ -219,6 +219,7 @@ describe('POST /api/tools/:name', () => {
     const names = async (c: Client) => ((await (await c.get('/api/tools')).json()) as { tools: { name: string }[] }).tools.map((x) => x.name);
     expect(await names(owner)).toHaveLength(registry.size);
     expect((await names(viewer)).sort()).toEqual([
+      'find_places',
       'get_asset',
       'get_brand_kit',
       'get_data_source',
