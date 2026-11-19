@@ -16,7 +16,7 @@ export { claimDueDataSources } from './poller';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
 export { findMembership, organizationExists, orgMembers } from './members';
 export { findAlertWork, type AlertWork } from './alerts';
-export { expireIdempotencyKeys } from './retention';
+export { AUDIT_ROWS_PER_RUN, DEFAULT_AUDIT_RETENTION_DAYS, expireAuditRows, expireIdempotencyKeys } from './retention';
 
 // Row shapes, as types only.
 export type Screen = typeof s.screens.$inferSelect;

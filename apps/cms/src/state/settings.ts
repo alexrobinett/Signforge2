@@ -30,13 +30,13 @@ export interface SettingsSlice {
   settings: SettingsState;
   editDefaultHours: (hours: DisplayHours | null) => void;
   /**
-   * Saves the org's defaults for new screens, and renames it if the name changed. This and the two
+   * Saves the org's defaults for new screens and how long its audit log is kept, and renames it if the name changed. This and the two
    * below send `ifVersion`, the settings' version when the page read them, so a save cannot
    * overwrite a change made since.
    */
   saveGeneral: (
     org: { id: string; name: string },
-    values: { name: string; timezone: string | null; locale: string | null },
+    values: { name: string; timezone: string | null; locale: string | null; auditRetentionDays: number },
     ifVersion: number,
   ) => Promise<void>;
   saveScreenDefaults: (values: { updateWindow: { from: string; to: string }; unreachableAfterMinutes: number }, ifVersion: number) => Promise<void>;
@@ -101,6 +101,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
           await callTool('update_org_settings', {
             timezone: values.timezone,
             locale: values.locale,
+            auditRetentionDays: values.auditRetentionDays,
             ...(hours ? { displayHours: hours.value } : {}),
             ifVersion,
           });

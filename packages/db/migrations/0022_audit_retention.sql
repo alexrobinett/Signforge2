@@ -1,0 +1,1 @@
+ALTER TABLE `org_settings` ADD `audit_retention_days` integer;
