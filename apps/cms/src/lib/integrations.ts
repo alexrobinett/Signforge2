@@ -39,7 +39,7 @@ export interface ConnectionView {
 /** A provider's name as people write it: `google` is Google. */
 export const providerName = (provider: string) => provider.charAt(0).toUpperCase() + provider.slice(1);
 
-export type ConnectorState = 'built' | 'planned' | 'later';
+type ConnectorState = 'built' | 'planned' | 'later';
 
 export interface Connector {
   /** The tile's letters. */
@@ -205,7 +205,7 @@ export interface Clock {
   now: number;
 }
 
-export function clockTime(at: number, { timezone, locale, now }: Clock): string {
+function clockTime(at: number, { timezone, locale, now }: Clock): string {
   const day = (t: number) => new Date(t).toLocaleDateString('en-CA', { timeZone: timezone });
   const time = new Date(at).toLocaleTimeString(locale, { timeZone: timezone, hour: 'numeric', minute: '2-digit' });
   return day(at) === day(now) ? time : `${new Date(at).toLocaleDateString(locale, { timeZone: timezone, weekday: 'short' })} ${time}`;
