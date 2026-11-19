@@ -1203,9 +1203,14 @@ export function scoped(d1: D1Database, orgId: string) {
 
     connections: {
       ...connectionRows,
-      /** The poller refreshed the grant: stored only over the one it refreshed (another run may have refreshed it first, or a person reconnected). */
+      /**
+       * The poller refreshed the grant: stored only over the one it refreshed (another run may have
+       * refreshed it first, or a person reconnected), and active again, since a racing run whose
+       * rotated-out token was refused may have marked it `needs_reconnect` first. A disconnected
+       * connection has no grant to match, so this never revives one.
+       */
       saveGrant: (id: string, from: string, grant: { credentialsSealed: string; expiresAt: number | null }) =>
-        changeGrant(id, from, { ...grant, lastError: null }),
+        changeGrant(id, from, { ...grant, status: 'active', lastError: null }),
       /** The provider refused the grant the poller read: a person must connect it again. */
       markNeedsReconnect: (id: string, from: string, lastError: string) => changeGrant(id, from, { status: 'needs_reconnect', lastError }),
       authorizations: {

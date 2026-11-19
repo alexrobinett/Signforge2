@@ -71,6 +71,15 @@ describe('a connection', () => {
     expect(await s.b.scope.connections.saveGrant(row.id, 'g2', { credentialsSealed: 'g9', expiresAt: NOW })).toBe(false);
   });
 
+  it('is active again once a refreshed grant is saved over one a racing run marked refused', async () => {
+    const c = s.a.scope.connections;
+    const row = await c.insert({ provider: 'fake', account: 'x', scopesJson: '[]', status: 'active', credentialsSealed: 'r1', createdBy: 'user-a' });
+    // The loser of a refresh race (its rotated-out token refused) marks it first; the winner then saves its grant.
+    expect(await c.markNeedsReconnect(row.id, 'r1', 'invalid_grant')).toBe(true);
+    expect(await c.saveGrant(row.id, 'r1', { credentialsSealed: 'r2', expiresAt: NOW })).toBe(true);
+    expect(await c.get(row.id)).toMatchObject({ status: 'active', lastError: null, credentialsSealed: 'r2' });
+  });
+
   it('is named by a data source of its own org only', async () => {
     const base = { name: 'Cal', format: 'provider' as const, urlEncrypted: 'sealed', refreshS: 300 };
     await expect(s.b.scope.dataSources.insert({ ...base, id: 'cal-b', connectionId: s.a.connection })).rejects.toThrow(NotInOrgError);
