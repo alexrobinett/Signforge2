@@ -36,7 +36,10 @@ export interface CheckResult {
   renders: TemplateRender[];
 }
 
-const shortUrl = (url: string) => (url.length > 200 ? `${url.slice(0, 197)}...` : url);
+/** Problems carry text the template chose (URLs, error messages): each is cut to this, and their number too. */
+const MAX_PROBLEM_CHARS = 200;
+const MAX_PROBLEMS = 20;
+const clip = (text: string) => (text.length > MAX_PROBLEM_CHARS ? `${text.slice(0, MAX_PROBLEM_CHARS - 3)}...` : text);
 
 /**
  * Chromium's console lines for an attempt it blocked, as problems. Chromium quotes the URL in '...'
@@ -59,9 +62,9 @@ function consoleProblem(text: string): string | undefined {
   if (text.startsWith(WEBRTC)) return "used WebRTC (RTCPeerConnection), which a template may not: the screen's policy does not block it";
   for (const [pattern, problem] of BLOCKED) {
     const m = pattern.exec(text);
-    if (m) return problem(shortUrl(m[1] ?? ''));
+    if (m) return problem(m[1] ?? '');
   }
-  if (text.includes(CSP_VIOLATION)) return `did something the screen's policy blocks: ${shortUrl(text)}`;
+  if (text.includes(CSP_VIOLATION)) return `did something the screen's policy blocks: ${text}`;
   return undefined;
 }
 
@@ -160,7 +163,8 @@ async function renderInHost(a: RenderArgs): Promise<{ readyMs: number | null; er
   let sentAt = 0;
   let loads = 0;
   const outcome = new Promise<{ readyMs: number | null; error: string | null }>((resolve) => {
-    // Counted from the frame's load, as the player counts it.
+    // Counted from when the template's frame is added. The player counts from the start of the
+    // spot's prepare, a few ms earlier, so this is no stricter than a screen.
     setTimeout(() => resolve({ readyMs: null, error: null }), a.readyTimeoutMs);
     frame.addEventListener('load', () => ++loads > 1 && resolve({ readyMs: null, error: null }));
     wrapper.addEventListener('message', (e) => {
@@ -213,7 +217,7 @@ async function render(
     await context.route('**/*', (route) => {
       const url = route.request().url();
       if (url === HOST) return route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Template check</title><body style="margin:0">' });
-      problems.add(`requested ${shortUrl(url)} (blocked)`);
+      problems.add(`requested ${url} (blocked)`);
       return route.abort('blockedbyclient');
     });
     const page = await context.newPage();
@@ -224,7 +228,8 @@ async function render(
     });
     page.on('pageerror', (e) => problems.add(`threw an uncaught error: ${e.message}`));
     page.on('framenavigated', (f) => {
-      if (f === templateFrame(page) && f.url() !== 'about:srcdoc') problems.add('navigated its own frame (blocked)');
+      // A new fragment keeps the document (no second load), so the player does not count it either.
+      if (f === templateFrame(page) && f.url().split('#')[0] !== 'about:srcdoc') problems.add('navigated its own frame (blocked)');
     });
     await page.goto(HOST);
 
@@ -268,9 +273,11 @@ export async function checkTemplate(browser: Browser, manifest: TemplateManifest
   for (const orientation of manifest.orientations) {
     const r = await render(browser, manifest, html, orientation);
     renders.push(r.render);
-    for (const p of r.problems) problems.add(p);
+    for (const p of r.problems) problems.add(clip(p));
   }
-  return { problems: [...problems], renders };
+  const all = [...problems];
+  const shown = all.length > MAX_PROBLEMS ? [...all.slice(0, MAX_PROBLEMS - 1), `and ${all.length - MAX_PROBLEMS + 1} more problems`] : all;
+  return { problems: shown, renders };
 }
 
 /** A template that makes one request the policy blocks, with a quote in its URL. Protocol 1, no SDK. */

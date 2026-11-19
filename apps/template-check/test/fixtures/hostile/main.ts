@@ -11,6 +11,17 @@ const forever = () => new Promise<never>(() => {});
 
 const attempts: Record<string, () => unknown> = {
   fetch: () => (reach(['fe', 'tch'].join('')) as (u: string) => Promise<unknown>)(TARGET).catch(() => undefined),
+  // Not a navigation: the document stays, and the player sees no second load.
+  hash: () => {
+    location.hash = '#x';
+  },
+  // Many problems, and a long message the template chose: the report stays short.
+  flood: () => {
+    for (let i = 0; i < 50; i++) new Image().src = `${TARGET}/${i}`;
+  },
+  'long-error': () => {
+    throw new Error('x'.repeat(5000));
+  },
   // Chromium quotes the URL in '...' without escaping, so a quote in it must not end the URL.
   apostrophe: () => {
     (reach(['fe', 'tch'].join('')) as (u: string) => Promise<unknown>)(`${TARGET}/a'b`).catch(() => undefined);

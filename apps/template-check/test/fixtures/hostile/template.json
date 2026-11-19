@@ -7,7 +7,24 @@
     "mode": {
       "type": "select",
       "label": "What it tries",
-      "options": ["ok", "fetch", "apostrophe", "media", "navigate-top", "navigate-self", "no-ready", "spin", "throw", "uncaught", "webrtc", "image", "on-play"],
+      "options": [
+        "ok",
+        "hash",
+        "flood",
+        "long-error",
+        "fetch",
+        "apostrophe",
+        "media",
+        "navigate-top",
+        "navigate-self",
+        "no-ready",
+        "spin",
+        "throw",
+        "uncaught",
+        "webrtc",
+        "image",
+        "on-play"
+      ],
       "default": "ok"
     },
     "photo": { "type": "image", "label": "Photo" }

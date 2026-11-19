@@ -78,6 +78,19 @@ describe('a template that misbehaves', () => {
     });
   }
 
+  it('passes a change of its own fragment, which is not a navigation', async () => {
+    expect((await checkTemplate(browser, inMode('hash'), hostile.html)).problems).toEqual([]);
+  });
+
+  it('keeps the report short: at most 20 problems, each at most 200 characters', async () => {
+    const flood = (await checkTemplate(browser, inMode('flood'), hostile.html)).problems;
+    expect(flood).toHaveLength(20);
+    expect(flood.at(-1)).toBe('and 31 more problems');
+    const [long] = (await checkTemplate(browser, inMode('long-error'), hostile.html)).problems;
+    expect(long).toBe(`failed to prepare: ${'x'.repeat(178)}...`);
+    expect(long).toHaveLength(200);
+  });
+
   it('reports no ready time when it never got ready, and no frames when it never played', async () => {
     const result = await checkTemplate(browser, inMode('no-ready'), hostile.html);
     expect(result.renders.map((r) => [r.readyMs, r.frames])).toEqual([
