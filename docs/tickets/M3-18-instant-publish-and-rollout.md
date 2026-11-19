@@ -40,7 +40,7 @@ Publish compiles every affected screen, stores manifests, nudges screens, and sh
 - [x] A simulated 1,000-screen org publishes inside the Worker limits: test with a fake binding.
   `packages/tools/test/publish-scale.test.ts`: 1,000 screens through a counting D1 and R2: 14 D1 queries (one batch of 1,051 statements; D1 counts a batch as one), 1,000 R2 writes, one notice, about 0.6 s in workerd. Under the Free plan's 50 D1 queries, and under Paid's 10,000 calls to Cloudflare services; over Free's 1,000 (docs/backend-plan.md#publishing says so). The fan-out: `apps/api/test/publish.test.ts` splits 120 screens into messages of 50, 50 and 20, tells every screen of a message at once and retries a message with a failed call; a consumer batch of 10 messages is at most 500 calls.
 - [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
-  Both pass after merging origin/master (573e621), the CMS e2e on its own ports; `pnpm lint`, `pnpm knip`, `pnpm dupes` (0.93%), `turbo boundaries`, the format check and `scripts/check-contract-commits.sh` too. Docs: `docs/backend-plan.md` (Publishing, Deploying, the `/admin` table), `packages/tools/README.md` (the publish tools, callers, settings), `apps/cms/README.md` (layout, e2e), this ticket.
+  Both pass after merging origin/master (3a314da, #98): 35 of 35 turbo tasks, the CMS e2e (26 tests) on its own ports; `pnpm lint`, `pnpm knip`, `pnpm dupes` (0.91%), `turbo boundaries`, the format check and `scripts/check-contract-commits.sh` too. Docs: `docs/backend-plan.md` (Publishing, Deploying, the `/admin` table), `packages/tools/README.md` (the publish tools, callers, settings), `apps/cms/README.md` (layout, e2e), this ticket.
 
 ## Notes
 

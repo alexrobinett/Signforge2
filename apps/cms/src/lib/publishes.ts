@@ -88,7 +88,7 @@ export function standing(p: PublishView): string {
 export const versionName = (p: { revision: number }) => `v${p.revision}`;
 
 /** What a publish's screens play, in words: a roll back's is the earlier version, again. */
-export const playsWord = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
+const playsWord = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
   p.restoresRevision === null ? versionName(p) : `${versionName({ revision: p.restoresRevision })} again`;
 
 /** A publish's title: its version, and for a roll back where it went back to. */
