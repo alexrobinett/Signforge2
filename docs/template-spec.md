@@ -148,7 +148,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 
 **Isolation**
 - No network. The template runs in a sandboxed frame under a policy that blocks every request, including navigating its own frame: a template that tries is stopped and its spot is skipped. There is no WebRTC either: `RTCPeerConnection` is undefined in the template's frame and in any frame it adds, on screens and in the runtime check. Scripts and styles must be inline after the build, and images arrive from the player.
-- Only the bundle's own scripts run. Inline event handlers (`onclick="…"`, `setAttribute('onload', …)`) and `javascript:` URLs do not: use `addEventListener` or a property (`img.onload = …`). Nor do `eval` and `new Function`.
+- Only the bundle's own classic scripts run (`sf build` makes one). Inline modules, external scripts (none is ever requested), inline event handlers (`onclick="…"`, `setAttribute('onload', …)`) and `javascript:` URLs do not: use `addEventListener` or a property (`img.onload = …`). Nor do `eval` and `new Function`.
 - No storage, cookies or access to anything outside its own frame.
 - Fonts ship inside the bundle. Reference a font file from `style.css` and the build inlines it. Use a font you are licensed to redistribute. Brand fonts are the exception: they come with the theme (see Brand), from the curated catalogue in `fonts/`.
 - Data is fixed for one play. New values arrive with the next `init`, from a clean document (see Lifecycle).
@@ -172,7 +172,7 @@ These checks are a lint, not a security boundary: string matching can be evaded.
 
 - a request of any kind (`requested https://example.com/x (blocked)`), including images, fonts, media, workers and beacons, and anything else the policy blocks (`eval`);
 - navigating its own frame, the page around it, a new window or a form;
-- an uncaught error, or a `prepare` that rejects (a template that reaches for `RTCPeerConnection`, which its frames do not have, fails this way);
+- an uncaught error, or a `prepare` that rejects. Its frames have no `RTCPeerConnection`, as on a screen, so a template whose use of it throws is refused this way; one that catches the error, or only tests for the constructor, passes (and has no WebRTC on screens either);
 - no `ready` within 2 seconds, the player's limit.
 
 It runs in your org's own container, which no other org's template shares. A check that could not run (the container busy or not started) refuses the push as `unavailable`: try again. An org may run about 10 checks a minute (the count is kept per Cloudflare location). A pass is stored on the version with its timings (ms from `init` to `ready`, and the first second's frames, per orientation); they are information, not a gate, since the budgets are measured on the Pi. Base templates in `templates/` go through the same runner in CI (`apps/template-check/test/check.test.ts`). Test yours with `sf template push` to an org.
