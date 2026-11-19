@@ -47,8 +47,9 @@ describe('the audit log in words', () => {
     expect(whoText(entry({}), names, 'usr_me')).toBe('Jun Takahashi');
     expect(whoText(entry({}), names, 'usr_jun')).toBe('You');
     expect(whoText(entry({ actor: { kind: 'user', id: 'usr_gone', clientId: 'cms' } }), names, 'usr_me')).toBe('Former member usr_gone');
-    // The file is read by others: the exporter's own rows by name.
-    expect(csvRow(entry({}), names)[1]).toBe('Jun Takahashi');
+    // The file is read by others: the exporter's own rows by name, even when a caller says who is exporting.
+    // @ts-expect-error: csvRow takes no exporter; a CSV never says "You".
+    expect(csvRow(entry({}), names, 'usr_jun')[1]).toBe('Jun Takahashi');
   });
 
   it('shows the input, without the target it names, redacted values as recorded', () => {
