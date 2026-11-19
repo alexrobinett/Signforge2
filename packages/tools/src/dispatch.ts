@@ -1,7 +1,8 @@
 /**
  * The dispatcher: the one door to every tool.
  *
- *   1. Find the tool by name.
+ *   1. Find the tool by name. For an agent, count the call against its grant's limits
+ *      (`AGENT_LIMITS`) and refuse it with `rate_limited` over one, before anything else runs.
  *   2. Check the caller's role reaches the tool's minimum and its scopes include the tool's. An
  *      editor's scopes are read per call from the org's settings: with `editorsPublish` off, they
  *      lack `content:publish` (owner decision Q7).
