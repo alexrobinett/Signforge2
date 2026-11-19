@@ -477,7 +477,9 @@ describe("an agent grant's limits", () => {
 
   it('count a call to a tool that does not exist, and refuse it over the limit', async () => {
     let over = false;
-    const { asked, agentLimiter } = scripted(() => (over ? { ok: false, limit: 'calls_per_minute', retryAfterSeconds: 5, audit: { window: 'minute', start: 60_000 } } : { ok: true }));
+    const { asked, agentLimiter } = scripted(() =>
+      over ? { ok: false, limit: 'calls_per_minute', retryAfterSeconds: 5, audit: { window: 'minute', start: 60_000 } } : { ok: true },
+    );
     const as = { ...caller('editor', undefined, agent), agentLimiter };
     expect(await dispatch(registry, 'drop_tables', {}, as)).toMatchObject({ ok: false, error: 'unknown_tool' });
     expect(asked).toEqual([{ grantId: 'grant-limits', write: false }]);
