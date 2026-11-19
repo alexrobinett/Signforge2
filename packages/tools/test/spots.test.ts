@@ -122,6 +122,16 @@ describe('spot drafts', () => {
   });
 });
 
+/** Each binding set is refused by update_spot with its one message, at `bindings`. */
+async function refusesBindings(call: ReturnType<typeof editorCalls>, spotId: string, refused: [unknown, string][]) {
+  for (const [bindings, message] of refused)
+    expect(await call('update_spot', { spotId, bindings }), JSON.stringify(bindings)).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [{ path: 'bindings', message }],
+    });
+}
+
 describe('spot bindings', () => {
   it("binds fields to the org's data sources, keeping the data as the fallback, and reads them back", async () => {
     const { call, version } = await setup('spots-bind');
@@ -159,12 +169,7 @@ describe('spot bindings', () => {
       [{ headline: { dataSourceId: 'news', path: 'entries.0.title' } }, 'news is a news feed, which has no entries.0.title (it has title, language, items)'],
       [{ headline: { dataSourceId: 'news', path: 'items.0.body' } }, 'news is a news feed, which has no items.0.body (it has title, language, items)'],
     ];
-    for (const [bindings, message] of refused)
-      expect(await call('update_spot', { spotId, bindings }), JSON.stringify(bindings)).toMatchObject({
-        ok: false,
-        error: 'invalid_input',
-        details: [{ path: 'bindings', message }],
-      });
+    await refusesBindings(call, spotId, refused);
     expect(await call('update_spot', { spotId, bindings: { headline: { dataSourceId: 'weather', path: 'a..b' } } })).toMatchObject({
       ok: false,
       error: 'invalid_input',
@@ -200,12 +205,7 @@ describe('spot bindings', () => {
       [{ items: { ...items, table: { columns: {} } } }, 'binding for "items" needs a column for "name"'],
       [{ headline: { dataSourceId: 'menu', path: 'items.0' } }, 'menu is a table, which has no items.0 (it has columns, rows)'],
     ];
-    for (const [bindings, message] of refused)
-      expect(await call('update_spot', { spotId, bindings }), JSON.stringify(bindings)).toMatchObject({
-        ok: false,
-        error: 'invalid_input',
-        details: [{ path: 'bindings', message }],
-      });
+    await refusesBindings(call, spotId, refused);
     // A single field takes one cell by its path.
     expect(await ok(call('update_spot', { spotId, bindings: { items, headline: { dataSourceId: 'menu', path: 'rows.0.0' } } }))).toMatchObject({
       spot: { bindings: { headline: { dataSourceId: 'menu', path: 'rows.0.0' } } },

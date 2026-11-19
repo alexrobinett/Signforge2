@@ -1,12 +1,13 @@
 // The sync (M3-07): one periodic call carries the heartbeat and play counts up, and the desired
 // manifest, changed snapshots, a socket ticket, the server time and commands down.
-import { MANIFEST_SCHEMA, MAX_SYNC_REQUEST_BYTES, MAX_SYNC_SOURCES, type SyncRequest, type SyncResponse } from '@signforge/contract';
+import { MANIFEST_SCHEMA, MAX_SYNC_REQUEST_BYTES, MAX_SYNC_SOURCES, type SyncRequest } from '@signforge/contract';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mintCredential } from '../src/device/credential';
 import { parseHeartbeat } from '@signforge/tools';
 import { manifestKey } from '../src/r2';
+import { syncAs, syncBody } from './sync-client';
 
 const BASE = 'https://api.test/v1/device';
 const HOUR = '2026-11-17T09:00Z';
@@ -36,28 +37,8 @@ async function publish(
   await s.seed.scope.screens.setDesiredManifest(s.seed.screen, id);
 }
 
-const body = (over: Partial<SyncRequest> = {}): SyncRequest => ({
-  seq: 0,
-  epoch: 'ep1',
-  player: { version: '2.0.0', manifestSchemas: [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA], protocols: [1, 2] },
-  manifest: { filesMissing: 0 },
-  display: { on: true },
-  deviceTime: new Date().toISOString(),
-  clock: { offsetMs: 0, trusted: true },
-  playCounts: [],
-  snapshots: {},
-  ...over,
-});
-
-async function sync(s: Screen, req: SyncRequest): Promise<SyncResponse> {
-  const res = await exports.default.fetch(`${BASE}/sync`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${s.credential}`, 'content-type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-  expect(res.status).toBe(200);
-  return (await res.json()) as SyncResponse;
-}
+const body = syncBody;
+const sync = (s: Screen, req: SyncRequest) => syncAs(s.credential, req);
 
 const plays = async (s: Screen) =>
   (await s.seed.scope.playCounts.list({ from: HOUR_MS, to: HOUR_MS + 3_600_000, screenId: s.seed.screen })).map((c) => [c.spotId, c.plays, c.ms]);

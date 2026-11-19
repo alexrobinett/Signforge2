@@ -2,11 +2,11 @@
 // menu-board spot binds its items to a csv source, the poller reads the file through the guards,
 // the screen's sync carries the snapshot, and the player's own rule (player-core) fills the items.
 // No network: the file is served by stubbed guards, and the clock is a parameter.
-import { MANIFEST_SCHEMA, type Spot, type SyncRequest, type SyncResponse, templateKey, type TemplateManifest } from '@signforge/contract';
+import { MANIFEST_SCHEMA, type Spot, type SyncResponse, templateKey, type TemplateManifest } from '@signforge/contract';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { resolveSpotData } from '@signforge/player-core';
 import { ToolError } from '@signforge/tools';
-import { env, exports } from 'cloudflare:workers';
+import { env } from 'cloudflare:workers';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import menuBoard from '../../../templates/menu-board/template.json';
 import { feedUrlSealer } from '../src/data/cipher';
@@ -16,6 +16,7 @@ import { tableReader } from '../src/data/tables';
 import { mintCredential } from '../src/device/credential';
 import { manifestKey } from '../src/r2';
 import { Client, email, inOneLimiterWindow, testApp } from './client';
+import { syncAs, syncBody } from './sync-client';
 
 const NOW = Date.UTC(2026, 11, 1, 12);
 const MIN = 60_000;
@@ -96,26 +97,7 @@ beforeAll(async () => {
 
 const poll = (guards: FetchGuards, at: number) => pollDataSources(env, { now: at, guards });
 
-async function sync(held: Record<string, number> = {}): Promise<SyncResponse> {
-  const req: SyncRequest = {
-    seq: 0,
-    epoch: 'ep1',
-    player: { version: '2.0.0', manifestSchemas: [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA], protocols: [1, 2] },
-    manifest: { filesMissing: 0 },
-    display: { on: true },
-    deviceTime: new Date().toISOString(),
-    clock: { offsetMs: 0, trusted: true },
-    playCounts: [],
-    snapshots: held,
-  };
-  const res = await exports.default.fetch('https://api.test/v1/device/sync', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-  expect(res.status).toBe(200);
-  return res.json();
-}
+const sync = (held: Record<string, number> = {}) => syncAs(credential, syncBody({ snapshots: held }));
 
 /** What the screen draws for the spot, from the snapshots it holds. */
 const played = (snapshots: SyncResponse['snapshots'], at: number) =>
