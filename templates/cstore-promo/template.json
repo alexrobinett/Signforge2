@@ -1,6 +1,6 @@
 {
   "id": "cstore-promo",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "name": "C-Store Promo",
   "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
   "fields": {
