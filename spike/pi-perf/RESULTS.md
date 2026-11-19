@@ -397,6 +397,19 @@ Prepares over both sets and kits (ms, before / after): meeting-room (agenda) med
 
 No cost in frames: the ranges overlap run for run, and the one 83 ms frame was in set 1's second after run with no kit. Agenda's meeting room, the spot with the most rows, prepares about 20 ms slower, the canvas read per row; well within 500 ms. The other templates are within run-to-run noise. Nothing was skipped.
 
+## Table bindings: menu-board fed by a CSV (issue #84, 2026-11-19)
+
+menu-board 1.3.0's items from a table binding (the contract's `tableItems`: column mapping, a filter, cut to `maxItems`, run by the player as the spot prepares) against the same template with its items typed. A scratch copy of `examples/stress` with two spots: `menu-typed`, 12 typed items, and `menu-table`, bound to a `TableFeed` snapshot of 24 rows (2x `maxItems`; every third price a JSON number, written in the screen's locale), filtered to one section that every row is in, so 12 are drawn. This branch's player at a subdirectory of the rig, the content beside it with the snapshot at `data/menu-table.json`; HTTP cache cleared and the service worker bypassed before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`, 60 s per run after 10 s to settle. A screenshot confirmed 12 rows from the table on screen, and `__sf.dataRejected` stayed empty.
+
+| Spots | Transition | Runs | Overall | Playing | Loading next | Worst frame | Prepares (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| menu-typed | cut | 3 | 0.03-0.06% | 0.00-0.03% | 1.5-1.6% | 33 ms | 153-345, median 165 |
+| menu-table | cut | 3 | 0.03% | 0.00-0.03% | 0.0-1.6% | 33 ms | 151-235, median 164 |
+| menu-typed, photo-river | fade 600 | 2 | 0.14, 0.19% | 0.09, 0.06% | 2.9, 6.7% | 50, 67 ms | menu 165-375 |
+| menu-table, photo-river | fade 600 | 2 | 0.28, 0.11% | 0.12, 0.06% | 7.6, 2.8% | 50, 50 ms | menu 168-254 |
+
+Order alternated (cut: typed, table, table, typed, typed, table; fade: table first, then typed first). No cost: the ranges overlap run for run, and mapping 24 rows adds nothing visible to a prepare (medians 164 and 165 ms). Only `maxItems` rows reach the template, so a longer file costs the player one pass over its rows (the snapshot limit, 64 kB, bounds it). The one 67 ms frame was in a typed run. Nothing was skipped.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
