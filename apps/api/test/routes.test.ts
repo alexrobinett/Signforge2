@@ -228,6 +228,7 @@ describe('POST /api/tools/:name', () => {
       'get_spot_preview',
       'get_template',
       'list_assets',
+      'list_audit_log',
       'list_brand_kits',
       'list_data_sources',
       'list_fonts',
