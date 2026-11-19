@@ -13,9 +13,8 @@ import {
   type Spot,
   type TemplateMessage,
 } from '@signforge/contract';
-import { READY_TIMEOUT_MS, resolveSpotData, TEMPLATE_SANDBOX } from '@signforge/player-core';
+import { containedFrames, READY_TIMEOUT_MS, resolveSpotData, TEMPLATE_SANDBOX } from '@signforge/player-core';
 import { clock, now } from './clock';
-import { containedFrames } from './contain';
 import { liveData, reportRejected } from './data';
 import { getFile } from './source';
 
@@ -224,7 +223,7 @@ export class Slot {
     // policy, not the template's, also decides where the template's frame may navigate: nowhere
     // (`frame-src` falls back to `default-src 'none'`). A template that tries is replaced by an
     // error page, without a request. It runs only the bundle's own scripts, each of which first
-    // takes WebRTC away from its realm (src/contain.ts). See "Template containment" in docs/architecture.md.
+    // takes WebRTC away from its realm (`containedFrames` in packages/player-core). See "Template containment" in docs/architecture.md.
     const wrapperFrame = document.createElement('iframe');
     // A frame needs a title for assistive technology (WCAG 4.1.2); the editor's preview is read by one.
     wrapperFrame.title = spot.name;

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { containedFrames } from './contain';
+import { containedFrames } from './frame';
 
 const hash = (text: string) => `'sha256-${createHash('sha256').update(text).digest('base64')}'`;
 const policyOf = (wrapper: string) => /content="([^"]*)"/.exec(wrapper)![1]!;

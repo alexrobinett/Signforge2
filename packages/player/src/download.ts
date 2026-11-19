@@ -2,7 +2,7 @@
  * Fetching one content file into Cache Storage. Shared by the download worker and, where there
  * are no workers, the store itself.
  */
-import { Sha256 } from './sha256';
+import { Sha256 } from '@signforge/player-core';
 
 /**
  * The server refused the screen's credential. Not offline: the server answered. The player treats
