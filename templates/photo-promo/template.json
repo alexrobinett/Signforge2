@@ -1,6 +1,6 @@
 {
   "id": "photo-promo",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "name": "Photo Promo",
   "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
   "fields": {

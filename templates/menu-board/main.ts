@@ -1,4 +1,5 @@
 import { defineTemplate } from '@signforge/template-sdk';
+import { readableOn } from '@signforge/template-sdk/contrast';
 
 interface Item {
   name: string;
@@ -10,8 +11,12 @@ interface Item {
 defineTemplate({
   prepare(ctx) {
     const stage = document.getElementById('stage')!;
-    document.documentElement.style.setProperty('--accent', String(ctx.data.accent));
+    const accent = String(ctx.data.accent);
+    document.documentElement.style.setProperty('--accent', accent);
     if (ctx.data.theme === 'light') stage.classList.add('light');
+    // The tags' fill is the spot's accent, which need not be the kit's, and their text without a
+    // kit is the theme's background, light in the light theme: the text is chosen against the fill.
+    stage.style.setProperty('--on-accent', readableOn(accent, getComputedStyle(stage).getPropertyValue('--on-accent')));
     const items = (ctx.data.items as Item[]) ?? [];
     // A short menu reads better as one centred column.
     if (items.length <= 5) stage.classList.add('one-col');
