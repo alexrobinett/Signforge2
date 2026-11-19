@@ -397,6 +397,25 @@ Prepares over both sets and kits (ms, before / after): meeting-room (agenda) med
 
 No cost in frames: the ranges overlap run for run, and the one 83 ms frame was in set 1's second after run with no kit. Agenda's meeting room, the spot with the most rows, prepares about 20 ms slower, the canvas read per row; well within 500 ms. The other templates are within run-to-run noise. Nothing was skipped.
 
+## The sun and moon cross the sky (issue #70, 2026-11-18)
+
+weather 1.3.0 places the sun or moon on an arc from sunrise, sunset and `now()`, mixes the day and night skies, and adds a dawn or dusk glow, the moon's phase (a `clip-path`) and stars. Four spots with fixed data, with sunrise and sunset set around the time of the run: clear midday, partly cloudy 5 min after sunset (glow, clouds, faint stars), clear night (moon, stars), rain 5 min after sunset (glow muted, rain tiles). Before: master's weather 1.2.1 with `isDay` instead. This branch's player at a subdirectory of the rig, cut, 45 s per spot after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order before, after, after, before. Portrait by rotating the output (`wlr-randr --transform 90`; cage resizes Chromium to 1080×1920), restored afterwards.
+
+| Orientation | Spot | Overall (before; after) | Playing (before; after) | Worst frame | Prepares, ms (before; after) |
+| --- | --- | --- | --- | --- | --- |
+| Landscape | midday | 0.11, 0.22%; 0.15, 0.22% | 0.00; 0.00% | 33-50; 33-50 ms | 164-182; 166-185 |
+| | dusk | 0.19, 0.19%; 0.15, 0.15% | 0.00; 0.00% | 33; 33 ms | 168-206; 167-183 |
+| | night | 0.00, 0.07%; 0.04, 0.00% | 0.00; 0.00% | 17-33; 17-33 ms | 147-151; 151-154 |
+| | rain at dusk | 1.96, 1.67%; 1.67, 1.63% | 1.23, 1.00; 0.88, 0.96% | 133; 117 ms | 372-500; 385-473 |
+| Portrait | midday | 0.67, 0.59%; 0.70, 0.67% | 0.27, 0.23; 0.30, 0.30% | 67; 67 ms | 238-285; 239-286 |
+| | dusk | 0.59, 0.67%; 0.67, 0.67% | 0.26, 0.34; 0.30, 0.38% | 67; 67 ms | 211-254; 241-275 |
+| | night | 0.19, 0.22%; 0.19, 0.15% | 0.15, 0.19; 0.15, 0.11% | 33; 33 ms | 151-183; 164-535¹ |
+| | rain at dusk | 5.74, 5.33%; 5.77, 5.29% | 4.72, 4.46; 4.55, 4.50% | 100; 83-117 ms | 458-893; 459-904 |
+
+No extra dropped frames and no longer frames. Nothing was skipped. ¹ One of 8 prepares; 12 more, alternating (30 s each), were 164-181 ms after and 150-166 ms before. Rain in portrait drops 4.5-5.7% before and after alike; it is over the 1% budget already in 1.2.1 and is not changed here.
+
+The first version drew the stars as twelve full-screen repeating `radial-gradient` layers, and the stars and glow through `opacity`. In portrait it played dusk and night with a 167-200 ms frame at every play (1.4-1.9% dropped, against 0.3-0.6%), and landscape dusk dropped 0.94% while playing (0.00%). Those layers are rastered as the frame comes on screen. Stars as 60 small dots, and the glow's strength in its gradient stops' alpha, removed it (the table).
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
