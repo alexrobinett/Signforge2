@@ -22,7 +22,7 @@ export interface ConnectorDeps {
 }
 
 /** workerd's `fetch` throws "Illegal invocation" when called as a method of another object, so it is wrapped. */
-const workerFetch: typeof fetch = (input, init) => fetch(input, init);
+export const workerFetch: typeof fetch = (input, init) => fetch(input, init);
 
 export const connectorDeps = (env: Env): ConnectorDeps => ({ adapters: ADAPTERS.flatMap((make) => make(env) ?? []), fetch: workerFetch });
 

@@ -20,7 +20,7 @@
 import { canonicalJson, MAX_SNAPSHOT_BYTES, snapshotBytes } from '@signforge/contract';
 import { claimDueDataSources, type DataSourceRow, type OrgScope, published, scoped } from '@signforge/db';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
-import { type ConnectorDeps, connectorDeps } from '../connectors';
+import { type ConnectorDeps, connectorDeps, workerFetch } from '../connectors';
 import { type Grant, type ProviderAdapter, ProviderError, type ProviderFetch, providerFetch } from '../connectors/adapter';
 import { openGrant, sealGrant } from '../connectors/vault';
 import { openFeedUrl } from './cipher';
@@ -66,8 +66,6 @@ class PollFailure extends Error {
   }
 }
 
-/** workerd's `fetch` throws "Illegal invocation" when called as a method of another object, so the guards get a bare function. */
-const workerFetch: typeof fetch = (input, init) => fetch(input, init);
 const workerGuards = (): FetchGuards => ({ fetch: workerFetch, resolve: dohResolver(workerFetch) });
 
 /** What one poll run reads with: the clock, the feed guards, the providers, and the grants this run refreshed. */
