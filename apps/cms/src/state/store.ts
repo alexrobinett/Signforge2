@@ -12,13 +12,23 @@ import { connectCommandMenu, createCommandMenuSlice, type CommandMenuSlice } fro
 import { connectUi, createUiSlice, type UiSlice } from './ui';
 import { createAssetsSlice, type AssetsSlice } from './assets';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
+import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
 import { createScreensSlice, type ScreensSlice } from './screens';
 import { createSettingsSlice, type SettingsSlice } from './settings';
 import { createSignInSlice, type SignInSlice } from './sign-in';
 import { createSpotEditorSlice, type SpotEditorSlice } from './spot-editor';
 import { createSpotSourceSlice, type SpotSourceSlice } from './spot-source';
 
-export type AppState = UiSlice & SignInSlice & OrgsSlice & ScreensSlice & AssetsSlice & CommandMenuSlice & SettingsSlice & SpotEditorSlice & SpotSourceSlice;
+export type AppState = UiSlice &
+  SignInSlice &
+  OrgsSlice &
+  ScreensSlice &
+  AssetsSlice &
+  CommandMenuSlice &
+  SettingsSlice &
+  SpotEditorSlice &
+  PlaylistEditorSlice &
+  SpotSourceSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -42,6 +52,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createSettingsSlice(set, get, deps),
     ...createSpotEditorSlice(set, get, deps),
     ...createSpotSourceSlice(set, get, deps),
+    ...createPlaylistEditorSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);

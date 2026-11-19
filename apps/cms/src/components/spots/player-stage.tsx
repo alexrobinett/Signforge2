@@ -2,8 +2,9 @@
  * `PlayerStage` (docs/proposals/cms-ui.md, canvas boards Spot editor A and "Stage is the player"):
  * the real player build in an iframe, at the screen's true resolution, scaled to fit or shown at
  * 100%. The CMS serves the build at /player/ (apps/cms README); the store's actions post it the
- * draft (src/state/spot-editor.ts). Orientation, scale, brand kit and, for a spot bound to data
- * sources, live data or the fallback are in the URL.
+ * draft (src/state/spot-editor.ts): a spot's, or a playlist's from the playlist editor.
+ * Orientation, scale, brand kit and, for a spot bound to data sources, live data or the fallback
+ * are in the URL.
  */
 import { SCREEN_BOX } from '@signforge/contract';
 import { TriangleAlertIcon } from 'lucide-react';
@@ -13,12 +14,28 @@ import { useHydrated } from '~/lib/hydrated';
 import type { BrandKitView } from '~/lib/spots';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
-import type { StageTarget } from '~/state/spot-editor';
+import type { StageShows } from '~/state/spot-editor';
 
-type Orientation = 'landscape' | 'portrait';
 type Scale = 'fit' | 'actual';
 
 const PLAYER_URL = '/player/index.html?source=preview';
+
+/** The stage's settings in an editor's URL: `?o=portrait&scale=actual&kit=<id>&data=fallback`. */
+export interface StageSearch {
+  o?: 'portrait';
+  scale?: 'actual';
+  kit?: string;
+  /** A spot's stage plays its fallback values instead of its sources' data. */
+  data?: 'fallback';
+}
+
+/** An editor route's `validateSearch`: the stage's settings, anything else dropped. */
+export const stageSearch = (s: Record<string, unknown>): StageSearch => ({
+  ...(s.o === 'portrait' ? { o: 'portrait' as const } : {}),
+  ...(s.scale === 'actual' ? { scale: 'actual' as const } : {}),
+  ...(typeof s.kit === 'string' && s.kit ? { kit: s.kit } : {}),
+  ...(s.data === 'fallback' ? { data: 'fallback' as const } : {}),
+});
 
 function Toggle<T extends string>({
   label,
@@ -54,23 +71,20 @@ function Toggle<T extends string>({
 
 export function PlayerStage({
   target,
-  scale,
   kits,
   kitId,
-  onOrientation,
-  onScale,
-  onKit,
-  onLive,
+  search,
+  onSearch,
+  bound = false,
 }: {
-  target: Omit<StageTarget, 'frame'>;
-  scale: Scale;
+  target: StageShows;
   kits: BrandKitView[];
   kitId: string | null;
-  onOrientation: (o: Orientation) => void;
-  onScale: (s: Scale) => void;
-  onKit: (id: string) => void;
-  /** For a spot bound to data sources: switches the stage between their data and the fallback. */
-  onLive?: (live: boolean) => void;
+  /** The stage's settings, from the editor's URL; `onSearch` changes them there. */
+  search: StageSearch;
+  onSearch: (next: Partial<StageSearch>) => void;
+  /** A spot bound to data sources: the stage offers its data or its fallback values. */
+  bound?: boolean;
 }) {
   const attach = useAppStore((s) => s.attachStage);
   const measure = useAppStore((s) => s.measureStage);
@@ -80,9 +94,14 @@ export function PlayerStage({
   const playing = useAppStore((s) => s.spotEditor.playing);
   // The player says once that it is listening; a frame in the server's HTML could say it before the store hears.
   const hydrated = useHydrated();
-  const { orgId, spotId, orientation, templateVersionId, brandKitId, live } = target;
+  const { orgId, orientation, brandKitId } = target;
+  const spotId = 'spotId' in target ? target.spotId : undefined;
+  const templateVersionId = 'spotId' in target ? target.templateVersionId : undefined;
+  const playlistId = 'playlistId' in target ? target.playlistId : undefined;
+  const fallback = search.data === 'fallback';
   const size = SCREEN_BOX[orientation];
   const fit = box ? Math.min(box.w / size.w, box.h / size.h, 1) : 0;
+  const scale: Scale = search.scale ?? 'fit';
   const shown = scale === 'fit' ? fit : 1;
 
   // The frame and what it shows, handed to the store whenever either changes.
@@ -90,10 +109,11 @@ export function PlayerStage({
     (el: HTMLIFrameElement | null) => {
       const frame = el?.contentWindow;
       if (!frame) return;
-      attach({ frame, orgId, spotId, orientation, templateVersionId, brandKitId, live });
+      const shows = playlistId !== undefined ? { playlistId } : { spotId: spotId ?? '', templateVersionId, fallback };
+      attach({ frame, orgId, orientation, brandKitId, ...shows });
       return () => attach(null);
     },
-    [attach, orgId, spotId, orientation, templateVersionId, brandKitId, live],
+    [attach, orgId, spotId, playlistId, orientation, templateVersionId, brandKitId, fallback],
   );
   // The room the stage has, for scaling to fit.
   const roomRef = useCallback(
@@ -116,7 +136,7 @@ export function PlayerStage({
             { value: 'landscape', label: 'Landscape' },
             { value: 'portrait', label: 'Portrait' },
           ]}
-          onChange={onOrientation}
+          onChange={(o) => onSearch({ o: o === 'portrait' ? 'portrait' : undefined })}
         />
         <Toggle
           label="Scale"
@@ -125,23 +145,28 @@ export function PlayerStage({
             { value: 'fit', label: 'Fit' },
             { value: 'actual', label: '100%' },
           ]}
-          onChange={onScale}
+          onChange={(v) => onSearch({ scale: v === 'actual' ? 'actual' : undefined })}
         />
-        {onLive && (
+        {bound && (
           <Toggle
             label="Data"
-            value={live ? 'live' : 'fallback'}
+            value={fallback ? 'fallback' : 'live'}
             options={[
               { value: 'live', label: 'Live data' },
               { value: 'fallback', label: 'Fallback' },
             ]}
-            onChange={(v) => onLive(v === 'live')}
+            onChange={(v) => onSearch({ data: v === 'live' ? undefined : 'fallback' })}
           />
         )}
         {kits.length > 0 && (
           <span className="flex items-center gap-2 text-sm text-[#d4d4d4]">
             <label htmlFor="stage-kit">Brand kit</label>
-            <NativeSelect id="stage-kit" value={kitId ?? ''} onChange={(e) => onKit(e.target.value)} className="min-w-40 text-[#101828] dark:text-foreground">
+            <NativeSelect
+              id="stage-kit"
+              value={kitId ?? ''}
+              onChange={(e) => onSearch({ kit: e.target.value })}
+              className="min-w-40 text-[#101828] dark:text-foreground"
+            >
               {kits.map((k) => (
                 <option key={k.id} value={k.id}>
                   {k.name}
@@ -185,7 +210,7 @@ export function PlayerStage({
         {holding ? (
           <span className="inline-flex items-center gap-2">
             <TriangleAlertIcon className="size-3.5 text-[#fdb022]" aria-hidden />
-            Holding the last valid frame until the marked field is fixed.
+            {playlistId !== undefined ? 'Holding the last frame the player could show.' : 'Holding the last valid frame until the marked field is fixed.'}
           </span>
         ) : stageError ? (
           <span className="inline-flex items-center gap-2">
@@ -195,7 +220,7 @@ export function PlayerStage({
         ) : (
           <span>{playing ? 'Drawn by the player your screens run.' : 'Starting the player…'}</span>
         )}
-        <span>Updates as you type.</span>
+        <span>{playlistId !== undefined ? 'Plays the loop. Updates as you edit.' : 'Updates as you type.'}</span>
       </p>
     </section>
   );

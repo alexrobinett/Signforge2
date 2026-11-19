@@ -88,6 +88,7 @@ describe('requests', () => {
   let assetId: string;
   let brandKitId: string;
   let spotId: string;
+  let playlistId: string;
   let baseTemplate: string;
   let baseVersion: string;
 
@@ -109,6 +110,7 @@ describe('requests', () => {
       })
     ).id;
     spotId = (await scoped(env.DB, org.id).spots.insert({ name: 'Site', kind: 'url', durationMs: 10_000, url: 'https://example.com' })).id;
+    playlistId = (await scoped(env.DB, org.id).playlists.insert({ name: 'Main', transitionJson: JSON.stringify({ type: 'cut' }) })).id;
     // get_data_source's example names `weather`.
     await scoped(env.DB, org.id).dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
     // The same session, on a D1 binding that records writes.
@@ -147,7 +149,7 @@ describe('requests', () => {
       writes.length = 0;
       const example = tool.example as Record<string, unknown>;
       // Each id the example names, as one of this org's (or a base template's).
-      const orgIds: Record<string, string> = { screenId, templateId: baseTemplate, templateVersionId: baseVersion, assetId, brandKitId, spotId };
+      const orgIds: Record<string, string> = { screenId, templateId: baseTemplate, templateVersionId: baseVersion, assetId, brandKitId, spotId, playlistId };
       const input = Object.fromEntries(Object.entries(example).map(([k, v]) => [k, orgIds[k] ?? v]));
       const res = await owner.tool(tool.name, input);
       // find_places asks a third party, here a closed port (vitest.config.ts): only that it writes nothing counts.
@@ -233,26 +235,8 @@ describe('POST /api/tools/:name', () => {
   it('lists what the caller may use', async () => {
     const names = async (c: Client) => ((await (await c.get('/api/tools')).json()) as { tools: { name: string }[] }).tools.map((x) => x.name);
     expect(await names(owner)).toHaveLength(registry.size);
-    expect((await names(viewer)).sort()).toEqual([
-      'find_places',
-      'get_asset',
-      'get_brand_kit',
-      'get_data_source',
-      'get_org_settings',
-      'get_screen',
-      'get_spot',
-      'get_spot_preview',
-      'get_template',
-      'list_assets',
-      'list_brand_kits',
-      'list_connections',
-      'list_data_sources',
-      'list_fonts',
-      'list_groups',
-      'list_screen_status',
-      'list_screens',
-      'list_spots',
-      'list_templates',
-    ]);
+    // A viewer gets the tools a viewer may run: the read tools (packages/tools test/dispatch.test.ts names them).
+    const reads = [...registry.values()].filter((t) => t.minRole === 'viewer').map((t) => t.name);
+    expect((await names(viewer)).sort()).toEqual(reads.sort());
   });
 });

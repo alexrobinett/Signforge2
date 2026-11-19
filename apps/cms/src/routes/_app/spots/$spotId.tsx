@@ -8,14 +8,12 @@
  */
 import { safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, Link, notFound } from '@tanstack/react-router';
-import { ChevronLeftIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { createFileRoute, notFound } from '@tanstack/react-router';
 import { AssetPicker } from '~/components/assets/asset-picker';
+import { EditorHeader, EditorSection, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { FieldForm } from '~/components/spots/field-form';
-import { PlayerStage } from '~/components/spots/player-stage';
+import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
-import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
@@ -25,21 +23,8 @@ import { draftOf, publishWord, seconds, versionsById, type SpotDraft, type SpotV
 import { assetsQuery, brandKitsQuery, dataSourceQuery, dataSourcesQuery, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 
-interface Search {
-  o?: 'portrait';
-  scale?: 'actual';
-  kit?: string;
-  /** The stage plays the fallback values instead of the bound sources' data. */
-  data?: 'fallback';
-}
-
 export const Route = createFileRoute('/_app/spots/$spotId')({
-  validateSearch: (s: Record<string, unknown>): Search => ({
-    ...(s.o === 'portrait' ? { o: 'portrait' as const } : {}),
-    ...(s.scale === 'actual' ? { scale: 'actual' as const } : {}),
-    ...(typeof s.kit === 'string' && s.kit ? { kit: s.kit } : {}),
-    ...(s.data === 'fallback' ? { data: 'fallback' as const } : {}),
-  }),
+  validateSearch: stageSearch,
   loaderDeps: ({ search }) => ({ o: search.o, kit: search.kit }),
   loader: async ({ context: { queryClient }, params, deps, parentMatchPromise }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
@@ -64,23 +49,6 @@ export const Route = createFileRoute('/_app/spots/$spotId')({
   head: () => ({ meta: [{ title: 'Spot · SignForge' }] }),
   component: SpotEditor,
 });
-
-/** How the save is going, in the header's words. */
-function saveWord(status: string, savedAt: number | null) {
-  if (status === 'saving') return 'Saving…';
-  if (status === 'invalid') return 'Not saved: fix the marked field';
-  if (status === 'unsaved') return 'Unsaved changes';
-  return savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'No changes yet';
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <fieldset className="flex flex-col gap-3.5">
-      <legend className="mb-3 text-xs font-semibold tracking-[0.06em] text-muted-foreground uppercase">{title}</legend>
-      {children}
-    </fieldset>
-  );
-}
 
 function SpotEditor() {
   const orgId = useOrgId();
@@ -116,41 +84,18 @@ function SpotEditor() {
   const durationBad = range ? draft.durationMs < range.minMs || draft.durationMs > range.maxMs : draft.durationMs < 1000;
   const image = assets.find((a) => a.id === draft.assetId);
   const what = spot.kind === 'template' ? (version?.manifest.name ?? 'Template') : spot.kind === 'url' ? 'Web page' : spot.kind === 'image' ? 'Image' : 'Video';
-  const setSearch = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
+  const setSearch = (next: Partial<StageSearch>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
 
   return (
     <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-xl border">
-      <header className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b bg-card px-4 py-2.5 sm:px-6">
-        <Link to="/spots" className="flex items-center gap-1.5 py-2.5 text-muted-foreground hover:text-foreground">
-          <ChevronLeftIcon className="size-4" aria-hidden />
-          Spots
-        </Link>
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <h1 className="truncate text-[17px] font-semibold">{draft.name || spot.name}</h1>
-          <p className="text-xs text-muted-foreground" aria-live="polite">
-            {what} · {saveWord(status, savedAt)} · {publishWord(spot)}
-          </p>
-        </div>
-        {canManage && (
-          <div className="ml-auto flex gap-2">
-            <Button variant="outline" disabled={status === 'saved' || status === 'saving' || stale} onClick={() => void save()}>
-              Save draft
-            </Button>
-          </div>
-        )}
-      </header>
-      {(stale || saveError) && (
-        <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
-          <AlertDescription className="flex flex-wrap items-center gap-3">
-            {saveError}
-            {stale && (
-              <Button size="sm" variant="outline" onClick={() => void reload()}>
-                Reload
-              </Button>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
+      <EditorHeader
+        back={{ to: '/spots', label: 'Spots' }}
+        title={draft.name || spot.name}
+        about={`${what} · ${saveWord(status, savedAt)} · ${publishWord(spot)}`}
+      >
+        {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save()} />}
+      </EditorHeader>
+      <SaveAlert error={saveError} stale={stale} onReload={() => void reload()} />
       <div className="flex flex-1 flex-wrap items-stretch">
         <form
           aria-label="Spot fields"
@@ -171,7 +116,7 @@ function SpotEditor() {
               />
             </div>
             {spot.kind === 'template' && version?.manifest.live && (
-              <Section title="Source">
+              <EditorSection title="Source">
                 <SourceSection
                   orgId={orgId}
                   spot={spot}
@@ -182,18 +127,18 @@ function SpotEditor() {
                   canManage={canManage}
                   onChange={change}
                 />
-              </Section>
+              </EditorSection>
             )}
             {spot.kind === 'template' &&
               (version ? (
-                <Section title="Content">
+                <EditorSection title="Content">
                   <FieldForm fields={typedFields(version.manifest)} draft={draft} assets={assets} onChange={change} />
-                </Section>
+                </EditorSection>
               ) : (
                 <p className="text-sm text-muted-foreground">This spot's template is not available to this organization.</p>
               ))}
             {(spot.kind === 'image' || spot.kind === 'video') && (
-              <Section title={spot.kind === 'image' ? 'Image' : 'Video'}>
+              <EditorSection title={spot.kind === 'image' ? 'Image' : 'Video'}>
                 <div className="flex items-center gap-3">
                   <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-[#0e0f12]">
                     {image && <img src={sessionBlobPath(image.sha256)} alt="" className="size-full object-cover" />}
@@ -215,10 +160,10 @@ function SpotEditor() {
                     <option value="contain">Show it whole (bars at the sides)</option>
                   </NativeSelect>
                 </div>
-              </Section>
+              </EditorSection>
             )}
             {spot.kind === 'url' && (
-              <Section title="Web page">
+              <EditorSection title="Web page">
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="spot-url" className="font-medium">
                     Address
@@ -236,9 +181,9 @@ function SpotEditor() {
                     {safeUrl(draft.url) ? 'An https page, shown full screen.' : 'The address must start with https://.'}
                   </p>
                 </div>
-              </Section>
+              </EditorSection>
             )}
-            <Section title="Timing">
+            <EditorSection title="Timing">
               <div className="flex items-center justify-between gap-3">
                 <label htmlFor="spot-duration" className="font-medium">
                   Duration
@@ -265,19 +210,17 @@ function SpotEditor() {
                   ? `Seconds on screen each time the playlist reaches it: ${seconds(range.minMs)} to ${seconds(range.maxMs)}.`
                   : 'Seconds on screen each time the playlist reaches it.'}
               </p>
-            </Section>
+            </EditorSection>
           </fieldset>
         </form>
         <div className="flex min-w-0 flex-[999_1_560px] flex-col">
           <PlayerStage
-            target={{ orgId, spotId, orientation, templateVersionId, brandKitId: search.kit, live: search.data !== 'fallback' }}
-            scale={search.scale ?? 'fit'}
+            target={{ orgId, spotId, orientation, templateVersionId, brandKitId: search.kit }}
             kits={brandKits}
             kitId={preview.brandKitId}
-            onOrientation={(o) => setSearch({ o: o === 'portrait' ? 'portrait' : undefined })}
-            onScale={(s) => setSearch({ scale: s === 'actual' ? 'actual' : undefined })}
-            onKit={(kit) => setSearch({ kit })}
-            onLive={Object.keys(draft.bindings).length ? (on) => setSearch({ data: on ? undefined : 'fallback' }) : undefined}
+            search={search}
+            onSearch={setSearch}
+            bound={Object.keys(draft.bindings).length > 0}
           />
         </div>
       </div>

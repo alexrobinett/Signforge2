@@ -12,6 +12,7 @@ import { connectionTools } from './connections';
 import { dataSourceTools } from './data-sources';
 import { groupTools } from './groups';
 import { pairingTools } from './pairing';
+import { playlistTools } from './playlists';
 import { publishTools } from './publish';
 import { screenTools } from './screens';
 import { settingsTools } from './settings';
@@ -33,6 +34,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...connectionTools,
   ...settingsTools,
   ...spotTools,
+  ...playlistTools,
 ];
 export const PLATFORM_TOOLS: readonly AnyTool<PlatformScope>[] = [...platformTemplateTools];
 

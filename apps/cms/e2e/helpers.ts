@@ -156,7 +156,7 @@ export async function stageShows(page: Page, text: string) {
   return false;
 }
 
-/** A tool's output, called as the page's member; fails the test on a refusal. */
+/** Call a tool as the signed-in member, as the CMS's pages do, and expect it to succeed. */
 export async function tool(page: Page, name: string, input: unknown) {
   const res = await page.request.post(`/api/tools/${name}`, { data: input });
   expect(res.status(), await res.text()).toBe(200);
@@ -175,4 +175,12 @@ export function d1(command: string) {
     },
   );
   expect(run.status, run.stderr).toBe(0);
+}
+
+/** As a member with no org yet: make one called `name`, as the first page asks, and land on it. */
+export async function createOrg(page: Page, name: string) {
+  await page.goto('/');
+  await fillUntilEnabled(page, 'Organization name', name, 'Create organization');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
 }
