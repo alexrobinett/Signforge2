@@ -12,6 +12,12 @@ import { defineTool, ToolError } from './tool';
 
 const ACTOR_KINDS = ['user', 'agent', 'device', 'system'] as const;
 
+/**
+ * Membership changes whose detail names the invitee by email. Better Auth lets only owners list
+ * invitations, so only an owner gets the email here, or finds the row by it.
+ */
+const INVITATIONS = ['invite_member', 'cancel_invitation', 'reject_invitation'];
+
 const entryOutput = z.object({
   at: z.number().describe('When, in ms since the epoch'),
   actor: z.object({
@@ -29,7 +35,7 @@ const entryOutput = z.object({
 const listAuditLog = defineTool({
   name: 'list_audit_log',
   description:
-    'List the changes made in the organization, newest first, a page at a time: who made each (a member, an agent, a screen or the system) and through what, the action, its target and what it was given, with secrets redacted. Filter by actor, action, target, time and text. Reads are not recorded. Returns { entries, next }; pass next as cursor, with the same filters, for older entries.',
+    "List the changes made in the organization, newest first, a page at a time: who made each (a member, an agent, a screen or the system) and through what, the action, its target and what it was given, with secrets redacted (and an invitee's email, except for owners). Filter by actor, action, target, time and text. Reads are not recorded. Returns { entries, next }; pass next as cursor, with the same filters, for older entries.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -50,8 +56,9 @@ const listAuditLog = defineTool({
   }),
   output: z.object({ entries: z.array(entryOutput), next: nextOutput }),
   example: {},
-  handler: async ({ org, input }) => {
+  handler: async ({ org, input, role }) => {
     const { actor, target, action, from, to, query } = input;
+    const owner = role === 'owner';
     const { rows, next } = await keysetPage(
       input,
       (after, limit) =>
@@ -66,16 +73,21 @@ const listAuditLog = defineTool({
           from,
           to,
           query,
+          hideDetailOf: owner ? undefined : INVITATIONS,
         }),
       (e) => [e.at, e.seq, org.orgId],
     );
-    const entries = rows.map((e) => ({
-      at: e.at,
-      actor: { kind: e.actorKind, id: e.actorId, clientId: e.clientId },
-      action: e.action,
-      target: e.targetKind && e.targetId ? { kind: e.targetKind, id: e.targetId } : null,
-      detail: e.detailJson ? JSON.parse(e.detailJson) : {},
-    }));
+    const entries = rows.map((e) => {
+      const detail: Record<string, unknown> = e.detailJson ? JSON.parse(e.detailJson) : {};
+      if (!owner && INVITATIONS.includes(e.action)) delete detail.email;
+      return {
+        at: e.at,
+        actor: { kind: e.actorKind, id: e.actorId, clientId: e.clientId },
+        action: e.action,
+        target: e.targetKind && e.targetId ? { kind: e.targetKind, id: e.targetId } : null,
+        detail,
+      };
+    });
     return { entries, next };
   },
 });

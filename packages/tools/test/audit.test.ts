@@ -124,6 +124,36 @@ describe('list_audit_log', () => {
     expect(await all({ query: 'hunter2' })).toEqual([]);
   });
 
+  it("shows an invitee's email to owners only, who alone may list invitations", async () => {
+    const log = scoped(env.DB, o.orgId).auditLog;
+    const invited = 'sam.invitee@example.com';
+    for (const action of ['invite_member', 'cancel_invitation', 'reject_invitation'])
+      await log.append({
+        at: T + 3000,
+        actorKind: 'user',
+        actorId: 'usr_jun',
+        clientId: 'cms',
+        action,
+        targetKind: 'invitation',
+        targetId: 'inv_1',
+        detailJson: JSON.stringify({ email: invited, role: 'editor' }),
+      });
+    const invitations = { target: { kind: 'invitation' } };
+    expect((await all(invitations, 'owner')).map((e) => e.detail)).toEqual([
+      { email: invited, role: 'editor' },
+      { email: invited, role: 'editor' },
+      { email: invited, role: 'editor' },
+    ]);
+    expect((await all({ query: 'sam.invitee' }, 'owner')).map((e) => e.action).sort()).toEqual(['cancel_invitation', 'invite_member', 'reject_invitation']);
+    for (const role of ['editor', 'viewer'] as const) {
+      expect((await all(invitations, role)).map((e) => e.detail)).toEqual([{ role: 'editor' }, { role: 'editor' }, { role: 'editor' }]);
+      // Nor can a search find who was invited by guessing the address.
+      expect(await all({ query: 'sam.invitee' }, role)).toEqual([]);
+      // The rest of the row is still searchable.
+      expect(await all({ query: 'inv_1' }, role)).toHaveLength(3);
+    }
+  });
+
   it("refuses a cursor made in another org, so a member who switched org cannot page one org's log into another's", async () => {
     const other = await seedOrg(env.DB, 'audit-other-org');
     const first = await list({ limit: 1 });
