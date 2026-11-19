@@ -15,7 +15,7 @@
  */
 import type { ScreenManifest } from '@signforge/contract';
 import { toast } from 'sonner';
-import { playlistDraftOf, type PlaylistDraft, type PlaylistView } from '~/lib/playlists';
+import { playlistDraftOf, rowKeys, type PlaylistDraft, type PlaylistView } from '~/lib/playlists';
 import { compilePlaylistPreview, versionsById, type SpotPreview } from '~/lib/spots';
 import { callTool, isGone, playlistOf, saveRefused, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery } from '~/queries/playlists';
@@ -48,6 +48,10 @@ interface PlaylistEditorState {
   addQuery: string;
   /** The position of the spot being dragged, or null. */
   dragging: number | null;
+  /** After a move by its buttons: the moved row (`rowKeys`) and which of its buttons takes focus. */
+  focusAfterMove: { row: string; button: 'up' | 'down' } | null;
+  /** Where the last move by its buttons put the spot, for a polite live region. */
+  moved: string;
   newPlaylist: { open: boolean; name: string; pending: boolean; error: string | null; key: string | null };
   deleting: { open: boolean; pending: boolean; error: string | null };
 }
@@ -60,6 +64,10 @@ export interface PlaylistEditorSlice {
   /** Removes the spot at `index`, with a toast that puts it back. */
   removeSpotFromPlaylist: (orgId: string, playlist: PlaylistView, index: number, name: string) => void;
   moveSpotInPlaylist: (orgId: string, playlist: PlaylistView, from: number, to: number) => void;
+  /** A move by a row's up or down button: focus stays on the moved row, and its new place is said. */
+  moveSpotByButton: (orgId: string, playlist: PlaylistView, from: number, to: number, name: string) => void;
+  /** The moved row's button has taken focus. */
+  focusMoved: () => void;
   startDragSpot: (index: number | null) => void;
   /** Drops the dragged spot at `index`. */
   dropSpot: (orgId: string, playlist: PlaylistView, index: number) => void;
@@ -96,6 +104,8 @@ const initial: PlaylistEditorState = {
   adding: false,
   addQuery: '',
   dragging: null,
+  focusAfterMove: null,
+  moved: '',
   newPlaylist: closedNew(),
   deleting: closedDelete(),
 };
@@ -211,6 +221,18 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     },
 
     moveSpotInPlaylist: (orgId, playlist, from, to) => get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: moved(d.spotIds, from, to) })),
+
+    moveSpotByButton(orgId, playlist, from, to, name) {
+      get().moveSpotInPlaylist(orgId, playlist, from, to);
+      const order = current(playlist).spotIds;
+      const row = rowKeys(order)[to];
+      if (row === undefined) return;
+      // The pressed button, unless the row reached that end and it is disabled: then the other one.
+      const button = to === 0 ? 'down' : to === order.length - 1 ? 'up' : to < from ? 'up' : 'down';
+      editor((e) => ({ ...e, focusAfterMove: order.length > 1 ? { row, button } : null, moved: `${name}, ${to + 1} of ${order.length}` }));
+    },
+
+    focusMoved: () => editor((e) => ({ ...e, focusAfterMove: null })),
 
     startDragSpot: (dragging) => editor((e) => ({ ...e, dragging })),
 

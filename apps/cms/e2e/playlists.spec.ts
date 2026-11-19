@@ -111,11 +111,23 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
   await axe(page);
   await shots(page, '43-playlist-crossfade');
 
+  // By keyboard alone: focus stays on the moved spot's buttons, so two Enters move it two places,
+  // and where it went is said politely.
+  await page.getByRole('button', { name: 'Move Lunch up' }).focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(names).toEqual(['Opening', 'Lunch', 'Closing']);
+  await expect(page.getByRole('button', { name: 'Move Lunch up' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(names).toEqual(['Lunch', 'Opening', 'Closing']);
+  // At the top its up button is disabled: focus is on its down button instead.
+  await expect(page.getByRole('button', { name: 'Move Lunch down' })).toBeFocused();
+  await expect(page.getByRole('status').filter({ hasText: 'Lunch, 1 of 3' })).toBeAttached();
+
   // At phone width the form and the stage stack, and the move buttons reorder without a drag.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('region', { name: 'Live preview' })).toBeVisible();
-  await page.getByRole('button', { name: 'Move Lunch up' }).click();
-  await expect.poll(names).toEqual(['Opening', 'Lunch', 'Closing']);
+  await page.getByRole('button', { name: 'Move Closing up' }).click();
+  await expect.poll(names).toEqual(['Lunch', 'Closing', 'Opening']);
   await axe(page);
   await shots(page, '44-playlist-editor-phone');
   await page.setViewportSize({ width: 1280, height: 720 });

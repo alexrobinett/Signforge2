@@ -36,6 +36,19 @@ export const playlistDraftOf = (p: PlaylistView): PlaylistDraft => ({ name: p.na
  */
 export const loopMs = (spotIds: string[], spots: Map<string, SpotView>) => spotIds.reduce((ms, id) => ms + (spots.get(id)?.durationMs ?? 0), 0);
 
+/**
+ * A key for each row of the order: the spot and which of its occurrences this is (`spt_1#0`,
+ * `spt_1#1`), so a row keeps its key, and its focus, when it moves.
+ */
+export function rowKeys(spotIds: string[]): string[] {
+  const seen = new Map<string, number>();
+  return spotIds.map((id) => {
+    const n = seen.get(id) ?? 0;
+    seen.set(id, n + 1);
+    return `${id}#${n}`;
+  });
+}
+
 /** A length as a clock reads it: `45 s`, `2:05`, `1:02:05`. */
 export function clockLength(ms: number): string {
   const total = Math.round(ms / 1000);

@@ -10,6 +10,7 @@ import type { Transition } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ArrowDownIcon, ArrowUpIcon, GripVerticalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-react';
+import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { EditorHeader, EditorSection, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
@@ -26,7 +27,7 @@ import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { useCanManage, useOrgId } from '~/lib/live';
-import { clockLength, loopMs, playlistDraftOf, playlistPublishWord, type PlaylistView } from '~/lib/playlists';
+import { clockLength, loopMs, playlistDraftOf, playlistPublishWord, rowKeys, type PlaylistView } from '~/lib/playlists';
 import { seconds, spotWhat, versionsById } from '~/lib/spots';
 import { cn } from '~/lib/utils';
 import { playlistQuery } from '~/queries/playlists';
@@ -93,7 +94,19 @@ function PlaylistEditor() {
   const edit = useAppStore((s) => s.editPlaylist);
   const add = useAppStore((s) => s.addSpotToPlaylist);
   const remove = useAppStore((s) => s.removeSpotFromPlaylist);
-  const move = useAppStore((s) => s.moveSpotInPlaylist);
+  const move = useAppStore((s) => s.moveSpotByButton);
+  const focusAfterMove = useAppStore((s) => s.playlistEditor.focusAfterMove);
+  const moved = useAppStore((s) => s.playlistEditor.moved);
+  const focusMoved = useAppStore((s) => s.focusMoved);
+  // Given only to the moved row's button, as its ref: React moves the row's node, which loses focus.
+  const takeFocus = useCallback(
+    (el: HTMLButtonElement | null) => {
+      if (!el) return;
+      el.focus();
+      focusMoved();
+    },
+    [focusMoved],
+  );
   const startDrag = useAppStore((s) => s.startDragSpot);
   const drop = useAppStore((s) => s.dropSpot);
   const openAdd = useAppStore((s) => s.openAddSpots);
@@ -107,6 +120,7 @@ function PlaylistEditor() {
   const byId = new Map(spots.map((s) => [s.id, s]));
   const versions = versionsById(templates);
   const leftOut = new Map(leftOutList);
+  const rows = rowKeys(draft.spotIds);
   const counts = new Map<string, number>();
   for (const id of draft.spotIds) counts.set(id, (counts.get(id) ?? 0) + 1);
   const t = draft.transition;
@@ -166,16 +180,20 @@ function PlaylistEditor() {
             </div>
             <EditorSection title="Spots">
               <p className="text-sm text-muted-foreground">Each plays for its own duration, then the loop starts again. The spot on the stage is marked.</p>
+              <p role="status" className="sr-only">
+                {moved}
+              </p>
               {draft.spotIds.length > 0 && (
                 <ol aria-label="Spots in play order" className="flex flex-col gap-1.5">
                   {draft.spotIds.map((id, i) => {
+                    const row = rows[i] ?? id;
+                    const focusOn = (button: 'up' | 'down') => (focusAfterMove?.row === row && focusAfterMove.button === button ? takeFocus : undefined);
                     const spot = byId.get(id);
                     const name = spot?.name ?? 'A spot no longer in the library';
                     const why = leftOut.get(id);
                     return (
                       <li
-                        // biome-ignore lint/suspicious/noArrayIndexKey: a spot may be in the list twice; its place is what identifies the row.
-                        key={`${i}-${id}`}
+                        key={row}
                         draggable={canManage}
                         onDragStart={(e) => {
                           e.dataTransfer.effectAllowed = 'move';
@@ -190,7 +208,8 @@ function PlaylistEditor() {
                           drop(orgId, playlist, i);
                         }}
                         onDragEnd={() => startDrag(null)}
-                        aria-current={playingSpot === id || undefined}
+                        // The player names the spot, not its place: a spot listed twice is marked once, at its first place.
+                        aria-current={row === `${playingSpot}#0` || undefined}
                         className={cn(
                           'flex min-h-12 items-center gap-2 rounded-lg border bg-card py-1 pr-1 pl-2',
                           playingSpot === id && 'border-primary bg-accent',
@@ -220,7 +239,8 @@ function PlaylistEditor() {
                               size="icon"
                               className="size-9"
                               disabled={i === 0}
-                              onClick={() => move(orgId, playlist, i, i - 1)}
+                              ref={focusOn('up')}
+                              onClick={() => move(orgId, playlist, i, i - 1, name)}
                               aria-label={`Move ${name} up`}
                             >
                               <ArrowUpIcon aria-hidden />
@@ -231,7 +251,8 @@ function PlaylistEditor() {
                               size="icon"
                               className="size-9"
                               disabled={i === draft.spotIds.length - 1}
-                              onClick={() => move(orgId, playlist, i, i + 1)}
+                              ref={focusOn('down')}
+                              onClick={() => move(orgId, playlist, i, i + 1, name)}
                               aria-label={`Move ${name} down`}
                             >
                               <ArrowDownIcon aria-hidden />
