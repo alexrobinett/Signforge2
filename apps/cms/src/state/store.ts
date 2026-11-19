@@ -13,12 +13,22 @@ import { connectUi, createUiSlice, type UiSlice } from './ui';
 import { createAssetsSlice, type AssetsSlice } from './assets';
 import { createAuditSlice, type AuditSlice } from './audit';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
+import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
 import { createScreensSlice, type ScreensSlice } from './screens';
 import { createSettingsSlice, type SettingsSlice } from './settings';
 import { createSignInSlice, type SignInSlice } from './sign-in';
 import { createSpotEditorSlice, type SpotEditorSlice } from './spot-editor';
 
-export type AppState = UiSlice & SignInSlice & OrgsSlice & ScreensSlice & AssetsSlice & CommandMenuSlice & SettingsSlice & SpotEditorSlice & AuditSlice;
+export type AppState = UiSlice &
+  SignInSlice &
+  OrgsSlice &
+  ScreensSlice &
+  AssetsSlice &
+  CommandMenuSlice &
+  SettingsSlice &
+  SpotEditorSlice &
+  PlaylistEditorSlice &
+  AuditSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -41,6 +51,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createCommandMenuSlice(set, get, deps),
     ...createSettingsSlice(set, get, deps),
     ...createSpotEditorSlice(set, get, deps),
+    ...createPlaylistEditorSlice(set, get, deps),
     ...createAuditSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {

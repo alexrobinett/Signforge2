@@ -11,7 +11,7 @@ import { spotProblems } from '@signforge/compiler';
 import { safeUrl, templateKey, type FieldDef, type TemplateManifest } from '@signforge/contract';
 import { draftChanged, type OrgScope, type SpotRow } from '@signforge/db';
 import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name, orientation, version } from './fields';
+import { draftOutput, id, idempotencyKey, ifVersion, name, orientation, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
 import { loadOrg, previewInput } from './publishing';
 import { defineTool, notFound, ToolError } from './tool';
@@ -49,11 +49,7 @@ const spotOutput = z.object({
   fit: z.enum(FITS).nullable().describe('Image and video spots'),
   url: z.string().nullable().describe('URL spots'),
   version: version.describe('Moves on with every edit of the draft; pass it as ifVersion to update only what you read'),
-  published: z.boolean().describe('Whether a version of it has been published'),
-  draftChanged: z.boolean().describe('Whether the draft differs from what is published (always, before the first publish)'),
-  publishedAt: z.number().nullable(),
-  createdAt: z.number(),
-  updatedAt: z.number(),
+  ...draftOutput,
 });
 export type SpotView = z.infer<typeof spotOutput>;
 const spotResult = z.object({ spot: spotOutput });

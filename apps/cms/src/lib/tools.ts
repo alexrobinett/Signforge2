@@ -4,6 +4,7 @@
  * tool's own message, written to be shown as it is.
  */
 import type { AuditPage } from './audit';
+import type { PlaylistView } from './playlists';
 import type { SpotView } from './spots';
 
 class ToolCallError extends Error {
@@ -56,6 +57,13 @@ export const isStale = (err: unknown) =>
 /** A tool's refusal as a sentence for the page. */
 export const toolMessage = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');
 
+/** Whether a refusal says the row is gone: deleted, by someone else or in another tab. */
+export const isGone = (err: unknown) => err instanceof ToolCallError && err.code === 'not_found';
+
+/** An editor's state after a refused save: `stale` when someone else changed the row since, which the editor offers to reload. */
+export const saveRefused = (err: unknown) =>
+  isStale(err) ? { stale: true, saveError: 'This changed since you opened it.' } : { stale: false, saveError: toolMessage(err) };
+
 /** The spot in a `{ spot }` output, such as `update_spot`'s, for the Query cache. */
 export function spotOf(output: unknown): SpotView {
   if (isRecord(output) && isSpot(output.spot)) return output.spot;
@@ -70,3 +78,11 @@ export function auditPageOf(output: unknown): AuditPage {
     return { entries: output.entries, next: output.next };
   throw new ToolCallError('error', 'SignForge answered without the audit log. Try the export again.');
 }
+
+/** The playlist in a `{ playlist }` output, such as `update_playlist`'s, for the Query cache. */
+export function playlistOf(output: unknown): PlaylistView {
+  if (isRecord(output) && isPlaylist(output.playlist)) return output.playlist;
+  throw new ToolCallError('error', 'SignForge answered without the playlist. Reload the page to see it.');
+}
+
+const isPlaylist = (v: unknown): v is PlaylistView => isRecord(v) && typeof v.id === 'string' && typeof v.version === 'number' && Array.isArray(v.spotIds);

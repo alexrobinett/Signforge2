@@ -10,12 +10,14 @@
  * spot into the Query cache.
  *
  * Which spot, orientation and kit the stage shows lives in the URL and the Query cache; the stage
- * component hands them over with `attachStage` from its ref callback.
+ * component hands them over with `attachStage` from its ref callback. The playlist editor shows
+ * its playlist on the same stage (a target with a `playlistId`): it compiles the draft
+ * (`playlistStageDraft`, src/state/playlist-editor.ts) and asks for a redraw (`redrawStage`).
  */
 import { PREVIEW_PROTOCOL, safeUrl } from '@signforge/contract';
 import { assetsQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
-import { callTool, isStale, spotOf, toolMessage } from '~/lib/tools';
+import { callTool, saveRefused, spotOf, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 
 /** How long typing pauses before the stage redraws, and before the draft is saved. */
@@ -24,15 +26,15 @@ const SAVE_DELAY_MS = 1000;
 
 type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'invalid';
 
-/** Where the stage is and what it shows: from the stage component, which reads them from the URL. */
-export interface StageTarget {
-  frame: Window;
+/** What the stage shows, a spot or a playlist, as the stage component reads it from the URL. */
+export type StageShows = {
   orgId: string;
-  spotId: string;
   orientation: 'landscape' | 'portrait';
-  templateVersionId?: string;
   brandKitId?: string;
-}
+} & ({ spotId: string; templateVersionId?: string } | { playlistId: string });
+
+/** Where the stage is and what it shows. */
+export type StageTarget = StageShows & { frame: Window };
 
 interface NewSpotDraft {
   open: boolean;
@@ -64,6 +66,8 @@ interface SpotEditorState {
   holding: boolean;
   /** Whether the player has said it plays the draft. */
   playing: boolean;
+  /** The spot the player last said is on screen. */
+  playingSpot: string | null;
   /** What the player last said went wrong, or null once it plays. */
   stageError: string | null;
   /** The room the stage has on the page, for scaling the screen to fit; null until measured. */
@@ -82,6 +86,8 @@ export interface SpotEditorSlice {
   pickImageFor: (field: string | null) => void;
   /** The stage's iframe and what it should show; null when it unmounts. */
   attachStage: (target: StageTarget | null) => void;
+  /** Draws what the stage shows again, a moment after the last call: after an edit of the playlist it shows. */
+  redrawStage: () => void;
   measureStage: (box: { w: number; h: number }) => void;
   openNewSpot: (open: boolean) => void;
   editNewSpot: (change: Partial<Pick<NewSpotDraft, 'kind' | 'templateVersionId' | 'name' | 'url' | 'assetId'>>) => void;
@@ -112,6 +118,7 @@ const initial: SpotEditorState = {
   picking: null,
   holding: false,
   playing: false,
+  playingSpot: null,
   stageError: null,
   stageBox: null,
   newSpot: newSpotDraft(),
@@ -145,20 +152,32 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     return [...fieldProblems(v.manifest.fields, d).keys()].some((name) => v.manifest.fields[name]?.type !== 'image' || name in d.assets);
   };
 
-  async function redraw() {
-    const t = stage.target;
-    if (!t || stage.listening !== t.frame) return;
-    const seq = ++stage.seq;
+  /** The spot target's draft, compiled; undefined while what it needs is not loaded. */
+  async function spotDraft(t: StageTarget & { spotId: string }) {
     const spot = savedSpot(t.orgId, t.spotId);
     const preview = queryClient.getQueryData(spotPreviewQuery(t.orgId, t).queryKey);
     const templates = queryClient.getQueryData(templatesQuery(t.orgId).queryKey)?.templates;
     const assets = queryClient.getQueryData(assetsQuery(t.orgId).queryKey)?.assets;
-    if (!spot || !preview || !templates || !assets) return;
+    if (!spot || !preview || !templates || !assets) return undefined;
     const e = get().spotEditor;
     const draft = e.spotId === spot.id && e.draft ? e.draft : draftOf(spot);
     const version = spot.templateVersionId ? versionsById(templates).get(spot.templateVersionId) : undefined;
-    const result = await compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation });
-    if (seq !== stage.seq || stage.target?.frame !== t.frame) return;
+    return compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation });
+  }
+
+  async function redraw() {
+    const t = stage.target;
+    if (!t || stage.listening !== t.frame) return;
+    const seq = ++stage.seq;
+    let result: Awaited<ReturnType<typeof spotDraft>>;
+    try {
+      result = 'playlistId' in t ? await get().playlistStageDraft(t) : await spotDraft(t);
+    } catch (err) {
+      // A playlist's previews are read here, not in its loader: one that fails is said on the stage.
+      if (seq === stage.seq) editor((x) => ({ ...x, stageError: `what it needs did not load (${toolMessage(err)})` }));
+      return;
+    }
+    if (!result || seq !== stage.seq || stage.target?.frame !== t.frame) return;
     if (!result.manifest) {
       editor((x) => ({ ...x, holding: true }));
       return;
@@ -176,7 +195,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     if (msg?.type === 'listening') {
       stage.listening = stage.target.frame;
       void redraw();
-    } else if (msg?.type === 'playing') editor((x) => ({ ...x, playing: true, stageError: null }));
+    } else if (msg?.type === 'playing') editor((x) => ({ ...x, playing: true, playingSpot: msg.spot, stageError: null }));
     else if (msg?.type === 'error') editor((x) => ({ ...x, stageError: msg.message }));
   };
 
@@ -202,7 +221,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       clearTimeout(timers.save);
       const t = stage.target;
       const { spotId, draft, version, stale } = get().spotEditor;
-      if (!t || !spotId || !draft || version === null || stale || t.spotId !== spotId) return;
+      if (!t || !('spotId' in t) || !spotId || !draft || version === null || stale || t.spotId !== spotId) return;
       const spot = savedSpot(t.orgId, spotId);
       if (!spot) return;
       if (saving) {
@@ -215,6 +234,8 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       }
       saving = true;
       editor((e) => ({ ...e, status: 'saving', saveError: null }));
+      // The answer belongs to this spot: another opened meanwhile has its own draft and version.
+      const open = () => get().spotEditor.spotId === spotId;
       const kindFields =
         spot.kind === 'template'
           ? { data: draft.data, assets: draft.assets }
@@ -227,24 +248,21 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
         );
         queryClient.setQueryData(spotKeys.one(t.orgId, spotId), saved);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(t.orgId), exact: true });
-        editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === draft ? 'saved' : 'unsaved' }));
+        if (open()) editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === draft ? 'saved' : 'unsaved' }));
       } catch (err) {
-        editor((e) =>
-          isStale(err)
-            ? { ...e, status: 'unsaved', stale: true, saveError: 'This changed since you opened it.' }
-            : { ...e, status: 'unsaved', saveError: toolMessage(err) },
-        );
+        if (open()) editor((e) => ({ ...e, status: 'unsaved', ...saveRefused(err) }));
       } finally {
         saving = false;
       }
-      if (get().spotEditor.status === 'unsaved' && !get().spotEditor.saveError) later('save', SAVE_DELAY_MS, get().saveSpotDraft);
+      const after = get().spotEditor;
+      if (open() && after.status === 'unsaved' && !after.saveError) later('save', SAVE_DELAY_MS, get().saveSpotDraft);
     },
 
     async reloadSpot() {
       const t = stage.target;
       clearTimeout(timers.save);
       editor((e) => ({ ...initial, newSpot: e.newSpot, stageBox: e.stageBox }));
-      if (t) await queryClient.invalidateQueries({ queryKey: spotKeys.one(t.orgId, t.spotId) });
+      if (t && 'spotId' in t) await queryClient.invalidateQueries({ queryKey: spotKeys.one(t.orgId, t.spotId) });
       await redraw();
     },
 
@@ -258,9 +276,11 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       }
       const changed = stage.target?.frame !== target?.frame;
       stage.target = target;
-      if (changed) editor((e) => ({ ...e, holding: false, playing: false, stageError: null }));
+      if (changed) editor((e) => ({ ...e, holding: false, playing: false, playingSpot: null, stageError: null }));
       void redraw();
     },
+
+    redrawStage: () => later('stage', STAGE_DELAY_MS, redraw),
 
     measureStage: (stageBox) => editor((e) => ({ ...e, stageBox })),
 
@@ -291,9 +311,10 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
 };
 
 /** What the player says over the preview channel (contract `PreviewPlayerMessage`), read field by field. */
-function playerMessage(data: unknown): { type: 'listening' } | { type: 'playing' } | { type: 'error'; message: string } | undefined {
+function playerMessage(data: unknown): { type: 'listening' } | { type: 'playing'; spot: string | null } | { type: 'error'; message: string } | undefined {
   if (typeof data !== 'object' || data === null || !('sfPreview' in data) || data.sfPreview !== PREVIEW_PROTOCOL || !('type' in data)) return undefined;
-  if (data.type === 'listening' || data.type === 'playing') return { type: data.type };
+  if (data.type === 'listening') return { type: 'listening' };
+  if (data.type === 'playing') return { type: 'playing', spot: 'spot' in data && typeof data.spot === 'string' ? data.spot : null };
   if (data.type === 'error')
     return { type: 'error', message: 'message' in data && typeof data.message === 'string' ? data.message : 'The player could not show it.' };
   return undefined;
