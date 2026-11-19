@@ -1,6 +1,6 @@
 import { validateTableFeed } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { FeedError, normaliseFeed, parseCsv, parseJsonTable } from '../src/index';
+import { FeedError, LIMITS, normaliseFeed, parseCsv, parseJsonTable } from '../src/index';
 import menu from './fixtures/menu.csv?raw';
 
 const code = (run: () => unknown) => {
@@ -46,6 +46,18 @@ describe('CSV (RFC 4180, header row)', () => {
     expect(code(() => parseCsv('Item,Price\nTea,2,extra\n'))).toBe('malformed');
   });
 
+  it('refuses a table too big for a snapshot before it builds the rows: short rows under a wide header', () => {
+    const wide = (columns: number, rows: number) => [Array.from({ length: columns }, (_, i) => `c${i}`).join(','), ...Array(rows).fill('x')].join('\n');
+    // 20 kB: 3000 columns by 3000 rows would be 9M cells.
+    expect(code(() => parseCsv(wide(3000, 3000)))).toBe('too-large');
+    // Just under 1 MB.
+    const big = wide(40_000, 300_000);
+    expect(big.length).toBeLessThan(LIMITS.maxBytes);
+    expect(code(() => parseCsv(big))).toBe('too-large');
+    // A table that can fit is still read.
+    expect(parseCsv(wide(16, 2000)).rows).toHaveLength(2000);
+  });
+
   it('refuses a body over the size limit before reading it', () => {
     expect(code(() => parseCsv(`Item\n${'x'.repeat(50)}`, { maxBytes: 40 }))).toBe('too-large');
   });
@@ -69,6 +81,13 @@ describe('JSON (a list of objects, or a path to one)', () => {
       ],
     });
     expect(parseJsonTable('[{"a":1}]')).toEqual({ columns: ['a'], rows: [[1]] });
+  });
+
+  it('refuses a table too big for a snapshot before it builds the rows: objects that each have their own key', () => {
+    // 71 kB: 6000 objects with one distinct key each would be 6000 x 6000 = 36M cells.
+    const sparse = JSON.stringify(Array.from({ length: 6000 }, (_, i) => ({ [`k${i}`]: 1 })));
+    expect(sparse.length).toBeLessThan(80_000);
+    expect(code(() => parseJsonTable(sparse))).toBe('too-large');
   });
 
   it('refuses JSON that does not parse as malformed, and a path to anything but a list of objects as not-a-table', () => {

@@ -2,7 +2,7 @@
  * Tables: a CSV file (RFC 4180, with a header row) or a JSON list of objects, as the contract's
  * `TableFeed`. Spots map its rows onto a list field's items (`TableMapping`).
  */
-import { readPath, type TableFeed } from '@signforge/contract';
+import { MAX_SNAPSHOT_BYTES, readPath, type TableFeed } from '@signforge/contract';
 import { checkSize, FeedError, LIMITS } from './errors';
 
 export interface TableOptions {
@@ -12,6 +12,19 @@ export interface TableOptions {
 }
 
 const malformed = (message: string) => new FeedError('malformed', message);
+
+/**
+ * The most cells a table may have. Every cell costs at least 2 bytes of a snapshot's JSON (a
+ * one-digit number and its comma), so a table with more can never fit `MAX_SNAPSHOT_BYTES`. It is
+ * checked before the rows are built: padding every row to every column turns a small body (keys
+ * that each appear once, short rows under a wide header) into millions of cells, past a Worker's
+ * memory.
+ */
+const MAX_CELLS = MAX_SNAPSHOT_BYTES / 2;
+
+function refuseOversized(columns: number, rows: number): void {
+  if (columns * rows > MAX_CELLS) throw new FeedError('too-large', `${columns} columns by ${rows} rows cannot fit a snapshot`);
+}
 
 /** RFC 4180 records: commas between cells, quotes around a cell that holds commas, quotes or line breaks, CRLF or LF between records. */
 function records(text: string): string[][] {
@@ -72,21 +85,22 @@ export function parseCsv(body: string, options: TableOptions = {}): TableFeed {
   checkSize(body, options.maxBytes ?? LIMITS.maxBytes);
   const [header, ...rest] = records(body.replace(/^﻿/, '')).filter((r) => r.some((c) => c.trim() !== ''));
   if (!header) throw malformed('the file has no header row');
-  const rows = rest.map((r, i) => {
+  rest.forEach((r, i) => {
     if (r.length > header.length && r.slice(header.length).some((c) => c.trim() !== ''))
       throw malformed(`row ${i + 1} has ${r.length} cells and the header ${header.length}`);
-    return header.map((_, k) => r[k] ?? '');
   });
   const names = header.map((h) => h.trim());
   const keep = names.flatMap((name, k) => {
     if (name) return [k];
-    if (rows.some((r) => r[k]?.trim())) throw malformed(`column ${k + 1} has cells but no name`);
+    if (rest.some((r) => r[k]?.trim())) throw malformed(`column ${k + 1} has cells but no name`);
     return [];
   });
   const columns = keep.map((k) => names[k] ?? '');
   const twice = columns.find((c, k) => columns.indexOf(c) !== k);
   if (twice !== undefined) throw malformed(`two columns are named "${twice.slice(0, 40)}"`);
-  return { columns, rows: rows.map((r) => keep.map((k) => r[k] ?? '')) };
+  refuseOversized(columns.length, rest.length);
+  // Short rows padded with empty cells.
+  return { columns, rows: rest.map((r) => keep.map((k) => r[k] ?? '')) };
 }
 
 /** A JSON value as a cell: text and numbers as they are, true and false as words, anything else empty. */
@@ -113,5 +127,6 @@ export function parseJsonTable(body: string, options: TableOptions = {}): TableF
   if (!Array.isArray(list) || !list.every(isRecord))
     throw new FeedError('not-a-table', options.rowsPath ? `${options.rowsPath} is not a list of objects` : 'the document is not a list of objects');
   const columns = [...new Set(list.flatMap((o) => Object.keys(o).filter(Boolean)))];
+  refuseOversized(columns.length, list.length);
   return { columns, rows: list.map((o) => columns.map((c) => cell(Object.hasOwn(o, c) ? o[c] : undefined))) };
 }

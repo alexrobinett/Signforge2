@@ -29,6 +29,7 @@ Failures throw `FeedError` with a `code` (`too-large`, `doctype`, `malformed`, `
 
 - CSV follows RFC 4180 with a header row: commas between cells, double quotes around a cell that holds a comma, a quote (doubled) or a line break; CRLF or LF between records; UTF-8, a byte order mark dropped. Cells stay text as written ("$4.50", "02134"). Blank lines are skipped and short rows padded with empty cells. A column with no name is dropped when all its cells are empty. `malformed`: no header row, a quote never closed or followed by text, two columns with one name, a named-less column with cells, a row with more cells than the header.
 - JSON: every key of the objects is a column, in the order first seen; text and numbers stay as they are, `true` and `false` become words, and anything else (null, a nested object or list) is an empty cell. `not-a-table`: the document, or the value at `rowsPath`, is not a list of objects.
+- `too-large`, before any row is built: a table with more cells (columns × rows) than half `MAX_SNAPSHOT_BYTES`, which no snapshot can hold. Padding every row to every column turns a small body into millions of cells (each object with a key of its own, short rows under a wide header).
 - How rows fill a template's list field (columns per item property, filter, sort, `maxItems`) is the contract's `tableItems`, run where the data is played.
 
 ## Limits
