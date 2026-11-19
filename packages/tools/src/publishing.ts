@@ -15,11 +15,10 @@
  * the default) and its choices; the compiler picks one (`chooseBrandKit`) and freezes it into the
  * manifest. Kits have no drafts: a publish takes each kit as it is then.
  */
-import { compileScreen, fontById, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
+import { brandFont, compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
 import {
   templateKey,
   type Binding,
-  type BrandFont,
   type BrandKit,
   type DataSource,
   type Playlist,
@@ -144,16 +143,10 @@ function toBrandKit(graph: OrgGraph, row: BrandKitRow, orientation: Orientation,
     if (f.problem) problems.push(`logo ${f.problem}`);
     return f.sha;
   };
-  const font = (id: string | null): BrandFont | undefined => {
-    const f = id ? fontById(id) : undefined;
-    if (!f?.files.length) return undefined;
-    for (const x of f.files) files[x.file] = { size: x.size, type: 'font/woff2' };
-    return { id: f.id, family: f.family, files: f.files.map(({ weight, style, file }) => ({ weight, style, file })) };
-  };
   const onDark = logoFile(row.logoOnDarkAssetId);
   const onLight = logoFile(row.logoOnLightAssetId);
-  const display = font(row.displayFontId);
-  const body = font(row.bodyFontId);
+  const display = brandFont(row.displayFontId, files);
+  const body = brandFont(row.bodyFontId, files);
   if (problems.length) return { problems };
   return {
     kit: {
