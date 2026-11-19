@@ -759,7 +759,7 @@ export const publishes = sqliteTable(
     createdAt: created(),
     /** When every screen it switched reported playing its manifest, moved on to a later one, or was revoked. */
     finishedAt: integer('finished_at'),
-    /** How many of its screens were playing it then: 0 for one undone before any got there. Null until finished. */
+    /** How many of its screens the check saw playing it then: 0 when replaced before any check saw one report it. Null until finished. */
     reached: integer('reached'),
   },
   (t) => [

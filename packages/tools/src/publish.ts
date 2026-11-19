@@ -218,7 +218,13 @@ const publishOutput = z.object({
   by: z.object({ kind: z.string(), id: z.string(), name: z.string().nullable().describe("A member's name; null for an agent or the system") }),
   createdAt: z.number(),
   finishedAt: z.number().nullable().describe('When every screen it switched played it, moved on to a later publish, or was revoked'),
-  reached: z.number().int().nullable().describe('Once finished: how many of its screens played it (0 when it was undone before any did); null until then'),
+  reached: z
+    .number()
+    .int()
+    .nullable()
+    .describe(
+      'Once finished: how many of its screens the five-minute check saw playing it; 0 when it was replaced before any check saw a screen report it (a screen may have played it in between); null until then',
+    ),
   screens: z.number().int().describe('Screens it switched'),
   playing: z.number().int().describe('Of those, how many say they are playing it'),
   replaced: z.number().int().describe('Of those, how many a later publish has switched, and do not say they play this one'),

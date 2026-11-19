@@ -150,8 +150,9 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, ema
 /**
  * Mark finished every publish whose rollout is over: each screen it switched plays it, or a later
  * publish moved it on. The mark and its `publish.finished` event are written in one batch, by the
- * check that made the mark, so the alert goes once; the email follows. A publish no screen played
- * (none switched, or undone before any got there) is marked with no alert: it reached nobody.
+ * check that made the mark, so the alert goes once; the email follows. A publish this check sees
+ * no screen playing (none switched, or replaced before any check saw a screen report it, which
+ * includes one played and replaced between two checks) is marked with no alert.
  */
 export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email: EmailSender, now: number): Promise<void> {
   const contextFor = contexts(env.DB, 'publish_finished');

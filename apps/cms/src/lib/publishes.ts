@@ -14,7 +14,7 @@ export interface PublishView {
   by: { kind: string; id: string; name: string | null };
   createdAt: number;
   finishedAt: number | null;
-  /** Once finished: how many of its screens played it (0 for one undone before any did). */
+  /** Once finished: how many of its screens the five-minute check saw playing it (0 when replaced before any check saw one). */
   reached: number | null;
   screens: number;
   playing: number;
