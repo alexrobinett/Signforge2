@@ -1,5 +1,6 @@
 // find_places's geocoder: Open-Meteo's search, read at the edge. No network: fetch is stubbed.
 import { beforeEach, describe, expect, it } from 'vitest';
+import { ToolError } from '@signforge/tools';
 import { openMeteoPlaces } from '../src/data/places';
 import { Client, email, testApp } from './client';
 
@@ -51,7 +52,22 @@ describe('openMeteoPlaces', () => {
   it('leaves out a result a forecast could not be made for, and fails on an answer that is not one', async () => {
     const { fetch } = stub({ results: [{ ...atlanta, timezone: undefined }, { ...atlanta, latitude: 'north' }, 'x', atlanta] });
     expect((await openMeteoPlaces(PROD, fetch).search('Atlanta')).map((p) => p.id)).toEqual([4180439]);
-    await expect(openMeteoPlaces(PROD, stub({ error: true, reason: 'busy' }, 429).fetch).search('Atlanta')).rejects.toThrow('geocoding answered 429');
+    await expect(openMeteoPlaces(PROD, stub({ error: true }, 500).fetch).search('Atlanta')).rejects.toThrow('geocoding answered 500');
+  });
+});
+
+describe('a busy geocoder', () => {
+  it('is a refusal to try again later, not a failure: a 429 or no answer in time', async () => {
+    const timedOut: typeof fetch = async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    };
+    for (const fetcher of [stub({ error: true, reason: 'busy' }, 429).fetch, timedOut]) {
+      const refusal = await openMeteoPlaces(PROD, fetcher)
+        .search('Atlanta')
+        .catch((err: unknown) => err);
+      expect(refusal).toBeInstanceOf(ToolError);
+      expect(refusal).toMatchObject({ code: 'rate_limited', message: 'place search is busy; try again in a minute' });
+    }
   });
 });
 

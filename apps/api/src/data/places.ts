@@ -3,12 +3,15 @@
  * browser never calls a third party. Its answer is read here, at the edge: a result missing what a
  * forecast URL needs (coordinates, a time zone) is left out.
  */
-import type { Place, PlaceFinder } from '@signforge/tools';
+import { type Place, type PlaceFinder, ToolError } from '@signforge/tools';
 
 const OPEN_METEO_GEOCODING = 'https://geocoding-api.open-meteo.com/v1/search';
 const TIMEOUT_MS = 5_000;
 /** Results asked for: enough to tell the Atlantas apart. */
 const COUNT = 10;
+
+/** The geocoder is over its free allowance or slow: the caller may try again shortly. Not a failure of ours. */
+const busy = (cause?: unknown) => new ToolError('rate_limited', 'place search is busy; try again in a minute', undefined, false, { cause });
 
 /** workerd's `fetch` throws "Illegal invocation" when called as a method of another object. */
 const workerFetch: typeof fetch = (input, init) => fetch(input, init);
@@ -42,7 +45,14 @@ export function openMeteoPlaces(env: { ENVIRONMENT: string; GEOCODING_URL?: stri
     async search(query) {
       const q = new URL(url);
       q.search = new URLSearchParams({ name: query, count: String(COUNT), language: 'en', format: 'json' }).toString();
-      const res = await fetcher(q.href, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+      let res: Response;
+      try {
+        res = await fetcher(q.href, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'TimeoutError') throw busy(err);
+        throw err;
+      }
+      if (res.status === 429) throw busy();
       if (!res.ok) throw new Error(`geocoding answered ${res.status}`);
       const body: unknown = await res.json();
       // No match: Open-Meteo leaves `results` out.
