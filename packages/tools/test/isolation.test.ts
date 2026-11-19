@@ -56,9 +56,17 @@ interface IdField {
 
 /** Every id field of an input schema (as JSON Schema), at any depth, optional or not, in every branch. */
 function idFields(schema: unknown, path: string[] = []): IdField[] {
-  const s = (schema ?? {}) as { properties?: Record<string, unknown>; required?: string[]; anyOf?: unknown[]; items?: { properties?: unknown } };
+  const s = (schema ?? {}) as {
+    properties?: Record<string, unknown>;
+    required?: string[];
+    anyOf?: unknown[];
+    items?: { properties?: unknown };
+    additionalProperties?: unknown;
+  };
   if (s.anyOf) return s.anyOf.flatMap((b) => idFields(b, path));
   if (s.items?.properties && idFields(s.items, path).length) throw new Error(`${path.join('.')}: ids inside a list of objects; teach idFields to reach them`);
+  // A record's values (a spot's bindings by field name): `*` stands for any key, and REACHED_BY gives the input.
+  if (typeof s.additionalProperties === 'object') return idFields(s.additionalProperties, [...path, '*']).map((f) => ({ ...f, optional: true }));
   return Object.entries(s.properties ?? {}).flatMap(([key, prop]) => {
     const kind = kindOf(key);
     if (kind && !CATALOGUE_IDS[kind] && !NOT_ROWS.has(kind)) {
@@ -107,6 +115,7 @@ function oneForeignId(tool: AnyTool, fields: IdField[], field: IdField, s: Seede
     base,
     others.reduce((v, f) => setPath(v, f.path, undefined), base),
   ].map((v) => setPath(v, field.path, foreign));
+  if (field.path.includes('*')) throw new Error(`${tool.name}: ${field.path.join('.')} is inside a record; give it an input in REACHED_BY`);
   const valid = candidates.find((c) => tool.input.safeParse(c).success);
   if (!valid) throw new Error(`${tool.name}: no valid input names org A's ${field.path.join('.')}; give the tool an example that reaches it`);
   return valid;
@@ -141,6 +150,13 @@ const REACHED_BY: Record<string, (s: Seeded) => unknown> = {
   'create_spot.templateVersionId': (s) => ({ name: 'Menu', kind: 'template', templateVersionId: s.a.templateVersion }),
   'create_spot.assetId': (s) => ({ name: 'Logo', kind: 'image', assetId: s.a.asset }),
   'update_spot.assetId': (s) => ({ spotId: s.b.imageSpot, assetId: s.a.asset }),
+  'create_spot.bindings.*.dataSourceId': (s) => ({
+    name: 'Menu',
+    kind: 'template',
+    templateVersionId: s.b.templateVersion,
+    bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } },
+  }),
+  'update_spot.bindings.*.dataSourceId': (s) => ({ spotId: s.b.templateSpot, bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } } }),
   // A provider source takes a resource with its connection, and no feed URL.
   'create_data_source.connectionId': (s) => ({ name: 'Rooms', format: 'provider', connectionId: s.a.connection, resource: 'calendar-1' }),
 };
@@ -187,6 +203,7 @@ beforeAll(async () => {
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
     rateLimit: async () => true,
     feedUrls: { seal: async (_source, url) => `sealed:${url}` },
+    places: { search: async () => [] },
     connectors,
   };
   // finish_connection's example state, pending for org B's owner.
@@ -208,6 +225,7 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
     expect(paths('assign_brand_kit')).toEqual(['brandKitId', 'screenId', 'groupId']);
     expect(paths('create_brand_kit')).toEqual(['logoOnDarkAssetId', 'logoOnLightAssetId']);
     expect(paths('create_group')).toEqual(['screenIds']);
+    expect(paths('update_spot')).toContain('bindings.*.dataSourceId');
   });
 
   for (const tool of TOOLS) {
