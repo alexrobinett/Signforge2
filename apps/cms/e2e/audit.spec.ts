@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
-import { API_PORT } from './servers';
+import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
+import { API_PORT, CMS_URL } from './servers';
 
 /** This spec's own client addresses, so its sign-in and pairing have their own rate limits. */
 const ADDRESS = '192.0.2.41';
@@ -10,10 +10,7 @@ const SCREEN_ADDRESS = '192.0.2.42';
 test('a change shows in the audit log, filters to it, pages and exports, with the pairing code redacted', async ({ page, request }) => {
   test.setTimeout(120_000);
   await signInAs(page, `e2e-audit-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Welcome to SignForge' })).toHaveCount(0);
+  await createOrg(page, 'Northside Market');
 
   // A change in the CMS: the org's time zone.
   await page.goto('/settings/general');
@@ -25,13 +22,8 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   // A screen paired, whose code the log keeps redacted, and renamed 55 times: more than a page.
   const start = await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': SCREEN_ADDRESS } });
   const { code } = (await start.json()) as { code: string };
-  const tool = async (name: string, input: unknown) => {
-    const res = await page.request.post(`/api/tools/${name}`, { data: input });
-    expect(res.status(), `${name}: ${await res.text()}`).toBe(200);
-    return res.json() as Promise<{ screen: { id: string } }>;
-  };
-  const { screen } = await tool('claim_screen', { code, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' });
-  for (let i = 1; i <= 55; i++) await tool('rename_screen', { screenId: screen.id, name: `Lobby ${i}` });
+  const { screen } = (await tool(page, 'claim_screen', { code, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' })) as { screen: { id: string } };
+  for (let i = 1; i <= 55; i++) await tool(page, 'rename_screen', { screenId: screen.id, name: `Lobby ${i}` });
 
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Audit log' }).click();
   await expect(page).toHaveURL(/\/audit$/);
@@ -89,7 +81,9 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export CSV' }).click();
   const csv = readFileSync(await (await download).path(), 'utf8');
-  const lines = csv.trimEnd().split('\r\n');
+  // A byte order mark first, so Excel reads it as UTF-8.
+  expect(csv.startsWith('\uFEFF')).toBe(true);
+  const lines = csv.slice(1).trimEnd().split('\r\n');
   expect(lines[0]).toBe('time,who,actor_kind,actor_id,via,action,what,target_kind,target_id,detail');
   expect(lines).toHaveLength(1 + 56);
   expect(lines.at(-1)).toContain('claim_screen');
@@ -105,4 +99,33 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   await axe(page);
   await shots(page, '51-audit-log-phone');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  // One target from a phone: its link is in the line folded under What.
+  await rows
+    .first()
+    .getByRole('link', { name: `Only screen ${screen.id}` })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`targetId=${screen.id}`));
+  await expect(page.getByText(`Only Screen ${screen.id}.`)).toBeVisible();
+
+  // Hand-edited URLs: a name every object has, blank text, or an id without its kind filter nothing and break nothing.
+  for (const search of ['when=constructor', 'q=%20', 'targetId=x']) {
+    await page.goto(`/audit?${search}`);
+    await expect(rows, search).toHaveCount(50);
+    await expect(page.getByText(/^Only /)).toHaveCount(0);
+  }
+  await page.goto('/audit?who=constructor');
+  await expect(page.getByText('Nothing matches these filters.')).toBeVisible();
+
+  // The member switches org in another tab: Load older on this one is refused, not filled from the other org.
+  await page.goto('/audit');
+  await hydrated(page);
+  await expect(rows).toHaveCount(50);
+  const other = await page.request.post('/api/auth/organization/create', {
+    data: { name: 'Other Co', slug: `other-${Date.now()}` },
+    headers: { origin: CMS_URL },
+  });
+  expect(other.status(), await other.text()).toBe(200);
+  await page.getByRole('button', { name: 'Load older' }).click();
+  await expect(page.getByRole('alert')).toContainText('Could not load older entries: cursor cannot be used: it was made in another organization');
+  await expect(rows).toHaveCount(50);
 });

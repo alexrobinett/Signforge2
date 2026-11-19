@@ -6,8 +6,8 @@
  * locations; Target takes its place.
  */
 import { useSuspenseInfiniteQuery } from '@tanstack/react-query';
-import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
-import { DownloadIcon, LoaderCircleIcon } from 'lucide-react';
+import { createFileRoute, getRouteApi, Link, useRouter } from '@tanstack/react-router';
+import { DownloadIcon, LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
 import { useId, useMemo, type MouseEvent, type SubmitEvent } from 'react';
 import { PageHeader } from '~/components/page';
 import { SettingsNav } from '~/components/settings/parts';
@@ -38,17 +38,25 @@ import { auditQuery } from '~/queries/audit';
 import { getMembers, getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
 
-/** A search param as text: the router reads `?q=142` as a number. */
+/** A search param as trimmed text, or nothing: the router reads `?q=142` as a number, and a URL can say anything. */
 function text(v: unknown, max: number): string | undefined {
-  const s = typeof v === 'number' ? String(v) : v;
-  return typeof s === 'string' && s && s.length <= max ? s : undefined;
+  const s = (typeof v === 'number' ? String(v) : typeof v === 'string' ? v : '').trim();
+  return s && s.length <= max ? s : undefined;
 }
 
 export const Route = createFileRoute('/_app/audit')({
   validateSearch: (s: Record<string, unknown>): AuditFilters => {
-    const f: AuditFilters = { who: text(s.who, 200), what: text(s.what, 64), target: text(s.target, 40), targetId: text(s.targetId, 200), q: text(s.q, 100) };
-    if (isWhen(s.when)) f.when = s.when;
-    return Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined));
+    const target = text(s.target, 40);
+    // One target needs its kind: an id alone would say "Only x" over the whole log.
+    // Every key, undefined when dropped: the router lays a route's search over the raw params, so a key left out keeps its raw value.
+    return {
+      who: text(s.who, 200),
+      what: text(s.what, 64),
+      target,
+      targetId: target && text(s.targetId, 200),
+      when: isWhen(s.when) ? s.when : undefined,
+      q: text(s.q, 100),
+    };
   },
   loaderDeps: ({ search }) => search,
   // The first page is read again on every load, as after a change elsewhere, never from the cache.
@@ -73,7 +81,9 @@ function AuditLogPage() {
   const orgId = useOrgId();
   const me = app.useLoaderData().user.id;
   const now = useNow(at);
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useSuspenseInfiniteQuery(auditQuery(orgId, search));
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError, error } = useSuspenseInfiniteQuery(auditQuery(orgId, search));
+  const router = useRouter();
+  const countId = useId();
   const exporting = useAppStore((s) => s.audit.exporting);
   const exportNote = useAppStore((s) => s.audit.exportNote);
   const exportAuditLog = useAppStore((s) => s.exportAuditLog);
@@ -81,14 +91,14 @@ function AuditLogPage() {
   const entries = data.pages.flatMap((p) => p.entries);
   const timezone = settings?.timezone ?? 'UTC';
   const kept = settings ? ` Kept ${settings.auditRetentionDays} days.` : '';
-  const filtered = Object.keys(search).length > 0;
+  const filtered = Object.values(search).some(Boolean);
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
       <SettingsNav />
       <div className="min-w-0 flex-1 space-y-4">
         <PageHeader title="Audit log" description={`Every change by a person, agent or screen.${kept} Times in ${timezone}.`}>
-          <Button variant="outline" disabled={exporting} onClick={() => void exportAuditLog(auditInput(search, Date.now()), (e) => csvRow(e, names, me))}>
+          <Button variant="outline" disabled={exporting} onClick={() => void exportAuditLog(auditInput(search, Date.now()), (e) => csvRow(e, names))}>
             {exporting ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <DownloadIcon aria-hidden />} Export CSV
           </Button>
         </PageHeader>
@@ -143,13 +153,26 @@ function AuditLogPage() {
           </p>
         )}
 
+        {isFetchNextPageError && (
+          <div role="alert" className="flex flex-wrap items-center gap-2 text-sm font-medium text-destructive">
+            Could not load older entries: {error?.message}
+            <Button type="button" variant="outline" size="sm" onClick={() => void router.invalidate()}>
+              <RotateCwIcon aria-hidden /> Reload
+            </Button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3 text-[15px]">
-          <span className="text-muted-foreground">
+          <span id={countId} tabIndex={-1} role="status" className="text-muted-foreground outline-none">
             Showing {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
             {entries.length > 0 && !hasNextPage ? ', all there are' : ''}
           </span>
           {hasNextPage && (
-            <Button variant="outline" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+            <Button
+              variant="outline"
+              disabled={isFetchingNextPage}
+              // The last page takes the button away: focus moves to the count, which says it is all there is.
+              onClick={() => void fetchNextPage().then((r) => r.hasNextPage || document.getElementById(countId)?.focus())}
+            >
               {isFetchingNextPage && <LoaderCircleIcon className="animate-spin" aria-hidden />} Load older
             </Button>
           )}
@@ -175,7 +198,12 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
         {detail && <span className="mt-0.5 block font-mono text-[13px] break-all text-muted-foreground">{detail}</span>}
         {/* Phones have no room for the last two columns: they read under what was done. */}
         <span className="mt-0.5 block text-sm break-all text-muted-foreground sm:hidden">
-          {e.target && `${targetLabel(e.target.kind)} ${e.target.id} · `}
+          {e.target && (
+            <>
+              {targetLabel(e.target.kind)} <TargetLink target={e.target} className="inline" />
+              {' · '}
+            </>
+          )}
           {viaText(e)}
         </span>
       </td>
@@ -183,19 +211,26 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
         {e.target && (
           <>
             {targetLabel(e.target.kind)}
-            <Link
-              to="/audit"
-              search={(s) => ({ ...s, target: e.target?.kind, targetId: e.target?.id })}
-              className="block font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline"
-              aria-label={`Only ${targetLabel(e.target.kind).toLowerCase()} ${e.target.id}`}
-            >
-              {e.target.id}
-            </Link>
+            <TargetLink target={e.target} className="block" />
           </>
         )}
       </td>
       <td className="hidden px-3 py-2 text-sm whitespace-nowrap text-muted-foreground sm:table-cell">{viaText(e)}</td>
     </tr>
+  );
+}
+
+/** A target's id, narrowing the log to that one thing. */
+function TargetLink({ target, className }: { target: { kind: string; id: string }; className: string }) {
+  return (
+    <Link
+      to="/audit"
+      search={(s) => ({ ...s, target: target.kind, targetId: target.id })}
+      className={cn('font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline', className)}
+      aria-label={`Only ${targetLabel(target.kind).toLowerCase()} ${target.id}`}
+    >
+      {target.id}
+    </Link>
   );
 }
 
@@ -283,7 +318,7 @@ function Filters({ members }: { members: { id: string; name: string }[] }) {
           <Label htmlFor={`${id}-q`}>Search</Label>
           <Input id={`${id}-q`} name="q" type="search" defaultValue={search.q} placeholder="Screen, spot, name, agent…" />
         </div>
-        {Object.keys(search).length > 0 && (
+        {Object.values(search).some(Boolean) && (
           <Button type="button" variant="ghost" onClick={clear}>
             Clear filters
           </Button>

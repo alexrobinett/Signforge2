@@ -29,11 +29,11 @@ export const WHENS: { value: When; label: string }[] = [
   { value: 'week', label: 'Last 7 days' },
   { value: 'month', label: 'Last 30 days' },
 ];
-export const isWhen = (v: unknown): v is When => typeof v === 'string' && v in WHEN;
+export const isWhen = (v: unknown): v is When => typeof v === 'string' && Object.hasOwn(WHEN, v);
 
 /** Who, by kind: the filter's first options. Any other value of `who` is one actor's id (a member's user id). */
 const WHO_KINDS = { people: 'user', agents: 'agent', screens: 'device', system: 'system' } as const satisfies Record<string, ActorKind>;
-const isWhoKind = (v: string): v is keyof typeof WHO_KINDS => v in WHO_KINDS;
+const isWhoKind = (v: string): v is keyof typeof WHO_KINDS => Object.hasOwn(WHO_KINDS, v);
 export const WHO_OPTIONS: { value: keyof typeof WHO_KINDS; label: string }[] = [
   { value: 'people', label: 'People' },
   { value: 'agents', label: 'Agents' },
@@ -71,6 +71,10 @@ export const TARGET_KINDS: { value: string; label: string }[] = [
   { value: 'brand_kit', label: 'Brand kit' },
   { value: 'data_source', label: 'Data source' },
   { value: 'connection', label: 'Connection' },
+  { value: 'connection_authorization', label: 'Connection request' },
+  { value: 'credential', label: 'Screen credential' },
+  { value: 'playlist', label: 'Playlist' },
+  { value: 'schedule_entry', label: 'Schedule entry' },
   { value: 'template_version', label: 'Template version' },
   { value: 'member', label: 'Member' },
   { value: 'invitation', label: 'Invitation' },
@@ -101,6 +105,9 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   remove_group_members: { group: 'Groups', words: 'Screens removed' },
   create_spot: { group: 'Spots', words: 'Created' },
   update_spot: { group: 'Spots', words: 'Draft changed' },
+  create_playlist: { group: 'Playlists', words: 'Created' },
+  update_playlist: { group: 'Playlists', words: 'Draft changed' },
+  delete_playlist: { group: 'Playlists', words: 'Deleted' },
   create_asset_upload: { group: 'Assets', words: 'Image upload started' },
   renew_asset_upload: { group: 'Assets', words: 'Upload renewed' },
   finalize_asset: { group: 'Assets', words: 'Image checked' },
@@ -205,8 +212,8 @@ function short(v: unknown): string {
   return s.length > 80 ? `${s.slice(0, 79)}…` : s;
 }
 
-/** Who did it: "You", a member's name, an agent, a screen or the system. A user no longer a member is named by id. */
-export function whoText(e: AuditEntry, names: ReadonlyMap<string, string>, me: string): string {
+/** Who did it: "You" (given `me`), a member's name, an agent, a screen or the system. A user no longer a member is named by id. */
+export function whoText(e: AuditEntry, names: ReadonlyMap<string, string>, me?: string): string {
   switch (e.actor.kind) {
     case 'user':
       return e.actor.id === me ? 'You' : (names.get(e.actor.id) ?? `Former member ${e.actor.id}`);
@@ -253,10 +260,10 @@ export function auditTime(at: number, timezone: string, now: number): string {
 /** The CSV's columns, in order. */
 export const CSV_HEADER = ['time', 'who', 'actor_kind', 'actor_id', 'via', 'action', 'what', 'target_kind', 'target_id', 'detail'];
 
-/** One entry as the CSV's row: the time in UTC (ISO 8601), the words the page shows, and the detail as recorded. */
-export const csvRow = (e: AuditEntry, names: ReadonlyMap<string, string>, me: string): string[] => [
+/** One entry as the CSV's row: the time in UTC (ISO 8601), the words the page shows (a member by name, never "You": others read the file), and the detail as recorded. */
+export const csvRow = (e: AuditEntry, names: ReadonlyMap<string, string>): string[] => [
   new Date(e.at).toISOString(),
-  whoText(e, names, me),
+  whoText(e, names),
   e.actor.kind,
   e.actor.id,
   viaText(e),

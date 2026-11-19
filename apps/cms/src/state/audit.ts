@@ -30,21 +30,28 @@ export const createAuditSlice: SliceCreator<AuditSlice> = (set) => {
 
     async exportAuditLog(input, row) {
       audit({ exporting: true, exportNote: null });
-      const lines = [csvLine(CSV_HEADER)];
+      // One string per page, so a page's lines are joined as it arrives. The byte order mark makes Excel read UTF-8.
+      const parts = [`\uFEFF${csvLine(CSV_HEADER)}`];
       let count = 0;
       let cursor: string | null = null;
       try {
         do {
           const page = auditPageOf(await callTool('list_audit_log', { ...input, limit: EXPORT_PAGE, ...(cursor ? { cursor } : {}) }));
-          for (const e of page.entries.slice(0, EXPORT_LIMIT - count)) lines.push(csvLine(row(e)));
+          parts.push(
+            page.entries
+              .slice(0, EXPORT_LIMIT - count)
+              .map((e) => csvLine(row(e)))
+              .join(''),
+          );
           count = Math.min(EXPORT_LIMIT, count + page.entries.length);
           cursor = page.next;
         } while (cursor && count < EXPORT_LIMIT);
       } catch (err) {
+        // A refusal mid-way (another org's cursor, after a switch in another tab) leaves no file: never a part of one org's log.
         audit({ exporting: false, exportNote: { text: toolMessage(err), failed: true } });
         return;
       }
-      const url = URL.createObjectURL(new Blob(lines, { type: 'text/csv;charset=utf-8' }));
+      const url = URL.createObjectURL(new Blob(parts, { type: 'text/csv;charset=utf-8' }));
       const link = document.createElement('a');
       link.href = url;
       link.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;

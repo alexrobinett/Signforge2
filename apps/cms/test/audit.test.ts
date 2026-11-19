@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auditInput, auditTime, csvLine, detailText, eventText, viaText, whatText, whoText, type AuditEntry } from '../src/lib/audit';
+import { auditInput, auditTime, csvLine, csvRow, detailText, eventText, isWhen, viaText, whatText, whoText, type AuditEntry } from '../src/lib/audit';
 
 const entry = (e: Partial<AuditEntry>): AuditEntry => ({
   at: Date.UTC(2026, 10, 17, 14, 20),
@@ -47,6 +47,8 @@ describe('the audit log in words', () => {
     expect(whoText(entry({}), names, 'usr_me')).toBe('Jun Takahashi');
     expect(whoText(entry({}), names, 'usr_jun')).toBe('You');
     expect(whoText(entry({ actor: { kind: 'user', id: 'usr_gone', clientId: 'cms' } }), names, 'usr_me')).toBe('Former member usr_gone');
+    // The file is read by others: the exporter's own rows by name.
+    expect(csvRow(entry({}), names)[1]).toBe('Jun Takahashi');
   });
 
   it('shows the input, without the target it names, redacted values as recorded', () => {
@@ -75,6 +77,9 @@ describe('auditInput', () => {
       query: 'latte',
     });
     expect(auditInput({ who: 'usr_jun' }, now)).toEqual({ actor: { id: 'usr_jun' } });
+    // A name every object has is no filter of ours: one actor's id, never a kind.
+    expect(isWhen('constructor')).toBe(false);
+    expect(auditInput({ who: 'constructor' }, now)).toEqual({ actor: { id: 'constructor' } });
   });
 });
 
