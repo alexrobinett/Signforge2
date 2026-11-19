@@ -143,9 +143,12 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     addSpotToPlaylist: (orgId, playlist, spotId) => get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: [...d.spotIds, spotId] })),
 
     removeSpotFromPlaylist(orgId, playlist, index, name) {
-      const before = current(playlist).spotIds;
-      get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: d.spotIds.filter((_, i) => i !== index) }));
-      toast(`Removed ${name}`, { action: { label: 'Undo', onClick: () => get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: before })) } });
+      const spotId = current(playlist).spotIds[index];
+      if (spotId === undefined) return;
+      get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(index, 1) }));
+      // Back at its place in the order as it is by then, so what was done since stays.
+      const undo = () => get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(Math.min(index, d.spotIds.length), 0, spotId) }));
+      toast(`Removed ${name}`, { action: { label: 'Undo', onClick: undo } });
     },
 
     moveSpotInPlaylist: (orgId, playlist, from, to) => get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: moved(d.spotIds, from, to) })),
