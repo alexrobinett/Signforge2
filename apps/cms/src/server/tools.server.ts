@@ -6,8 +6,9 @@
 import { redirect } from '@tanstack/react-router';
 import { getRequest } from '@tanstack/react-start/server';
 import type { AssetView } from '~/lib/assets';
+import type { BrandKitView } from '~/lib/brand-kits';
 import type { ListedSource } from '~/lib/integrations';
-import type { BrandKitView, SpotView, TemplateView } from '~/lib/spots';
+import type { SpotView, TemplateView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { callApi } from './api.server';
 
@@ -29,7 +30,12 @@ export async function tool<T>(name: string, input: unknown, opts?: { missing: 'n
     const refusal: { error?: string } = await res.clone().json();
     if (refusal.error === 'no_active_organization') throw new NoActiveOrg();
   }
-  if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
+  if (!res.ok) {
+    // A refusal's own message, written to be shown (Load older shows it); anything else by its status.
+    const refusal: unknown = await res.json().catch(() => null);
+    const message = typeof refusal === 'object' && refusal !== null && 'message' in refusal && typeof refusal.message === 'string' ? refusal.message : null;
+    throw new Error(message ?? `${name} failed: ${res.status}`);
+  }
   // The tool's output, as its output schema in packages/tools says (checked there in tests).
   const output: T = await res.json();
   return output;

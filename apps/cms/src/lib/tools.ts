@@ -3,6 +3,7 @@
  * (the API checks the session, the role and the input). A refusal throws `ToolCallError` with the
  * tool's own message, written to be shown as it is.
  */
+import type { AuditPage } from './audit';
 import type { PlaylistView } from './playlists';
 import type { SpotView } from './spots';
 
@@ -49,6 +50,18 @@ export function screenVersionOf(output: unknown): number {
   throw new ToolCallError('error', 'SignForge answered without the screen. Reload the page to see it.');
 }
 
+/** The id of the kit in a `{ brandKit }` output, such as `create_brand_kit`'s. */
+export function brandKitIdOf(output: unknown): string {
+  if (isRecord(output) && isRecord(output.brandKit) && typeof output.brandKit.id === 'string') return output.brandKit.id;
+  throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
+}
+
+/** The version of the kit in a `{ brandKit }` output, such as `update_brand_kit`'s: what the next save sends as `ifVersion`. */
+export function brandKitVersionOf(output: unknown): number {
+  if (isRecord(output) && isRecord(output.brandKit) && typeof output.brandKit.version === 'number') return output.brandKit.version;
+  throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
+}
+
 /** Whether a refusal is an `ifVersion` conflict: someone changed the thing since the page read it. */
 export const isStale = (err: unknown) =>
   err instanceof ToolCallError && err.code === 'conflict' && isRecord(err.details) && typeof err.details.version === 'number';
@@ -70,6 +83,13 @@ export function spotOf(output: unknown): SpotView {
 }
 
 const isSpot = (v: unknown): v is SpotView => isRecord(v) && typeof v.id === 'string' && typeof v.version === 'number' && typeof v.kind === 'string';
+
+/** A `list_audit_log` page, as the CSV export reads it from the browser. */
+export function auditPageOf(output: unknown): AuditPage {
+  if (isRecord(output) && Array.isArray(output.entries) && (output.next === null || typeof output.next === 'string'))
+    return { entries: output.entries, next: output.next };
+  throw new ToolCallError('error', 'SignForge answered without the audit log. Try the export again.');
+}
 
 /** The playlist in a `{ playlist }` output, such as `update_playlist`'s, for the Query cache. */
 export function playlistOf(output: unknown): PlaylistView {

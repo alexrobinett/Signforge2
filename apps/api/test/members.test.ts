@@ -180,3 +180,33 @@ describe('the audit log', () => {
     for (const r of rows) expect(r.detailJson).not.toContain(SECRET);
   });
 });
+
+describe('list_audit_log over /api/tools', () => {
+  it("gives an invitee's email to owners only, as Better Auth lists invitations to owners only", async () => {
+    const { owner, editor, viewer } = await team();
+    const invites = async (c: Client) => {
+      const res = await c.tool('list_audit_log', { action: 'invite_member' });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { entries: { detail: Record<string, unknown> }[] }).entries.map((e) => e.detail);
+    };
+    expect(await invites(owner)).toEqual([
+      { email: expect.stringContaining('viewer-'), role: 'viewer' },
+      { email: expect.stringContaining('editor-'), role: 'editor' },
+    ]);
+    for (const m of [editor, viewer]) {
+      expect((await m.c.get('/api/auth/organization/list-invitations')).status).toBe(403);
+      expect(await invites(m.c)).toEqual([{ role: 'viewer' }, { role: 'editor' }]);
+    }
+  });
+
+  it("refuses a cursor from the org the member switched away from, so no page mixes two orgs' rows", async () => {
+    const { owner } = await team();
+    const first = await owner.tool('list_audit_log', { limit: 1 });
+    const { next } = (await first.json()) as { next: string };
+    expect(next).toBeTruthy();
+    await owner.createOrg('Second Co');
+    const res = await owner.tool('list_audit_log', { limit: 1, cursor: next });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_input', message: expect.stringContaining('another organization') });
+  });
+});

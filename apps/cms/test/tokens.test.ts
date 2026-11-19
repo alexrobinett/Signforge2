@@ -26,6 +26,11 @@ const TEXT_ON: [string, string][] = [
   ['primary', 'card'],
   ['primary', 'background'],
   ...STATUSES.map((s): [string, string] => [`status-${s}-foreground`, `status-${s}-muted`]),
+  // The audit log's Who, on its rows and on a refused row's tint.
+  ...['agent', 'device'].flatMap((a): [string, string][] => [
+    [`actor-${a}`, 'card'],
+    [`actor-${a}`, 'accent'],
+  ]),
 ];
 const EDGES_ON: [string, string][] = [
   ['input', 'card'],

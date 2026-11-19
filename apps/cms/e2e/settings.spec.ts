@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, createOrg, hydrated, shots, signInAs } from './helpers';
 import { API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -29,10 +29,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   const editorEmail = `e2e-settings-editor-${stamp}@example.com`;
 
   await signInAs(page, ownerEmail, OWNER_ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Welcome to SignForge' })).toHaveCount(0);
+  await createOrg(page, 'Northside Market');
 
   // General: from the sidebar, /settings opens General.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click();
