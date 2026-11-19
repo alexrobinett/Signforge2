@@ -24,7 +24,7 @@ import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKi
 import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
-import { byWord, versionName } from '~/lib/publishes';
+import { byWord, publishTitle } from '~/lib/publishes';
 import { publishQuery } from '~/queries/publishes';
 import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
@@ -194,12 +194,12 @@ function LatestPublish({ orgId, now }: { orgId: string; now: number }) {
     <section aria-label="Latest publish" className="flex flex-col gap-3.5 rounded-[14px] border bg-card px-5 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
         <p className="text-[15px]">
-          <strong className="font-semibold">{versionName(publish)}</strong>{' '}
+          <strong className="font-semibold">{publishTitle(publish)}</strong>{' '}
           <span className="text-muted-foreground">
             · {publish.restoresId ? 'rolled back' : 'published'} {at} by {byWord(publish)}
           </span>
         </p>
-        <Link to="/publishes" className="py-1.5 text-sm text-primary underline-offset-4 hover:underline">
+        <Link to="/publishes" className="flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline sm:min-h-0 sm:py-1.5">
           View rollout
         </Link>
       </div>

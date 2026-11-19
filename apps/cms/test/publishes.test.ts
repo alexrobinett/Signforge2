@@ -16,7 +16,7 @@ const screen = (name: string, outcome: RolloutScreen['outcome'], more: Partial<R
 describe('a rollout', () => {
   it('groups screens by where they stand, playing first, and says why the rest wait', () => {
     const segs = segments(
-      { revision: 15 },
+      { revision: 15, restoresRevision: null },
       [
         screen('Kitchen', 'asleep', { wakesAt: '2026-11-20T07:00:00Z' }),
         screen('Deli', 'playing'),
@@ -35,9 +35,13 @@ describe('a rollout', () => {
     ]);
     expect(segs[0]!.label).toBe('playing v15');
     expect(segs[1]!.why).toBe('5 files still to fetch, then they switch.');
+    expect(segments({ revision: 4, restoresRevision: 2 }, [screen('Deli', 'playing'), screen('Window', 'downloading')], NOW).map((s) => [s.label, s.why])).toEqual([
+      ['playing v2 again', 'Confirmed by their last check-in.'],
+      ['downloading', 'Fetching their files, then they switch.'],
+    ]);
     expect(segs[2]!.label).toMatch(/^asleep, update at /);
     expect(segs[3]!.why).toBe('Unreachable for 26 h, playing what they have from their cache.');
-    expect(rolloutLabel({ revision: 15 }, segs, 6)).toMatch(
+    expect(rolloutLabel({ revision: 15, restoresRevision: null }, segs, 6)).toMatch(
       /^Rollout of v15: 2 playing v15, 2 downloading, 1 asleep, update at .+, 1 offline, update when back, of 6 screens$/,
     );
   });

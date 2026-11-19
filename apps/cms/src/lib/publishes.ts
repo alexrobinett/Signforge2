@@ -8,8 +8,9 @@
 export interface PublishView {
   id: string;
   revision: number;
-  /** For a roll back: the publish whose screens it put back. */
+  /** For a roll back: the publish whose screens it put back, and its revision. */
   restoresId: string | null;
+  restoresRevision: number | null;
   by: { kind: string; id: string; name: string | null };
   createdAt: number;
   finishedAt: number | null;
@@ -77,7 +78,7 @@ export function publishResultOf(output: unknown): PublishResult {
 
 /** How a past publish's rollout stands, in a few words. */
 export function standing(p: PublishView): string {
-  if (!p.screens) return 'no screens';
+  if (!p.screens) return 'reached no screen';
   if (p.finishedAt) return 'complete';
   if (p.replaced === p.screens) return 'moved on';
   return `${p.playing} of ${p.screens}`;
@@ -85,6 +86,14 @@ export function standing(p: PublishView): string {
 
 /** A publish's name as people say it. */
 export const versionName = (p: { revision: number }) => `v${p.revision}`;
+
+/** What a publish's screens play, in words: a roll back's is the earlier version, again. */
+export const playsWord = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
+  p.restoresRevision === null ? versionName(p) : `${versionName({ revision: p.restoresRevision })} again`;
+
+/** A publish's title: its version, and for a roll back where it went back to. */
+export const publishTitle = (p: Pick<PublishView, 'revision' | 'restoresRevision'>) =>
+  p.restoresRevision === null ? versionName(p) : `${versionName(p)}: back to ${versionName({ revision: p.restoresRevision })}`;
 
 /** Who made a publish, in words. */
 export const byWord = (p: PublishView) => p.by.name || (p.by.kind === 'agent' ? 'an agent' : p.by.kind === 'system' ? p.by.id : 'a member');
@@ -115,8 +124,8 @@ export interface Segment {
 const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /** A rollout grouped by where each screen stands, in the bar's order, with reasons. */
-export function segments(publish: Pick<PublishView, 'revision'>, screens: readonly RolloutScreen[], now: number): Segment[] {
-  const v = versionName(publish);
+export function segments(publish: Pick<PublishView, 'revision' | 'restoresRevision'>, screens: readonly RolloutScreen[], now: number): Segment[] {
+  const v = playsWord(publish);
   return ORDER.flatMap((outcome) => {
     const these = screens.filter((s) => s.outcome === outcome);
     if (!these.length) return [];
@@ -125,12 +134,13 @@ export function segments(publish: Pick<PublishView, 'revision'>, screens: readon
     const base = { outcome, count: n, names };
     switch (outcome) {
       case 'playing':
-        return [{ ...base, label: `playing ${v}`, why: 'They say they are playing it.' }];
+        return [{ ...base, label: `playing ${v}`, why: 'Confirmed by their last check-in.' }];
       case 'waiting':
         return [{ ...base, label: 'switching now', why: 'Online: each takes it as it hears of it, in a few seconds.' }];
       case 'downloading': {
         const files = these.reduce((sum, s) => sum + (s.filesMissing ?? 0), 0);
-        return [{ ...base, label: 'downloading', why: `${files} ${files === 1 ? 'file' : 'files'} still to fetch, then they switch.` }];
+        const left = files ? `${files} ${files === 1 ? 'file' : 'files'} still to fetch` : 'Fetching their files';
+        return [{ ...base, label: 'downloading', why: `${left}, then they switch.` }];
       }
       case 'asleep': {
         const wakes = these.flatMap((s) => (s.wakesAt ? [Date.parse(s.wakesAt)] : [])).sort((a, b) => a - b)[0];
@@ -159,5 +169,5 @@ function agoWords(ms: number): string {
 }
 
 /** The bar's words for a screen reader: how many play it, then each other part. */
-export const rolloutLabel = (publish: Pick<PublishView, 'revision'>, segs: readonly Segment[], total: number) =>
-  `Rollout of ${versionName(publish)}: ${segs.map((s) => `${s.count} ${s.label}`).join(', ')}, of ${total} screens`;
+export const rolloutLabel = (publish: Pick<PublishView, 'revision' | 'restoresRevision'>, segs: readonly Segment[], total: number) =>
+  `Rollout of ${publishTitle(publish)}: ${segs.map((s) => `${s.count} ${s.label}`).join(', ')}, of ${total} screens`;

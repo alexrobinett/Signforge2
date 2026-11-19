@@ -10,7 +10,7 @@ import { EmptyState, PageHeader } from '~/components/page';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { Button } from '~/components/ui/button';
 import { useCanPublish, useNow, useOrgId } from '~/lib/live';
-import { byWord, standing, versionName, type PublishView } from '~/lib/publishes';
+import { byWord, publishTitle, standing, versionName, type PublishView } from '~/lib/publishes';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
 import { publishesQuery, publishQuery } from '~/queries/publishes';
@@ -30,11 +30,10 @@ export const Route = createFileRoute('/_app/publishes')({
 
 const when = (ms: number) => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-/** One line about a publish: when, who, and what kind. */
-function about(p: PublishView, all: PublishView[]) {
-  const restored = p.restoresId && all.find((x) => x.id === p.restoresId);
-  const what = p.restoresId ? `Rolled back${restored ? ` to ${versionName(restored)}` : ''}` : 'Published';
-  return `${what} ${when(p.createdAt)} by ${byWord(p)}`;
+/** One line about a publish: what kind, when, and who. */
+function about(p: PublishView) {
+  const what = p.restoresRevision === null ? 'Published' : `Rolled back to ${versionName({ revision: p.restoresRevision })}`;
+  return `${what} · ${when(p.createdAt)} · by ${byWord(p)}`;
 }
 
 function PublishesPage() {
@@ -61,17 +60,17 @@ function PublishesPage() {
   }
   const v = versionName(publish);
   const latest = publishes[0];
-  const restored = publish.restoresId ? publishes.find((p) => p.id === publish.restoresId) : undefined;
   const done = screens.filter((s) => s.outcome === 'playing').length;
   const waiting = screens.filter((s) => s.outcome !== 'playing' && s.outcome !== 'replaced').length;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <PageHeader title={section.label} description={about(publish, publishes)} />
+    // Room at the foot for the toast, so it never covers the last row's button.
+    <div className="mx-auto max-w-4xl space-y-6 pb-36">
+      <PageHeader title={section.label} description={about(publish)} />
       <section aria-labelledby="rollout-title" className="flex flex-col gap-4 rounded-[14px] border bg-card p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 id="rollout-title" className="text-lg font-semibold">
-            {restored ? `Rolling back to ${versionName(restored)} (${v})` : `Rollout of ${v}`}
+            {publish.restoresRevision === null ? `Rollout of ${v}` : publishTitle(publish)}
           </h2>
           <p className="text-sm text-muted-foreground">
             <strong className="font-mono text-base font-semibold text-foreground">{done}</strong> of {screens.length} playing it
@@ -80,7 +79,7 @@ function PublishesPage() {
         </div>
         {screens.length ? (
           <>
-            <RolloutBar publish={publish} screens={screens} now={now} />
+            <RolloutBar publish={publish} screens={screens} now={now} className="h-3.5" />
             <RolloutLegend publish={publish} screens={screens} now={now} reasons />
           </>
         ) : (
@@ -92,10 +91,12 @@ function PublishesPage() {
         <h2 id="history-title" className="text-lg font-semibold">
           Publish history
         </h2>
-        <ol className="divide-y rounded-[14px] border bg-card">
+        <ol className="divide-y overflow-hidden rounded-[14px] border bg-card">
           {publishes.map((p) => {
-            // Of the screens it switched, the share that played it: all of them once it finished.
-            const share = p.finishedAt ? 100 : p.screens ? Math.round((p.playing / p.screens) * 100) : 0;
+            // Of the screens it switched, the share that played it: all of them once it finished; a
+            // full grey bar once later publishes replaced them all.
+            const movedOn = !p.finishedAt && p.screens > 0 && p.replaced === p.screens;
+            const share = p.finishedAt || movedOn ? 100 : p.screens ? Math.round((p.playing / p.screens) * 100) : 0;
             return (
               <li key={p.id} className={cn('flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3', p.id === publish.id && 'bg-accent/60')}>
                 <Link
@@ -106,15 +107,19 @@ function PublishesPage() {
                 >
                   {versionName(p)}
                 </Link>
-                <span className="min-w-0 flex-[1_1_14rem] text-sm text-muted-foreground">{about(p, publishes)}</span>
-                <span aria-hidden className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
-                  <span className="block h-full bg-chart-1" style={{ width: `${share}%` }} />
+                <span className="min-w-0 flex-[1_1_14rem] text-sm text-muted-foreground">{about(p)}</span>
+                <span aria-hidden className="h-2 w-32 overflow-hidden rounded-full bg-muted">
+                  <span className={cn('block h-full', movedOn ? 'bg-border-strong' : 'bg-chart-1')} style={{ width: `${share}%` }} />
                 </span>
-                <span className="w-24 font-mono text-sm">{standing(p)}</span>
-                {canPublish && p.id !== latest?.id && (
-                  <Button variant="outline" size="sm" disabled={pending} onClick={() => void rollBack(orgId, p)}>
-                    Roll back to {versionName(p)}
-                  </Button>
+                <span className="w-40 font-mono text-sm text-muted-foreground">{standing(p)}</span>
+                {canPublish && (
+                  <span className="flex w-40 justify-end">
+                    {p.id !== latest?.id && (
+                      <Button variant="outline" className="sm:h-8" disabled={pending} onClick={() => void rollBack(orgId, p)}>
+                        Roll back to {versionName(p)}
+                      </Button>
+                    )}
+                  </span>
                 )}
               </li>
             );

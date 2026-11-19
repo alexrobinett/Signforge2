@@ -688,6 +688,7 @@ describe('the publish tools (M3-18)', () => {
     expect(back.publish).toMatchObject({ revision: 3, screens: 2, previousId: second.publish!.id });
     expect((await org.screens.get(lobby.id))!).toMatchObject({ desiredManifestId: v1, previousManifestId: v2 });
     expect((await org.publishes.get(back.publish!.id))!.restoresId).toBe(first.publish!.id);
+    expect((await ok(editorCalls(org)('get_publish', {}))).publish).toMatchObject({ revision: 3, restoresId: first.publish!.id, restoresRevision: 1 });
     expect(p.told.at(-1)).toContainEqual({ screenId: lobby.id, manifestId: v1 });
     expect(await ok(p.call('roll_back_publish', { publishId: first.publish!.id }))).toEqual({ publish: null });
     expect(await p.call('roll_back_publish', { publishId: 'pub_gone' })).toMatchObject({ ok: false, error: 'not_found' });

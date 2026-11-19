@@ -1152,11 +1152,12 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       /**
        * Publishes newest first, `limit` of them from below `beforeRevision`, each with who made it
-       * (a member's name) and how its rollout stands: the screens it switched, how many report
+       * (a member's name), for a roll back the revision it went back to, and how its rollout stands: the screens it switched, how many report
        * playing its manifest, and how many a later publish moved on.
        */
       history: ({ beforeRevision, limit }: { beforeRevision?: number; limit: number }) => {
         const p = s.publishes;
+        const restored = alias(s.publishes, 'restored');
         const sc = s.screens;
         const rows = (where: SQL) =>
           sql<number>`(SELECT count(*) FROM ${ps} JOIN ${sc} ON ${sc.orgId} = ${ps.orgId} AND ${sc.id} = ${ps.screenId}
@@ -1165,12 +1166,14 @@ export function scoped(d1: D1Database, orgId: string) {
           .select({
             ...getTableColumns(p),
             actorName: s.user.name,
+            restoresRevision: restored.revision,
             screens: rows(sql`1`),
             applied: rows(sql`${sc.reportedManifestId} = ${ps.manifestId}`),
             replaced: rows(sql`${sc.desiredManifestId} IS NOT ${ps.manifestId}`),
           })
           .from(p)
           .leftJoin(s.user, and(eq(p.actorKind, 'user'), eq(s.user.id, p.actorId)))
+          .leftJoin(restored, and(eq(restored.orgId, p.orgId), eq(restored.id, p.restoresId)))
           .where(and(eq(p.orgId, orgId), beforeRevision === undefined ? undefined : lt(p.revision, beforeRevision)))
           .orderBy(desc(p.revision))
           .limit(limit)

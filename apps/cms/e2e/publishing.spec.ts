@@ -91,6 +91,8 @@ test('an edit to a spot, published from the spot editor, is on the screen in sec
   // Undo: the screen goes back to the manifest it had, with nothing compiled again.
   await toastSays('Published v3').getByRole('button', { name: 'Undo' }).click();
   await expect(toastSays('Screens pointed back at v2')).toBeVisible();
+  // A roll back cannot itself be undone from its toast: Undo belonged to the publish.
+  await expect(toastSays('Screens pointed back at v2').getByRole('button', { name: 'Undo' })).toHaveCount(0);
   await expect.poll(async () => (await playing(screen))?.manifestId, { timeout: 20_000 }).toBe(before);
   await expect.poll(() => stageShows(screen, 'Two for $4'), { timeout: 20_000 }).toBe(true);
 });
@@ -101,13 +103,13 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
   await hydrated(page);
   const latest = page.getByRole('region', { name: 'Latest publish' });
   await expect(latest).toContainText('v4');
-  await expect(latest.getByRole('img', { name: /^Rollout of v4: 1 playing v4/ })).toBeVisible({ timeout: 30_000 });
+  await expect(latest.getByRole('img', { name: /^Rollout of v4: back to v2: 1 playing v2 again/ })).toBeVisible({ timeout: 30_000 });
   await axe(page);
   await shots(page, '52-screens-latest-publish');
 
   await latest.getByRole('link', { name: 'View rollout' }).click();
-  await expect(page.getByRole('heading', { name: 'Rolling back to v2 (v4)' })).toBeVisible();
-  await expect(page.getByText('1 playing v4')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'v4: back to v2' })).toBeVisible();
+  await expect(page.getByText('1 playing v2 again')).toBeVisible();
   const history = page.getByRole('list').filter({ hasText: 'v3' });
   await expect(history.getByRole('listitem')).toHaveCount(4);
   await axe(page);
@@ -117,7 +119,7 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
   await history.getByRole('button', { name: 'Roll back to v3' }).click();
   await expect(toastSays('Screens pointed back at v3')).toBeVisible();
   await expect.poll(() => stageShows(screen, 'Three for $5'), { timeout: 20_000 }).toBe(true);
-  await expect(page.getByRole('heading', { name: 'Rolling back to v3 (v5)' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'v5: back to v3' })).toBeVisible();
 
   await page.setViewportSize({ width: 412, height: 915 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

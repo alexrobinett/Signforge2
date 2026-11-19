@@ -39,6 +39,8 @@ export interface PublishingSlice {
   makeDefaultPlaylist: (orgId: string, playlistId: string) => Promise<void>;
 }
 
+const TOAST_ID = 'publish';
+
 const screensWord = (n: number) => (n === 1 ? '1 screen' : `${n} screens`);
 
 export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, { queryClient, router }) => {
@@ -78,6 +80,8 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         : {}),
       cancel: viewRollout(made.id),
       duration: 10_000,
+      // One publish toast at a time: the next replaces it.
+      id: TOAST_ID,
     });
   }
 
@@ -129,10 +133,12 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       try {
         const made = madeOf(await callTool('roll_back_publish', { publishId: target.id }));
         const v = versionName(target);
+        // A new toast, not the publish toast updated: that one's Undo would go along with it.
+        toast.dismiss(TOAST_ID);
         if (!made) toast('Nothing to roll back', { description: `Every screen already has what ${v} gave it.` });
         else
           toast.success(`Screens pointed back at ${v}`, {
-            description: `Nothing was rebuilt or deleted: the newer publishes stay in the history. The next publish sends today's published content again.`,
+            description: 'Nothing was rebuilt or deleted: the newer publishes stay in the history. Your next Publish replaces this with what is published now.',
             cancel: viewRollout(made.id),
             duration: 10_000,
           });
