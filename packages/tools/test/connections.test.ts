@@ -110,16 +110,25 @@ describe('connecting an account', () => {
     expect((await owner.org.connections.authorizations.list()).every((r) => r.expiresAt > Date.now())).toBe(true);
   });
 
-  it('keeps the authorization when the provider refuses the code, and writes nothing', async () => {
+  it('uses the authorization up when the provider refuses the code, creating nothing and auditing the refusal', async () => {
     const { authorizeUrl } = await call('start_connection', { provider: 'fake' });
+    const oauthState = stateOf(authorizeUrl);
     const before = (await owner.org.connections.list()).length;
     refuseCode = true;
     try {
-      expect(await result('finish_connection', { oauthState: stateOf(authorizeUrl), code: 'bad' })).toMatchObject({ ok: false, error: 'invalid_input' });
+      expect(await result('finish_connection', { oauthState, code: 'bad' })).toMatchObject({ ok: false, error: 'invalid_input' });
     } finally {
       refuseCode = false;
     }
     expect((await owner.org.connections.list()).length).toBe(before);
+    // Works once, refused or not.
+    expect(await result('finish_connection', { oauthState, code: 'good' })).toMatchObject({ ok: false, error: 'not_found' });
+    const [entry] = await owner.org.auditLog.list({ limit: 1 });
+    expect(entry).toMatchObject({ action: 'finish_connection', targetKind: null });
+    expect(JSON.parse(entry?.detailJson ?? '{}')).toMatchObject({
+      refused: { error: 'invalid_input' },
+      input: { oauthState: '[redacted]', code: '[redacted]' },
+    });
   });
 
   it('reconnects a connection in place, keeping its id', async () => {

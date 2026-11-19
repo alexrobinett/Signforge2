@@ -158,7 +158,8 @@ const finishConnection = defineTool({
   }),
   output: z.object({ connection: connectionOutput }),
   example: { oauthState: 'example-state-from-the-callback', code: 'example-code' },
-  target: (_input, output) => ({ kind: 'connection', id: output.connection.id }),
+  // No output when the provider refused the code: the authorization was used up, with nothing to name.
+  target: (_input, output: { connection: { id: string } } | undefined) => (output ? { kind: 'connection', id: output.connection.id } : undefined),
   handler: async ({ org, actor, input, write, connectors }) => {
     const providers = connectorsOf(connectors);
     const pending = await org.connections.authorizations.byState(await sha256Hex(input.oauthState), Date.now());
@@ -172,7 +173,15 @@ const finishConnection = defineTool({
       fresh = org.connections.stage.insert({ provider: pending.provider, account: '', scopesJson: '[]', status: 'active', createdBy: actor.id });
       target = fresh.row;
     }
-    const grant = await providers.finish(pending.provider, pending, input.code, { orgId: org.orgId, id: target.id });
+    let grant: Awaited<ReturnType<Connectors['finish']>>;
+    try {
+      grant = await providers.finish(pending.provider, pending, input.code, { orgId: org.orgId, id: target.id });
+    } catch (e) {
+      if (!(e instanceof ToolError)) throw e;
+      // The state works once, refused or not: commit using it up, audited with the refusal.
+      // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
+      throw new ToolError(e.code, e.message, e.details, true, { cause: e });
+    }
     if (fresh) write(fresh);
     // Its sources failed while it needed reconnecting, backing off for hours: poll them now.
     else write(org.dataSources.stage.pollAgain(target.id));

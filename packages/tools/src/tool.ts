@@ -215,8 +215,12 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
   output: R;
   /** A valid input, shown to agents and used by the generated tests. Id fields name their kind (`screenId`, `groupIds`). */
   example: z.input<S>;
-  /** What the change was made to, for the audit log. */
-  target?: (input: z.output<S>, output: NoInfer<z.output<R>>) => { kind: string; id: string };
+  /**
+   * What the change was made to, for the audit log. A refusal that changed something (`ToolError`'s
+   * `changed`) has no output: a tool that refuses so either names its target from the input, or
+   * takes the output as possibly undefined and returns undefined for no target.
+   */
+  target?: (input: z.output<S>, output: NoInfer<z.output<R>>) => { kind: string; id: string } | undefined;
   handler: (ctx: ToolContext<z.output<S>, D>) => Promise<NoInfer<z.output<R>>>;
   /**
    * For a tool whose writes carry a guard (a statement that fails the batch when what the handler
