@@ -4,7 +4,8 @@
 import { scoped } from '@signforge/db';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { ProviderError, providerFetch } from '../src/connectors/adapter';
+import { ProviderError, type ProviderFetch, providerFetch } from '../src/connectors/adapter';
+import { oauth2 } from '../src/connectors/oauth';
 import { openGrant, sealGrant } from '../src/connectors/vault';
 import { pollDataSources, REFRESH_MARGIN_MS } from '../src/data/poller';
 import { Client, email, testApp } from './client';
@@ -160,6 +161,30 @@ describe('provider requests', () => {
     await expect(http('https://api.provider.test/x')).rejects.toBeInstanceOf(ProviderError);
     await expect(http('https://api.provider.test/x')).rejects.toMatchObject({ code: 'redirect' });
     expect(reached).toEqual(['https://api.provider.test/x', 'https://api.provider.test/x']);
+  });
+});
+
+describe('a token answer', () => {
+  const client = oauth2({
+    authorizeEndpoint: 'https://a.test/authorize',
+    tokenEndpoint: 'https://a.test/token',
+    clientId: 'c',
+    clientSecret: 's',
+    scopes: ['read'],
+  });
+  const answering =
+    (body: unknown): ProviderFetch =>
+    async () =>
+      new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  const exchange = (body: unknown) => client.exchange({ code: 'c', codeVerifier: 'v', redirectUri: 'https://api.test/cb' }, answering(body), 1_000);
+
+  it('takes expires_in as a number or a numeric string, and refuses anything else', async () => {
+    const base = { access_token: 'a', token_type: 'Bearer' };
+    expect((await exchange({ ...base, expires_in: 3600 })).grant.expiresAt).toBe(1_000 + 3_600_000);
+    expect((await exchange({ ...base, expires_in: '3600' })).grant.expiresAt).toBe(1_000 + 3_600_000);
+    expect((await exchange(base)).grant.expiresAt).toBeNull();
+    for (const expires_in of ['soon', '', -5, '1e3'])
+      await expect(exchange({ ...base, expires_in }), String(expires_in)).rejects.toMatchObject({ code: 'malformed' });
   });
 });
 

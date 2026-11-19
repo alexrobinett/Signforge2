@@ -19,6 +19,19 @@ export interface OAuthClient {
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+/**
+ * `expires_in` in seconds (RFC 6749 5.1: a number), or null when it is absent. Some providers
+ * send it as a string of digits; anything else would turn into a token that never expires, so
+ * it is `malformed`.
+ */
+function lifetime(v: unknown): number | null {
+  if (v === undefined) return null;
+  const n = typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0)
+    throw new ProviderError('malformed', 'the token answer has an expires_in that is not a number of seconds');
+  return n;
+}
+
 /** A token endpoint's success answer (RFC 6749 5.1), or `malformed`. */
 function tokenAnswer(body: unknown): { accessToken: string; refreshToken: string | null; expiresIn: number | null; scope: string | null } {
   if (!isObject(body)) throw new ProviderError('malformed', 'the token answer is not a JSON object');
@@ -28,7 +41,7 @@ function tokenAnswer(body: unknown): { accessToken: string; refreshToken: string
   return {
     accessToken: access_token,
     refreshToken: typeof refresh_token === 'string' && refresh_token ? refresh_token : null,
-    expiresIn: typeof expires_in === 'number' && expires_in > 0 ? expires_in : null,
+    expiresIn: lifetime(expires_in),
     scope: typeof scope === 'string' ? scope : null,
   };
 }
