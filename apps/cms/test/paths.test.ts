@@ -21,6 +21,8 @@ describe('signInBack', () => {
       expect(signInBack(fn, `https://cms.test${path}?redirect=%2Fspots`)).toBe('/spots');
     }
     expect(signInBack(fn, 'https://cms.test/sign-in?redirect=%2FSIGN-IN%3Fredirect%3D%252Fspots')).toBe('/');
+    // A tab, CR or LF the browser would drop, making a host of what follows: refused, not an error.
+    expect(signInBack(fn, 'https://cms.test/sign-in?redirect=%2F%09%2F%5B')).toBe('/');
   });
 
   it('keeps the case of a page to come back to', () => {
@@ -52,6 +54,10 @@ describe('safeRedirect', () => {
       '/sign-in/',
       '/x/../sign-in',
       '/sign-in#top',
+      '/\t/[',
+      '/\t/evil.example',
+      '/\n/evil.example',
+      '/\r/evil.example',
       '/api/auth/sign-out',
     ]) {
       expect(safeRedirect(bad)).toBe('/');

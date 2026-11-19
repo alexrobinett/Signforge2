@@ -1,9 +1,10 @@
 /**
  * Where to go after signing in. Only a path on this site is accepted, so a crafted
- * `/sign-in?redirect=` link cannot send someone elsewhere.
+ * `/sign-in?redirect=` link cannot send someone elsewhere. A tab, CR or LF is refused as the router
+ * refuses it: URL parsing drops them, so `/\t/x` reads as `//x`, another host.
  */
 export function safeRedirect(value: unknown, fallback = '/'): string {
-  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return fallback;
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || /[\\\t\n\r]/.test(value)) return fallback;
   if (isSignIn(new URL(value, 'https://cms.invalid').pathname) || value.startsWith('/api/')) return fallback;
   return value;
 }
