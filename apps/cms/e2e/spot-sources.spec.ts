@@ -73,7 +73,11 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
   await form.getByLabel('Place').fill('Atl');
   const places = form.getByRole('list', { name: 'Places found' });
   await expect(places.getByRole('button')).toHaveText(['Atlanta, Georgia, United States', 'Atlanta, Alabama, United States']);
+  // Announced, not only shown: the search's state is a status message.
+  await expect(form.getByRole('status')).toHaveText('2 places found.');
   await places.getByRole('button', { name: 'Atlanta, Georgia, United States' }).click();
+  // The button that had focus is gone: focus goes to what replaced the picker.
+  await expect(form.getByRole('button', { name: 'Change source' })).toBeFocused();
 
   await expect(form.getByText('Weather, Atlanta, Georgia, United States (°F, mph)')).toBeVisible();
   await expect(form.getByText('Waiting for the first check')).toBeVisible();
@@ -200,8 +204,12 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
 
   // Another news spot picks the feed the org has.
   await newSpot(page, 'News', 'Lobby news');
+  // Choosing in the list binds nothing (arrow keys change a closed select on Windows); the button does.
   await form.getByLabel('News feed').selectOption({ label: 'World desk' });
+  await expect(form.getByRole('listitem').filter({ hasText: 'Harbour bridge reopens after repairs' })).toBeHidden();
+  await form.getByRole('button', { name: 'Use this feed' }).click();
   await expect(form.getByRole('listitem').filter({ hasText: 'Harbour bridge reopens after repairs' })).toBeVisible();
+  await expect(form.getByRole('button', { name: 'Change source' })).toBeFocused();
   await page.setViewportSize({ width: 390, height: 844 });
   await axe(page);
   await shots(page, '38-spot-source-phone');

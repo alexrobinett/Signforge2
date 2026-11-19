@@ -8,6 +8,7 @@
 import { type LiveData, SNAPSHOT_STALE_MS, type TemplateManifest } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { ChevronRightIcon, Link2Icon, TriangleAlertIcon } from 'lucide-react';
+import { useCallback } from 'react';
 import { FieldForm } from '~/components/spots/field-form';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
@@ -26,6 +27,7 @@ import {
   weatherWords,
   withUnit,
   type DataSourceView,
+  type PlaceView,
   type SnapshotView,
   type WeatherUnits,
 } from '~/lib/live-data';
@@ -65,6 +67,13 @@ function shown(value: unknown, suffix = ''): string {
 /** A field's label without its help in brackets: "Feed language (BCP 47, e.g. fr-FR)" is "Feed language". */
 const shortLabel = (label: string) => label.replace(/\s*\(.*\)$/, '');
 
+/** What a place search found, as its status message says it. */
+function searchWords(places: PlaceView[] | null): string {
+  if (!places) return '';
+  if (!places.length) return 'No place by that name.';
+  return `${places.length} ${places.length === 1 ? 'place' : 'places'} found.`;
+}
+
 /** Whether screens show the snapshot: one confirmed within `SNAPSHOT_STALE_MS`. */
 const isFresh = (snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
   snapshot !== null && now - Date.parse(snapshot.checkedAt) <= SNAPSHOT_STALE_MS;
@@ -84,6 +93,7 @@ function freshness(source: DataSourceView, snapshot: SnapshotView | null, now: n
 
 function LiveValues({
   orgId,
+  spotId,
   dataSourceId,
   manifest,
   live,
@@ -92,6 +102,7 @@ function LiveValues({
   onChange,
 }: {
   orgId: string;
+  spotId: string;
   dataSourceId: string;
   manifest: TemplateManifest;
   live: LiveData;
@@ -102,6 +113,17 @@ function LiveValues({
 }) {
   const { data: read, dataUpdatedAt } = useSuspenseQuery(dataSourceQuery(orgId, dataSourceId));
   const now = useNow(dataUpdatedAt);
+  const focusRequested = useAppStore((s) => sourceStateOf(s.spotSource, spotId).focusChange);
+  const focusedChange = useAppStore((s) => s.focusedChange);
+  // After a bind the control that had focus is gone; this takes it, once.
+  const takeFocus = useCallback(
+    (el: HTMLButtonElement | null) => {
+      if (!el || !focusRequested) return;
+      el.focus();
+      focusedChange(spotId);
+    },
+    [focusRequested, focusedChange, spotId],
+  );
   if (!read)
     return (
       <p className="text-sm font-medium text-destructive">
@@ -177,7 +199,7 @@ function LiveValues({
       )}
       <p className="text-[13px] leading-snug text-foreground">{freshness(dataSource, snapshot, now)}</p>
       {canManage && (
-        <Button type="button" variant="outline" size="sm" className="self-start border-primary/30 text-primary" onClick={onChange}>
+        <Button ref={takeFocus} type="button" variant="outline" size="sm" className="self-start border-primary/30 text-primary" onClick={onChange}>
           Change source
         </Button>
       )}
@@ -234,8 +256,9 @@ function PlacePicker({ target, draft, bound }: { target: SourceTarget; draft: Sp
         {unitSelect('temperature', 'Temperature in')}
         {unitSelect('wind', 'Wind in')}
       </div>
-      {st.searching && <p className="text-sm text-muted-foreground">Looking…</p>}
-      {!st.searching && st.places?.length === 0 && <p className="text-sm text-muted-foreground">No place by that name.</p>}
+      <p role="status" className="text-sm text-muted-foreground empty:hidden">
+        {st.searching ? 'Looking…' : searchWords(st.places)}
+      </p>
       {!st.searching && st.places && st.places.length > 0 && (
         <ul aria-label="Places found" className="flex flex-col gap-1.5">
           {st.places.map((p) => (
@@ -270,8 +293,10 @@ function FeedPicker({ target, sources, boundId }: { target: SourceTarget; source
   const editFeed = useAppStore((s) => s.editFeed);
   const addFeed = useAppStore((s) => s.addFeed);
   const changeSource = useAppStore((s) => s.changeSource);
+  const chooseFeed = useAppStore((s) => s.chooseFeed);
   const format = SOURCE_FORMAT[live.source];
   const mine = sources.filter((d) => d.format === format);
+  const choice = st.feedChoice ?? boundId;
   const word = format === 'ical' ? 'calendar' : 'feed';
   return (
     <div className="flex flex-col gap-3">
@@ -280,7 +305,7 @@ function FeedPicker({ target, sources, boundId }: { target: SourceTarget; source
           <label htmlFor="source-feed" className="font-medium">
             {format === 'ical' ? 'Calendar' : 'News feed'}
           </label>
-          <NativeSelect id="source-feed" value={boundId ?? ''} disabled={st.pending} onChange={(e) => e.target.value && void connect(target, e.target.value)}>
+          <NativeSelect id="source-feed" value={choice ?? ''} disabled={st.pending} onChange={(e) => chooseFeed(spot.id, e.target.value)}>
             <option value="" disabled>
               Choose a {word}
             </option>
@@ -290,6 +315,15 @@ function FeedPicker({ target, sources, boundId }: { target: SourceTarget; source
               </option>
             ))}
           </NativeSelect>
+          <Button
+            type="button"
+            variant="outline"
+            className="self-start"
+            disabled={st.pending || !choice || choice === boundId}
+            onClick={() => choice && void connect(target, choice)}
+          >
+            Use this {word}
+          </Button>
         </div>
       )}
       {st.adding || mine.length === 0 ? (
@@ -401,6 +435,7 @@ export function SourceSection({
       {boundId && (
         <LiveValues
           orgId={orgId}
+          spotId={spot.id}
           dataSourceId={boundId}
           manifest={manifest}
           live={live}

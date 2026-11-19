@@ -35,6 +35,10 @@ interface SpotSourceState {
   adding: boolean;
   /** "If the source is down" is open, as the person left it: a re-render never closes it under someone typing. */
   fallbackOpen: boolean;
+  /** The feed chosen in the list, not yet used: a select binds nothing until its button is pressed. */
+  feedChoice: string | null;
+  /** A bind just replaced the picker that had focus: "Change source" takes it once it is on the page. */
+  focusChange: boolean;
   feedUrl: string;
   feedName: string;
   horizonDays: number;
@@ -64,6 +68,9 @@ export interface SpotSourceSlice {
   openFeedForm: (spotId: string, open: boolean) => void;
   /** The fallback section opened or closed, as the person toggled it. */
   toggleFallback: (spotId: string, open: boolean) => void;
+  chooseFeed: (spotId: string, dataSourceId: string) => void;
+  /** "Change source" has taken focus after a bind. */
+  focusedChange: (spotId: string) => void;
   editFeed: (spotId: string, change: Partial<Pick<SpotSourceState, 'feedUrl' | 'feedName' | 'horizonDays'>>) => void;
   /** Adds the feed in the form as a source and binds the live fields to it. */
   addFeed: (target: SourceTarget) => Promise<void>;
@@ -78,6 +85,8 @@ const initial: SpotSourceState = {
   units: null,
   adding: false,
   fallbackOpen: false,
+  feedChoice: null,
+  focusChange: false,
   feedUrl: '',
   feedName: '',
   horizonDays: DEFAULT_HORIZON_DAYS,
@@ -141,7 +150,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
       queryClient.invalidateQueries({ queryKey: ['org', t.orgId, 'spotPreview'] }),
     ]);
     get().editSpot(t.spot, (d) => ({ ...d, data: { ...d.data, ...data }, bindings: bindAll(t.live, d.bindings, dataSourceId) }));
-    source(t.spot.id, (s) => ({ ...initial, units: s.units, fallbackOpen: s.fallbackOpen }));
+    source(t.spot.id, (s) => ({ ...initial, units: s.units, fallbackOpen: s.fallbackOpen, focusChange: true }));
   }
 
   /**
@@ -201,6 +210,10 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
     openFeedForm: (spotId, adding) => source(spotId, (s) => ({ ...s, adding, error: null })),
 
     toggleFallback: (spotId, fallbackOpen) => source(spotId, (s) => ({ ...s, fallbackOpen })),
+
+    chooseFeed: (spotId, feedChoice) => source(spotId, (s) => ({ ...s, feedChoice, error: null })),
+
+    focusedChange: (spotId) => source(spotId, (s) => ({ ...s, focusChange: false })),
 
     editFeed: (spotId, change) => source(spotId, (s) => ({ ...s, ...change, error: null })),
 
