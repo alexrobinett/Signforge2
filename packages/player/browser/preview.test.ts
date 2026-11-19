@@ -239,6 +239,25 @@ describe('preview content source', () => {
     expect((await p.state()).played).toBe(1);
   });
 
+  it('titles the frames with the spot name a draft renames it to (#69)', async () => {
+    const named = (name: string) => h.content([{ id: 'draft', durationMs: 60_000 }], { edit: (m) => (m.spots.draft!.name = name) });
+    const titles = async () => {
+      const wrapper = player().childFrames()[0]!;
+      return [await (await wrapper.frameElement()).getAttribute('title'), await (await wrapper.childFrames()[0]!.frameElement()).getAttribute('title')];
+    };
+    const p = await openPreview(CMS);
+    const player = p.player;
+    await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'listening' });
+    await p.post(named('Before'));
+    await p.until((s) => s.played >= 1);
+    await p.mark();
+    expect(await titles()).toEqual(['Before', 'Before']);
+
+    await p.post(named('After'));
+    await expect.poll(titles, { timeout: 3000 }).toEqual(['After', 'After']);
+    expect(await p.onScreen()).toMatchObject({ marked: true });
+  });
+
   it('reloads a protocol 1 bundle in place for a new draft, since it cannot reset', async () => {
     const p = await openPreview(CMS);
     await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'listening' });
