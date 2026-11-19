@@ -1,0 +1,4 @@
+p {
+  font-size: 5vmin;
+  color: var(--sf-text, #fff);
+}

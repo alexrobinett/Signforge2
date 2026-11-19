@@ -48,6 +48,7 @@ import {
   type Connectors,
   type FeedUrlSealer,
   type ScreenNotifier,
+  type TemplateChecker,
   type ToolErrorCode,
 } from './tool';
 
@@ -65,6 +66,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Seals feed URLs. The data source tools that take a URL need it. */
   feedUrls?: FeedUrlSealer;
+  /** The runtime check of uploaded templates. Registering an org template needs it. */
+  templateCheck?: TemplateChecker;
   /** Providers' OAuth. The connection tools need it. */
   connectors?: Connectors;
   /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
@@ -233,6 +236,7 @@ export async function dispatch<D extends DataScope>(
         blobs: caller.blobs,
         uploads: caller.uploads,
         feedUrls: caller.feedUrls,
+        templateCheck: caller.templateCheck,
         connectors: caller.connectors,
         write,
         notify,

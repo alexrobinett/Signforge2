@@ -14,16 +14,18 @@ import { type ConnectorDeps, connectorDeps, connectorsFor } from '../connectors'
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
 import { feedUrlSealer } from '../data/cipher';
+import { templateCheckAllowed, templateChecker } from '../template-check';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
 
-const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429> = {
+const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = {
   invalid_input: 400,
   forbidden: 403,
   unknown_tool: 404,
   not_found: 404,
   conflict: 409,
   rate_limited: 429,
+  unavailable: 503,
 };
 
 /** The CMS's client id in the audit log. */
@@ -42,9 +44,12 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     uploads: uploadSigner(c.env, c.req.url),
     feedUrls: feedUrlSealer(c.env),
     connectors: connectorsFor(c.env, connectors ?? connectorDeps(c.env), new URL(CALLBACK_PATH, c.req.url).href),
+    templateCheck: templateChecker(c.env),
     screens: screenNotifier(c.env),
     // A claim counts against the member and against the address, so many accounts on one address share a limit.
-    rateLimit: async () => {
+    // A template check counts against the org, whose one container it uses.
+    rateLimit: async (bucket) => {
+      if (bucket === 'template_check') return templateCheckAllowed(c.env, c.var.org.orgId);
       const [user, ip] = await Promise.all([
         c.env.PAIR_CLAIM_LIMIT.limit({ key: `user:${c.var.session.user.id}` }),
         c.env.PAIR_CLAIM_LIMIT.limit({ key: `ip:${clientIp(c)}` }),
