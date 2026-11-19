@@ -128,6 +128,14 @@ function oneForeignId(tool: AnyTool, fields: IdField[], field: IdField, s: Seede
  */
 const IGNORES_UNKNOWN = new Set(['remove_group_members.screenIds']);
 
+/**
+ * Tools that list what org B's own calls were given, which this test fills with org A's ids: the
+ * audit log. Each must list exactly org B's own rows instead.
+ */
+const LISTS_CALLS: Record<string, (out: unknown) => unknown> = {
+  list_audit_log: (out) => (out as { entries: { at: number; action: string; actor: { id: string } }[] }).entries.map((e) => [e.at, e.action, e.actor.id]),
+};
+
 /** Fields whose foreign id is refused by the check of another field, which the tool makes first. */
 const REFUSED_BY_ANOTHER = new Set([
   // The credential is looked up first and must belong to the screen named.
@@ -231,6 +239,12 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
       it(`${tool.name}: names no ids, and works on org B alone`, async () => {
         const result = await dispatch(registry, tool.name, tool.example, callerB);
         expect(result.ok, JSON.stringify(result)).toBe(true);
+        const calls = LISTS_CALLS[tool.name];
+        if (calls && result.ok) {
+          const own = await scoped(env.DB, 'org-b').auditLog.list({ limit: 200 });
+          expect(calls(result.output)).toEqual(own.map((e) => [e.at, e.action, e.actorId]));
+          return;
+        }
         // Names and content ids say org-a; server ids (a screen's scr_…) do not, so look for each of org A's ids too.
         const out = JSON.stringify(result);
         expect(out).not.toContain('org-a');

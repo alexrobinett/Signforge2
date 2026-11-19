@@ -66,6 +66,9 @@
   --status-needs-you: #d92d20;
   --status-needs-you-foreground: #7a271a;
   --status-needs-you-muted: #fee4e2;
+  /* Who did it, in the audit log (canvas board SettingsAudit): agents and screens apart from people. */
+  --actor-agent: #5b2a86;
+  --actor-device: #2b4c7e;
 
   /* Rollout bars and play counts; every bar carries a text legend. */
   --chart-1: #1f3fbf;
@@ -123,6 +126,8 @@
   --status-needs-you: #f87171;
   --status-needs-you-foreground: #fca5a5;
   --status-needs-you-muted: #3f0d0d;
+  --actor-agent: #c9a7eb;
+  --actor-device: #9db8e8;
 
   --chart-1: #7b93ff;
   --chart-2: #f59e0b;
@@ -180,6 +185,8 @@
   --color-status-needs-you: var(--status-needs-you);
   --color-status-needs-you-foreground: var(--status-needs-you-foreground);
   --color-status-needs-you-muted: var(--status-needs-you-muted);
+  --color-actor-agent: var(--actor-agent);
+  --color-actor-device: var(--actor-device);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);

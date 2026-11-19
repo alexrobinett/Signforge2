@@ -152,6 +152,8 @@ export interface Connectors {
 export interface ToolContext<I, D extends DataScope = OrgScope> {
   org: D;
   actor: Actor;
+  /** The caller's role in the org, for what a read may show it (an invitee's email, to owners only). */
+  role: Role;
   input: I;
   /** The R2 bucket holding blobs and manifests (keys in ./r2.ts). */
   blobs: R2Bucket;
