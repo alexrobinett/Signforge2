@@ -64,6 +64,7 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   logoOnLightAsset: (o) => o.asset,
   dataSource: (o) => o.dataSource,
   connection: (o) => o.connection,
+  publish: (o) => o.publish,
   // An R2 multipart upload's id, not a row.
   upload: () => 'upload-id',
   // Catalogue ids, the same for every org.

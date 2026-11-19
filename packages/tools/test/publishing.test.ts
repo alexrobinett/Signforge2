@@ -2,13 +2,14 @@
 // database to `compileScreen`. See docs/backend-plan.md#publishing.
 import { compileScreen } from '@signforge/compiler';
 import { templateKey, type ScreenManifest, type Spot, type TemplateManifest } from '@signforge/contract';
-import { platform, published, scoped, StaleVersionError, type OrgScope } from '@signforge/db';
+import { draftChanged, platform, published, scoped, StaleVersionError, type OrgScope } from '@signforge/db';
 import { seedOrganization, seedScreen } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import stressGolden from '@signforge/cli/golden/stress.json';
 import { editorCalls, ok } from './calls';
 import { loadCompileInput, loadOrg, publishOrg } from '../src/publishing';
+import { dispatch, manifestKey, registry, type Caller, type ScreenNotifier } from '../src';
 
 const hash = async (text: string) =>
   [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -250,9 +251,10 @@ describe('publishOrg', () => {
     expect([...result.screens].sort((p, q) => (p.screenId === hall.id ? -1 : q.screenId === hall.id ? 1 : 0))).toEqual([
       {
         screenId: hall.id,
+        current: null,
         problems: [`spot ${x('extra')}: asset ${other.id} is not verified`, `manifest: playlist "${x('lonely')}" lists unknown spot "${x('extra')}"`],
       },
-      { screenId: lobby.id, problems: [], manifest: expect.objectContaining({ defaultPlaylist: x('main') }) },
+      { screenId: lobby.id, current: null, problems: [], manifest: expect.objectContaining({ defaultPlaylist: x('main') }) },
     ]);
   });
 
@@ -260,13 +262,13 @@ describe('publishOrg', () => {
     await seedOrganization(env.DB, 'pub-no-default');
     const org = scoped(env.DB, 'pub-no-default');
     const only = await org.screens.insert({ name: 'Only', timezone: 'UTC', orientation: 'landscape' });
-    expect((await publishOrg(org, opts)).screens).toEqual([{ screenId: only.id, problems: ['the organization has no default playlist'] }]);
+    expect((await publishOrg(org, opts)).screens).toEqual([{ screenId: only.id, current: null, problems: ['the organization has no default playlist'] }]);
   });
 });
 
 describe('concurrent publishes (R09)', () => {
   type Publish = Awaited<ReturnType<typeof publishOrg>>;
-  /** Commit a publish as M3-18's publish tool will: its writes and every screen's switch, in one batch. */
+  /** Commit a publish as the publish tool does: its writes and every screen's switch, in one batch. */
   const commitPublish = (org: OrgScope, result: Publish) =>
     org.commit([
       ...result.writes,
@@ -517,5 +519,210 @@ describe('loadCompileInput', () => {
     expect(after.groups).toHaveLength(1);
     expect(await loadCompileInput(org, elsewhere.id)).toBeUndefined();
     expect((await loadOrg(org)).screens.map((s) => s.id).sort()).toEqual([hall.id, lobby.id].sort());
+  });
+});
+
+describe('the publish tools (M3-18)', () => {
+  /** Calls as an editor, with a notifier that records which screens it was told of and a bucket `put` can be wrapped around. */
+  function publisher(org: OrgScope, opts: { onPut?: (attempt: number) => Promise<void>; lock?: boolean } = {}) {
+    const told: { screenId: string; manifestId: string }[][] = [];
+    let puts = 0;
+    let locked = 0;
+    const blobs = new Proxy(env.BLOBS, {
+      get: (target, key) =>
+        key === 'put'
+          ? async (...args: Parameters<R2Bucket['put']>) => {
+              puts += 1;
+              await opts.onPut?.(puts);
+              return target.put(...args);
+            }
+          : Reflect.get(target, key, target),
+    });
+    const screens: ScreenNotifier = {
+      manifest: async () => {},
+      manifests: async (rows) => void told.push([...rows]),
+      revoked: async () => {},
+      command: async () => {},
+    };
+    const caller: Caller = {
+      org,
+      role: 'editor',
+      actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
+      blobs,
+      screens,
+      ...(opts.lock ? { publishLock: async <T>(run: () => Promise<T>) => ((locked += 1), run()) } : {}),
+    };
+    return { call: (name: string, input: unknown) => dispatch(registry, name, input, caller), told, locked: () => locked };
+  }
+  const editDeal = (org: OrgScope, title: string) => org.spots.update(x('deal'), { dataJson: JSON.stringify({ title }) });
+  type Out = { publish: { id: string; revision: number; screens: number } | null; promoted: unknown[]; screens: { screenId: string; outcome: string }[] };
+
+  it('publishes every changed draft, stores each manifest, switches the screens in one batch and tells them', async () => {
+    const { org, lobby, hall } = await seedSmallOrg('tool-pub');
+    const p = publisher(org, { lock: true });
+    const out = (await ok(p.call('publish', {}))) as unknown as Out;
+    expect(out.publish).toMatchObject({ revision: 1, screens: 2 });
+    expect(out.promoted).toHaveLength(5);
+    expect(out.screens.map((s) => s.outcome)).toEqual(['updated', 'updated']);
+    expect(p.locked()).toBe(1);
+    for (const s of [lobby, hall]) {
+      const desired = (await org.screens.get(s.id))!.desiredManifestId!;
+      const stored = await env.BLOBS.get(manifestKey(org.orgId, s.id, desired));
+      expect(((await stored!.json()) as ScreenManifest).id).toBe(desired);
+    }
+    expect(p.told).toEqual([await org.publishes.screens(out.publish!.id)]);
+    expect((await org.settings.get())!.publishRevision).toBe(1);
+    expect(await org.auditLog.list({ target: { kind: 'publish', id: out.publish!.id } })).toHaveLength(1);
+  });
+
+  it('touches no screen and writes nothing when nothing changed', async () => {
+    const { org } = await seedSmallOrg('tool-pub-same');
+    const p = publisher(org);
+    await ok(p.call('publish', {}));
+    const audit = (await org.auditLog.list()).length;
+    const again = (await ok(p.call('publish', {}))) as unknown as Out;
+    expect(again).toMatchObject({ publish: null, promoted: [] });
+    expect(again.screens.map((s) => s.outcome)).toEqual(['unchanged', 'unchanged']);
+    expect(p.told).toHaveLength(1);
+    expect((await org.settings.get())!.publishRevision).toBe(1);
+    expect(await org.auditLog.list()).toHaveLength(audit);
+  });
+
+  it("publishes only the pinned drafts, and refuses a pin whose draft changed since or is another org's", async () => {
+    await seedSmallOrg('tool-pub-pins-theirs');
+    const theirs = x('deal');
+    const { org } = await seedSmallOrg('tool-pub-pins');
+    const p = publisher(org);
+    await ok(p.call('publish', {}));
+    await editDeal(org, 'Three for $5');
+    await org.spots.update(x('still'), { durationMs: 6000 });
+    const deal = (await org.spots.get(x('deal')))!;
+    const out = (await ok(p.call('publish', { drafts: [{ kind: 'spot', id: deal.id, version: deal.rowVersion }] }))) as unknown as Out;
+    expect(out.promoted).toEqual([{ kind: 'spot', id: deal.id }]);
+    expect(draftChanged((await org.spots.get(x('still')))!)).toBe(true);
+
+    await editDeal(org, 'Four for $6');
+    expect(await p.call('publish', { drafts: [{ kind: 'spot', id: deal.id, version: deal.rowVersion }] })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { id: deal.id, version: deal.rowVersion + 1 },
+    });
+    expect(await p.call('publish', { drafts: [{ kind: 'playlist', id: 'pls_gone', version: 1 }] })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { id: 'pls_gone', version: 0 },
+    });
+    expect(await p.call('publish', { drafts: [{ kind: 'spot', id: theirs, version: 1 }] })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { id: theirs, version: 0 },
+    });
+    expect((await org.settings.get())!.publishRevision).toBe(2);
+    expect(draftChanged((await scoped(env.DB, 'tool-pub-pins-theirs').spots.get(theirs))!)).toBe(true);
+  });
+
+  it('is refused to an editor when only owners publish', async () => {
+    const { org } = await seedSmallOrg('tool-pub-owners');
+    await org.commit((await org.settings.stage.set({ editorsPublish: false })).writes);
+    expect(await publisher(org).call('publish', {})).toMatchObject({ ok: false, error: 'forbidden' });
+  });
+
+  it('runs again from a fresh read when another publish commits first, and when a screen is deleted mid-publish', async () => {
+    const { org, lobby, hall } = await seedSmallOrg('tool-pub-race');
+    // Between this publish's read and its commit (its R2 writes), another publish commits.
+    const rival = publisher(org);
+    const p = publisher(org, {
+      onPut: async (n) => {
+        if (n === 1) {
+          await ok(rival.call('publish', {}));
+          await editDeal(org, 'Three for $5');
+        }
+      },
+    });
+    const out = (await ok(p.call('publish', {}))) as unknown as Out;
+    expect(out.publish!.revision).toBe(2);
+
+    // A screen deleted while it compiles: the batch's screen guard fails, and the next read has one screen.
+    await editDeal(org, 'Five for $7');
+    const q = publisher(org, { onPut: async (n) => void (n === 1 && (await org.screens.delete(hall.id))) });
+    const after = (await ok(q.call('publish', {}))) as unknown as Out;
+    expect(after.publish).toMatchObject({ revision: 3, screens: 1 });
+    expect(after.screens.map((s) => s.screenId)).toEqual([lobby.id]);
+  });
+
+  it('gives up with a conflict after losing three times', async () => {
+    const { org } = await seedSmallOrg('tool-pub-lose');
+    const rival = publisher(org);
+    let n = 0;
+    const p = publisher(org, {
+      // Two screens, two concurrent puts an attempt: the first of each pair lets the rival in.
+      onPut: async (put) => {
+        if (put % 2 === 0) return;
+        await ok(rival.call('publish', {}));
+        await editDeal(org, `Deal ${++n}`);
+      },
+    });
+    await editDeal(org, 'Mine');
+    expect(await p.call('publish', {})).toMatchObject({ ok: false, error: 'conflict', details: { id: 'publish revision' } });
+    expect(n).toBe(3);
+  });
+
+  it('rolls screens back to an earlier publish without compiling, as a new publish', async () => {
+    const { org, lobby } = await seedSmallOrg('tool-rollback');
+    const p = publisher(org);
+    const first = (await ok(p.call('publish', {}))) as unknown as Out;
+    const v1 = (await org.screens.get(lobby.id))!.desiredManifestId;
+    await editDeal(org, 'Three for $5');
+    await ok(p.call('publish', {}));
+    const v2 = (await org.screens.get(lobby.id))!.desiredManifestId;
+    expect(v2).not.toBe(v1);
+
+    const back = (await ok(p.call('roll_back_publish', { publishId: first.publish!.id }))) as unknown as Out;
+    expect(back.publish).toMatchObject({ revision: 3, screens: 2 });
+    expect((await org.screens.get(lobby.id))!).toMatchObject({ desiredManifestId: v1, previousManifestId: v2 });
+    expect((await org.publishes.get(back.publish!.id))!.restoresId).toBe(first.publish!.id);
+    expect(p.told.at(-1)).toContainEqual({ screenId: lobby.id, manifestId: v1 });
+    expect(await ok(p.call('roll_back_publish', { publishId: first.publish!.id }))).toEqual({ publish: null });
+    expect(await p.call('roll_back_publish', { publishId: 'pub_gone' })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it("lists publishes and reads a publish's rollout, screen by screen", async () => {
+    const { org, lobby, hall } = await seedSmallOrg('tool-rollout');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    expect(await ok(call('get_publish', {}))).toEqual({ publish: null, screens: [] });
+    const first = (await ok(p.call('publish', {}))) as unknown as Out;
+    const manifest = (await org.screens.get(lobby.id))!.desiredManifestId!;
+    await org.screens.reportManifest(lobby.id, manifest, { arrivedAt: Date.now() });
+    await org.screens.update(hall.id, { lastSeenAt: Date.now() - 3_600_000 });
+
+    const latest = await ok(call('get_publish', {}));
+    expect(latest.publish).toMatchObject({ id: first.publish!.id, revision: 1, by: { kind: 'user', id: 'user-1' }, screens: 2, playing: 1, replaced: 0 });
+    expect(latest.screens).toEqual([
+      expect.objectContaining({ screenId: hall.id, name: 'Hall', outcome: 'offline' }),
+      expect.objectContaining({ screenId: lobby.id, name: 'Lobby', outcome: 'playing', manifestId: manifest }),
+    ]);
+    await editDeal(org, 'Three for $5');
+    await ok(p.call('publish', {}));
+    expect((await ok(call('get_publish', { publishId: first.publish!.id }))).publish).toMatchObject({ revision: 1, replaced: 2 });
+    const page1 = await ok(call('list_publishes', { limit: 1 }));
+    expect((page1.publishes as { revision: number }[]).map((x) => x.revision)).toEqual([2]);
+    const page2 = await ok(call('list_publishes', { limit: 1, cursor: page1.next }));
+    expect(page2).toMatchObject({ publishes: [{ revision: 1 }], next: null });
+    expect(await call('get_publish', { publishId: 'pub_gone' })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('sets the default playlist, without which no screen can be published to', async () => {
+    const { org } = await seedSmallOrg('tool-default');
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    const p = publisher(org);
+    const none = (await ok(p.call('publish', {}))) as unknown as Out;
+    expect(none.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
+    const call = editorCalls(org);
+    expect(await ok(call('set_default_playlist', { playlistId: x('main') }))).toMatchObject({ playlist: { id: x('main'), isDefault: true } });
+    expect((await ok(call('get_playlist', { playlistId: x('evenings') }))).playlist).toMatchObject({ isDefault: false });
+    const out = (await ok(p.call('publish', {}))) as unknown as Out;
+    expect(out.screens.map((s) => s.outcome)).toEqual(['updated', 'updated']);
+    expect(await call('set_default_playlist', { playlistId: 'pls_gone' })).toMatchObject({ ok: false, error: 'not_found' });
   });
 });

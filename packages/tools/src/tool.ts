@@ -50,6 +50,8 @@ export type DataScope = OrgScope | PlatformScope;
 export interface ScreenNotifier {
   /** The screen's desired manifest is now `manifestId`. */
   manifest(screenId: string, manifestId: string): Promise<void>;
+  /** A publish switched these screens: tell each (the API: through a queue, 50 screens a message). */
+  manifests(changes: readonly { screenId: string; manifestId: string }[]): Promise<void>;
   /** The credential was revoked: close its sockets. */
   revoked(screenId: string, credentialId: string): Promise<void>;
   /** A command to act on now (a display override, identify, restart). A screen whose socket is down misses it. */
@@ -212,6 +214,12 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * audited, and its notices are sent, though it stages no write.
    */
   alwaysAudited?: boolean;
+  /**
+   * True for a tool that publishes: the dispatcher runs it one call at a time per org and, when
+   * its commit loses to another publish or an edit (`StaleVersionError`), runs it again from a
+   * fresh read (./dispatch.ts, step 6). Its handler must be safe to run again.
+   */
+  publishes?: boolean;
   input: S;
   /**
    * What the tool returns. Shown to agents as JSON Schema, and checked against every output in

@@ -32,18 +32,20 @@ const playlistOutput = z.object({
   transition,
   spotIds: z.array(z.string()).describe('The spots in play order'),
   version: version.describe('Moves on with every edit of the draft, its spots too; pass it as ifVersion to update only what you read'),
+  isDefault: z.boolean().describe('Whether it is the default playlist: what every screen plays when no schedule entry says otherwise'),
   ...draftOutput,
 });
 type PlaylistView = z.infer<typeof playlistOutput>;
 const playlistResult = z.object({ playlist: playlistOutput });
 
-const playlistView = (row: PlaylistRow, items: string[]): PlaylistView => ({
+const playlistView = (row: PlaylistRow, items: string[], defaultId: string | null | undefined): PlaylistView => ({
   id: row.id,
   name: row.name,
   // Written only by these tools and `sf push`, from the contract's `Transition`.
   transition: JSON.parse(row.transitionJson),
   spotIds: items,
   version: row.rowVersion,
+  isDefault: row.id === defaultId,
   published: published(row) !== undefined,
   draftChanged: draftChanged(row, items),
   publishedAt: row.publishedAt,
@@ -73,9 +75,9 @@ const listPlaylists = defineTool({
     // Rows before items: an edit of the order moves its playlist's version on, so items read after
     // a version are never older than it, and an edit made from this listing's version is safe.
     const rows = await org.playlists.list();
-    const items = await org.playlists.allItems();
+    const [items, settings] = await Promise.all([org.playlists.allItems(), org.settings.get()]);
     const { rows: shown, next } = page(rows, (p) => [-p.updatedAt, p.id], input);
-    return { playlists: shown.map((p) => playlistView(p, items.get(p.id) ?? [])), next };
+    return { playlists: shown.map((p) => playlistView(p, items.get(p.id) ?? [], settings?.defaultPlaylistId)), next };
   },
 });
 
@@ -90,7 +92,8 @@ const getPlaylist = defineTool({
   example: { playlistId: 'pls_example' },
   handler: async ({ org, input }) => {
     const row = await requirePlaylist(org, input.playlistId);
-    return { playlist: playlistView(row, await org.playlists.items(row.id)) };
+    const [items, settings] = await Promise.all([org.playlists.items(row.id), org.settings.get()]);
+    return { playlist: playlistView(row, items, settings?.defaultPlaylistId) };
   },
 });
 
@@ -109,7 +112,7 @@ const createPlaylist = defineTool({
   handler: async ({ org, input, write }) => {
     const items = input.spotIds ?? [];
     const row = write(await org.playlists.stage.insert({ name: input.name, transitionJson: JSON.stringify(input.transition ?? DEFAULT_TRANSITION) }, items));
-    return { playlist: playlistView(row, items) };
+    return { playlist: playlistView(row, items, null) };
   },
 });
 
@@ -130,7 +133,8 @@ const updatePlaylist = defineTool({
     const current = await requirePlaylist(org, input.playlistId);
     const patch = { name: input.name, transitionJson: input.transition && JSON.stringify(input.transition) };
     const row = write(await org.playlists.stage.update(current, patch, input.ifVersion, input.spotIds));
-    return { playlist: playlistView(row, input.spotIds ?? (await org.playlists.items(row.id))) };
+    const [items, settings] = await Promise.all([input.spotIds ?? org.playlists.items(row.id), org.settings.get()]);
+    return { playlist: playlistView(row, items, settings?.defaultPlaylistId) };
   },
   // The order's rows name the playlist: deleted between the read and the commit, they fail the batch.
   refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
@@ -167,4 +171,24 @@ const deletePlaylist = defineTool({
   refuseFailedCommit: async ({ org, input }) => inUse(org, input.playlistId),
 });
 
-export const playlistTools = [listPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist];
+const setDefaultPlaylist = defineTool({
+  name: 'set_default_playlist',
+  description:
+    "Make a playlist the organization's default: what every screen plays when no schedule entry says otherwise. Until there is one, no screen can be published to. Takes effect at the next publish, which must also publish the playlist and its spots if they are drafts. Returns { playlist }.",
+  scope: 'content:draft',
+  minRole: 'editor',
+  mutates: true,
+  input: z.object({ playlistId: id('playlist') }),
+  output: playlistResult,
+  example: { playlistId: 'pls_example' },
+  target,
+  handler: async ({ org, input, write }) => {
+    const row = await requirePlaylist(org, input.playlistId);
+    write(await org.settings.stage.set({ defaultPlaylistId: row.id }));
+    return { playlist: playlistView(row, await org.playlists.items(row.id), row.id) };
+  },
+  // Deleted between the read and the commit, the setting's foreign key fails the batch.
+  refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
+});
+
+export const playlistTools = [listPlaylists, getPlaylist, createPlaylist, updatePlaylist, deletePlaylist, setDefaultPlaylist];

@@ -19,6 +19,9 @@
  *      with `ctx.onDiscard`. Any other error commits nothing. An update given `ifVersion` whose row has
  *      changed since (checked when staged, and again inside the batch) is refused with
  *      `conflict` and `{ id, version }`, the version now.
+ *   6. A tool that `publishes` runs one call at a time per org (`Caller.publishLock`), and a call
+ *      whose commit lost to another publish, an edit or a deleted screen (`StaleVersionError`)
+ *      runs again from a fresh read, up to `PUBLISH_ATTEMPTS` times in all.
  *
  * A platform tool (`platformRegistry`, run by `/admin` with `platform(db)`) is audited the same way
  * in `platform_audit_log`, since what it changes belongs to no org.
@@ -66,6 +69,11 @@ export interface Caller<D extends DataScope = OrgScope> {
   connectors?: Connectors;
   /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
   screens?: ScreenNotifier;
+  /**
+   * Runs `run` while no other publish of the org runs (the API: the org's Durable Object). Without
+   * it, publishes may overlap, and the publish revision's guard still commits them in order.
+   */
+  publishLock?: <T>(run: () => Promise<T>) => Promise<T>;
   /** Counts attempts against the caller's rate limits. `claim_screen` refuses without one. */
   rateLimit?: RateLimiter;
   /** Counts an agent's calls against its grant's limits. Required when the actor is an agent: dispatch throws without it. */
@@ -123,6 +131,9 @@ const fail = (error: ToolErrorCode, message: string, details?: unknown): Dispatc
   message,
   ...(details === undefined ? {} : { details }),
 });
+
+/** How many times a publish is run before a lost race is returned as `conflict`. */
+const PUBLISH_ATTEMPTS = 3;
 
 /** An update refused because its row moved on since the caller read it (`ifVersion`, ./fields.ts). */
 const stale = (err: StaleVersionError) => fail('conflict', err.message, { id: err.id, version: err.version });
@@ -254,6 +265,8 @@ export async function dispatch<D extends DataScope>(
     try {
       await commit(tool.target?.(parsed.data, output), {});
     } catch (err) {
+      // A publish that lost a race runs again (`publishAttempts`).
+      if (tool.publishes && err instanceof StaleVersionError) throw err;
       // A concurrent call with the same key committed first, and this batch failed on its record.
       const prior = await keyed?.find();
       if (prior) return prior;
@@ -265,9 +278,23 @@ export async function dispatch<D extends DataScope>(
     return { ok: true, output };
   };
 
+  /** A publish: again from a fresh read while it loses races, then the last loss as a conflict. */
+  const publishAttempts = async (): Promise<DispatchResult> => {
+    for (let attempt = 1; ; attempt++) {
+      writes.length = 0;
+      notices.length = 0;
+      try {
+        return await run();
+      } catch (err) {
+        if (!(err instanceof StaleVersionError)) throw err;
+        if (attempt === PUBLISH_ATTEMPTS) return stale(err);
+      }
+    }
+  };
+
   let succeeded = false;
   try {
-    const result = await run();
+    const result = !tool.publishes ? await run() : caller.publishLock ? await caller.publishLock(publishAttempts) : await publishAttempts();
     succeeded = result.ok;
     return result;
   } finally {

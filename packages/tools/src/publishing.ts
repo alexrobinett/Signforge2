@@ -31,6 +31,7 @@ import {
   draftChanged,
   published,
   type Asset,
+  type DraftRow,
   type AssetRendition,
   type BrandAssignment,
   type BrandKitRow,
@@ -44,6 +45,7 @@ import {
   type Write,
 } from '@signforge/db';
 import { kitColors } from './brand';
+import { ToolError } from './tool';
 
 type Orientation = Screen['orientation'];
 
@@ -398,8 +400,15 @@ async function probe(
  * (every item must be a published spot), then schedule entries (their playlist must be published).
  * Returns the graph as it will be once `writes` are committed.
  */
-export async function promoteDrafts(org: OrgScope, graph: OrgGraph, opts: CompileOptions): Promise<{ graph: OrgGraph; writes: Write[]; drafts: DraftReport }> {
+export async function promoteDrafts(
+  org: OrgScope,
+  graph: OrgGraph,
+  opts: CompileOptions,
+  pins?: ReadonlyMap<string, number>,
+): Promise<{ graph: OrgGraph; writes: Write[]; drafts: DraftReport }> {
   const writes: Write[] = [];
+  // With pins, only the pinned drafts are candidates: every other draft stays as it is published.
+  const changed = (kind: DraftKind, row: DraftRow, items?: string[]) => (!pins || pins.has(pinKey(kind, row.id))) && draftChanged(row, items);
   const drafts: DraftReport = { promoted: [], held: [] };
   // Every orientation a screen of this org has: a spot's files differ by orientation.
   const orientations = [...new Set<Orientation>(graph.screens.length ? graph.screens.map((s) => s.orientation) : ['landscape'])].sort();
@@ -413,7 +422,7 @@ export async function promoteDrafts(org: OrgScope, graph: OrgGraph, opts: Compil
 
   const spots: SpotRow[] = [];
   for (const row of graph.spots) {
-    if (!draftChanged(row)) {
+    if (!changed('spot', row)) {
       spots.push(row);
       continue;
     }
@@ -445,7 +454,7 @@ export async function promoteDrafts(org: OrgScope, graph: OrgGraph, opts: Compil
   const playlists: PlaylistRow[] = [];
   for (const row of graph.playlists) {
     const items = graph.items.get(row.id) ?? [];
-    if (!draftChanged(row, items)) {
+    if (!changed('playlist', row, items)) {
       playlists.push(row);
       continue;
     }
@@ -473,7 +482,7 @@ export async function promoteDrafts(org: OrgScope, graph: OrgGraph, opts: Compil
 
   const entries: ScheduleEntryRow[] = [];
   for (const row of graph.entries) {
-    if (!draftChanged(row)) {
+    if (!changed('schedule_entry', row)) {
       entries.push(row);
       continue;
     }
@@ -500,10 +509,21 @@ export async function promoteDrafts(org: OrgScope, graph: OrgGraph, opts: Compil
 
 export interface ScreenPublish {
   screenId: string;
+  /** The screen's desired manifest as read: one compiled to the same id changes nothing. */
+  current: string | null;
   /** Absent when the screen cannot be published; it keeps the manifest it has. */
   manifest?: Awaited<ReturnType<typeof compileScreen>>['manifest'];
   problems: string[];
 }
+
+/** A draft chosen for a publish, at the version it was chosen at. */
+export interface DraftPin {
+  kind: DraftKind;
+  id: string;
+  version: number;
+}
+
+const pinKey = (kind: DraftKind, id: string) => `${kind}:${id}`;
 
 /**
  * Promote drafts, then compile every screen from the published graph. A screen that cannot be
@@ -511,15 +531,37 @@ export interface ScreenPublish {
  * its switch of each screen's desired manifest, in one batch. The writes put the publish in order
  * (`publishes.stage.advance`) and each promotion is guarded by its draft's version, so a batch
  * that lost to another publish or to an edit fails with `StaleVersionError` and writes nothing.
+ *
+ * With `pins`, only those drafts are promoted, and only at the version pinned: one that changed or
+ * was deleted since is refused (`conflict`, details `{ id, version }`, the version now, 0 if gone).
+ * `revision` is the org's publish revision as read; the publish moves it to the next.
  */
-export async function publishOrg(org: OrgScope, opts: CompileOptions): Promise<{ writes: Write[]; drafts: DraftReport; screens: ScreenPublish[] }> {
+export async function publishOrg(
+  org: OrgScope,
+  opts: CompileOptions,
+  pins?: readonly DraftPin[],
+): Promise<{ writes: Write[]; drafts: DraftReport; screens: ScreenPublish[]; revision: number }> {
   const read = await loadOrg(org);
-  const { graph, writes: promotions, drafts } = await promoteDrafts(org, read, opts);
+  const pinned = pins && new Map(pins.map((p) => [pinKey(p.kind, p.id), p.version]));
+  if (pins) {
+    const rows: Record<DraftKind, DraftRow[]> = { spot: read.spots, playlist: read.playlists, schedule_entry: read.entries };
+    for (const p of pins) {
+      const now = rows[p.kind].find((r) => r.id === p.id)?.rowVersion ?? 0;
+      if (now !== p.version) {
+        throw new ToolError('conflict', `${p.kind.replace('_', ' ')} ${p.id} has changed since it was chosen for this publish; it is now version ${now}`, {
+          id: p.id,
+          version: now,
+        });
+      }
+    }
+  }
+  const { graph, writes: promotions, drafts } = await promoteDrafts(org, read, opts, pinned);
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
   const screens: ScreenPublish[] = [];
   for (const screen of [...graph.screens].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    const current = screen.desiredManifestId;
     if (!graph.defaultPlaylist) {
-      screens.push({ screenId: screen.id, problems: ['the organization has no default playlist'] });
+      screens.push({ screenId: screen.id, current, problems: ['the organization has no default playlist'] });
       continue;
     }
     const { input, unavailable, unavailableKits } = screenInput(graph, screen);
@@ -533,7 +575,7 @@ export async function publishOrg(org: OrgScope, opts: CompileOptions): Promise<{
       .filter(([id]) => result.problems.includes(`brand: brand kit ${id} is not available`))
       .flatMap(([id, ps]) => ps.map((p) => `brand: brand kit ${id}: ${p}`));
     const problems = [...reasons, ...kitReasons, ...result.problems];
-    screens.push(result.manifest ? { screenId: screen.id, manifest: result.manifest, problems } : { screenId: screen.id, problems });
+    screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
-  return { writes, drafts, screens };
+  return { writes, drafts, screens, revision: read.publishRevision };
 }
