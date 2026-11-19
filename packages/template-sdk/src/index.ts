@@ -27,15 +27,9 @@
  * from clean markup. Look elements up inside the hooks, not once at the top of `main.ts`: a reset
  * replaces them. State a template keeps outside the DOM must be cleared in `stop`.
  */
-import {
-  BRAND_CSS_VARS,
-  PROTOCOL_VERSION,
-  type BrandShape,
-  type FrameTheme,
-  type HostMessage,
-  type InitPayload,
-  type TemplateMessage,
-} from '@signforge/contract';
+import type { BrandShape, FrameTheme, HostMessage, InitPayload, TemplateMessage } from '@signforge/contract';
+// Values only from the narrow entry: the index would bring the whole contract into every bundle.
+import { BRAND_CSS_VARS, PROTOCOL_VERSION } from '@signforge/contract/frame';
 
 export interface TemplateContext extends Omit<InitPayload, 'assets' | 'theme'> {
   /** Image fields as object URLs; `$brand.logo` too when the brand kit has a logo. */
