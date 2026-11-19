@@ -79,6 +79,8 @@ export const TARGET_KINDS: { value: string; label: string }[] = [
   { value: 'member', label: 'Member' },
   { value: 'invitation', label: 'Invitation' },
   { value: 'organization', label: 'Organization' },
+  { value: 'alert_channel', label: 'Alert channel' },
+  { value: 'alert_delivery', label: 'Alert delivery' },
   { value: 'org', label: 'Settings' },
 ];
 export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value === kind)?.label ?? kind.replaceAll('_', ' ');
@@ -127,6 +129,11 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   register_template_version: { group: 'Templates', words: 'Version registered' },
   set_template_version_status: { group: 'Templates', words: 'Version status changed' },
   update_org_settings: { group: 'Organization', words: 'Settings changed' },
+  set_slack_alert_channel: { group: 'Alerts', words: 'Slack channel set' },
+  set_webhook_alert_channel: { group: 'Alerts', words: 'Webhook set' },
+  remove_alert_channel: { group: 'Alerts', words: 'Channel removed' },
+  test_alert_channel: { group: 'Alerts', words: 'Test alert sent' },
+  retry_alert_delivery: { group: 'Alerts', words: 'Delivery retried' },
   create_organization: { group: 'Organization', words: 'Created' },
   update_organization: { group: 'Organization', words: 'Name changed' },
   invite_member: { group: 'Members', words: 'Invited' },
