@@ -32,6 +32,12 @@ const WRAPPER_HTML =
   '<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style>' +
   "<script>relay=(w,m)=>w.postMessage(m,'*')</script>";
 type WrapperWindow = Window & { relay: (to: Window, m: HostMessage) => void };
+// No CSP directive covers WebRTC (Chromium ignores `webrtc 'block'`), so a peer connection would
+// still reach STUN and TURN servers. This goes first in the template's document, so it runs before
+// any template code and leaves the template no way to build one: the sandbox gives every document
+// in the frame, a frame the template adds too, an opaque origin of its own, so no other window's
+// constructor is within its reach. See "Template containment" in docs/architecture.md.
+const NO_WEBRTC = '<script>delete window.RTCPeerConnection;delete window.webkitRTCPeerConnection</script>';
 
 /** Corrected time and the offset the SDK's `now()` adds to the frame's own clock (src/clock.ts). */
 const frameClock = (): FrameClock => ({ now: now(), offsetMs: clock.offsetMs });
@@ -251,7 +257,8 @@ export class Slot {
     // no popups, forms, or navigating any frame but its own.
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.title = spot.name;
-    frame.srcdoc = html;
+    // After the doctype, if there is one: a script before it would put the document in quirks mode.
+    frame.srcdoc = html.replace(/^(\s*<!doctype[^>]*>)?/i, `$&${NO_WEBRTC}`);
 
     const live: LiveFrame = (this.live = {
       frame,
