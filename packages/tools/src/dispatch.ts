@@ -46,6 +46,7 @@ import {
   type FeedUrlSealer,
   type PlaceFinder,
   type ScreenNotifier,
+  type TemplateChecker,
   type ToolErrorCode,
 } from './tool';
 
@@ -65,6 +66,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   feedUrls?: FeedUrlSealer;
   /** Looks places up by name. `find_places` needs it. */
   places?: PlaceFinder;
+  /** The runtime check of uploaded templates. Registering an org template needs it. */
+  templateCheck?: TemplateChecker;
   /** Providers' OAuth. The connection tools need it. */
   connectors?: Connectors;
   /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
@@ -226,6 +229,7 @@ export async function dispatch<D extends DataScope>(
         uploads: caller.uploads,
         feedUrls: caller.feedUrls,
         places: caller.places,
+        templateCheck: caller.templateCheck,
         connectors: caller.connectors,
         write,
         notify,

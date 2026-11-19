@@ -22,6 +22,7 @@ export {
   type FeedUrlSealer,
   type Place,
   type PlaceFinder,
+  type TemplateChecker,
   type Role,
   type Scope,
   type RateLimitBucket,

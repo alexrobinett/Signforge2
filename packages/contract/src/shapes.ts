@@ -260,6 +260,41 @@ export interface TemplateCheckReport {
    * fallback (`brandColourWarnings`). Absent on reports stored before the lint existed.
    */
   warnings?: string[];
+  /**
+   * The runtime check, which the server adds to an org template's report. Absent on base
+   * templates (CI checks those) and on reports stored before the check existed.
+   */
+  runtime?: TemplateRuntimeReport;
+}
+
+/**
+ * The runtime check of a template (`apps/template-check`): its bundle rendered in headless
+ * Chromium, in the player's sandbox and policy, in a container with no network, at 1920x1080 in
+ * each orientation it supports, with example data. Each request or navigation it attempts, an
+ * uncaught error, a failed prepare and no `ready` within the player's limit is a problem.
+ */
+export interface TemplateRuntimeReport {
+  ok: boolean;
+  /** Sentences, such as `requested https://example.com/x (blocked)`. */
+  problems: string[];
+  /** What rendered it: the runner image (pinned by digest when deployed) and the browser. */
+  runner: { image: string; browser: string };
+  /** One per orientation the template supports. */
+  renders: TemplateRender[];
+  /** What the check cost, in ms: starting the container (0 when it was running) and the check in it. */
+  cost: { startMs: number; checkMs: number };
+}
+
+export interface TemplateRender {
+  orientation: Orientation;
+  viewport: { width: number; height: number };
+  /** From `init` to `ready`, as the page around the template saw it; null when it never came. */
+  readyMs: number | null;
+  /**
+   * The first second of play, counted in the template's own frame, so the template could skew
+   * it: information, not a gate. The frame budgets are measured on the Pi. Null when it never played.
+   */
+  frames: { count: number; longestMs: number } | null;
 }
 
 /** Named colours the lint knows. Not the whole CSS list: the ones a template is likely to write. */
