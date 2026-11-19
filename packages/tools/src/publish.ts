@@ -217,10 +217,11 @@ const publishOutput = z.object({
   restoresRevision: z.number().int().nullable().describe("For a roll back: that publish's revision"),
   by: z.object({ kind: z.string(), id: z.string(), name: z.string().nullable().describe("A member's name; null for an agent or the system") }),
   createdAt: z.number(),
-  finishedAt: z.number().nullable().describe('When every screen it switched played it, or moved on to a later publish'),
+  finishedAt: z.number().nullable().describe('When every screen it switched played it, moved on to a later publish, or was revoked'),
+  reached: z.number().int().nullable().describe('Once finished: how many of its screens played it (0 when it was undone before any did); null until then'),
   screens: z.number().int().describe('Screens it switched'),
   playing: z.number().int().describe('Of those, how many say they are playing it'),
-  replaced: z.number().int().describe('Of those, how many a later publish has switched since'),
+  replaced: z.number().int().describe('Of those, how many a later publish has switched, and do not say they play this one'),
 });
 type PublishView = z.output<typeof publishOutput>;
 
@@ -232,6 +233,7 @@ const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[nu
   by: { kind: h.actorKind, id: h.actorId, name: h.actorName },
   createdAt: h.createdAt,
   finishedAt: h.finishedAt,
+  reached: h.reached,
   screens: h.screens,
   playing: h.applied,
   replaced: h.replaced,

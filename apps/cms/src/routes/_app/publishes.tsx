@@ -93,10 +93,11 @@ function PublishesPage() {
         </h2>
         <ol className="divide-y overflow-hidden rounded-[14px] border bg-card">
           {publishes.map((p) => {
-            // Of the screens it switched, the share that played it: all of them once it finished; a
-            // full grey bar once later publishes replaced them all.
-            const movedOn = p.screens > 0 && p.replaced === p.screens;
-            const share = p.finishedAt || movedOn ? 100 : p.screens ? Math.round((p.playing / p.screens) * 100) : 0;
+            // Of the screens it switched, the share that played it: once finished, the share it reached;
+            // a full grey bar for one that later publishes replaced before any screen played it.
+            const played = p.reached ?? p.playing;
+            const movedOn = p.screens > 0 && (p.reached === 0 || (p.reached === null && p.replaced === p.screens));
+            const share = movedOn ? 100 : p.screens ? Math.round((played / p.screens) * 100) : 0;
             return (
               <li key={p.id} className={cn('flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3', p.id === publish.id && 'bg-accent/60')}>
                 <Link

@@ -725,7 +725,8 @@ describe('the publish tools (M3-18)', () => {
     ]);
     await editDeal(org, 'Three for $5');
     await ok(p.call('publish', {}));
-    expect((await ok(call('get_publish', { publishId: first.publish!.id }))).publish).toMatchObject({ revision: 1, replaced: 2 });
+    expect((await ok(call('get_publish', { publishId: first.publish!.id }))).publish).toMatchObject({ revision: 1, playing: 1, replaced: 1 });
+    // Lobby still says it plays v1, so it counts as playing it; Hall never did and v2 replaced it.
     const page1 = await ok(call('list_publishes', { limit: 1 }));
     expect((page1.publishes as { revision: number }[]).map((x) => x.revision)).toEqual([2]);
     const page2 = await ok(call('list_publishes', { limit: 1, cursor: page1.next }));

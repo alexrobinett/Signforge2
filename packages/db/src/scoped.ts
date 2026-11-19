@@ -1328,16 +1328,16 @@ export function scoped(d1: D1Database, orgId: string) {
         },
       },
       /**
-       * Mark a publish's rollout finished at `now` and queue its alert, in one batch; false if it
-       * was marked already (by a check that queued the same event, which is queued once). Without
-       * `alert`, the mark alone, as `incidents.clear`.
+       * Mark a publish's rollout finished at `now`, with how many of its screens were playing it
+       * (`reached`), and queue its alert, in one batch; false if it was marked already (by a check
+       * that queued the same event, which is queued once). Without `alert`, the mark alone.
        */
-      finish: async (publishId: string, now: number, alert?: QueuedAlert): Promise<boolean> => {
+      finish: async (publishId: string, now: number, reached: number, alert?: QueuedAlert): Promise<boolean> => {
         const p = s.publishes;
         const [marked] = await db.batch([
           db
             .update(p)
-            .set({ finishedAt: now })
+            .set({ finishedAt: now, reached })
             .where(and(eq(p.orgId, orgId), eq(p.id, publishId), isNull(p.finishedAt)))
             .returning({ id: p.id }),
           ...(alert ? queueAlert(alert, now, sql`1`) : []),
@@ -1363,7 +1363,8 @@ export function scoped(d1: D1Database, orgId: string) {
             restoresRevision: restored.revision,
             screens: rows(sql`1`),
             applied: rows(sql`${sc.reportedManifestId} = ${ps.manifestId}`),
-            replaced: rows(sql`${sc.desiredManifestId} IS NOT ${ps.manifestId}`),
+            // Moved on and not reporting it: a screen still reporting it is playing it.
+            replaced: rows(sql`${sc.desiredManifestId} IS NOT ${ps.manifestId} AND ${sc.reportedManifestId} IS NOT ${ps.manifestId}`),
           })
           .from(p)
           .leftJoin(s.user, and(eq(p.actorKind, 'user'), eq(s.user.id, p.actorId)))

@@ -158,7 +158,7 @@ export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email:
   for (const p of await findFinishedRollouts(env.DB)) {
     const org = scoped(env.DB, p.orgId);
     if (!p.playing) {
-      await org.publishes.finish(p.id, now);
+      await org.publishes.finish(p.id, now, p.playing);
       continue;
     }
     const { recipients, channels, time } = await contextFor(p.orgId);
@@ -175,8 +175,8 @@ export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email:
       },
     });
     const marked = await orAlone(
-      () => org.publishes.finish(p.id, now, finished),
-      () => org.publishes.finish(p.id, now),
+      () => org.publishes.finish(p.id, now, p.playing, finished),
+      () => org.publishes.finish(p.id, now, p.playing),
     );
     if (!marked) continue;
     const every = p.playing === p.screens;

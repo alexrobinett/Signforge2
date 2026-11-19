@@ -757,8 +757,10 @@ export const publishes = sqliteTable(
     /** A roll back: the publish whose screens it put back. Null for a publish of content. */
     restoresId: text('restores_id'),
     createdAt: created(),
-    /** When every screen it switched reported playing its manifest, or moved on to a later one. */
+    /** When every screen it switched reported playing its manifest, moved on to a later one, or was revoked. */
     finishedAt: integer('finished_at'),
+    /** How many of its screens were playing it then: 0 for one undone before any got there. Null until finished. */
+    reached: integer('reached'),
   },
   (t) => [
     uniqueIndex('publishes_org_id_uq').on(t.orgId, t.id),

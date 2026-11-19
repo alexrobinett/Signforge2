@@ -259,6 +259,46 @@ describe('alerts to Slack and webhooks', () => {
     expect((await to(slackUrl)[2]!.json<{ text: string }>()).text).toBe(`v4 finished in ${org.name}: playing on 1 of 2 screens`);
   });
 
+  it('counts a screen that played a publish, then was switched by the next before it said so, as playing, not replaced (re-check of #127)', async () => {
+    const { owner, org, webhookUrl, outbox } = await orgWithChannels();
+    await owner.ok('/api/tools/update_org_settings', { alerts: { publish_finished: { webhook: true } } });
+    const start = Date.now();
+    const o = scoped(env.DB, org.id);
+    const screens = [await pairedScreen(org.id, 'Till 1', start), await pairedScreen(org.id, 'Till 2', start)];
+    const publishTo = async (revision: number, manifest: (i: number) => string) => {
+      const p = o.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision });
+      const r = screens.map((screenId, i) => ({ screenId, manifestId: manifest(i) }));
+      await o.commit([
+        ...p.writes,
+        ...o.publishes.stage.addScreens(p.row.id, r).writes,
+        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId).writes),
+      ]);
+      return p.row;
+    };
+    const v1 = await publishTo(1, (i) => String(i + 1).repeat(64));
+    for (const [i, id] of screens.entries()) await o.screens.reportManifest(id, String(i + 1).repeat(64), { arrivedAt: start });
+    // v2 switches both while they are still fetching it: they report v1.
+    await publishTo(2, (i) => String(i + 5).repeat(64));
+    const { guards, to } = receivers({ [webhookUrl]: [200] });
+    await finishRollouts(env, outbox, start + MIN);
+    await deliverAlerts(env, outbox, { now: start + MIN, guards });
+
+    const sent = outbox.messages.filter((m) => m.subject.startsWith('v1 '));
+    expect(sent.map((m) => m.subject)).toEqual(['v1 reached every screen']);
+    expect(sent[0]!.text).not.toMatch(/revoked|later publish/);
+    expect((await to(webhookUrl)[0]!.json<{ data: unknown }>()).data).toMatchObject({ screens: 2, playing: 2, replaced: 0 });
+    // The history row: played by both, then replaced, is complete, not "moved on".
+    const history = (
+      await owner.ok<{ publishes: { id: string; playing: number; replaced: number; reached: number | null }[] }>('/api/tools/list_publishes', {})
+    ).publishes;
+    expect(history.find((h) => h.id === v1.id)).toMatchObject({ playing: 2, replaced: 0, reached: 2 });
+    // Once they report v2, v1 still says it reached both.
+    for (const [i, id] of screens.entries()) await o.screens.reportManifest(id, String(i + 5).repeat(64), { arrivedAt: start + 2 * MIN });
+    const later = (await owner.ok<{ publishes: { id: string; playing: number; replaced: number; reached: number | null }[] }>('/api/tools/list_publishes', {}))
+      .publishes;
+    expect(later.find((h) => h.id === v1.id)).toMatchObject({ playing: 0, replaced: 2, reached: 2 });
+  });
+
   it("escapes a screen's name in Slack's notification text as in its blocks", async () => {
     const { org, slackUrl, webhookUrl, outbox } = await orgWithChannels();
     const start = Date.now();

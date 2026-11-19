@@ -65,11 +65,15 @@ describe('a rollout', () => {
     expect(() => publishResultOf({ screens: [] })).toThrow();
   });
 
-  it('calls a publish every screen of which a later one replaced "moved on", finished or not', () => {
+  it('tells a finished publish its screens played from one replaced before any did', () => {
     const p = { id: 'pub_1', revision: 2, restoresId: null, restoresRevision: null, by: { kind: 'user', id: 'u', name: 'Maria' }, createdAt: 0, screens: 2 };
-    expect(standing({ ...p, finishedAt: 10, playing: 0, replaced: 2 })).toBe('moved on');
-    expect(standing({ ...p, finishedAt: 10, playing: 2, replaced: 0 })).toBe('complete');
-    expect(standing({ ...p, finishedAt: null, playing: 1, replaced: 0 })).toBe('1 of 2');
-    expect(standing({ ...p, screens: 0, finishedAt: 10, playing: 0, replaced: 0 })).toBe('reached no screen');
+    // Played by both, then a later publish switched them: complete, though none plays it now.
+    expect(standing({ ...p, finishedAt: 10, reached: 2, playing: 0, replaced: 2 })).toBe('complete');
+    expect(standing({ ...p, finishedAt: 10, reached: 1, playing: 0, replaced: 2 })).toBe('played on 1 of 2');
+    // Undone before any screen played it.
+    expect(standing({ ...p, finishedAt: 10, reached: 0, playing: 0, replaced: 2 })).toBe('moved on');
+    expect(standing({ ...p, finishedAt: null, reached: null, playing: 0, replaced: 2 })).toBe('moved on');
+    expect(standing({ ...p, finishedAt: null, reached: null, playing: 1, replaced: 0 })).toBe('1 of 2');
+    expect(standing({ ...p, screens: 0, finishedAt: 10, reached: 0, playing: 0, replaced: 0 })).toBe('reached no screen');
   });
 });

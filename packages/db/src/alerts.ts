@@ -111,7 +111,8 @@ export async function findFinishedRollouts(
       createdAt: p.createdAt,
       screens: sql<number>`(SELECT count(*) FROM ${ps} WHERE ${ps.orgId} = ${p.orgId} AND ${ps.publishId} = ${p.id})`.mapWith(Number),
       playing: count(sql`${sc.reportedManifestId} = ${ps.manifestId}`),
-      replaced: count(sql`${sc.desiredManifestId} IS NOT ${ps.manifestId}`),
+      // Moved on before it played this one: a screen still reporting it played it, whatever comes next.
+      replaced: count(sql`${sc.desiredManifestId} IS NOT ${ps.manifestId} AND ${sc.reportedManifestId} IS NOT ${ps.manifestId}`),
     })
     .from(p)
     .innerJoin(s.organization, eq(s.organization.id, p.orgId))

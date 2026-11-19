@@ -326,36 +326,53 @@ describe('publish history', () => {
     ]);
     const due = async () => (await findFinishedRollouts(env.DB)).filter((f) => f.orgId === p.orgId).map((f) => [f.id, f.revision, f.screens]);
     expect(await due()).toEqual([[p.publish, 0, 1]]);
-    expect(await org.publishes.finish(p.publish, 10)).toBe(true);
+    expect(await org.publishes.finish(p.publish, 10, 0)).toBe(true);
     await org.screens.reportManifest(p.screen, m('1'), { arrivedAt: 2 });
     expect(await due()).toEqual([]);
     const v3 = await publishAt(org, 3, [{ screenId: two.id, manifestId: m('3') }]);
     expect(await due()).toEqual([[v2.id, 2, 2]]);
 
     const alert = { event: { id: `evt_${v2.id}_finished`, type: 'publish.finished', json: '{}' }, channels: ['webhook' as const], giveUpAt: 99 };
-    expect(await org.publishes.finish(v2.id, 30, alert)).toBe(true);
+    expect(await org.publishes.finish(v2.id, 30, 2, alert)).toBe(true);
     // A second check marks nothing, and the event is queued once.
-    expect(await org.publishes.finish(v2.id, 40, alert)).toBe(false);
-    expect((await org.publishes.get(v2.id))!.finishedAt).toBe(30);
+    expect(await org.publishes.finish(v2.id, 40, 2, alert)).toBe(false);
+    expect(await org.publishes.get(v2.id)).toMatchObject({ finishedAt: 30, reached: 2 });
     expect((await org.alertDeliveries.list({ take: 50 })).filter((d) => d.eventId === alert.event.id)).toHaveLength(1);
     expect(await due()).toEqual([]);
     // Another org's publish is not theirs to mark.
-    expect(await scoped(env.DB, 'drafts-org').publishes.finish(v2.id, 50)).toBe(false);
+    expect(await scoped(env.DB, 'drafts-org').publishes.finish(v2.id, 50, 0)).toBe(false);
 
     // A screen whose credentials are all revoked never reports again: it does not hold a rollout open.
     const cred = await org.screens.credentials.insert({ screenId: two.id, secretHash: '9'.repeat(64) });
     const v4 = await publishAt(org, 4, [{ screenId: two.id, manifestId: m('4') }]);
     // v3 is moved on by v4; v4 waits for its screen.
     expect(await due()).toEqual([[v3.id, 3, 1]]);
-    await org.publishes.finish(v3.id, 55);
+    await org.publishes.finish(v3.id, 55, 0);
     await org.screens.credentials.update(cred.id, { revokedAt: 60 });
     const [found] = (await findFinishedRollouts(env.DB)).filter((f) => f.orgId === p.orgId);
     expect(found).toMatchObject({ id: v4.id, screens: 1, playing: 0, replaced: 0 });
   });
 
   it('reads the unfinished rollouts through their partial index', async () => {
-    const plan = await env.DB.prepare("EXPLAIN QUERY PLAN SELECT id FROM publishes WHERE finished_at IS NULL AND status = 'published'").all();
-    expect(JSON.stringify(plan.results)).toContain('publishes_unfinished_idx');
+    // The statement findFinishedRollouts sends, with its values, captured on its way to D1.
+    const sent: { sql: string; values: unknown[] }[] = [];
+    const watching = new Proxy(env.DB, {
+      get: (target, key) =>
+        key === 'prepare'
+          ? (query: string) => {
+              const stmt = target.prepare(query);
+              return new Proxy(stmt, {
+                get: (t, k) => (k === 'bind' ? (...values: unknown[]) => (sent.push({ sql: query, values }), t.bind(...values)) : Reflect.get(t, k, t)),
+              });
+            }
+          : Reflect.get(target, key, target),
+    });
+    await findFinishedRollouts(watching);
+    expect(sent).toHaveLength(1);
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${sent[0]!.sql}`)
+      .bind(...sent[0]!.values)
+      .all();
+    expect(JSON.stringify(plan.results)).toContain('USING INDEX publishes_unfinished_idx');
   });
 });
 

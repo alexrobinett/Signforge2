@@ -14,6 +14,8 @@ export interface PublishView {
   by: { kind: string; id: string; name: string | null };
   createdAt: number;
   finishedAt: number | null;
+  /** Once finished: how many of its screens played it (0 for one undone before any did). */
+  reached: number | null;
   screens: number;
   playing: number;
   replaced: number;
@@ -79,9 +81,9 @@ export function publishResultOf(output: unknown): PublishResult {
 /** How a past publish's rollout stands, in a few words. */
 export function standing(p: PublishView): string {
   if (!p.screens) return 'reached no screen';
-  // Before complete: one undone before any screen played it is finished too, but reached nobody.
+  // Finished: what it reached then, whatever later publishes did since.
+  if (p.reached !== null) return p.reached === p.screens ? 'complete' : p.reached ? `played on ${p.reached} of ${p.screens}` : 'moved on';
   if (p.replaced === p.screens) return 'moved on';
-  if (p.finishedAt) return 'complete';
   return `${p.playing} of ${p.screens}`;
 }
 
