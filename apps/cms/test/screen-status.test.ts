@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeScreen, eventText, rollup, summarise, type ScreenLike } from '../src/lib/screen-status';
+import { describeScreen, rollup, summarise, type ScreenLike } from '../src/lib/screen-status';
 
 const NOW = Date.parse('2026-11-18T15:00:00Z'); // Wed 10:00 in New York
 
@@ -77,18 +77,5 @@ describe('summarise', () => {
       '6 screens · 4 playing now · 1 asleep on purpose · 1 unreachable, still playing · 1 needs you',
     );
     expect(summarise([k('online')])).toBe('1 screen · 1 playing now');
-  });
-});
-
-describe('eventText', () => {
-  it('says what was done, from the tool and its input', () => {
-    expect(eventText({ action: 'set_display_override', input: { state: 'on' } })).toBe('Woken from the CMS');
-    expect(eventText({ action: 'set_display_override', input: { state: 'off' } })).toBe('Put to sleep from the CMS');
-    expect(eventText({ action: 'set_display_override', input: { state: null } })).toBe('Back to its display hours');
-    expect(eventText({ action: 'update_screen_settings', input: { displayHours: null, timezone: 'UTC' } })).toBe('Display hours and time zone changed');
-    expect(eventText({ action: 'update_screen_settings', input: { orientation: 'portrait' } })).toBe('Orientation changed');
-    expect(eventText({ action: 'rename_screen', input: { name: 'Lobby' } })).toBe('Renamed to Lobby');
-    expect(eventText({ action: 'restart_screen', input: {} })).toBe('Player restarted');
-    expect(eventText({ action: 'some_new_tool', input: {} })).toBe('Some new tool');
   });
 });

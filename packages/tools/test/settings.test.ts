@@ -1,21 +1,12 @@
 // Org settings (M3-42): defaults until set, only owners change them, and the screen state follows the threshold.
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
-import { dispatch, registry, type Caller } from '../src';
+import { describe, expect, it } from 'vitest';
+import { dispatch, registry } from '../src';
+import { seededMembers } from './member';
 
-let o: SeededOrg;
-const as = (role: Caller['role']): Caller => ({
-  org: scoped(env.DB, o.orgId),
-  role,
-  actor: { kind: 'user', id: `user-${role}`, clientId: 'cms' },
-  blobs: env.BLOBS,
-});
-
-beforeAll(async () => {
-  o = await seedOrg(env.DB, 'settings-org');
-});
+const { o, as } = seededMembers('settings-org');
 
 describe('org settings', () => {
   it('reads the defaults before anything is set', async () => {
