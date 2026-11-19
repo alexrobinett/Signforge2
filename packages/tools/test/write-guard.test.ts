@@ -7,7 +7,8 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { defineTool, dispatch, manifestKey, r2Presigner, registry, TOOLS, uploadKey, type AnyTool, type Caller, type Connectors } from '../src';
+import { defineTool, dispatch, manifestKey, r2Presigner, TOOLS, uploadKey, type AnyTool, type Caller } from '../src';
+import { connectors, pendingFor } from './connectors-stub';
 
 const WRITE_SQL = /^\s*(insert|update|delete|replace)\b/i;
 
@@ -87,29 +88,6 @@ function withOwnIds(example: unknown, o: SeededOrg): unknown {
 }
 
 /** Clear what would make a tool's example refuse before it writes. */
-/** The API's OAuth, stubbed: no provider is reached. */
-const connectors: Connectors = {
-  providers: ['google'],
-  begin: async (_provider, _authorization, state) => ({ authorizeUrl: `https://accounts.test/authorize?state=${state}`, verifierSealed: 'sealed-verifier' }),
-  finish: async () => ({ credentialsSealed: 'sealed-grant', account: 'someone@example.test', scopes: ['read'], expiresAt: null }),
-  revoke: async () => undefined,
-};
-
-/** A pending authorization of `orgId`'s, started by `actorId`, for finish_connection's example state. */
-async function pendingFor(orgId: string, actorId: string) {
-  const example = registry.get('finish_connection')!.example as { oauthState: string };
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(example.oauthState));
-  const stateHash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await scoped(env.DB, orgId).connections.authorizations.insert({
-    provider: 'google',
-    stateHash,
-    verifierSealed: 'sealed-verifier',
-    actorKind: 'user',
-    actorId,
-    expiresAt: Date.now() + 600_000,
-  });
-}
-
 const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   // Its example state, pending for the caller.
   finish_connection: (o) => pendingFor(o.orgId, 'user-g'),
