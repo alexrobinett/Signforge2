@@ -399,27 +399,27 @@ No cost in frames: the ranges overlap run for run, and the one 83 ms frame was i
 
 ## No WebRTC in template frames (issue #91, 2026-11-19)
 
-The template's policy runs only the bundle's own scripts, by hash, each rewritten to delete `RTCPeerConnection` and `webkitRTCPeerConnection` first; the player builds the wrapper's policy and the rewritten bundle at every template load (`packages/player/src/contain.ts`; see Template containment in `docs/architecture.md`). Master's player (`966b319`) and this branch's (`9c618a8`) at subdirectories of the rig, served on `http://localhost:8090` so the kiosk's own origin and caches were not touched.
+The template's policy runs only the bundle's classic scripts, by hash, each rewritten to start (after its directive prologue) with a guard that deletes `RTCPeerConnection` and `webkitRTCPeerConnection` from `this`; a second policy allows no script URL. The player builds both policies and the rewritten bundle at every template load (`containedFrames` in `packages/player-core`; see Template containment in `docs/architecture.md`). Master's player (`96cd45b`), this branch's (`504ad0c`) and, for the two cases found in the re-check, the PR's previous head (`cd3b308`), at subdirectories of the rig, served on `http://localhost:8090` so the kiosk's own origin and caches were not touched.
 
-WebRTC, in a new tab of the kiosk's Chromium 156: each of the browser tests' WebRTC fixture modes (a peer connection to a STUN server on UDP 34780 and a TURN server on TCP 34781, both on the Pi's loopback), 14 s, so the spot came up three times.
+WebRTC, in a new tab of the kiosk's Chromium 156: the browser tests' fixture modes (a peer connection to a STUN server on UDP 34780 and a TURN server on TCP 34781, both on the Pi's loopback; `external-script` asks for `http://127.0.0.1:34781/x.js` with the template's own hash as `integrity`), 14 s, so the spot came up three times. Datagrams, then TCP connections:
 
-| Mode | Master | This branch |
-| --- | --- | --- |
-| `webrtc` (the template's own window) | gathered a host candidate; 9 datagrams, 3 TURN connections | refused; 0, 0 |
-| `webrtc-srcdoc` (a frame it adds runs its own script) | gathered; 9, 3 | refused; 0, 0 |
-| `webrtc-srcdoc-same-origin` (the same with `sandbox="allow-scripts allow-same-origin"`) | gathered; 9, 3 | refused; 0, 0 |
-| `webrtc-javascript-url` | gathered; 9, 3 | refused; 0, 0 |
-| `webrtc-grandchild` | gathered; 9, 3 | refused; 0, 0 |
-| `webrtc-markup` (the frame is in the bundle's markup, so every spot of it has one) | gathered; 25, 9 | refused; 0, 0 |
+| Mode | Master | Previous head | This branch |
+| --- | --- | --- | --- |
+| `webrtc` (the template's own window) | 9, 3 | | 0, 0 |
+| `webrtc-srcdoc` (a frame it adds runs its own script) | 9, 3 | | 0, 0 |
+| `webrtc-javascript-url` | 9, 3 | | 0, 0 |
+| `webrtc-markup` (the frame is in the bundle's markup, so every spot of it has one) | 24, 8 | | 0, 0 |
+| module copy (one of its classic scripts, declaring `function window`, run as a module in a frame it adds) | 24, 8 | 23, 8 | 0, 0 |
+| `external-script` | 0, 0 (no hashes in its policy) | 0, 3 (requested) | 0, 0 |
 
 Frames: the full 16-spot `examples/stress` playlist, cut, 120 s per run after 10 s to settle, HTTP cache cleared, the service worker bypassed and the origin's storage cleared before each run, the soak logger and the supervisor stopped (the kiosk page left the player's origin, so it did not beat), `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order: master, branch, branch, master.
 
 | Build | Overall | Playing | Loading next | Worst frame | Prepares, median and max (13 each) |
 | --- | --- | --- | --- | --- | --- |
-| Master | 0.60, 0.37% | 0.13, 0.11% | 16.9, 10.3% | 300, 100 ms | 238 / 686, 246 / 336 ms |
-| This branch | 0.39, 0.39% | 0.11, 0.10% | 11.0, 11.2% | 100, 100 ms | 237 / 360, 241 / 374 ms |
+| Master | 0.35, 0.33% | 0.11, 0.13% | 9.1, 7.8% | 117, 117 ms | 243 / 371, 233 / 512 ms |
+| This branch | 0.43, 0.43% | 0.14, 0.13% | 10.3, 10.3% | 100, 117 ms | 243 / 529, 267 / 446 ms |
 
-No cost: rewriting and hashing a 70-80 kB bundle at each load does not show in prepares or frames. The one 300 ms frame (a prepare) was in master's first run after the cache was cleared, as in the first measurement of this issue. Nothing was skipped.
+`containedFrames` itself, timed in a tab of the same Chromium on a 79 kB stress bundle, 30 times: 0.9 ms median, 0.4 ms at best, 11.6 ms on the first (cold) call. That is well inside the spread between runs: the previous session of this issue had master higher (0.60, 0.37% against 0.39, 0.39%), and both builds here have one prepare over 500 ms. Nothing was skipped.
 
 ## Accent text measured on its real backdrop, 3:1 for large text (issue #92, 2026-11-19)
 
