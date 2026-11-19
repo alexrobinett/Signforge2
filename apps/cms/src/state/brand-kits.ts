@@ -11,7 +11,7 @@
  * Kit and assignment changes invalidate the kit list, whose `reach` they change.
  */
 import { DEFAULT_BRAND_COLORS } from '@signforge/compiler';
-import { PREVIEW_PROTOCOL, type BrandColor } from '@signforge/contract';
+import { PREVIEW_PROTOCOL, type BrandColor, type ScreenManifest } from '@signforge/contract';
 import { duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { playerMessage } from '~/lib/preview';
 import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/spots';
@@ -20,6 +20,12 @@ import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQue
 import type { SliceCreator } from './store';
 
 const PREVIEW_DELAY_MS = 40;
+
+/**
+ * How long a draft may go unanswered before the next is posted anyway: past the player's 2 s ready
+ * timeout, after which it answers with an error.
+ */
+const DRAFT_ANSWER_MS = 3000;
 
 /** A new kit's colours: the palette screens use with no kit, its on-colours left to be derived. */
 const NEW_KIT_COLORS = Object.fromEntries(Object.entries(DEFAULT_BRAND_COLORS).filter(([name]) => name !== 'onPrimary' && name !== 'onAccent'));
@@ -106,6 +112,14 @@ interface PreviewLink {
   target: KitPreviewTarget;
   /** Counts redraws, so a slow compile never posts over a newer one. */
   seq: number;
+  /**
+   * Whether a posted draft is not answered yet. The player updates the spot on screen for each
+   * draft and two updates can finish out of order (Slot.update awaits the theme's fonts), leaving
+   * the older kit on screen; so one draft at a time, and edits meanwhile send only the newest.
+   */
+  busy: ReturnType<typeof setTimeout> | null;
+  /** The newest draft compiled while one was unanswered. */
+  next: ScreenManifest | null;
 }
 
 export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { router, queryClient }) => {
@@ -145,7 +159,25 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     const version = versionsById(templates).get(t.templateVersionId);
     const result = await compilePreview({ spot, draft: draftOf(spot), version, preview: themed, assets, orientation: 'landscape', live: true });
     if (seq !== link.seq || links.get(t.spotId) !== link || !result.manifest) return;
-    t.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest: result.manifest }, location.origin);
+    post(link, result.manifest);
+  }
+
+  function post(link: PreviewLink, manifest: ScreenManifest) {
+    if (link.busy) {
+      link.next = manifest;
+      return;
+    }
+    link.target.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest }, location.origin);
+    link.busy = setTimeout(() => answered(link), DRAFT_ANSWER_MS);
+  }
+
+  /** The player answered (or did not in time): the newest draft waiting, if any, goes now. */
+  function answered(link: PreviewLink) {
+    if (link.busy) clearTimeout(link.busy);
+    link.busy = null;
+    const next = link.next;
+    link.next = null;
+    if (next && links.get(link.target.spotId) === link) post(link, next);
   }
 
   const redrawAll = () => {
@@ -164,12 +196,17 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     const spotId = link.target.spotId;
     if (msg.type === 'listening') {
       heard.add(link.target.frame);
+      // A player that has just loaded has no draft in hand.
+      if (link.busy) clearTimeout(link.busy);
+      link.busy = null;
       void redraw(link);
-    } else
-      kits((k) => ({
-        ...k,
-        previews: { ...k.previews, [spotId]: msg.type === 'playing' ? { playing: true, error: null } : { playing: false, error: msg.message } },
-      }));
+      return;
+    }
+    answered(link);
+    kits((k) => ({
+      ...k,
+      previews: { ...k.previews, [spotId]: msg.type === 'playing' ? { playing: true, error: null } : { playing: false, error: msg.message } },
+    }));
   };
 
   /** Runs one kit action for `kitId`'s page or row, marking it pending and showing its refusal there, then reads the kits again. */
@@ -291,7 +328,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       }
       const was = links.get(spotId)?.target;
       if (was?.frame === target.frame && was.kitId === target.kitId) return;
-      const link = { target, seq: 0 };
+      const link: PreviewLink = { target, seq: 0, busy: null, next: null };
       links.set(spotId, link);
       kits((k) => ({ ...k, previews: { ...k.previews, [spotId]: { playing: false, error: null } } }));
       // A frame already listening (the same player, now for another kit) is posted its spot at once.

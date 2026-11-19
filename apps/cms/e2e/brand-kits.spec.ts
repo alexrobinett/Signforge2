@@ -163,11 +163,12 @@ test('a change someone else made while the kit was open is not overwritten, even
 
   // Stands in for someone else: rounder corners land after the page read the kit.
   await tool(page, 'update_brand_kit', { brandKitId: kitId, shape: 'round' });
-  // Away and back: the page reads the kits again, and the draft is kept.
-  await page.getByRole('link', { name: 'Brand kits' }).first().click();
-  await hydrated(page);
-  await page.getByRole('link', { name: 'Edit Hearth Café', exact: true }).click();
-  await hydrated(page);
+  // Giving the kit to a screen reads the kits again: the page now holds the other change's version,
+  // and the draft is kept.
+  const screen = page.getByRole('region', { name: 'Where it is used' }).getByRole('checkbox', { name: 'Coffee bar' });
+  await screen.click();
+  await expect(screen).toBeChecked();
+  await expect(page.getByText('Edits reach 1 screen at the next publish: Coffee bar.')).toBeVisible();
   await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#c8102e');
 
   await page.getByRole('button', { name: 'Save kit' }).click();
