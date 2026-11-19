@@ -153,6 +153,16 @@ test('a second spot for the same place and units shares the source; moving it le
   await expect.poll(() => stageShows(page, '78°'), { timeout: 10_000 }).toBe(true);
   await axe(page);
   await shots(page, '36-spot-source-failing');
+
+  // Moved again, the source it leaves is bound by no other spot: it goes, so it no longer counts against the org's ten.
+  await form.getByRole('button', { name: 'Change source' }).click();
+  await form.getByLabel('Temperature in').selectOption('°F');
+  await form.getByRole('list', { name: 'Places found' }).getByRole('button', { name: 'Reykjavík, Capital Region, Iceland' }).click();
+  await expect(form.getByText('Weather, Reykjavík, Capital Region, Iceland (°F, mph)')).toBeVisible();
+  await expect(page.getByText(/Saved \d/)).toBeVisible();
+  const prefixes = async () =>
+    ((await tool(page, 'list_data_sources', {})).dataSources as { id: string }[]).map((d) => d.id.split('-').slice(0, 3).join('-')).sort();
+  await expect.poll(prefixes).toEqual(['weather-3413829-f', 'weather-4180439-f']);
 });
 
 test('a news spot: add a feed by its address, see the headlines live, and edit none of them', async () => {
