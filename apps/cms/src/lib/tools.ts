@@ -3,6 +3,7 @@
  * (the API checks the session, the role and the input). A refusal throws `ToolCallError` with the
  * tool's own message, written to be shown as it is.
  */
+import type { AuditPage } from './audit';
 import type { SpotView } from './spots';
 
 class ToolCallError extends Error {
@@ -62,3 +63,10 @@ export function spotOf(output: unknown): SpotView {
 }
 
 const isSpot = (v: unknown): v is SpotView => isRecord(v) && typeof v.id === 'string' && typeof v.version === 'number' && typeof v.kind === 'string';
+
+/** A `list_audit_log` page, as the CSV export reads it from the browser. */
+export function auditPageOf(output: unknown): AuditPage {
+  if (isRecord(output) && Array.isArray(output.entries) && (output.next === null || typeof output.next === 'string'))
+    return { entries: output.entries, next: output.next };
+  throw new ToolCallError('error', 'SignForge answered without the audit log. Try the export again.');
+}

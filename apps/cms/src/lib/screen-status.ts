@@ -98,38 +98,3 @@ export function summarise(screens: readonly { state: { kind: StateKind } }[]): s
   if (needs) parts.push(`${needs} ${needs === 1 ? 'needs' : 'need'} you`);
   return parts.join(' · ');
 }
-
-const SETTINGS: [string, string][] = [
-  ['displayHours', 'display hours'],
-  ['timezone', 'time zone'],
-  ['orientation', 'orientation'],
-  ['locale', 'language'],
-];
-
-const SIMPLE: Record<string, string> = {
-  claim_screen: 'Paired',
-  identify_screen: 'Identified',
-  restart_screen: 'Player restarted',
-  publish_manifest_to_screen: 'Published to',
-  assign_brand_kit: 'Brand kit changed',
-};
-
-/** A screen's event (an audit row: the tool and its input) as a phrase. */
-export function eventText(e: { action: string; input: Readonly<Record<string, unknown>> }): string {
-  switch (e.action) {
-    case 'set_display_override':
-      return e.input.state === 'on' ? 'Woken from the CMS' : e.input.state === 'off' ? 'Put to sleep from the CMS' : 'Back to its display hours';
-    case 'rename_screen':
-      return typeof e.input.name === 'string' ? `Renamed to ${e.input.name}` : 'Renamed';
-    case 'update_screen_settings': {
-      const changed = SETTINGS.filter(([key]) => key in e.input).map(([, word]) => word);
-      if (!changed.length) return 'Settings changed';
-      const list = changed.length > 1 ? `${changed.slice(0, -1).join(', ')} and ${changed.at(-1)}` : changed[0]!;
-      return `${list[0]!.toUpperCase()}${list.slice(1)} changed`;
-    }
-    default: {
-      const words = SIMPLE[e.action] ?? e.action.replaceAll('_', ' ');
-      return `${words[0]!.toUpperCase()}${words.slice(1)}`;
-    }
-  }
-}
