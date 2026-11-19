@@ -64,19 +64,24 @@ describe('CSV (RFC 4180, header row)', () => {
       expect(body.length).toBeLessThanOrEqual(LIMITS.maxBytes);
       const t0 = performance.now();
       const result = code(() => parseCsv(body));
-      return { result, fast: performance.now() - t0 < 1000 };
+      return { result: result === 'no error' ? 'ok' : result, fast: performance.now() - t0 < 1000 };
     };
-    // 300 kB: a named column and 100,000 unnamed ones, over 100,000 short rows (12.9 s with a scan of every row per column).
+    // 460 kB: a named column and 400,000 unnamed ones over 30,000 short rows, under the row cap, so every
+    // check runs; it reads as one column. A scan of every row per unnamed column took 13 s.
+    expect(timed(`a${','.repeat(400_000)}\n${'x\n'.repeat(30_000)}`)).toEqual({ result: 'ok', fast: true });
+    // 300 kB and 1 MB: the same over 100,000 and 250,000 rows, more than any snapshot can hold, so
+    // reading stops at the row cap before any column check.
     expect(timed(`a${','.repeat(100_000)}\n${'x\n'.repeat(100_000)}`)).toEqual({ result: 'too-large', fast: true });
-    // 1 MB: the same with 500,000 unnamed columns and 250,000 rows (over 45 s).
     expect(timed(`a${','.repeat(500_000)}\n${'x\n'.repeat(249_999)}`)).toEqual({ result: 'too-large', fast: true });
-    // 1 MB: one line of 135,000 distinct names, the last a repeat (22.9 s with a scan of every name per name).
+    // 1 MB: one line of 135,000 distinct names, the last a repeat. A scan of every name per name took 22.9 s.
     const names = Array.from({ length: 135_000 }, (_, i) => `c${i}`);
     expect(timed([...names, 'c0'].join(','))).toEqual({ result: 'malformed', fast: true });
     // A cell under an unnamed column is still found, wherever it is.
     expect(timed(`a,,b\n1,,2\n3,x,4\n`)).toEqual({ result: 'malformed', fast: true });
-    // 1 MB of one-character lines: refused once there are more rows than any snapshot can hold.
-    expect(timed(`a\n${'x\n'.repeat(499_000)}`)).toEqual({ result: 'too-large', fast: true });
+    // 1 MB of one-character lines: refused by the row cap itself, once there are more rows than any snapshot can hold.
+    const lines = `a\n${'x\n'.repeat(499_000)}`;
+    expect(timed(lines)).toEqual({ result: 'too-large', fast: true });
+    expect(() => parseCsv(lines)).toThrow(/^more than \d+ rows cannot fit a snapshot$/);
   });
 
   it('refuses a body over the size limit before reading it', () => {
