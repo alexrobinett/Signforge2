@@ -9,6 +9,10 @@
  * It then sends the browser to the CMS's Integrations page (#80): `?connected=<connectionId>`,
  * or `?connectionError=<code>` (`denied` when the person refused at the provider, `provider` for
  * another error the provider sent, else the tool's refusal: `not_found`, `invalid_input`, ...).
+ *
+ * A signed-out browser gets `requireSession`'s 401 JSON, as on every `/api` route: nothing is
+ * used up and the code goes nowhere, but it is a poor page to land on. With the Integrations page
+ * (#80), send it to `/integrations?connectionError=signed_out` instead, carrying neither code nor state.
  */
 import { dispatch, registry } from '@signforge/tools';
 import type { Hono } from 'hono';
