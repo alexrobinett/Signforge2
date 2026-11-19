@@ -15,29 +15,14 @@ import {
 } from '@signforge/contract';
 import { resolveSpotData } from '@signforge/player-core';
 import { clock, now } from './clock';
+import { containedFrames } from './contain';
 import { liveData, reportRejected } from './data';
 import { getFile } from './source';
 
 /** A spot that has not reported ready by this point is skipped. */
 const READY_TIMEOUT_MS = 2000;
 
-// A template gets no network at all: scripts and styles are inline, media arrives as blobs. No
-// `frame-src`, so it falls back to `'none'`: the template cannot load a frame or navigate its own.
-const TEMPLATE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; font-src data:";
-// The document around each template; see `template()`. Its one script is `relay`: templates
-// accept messages only from their `parent`, which is now the wrapper, and a message's source is
-// the window whose code called postMessage. So the player posts through a function of the wrapper.
-const WRAPPER_HTML =
-  `<!doctype html><meta http-equiv="Content-Security-Policy" content="${TEMPLATE_CSP}">` +
-  '<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style>' +
-  "<script>relay=(w,m)=>w.postMessage(m,'*')</script>";
 type WrapperWindow = Window & { relay: (to: Window, m: HostMessage) => void };
-// No CSP directive covers WebRTC (Chromium ignores `webrtc 'block'`), so a peer connection would
-// still reach STUN and TURN servers. This goes first in the template's document, so it runs before
-// any template code and leaves the template no way to build one: the sandbox gives every document
-// in the frame, a frame the template adds too, an opaque origin of its own, so no other window's
-// constructor is within its reach. See "Template containment" in docs/architecture.md.
-const NO_WEBRTC = '<script>delete window.RTCPeerConnection;delete window.webkitRTCPeerConnection</script>';
 
 /** Corrected time and the offset the SDK's `now()` adds to the frame's own clock (src/clock.ts). */
 const frameClock = (): FrameClock => ({ now: now(), offsetMs: clock.offsetMs });
@@ -215,7 +200,7 @@ export class Slot {
     // Speak the protocol the bundle was built against: published bundles never change.
     const protocol = t.manifest.protocol ?? 1;
     if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
-    const html = await (await getFile(t.html)).text();
+    const { wrapper: wrapperHtml, template: templateHtml } = containedFrames(await (await getFile(t.html)).text());
     const assets = await spotAssets(spot);
     // Protocol 1 bundles predate the theme.
     const theme = protocol >= 2 ? await brandTheme(manifest) : undefined;
@@ -241,13 +226,14 @@ export class Slot {
     // markup of its own runs, and no document can drop a policy it was given. The wrapper's
     // policy, not the template's, also decides where the template's frame may navigate: nowhere
     // (`frame-src` falls back to `default-src 'none'`). A template that tries is replaced by an
-    // error page, without a request. See "Template containment" in docs/architecture.md.
+    // error page, without a request. It runs only the bundle's own scripts, each of which first
+    // takes WebRTC away from its realm (src/contain.ts). See "Template containment" in docs/architecture.md.
     const wrapperFrame = document.createElement('iframe');
     // A frame needs a title for assistive technology (WCAG 4.1.2); the editor's preview is read by one.
     wrapperFrame.title = spot.name;
     wrapperFrame.style.width = `${w}px`;
     wrapperFrame.style.height = `${h}px`;
-    wrapperFrame.srcdoc = WRAPPER_HTML;
+    wrapperFrame.srcdoc = wrapperHtml;
     const wrapped = new Promise<void>((resolve) => wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal }));
     this.el.appendChild(wrapperFrame);
     await wrapped;
@@ -258,8 +244,7 @@ export class Slot {
     // no popups, forms, or navigating any frame but its own.
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.title = spot.name;
-    // After the doctype, if there is one: a script before it would put the document in quirks mode.
-    frame.srcdoc = html.replace(/^(\s*<!doctype[^>]*>)?/i, `$&${NO_WEBRTC}`);
+    frame.srcdoc = templateHtml;
 
     const live: LiveFrame = (this.live = {
       frame,
