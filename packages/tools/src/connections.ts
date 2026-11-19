@@ -160,7 +160,7 @@ const finishConnection = defineTool({
   example: { oauthState: 'example-state-from-the-callback', code: 'example-code' },
   // No output when the provider refused the code: the authorization was used up, with nothing to name.
   target: (_input, output: { connection: { id: string } } | undefined) => (output ? { kind: 'connection', id: output.connection.id } : undefined),
-  handler: async ({ org, actor, input, write, connectors }) => {
+  handler: async ({ org, actor, input, write, onDiscard, connectors }) => {
     const providers = connectorsOf(connectors);
     const pending = await org.connections.authorizations.byState(await sha256Hex(input.oauthState), Date.now());
     if (!pending || pending.actorKind !== actor.kind || pending.actorId !== actor.id) throw new ToolError('not_found', NOT_PENDING);
@@ -182,6 +182,8 @@ const finishConnection = defineTool({
       // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
       throw new ToolError(e.code, e.message, e.details, true, { cause: e });
     }
+    // Not stored if this call loses (a twin callback for the same state committed first): revoke it then.
+    onDiscard(() => providers.revoke(pending.provider, { orgId: org.orgId, id: target.id }, grant.credentialsSealed));
     if (fresh) write(fresh);
     // Its sources failed while it needed reconnecting, backing off for hours: poll them now.
     else write(org.dataSources.stage.pollAgain(target.id));

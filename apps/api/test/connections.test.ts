@@ -143,6 +143,52 @@ describe('connecting an account', () => {
     expect(new URL(res.headers.get('location') ?? '', 'https://x').searchParams.get('connectionError')).toBe('invalid_input');
   });
 
+  /**
+   * Two callbacks for one state at once (a browser sending the navigation twice): the provider
+   * grants its single-use code to one and refuses the other. `hold` decides which commits first.
+   */
+  async function doubledCallback(hold: 'second-exchange' | 'account-lookup') {
+    const provider = fakeProvider();
+    let gate: Promise<unknown> = Promise.resolve();
+    let exchanges = 0;
+    const held: typeof fetch = async (input, init) => {
+      const req = new Request(input, init);
+      const url = new URL(req.url);
+      const isExchange = new URLSearchParams(await req.clone().text()).get('grant_type') === 'authorization_code';
+      // Wait for the other callback to be answered.
+      if ((hold === 'second-exchange' && isExchange && ++exchanges === 2) || (hold === 'account-lookup' && url.pathname === '/v1/me')) await gate;
+      return provider.fetch(req);
+    };
+    const who = new Client(testApp({ connectors: { adapters: [provider.adapter], fetch: held } }));
+    await who.signIn(email(`doubled-${hold}`));
+    const id = (await who.createOrg(`Doubled ${hold}`)).id;
+    const { authorizeUrl } = await json(await who.tool('start_connection', { provider: 'fake' }));
+    const back = provider.consent(authorizeUrl);
+    const callbacks = [who.get(`${back.pathname}${back.search}`), who.get(`${back.pathname}${back.search}`)];
+    gate = Promise.race(callbacks);
+    const answers = await Promise.all(callbacks);
+    const outcomes = answers.map((r) => {
+      expect(r.status).toBe(303);
+      return Object.fromEntries(new URL(r.headers.get('location') ?? '', 'https://x').searchParams);
+    });
+    return { provider, outcomes, connections: await scoped(env.DB, id).connections.list() };
+  }
+
+  it('answers a doubled callback cleanly when the granted one commits first: one connection, one refusal', async () => {
+    const { outcomes, connections } = await doubledCallback('second-exchange');
+    expect(connections).toHaveLength(1);
+    expect(outcomes).toEqual(expect.arrayContaining([{ connected: connections[0]?.id }, { connectionError: 'not_found' }]));
+  });
+
+  it('revokes the grant of a doubled callback that lost to its refused twin', async () => {
+    const { provider, outcomes, connections } = await doubledCallback('account-lookup');
+    expect(connections).toEqual([]);
+    expect(outcomes).toEqual(expect.arrayContaining([{ connectionError: 'invalid_input' }, { connectionError: 'not_found' }]));
+    // The provider issued a grant for the lost one; it must not stay live.
+    expect(provider.issuedTokens().length).toBeGreaterThan(0);
+    expect(provider.liveRefreshTokens()).toEqual([]);
+  });
+
   it('says so when the person refused at the provider', async () => {
     const res = await owner.get('/api/connections/callback?error=access_denied&state=whatever');
     expect(new URL(res.headers.get('location') ?? '', 'https://x').searchParams.get('connectionError')).toBe('denied');

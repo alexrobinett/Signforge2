@@ -117,6 +117,11 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
    * writes are committed, so a screen never hears of a change that was rolled back.
    */
   notify: (send: (screens: ScreenNotifier) => Promise<void>) => void;
+  /**
+   * Undo, if this call does not succeed, something the handler did outside the batch (a grant a
+   * provider issued). Run after the refusal or failure, its own failure logged: best effort.
+   */
+  onDiscard: (undo: () => Promise<void>) => void;
   /** The caller's rate limits. A tool that guards a guessable secret refuses without it. */
   rateLimit?: RateLimiter;
 }

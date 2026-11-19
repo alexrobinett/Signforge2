@@ -15,7 +15,8 @@
  *      changed nothing and is not audited, nor is a read, unless the tool is `alwaysAudited`
  *      (a command to a screen). A refusal (`ToolError`) commits nothing,
  *      unless it says it `changed` something: then what was staged is committed, audited with
- *      the refusal. Any other error commits nothing. An update given `ifVersion` whose row has
+ *      the refusal. A call that does not succeed runs the undos its handler registered
+ *      with `ctx.onDiscard`. Any other error commits nothing. An update given `ifVersion` whose row has
  *      changed since (checked when staged, and again inside the batch) is refused with
  *      `conflict` and `{ id, version }`, the version now.
  *
@@ -197,51 +198,82 @@ export async function dispatch<D extends DataScope>(
     await caller.org.commit([...writes, ...audit.writes]);
   };
 
-  let output: unknown;
-  try {
-    output = await tool.handler({
-      org: caller.org,
-      actor: caller.actor,
-      input: parsed.data,
-      blobs: caller.blobs,
-      uploads: caller.uploads,
-      feedUrls: caller.feedUrls,
-      connectors: caller.connectors,
-      write,
-      notify,
-      rateLimit: caller.rateLimit,
-    });
-  } catch (err) {
-    if (err instanceof ToolError) {
-      // A refusal that changed something is recorded too, with what was refused.
-      if (err.changed) {
-        await commit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
-        await tell();
-      }
-      return fail(err.code, err.message, err.details);
-    }
-    if (err instanceof NotInOrgError) return fail('not_found', err.message);
-    if (err instanceof StaleVersionError) return stale(err);
-    throw err;
-  }
-
-  checkOutput(tool, output);
-  if (keyed && writes.length) writes.push(...(await keyed.record(output)));
-  try {
-    await commit(tool.target?.(parsed.data, output), {});
-  } catch (err) {
-    // A concurrent call with the same key committed first, and this batch failed on its record.
-    const prior = await keyed?.find();
-    if (prior) return prior;
+  /** What the handler asked to undo if the call does not succeed (`onDiscard`). Best effort: a failure is logged. */
+  const discards: (() => Promise<void>)[] = [];
+  const onDiscard = (undo: () => Promise<void>) => {
+    discards.push(undo);
+  };
+  /** A commit that failed: a refusal, if a guard or the tool says what refused it. */
+  const refusedCommit = async (err: unknown): Promise<DispatchResult | undefined> => {
     // An `ifVersion` guard: the row changed between the handler's read and the commit.
     if (err instanceof StaleVersionError) return stale(err);
     if (err instanceof NotInOrgError) return fail('not_found', err.message);
     const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data });
-    if (refusal) return fail(refusal.code, refusal.message, refusal.details);
-    throw err;
+    return refusal && fail(refusal.code, refusal.message, refusal.details);
+  };
+
+  const run = async (): Promise<DispatchResult> => {
+    let output: unknown;
+    try {
+      output = await tool.handler({
+        org: caller.org,
+        actor: caller.actor,
+        input: parsed.data,
+        blobs: caller.blobs,
+        uploads: caller.uploads,
+        feedUrls: caller.feedUrls,
+        connectors: caller.connectors,
+        write,
+        notify,
+        onDiscard,
+        rateLimit: caller.rateLimit,
+      });
+    } catch (err) {
+      if (err instanceof ToolError) {
+        // A refusal that changed something is recorded too, with what was refused.
+        if (err.changed) {
+          try {
+            await commit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
+          } catch (commitErr) {
+            // What it staged was refused too (another call changed it first): say so, as for a change.
+            const refusal = await refusedCommit(commitErr);
+            if (refusal) return refusal;
+            throw commitErr;
+          }
+          await tell();
+        }
+        return fail(err.code, err.message, err.details);
+      }
+      if (err instanceof NotInOrgError) return fail('not_found', err.message);
+      if (err instanceof StaleVersionError) return stale(err);
+      throw err;
+    }
+
+    checkOutput(tool, output);
+    if (keyed && writes.length) writes.push(...(await keyed.record(output)));
+    try {
+      await commit(tool.target?.(parsed.data, output), {});
+    } catch (err) {
+      // A concurrent call with the same key committed first, and this batch failed on its record.
+      const prior = await keyed?.find();
+      if (prior) return prior;
+      const refusal = await refusedCommit(err);
+      if (refusal) return refusal;
+      throw err;
+    }
+    await tell();
+    return { ok: true, output };
+  };
+
+  let succeeded = false;
+  try {
+    const result = await run();
+    succeeded = result.ok;
+    return result;
+  } finally {
+    // A call that did not succeed takes back what its handler did outside the batch.
+    if (!succeeded) await Promise.all(discards.map((undo) => undo().catch((err: unknown) => console.warn(`[tools] ${tool.name}: could not undo`, err))));
   }
-  await tell();
-  return { ok: true, output };
 }
 
 const OVER: Record<AgentLimit, string> = {

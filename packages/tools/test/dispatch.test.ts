@@ -22,6 +22,7 @@ import {
   type Role,
   type Scope,
   type ScreenNotifier,
+  ToolError,
 } from '../src';
 
 let o: SeededOrg;
@@ -357,6 +358,38 @@ describe('the audit log', () => {
 });
 
 describe('write safety', () => {
+  it('undoes what a handler did outside the batch when, and only when, the call does not succeed', async () => {
+    const undone: string[] = [];
+    const tool = (name: string, refuse: boolean) =>
+      defineTool({
+        name,
+        description: 'A test tool that does something outside the batch, then succeeds or refuses.',
+        scope: 'screens:manage',
+        minRole: 'editor',
+        mutates: true,
+        input: z.object({ groupId: z.string() }),
+        output: z.object({ ok: z.boolean() }),
+        example: { groupId: 'grp_example' },
+        handler: async ({ org, input, write, onDiscard }) => {
+          onDiscard(async () => {
+            undone.push(name);
+          });
+          if (refuse) throw new ToolError('conflict', 'refused after the outside effect');
+          const group = await org.screenGroups.get(input.groupId);
+          if (group) write(org.screenGroups.stage.update(group, { name: `${name} ran` }));
+          return { ok: true };
+        },
+      });
+    for (const [name, refuse] of [
+      ['outside_then_ok', false],
+      ['outside_then_refuse', true],
+    ] as const) {
+      const t = tool(name, refuse);
+      await dispatch(new Map([[t.name, t]]), t.name, { groupId: o.group }, caller('owner'));
+    }
+    expect(undone).toEqual(['outside_then_refuse']);
+  });
+
   it('rolls the change back when its audit row cannot be written', async () => {
     const org = scoped(env.DB, o.orgId);
     const before = await org.screenGroups.get(o.group);
