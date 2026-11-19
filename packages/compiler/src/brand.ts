@@ -85,8 +85,8 @@ export const MIN_CONTRAST = 4.5;
  */
 export const onColor = (fill: string): string => (contrastRatio('#000000', fill) >= contrastRatio('#ffffff', fill) ? '#000000' : '#ffffff');
 
-/** The pairs a template draws text with: foreground on fill. */
-const PAIRS: [BrandColor, BrandColor][] = [
+/** The pairs a template draws text with: foreground on fill. The CMS shows a verdict for each. */
+export const BRAND_PAIRS: [BrandColor, BrandColor][] = [
   ['onPrimary', 'primary'],
   ['onAccent', 'accent'],
   ['text', 'background'],
@@ -96,7 +96,7 @@ const PAIRS: [BrandColor, BrandColor][] = [
 
 /** One warning per pair below 4.5:1. Warnings, not problems: a kit that fails one still publishes. */
 export function brandWarnings(colors: BrandColors): string[] {
-  return PAIRS.flatMap(([fg, bg]) => {
+  return BRAND_PAIRS.flatMap(([fg, bg]) => {
     if (!HEX_COLOR.test(colors[fg]) || !HEX_COLOR.test(colors[bg])) return [];
     const ratio = contrastRatio(colors[fg], colors[bg]);
     // Rounded down, so a pair just under the line never reads as 4.50.
