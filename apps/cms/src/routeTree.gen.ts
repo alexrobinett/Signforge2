@@ -29,6 +29,8 @@ import { Route as AppSettingsScreensRouteImport } from './routes/_app/settings/s
 import { Route as AppSpotsIndexRouteImport } from './routes/_app/spots/index'
 import { Route as AppSpotsSpotIdRouteImport } from './routes/_app/spots/$spotId'
 import { Route as V1DeviceSplatRouteImport } from './routes/v1/device/$'
+import { Route as AppSettingsBrandKitsIndexRouteImport } from './routes/_app/settings/brand-kits/index'
+import { Route as AppSettingsBrandKitsKitIdRouteImport } from './routes/_app/settings_/brand-kits/$kitId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -131,6 +133,18 @@ const V1DeviceSplatRoute = V1DeviceSplatRouteImport.update({
   path: '/v1/device/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppSettingsBrandKitsIndexRoute =
+  AppSettingsBrandKitsIndexRouteImport.update({
+    id: '/brand-kits/',
+    path: '/brand-kits/',
+    getParentRoute: () => AppSettingsRoute,
+  } as any)
+const AppSettingsBrandKitsKitIdRoute =
+  AppSettingsBrandKitsKitIdRouteImport.update({
+    id: '/settings_/brand-kits/$kitId',
+    path: '/settings/brand-kits/$kitId',
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -152,6 +166,8 @@ export interface FileRoutesByFullPath {
   '/screens/': typeof AppScreensIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/spots/': typeof AppSpotsIndexRoute
+  '/settings/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
+  '/settings/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
@@ -172,6 +188,8 @@ export interface FileRoutesByTo {
   '/screens': typeof AppScreensIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/spots': typeof AppSpotsIndexRoute
+  '/settings/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
+  '/settings/brand-kits': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -195,6 +213,8 @@ export interface FileRoutesById {
   '/_app/screens/': typeof AppScreensIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/spots/': typeof AppSpotsIndexRoute
+  '/_app/settings_/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
+  '/_app/settings/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -218,6 +238,8 @@ export interface FileRouteTypes {
     | '/screens/'
     | '/settings/'
     | '/spots/'
+    | '/settings/brand-kits/$kitId'
+    | '/settings/brand-kits/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/sign-in'
@@ -238,6 +260,8 @@ export interface FileRouteTypes {
     | '/screens'
     | '/settings'
     | '/spots'
+    | '/settings/brand-kits/$kitId'
+    | '/settings/brand-kits'
   id:
     | '__root__'
     | '/_app'
@@ -260,6 +284,8 @@ export interface FileRouteTypes {
     | '/_app/screens/'
     | '/_app/settings/'
     | '/_app/spots/'
+    | '/_app/settings_/brand-kits/$kitId'
+    | '/_app/settings/brand-kits/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -412,6 +438,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof V1DeviceSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/settings/brand-kits/': {
+      id: '/_app/settings/brand-kits/'
+      path: '/brand-kits'
+      fullPath: '/settings/brand-kits/'
+      preLoaderRoute: typeof AppSettingsBrandKitsIndexRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings_/brand-kits/$kitId': {
+      id: '/_app/settings_/brand-kits/$kitId'
+      path: '/settings/brand-kits/$kitId'
+      fullPath: '/settings/brand-kits/$kitId'
+      preLoaderRoute: typeof AppSettingsBrandKitsKitIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -421,6 +461,7 @@ interface AppSettingsRouteChildren {
   AppSettingsNotificationsRoute: typeof AppSettingsNotificationsRoute
   AppSettingsScreensRoute: typeof AppSettingsScreensRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
+  AppSettingsBrandKitsIndexRoute: typeof AppSettingsBrandKitsIndexRoute
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
@@ -429,6 +470,7 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsNotificationsRoute: AppSettingsNotificationsRoute,
   AppSettingsScreensRoute: AppSettingsScreensRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
+  AppSettingsBrandKitsIndexRoute: AppSettingsBrandKitsIndexRoute,
 }
 
 const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
@@ -446,6 +488,7 @@ interface AppRouteChildren {
   AppSpotsSpotIdRoute: typeof AppSpotsSpotIdRoute
   AppScreensIndexRoute: typeof AppScreensIndexRoute
   AppSpotsIndexRoute: typeof AppSpotsIndexRoute
+  AppSettingsBrandKitsKitIdRoute: typeof AppSettingsBrandKitsKitIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -459,6 +502,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSpotsSpotIdRoute: AppSpotsSpotIdRoute,
   AppScreensIndexRoute: AppScreensIndexRoute,
   AppSpotsIndexRoute: AppSpotsIndexRoute,
+  AppSettingsBrandKitsKitIdRoute: AppSettingsBrandKitsKitIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

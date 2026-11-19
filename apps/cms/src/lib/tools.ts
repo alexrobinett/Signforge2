@@ -48,6 +48,12 @@ export function screenVersionOf(output: unknown): number {
   throw new ToolCallError('error', 'SignForge answered without the screen. Reload the page to see it.');
 }
 
+/** The id of the kit in a `{ brandKit }` output, such as `create_brand_kit`'s. */
+export function brandKitIdOf(output: unknown): string {
+  if (isRecord(output) && isRecord(output.brandKit) && typeof output.brandKit.id === 'string') return output.brandKit.id;
+  throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
+}
+
 /** Whether a refusal is an `ifVersion` conflict: someone changed the thing since the page read it. */
 export const isStale = (err: unknown) =>
   err instanceof ToolCallError && err.code === 'conflict' && isRecord(err.details) && typeof err.details.version === 'number';

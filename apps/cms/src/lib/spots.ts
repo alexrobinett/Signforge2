@@ -1,6 +1,6 @@
 /**
  * The spot tools' outputs as the CMS reads them (`list_spots`, `get_spot`, `get_spot_preview`,
- * `list_templates`, `list_brand_kits` in packages/tools, the source of truth), and the editor's
+ * `list_templates` in packages/tools, the source of truth), and the editor's
  * draft turned into what the real player plays: a one-spot manifest compiled in the browser with
  * the server's compiler, so the stage never waits on the network.
  */
@@ -54,13 +54,6 @@ export interface TemplateView {
   key: string;
   name: string;
   versions: TemplateVersionView[];
-}
-
-export interface BrandKitView {
-  id: string;
-  name: string;
-  colors: Record<'primary' | 'accent' | 'background' | 'surface' | 'text' | 'muted', string>;
-  isDefault: boolean;
 }
 
 /** `get_spot_preview`'s output: a compile input without its screen and content. */
@@ -142,7 +135,7 @@ export const startData = (fields: Record<string, FieldDef>) =>
   );
 
 /** The file an asset plays as on a screen of this orientation, as the publish picks it (packages/tools `assetFile`). */
-function assetFile(asset: AssetView, orientation: Orientation): { sha: string; size: number; type: string } | undefined {
+export function assetFile(asset: AssetView, orientation: Orientation): { sha: string; size: number; type: string } | undefined {
   if (asset.kind === 'video') return { sha: asset.sha256, size: asset.size, type: asset.type };
   const r = asset.renditions.find((x) => x.orientation === orientation);
   return r && { sha: r.sha256, size: r.size, type: r.type };

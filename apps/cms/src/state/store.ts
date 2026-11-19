@@ -11,13 +11,14 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import { connectCommandMenu, createCommandMenuSlice, type CommandMenuSlice } from './command-menu';
 import { connectUi, createUiSlice, type UiSlice } from './ui';
 import { createAssetsSlice, type AssetsSlice } from './assets';
+import { createBrandKitsSlice, type BrandKitsSlice } from './brand-kits';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createScreensSlice, type ScreensSlice } from './screens';
 import { createSettingsSlice, type SettingsSlice } from './settings';
 import { createSignInSlice, type SignInSlice } from './sign-in';
 import { createSpotEditorSlice, type SpotEditorSlice } from './spot-editor';
 
-export type AppState = UiSlice & SignInSlice & OrgsSlice & ScreensSlice & AssetsSlice & CommandMenuSlice & SettingsSlice & SpotEditorSlice;
+export type AppState = UiSlice & SignInSlice & OrgsSlice & ScreensSlice & AssetsSlice & CommandMenuSlice & SettingsSlice & SpotEditorSlice & BrandKitsSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -40,6 +41,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createCommandMenuSlice(set, get, deps),
     ...createSettingsSlice(set, get, deps),
     ...createSpotEditorSlice(set, get, deps),
+    ...createBrandKitsSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);
