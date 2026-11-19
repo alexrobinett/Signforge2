@@ -430,8 +430,9 @@ function cellValue(def: ScalarFieldDef, cell: string | number, locale: string): 
 
 /**
  * A table's rows as a list field's items, by a `TableMapping` (see it for the rules), with what
- * was wrong: a table that is not a `TableFeed` or lacks a mapped column gives no items; a row
- * that does not fit is left out and named. `def` and the mapping are already known valid.
+ * was wrong: a table that is not a `TableFeed`, lacks a mapped column, or whose rows all fail
+ * gives no items; a row that does not fit is left out and named. `def` and the mapping are
+ * already known valid.
  */
 export function tableItems(
   def: Extract<FieldDef, { type: 'list' }>,
@@ -486,7 +487,9 @@ export function tableItems(
     if (problem) problems.push(problem);
     else items.push(item);
   }
-  return { items, problems };
+  // Rows were read and none fit: a file broken by an edit, not an empty menu. Rows filtered away
+  // leave no problems, and stay an empty list.
+  return items.length || !problems.length ? { items, problems } : { problems };
 }
 
 /**

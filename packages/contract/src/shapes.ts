@@ -554,8 +554,9 @@ export const TABLE_ROWS_PATH = 'rows';
  * named for each item property fills it, converted to the property's type (a number written as
  * text in the screen's locale, as a price: 4.5 is "4.50"; a select matched to its options in any
  * case). A property with no column takes its default. A row that does not fit the item, or leaves
- * a property with no default empty, is left out. The rows kept are filtered, then sorted, then
- * cut to the field's `maxItems`.
+ * a property with no default empty, is left out; when every row the filter keeps is left out, the
+ * binding has no value, so the last good snapshot or the fallback stays. The rows kept are
+ * filtered, then sorted, then cut to the field's `maxItems`.
  */
 export interface TableMapping {
   /** Item property to the column that fills it. Every property without a default needs one. */

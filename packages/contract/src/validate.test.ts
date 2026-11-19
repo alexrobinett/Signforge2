@@ -540,6 +540,27 @@ describe('table bindings', () => {
     expect(names({ columns, filter: { column: 'Section', equals: 'Mains' }, sort: { column: 'Item' } })).toEqual(['Pie', 'Steak']);
   });
 
+  it('gives no items when every row it read fails, but an empty list when the filter keeps none', () => {
+    const long = {
+      columns: ['Item', 'Price'],
+      rows: [
+        ['Soup', '$4.50 a bowl'],
+        ['Stew', '$11.00 a pot'],
+      ],
+    };
+    expect(tableItems(menuItems, { columns: { name: 'Item', price: 'Price' } }, long, 'en-US')).toEqual({
+      problems: ['row 1: price is longer than 10', 'row 2: price is longer than 10'],
+    });
+    const fields = { items: menuItems };
+    expect(boundValue(fields, 'items', { source: 'menu', path: 'rows', table: { columns: { name: 'Item', price: 'Price' } } }, long, 'en-US')).toEqual({
+      problems: ['field "items": row 1: price is longer than 10', 'field "items": row 2: price is longer than 10'],
+    });
+    expect(tableItems(menuItems, { columns: { name: 'Item', price: 'Price' }, filter: { column: 'Item', equals: 'Pie' } }, long, 'en-US')).toEqual({
+      items: [],
+      problems: [],
+    });
+  });
+
   it('gives no items for a table without a mapped column, or not a table at all', () => {
     expect(tableItems(menuItems, { columns: { name: 'Dish', price: 'Price' }, sort: { column: 'Rank' } }, menuTable, 'en-US')).toEqual({
       problems: ['the table has no column "Dish", "Rank"'],
