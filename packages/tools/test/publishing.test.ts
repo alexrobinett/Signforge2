@@ -435,6 +435,10 @@ describe('loadCompileInput', () => {
     };
     // The golden names its screen; a screen's id is otherwise always the server's.
     await seedScreen(env.DB, orgId, { ...golden.screen, id: screenId });
+    // Before the spots: a spot may bind only to the org's own data sources.
+    for (const d of Object.values(golden.dataSources)) {
+      await org.dataSources.insert({ id: d.id, name: d.id, format: 'json', urlEncrypted: 'enc:test', refreshS: d.refreshS });
+    }
     for (const s of Object.values(golden.spots)) {
       if (s.kind === 'template') {
         const assetMap: Record<string, string> = {};
@@ -461,9 +465,6 @@ describe('loadCompileInput', () => {
         pl.id,
         pl.items.map((i) => i.spot),
       );
-    }
-    for (const d of Object.values(golden.dataSources)) {
-      await org.dataSources.insert({ id: d.id, name: d.id, format: 'json', urlEncrypted: 'enc:test', refreshS: d.refreshS });
     }
     if (playlists) await org.commit((await org.settings.stage.set({ defaultPlaylistId: golden.defaultPlaylist })).writes);
     return { org };

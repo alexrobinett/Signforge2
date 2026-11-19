@@ -1,8 +1,6 @@
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
-import { API_PORT, RUN_DIR } from './servers';
+import { axe, d1, fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
+import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.11';
@@ -49,15 +47,7 @@ async function sync(request: APIRequestContext, credential: string, display = { 
  * As if the screen stopped syncing `minutes` ago: its last sync moved back in the run's local D1,
  * which the dev API reads (`e2e/global-setup.ts`). Waiting out the org's 5-minute minimum would do the same, slowly.
  */
-function stopSyncing(screenId: string, minutes: number) {
-  const sql = `UPDATE screens SET last_seen_at = last_seen_at - ${minutes * 60_000} WHERE id = '${screenId}'`;
-  const run = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'dev', '--persist-to', `${RUN_DIR}state`, '--command', sql], {
-    cwd: fileURLToPath(new URL('../../api/', import.meta.url)),
-    env: { ...process.env, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' },
-    encoding: 'utf8',
-  });
-  expect(run.status, run.stderr).toBe(0);
-}
+const stopSyncing = (screenId: string, minutes: number) => d1(`UPDATE screens SET last_seen_at = last_seen_at - ${minutes * 60_000} WHERE id = '${screenId}'`);
 
 test('pair a screen from the empty Screens page, watch it come online, wake, identify, set its hours and revoke it', async ({ page, request }) => {
   test.setTimeout(120_000);
