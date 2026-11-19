@@ -2,6 +2,8 @@
 // values. The geocoder is a stub (global-setup.ts); the poller does not run under `wrangler dev`, so
 // a test writes the snapshot it would have fetched into the run's local D1.
 import { expect, test, type Page } from '@playwright/test';
+import { canonicalJson } from '@signforge/contract';
+import { parseNews } from '@signforge/feeds';
 import { axe, d1, fillUntilEnabled, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit. */
@@ -13,7 +15,8 @@ const orgOf = (spotId: string) => `(SELECT org_id FROM spots WHERE id = '${spotI
 /** As if the poller had just fetched `data` for the source. */
 function pollFound(spotId: string, sourceId: string, data: unknown) {
   const now = Date.now();
-  const json = JSON.stringify(data).replaceAll("'", "''");
+  // As the poller stores it: keys sorted at every level.
+  const json = canonicalJson(data).replaceAll("'", "''");
   d1(
     `INSERT INTO data_snapshots (org_id, data_source_id, version, fetched_at, checked_at, data_json) VALUES (${orgOf(spotId)}, '${sourceId}', 'e2e-${now}', ${now}, ${now}, '${json}') ` +
       'ON CONFLICT (org_id, data_source_id) DO UPDATE SET version = excluded.version, fetched_at = excluded.fetched_at, checked_at = excluded.checked_at, data_json = excluded.data_json',
@@ -163,15 +166,13 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
     language: { dataSourceId: feed.id, path: 'language' },
   });
 
-  const published = new Date(Date.now() - 20 * 60_000).toISOString();
-  pollFound(spotId, feed.id, {
-    title: 'World',
-    language: 'en',
-    items: [
-      { title: 'Harbour bridge reopens after repairs', published, source: '' },
-      { title: 'City library extends its weekend hours', published, source: '' },
-    ],
-  });
+  // The feed as the poller converts it: one dated item, one undated, the feed's title as their source.
+  const pubDate = new Date(Date.now() - 20 * 60_000).toUTCString();
+  const rss = `<?xml version="1.0"?><rss version="2.0"><channel><title>World desk</title><language>en</language>
+    <item><title>Harbour bridge reopens after repairs</title><pubDate>${pubDate}</pubDate></item>
+    <item><title>City library extends its weekend hours</title></item>
+  </channel></rss>`;
+  pollFound(spotId, feed.id, parseNews(rss));
   await page.reload();
   await hydrated(page);
   await expect(form.getByRole('listitem').filter({ hasText: 'Harbour bridge reopens after repairs' })).toBeVisible();

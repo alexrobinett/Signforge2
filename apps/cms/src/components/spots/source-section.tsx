@@ -20,6 +20,7 @@ import {
   liveValue,
   placeName,
   pollErrorWords,
+  rowTitles,
   SOURCE_FORMAT,
   unitsOf,
   weatherWords,
@@ -63,15 +64,6 @@ function shown(value: unknown, suffix = ''): string {
 
 /** A field's label without its help in brackets: "Feed language (BCP 47, e.g. fr-FR)" is "Feed language". */
 const shortLabel = (label: string) => label.replace(/\s*\(.*\)$/, '');
-
-/** The first rows of a live list, by their first text: headlines, events. */
-function firstRows(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 3).flatMap((row: unknown) => {
-    const text = typeof row === 'object' && row !== null ? Object.values(row).find((v) => typeof v === 'string' && v) : undefined;
-    return typeof text === 'string' ? [text] : [];
-  });
-}
 
 /** Whether screens show the snapshot: one confirmed within `SNAPSHOT_STALE_MS`. */
 const isFresh = (snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
@@ -160,7 +152,7 @@ function LiveValues({
         <dl aria-label="Live values" className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-sm">
           {rows.map(([field, path]) => {
             const value = liveValue(snapshot, path);
-            const first = firstRows(value);
+            const first = rowTitles(value);
             const suffix = weather ? WEATHER_SUFFIX.find(([p]) => p.test(path))?.[1](units) : undefined;
             return (
               <div key={field} className="contents">

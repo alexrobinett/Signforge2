@@ -189,3 +189,16 @@ export function pollErrorWords(code: string): string {
       return `the check failed (${code})`;
   }
 }
+
+/**
+ * The first rows of a live list by their `title`: a `NewsFeed` item's headline, a `CalendarFeed`
+ * event's name. Read by name: the poller stores snapshots with sorted keys, so a row's first text
+ * is its date or its source.
+ */
+export function rowTitles(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 3).flatMap((row: unknown) => {
+    const title = readPath(row, 'title');
+    return typeof title === 'string' && title ? [title] : [];
+  });
+}
