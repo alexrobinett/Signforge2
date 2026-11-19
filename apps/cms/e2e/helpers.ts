@@ -131,24 +131,50 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
  */
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
-  for (const frame of page.frames())
-    await frame.evaluate(() => {
-      const ms = Number.parseFloat(document.documentElement.style.getPropertyValue('--sf-duration'));
-      if (!ms) return;
-      for (const a of document.getAnimations()) {
-        a.pause();
-        a.currentTime = ms - 1500;
-      }
-    });
+  await holdTemplates(page);
   const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
   for (const dark of [false, true]) {
     await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), dark);
-    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-    const found = violations.flatMap((v) =>
-      v.nodes.map((n) => `${dark ? 'dark' : 'light'} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`),
-    );
+    const analyze = async () => {
+      const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
+      return violations.flatMap((v) =>
+        v.nodes.map((n) => `${dark ? 'dark' : 'light'} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`),
+      );
+    };
+    let found = await analyze();
+    // A play that began during the analysis restarted its frame's animations: hold it and analyse
+    // again. Once is enough: a play is many times longer than an analysis.
+    if (!(await holdTemplates(page))) found = await analyze();
+    expect(await holdTemplates(page), 'a template frame restarted again during axe').toBe(true);
     expect(found, page.url()).toEqual([]);
   }
   await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
   await still.evaluate((el) => el.parentNode?.removeChild(el));
+}
+
+/**
+ * Hold every template frame (a document with `--sf-duration`) at rest: its animations paused after
+ * its intro and before its outro. True when every one already was. A frame the player removed in the
+ * meantime is skipped: it is no longer on the page.
+ */
+async function holdTemplates(page: Page): Promise<boolean> {
+  let held = true;
+  for (const frame of page.frames()) {
+    const was = await frame
+      .evaluate(() => {
+        const ms = Number.parseFloat(document.documentElement.style.getPropertyValue('--sf-duration'));
+        if (!ms) return true;
+        const rest = ms - 1500;
+        const animations = document.getAnimations();
+        const already = animations.every((a) => a.playState === 'paused' && a.currentTime === rest);
+        for (const a of animations) {
+          a.pause();
+          a.currentTime = rest;
+        }
+        return already;
+      })
+      .catch(() => true);
+    held &&= was;
+  }
+  return held;
 }

@@ -109,6 +109,24 @@ test('a change someone else made while the editor was open is not overwritten', 
   await expect(page.getByLabel('Message')).toHaveValue('From the agent');
 });
 
+/** Whether a template frame shows `city` in its `.city` and is playing: the draft is on the stage. */
+async function stagePlays(page: Page, city: string) {
+  for (const frame of page.frames())
+    if (
+      await frame
+        .evaluate(
+          (city) =>
+            !!document.documentElement.style.getPropertyValue('--sf-duration') &&
+            document.querySelector('.city')?.textContent === city &&
+            document.getAnimations().some((a) => a.playState === 'running'),
+          city,
+        )
+        .catch(() => false)
+    )
+      return true;
+  return false;
+}
+
 /**
  * The weather preview at every time of day, each checked by axe: its scene follows sunrise, sunset
  * and the clock (#70), so they are set around the test's own clock, and every phase shows whenever
@@ -128,17 +146,21 @@ async function weatherAllDay() {
   for (const [phase, values] of phases) {
     for (const [field, value] of Object.entries(values)) await page.locator(`#field-${field}`).fill(String(value));
     await page.locator('#field-city').fill(phase);
-    await expect.poll(() => stageShows(page, phase), { message: `weather at ${phase}`, timeout: 10_000 }).toBe(true);
+    // On the stage, not just in the page: the form's own labels hold "Day" and "Night".
+    await expect.poll(() => stagePlays(page, phase), { message: `weather at ${phase}`, timeout: 10_000 }).toBe(true);
     // Where CI's axe once caught the preview (run 44430579357): 0.87 s into a play, the forecast's last
     // row a third of the way into its fade-in, at 2.68:1. axe must read text as it rests, not mid-fade.
     for (const frame of page.frames())
-      await frame.evaluate(() => {
-        if (!document.documentElement.style.getPropertyValue('--sf-duration')) return;
-        for (const a of document.getAnimations()) {
-          a.pause();
-          a.currentTime = 870;
-        }
-      });
+      await frame
+        .evaluate(() => {
+          if (!document.documentElement.style.getPropertyValue('--sf-duration')) return;
+          for (const a of document.getAnimations()) {
+            a.pause();
+            a.currentTime = 870;
+          }
+        })
+        // A frame the player removed in the meantime.
+        .catch(() => undefined);
     await axe(page);
   }
 }
