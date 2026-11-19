@@ -347,10 +347,17 @@ export function scoped(d1: D1Database, orgId: string) {
     const found = new Set((await assets.getMany(ids)).map((a) => a.id));
     for (const id of ids) if (!found.has(id)) throw new NotInOrgError('asset', id);
   };
-  type SpotPatch = { templateVersionId?: string | null; assetMapJson?: string | null; assetId?: string | null };
+  const checkBindings = async (json: string | null | undefined) => {
+    if (json == null) return;
+    const ids = [...new Set(Object.values(JSON.parse(json) as Record<string, { source: string }>).map((b) => b.source))];
+    const found = new Set((await dataSources.getMany(ids)).map((d) => d.id));
+    for (const id of ids) if (!found.has(id)) throw new NotInOrgError('data source', id);
+  };
+  type SpotPatch = { templateVersionId?: string | null; assetMapJson?: string | null; assetId?: string | null; bindingsJson?: string | null };
   const checkSpot = async (v: SpotPatch) => {
     await checkTemplateVersion(v.templateVersionId);
     await checkAssetMap(v.assetMapJson);
+    await checkBindings(v.bindingsJson);
     if (v.assetId != null && !(await assets.get(v.assetId))) throw new NotInOrgError('asset', v.assetId);
   };
 

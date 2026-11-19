@@ -170,6 +170,12 @@ describe("a call made for org B with org A's ids", () => {
       ['spot moved to A template version', () => b.spots.update(s.b.templateSpot, { templateVersionId: a.templateVersion })],
       ['spot image field on A asset', () => b.spots.update(s.b.templateSpot, { assetMapJson: JSON.stringify({ photo: a.asset }) })],
       ['spot staged with A asset', async () => b.spots.stage.update((await b.spots.get(s.b.imageSpot))!, { assetId: a.asset })],
+      ['spot bound to A data source', () => b.spots.update(s.b.templateSpot, { bindingsJson: JSON.stringify({ title: { source: a.dataSource, path: 't' } }) })],
+      [
+        'spot staged bound to A data source',
+        async () =>
+          b.spots.stage.update((await b.spots.get(s.b.templateSpot))!, { bindingsJson: JSON.stringify({ title: { source: a.dataSource, path: 't' } }) }),
+      ],
     ];
     for (const [name, call] of refused) await expect(call(), name).rejects.toBeInstanceOf(NotInOrgError);
     expect(await b.playlists.items(s.b.playlist)).toEqual([s.b.templateSpot, s.b.imageSpot]);
