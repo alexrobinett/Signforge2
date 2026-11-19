@@ -6,14 +6,11 @@
 import { FONTS } from '@signforge/compiler';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { PaletteIcon, PlusIcon, TriangleAlertIcon } from 'lucide-react';
-import type { SubmitEvent } from 'react';
+import { PaletteIcon, TriangleAlertIcon } from 'lucide-react';
 import { CatalogueFonts, fontStack, KitTile } from '~/components/brand/kit-fields';
+import { NameDialog } from '~/components/name-dialog';
 import { EmptyState, PageHeader } from '~/components/page';
 import { Button } from '~/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
-import { Input } from '~/components/ui/input';
-import { Label } from '~/components/ui/label';
 import type { BrandKitView } from '~/lib/brand-kits';
 import { useCanManage, useOrgId } from '~/lib/live';
 import type { GroupView } from '~/lib/screen-types';
@@ -51,42 +48,21 @@ const fontsText = (k: BrandKitView) =>
     : "The templates' own fonts";
 
 function NewKitDialog({ orgId }: { orgId: string }) {
-  const d = useAppStore((s) => s.brandKits.newKit);
+  const draft = useAppStore((s) => s.brandKits.newKit);
   const open = useAppStore((s) => s.openNewKit);
   const name = useAppStore((s) => s.nameNewKit);
   const create = useAppStore((s) => s.createKit);
-  const submit = (e: SubmitEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    void create(orgId);
-  };
   return (
-    <Dialog open={d.open} onOpenChange={open}>
-      <DialogTrigger asChild>
-        <Button>
-          <PlusIcon aria-hidden /> New kit
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>New brand kit</DialogTitle>
-          <DialogDescription>It starts with the colours screens use without a kit. No screen wears it until it is used and published.</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="new-kit-name">Name</Label>
-            <Input id="new-kit-name" value={d.name} onChange={(e) => name(e.target.value)} maxLength={100} />
-          </div>
-          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
-            {d.error}
-          </p>
-          <div className="flex justify-end">
-            <Button type="submit" disabled={!d.name.trim() || d.pending}>
-              {d.pending ? 'Creating…' : 'Create kit'}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <NameDialog
+      id="new-kit-name"
+      thing="kit"
+      title="New brand kit"
+      description="It starts with the colours screens use without a kit. No screen wears it until it is used and published."
+      draft={draft}
+      onOpenChange={open}
+      onName={name}
+      onCreate={() => void create(orgId)}
+    />
   );
 }
 

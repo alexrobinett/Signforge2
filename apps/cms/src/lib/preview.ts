@@ -9,7 +9,9 @@ import { PREVIEW_PROTOCOL } from '@signforge/contract';
 export const PLAYER_URL = '/player/index.html?source=preview';
 
 /** What the player says over the preview channel (contract `PreviewPlayerMessage`), read field by field. */
-export function playerMessage(data: unknown): { type: 'listening' } | { type: 'playing'; spot: string | null } | { type: 'error'; message: string } | undefined {
+export function playerMessage(
+  data: unknown,
+): { type: 'listening' } | { type: 'playing'; spot: string | null } | { type: 'error'; message: string } | undefined {
   if (typeof data !== 'object' || data === null || !('sfPreview' in data) || data.sfPreview !== PREVIEW_PROTOCOL || !('type' in data)) return undefined;
   if (data.type === 'listening') return { type: 'listening' };
   if (data.type === 'playing') return { type: 'playing', spot: 'spot' in data && typeof data.spot === 'string' ? data.spot : null };

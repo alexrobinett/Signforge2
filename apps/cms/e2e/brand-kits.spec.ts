@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -22,10 +22,7 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-kits-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Northside Market', level: 1 })).toBeVisible();
+  await createOrg(page, 'Northside Market');
   // A spot to see the kit on, and a screen in a group to give it to.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));
