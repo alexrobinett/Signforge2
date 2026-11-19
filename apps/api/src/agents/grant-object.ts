@@ -12,7 +12,8 @@
  *
  * The minute's counts are lost if the object restarts mid-minute (a deploy; an object is evicted
  * only when idle, by which time its minute is over), which forgives at most that minute. Windows
- * are fixed: the minute, and the UTC day, as the clock of the Worker that asks reads them.
+ * are fixed, the minute and the UTC day, by the object's own clock: one clock for every caller,
+ * read when the call reaches it, so a call delayed on its way never lands in a window already closed.
  */
 import { AGENT_LIMITS, type AgentAllowance, type AgentLimit, type AgentLimiter } from '@signforge/tools';
 import { DurableObject } from 'cloudflare:workers';
@@ -32,14 +33,14 @@ const DAY_KEY = 'day';
 export class AgentGrantObject extends DurableObject<Env> {
   private minute: Window & { calls: number } = { start: 0, calls: 0, writes: 0, refused: [] };
 
-  /** Counts a call made at `now`, a write if `write`, unless it is over a limit. */
-  take(write: boolean, now: number): AgentAllowance {
+  /** Counts a call, a write if `write`, unless it is over a limit. */
+  take(write: boolean): AgentAllowance {
+    const now = Date.now();
     const kv = this.ctx.storage.kv;
-    // Never back in time: a Worker whose clock lags another's counts in the window already open.
-    const minuteStart = Math.max(this.minute.start, now - (now % MINUTE_MS));
+    const minuteStart = now - (now % MINUTE_MS);
     if (minuteStart !== this.minute.start) this.minute = { start: minuteStart, calls: 0, writes: 0, refused: [] };
     const stored = kv.get<Window>(DAY_KEY);
-    const dayStart = Math.max(stored?.start ?? 0, now - (now % DAY_MS));
+    const dayStart = now - (now % DAY_MS);
     const day: Window = stored?.start === dayStart ? stored : { start: dayStart, writes: 0, refused: [] };
 
     const over = (limit: AgentLimit, window: Window, length: number): AgentAllowance => {
@@ -62,7 +63,7 @@ export class AgentGrantObject extends DurableObject<Env> {
   }
 }
 
-/** The API's `AgentLimiter`: each grant's calls counted in its object. `now` is for tests. */
-export function agentLimiter(env: Pick<Env, 'AGENT_GRANTS'>, now = Date.now): AgentLimiter {
-  return { take: (grantId, write) => env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(grantId)).take(write, now()) };
+/** The API's `AgentLimiter`: each grant's calls counted in its object. */
+export function agentLimiter(env: Pick<Env, 'AGENT_GRANTS'>): AgentLimiter {
+  return { take: (grantId, write) => env.AGENT_GRANTS.get(env.AGENT_GRANTS.idFromName(grantId)).take(write) };
 }
