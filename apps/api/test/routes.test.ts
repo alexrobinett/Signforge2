@@ -220,26 +220,8 @@ describe('POST /api/tools/:name', () => {
   it('lists what the caller may use', async () => {
     const names = async (c: Client) => ((await (await c.get('/api/tools')).json()) as { tools: { name: string }[] }).tools.map((x) => x.name);
     expect(await names(owner)).toHaveLength(registry.size);
-    expect((await names(viewer)).sort()).toEqual([
-      'get_asset',
-      'get_brand_kit',
-      'get_data_source',
-      'get_org_settings',
-      'get_playlist',
-      'get_screen',
-      'get_spot',
-      'get_spot_preview',
-      'get_template',
-      'list_assets',
-      'list_brand_kits',
-      'list_data_sources',
-      'list_fonts',
-      'list_groups',
-      'list_playlists',
-      'list_screen_status',
-      'list_screens',
-      'list_spots',
-      'list_templates',
-    ]);
+    // A viewer gets the tools a viewer may run: the read tools (packages/tools test/dispatch.test.ts names them).
+    const reads = [...registry.values()].filter((t) => t.minRole === 'viewer').map((t) => t.name);
+    expect((await names(viewer)).sort()).toEqual(reads.sort());
   });
 });
