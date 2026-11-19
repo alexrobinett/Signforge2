@@ -36,6 +36,12 @@ const WRITERS: Record<string, string> = {
 const MIDDLEWARE = new Set(['ALL /api/*', 'ALL /v1/device/*', 'ALL /admin/*']);
 /** Better Auth's own GETs may write its tables (OAuth callbacks, sign-out links). */
 const AUTH_GET = 'GET /api/auth/*';
+/**
+ * The connectors' OAuth callback: a GET because a provider redirects the browser to it. It changes
+ * data only by running finish_connection through the dispatcher (test/connections.test.ts), and
+ * answers a redirect, never 200.
+ */
+const OAUTH_CALLBACK = 'GET /api/connections/callback';
 
 /** Better Auth's tables. Writes to any other table are ours and must come from the dispatcher. */
 const AUTH_TABLES = new Set(['user', 'session', 'account', 'verification', 'organization', 'member', 'invitation', 'rateLimit']);
@@ -113,7 +119,7 @@ describe('requests', () => {
   const ours = () => writes.filter((table) => !AUTH_TABLES.has(table));
 
   it('to every GET on /api, other than Better Auth, write nothing of ours', async () => {
-    const gets = routes().filter((r) => r.startsWith('GET /api/') && r !== AUTH_GET);
+    const gets = routes().filter((r) => r.startsWith('GET /api/') && r !== AUTH_GET && r !== OAUTH_CALLBACK);
     expect(gets.length).toBeGreaterThan(0);
     for (const r of gets) {
       writes.length = 0;
@@ -126,6 +132,13 @@ describe('requests', () => {
       expect(res.status, r).toBe(200);
       expect(ours(), r).toEqual([]);
     }
+  });
+
+  it('writes through the dispatcher on the OAuth callback: a state that is not pending changes nothing', async () => {
+    writes.length = 0;
+    const res = await owner.get('/api/connections/callback?state=not-a-pending-state-at-all&code=x');
+    expect(res.status).toBe(303);
+    expect(ours()).toEqual([]);
   });
 
   it('to a read tool write nothing, and to a changing tool write the audit log with the change', async () => {
@@ -230,6 +243,7 @@ describe('POST /api/tools/:name', () => {
       'list_assets',
       'list_audit_log',
       'list_brand_kits',
+      'list_connections',
       'list_data_sources',
       'list_fonts',
       'list_groups',

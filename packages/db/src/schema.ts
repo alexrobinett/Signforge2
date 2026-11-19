@@ -713,9 +713,20 @@ export const dataSources = sqliteTable(
     id: text('id').notNull(),
     orgId: orgId(),
     name: text('name').notNull(),
-    format: text('format', { enum: ['json', 'ical', 'rss'] }).notNull(),
-    /** The feed URL, encrypted: a private calendar URL is a secret. */
+    /** `provider`: the connection's adapter fetches it and gives the snapshot's data. */
+    format: text('format', { enum: ['json', 'ical', 'rss', 'provider'] }).notNull(),
+    /**
+     * The feed URL, encrypted: a private calendar URL is a secret. For a provider source, the
+     * provider's resource (a calendar id, a sheet range), sealed the same way: a sheet's id can
+     * be all it takes to read it.
+     */
     urlEncrypted: text('url_encrypted').notNull(),
+    /**
+     * A provider source's connection. No foreign key: a column added to a table cannot carry a
+     * composite one without rebuilding it. The repository checks it is the org's, and the
+     * poller fails a source whose connection is gone as `disconnected`.
+     */
+    connectionId: text('connection_id'),
     /** How often the poller fetches it, at least 300 (docs/backend-plan.md, Data sources). */
     refreshS: integer('refresh_s').notNull(),
     /** Calendars: how many days ahead their events reach. Null: `@signforge/feeds`' default. */
@@ -750,6 +761,69 @@ export const dataSnapshots = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.orgId, t.dataSourceId] }),
     foreignKey({ columns: [t.orgId, t.dataSourceId], foreignColumns: [dataSources.orgId, dataSources.id] }).onDelete('cascade'),
+  ],
+);
+
+// --------------------------------------------------------------- connections
+
+/**
+ * An account an org connected at a provider (docs/backend-plan.md, Connectors), which provider
+ * data sources read through. Its credentials (an OAuth grant: access and refresh token and
+ * expiry; or an API key) are sealed under the CONNECTION_KEY secret, bound to the org and this
+ * id, and never leave the API's connector code: no tool returns them and the audit log never
+ * holds them. Null once disconnected.
+ */
+export const connections = sqliteTable(
+  'connections',
+  {
+    id: text('id').primaryKey(),
+    orgId: orgId(),
+    /** The adapter's name (`apps/api/src/connectors`). */
+    provider: text('provider').notNull(),
+    /** Which account, as the provider names it (`facilities@…`): shown, not a secret. */
+    account: text('account').notNull(),
+    /** The scopes the provider granted, a JSON array of strings. */
+    scopesJson: text('scopes_json').notNull(),
+    /** `needs_reconnect`: the provider refused the grant (revoked, expired); a person must connect it again. */
+    status: text('status', { enum: ['active', 'needs_reconnect', 'disconnected'] }).notNull(),
+    credentialsSealed: text('credentials_sealed'),
+    /** When the access token expires; null for one that does not (an API key). */
+    expiresAt: integer('expires_at'),
+    /** The user who first connected it. */
+    createdBy: text('created_by').notNull(),
+    /** Why the provider last refused, as a category (`invalid_grant`), never its body. */
+    lastError: text('last_error'),
+    createdAt: created(),
+    updatedAt: updated(),
+  },
+  (t) => [uniqueIndex('connections_org_id_uq').on(t.orgId, t.id)],
+);
+
+/**
+ * An OAuth authorization a member started and has not finished (`start_connection`): found by
+ * the SHA-256 of its `state`, which only the authorize URL holds, and deleted when it is
+ * finished, so a state works once. Good for 10 minutes. Bound to the member who started it.
+ */
+export const connectionAuthorizations = sqliteTable(
+  'connection_authorizations',
+  {
+    id: text('id').primaryKey(),
+    orgId: orgId(),
+    provider: text('provider').notNull(),
+    /** The connection it reconnects; null for a new one. */
+    connectionId: text('connection_id'),
+    stateHash: text('state_hash').notNull(),
+    /** The PKCE code verifier, sealed like credentials, bound to this row. */
+    verifierSealed: text('verifier_sealed').notNull(),
+    actorKind: text('actor_kind', { enum: ['user', 'agent', 'device', 'system'] }).notNull(),
+    actorId: text('actor_id').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    createdAt: created(),
+  },
+  (t) => [
+    uniqueIndex('connection_authorizations_org_id_uq').on(t.orgId, t.id),
+    uniqueIndex('connection_authorizations_state_uq').on(t.orgId, t.stateHash),
+    foreignKey({ columns: [t.orgId, t.connectionId], foreignColumns: [connections.orgId, connections.id] }).onDelete('cascade'),
   ],
 );
 

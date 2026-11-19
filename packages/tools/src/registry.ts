@@ -9,6 +9,7 @@ import type { PlatformScope } from '@signforge/db';
 import { assetTools } from './assets';
 import { auditTools } from './audit';
 import { brandTools } from './brand';
+import { connectionTools } from './connections';
 import { dataSourceTools } from './data-sources';
 import { groupTools } from './groups';
 import { pairingTools } from './pairing';
@@ -30,6 +31,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...videoTools,
   ...brandTools,
   ...dataSourceTools,
+  ...connectionTools,
   ...settingsTools,
   ...spotTools,
   ...auditTools,
