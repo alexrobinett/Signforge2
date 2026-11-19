@@ -44,6 +44,7 @@
     "@eslint-community/eslint-plugin-eslint-comments": "^4.8.1",
     "@playwright/test": "^1.65.1",
     "@signforge/cli": "workspace:*",
+    "@signforge/feeds": "workspace:*",
     "@signforge/player": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
     "@signforge/template-clock": "workspace:*",

@@ -59,7 +59,7 @@ Built:
 
 What is left:
 
-- **Binding a field to a data source** and **the sample-data switch**: no data-source tools exist yet (list them, read a snapshot for the live value). `update_spot` keeps a spot's bindings as they are.
+- ~~Binding a field to a data source and the sample-data switch~~: built by #79 (owner decision 2026-11-18: people choose the source, never the values). A template declares its live fields (`live` in template.json); the editor's Source section picks or makes the source (a place and units for Open-Meteo weather, a news feed, a calendar) and binds them, shows their live values read-only, and keeps the fallback values in a collapsed "If the source is down" section. The stage plays the snapshots; its Data switch (`?data=fallback`) is the sample-data switch. `create_spot` and `update_spot` take `bindings`. Left: menu-board, cstore-promo and photo-promo stay typed until a connector exists (#81); other weather providers; a page of the org's data sources.
 - **Publish** in the editor (M3-18). The stage label and the disabled publish while a field is invalid come with it; the header says whether the spot is published.
 - **cstore-promo on a small stage.** Below about half scale (a 1280 px window: the stage is at 27%) the player misses its 2 s ready timeout for cstore-promo, every retry, in Chromium headless and headed; at 100%, or at 60% and more, it plays. The other six templates play at any scale. Not the slot's 1 px gap (an 8 and a 12 px gap changed nothing) nor CSS `zoom` instead of `transform`. Likely the throttle M3-39 found (undrawn frames under the scaled layer); it needs a trace (`m39b-scripts/ptrace*.py`).
 - **Focal point** for portrait crops (below).

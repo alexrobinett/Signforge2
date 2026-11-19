@@ -8,12 +8,13 @@
  * Every route that changes data on `/api`, other than Better Auth's, is this one;
  * test/routes.test.ts fails if another appears. See packages/tools/README.md for the contract.
  */
-import { describeTools, dispatch, grantOf, registry, type Caller, type ToolErrorCode } from '@signforge/tools';
+import { describeTools, dispatch, grantOf, registry, type Caller, type RateLimitBucket, type ToolErrorCode } from '@signforge/tools';
 import type { Context, Hono } from 'hono';
 import { type ConnectorDeps, connectorDeps, connectorsFor } from '../connectors';
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
 import { feedUrlSealer } from '../data/cipher';
+import { openMeteoPlaces } from '../data/places';
 import { templateCheckAllowed, templateChecker } from '../template-check';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
@@ -26,6 +27,12 @@ const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = {
   conflict: 409,
   rate_limited: 429,
   unavailable: 503,
+};
+
+/** The Workers rate limit each bucket counts against (wrangler.jsonc). */
+const LIMITS: Record<Exclude<RateLimitBucket, 'template_check'>, (env: Env) => RateLimit> = {
+  pairing_claim: (env) => env.PAIR_CLAIM_LIMIT,
+  place_search: (env) => env.PLACE_SEARCH_LIMIT,
 };
 
 /** The CMS's client id in the audit log. */
@@ -43,17 +50,16 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     blobs: c.env.BLOBS,
     uploads: uploadSigner(c.env, c.req.url),
     feedUrls: feedUrlSealer(c.env),
+    places: openMeteoPlaces(c.env),
     connectors: connectorsFor(c.env, connectors ?? connectorDeps(c.env), new URL(CALLBACK_PATH, c.req.url).href),
     templateCheck: templateChecker(c.env),
     screens: screenNotifier(c.env),
-    // A claim counts against the member and against the address, so many accounts on one address share a limit.
-    // A template check counts against the org, whose one container it uses.
+    // A template check counts against the org, whose one container it uses. The others count against the
+    // member and against the address, so many accounts on one address share a limit.
     rateLimit: async (bucket) => {
       if (bucket === 'template_check') return templateCheckAllowed(c.env, c.var.org.orgId);
-      const [user, ip] = await Promise.all([
-        c.env.PAIR_CLAIM_LIMIT.limit({ key: `user:${c.var.session.user.id}` }),
-        c.env.PAIR_CLAIM_LIMIT.limit({ key: `ip:${clientIp(c)}` }),
-      ]);
+      const limit = LIMITS[bucket](c.env);
+      const [user, ip] = await Promise.all([limit.limit({ key: `user:${c.var.session.user.id}` }), limit.limit({ key: `ip:${clientIp(c)}` })]);
       return user.success && ip.success;
     },
   };

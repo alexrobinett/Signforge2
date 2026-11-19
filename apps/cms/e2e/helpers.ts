@@ -1,9 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { expect, request as playwrightRequest, type Page } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
-import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor } from './servers';
+import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor, RUN_DIR } from './servers';
 
 /**
  * Fill the email step and ask for a code. Retried until the page has hydrated: before that the
@@ -199,6 +201,20 @@ export async function tool(page: Page, name: string, input: unknown) {
   const res = await page.request.post(`/api/tools/${name}`, { data: input });
   expect(res.status(), await res.text()).toBe(200);
   return res.json();
+}
+
+/** Runs SQL on the run's local D1, which the dev API reads (`e2e/global-setup.ts`): for what the test cannot wait for. */
+export function d1(command: string) {
+  const run = spawnSync(
+    'pnpm',
+    ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'dev', '--persist-to', `${RUN_DIR}state`, '--command', command],
+    {
+      cwd: fileURLToPath(new URL('../../api/', import.meta.url)),
+      env: { ...process.env, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' },
+      encoding: 'utf8',
+    },
+  );
+  expect(run.status, run.stderr).toBe(0);
 }
 
 /** As a member with no org yet: make one called `name`, as the first page asks, and land on it. */
