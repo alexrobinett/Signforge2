@@ -63,6 +63,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "9d3d3e63607683cf54f951e37373695b235fbe471fd87fd603e79f083ef57a91": {
+      "size": 74661,
+      "type": "text/html"
+    },
     "a9defea4aba454adb5e2a881bcfa1099c4142ffcf40af87e2ab47ce9a6d268d2": {
       "size": 639,
       "type": "image/svg+xml"
@@ -75,10 +79,6 @@
       "size": 182996,
       "type": "image/jpeg"
     },
-    "dae7a4d67b9bdf92f5b847ac0f1b61320572c2015464d575238b9779d548a2f2": {
-      "size": 74649,
-      "type": "text/html"
-    },
     "eb02db352bf0cd6fc3df0420a494cfe120754982964a9f7c4eea482033753cbd": {
       "size": 72538,
       "type": "text/html"
@@ -88,7 +88,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "3a239fca13760f0e98aa258ec1f31075fe0a7692b31b80d35946b6f081d1390f",
+  "id": "4c9195fb25f3dd575e7ad87c614b2bd7f5bccdfeefdc12bc51e1eef09e185dc9",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -757,7 +757,7 @@
       }
     },
     "base/menu-board@1.2.3": {
-      "html": "dae7a4d67b9bdf92f5b847ac0f1b61320572c2015464d575238b9779d548a2f2",
+      "html": "9d3d3e63607683cf54f951e37373695b235fbe471fd87fd603e79f083ef57a91",
       "manifest": {
         "background": "#14110f",
         "description": "A priced list in one or two columns with optional tags. For menus, service lists and price lists.",
