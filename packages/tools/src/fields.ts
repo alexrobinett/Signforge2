@@ -36,6 +36,15 @@ export const ifVersion = z
 /** A row's version, on the view of every row an update tool changes. */
 export const version = z.number().int().describe('Moves on with every change; pass it as ifVersion to update only what you read');
 
+/** On the view of a draft (a spot, a playlist): whether screens have it, and when it changed. */
+export const draftOutput = {
+  published: z.boolean().describe('Whether a version of it has been published'),
+  draftChanged: z.boolean().describe('Whether the draft differs from what is published (always, before the first publish)'),
+  publishedAt: z.number().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+};
+
 export const name = (what: string) => z.string().trim().min(1, `the ${what} needs a name`).max(100).describe(`The ${what}'s name, 1 to 100 characters`);
 
 export const timezone = z.string().refine(validTimezone, 'not an IANA time zone').describe('IANA time zone, such as Europe/London');

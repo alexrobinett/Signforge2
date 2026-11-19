@@ -140,3 +140,31 @@ export async function axe(page: Page) {
   await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
   await still.evaluate((el) => el.parentNode?.removeChild(el));
 }
+
+/** Whether any frame on the page (the player's template frames included) shows `text`. */
+export async function stageShows(page: Page, text: string) {
+  for (const frame of page.frames())
+    if (
+      (await frame
+        .getByText(text, { exact: false })
+        .count()
+        .catch(() => 0)) > 0
+    )
+      return true;
+  return false;
+}
+
+/** Call a tool as the signed-in member, as the CMS's pages do, and expect it to succeed. */
+export async function tool(page: Page, name: string, input: unknown) {
+  const res = await page.request.post(`/api/tools/${name}`, { data: input });
+  expect(res.status(), await res.text()).toBe(200);
+  return res.json();
+}
+
+/** As a member with no org yet: make one called `name`, as the first page asks, and land on it. */
+export async function createOrg(page: Page, name: string) {
+  await page.goto('/');
+  await fillUntilEnabled(page, 'Organization name', name, 'Create organization');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+}
