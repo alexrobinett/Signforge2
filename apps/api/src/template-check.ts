@@ -1,5 +1,5 @@
 import { parseTemplateRuntimeReport } from '@signforge/contract';
-import type { TemplateChecker } from '@signforge/tools';
+import { ToolError, type TemplateChecker } from '@signforge/tools';
 
 /**
  * Long enough for a cold start (the check Worker allows 60 s), the checks queued before this one in
@@ -19,14 +19,22 @@ export const templateCheckAllowed = async (env: Pick<Env, 'TEMPLATE_CHECK_LIMIT'
 export const templateChecker =
   (env: Pick<Env, 'TEMPLATE_CHECK'>): TemplateChecker =>
   async (template) => {
-    // The org's own container: the org comes from the tool's scope, never from what was pushed.
-    const res = await env.TEMPLATE_CHECK.fetch(`https://template-check/check/org/${template.orgId}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ manifest: template.manifest, html: template.html }),
-      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new Error(`the template check answered ${res.status}: ${await res.text()}`);
+    // Not run, so not a verdict on the template: the push may simply be tried again.
+    const unavailable = (why: string, cause?: unknown) =>
+      new ToolError('unavailable', `the template check is not available (${why}); try again in a minute`, { retryAfterSeconds: 60 }, false, { cause });
+    let res: Response;
+    try {
+      // The org's own container: the org comes from the tool's scope, never from what was pushed.
+      res = await env.TEMPLATE_CHECK.fetch(`https://template-check/check/org/${template.orgId}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ manifest: template.manifest, html: template.html }),
+        signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
+      });
+    } catch (e) {
+      throw unavailable(`it could not be reached: ${e instanceof Error ? e.message : String(e)}`, e);
+    }
+    if (!res.ok) throw unavailable(`it answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const report = parseTemplateRuntimeReport(await res.json());
     if (!report.ok) throw new Error(`the template check sent a report the contract refuses: ${report.problems.join('; ')}`);
     return report.value;

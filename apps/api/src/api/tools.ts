@@ -17,13 +17,14 @@ import { templateCheckAllowed, templateChecker } from '../template-check';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
 
-const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429> = {
+const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = {
   invalid_input: 400,
   forbidden: 403,
   unknown_tool: 404,
   not_found: 404,
   conflict: 409,
   rate_limited: 429,
+  unavailable: 503,
 };
 
 /** The CMS's client id in the audit log. */

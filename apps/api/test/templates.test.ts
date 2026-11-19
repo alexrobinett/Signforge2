@@ -45,6 +45,17 @@ const card = (over: { css?: string; main?: string; id?: string; version?: string
   };
 };
 
+const hash = async (s: string) =>
+  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+/** Upload a template to the member's org and register it through the CMS's tool route, as the editor would. */
+async function registerFromCms(c: ReturnType<typeof card>) {
+  const sources = JSON.stringify(c.sources);
+  const [bundleId, sourcesId] = await Promise.all([hash(c.html), hash(sources)]);
+  await Promise.all([env.BLOBS.put(orgBlobKey(orgId, bundleId), c.html), env.BLOBS.put(orgBlobKey(orgId, sourcesId), sources)]);
+  return member.tool('register_template_version', { manifest: c.manifest, bundleId, sourcesId });
+}
+
 const t = testApp();
 const member = new Client(t);
 let orgId: string;
@@ -163,14 +174,18 @@ describe('org templates', () => {
     expect(await scoped(env.DB, orgId).templates.ownByKey('garbled-card')).toBeUndefined();
   });
 
+  it('are refused to retry, not registered, when the check is not available', async () => {
+    const message = await rejection(push(card({ id: 'down-card', css: '/* sf-runtime-down */' }), { owner: { org: orgId } }));
+    expect(message).toMatch(/503\nthe template check is not available \(it answered 503: .*did not start.*\); try again in a minute/);
+    expect(await scoped(env.DB, orgId).templates.ownByKey('down-card')).toBeUndefined();
+
+    const res = await registerFromCms(card({ id: 'down-cms-card', css: '/* sf-runtime-down */' }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: 'unavailable', details: { retryAfterSeconds: 60 } });
+  });
+
   it('are checked when registered from the CMS too', async () => {
-    const c = card({ id: 'cms-card', css: '/* sf-runtime-fail */' });
-    const hash = async (s: string) =>
-      [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-    const sources = JSON.stringify(c.sources);
-    const [bundleId, sourcesId] = await Promise.all([hash(c.html), hash(sources)]);
-    await Promise.all([env.BLOBS.put(orgBlobKey(orgId, bundleId), c.html), env.BLOBS.put(orgBlobKey(orgId, sourcesId), sources)]);
-    const res = await member.tool('register_template_version', { manifest: c.manifest, bundleId, sourcesId });
+    const res = await registerFromCms(card({ id: 'cms-card', css: '/* sf-runtime-fail */' }));
     expect(res.status).toBe(400);
     expect(((await res.json()) as { message: string }).message).toMatch(/^the template failed its runtime check: requested/);
   });

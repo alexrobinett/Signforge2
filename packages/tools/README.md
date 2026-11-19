@@ -32,6 +32,7 @@ Lists the tools the caller's role may use:
 | 404 | `not_found` | An id names nothing in this org, including another org's ids. |
 | 409 | `conflict` | The change would break something else, or (with `ifVersion`) the row changed since the caller read it. `details` says what. |
 | 429 | `rate_limited` | Too many attempts (`claim_screen`); try again in a minute. For an agent, its grant is over a limit (see Agent limits): `details` is `{ limit, retryAfterSeconds }`. |
+| 503 | `unavailable` | A service the tool needs could not answer (`register_template_version`'s runtime check: its container did not start, is over its limit or its queue is full). Nothing was written; `details` is `{ retryAfterSeconds }`. |
 | 401, 403 | `unauthenticated`, `no_active_organization`, `not_a_member` | Returned by `requireOrg`, before any tool runs. |
 
 The CMS should keep every cookie a response sets (see M3-09). Times in outputs are milliseconds since the epoch.

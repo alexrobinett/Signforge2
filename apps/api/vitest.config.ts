@@ -25,13 +25,15 @@ async function templateBuilds() {
 
 // TEMPLATE_CHECK: the check Worker (apps/template-check), replaced here by a stand-in in Node that
 // passes every template except one whose bundle holds `sf-runtime-fail` (refused with a request) or
-// `sf-runtime-garbage` (answered with a report the contract refuses). Its runner image names the
+// `sf-runtime-garbage` (answered with a report the contract refuses) or `sf-runtime-down` (a 503,
+// as when its container cannot start or is over its limit). Its runner image names the
 // org path it was called on, as the check Worker picks the org's container by it. The real runner's
 // tests are apps/template-check's.
 async function templateCheck(request: Request): Promise<Response> {
   const path = new URL(request.url).pathname;
   const { manifest, html }: { manifest: { orientations: ('landscape' | 'portrait')[] }; html: string } = await request.json();
   if (html.includes('sf-runtime-garbage')) return Response.json({ ok: 'yes' });
+  if (html.includes('sf-runtime-down')) return Response.json({ error: 'the check container did not start' }, { status: 503 });
   const problems = html.includes('sf-runtime-fail') ? ['requested https://example.com/leak (blocked)'] : [];
   return Response.json({
     ok: !problems.length,

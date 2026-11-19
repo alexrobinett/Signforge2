@@ -101,7 +101,7 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   rateLimit?: RateLimiter;
 }
 
-export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited';
+export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable';
 
 /**
  * What the adapter counts against a rate limit, keyed by what it knows of the caller (the API: the
