@@ -48,11 +48,11 @@ export class AgentGrantObject extends DurableObject<Env> {
       if (first && limit === 'writes_per_day') kv.put(DAY_KEY, day);
       return { ok: false, limit, retryAfterSeconds: Math.ceil((window.start + length - now) / 1000), first };
     };
+    if (this.minute.calls >= AGENT_LIMITS.calls_per_minute) return over('calls_per_minute', this.minute, MINUTE_MS);
+    // Every call within the call limit counts, a write refused by a write limit included.
+    this.minute.calls++;
     if (write && day.writes >= AGENT_LIMITS.writes_per_day) return over('writes_per_day', day, DAY_MS);
     if (write && this.minute.writes >= AGENT_LIMITS.writes_per_minute) return over('writes_per_minute', this.minute, MINUTE_MS);
-    if (this.minute.calls >= AGENT_LIMITS.calls_per_minute) return over('calls_per_minute', this.minute, MINUTE_MS);
-
-    this.minute.calls++;
     if (write) {
       this.minute.writes++;
       day.writes++;

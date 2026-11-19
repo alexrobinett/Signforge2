@@ -60,6 +60,16 @@ describe("an agent grant's writes", () => {
     expect(await read(a)).toMatchObject({ ok: true });
   });
 
+  it('counts a refused write as a call', async () => {
+    const t = clock(MIDNIGHT + 3 * DAY);
+    const a = agent('grant-mixed', t);
+    for (let i = 0; i < 30; i++) expect((await write(a, `Mixed ${i}`)).ok, `write ${i + 1}`).toBe(true);
+    for (let i = 0; i < 40; i++) expect(await write(a), `refused write ${i + 1}`).toMatchObject({ details: { limit: 'writes_per_minute' } });
+    // 70 calls so far: 50 more reads, then the minute's calls are spent.
+    for (let i = 0; i < 50; i++) expect((await read(a)).ok, `read ${i + 1}`).toBe(true);
+    expect(await read(a)).toMatchObject({ ok: false, error: 'rate_limited', details: { limit: 'calls_per_minute' } });
+  });
+
   it('refuses the 2,001st write in a UTC day, counted in one place for every location, until the next day', async () => {
     // Two limiters, as two Workers in two locations hold: each gets its own stub of the grant's object.
     const t = clock(MIDNIGHT);

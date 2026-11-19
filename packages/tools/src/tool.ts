@@ -119,7 +119,8 @@ export type AgentAllowance = { ok: true } | { ok: false; limit: AgentLimit; retr
 
 /**
  * Counts an agent grant's calls against `AGENT_LIMITS`, one counter per grant wherever the call
- * lands (the API: a Durable Object per grant). A call within the limits is counted, a refused one is not.
+ * lands (the API: a Durable Object per grant). Every call within the call limit counts as a call,
+ * one refused by a write limit included; only an admitted write counts as a write.
  */
 export interface AgentLimiter {
   take(grantId: string, write: boolean): Promise<AgentAllowance>;
