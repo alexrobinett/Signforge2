@@ -28,4 +28,6 @@ export const screenStatusQuery = (orgId: string) =>
       return status;
     },
     refetchInterval: POLL_MS,
+    // A poll fails when two tries in a row do, a second apart; the page then says its status is not current.
+    retry: 1,
   });

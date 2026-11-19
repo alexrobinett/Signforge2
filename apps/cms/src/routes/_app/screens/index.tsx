@@ -6,7 +6,7 @@
  */
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { LayoutGridIcon, PlusIcon, SearchIcon, TableIcon } from 'lucide-react';
+import { CloudOffIcon, LayoutGridIcon, PlusIcon, SearchIcon, TableIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { PageHeader } from '~/components/page';
 import { EmptyFleet } from '~/components/screens/empty-fleet';
@@ -55,13 +55,16 @@ export const Route = createFileRoute('/_app/screens/')({
 function ScreensPage() {
   const orgId = useOrgId();
   const { data } = useSuspenseQuery(screensQuery(orgId));
-  const { data: live } = useQuery(screenStatusQuery(orgId));
+  const { data: live, errorUpdatedAt, dataUpdatedAt } = useQuery(screenStatusQuery(orgId));
+  // Not `isError`: a query with no data yet goes back to pending on each retry, so the notice would blink.
+  const pollFailing = errorUpdatedAt > dataUpdatedAt;
   const { groups } = data;
   const screens = withStatus(data.screens, data.at, live);
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
-  const now = useNow(Math.max(data.at, live?.at ?? 0));
+  const heardAt = Math.max(data.at, live?.at ?? 0);
+  const now = useNow(heardAt);
 
   const view: View = search.view ?? 'tiles';
   const groupsOf = useMemo(() => {
@@ -95,6 +98,7 @@ function ScreensPage() {
     <div className="space-y-6">
       <PageHeader title="Screens">{canManage && <PairDialog groups={groups} />}</PageHeader>
       <Summary screens={screens} />
+      <NotCurrent failing={pollFailing} heardAt={heardAt} now={now} />
 
       {groups.length > 0 && <Locations groups={groups} screens={screens} onPick={(group) => set({ group })} />}
 
@@ -190,6 +194,27 @@ function Summary({ screens }: { screens: ScreenView[] }) {
         </>
       )}
     </p>
+  );
+}
+
+/**
+ * While the poll fails, the states on the page are the last ones heard, so it says so and since
+ * when; the next good poll clears it. The live region stays in the accessibility tree while empty
+ * (visually hidden, not `display: none`), so the notice is announced when it comes.
+ */
+function NotCurrent({ failing, heardAt, now }: { failing: boolean; heardAt: number; now: number }) {
+  return (
+    <div role="status" className="empty:sr-only">
+      {failing && (
+        <p className="flex items-start gap-3 rounded-xl border bg-card px-4 py-3.5 text-[15px] leading-normal">
+          <CloudOffIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+          <span>
+            <strong className="font-semibold">Status is not current.</strong> SignForge has not answered since{' '}
+            {new Date(heardAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} ({ago(now - heardAt)} ago). This page keeps trying.
+          </span>
+        </p>
+      )}
+    </div>
   );
 }
 
