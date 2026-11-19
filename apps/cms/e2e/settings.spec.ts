@@ -119,6 +119,15 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByText('ops.example.com')).toBeVisible();
   await expect(page.locator('body')).not.toContainText(secret);
 
+  // A new URL, kept and not shown: the field is empty once it is saved.
+  await hydrated(page);
+  await page.getByText('Manage').nth(1).click();
+  const webhookField = page.getByLabel('Webhook URL', { exact: true });
+  await webhookField.fill('https://ops2.example.com/hooks/signforge');
+  await page.getByRole('button', { name: 'Save URL' }).click();
+  await expect(page.getByText('ops2.example.com')).toBeVisible();
+  await expect(webhookField).toHaveValue('');
+
   // Offline alerts go to both; a test email shows in the log.
   await hydrated(page);
   await page.getByLabel('Slack for: A screen goes offline, and when it is back').check();

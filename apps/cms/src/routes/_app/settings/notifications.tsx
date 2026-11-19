@@ -140,7 +140,7 @@ function ChannelOf({
   at,
   onUrl,
   extra,
-}: CardProps & { kind: AlertChannel['kind']; onUrl: (url: string) => void; extra?: ReactNode }) {
+}: CardProps & { kind: AlertChannel['kind']; onUrl: (url: string) => Promise<boolean>; extra?: ReactNode }) {
   const now = useNow(at);
   const copy = CHANNEL_COPY[kind];
   const form = (button: string) => <UrlForm name={copy.field} placeholder={copy.placeholder} button={button} at={kind} onUrl={onUrl} />;
@@ -175,7 +175,7 @@ function ChannelOf({
 
 function SlackCard(props: CardProps) {
   const connectSlack = useAppStore((s) => s.connectSlack);
-  return <ChannelOf kind="slack" {...props} onUrl={(url) => void connectSlack(url, props.channel?.version)} />;
+  return <ChannelOf kind="slack" {...props} onUrl={(url) => connectSlack(url, props.channel?.version)} />;
 }
 
 function WebhookCard(props: CardProps) {
@@ -187,7 +187,7 @@ function WebhookCard(props: CardProps) {
     <ChannelOf
       kind="webhook"
       {...props}
-      onUrl={(url) => void setWebhook(url, channel?.version)}
+      onUrl={(url) => setWebhook(url, channel?.version)}
       extra={
         channel && (
           <Button type="button" variant="outline" disabled={pending} onClick={() => void rotate(channel.version)}>
@@ -229,12 +229,26 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
 }
 
 /** A channel's URL, which SignForge stores sealed and never shows again. */
-function UrlForm({ name, placeholder, button, at, onUrl }: { name: string; placeholder: string; button: string; at: string; onUrl: (url: string) => void }) {
+function UrlForm({
+  name,
+  placeholder,
+  button,
+  at,
+  onUrl,
+}: {
+  name: string;
+  placeholder: string;
+  button: string;
+  at: string;
+  onUrl: (url: string) => Promise<boolean>;
+}) {
   const id = useId();
   const pending = useAppStore((s) => s.settings.pending === at);
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
-    onUrl(String(new FormData(e.currentTarget).get('url') ?? ''));
+    const form = e.currentTarget;
+    // Cleared once saved: the URL is kept sealed, and never shown again here either.
+    void onUrl(String(new FormData(form).get('url') ?? '')).then((saved) => saved && form.reset());
   };
   return (
     <form onSubmit={submit} className="mt-2 w-full space-y-2" noValidate>

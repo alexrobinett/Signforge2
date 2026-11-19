@@ -50,10 +50,13 @@ export interface SettingsSlice {
   saveAlerts: (alerts: Record<AlertKind, AlertRule>, ifVersion: number) => Promise<void>;
   /** Whether editors publish, or only owners. */
   saveEditorsPublish: (editorsPublish: boolean, ifVersion: number) => Promise<void>;
-  /** Post alerts to Slack through an incoming-webhook URL; `ifVersion` when replacing one. */
-  connectSlack: (webhookUrl: string, ifVersion?: number) => Promise<void>;
-  /** Send alerts to a webhook. A new one gets a signing secret made here, shown once; changing the URL keeps the secret. */
-  setWebhook: (webhookUrl: string, ifVersion?: number) => Promise<void>;
+  /** Post alerts to Slack through an incoming-webhook URL; `ifVersion` when replacing one. True once saved, so the form can clear. */
+  connectSlack: (webhookUrl: string, ifVersion?: number) => Promise<boolean>;
+  /**
+   * Send alerts to a webhook. A new one gets a signing secret made here, shown once; changing the
+   * URL keeps the secret. True once saved, so the form can clear.
+   */
+  setWebhook: (webhookUrl: string, ifVersion?: number) => Promise<boolean>;
   /** A new signing secret for the webhook, shown once. */
   rotateSigningSecret: (ifVersion: number) => Promise<void>;
   dismissSigningSecret: () => void;
@@ -144,8 +147,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     saveAlerts: async (alerts, ifVersion) => void (await run('notifications', () => callTool('update_org_settings', { alerts, ifVersion }), 'Saved')),
     saveEditorsPublish: async (editorsPublish, ifVersion) =>
       void (await run('publishing', () => callTool('update_org_settings', { editorsPublish, ifVersion }), 'Saved')),
-    connectSlack: async (webhookUrl, ifVersion) =>
-      void (await run('slack', () => callTool('set_slack_alert_channel', { webhookUrl: webhookUrl.trim(), ifVersion }), 'Slack connected')),
+    connectSlack: (webhookUrl, ifVersion) =>
+      run('slack', () => callTool('set_slack_alert_channel', { webhookUrl: webhookUrl.trim(), ifVersion }), 'Slack connected'),
     async setWebhook(webhookUrl, ifVersion) {
       const signingSecret = ifVersion === undefined ? newSigningSecret() : undefined;
       const saved = await run(
@@ -154,6 +157,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         'Webhook saved',
       );
       if (saved && signingSecret) patch((s) => ({ ...s, signingSecret }));
+      return saved;
     },
     async rotateSigningSecret(ifVersion) {
       const signingSecret = newSigningSecret();
