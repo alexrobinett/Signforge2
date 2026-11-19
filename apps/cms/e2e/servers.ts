@@ -1,8 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const API_PORT = 8797;
-export const CMS_PORT = 3997;
+/** Fixed unless set, so two checkouts can run the e2e at once on different ports (`E2E_API_PORT=8807 E2E_CMS_PORT=4007`). */
+const port = (name: string, fallback: number) => {
+  const v = process.env[name];
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1024 || n > 65535) throw new Error(`${name} must be a port number, 1024 to 65535`);
+  return n;
+};
+export const API_PORT = port('E2E_API_PORT', 8797);
+export const CMS_PORT = port('E2E_CMS_PORT', 3997);
 export const CMS_URL = `http://localhost:${CMS_PORT}`;
 /** The dev API's deploy secret for this run, which turns on `/admin` (how `sf push` publishes until M3-18). */
 export const ADMIN_TOKEN = 'e2e-admin-token';
