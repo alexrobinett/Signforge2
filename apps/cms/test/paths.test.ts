@@ -15,6 +15,18 @@ describe('signInBack', () => {
     expect(signInBack(fn, 'https://cms.test/sign-in')).toBe('/');
     expect(signInBack(fn, 'https://cms.test/sign-in?redirect=https%3A%2F%2Fevil.example')).toBe('/');
   });
+
+  it('knows sign-in by every path the router renders it at, or sends to it', () => {
+    for (const path of ['/SIGN-IN', '/Sign-In', '/sign%2Din', '/%53IGN-IN', '/sign-in/', '//sign-in', '/x/../sign-in']) {
+      expect(signInBack(fn, `https://cms.test${path}?redirect=%2Fspots`)).toBe('/spots');
+    }
+    expect(signInBack(fn, 'https://cms.test/sign-in?redirect=%2FSIGN-IN%3Fredirect%3D%252Fspots')).toBe('/');
+  });
+
+  it('keeps the case of a page to come back to', () => {
+    expect(signInBack(fn, 'https://cms.test/spots/spt_AbC?tab=Draft')).toBe('/spots/spt_AbC?tab=Draft');
+    expect(signInBack(fn, 'https://cms.test/sign-in/x')).toBe('/sign-in/x');
+  });
 });
 
 describe('safeRedirect', () => {
@@ -34,6 +46,12 @@ describe('safeRedirect', () => {
       42,
       '/sign-in',
       '/sign-in?redirect=/',
+      '/SIGN-IN?redirect=%2Fspots',
+      '/Sign-In',
+      '/sign%2din',
+      '/sign-in/',
+      '/x/../sign-in',
+      '/sign-in#top',
       '/api/auth/sign-out',
     ]) {
       expect(safeRedirect(bad)).toBe('/');

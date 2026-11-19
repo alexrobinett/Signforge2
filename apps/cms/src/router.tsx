@@ -13,7 +13,9 @@ import { createAppStore } from './state/store';
 export function getRouter() {
   // Query's own retries (three in the browser, none on the server), less a redirect's. Loaders'
   // reads (`queryClient.query`) take them too: any default `retry` replaces their none.
-  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: environmentManager.isServer() ? 0 : retryUnlessRedirect(3) } } });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { staleTime: 10_000, retry: environmentManager.isServer() ? 0 : retryUnlessRedirect(3) } },
+  });
   const router = createRouter({
     routeTree,
     context: { queryClient },

@@ -4,8 +4,22 @@
  */
 export function safeRedirect(value: unknown, fallback = '/'): string {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return fallback;
-  if (value === '/sign-in' || value.startsWith('/sign-in?') || value.startsWith('/api/')) return fallback;
+  if (isSignIn(new URL(value, 'https://cms.invalid').pathname) || value.startsWith('/api/')) return fallback;
   return value;
+}
+
+/**
+ * Whether a URL's pathname is sign-in's as the router matches it (any case, letters percent-encoded
+ * or not) or redirects to it (stray slashes). A path that does not decode is the router's 404.
+ */
+function isSignIn(pathname: string): boolean {
+  let path: string;
+  try {
+    path = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
+  return path.toLowerCase().replace(/\/+/g, '/').replace(/\/$/, '') === '/sign-in';
 }
 
 /**
@@ -16,7 +30,7 @@ export function safeRedirect(value: unknown, fallback = '/'): string {
  */
 export function signInBack(url: string, referer: string | null): string {
   const page = new URL(new URL(url).pathname.startsWith('/_serverFn/') ? (referer ?? '/') : url, url);
-  if (page.pathname === '/sign-in') return safeRedirect(page.searchParams.get('redirect'));
+  if (isSignIn(page.pathname)) return safeRedirect(page.searchParams.get('redirect'));
   return page.pathname + page.search;
 }
 
