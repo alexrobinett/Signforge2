@@ -41,7 +41,8 @@ defineTemplate({
     const style = getComputedStyle(root);
     root.style.setProperty('--on-accent', readableOn(accent, style.getPropertyValue('--on-accent')));
     // The age line is the accent on the background: amber, for one, does not read on a light kit.
-    root.style.setProperty('--accent-text', readableOn(style.getPropertyValue('--bg'), accent));
+    // It is large text at 1080p (3.2vmin, 35 px), where 3:1 reads.
+    root.style.setProperty('--accent-text', readableOn(style.getPropertyValue('--bg'), accent, { large: true }));
     const now = clockNow();
     const items = ((ctx.data.items as Item[]) ?? []).filter((i) => i.title);
     const [lead, ...rest] = items;

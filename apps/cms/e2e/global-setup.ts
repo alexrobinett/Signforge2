@@ -6,8 +6,9 @@
 import { chromium } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, openSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, RUN_DIR } from './servers';
+import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, PLACES, RUN_DIR } from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
 const cmsDir = fileURLToPath(new URL('../', import.meta.url));
@@ -23,6 +24,23 @@ async function waitFor(url: string, timeoutMs = 90_000) {
     await new Promise((r) => setTimeout(r, 300));
   }
   throw new Error(`${url} did not come up`);
+}
+
+/**
+ * Open-Meteo's geocoding as the API's `find_places` asks it (`GEOCODING_URL`), answering from
+ * `PLACES`, so the run never reaches the internet. On a free port.
+ */
+async function geocodingStub(): Promise<{ url: string; close: () => void }> {
+  const server = createServer((req, res) => {
+    const name = new URL(req.url ?? '/', 'http://stub').searchParams.get('name')?.toLowerCase() ?? '';
+    const results = PLACES.filter((p) => p.name.toLowerCase().startsWith(name));
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(results.length ? { results, generationtime_ms: 0.1 } : { generationtime_ms: 0.1 }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (typeof address !== 'object' || !address) throw new Error('the geocoding stub is not listening');
+  return { url: `http://127.0.0.1:${address.port}/v1/search`, close: () => server.close() };
 }
 
 /** True if something already answers on the port: another checkout's run, whose servers this run would otherwise use. */
@@ -58,6 +76,7 @@ export default async function globalSetup() {
   const player = spawnSync('pnpm', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' }, encoding: 'utf8' });
   if (player.status !== 0) throw new Error(`player build failed:\n${player.stdout}\n${player.stderr}`);
 
+  const geocoding = await geocodingStub();
   const log = openSync(API_LOG, 'a');
   const children: ChildProcess[] = [
     spawn(
@@ -78,6 +97,8 @@ export default async function globalSetup() {
         `LOCAL_S3_ORIGIN:http://127.0.0.1:${API_PORT}`,
         '--var',
         `ADMIN_TOKEN:${ADMIN_TOKEN}`,
+        '--var',
+        `GEOCODING_URL:${geocoding.url}`,
       ],
       {
         cwd: apiDir,
@@ -120,6 +141,7 @@ export default async function globalSetup() {
   }
 
   return async () => {
+    geocoding.close();
     for (const child of children) {
       try {
         if (child.pid) process.kill(-child.pid, 'SIGTERM');

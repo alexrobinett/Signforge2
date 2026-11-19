@@ -76,6 +76,36 @@ export interface TemplateManifest {
   background: string;
   /** The frame protocol the bundle speaks. Set by the build, not the author; absent means 1. */
   protocol?: number;
+  /** The fields a data source fills. Absent: every field is typed by people. */
+  live?: LiveData;
+}
+
+/**
+ * The kinds of feed a template's live fields come from: an Open-Meteo forecast (a JSON source),
+ * or a news (`rss`) or calendar (`ical`) feed, which the server converts to `NewsFeed` and `CalendarFeed`.
+ */
+export const LIVE_SOURCES = ['open-meteo', 'rss', 'ical'] as const;
+export type LiveSource = (typeof LIVE_SOURCES)[number];
+
+/** The units an Open-Meteo forecast is fetched in, as a weather template's unit fields write them. */
+export const WEATHER_UNITS = { temperature: ['°F', '°C'], wind: ['mph', 'km/h'] } as const;
+
+/** A binding's path: dot-separated keys, numbers indexing arrays. */
+export const BINDING_PATH = /^[^.\s]+(?:\.[^.\s]+)*$/;
+
+/**
+ * Which fields of a template are live data: the kind of feed they come from and each field's path
+ * in its snapshot. The editor binds them to a source of that kind with these paths; the fields keep
+ * their values as the fallback a screen shows without fresh data. Other fields are typed by people.
+ */
+export interface LiveData {
+  source: LiveSource;
+  /** Field name to its path in the source's snapshot, as a `Binding` names it. */
+  fields: Record<string, string>;
+  /** Open-Meteo: the text field naming the place, which starts as the place picked. */
+  place?: string;
+  /** Open-Meteo: the select fields that say which units the forecast is fetched in (`WEATHER_UNITS`). */
+  units?: { temperature?: string; wind?: string };
 }
 
 /** Who owns a template: `base` for the platform's own, otherwise the org's id. */

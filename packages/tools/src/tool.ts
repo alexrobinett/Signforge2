@@ -65,6 +65,44 @@ export interface FeedUrlSealer {
   seal(source: { orgId: string; id: string }, url: string): Promise<string>;
 }
 
+/** A place a weather source can be made for: Open-Meteo's geocoding result, as the forecast URL needs it. */
+export interface Place {
+  /** The geocoder's own id for the place (a GeoNames id). */
+  id: number;
+  name: string;
+  /** The first-level region (state, province), or `''`. */
+  region: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+  /** IANA time zone: the forecast's daily values are for days there. */
+  timezone: string;
+}
+
+/** Looks places up by name. Implemented by the API with Open-Meteo's geocoding; absent where none runs (most tests). */
+export interface PlaceFinder {
+  search(query: string): Promise<Place[]>;
+}
+
+/**
+ * Seals an alert channel's URL or signing secret for storage (`alert_channels`, #88), bound to the
+ * org, the channel and the field, so a sealed value copied elsewhere does not open. Implemented by
+ * the API with its key; only the delivery run unseals.
+ */
+export interface AlertSecretSealer {
+  seal(channel: { orgId: string; kind: 'slack' | 'webhook' }, field: 'url' | 'secret', value: string): Promise<string>;
+}
+
+/**
+ * Sends a queued alert delivery now rather than at the next delivery run (a test send, a retry).
+ * Implemented by the API, which sends it after the response; absent in tests and scripts, where it
+ * waits for the run.
+ */
+export interface AlertDeliverer {
+  /** The delivery, in the caller's org. */
+  now(deliveryId: string): void;
+}
+
 /**
  * Runs the runtime check on a built template: a headless render in a container with no network
  * (`apps/template-check`), the org's own, so one org's template never shares a browser with
@@ -112,6 +150,10 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Seals feed URLs and provider resources (./data-sources.ts). Undefined where no data source tool runs. */
   feedUrls?: FeedUrlSealer;
+  /** Seals alert channels' URLs and secrets (./alert-channels.ts). Undefined where no channel tool runs. */
+  alertSecrets?: AlertSecretSealer;
+  /** Looks places up (`find_places`). Undefined where no geocoder is configured. */
+  places?: PlaceFinder;
   /** The runtime check (./templates.ts). Registering an org template refuses to run without it. */
   templateCheck?: TemplateChecker;
   /** Providers' OAuth (./connections.ts). Undefined where no connection tool runs. */
@@ -127,6 +169,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
    * writes are committed, so a screen never hears of a change that was rolled back.
    */
   notify: (send: (screens: ScreenNotifier) => Promise<void>) => void;
+  /** Send a delivery this call queues as soon as its writes are committed (`AlertDeliverer`). */
+  deliverNow: (deliveryId: string) => void;
   /**
    * Undo, if this call does not succeed, something the handler did outside the batch (a grant a
    * provider issued). Run after the refusal or failure, its own failure logged: best effort.
@@ -141,9 +185,10 @@ export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'no
 /**
  * What the adapter counts against a rate limit, keyed by what it knows of the caller (the API: the
  * member and the address). `pairing_claim`: every claim of a pairing code, right or wrong.
+ * `place_search`: every `find_places`, each a request to a third party's free service.
  * `template_check`: every runtime check of an org's template, keyed by the org, whose container it uses.
  */
-export type RateLimitBucket = 'pairing_claim' | 'template_check';
+export type RateLimitBucket = 'pairing_claim' | 'place_search' | 'template_check';
 /** Counts one attempt in `bucket`; false once the caller is over its limit. */
 export type RateLimiter = (bucket: RateLimitBucket) => Promise<boolean>;
 

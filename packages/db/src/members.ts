@@ -22,9 +22,9 @@ export async function organizationExists(d1: D1Database, orgId: string): Promise
 }
 
 /** The org's members with their address and role, for sending them alerts. */
-export async function orgMembers(d1: D1Database, orgId: string): Promise<{ email: string; name: string; role: string }[]> {
+export async function orgMembers(d1: D1Database, orgId: string): Promise<{ userId: string; email: string; name: string; role: string }[]> {
   return drizzle(d1)
-    .select({ email: user.email, name: user.name, role: member.role })
+    .select({ userId: member.userId, email: user.email, name: user.name, role: member.role })
     .from(member)
     .innerJoin(user, eq(user.id, member.userId))
     .where(eq(member.organizationId, orgId))

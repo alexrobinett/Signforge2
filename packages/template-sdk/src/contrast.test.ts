@@ -19,6 +19,16 @@ describe('readableOn', () => {
     expect(readableOn('#f59e0b', '')).toBe('#000000');
   });
 
+  it('keeps large text that reaches 3:1', () => {
+    // Green on white is 3.30:1: too little for body text, enough for large text.
+    expect(readableOn('#ffffff', '#16a34a')).toBe('#000000');
+    expect(readableOn('#ffffff', '#16a34a', { large: true })).toBe('#16a34a');
+    // The demo kit's orange on its card is 4.23:1.
+    expect(readableOn('#2e374d', '#f97316', { large: true })).toBe('#f97316');
+    // Amber on white is 2.15:1.
+    expect(readableOn('#ffffff', '#f59e0b', { large: true })).toBe('#000000');
+  });
+
   it('keeps the text on a fill it cannot measure', () => {
     expect(readableOn('rebeccapurple', '#fff')).toBe('#fff');
   });
