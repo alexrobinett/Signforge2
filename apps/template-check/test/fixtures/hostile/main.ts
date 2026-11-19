@@ -20,6 +20,10 @@ const attempts: Record<string, () => unknown> = {
   },
   'navigate-self': () => Reflect.set(location, 'href', TARGET),
   'no-ready': forever,
+  // Wedges its renderer: the page around it and the check must carry on.
+  spin: () => {
+    for (;;);
+  },
   throw: () => {
     throw new Error('prepare blew up');
   },

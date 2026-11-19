@@ -93,7 +93,18 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
       return void check(req, res).catch((e: unknown) => send(res, 500, { error: e instanceof Error ? e.message : String(e) }));
     return send(res, 404, { error: 'GET /health or POST /check' });
   });
-  server.on('close', () => void browser.close());
+  let closing = false;
+  // A browser that dies (a renderer exploit, the container's memory) fails every later check. Exit,
+  // so the container stops and the Worker starts a fresh one for the next check.
+  browser.on('disconnected', () => {
+    if (closing) return;
+    console.error('the browser exited; stopping the runner');
+    process.exit(1);
+  });
+  server.on('close', () => {
+    closing = true;
+    void browser.close();
+  });
   await new Promise<void>((resolve) => server.listen(opts.port, resolve));
   return server;
 }

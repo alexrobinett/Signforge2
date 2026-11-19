@@ -68,16 +68,19 @@ describe('the check Worker, with its container', () => {
   }
 });
 
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8' }).trim();
+/** The running check container's name. */
+function checkContainer(): string {
+  const name = docker(['ps', '--format', '{{.Names}}'])
+    .split('\n')
+    .find((n) => n.includes('TemplateCheckContainer') && !n.endsWith('-proxy'));
+  if (!name) throw new Error('no check container is running');
+  return name;
+}
+
 describe('the container', () => {
   /** Run `node -e <code>` in the running check container. */
-  function inContainer(code: string): string {
-    const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8' }).trim();
-    const name = docker(['ps', '--format', '{{.Names}}'])
-      .split('\n')
-      .find((n) => n.includes('TemplateCheckContainer') && !n.endsWith('-proxy'));
-    if (!name) throw new Error('no check container is running');
-    return docker(['exec', name, 'node', '-e', code]);
-  }
+  const inContainer = (code: string) => docker(['exec', checkContainer(), 'node', '-e', code]);
 
   it('cannot reach an outside host: the request fails without an answer', () => {
     const out = inContainer(
@@ -89,5 +92,12 @@ describe('the container', () => {
   it("reports so through the runner's own probe, which every check depends on", () => {
     const health = JSON.parse(inContainer("fetch('http://127.0.0.1:8080/health').then((r) => r.text()).then(console.log)"));
     expect(health.network).toMatchObject({ closed: true, detail: expect.stringContaining('could not be reached') });
+  });
+
+  it('is started afresh for the next check after it stopped (the runner exits when its browser dies)', async () => {
+    docker(['kill', checkContainer()]);
+    const report = await check('after a stop', inMode('ok'), hostile.html);
+    expect(report.ok).toBe(true);
+    expect(report.cost.startMs).toBeGreaterThan(0);
   });
 });

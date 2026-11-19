@@ -64,6 +64,7 @@ describe('a template that misbehaves', () => {
     ['navigate-self', ['tried to open https://example.com/ in a frame (blocked)', 'navigated its own frame (blocked)']],
     ['on-play', ['tried to open https://example.com/ in a frame (blocked)', 'navigated its own frame (blocked)']],
     ['no-ready', ['did not report ready within 2000 ms']],
+    ['spin', ['did not report ready within 2000 ms']],
     ['throw', ['failed to prepare: prepare blew up']],
     ['uncaught', ['threw an uncaught error: late failure']],
     ['webrtc', ["used WebRTC (RTCPeerConnection), which a template may not: the screen's policy does not block it"]],
