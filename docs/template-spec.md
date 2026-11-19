@@ -2,7 +2,7 @@
 
 Version 1. This is what a template author, human or agent, builds against and what a reviewer checks. The types and limits here are defined in code in `packages/contract/src/shapes.ts`; if the two disagree, the code is right.
 
-Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl) and `menu-board` (static list).
+Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl) and `menu-board` (static list).
 
 ## What a template is
 
@@ -73,7 +73,7 @@ A template that has not reported `ready` within 2 seconds is skipped.
 - `formatter(ctx, options)` and `dayKey(ctx, date)` format dates and times in the screen's time zone and locale. Use them for anything shown: the device's own clock settings may not match the screen's location.
 - `fitWords(text, fits)` shortens text to the whole words that fit, ending in "…": CSS `text-overflow` cuts after a space and shows "rain …". `fits` sets the candidate and checks for overflow (`templates/news/main.ts`); it costs about log2(words) layouts, and only for text that overflows.
 - `readableOn(fill, text)` from `@signforge/template-sdk/contrast` is `text` when it reads on `fill` (4.5:1), else black or white, whichever reads better. Use it for text on a fill the template does not choose: a colour field (news's badge on the spot's accent) or a kit's colour, whose on-colour a kit may set by hand to a pair that fails (cstore-promo's badge). Colours are `#rgb` or `#rrggbb`. It is a separate entry point so that templates which do not use it keep their bundles byte for byte.
-- `now()` is the screen's time: the device clock corrected from the server. Use it, never `new Date()` or `Date.now()`, for anything that depends on the time: a Pi has no battery-backed clock, and after a power cut its own clock can be days out.
+- `now()` is the screen's time: the device clock corrected from the server. Use it, never `new Date()` or `Date.now()`, for anything that depends on the time: a Pi has no battery-backed clock, and after a power cut its own clock can be days out. Something that follows the time without new data, like weather's sun and sky, works out its state in `prepare` from `now()`: the player prepares every play afresh, so it moves on from one play to the next. Round to the minute what should change at most once a minute.
 - The screen's brand (protocol 2): see Brand below.
 
 ## Brand

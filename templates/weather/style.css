@@ -1,5 +1,6 @@
 /* Weather Now. The scene (sky, sun or moon, clouds, rain or snow) follows the condition class
-   set on .stage by main.ts. Rain and snow are drawn on one canvas, not as DOM elements. */
+   set on .stage by main.ts, and with sunrise and sunset (.arc) the time of day: main.ts sets
+   --p, --day and --glow once per play. Rain and snow are tiles drawn on a canvas once. */
 @font-face {
   font-family: 'Inter';
   src: url('./node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2');
@@ -24,49 +25,144 @@ body {
 .stage {
   --u: 1vmin;
   --out: calc(var(--sf-duration, 8s) - 0.6s);
+  /* The sun's and moon's arc (.arc, below), also where the dawn and dusk glow sits. */
+  --rise-x: 44vw;
+  --set-x: 92vw;
+  --horizon: 100vh;
+  --zenith: 26vh;
   position: fixed;
   inset: 0;
   overflow: hidden;
 }
 
-/* The sky is mixed from the kit's colours, one pair of stops per condition. Each mix gives both
-   of its colours the same fallback, so with no kit the sky is exactly that colour. */
+/* The sky is mixed from the kit's colours, a day and a night pair of stops per condition. Each mix
+   gives both of its colours the same fallback, so with no kit the sky is exactly that colour. With
+   sunrise and sunset (.arc) the sky is the two pairs mixed by --day: 1 by day, 0 at night, in
+   between at dawn and dusk. Without, it is one pair or the other, unmixed: exactly the old sky. */
 .stage {
-  --sky-a: color-mix(in srgb, var(--sf-primary, #2f80ed) 75%, var(--sf-bg, #2f80ed));
-  --sky-b: color-mix(in srgb, var(--sf-primary, #56ccf2) 45%, var(--sf-text, #56ccf2));
+  --day-a: color-mix(in srgb, var(--sf-primary, #2f80ed) 75%, var(--sf-bg, #2f80ed));
+  --day-b: color-mix(in srgb, var(--sf-primary, #56ccf2) 45%, var(--sf-text, #56ccf2));
+  --night-a: var(--sf-bg, #0b1a33);
+  --night-b: color-mix(in srgb, var(--sf-primary, #1d2b64) 30%, var(--sf-bg, #1d2b64));
+  --sky-a: var(--day-a);
+  --sky-b: var(--day-b);
 }
 .night {
-  --sky-a: var(--sf-bg, #0b1a33);
-  --sky-b: color-mix(in srgb, var(--sf-primary, #1d2b64) 30%, var(--sf-bg, #1d2b64));
+  --sky-a: var(--night-a);
+  --sky-b: var(--night-b);
+}
+.arc {
+  --sky-a: color-mix(in srgb, var(--day-a) calc(var(--day) * 100%), var(--night-a));
+  --sky-b: color-mix(in srgb, var(--day-b) calc(var(--day) * 100%), var(--night-b));
 }
 .cloudy,
 .fog {
-  --sky-a: color-mix(in srgb, var(--sf-muted, #5b6b82) 45%, var(--sf-surface, #5b6b82));
-  --sky-b: color-mix(in srgb, var(--sf-muted, #9fb1c7) 80%, var(--sf-surface, #9fb1c7));
+  --day-a: color-mix(in srgb, var(--sf-muted, #5b6b82) 45%, var(--sf-surface, #5b6b82));
+  --day-b: color-mix(in srgb, var(--sf-muted, #9fb1c7) 80%, var(--sf-surface, #9fb1c7));
 }
 .rain,
 .storm {
-  --sky-a: color-mix(in srgb, var(--sf-surface, #26364d) 70%, var(--sf-bg, #26364d));
-  --sky-b: color-mix(in srgb, var(--sf-muted, #51657f) 35%, var(--sf-surface, #51657f));
+  --day-a: color-mix(in srgb, var(--sf-surface, #26364d) 70%, var(--sf-bg, #26364d));
+  --day-b: color-mix(in srgb, var(--sf-muted, #51657f) 35%, var(--sf-surface, #51657f));
 }
 .snow {
-  --sky-a: color-mix(in srgb, var(--sf-muted, #6f8fb0) 55%, var(--sf-surface, #6f8fb0));
-  --sky-b: color-mix(in srgb, var(--sf-text, #dfe9f3) 75%, var(--sf-muted, #dfe9f3));
+  --day-a: color-mix(in srgb, var(--sf-muted, #6f8fb0) 55%, var(--sf-surface, #6f8fb0));
+  --day-b: color-mix(in srgb, var(--sf-text, #dfe9f3) 75%, var(--sf-muted, #dfe9f3));
 }
-.night.cloudy,
-.night.rain,
-.night.storm,
-.night.snow,
-.night.fog {
-  --sky-a: color-mix(in srgb, var(--sf-bg, #0a1220) 85%, var(--sf-surface, #0a1220));
-  --sky-b: color-mix(in srgb, var(--sf-muted, #2b3a52) 25%, var(--sf-surface, #2b3a52));
+.cloudy,
+.rain,
+.storm,
+.snow,
+.fog {
+  --night-a: color-mix(in srgb, var(--sf-bg, #0a1220) 85%, var(--sf-surface, #0a1220));
+  --night-b: color-mix(in srgb, var(--sf-muted, #2b3a52) 25%, var(--sf-surface, #2b3a52));
 }
 .sky {
   position: absolute;
   inset: 0;
   background: linear-gradient(170deg, var(--sky-a) 0%, var(--sky-b) 100%);
 }
-
+/* Stars on a clear night, fading in as the sky darkens. Each layer is one star per tile, tiles of
+   different sizes, so the pattern does not read as a grid. Static: drawn once, like the sky. */
+.stars {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  --star: var(--sf-text, #fff);
+  background-image:
+    radial-gradient(circle at 20% 42%, color-mix(in srgb, var(--star) 60%, transparent) 0.18vmin, transparent 0.4vmin),
+    radial-gradient(circle at 22% 46%, var(--star) 0.1vmin, transparent 0.22vmin),
+    radial-gradient(circle at 91% 91%, var(--star) 0.22vmin, transparent 0.48vmin),
+    radial-gradient(circle at 90% 57%, var(--star) 0.18vmin, transparent 0.4vmin),
+    radial-gradient(circle at 56% 88%, color-mix(in srgb, var(--star) 80%, transparent) 0.1vmin, transparent 0.22vmin),
+    radial-gradient(circle at 40% 53%, var(--star) 0.18vmin, transparent 0.4vmin),
+    radial-gradient(circle at 16% 9%, color-mix(in srgb, var(--star) 80%, transparent) 0.18vmin, transparent 0.4vmin),
+    radial-gradient(circle at 41% 22%, color-mix(in srgb, var(--star) 80%, transparent) 0.1vmin, transparent 0.22vmin),
+    radial-gradient(circle at 62% 20%, var(--star) 0.18vmin, transparent 0.4vmin),
+    radial-gradient(circle at 22% 50%, var(--star) 0.22vmin, transparent 0.48vmin),
+    radial-gradient(circle at 81% 15%, color-mix(in srgb, var(--star) 60%, transparent) 0.1vmin, transparent 0.22vmin),
+    radial-gradient(circle at 10% 44%, color-mix(in srgb, var(--star) 80%, transparent) 0.12vmin, transparent 0.26vmin);
+  background-size:
+    37vmin 29vmin,
+    53vmin 41vmin,
+    61vmin 47vmin,
+    71vmin 59vmin,
+    43vmin 67vmin,
+    89vmin 73vmin,
+    47vmin 31vmin,
+    79vmin 53vmin,
+    59vmin 83vmin,
+    97vmin 61vmin,
+    41vmin 43vmin,
+    67vmin 37vmin;
+}
+.light-kit .stars {
+  --star: var(--sf-bg);
+}
+.arc.night:is(.clear, .partly) .stars {
+  opacity: calc((1 - var(--day)) * 0.85);
+}
+/* Dawn and dusk: a warm glow over the horizon where the sun rises or sets, faded in by --glow.
+   Clouds and rain mute it. */
+.glow {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.dawn .glow,
+.dusk .glow {
+  opacity: var(--glow);
+}
+/* From the kit's accent only, lightened with its light colour (its text, or its background on a
+   light kit): mixed with its primary, an accent went muddy. */
+.stage {
+  --glow-light: var(--sf-text);
+}
+.light-kit {
+  --glow-light: var(--sf-bg);
+}
+.dawn .glow {
+  background: radial-gradient(
+    ellipse 75% 70% at var(--rise-x) var(--horizon),
+    color-mix(in srgb, var(--sf-accent, #ffc59a) 45%, var(--glow-light, #ffc59a)),
+    color-mix(in srgb, var(--sf-accent, #f39bb1) 70%, var(--glow-light, #f39bb1)) 35%,
+    color-mix(in srgb, var(--sf-accent, #8d7cc9) 35%, transparent) 70%,
+    transparent
+  );
+}
+.dusk .glow {
+  background: radial-gradient(
+    ellipse 80% 75% at var(--set-x) var(--horizon),
+    color-mix(in srgb, var(--sf-accent, #ffb04a) 85%, var(--glow-light, #ffb04a)),
+    var(--sf-accent, #f0603c) 30%,
+    color-mix(in srgb, var(--sf-accent, #9b3a78) 50%, transparent) 60%,
+    transparent
+  );
+}
+.dawn:is(.cloudy, .rain, .storm, .snow, .fog) .glow,
+.dusk:is(.cloudy, .rain, .storm, .snow, .fog) .glow {
+  opacity: calc(var(--glow) * 0.4);
+}
 .orb {
   position: absolute;
   right: 10vw;
@@ -116,6 +212,17 @@ body {
 .night .orb .rays {
   display: none;
 }
+/* The moon's phase: its dark part (clip-path from main.ts) in the night sky's colour, a little of
+   the disc showing through as earthshine. Its glow follows how much of it is lit (--lit, below). */
+.orb .shade {
+  display: none;
+  position: absolute;
+  inset: 17.5%;
+  background: color-mix(in srgb, var(--sky-a) 88%, transparent);
+}
+.arc.night .orb .shade {
+  display: block;
+}
 /* Overcast, rain, snow and fog hide the sun or moon: only partly cloudy shows it behind clouds. */
 .cloudy .orb,
 .rain .orb,
@@ -127,31 +234,39 @@ body {
 }
 
 .stage {
-  --cloud: color-mix(in srgb, var(--sf-text, #fff) 90%, var(--sf-surface, #fff));
+  --cloud-day: color-mix(in srgb, var(--sf-text, #fff) 90%, var(--sf-surface, #fff));
+  --cloud-night: color-mix(in srgb, var(--sf-muted, #b9c3d1) 75%, var(--sf-text, #b9c3d1));
+  --cloud: var(--cloud-day);
+}
+.night {
+  --cloud: var(--cloud-night);
+}
+.arc {
+  --cloud: color-mix(in srgb, var(--cloud-day) calc(var(--day) * 100%), var(--cloud-night));
 }
 .rain,
-.storm,
-.night {
-  --cloud: color-mix(in srgb, var(--sf-muted, #b9c3d1) 75%, var(--sf-text, #b9c3d1));
+.storm {
+  --cloud-day: var(--cloud-night);
 }
 /* A light kit: clouds in its background colour over a sky darkened with its muted colour, and a
    clear sky only tinted with its primary colour. */
 .light-kit {
-  --cloud: var(--sf-bg);
-  --sky-a: color-mix(in srgb, var(--sf-primary) 35%, var(--sf-bg));
-  --sky-b: color-mix(in srgb, var(--sf-primary) 12%, var(--sf-bg));
-}
-.light-kit.night {
-  --sky-a: color-mix(in srgb, var(--sf-muted) 45%, var(--sf-bg));
-  --sky-b: color-mix(in srgb, var(--sf-primary) 20%, var(--sf-muted));
+  --cloud-day: var(--sf-bg);
+  --cloud-night: var(--sf-bg);
+  --day-a: color-mix(in srgb, var(--sf-primary) 35%, var(--sf-bg));
+  --day-b: color-mix(in srgb, var(--sf-primary) 12%, var(--sf-bg));
+  --night-a: color-mix(in srgb, var(--sf-muted) 45%, var(--sf-bg));
+  --night-b: color-mix(in srgb, var(--sf-primary) 20%, var(--sf-muted));
 }
 .light-kit.cloudy,
 .light-kit.fog,
 .light-kit.rain,
 .light-kit.storm,
 .light-kit.snow {
-  --sky-a: color-mix(in srgb, var(--sf-muted) 75%, var(--sf-surface));
-  --sky-b: color-mix(in srgb, var(--sf-muted) 50%, var(--sf-surface));
+  --day-a: color-mix(in srgb, var(--sf-muted) 75%, var(--sf-surface));
+  --day-b: color-mix(in srgb, var(--sf-muted) 50%, var(--sf-surface));
+  --night-a: var(--day-a);
+  --night-b: var(--day-b);
 }
 .light-kit .orb .disc {
   background: radial-gradient(
@@ -169,6 +284,12 @@ body {
     color-mix(in srgb, var(--sf-bg) 60%, var(--sf-muted))
   );
   box-shadow: 0 0 8vmin color-mix(in srgb, var(--sf-bg) 60%, transparent);
+}
+.arc.night .orb .disc {
+  box-shadow: 0 0 8vmin color-mix(in srgb, var(--sf-text, #c8dcff) calc(var(--lit) * 50%), transparent);
+}
+.light-kit.arc.night .orb .disc {
+  box-shadow: 0 0 8vmin color-mix(in srgb, var(--sf-bg) calc(var(--lit) * 60%), transparent);
 }
 .cloud {
   position: absolute;
@@ -375,11 +496,27 @@ body {
   font-weight: 800;
 }
 
+[data-orientation='portrait'] .stage {
+  --rise-x: 18vw;
+  --set-x: 82vw;
+  --horizon: 50vh;
+  --zenith: 17vh;
+}
 [data-orientation='portrait'] .orb {
   right: 50%;
   margin-right: -24vmin;
   top: 10vh;
   margin-top: 0;
+}
+/* With sunrise and sunset, the orb rides an arc instead: --p 0 at its rise on the left, 1 at its
+   set on the right, highest halfway. The landscape arc keeps right of the forecast card, the
+   portrait one above it. After the portrait placement, which it replaces. */
+.arc .orb {
+  left: -24vmin;
+  right: auto;
+  top: -24vmin;
+  margin: 0;
+  translate: calc(var(--rise-x) + var(--p) * (var(--set-x) - var(--rise-x))) calc(var(--horizon) - sin(var(--p) * 180deg) * (var(--horizon) - var(--zenith)));
 }
 [data-orientation='portrait'] .c1 {
   top: 22vh;
