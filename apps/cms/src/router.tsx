@@ -1,6 +1,7 @@
-import { QueryClient } from '@tanstack/react-query';
+import { environmentManager, QueryClient } from '@tanstack/react-query';
 import { createRouter } from '@tanstack/react-router';
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query';
+import { retryUnlessRedirect } from './queries/retry';
 import { routeTree } from './routeTree.gen';
 import { StoreProvider } from './state/provider';
 import { createAppStore } from './state/store';
@@ -10,7 +11,9 @@ import { createAppStore } from './state/store';
  * store and its own Query cache (server data, docs/research/cms-data-layer.md).
  */
 export function getRouter() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000 } } });
+  // Query's own retries (three in the browser, none on the server), less a redirect's. Loaders'
+  // reads (`queryClient.query`) take them too: any default `retry` replaces their none.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: environmentManager.isServer() ? 0 : retryUnlessRedirect(3) } } });
   const router = createRouter({
     routeTree,
     context: { queryClient },

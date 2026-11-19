@@ -62,7 +62,8 @@ test('a session that ends on Spots or in the spot editor goes to sign-in at once
     await page.context().clearCookies();
     calls = 0;
     await then();
-    await expect(page).toHaveURL(`/sign-in?redirect=${encodeURIComponent(back)}`);
+    // At once: a read that found the session ended is not retried first (Query's retries took 7s).
+    await expect(page).toHaveURL(`/sign-in?redirect=${encodeURIComponent(back)}`, { timeout: 5_000 });
     await page.waitForTimeout(2_000);
     expect(calls).toBeLessThan(20);
     await page.context().addCookies(session);
