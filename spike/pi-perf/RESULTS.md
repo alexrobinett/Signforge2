@@ -382,6 +382,21 @@ news 1.3.1 and cstore-promo 1.2.1 choose their badge text in `prepare` with the 
 
 No cost in frames. The one 433 ms frame was while a spot played, in master's last run. With the kit, energy's prepares were 10 to 26 ms slower (medians 315 against 295 ms) over six each, about the run-to-run spread, and all well within 500 ms. Nothing was skipped.
 
+## Accent text and tag text chosen for what they sit on (issue #69, 2026-11-18)
+
+news 1.3.3, agenda 1.2.2, clock 1.2.2, cstore-promo 1.2.3, photo-promo 1.2.2 and menu-board 1.2.2 choose accent-coloured text (and photo-promo's and menu-board's tag text) in `prepare` with the SDK's `readableOn`: one or two `getComputedStyle` reads, and in agenda a 1x1 canvas paint and read per row to resolve its `color-mix` card. This branch's player at a subdirectory of the rig, with `examples/stress` built from master's templates (before) and this branch's (after) beside it, with no kit and with a light kit (a scratch copy of the project with a `brand.json`: white background, amber accent). Cut, 60 s per run after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Two playlists per run: sport-drinks, clock, holidays, news; and menu, photo-river, meeting-room, photo-berries. Order alternated. Set 1 was measured before #73 (#71) landed, on its bundles; set 2 again after merging it, on the bundles that ship.
+
+| Content | Build | Runs | Overall | Playing | Loading next | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- |
+| stress, no kit | before | 6 | 0.06-0.19% | 0.00-0.03% | 2.6-11.7% | 50 ms |
+| | after | 6 | 0.06-0.25% | 0.00-0.11% | 2.4-8.2% | 83 ms |
+| stress, light kit | before | 6 | 0.00-0.17% | 0.00% | 0.0-10.2% | 50 ms |
+| | after | 6 | 0.00-0.17% | 0.00-0.03% | 0.0-7.6% | 33 ms |
+
+Prepares over both sets and kits (ms, before / after): meeting-room (agenda) median 194 / 214, 151-220 / 175-287; holidays (agenda) 166 / 163; clock 176 / 177; news 158 / 161; sport-drinks (cstore-promo) 192 / 195; menu 167 / 167; photo-berries 200 / 201; photo-river 213 / 214.
+
+No cost in frames: the ranges overlap run for run, and the one 83 ms frame was in set 1's second after run, while a spot loaded. Agenda's meeting room, the spot with the most rows, prepares about 20 ms slower, the canvas read per row; well within 500 ms. The other templates are within run-to-run noise. Nothing was skipped.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
