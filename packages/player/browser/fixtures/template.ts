@@ -10,7 +10,7 @@
  * the shape (so `items: {}` throws), marks whether it received asset `file`, runs a CSS animation
  * the SDK must hold until play, and marks `play`.
  */
-import { Sha256 } from '@signforge/player-core';
+import { Sha256 } from '@signforge/player-core/sha256';
 import { defineTemplate } from '@signforge/template-sdk';
 import { attribute, childPage, childScript } from './child';
 
