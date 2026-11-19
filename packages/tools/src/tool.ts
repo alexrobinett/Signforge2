@@ -65,6 +65,25 @@ export interface FeedUrlSealer {
   seal(source: { orgId: string; id: string }, url: string): Promise<string>;
 }
 
+/** A place a weather source can be made for: Open-Meteo's geocoding result, as the forecast URL needs it. */
+export interface Place {
+  /** The geocoder's own id for the place (a GeoNames id). */
+  id: number;
+  name: string;
+  /** The first-level region (state, province), or `''`. */
+  region: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+  /** IANA time zone: the forecast's daily values are for days there. */
+  timezone: string;
+}
+
+/** Looks places up by name. Implemented by the API with Open-Meteo's geocoding; absent where none runs (most tests). */
+export interface PlaceFinder {
+  search(query: string): Promise<Place[]>;
+}
+
 /**
  * Seals an alert channel's URL or signing secret for storage (`alert_channels`, #88), bound to the
  * org, the channel and the field, so a sealed value copied elsewhere does not open. Implemented by
@@ -133,6 +152,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   feedUrls?: FeedUrlSealer;
   /** Seals alert channels' URLs and secrets (./alert-channels.ts). Undefined where no channel tool runs. */
   alertSecrets?: AlertSecretSealer;
+  /** Looks places up (`find_places`). Undefined where no geocoder is configured. */
+  places?: PlaceFinder;
   /** The runtime check (./templates.ts). Registering an org template refuses to run without it. */
   templateCheck?: TemplateChecker;
   /** Providers' OAuth (./connections.ts). Undefined where no connection tool runs. */
@@ -164,9 +185,10 @@ export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'no
 /**
  * What the adapter counts against a rate limit, keyed by what it knows of the caller (the API: the
  * member and the address). `pairing_claim`: every claim of a pairing code, right or wrong.
+ * `place_search`: every `find_places`, each a request to a third party's free service.
  * `template_check`: every runtime check of an org's template, keyed by the org, whose container it uses.
  */
-export type RateLimitBucket = 'pairing_claim' | 'template_check';
+export type RateLimitBucket = 'pairing_claim' | 'place_search' | 'template_check';
 /** Counts one attempt in `bucket`; false once the caller is over its limit. */
 export type RateLimiter = (bucket: RateLimitBucket) => Promise<boolean>;
 

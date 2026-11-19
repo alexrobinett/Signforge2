@@ -113,3 +113,14 @@ export class Client {
 
 let n = 0;
 export const email = (who: string) => `${who}-${Date.now().toString(36)}-${++n}@signforge.test`;
+
+/**
+ * For a beforeEach in a rate limit test. The limiters count in one-minute windows fixed to the wall
+ * clock, so a test that ran across a minute boundary would count in two (600 polls, then a 601st that
+ * passes). This waits until the test's timeout fits in the window left: a run that finishes, passing
+ * or failing, counted in one window.
+ */
+export async function inOneLimiterWindow(ctx: { task: { timeout: number } }) {
+  const left = 60_000 - (Date.now() % 60_000);
+  if (left < ctx.task.timeout) await new Promise((resolve) => setTimeout(resolve, left));
+}

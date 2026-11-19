@@ -88,7 +88,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "a1c7247e59ff72014ede7eb8c9a37049b16c3634f97c836cfd11f53ecb62d36d",
+  "id": "80cbdf69297f8d69e70789bb7a042f9cbf87759a65968da254e133e955221359",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -214,7 +214,7 @@
       "id": "holidays",
       "kind": "template",
       "name": "US holidays (Google Calendar)",
-      "template": "base/agenda@1.2.2"
+      "template": "base/agenda@1.3.0"
     },
     "meeting-room": {
       "assets": {},
@@ -266,7 +266,7 @@
       "id": "meeting-room",
       "kind": "template",
       "name": "Meeting room (fixed data)",
-      "template": "base/agenda@1.2.2"
+      "template": "base/agenda@1.3.0"
     },
     "menu": {
       "assets": {},
@@ -357,7 +357,7 @@
       "id": "news",
       "kind": "template",
       "name": "NPR headlines",
-      "template": "base/news@1.3.3"
+      "template": "base/news@1.4.0"
     },
     "photo-berries": {
       "assets": {
@@ -500,7 +500,7 @@
       "id": "weather-live",
       "kind": "template",
       "name": "Weather, live",
-      "template": "base/weather@1.2.1"
+      "template": "base/weather@1.4.0"
     },
     "weather-rain": {
       "assets": {},
@@ -520,7 +520,7 @@
       "id": "weather-rain",
       "kind": "template",
       "name": "Weather, rain (fixed data)",
-      "template": "base/weather@1.2.1"
+      "template": "base/weather@1.4.0"
     },
     "weather-snow": {
       "assets": {},
@@ -540,11 +540,11 @@
       "id": "weather-snow",
       "kind": "template",
       "name": "Weather, snow (fixed data)",
-      "template": "base/weather@1.2.1"
+      "template": "base/weather@1.4.0"
     }
   },
   "templates": {
-    "base/agenda@1.2.2": {
+    "base/agenda@1.3.0": {
       "html": "4d15f33bd516fdb8ca00d389d19872e2c7eb0e191f3bfad7aae396ddc442b217",
       "manifest": {
         "background": "#0d1117",
@@ -619,6 +619,12 @@
           }
         },
         "id": "agenda",
+        "live": {
+          "fields": {
+            "events": "events"
+          },
+          "source": "ical"
+        },
         "name": "Agenda",
         "orientations": [
           "landscape",
@@ -626,7 +632,7 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.2"
+        "version": "1.3.0"
       }
     },
     "base/clock@1.2.2": {
@@ -847,7 +853,7 @@
         "version": "1.2.2"
       }
     },
-    "base/news@1.3.3": {
+    "base/news@1.4.0": {
       "html": "479f77409dda317adc0dcd0163323b66540804f64c9c183207aeca8f5e6e4f42",
       "manifest": {
         "background": "#0b0d12",
@@ -913,6 +919,13 @@
           }
         },
         "id": "news",
+        "live": {
+          "fields": {
+            "items": "items",
+            "language": "language"
+          },
+          "source": "rss"
+        },
         "name": "News",
         "orientations": [
           "landscape",
@@ -920,7 +933,7 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.3.3"
+        "version": "1.4.0"
       }
     },
     "base/photo-promo@1.2.2": {
@@ -974,7 +987,7 @@
         "version": "1.2.2"
       }
     },
-    "base/weather@1.2.1": {
+    "base/weather@1.4.0": {
       "html": "19f93988c7682e3fd3bdcbd4248b4bfde6f6527a61d2c902671213f2bcb7e9b3",
       "manifest": {
         "background": "#0b1a33",
@@ -1046,6 +1059,23 @@
           }
         },
         "id": "weather",
+        "live": {
+          "fields": {
+            "code": "current.weather_code",
+            "high": "daily.temperature_2m_max.0",
+            "humidity": "current.relative_humidity_2m",
+            "isDay": "current.is_day",
+            "low": "daily.temperature_2m_min.0",
+            "temp": "current.temperature_2m",
+            "wind": "current.wind_speed_10m"
+          },
+          "place": "city",
+          "source": "open-meteo",
+          "units": {
+            "temperature": "unit",
+            "wind": "windUnit"
+          }
+        },
         "name": "Weather Now",
         "orientations": [
           "landscape",
@@ -1055,7 +1085,7 @@
         "uses": [
           "canvas"
         ],
-        "version": "1.2.1"
+        "version": "1.4.0"
       }
     }
   }

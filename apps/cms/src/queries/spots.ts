@@ -6,7 +6,7 @@
  */
 import { queryOptions } from '@tanstack/react-query';
 import { getAssets } from '~/server/assets.functions';
-import { getBrandKits, getSpot, getSpotPreview, getSpots, getTemplates } from '~/server/spots.functions';
+import { getBrandKits, getDataSource, getDataSources, getSpot, getSpotPreview, getSpots, getTemplates } from '~/server/spots.functions';
 
 type Orientation = 'landscape' | 'portrait';
 
@@ -32,3 +32,18 @@ export const spotPreviewQuery = (orgId: string, p: { orientation: Orientation; t
     queryFn: () => getSpotPreview({ data: p }),
     staleTime: 60_000,
   });
+
+export const dataSourceKeys = {
+  all: (orgId: string) => ['org', orgId, 'dataSources'] as const,
+  one: (orgId: string, dataSourceId: string) => ['org', orgId, 'dataSources', dataSourceId] as const,
+};
+
+/** The org's data sources, for the editor's source pickers. */
+export const dataSourcesQuery = (orgId: string) => queryOptions({ queryKey: dataSourceKeys.all(orgId), queryFn: () => getDataSources() });
+
+/**
+ * One source and its latest snapshot: the live values the editor shows and the stage plays. Read
+ * again every 30 seconds while the editor shows it, so a new source's first poll appears.
+ */
+export const dataSourceQuery = (orgId: string, dataSourceId: string) =>
+  queryOptions({ queryKey: dataSourceKeys.one(orgId, dataSourceId), queryFn: () => getDataSource({ data: dataSourceId }), refetchInterval: 30_000 });
