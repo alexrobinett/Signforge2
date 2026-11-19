@@ -100,7 +100,8 @@ export async function grantOf(caller: Pick<Caller<DataScope>, 'org' | 'role' | '
   return { role: caller.role, scopes: caller.scopes, editorsPublish };
 }
 
-const SECRET_KEY = /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|webhook_?url|pairing_?code|^code$/i;
+const SECRET_KEY =
+  /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|webhook_?url|pairing_?code|^code$/i;
 const REDACTED = '[redacted]';
 
 /**

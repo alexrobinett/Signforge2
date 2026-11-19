@@ -48,7 +48,11 @@ async function open(env: KeyEnv, info: Info, aad: string, sealed: string): Promi
   const [v, iv, data] = sealed.split('.');
   if (v !== 'v1' || !iv || !data) return undefined;
   try {
-    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64url(iv), additionalData: encoder.encode(aad) }, await key(env, info), fromB64url(data));
+    const plain = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: fromB64url(iv), additionalData: encoder.encode(aad) },
+      await key(env, info),
+      fromB64url(data),
+    );
     return new TextDecoder().decode(plain);
   } catch {
     return undefined;

@@ -266,7 +266,11 @@ const listAlertDeliveries = defineTool({
   output: z.object({ deliveries: z.array(deliveryView), next: nextOutput }),
   example: {},
   handler: async ({ org, input }) => {
-    const { rows, next } = await keysetPage(input, (after, take) => org.alertDeliveries.list({ after, take }), (d) => [d.createdAt, d.id]);
+    const { rows, next } = await keysetPage(
+      input,
+      (after, take) => org.alertDeliveries.list({ after, take }),
+      (d) => [d.createdAt, d.id],
+    );
     return { deliveries: rows.map(deliveryOf), next };
   },
 });

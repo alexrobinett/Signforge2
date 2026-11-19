@@ -34,7 +34,10 @@ describe('alert channels', () => {
   it('sets a Slack webhook, sealed, showing only its host', async () => {
     expect(await call('get_alert_channels', {}, 'viewer')).toMatchObject({ ok: true, output: { slack: null, webhook: null } });
     const set = await call('set_slack_alert_channel', { webhookUrl: SLACK });
-    expect(set).toMatchObject({ ok: true, output: { channel: { kind: 'slack', host: 'hooks.slack.com', connectedBy: 'user-owner', secretSetAt: null, version: 1 } } });
+    expect(set).toMatchObject({
+      ok: true,
+      output: { channel: { kind: 'slack', host: 'hooks.slack.com', connectedBy: 'user-owner', secretSetAt: null, version: 1 } },
+    });
     expect(JSON.stringify(set)).not.toContain('abcDEF123');
 
     const stored = await scoped(env.DB, o.orgId).alertChannels.get('slack');
@@ -43,7 +46,11 @@ describe('alert channels', () => {
   });
 
   it('takes only a Slack incoming-webhook URL', async () => {
-    for (const webhookUrl of ['https://hooks.slack.com.evil.test/services/T1/B1/x', 'http://hooks.slack.com/services/T1/B1/x', 'https://example.com/services/T1/B1/x'])
+    for (const webhookUrl of [
+      'https://hooks.slack.com.evil.test/services/T1/B1/x',
+      'http://hooks.slack.com/services/T1/B1/x',
+      'https://example.com/services/T1/B1/x',
+    ])
       expect(await call('set_slack_alert_channel', { webhookUrl }), webhookUrl).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 

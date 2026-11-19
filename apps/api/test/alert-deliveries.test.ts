@@ -23,7 +23,8 @@ async function orgWithChannels() {
   const t = testApp();
   const owner = new Client(t);
   await owner.signIn(email(`channels-${n}`));
-  const org = await owner.createOrg(`Northside ${n}`);
+  const name = `Northside ${n}`;
+  const org = { ...(await owner.createOrg(name)), name };
   const slackUrl = `https://hooks.slack.com/services/T0ORG${n}/B0ORG${n}/secretpart${n}`;
   const webhookUrl = `https://ops${n}.example.com/hooks/sf?key=k${n}`;
   await owner.ok('/api/tools/set_slack_alert_channel', { webhookUrl: slackUrl });
@@ -133,7 +134,12 @@ describe('alerts to Slack and webhooks', () => {
     await checkScreenAlerts(env, outbox, start + 16 * MIN);
     await run(16 * MIN);
     expect(to(webhookUrl)).toHaveLength(1);
-    expect((await log(owner)).find((d) => d.channel === 'webhook')).toMatchObject({ status: 'pending', attempts: 1, lastHttpStatus: 500, lastError: 'http-status' });
+    expect((await log(owner)).find((d) => d.channel === 'webhook')).toMatchObject({
+      status: 'pending',
+      attempts: 1,
+      lastHttpStatus: 500,
+      lastError: 'http-status',
+    });
 
     // 5 minutes after the first failure, then 10 after the second.
     await run(20 * MIN);
@@ -147,7 +153,13 @@ describe('alerts to Slack and webhooks', () => {
     expect(to(slackUrl)).toHaveLength(1);
 
     const entries = await log(owner);
-    expect(entries.find((d) => d.channel === 'webhook')).toMatchObject({ eventType: 'screen.offline', status: 'delivered', attempts: 3, lastHttpStatus: 200, lastError: null });
+    expect(entries.find((d) => d.channel === 'webhook')).toMatchObject({
+      eventType: 'screen.offline',
+      status: 'delivered',
+      attempts: 3,
+      lastHttpStatus: 200,
+      lastError: null,
+    });
     expect(entries.find((d) => d.channel === 'slack')).toMatchObject({ status: 'delivered', attempts: 1, lastHttpStatus: 200 });
   });
 
@@ -220,7 +232,13 @@ describe('the five-minute Cron Trigger', () => {
         channel: 'email',
         eventId: 'evt_cron_test',
         eventType: 'test',
-        eventJson: JSON.stringify({ type: 'test', id: 'evt_cron_test', occurredAt: new Date(now).toISOString(), org: { id: org.id, name: org.name }, data: { message: 'Cron test' } }),
+        eventJson: JSON.stringify({
+          type: 'test',
+          id: 'evt_cron_test',
+          occurredAt: new Date(now).toISOString(),
+          org: { id: org.id, name: org.name },
+          data: { message: 'Cron test' },
+        }),
         toUserId: member!.userId,
         nextAttemptAt: now,
         giveUpAt: now,

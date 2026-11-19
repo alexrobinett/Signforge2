@@ -100,7 +100,14 @@ async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards
 }
 
 /** Send it on its channel; the receiver's HTTP status, or null for email. */
-async function send(env: DeliveryEnv, email: EmailSender, guards: FetchGuards, org: OrgScope, row: AlertDeliveryRow, event: AlertEvent): Promise<number | null> {
+async function send(
+  env: DeliveryEnv,
+  email: EmailSender,
+  guards: FetchGuards,
+  org: OrgScope,
+  row: AlertDeliveryRow,
+  event: AlertEvent,
+): Promise<number | null> {
   if (row.channel === 'email') {
     const member = (await orgMembers(env.DB, org.orgId)).find((m) => m.userId === row.toUserId);
     if (!member) throw new Undeliverable('no-member');

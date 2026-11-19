@@ -1081,7 +1081,11 @@ export function scoped(d1: D1Database, orgId: string) {
           .returning()
           .get(),
       /** What an attempt came to: delivered, to be tried again at `retryAt`, or given up on (no `retryAt`). */
-      settle: async (id: string, now: number, result: { ok: true; httpStatus: number | null } | { ok: false; httpStatus: number | null; error: string; retryAt?: number }) => {
+      settle: async (
+        id: string,
+        now: number,
+        result: { ok: true; httpStatus: number | null } | { ok: false; httpStatus: number | null; error: string; retryAt?: number },
+      ) => {
         const set = result.ok
           ? { status: 'delivered' as const, lastHttpStatus: result.httpStatus, lastError: null }
           : result.retryAt === undefined

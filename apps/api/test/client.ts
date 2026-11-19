@@ -45,7 +45,12 @@ export class Client {
     if (body !== undefined) headers.set('content-type', 'application/json');
     const ctx = createExecutionContext();
     this.contexts.push(ctx);
-    const res = await this.t.app.request(`${ORIGIN}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }, this.bindings, ctx);
+    const res = await this.t.app.request(
+      `${ORIGIN}${path}`,
+      { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
+      this.bindings,
+      ctx,
+    );
     for (const c of res.headers.getSetCookie()) {
       const [pair = '', ...attrs] = c.split(';');
       const eq = pair.indexOf('=');

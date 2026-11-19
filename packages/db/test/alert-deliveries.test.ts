@@ -15,8 +15,7 @@ beforeAll(async () => {
 });
 
 const event = (id: string) => ({ id, type: 'screen.offline', json: JSON.stringify({ id }) });
-const mine = async (orgId: string, eventId: string) =>
-  (await scoped(env.DB, orgId).alertDeliveries.list({ take: 100 })).filter((d) => d.eventId === eventId);
+const mine = async (orgId: string, eventId: string) => (await scoped(env.DB, orgId).alertDeliveries.list({ take: 100 })).filter((d) => d.eventId === eventId);
 
 describe('alert deliveries', () => {
   it('queues an event once per channel, however often it is queued', async () => {
@@ -65,7 +64,12 @@ describe('alert deliveries', () => {
     await a.alertDeliveries.settle(slack!.id, at, { ok: true, httpStatus: 200 });
     await a.alertDeliveries.settle(webhook!.id, at, { ok: false, httpStatus: 500, error: 'http-status', retryAt: at + 5 * MIN });
     expect(await a.alertDeliveries.get(slack!.id)).toMatchObject({ status: 'delivered', lastHttpStatus: 200, lastError: null });
-    expect(await a.alertDeliveries.get(webhook!.id)).toMatchObject({ status: 'pending', lastHttpStatus: 500, lastError: 'http-status', nextAttemptAt: at + 5 * MIN });
+    expect(await a.alertDeliveries.get(webhook!.id)).toMatchObject({
+      status: 'pending',
+      lastHttpStatus: 500,
+      lastError: 'http-status',
+      nextAttemptAt: at + 5 * MIN,
+    });
 
     await a.alertDeliveries.settle(webhook!.id, at, { ok: false, httpStatus: 500, error: 'http-status' });
     expect(await a.alertDeliveries.get(webhook!.id)).toMatchObject({ status: 'failed' });
