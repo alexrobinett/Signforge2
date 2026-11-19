@@ -4,7 +4,7 @@
  * the MCP server and WebMCP all call tools through `dispatch` (./dispatch.ts); none of them
  * reaches the database another way.
  */
-import type { DeviceCommand } from '@signforge/contract';
+import type { DeviceCommand, TemplateManifest, TemplateRuntimeReport } from '@signforge/contract';
 import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
 import type { UploadSigner } from './upload';
@@ -65,6 +65,13 @@ export interface FeedUrlSealer {
   seal(source: { orgId: string; id: string }, url: string): Promise<string>;
 }
 
+/**
+ * Runs the runtime check on a built template: a headless render in a container with no network
+ * (`apps/template-check`). Implemented by the API with the check Worker. Rejects when the check
+ * could not run; a template that fails it resolves with `ok: false` and its problems.
+ */
+export type TemplateChecker = (template: { manifest: TemplateManifest; html: string }) => Promise<TemplateRuntimeReport>;
+
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
 export interface ToolContext<I, D extends DataScope = OrgScope> {
   org: D;
@@ -76,6 +83,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Seals feed URLs (./data-sources.ts). Undefined where no data source tool runs. */
   feedUrls?: FeedUrlSealer;
+  /** The runtime check (./templates.ts). Registering an org template refuses to run without it. */
+  templateCheck?: TemplateChecker;
   /**
    * Add a staged change (a repository's `stage.*`) to this call's writes, and get its row back.
    * A tool never writes to D1 itself: the dispatcher runs the writes and the audit row in one

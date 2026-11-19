@@ -14,6 +14,7 @@ export {
   type AnyTool,
   type DataScope,
   type FeedUrlSealer,
+  type TemplateChecker,
   type Role,
   type Scope,
   type RateLimitBucket,
