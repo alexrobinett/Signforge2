@@ -12,7 +12,7 @@ const as = (org: OrgScope, kind: 'user' | 'agent'): Caller => ({
   role: 'owner',
   actor: { kind, id: `${kind}-1` },
   blobs: env.BLOBS,
-  agentLimiter: { take: async () => ({ ok: true }) },
+  agentLimiter: { take: async () => ({ ok: true }), audited: async () => {} },
 });
 let person: Caller;
 let agent: Caller;

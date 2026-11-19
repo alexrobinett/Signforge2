@@ -1147,6 +1147,18 @@ export function scoped(d1: D1Database, orgId: string) {
       /** The audit row for a change, staged to commit with it. */
       stage: (entry: NewRow<typeof s.auditLog>) => audit.stage.insert(entry),
       /**
+       * An audit row written at most once for `key` in this org (an agent grant's refusals in one
+       * window, which several calls may race to record): another call with the key writes nothing.
+       * Its id is made from the org and the key, so no other org's row can stand in for it.
+       */
+      appendOnce: async (key: string, entry: Omit<NewRow<typeof s.auditLog>, 'id'>): Promise<void> => {
+        await db
+          .insert(s.auditLog)
+          .values({ ...strip(entry), id: `aud_once_${orgId}_${key}`, orgId })
+          .onConflictDoNothing()
+          .run();
+      },
+      /**
        * Newest first; rows of the same millisecond by insertion order (`rowid`), as ids are random.
        * With `target`, only what was done to that one thing (a screen's recent events).
        */

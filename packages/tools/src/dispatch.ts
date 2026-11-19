@@ -256,18 +256,27 @@ async function overLimit(name: string, write: boolean, caller: Caller<DataScope>
   const { limit, retryAfterSeconds } = allowance;
   const message = `this agent grant ${OVER[limit]}, its limit; try again in ${retryAfterSeconds} s`;
   const details = { limit, retryAfterSeconds };
-  if (allowance.first) {
-    const audit = caller.org.auditLog.stage({
-      actorKind: 'agent',
-      actorId: caller.actor.id,
-      clientId: caller.actor.clientId ?? null,
-      action: 'rate_limited',
-      targetKind: null,
-      targetId: null,
-      // The name as the agent sent it, which may name no tool.
-      detailJson: JSON.stringify({ tool: redact(name), refused: { error: 'rate_limited', message, details } }),
-    });
-    await caller.org.commit(audit.writes);
+  const { agentLimiter, actor, org } = caller;
+  if (allowance.audit) {
+    if (!('appendOnce' in org.auditLog)) throw new Error('an agent acts only in an org');
+    const { window, start } = allowance.audit;
+    try {
+      // One row per grant and window, however many refused calls race to write it.
+      await org.auditLog.appendOnce(`rate_limited_${actor.id}_${window}_${start}`, {
+        actorKind: 'agent',
+        actorId: actor.id,
+        clientId: actor.clientId ?? null,
+        action: 'rate_limited',
+        targetKind: null,
+        targetId: null,
+        // The name as the agent sent it, which may name no tool.
+        detailJson: JSON.stringify({ tool: redact(name), refused: { error: 'rate_limited', message, details } }),
+      });
+      await agentLimiter.audited(actor.id, allowance.audit);
+    } catch (err) {
+      // Still a refusal, not an error: the window keeps asking for its row, and its next refused call writes it.
+      console.warn(`[tools] could not record that agent grant ${actor.id} was refused`, err);
+    }
   }
   return fail('rate_limited', message, details);
 }

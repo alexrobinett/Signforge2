@@ -119,6 +119,40 @@ describe("an agent grant's writes", () => {
   });
 });
 
+describe('the audit row of a refusal', () => {
+  const refusals = async (grantId: string) =>
+    (await scoped(env.DB, o.orgId).auditLog.list({ limit: 1000 })).filter((e) => e.actorId === grantId && e.action === 'rate_limited');
+
+  it('is one per grant and minute, whichever minute limit refuses', async () => {
+    at(MIDNIGHT + 6 * DAY);
+    const a = agent('grant-both');
+    for (let i = 0; i < 30; i++) await write(a, `Both ${i}`);
+    expect(await write(a)).toMatchObject({ details: { limit: 'writes_per_minute' } });
+    for (let i = 0; i < 89; i++) await read(a);
+    expect(await read(a)).toMatchObject({ details: { limit: 'calls_per_minute' } });
+    expect(await refusals('grant-both')).toHaveLength(1);
+  });
+
+  it('is written by a later refusal when the first one could not write it, once however many race', async () => {
+    at(MIDNIGHT + 7 * DAY);
+    const a = agent('grant-unaudited');
+    for (let i = 0; i < 120; i++) await read(a);
+    await env.DB.exec("CREATE TRIGGER audit_down BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+    try {
+      // Still a refusal, not an error: the row waits for the next one.
+      const refused = await Promise.all([1, 2, 3].map(() => read(a)));
+      for (const r of refused) expect(r).toMatchObject({ ok: false, error: 'rate_limited' });
+    } finally {
+      await env.DB.exec('DROP TRIGGER audit_down');
+    }
+    expect(await refusals('grant-unaudited')).toHaveLength(0);
+    await Promise.all([1, 2, 3, 4, 5].map(() => read(a)));
+    expect(await refusals('grant-unaudited')).toHaveLength(1);
+    await read(a);
+    expect(await refusals('grant-unaudited')).toHaveLength(1);
+  });
+});
+
 describe('a pause mid-minute', () => {
   // Real time: an object with nothing pending is hibernated after about 10 s without a call, and loses its memory.
   it("keeps the minute's calls and writes through 12 s without a call, and its writes through a restart", { timeout: 30_000 }, async () => {

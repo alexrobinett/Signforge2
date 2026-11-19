@@ -111,11 +111,20 @@ export const AGENT_LIMITS = { calls_per_minute: 120, writes_per_minute: 30, writ
 export type AgentLimit = keyof typeof AGENT_LIMITS;
 
 /**
- * Whether an agent grant's call is within its limits. Over one, `retryAfterSeconds` is when its
- * window (the minute, or the UTC day) ends, and `first` is true for the first call refused by that
- * limit in that window, which the dispatcher records in the audit log.
+ * A window of an agent grant's limits, the minute or the UTC day, by when it started. Each window
+ * gets one audit row for all the calls refused in it, whichever of its limits refused them.
  */
-export type AgentAllowance = { ok: true } | { ok: false; limit: AgentLimit; retryAfterSeconds: number; first: boolean };
+export interface AgentLimitWindow {
+  window: 'minute' | 'day';
+  start: number;
+}
+
+/**
+ * Whether an agent grant's call is within its limits. Over one, `retryAfterSeconds` is when its
+ * window ends, and `audit` names the window while it has no audit row yet: the dispatcher writes
+ * it (once, however many calls race), then says so with `audited`.
+ */
+export type AgentAllowance = { ok: true } | { ok: false; limit: AgentLimit; retryAfterSeconds: number; audit?: AgentLimitWindow };
 
 /**
  * Counts an agent grant's calls against `AGENT_LIMITS`, one counter per grant wherever the call
@@ -124,6 +133,8 @@ export type AgentAllowance = { ok: true } | { ok: false; limit: AgentLimit; retr
  */
 export interface AgentLimiter {
   take(grantId: string, write: boolean): Promise<AgentAllowance>;
+  /** The window's audit row is written: stop asking for it. */
+  audited(grantId: string, window: AgentLimitWindow): Promise<void>;
 }
 
 /**

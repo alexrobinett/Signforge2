@@ -15,6 +15,7 @@ export {
   type AgentAllowance,
   type AgentLimit,
   type AgentLimiter,
+  type AgentLimitWindow,
   type AnyTool,
   type DataScope,
   type FeedUrlSealer,
