@@ -1,28 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { png } from '@signforge/media/testing';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.31';
-
-/** Whether any frame on the page (the player's template frames included) shows `text`. */
-async function stageShows(page: Page, text: string) {
-  for (const frame of page.frames())
-    if (
-      (await frame
-        .getByText(text, { exact: false })
-        .count()
-        .catch(() => 0)) > 0
-    )
-      return true;
-  return false;
-}
-
-async function tool(page: Page, name: string, input: unknown) {
-  const res = await page.request.post(`/api/tools/${name}`, { data: input });
-  expect(res.status(), await res.text()).toBe(200);
-  return res.json();
-}
 
 test.describe.configure({ mode: 'serial' });
 

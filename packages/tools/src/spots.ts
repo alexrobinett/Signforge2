@@ -46,6 +46,16 @@ const bindings = z
     "Template fields that take their value from one of the organization's data sources, by field name: the whole set, replacing the draft's ({} unbinds every field). The field's value in data stays as the fallback a screen shows without fresh data. A template's manifest says which fields are live (live.fields) and their usual paths",
   );
 
+/** The fields that belong to one kind of spot (KIND_FIELDS), as create_spot and update_spot both take them. */
+const kindInput = {
+  data: data.optional(),
+  assets: assets.optional(),
+  bindings: bindings.optional(),
+  assetId: id('asset').optional(),
+  fit: z.enum(FITS).optional(),
+  url: url.optional(),
+};
+
 const spotOutput = z.object({
   id: z.string(),
   name: z.string(),
@@ -257,12 +267,7 @@ const createSpot = defineTool({
     kind: z.enum(KINDS),
     durationMs: durationMs.optional(),
     templateVersionId: id('template version').optional(),
-    data: data.optional(),
-    assets: assets.optional(),
-    bindings: bindings.optional(),
-    assetId: id('asset').optional(),
-    fit: z.enum(FITS).optional(),
-    url: url.optional(),
+    ...kindInput,
     idempotencyKey,
   }),
   output: spotResult,
@@ -316,12 +321,7 @@ const updateSpot = defineTool({
     spotId: id('spot'),
     name: name('spot').optional(),
     durationMs: durationMs.optional(),
-    data: data.optional(),
-    assets: assets.optional(),
-    bindings: bindings.optional(),
-    assetId: id('asset').optional(),
-    fit: z.enum(FITS).optional(),
-    url: url.optional(),
+    ...kindInput,
     ifVersion,
   }),
   output: spotResult,

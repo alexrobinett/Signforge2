@@ -2,26 +2,10 @@
 // values. The geocoder is a stub (global-setup.ts); the poller does not run under `wrangler dev`, so
 // a test writes the snapshot it would have fetched into the run's local D1.
 import { expect, test, type Page } from '@playwright/test';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
-import { RUN_DIR } from './servers';
+import { axe, d1, fillUntilEnabled, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit. */
 const ADDRESS = '192.0.2.33';
-
-function sql(command: string) {
-  const run = spawnSync(
-    'pnpm',
-    ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'dev', '--persist-to', `${RUN_DIR}state`, '--command', command],
-    {
-      cwd: fileURLToPath(new URL('../../api/', import.meta.url)),
-      env: { ...process.env, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' },
-      encoding: 'utf8',
-    },
-  );
-  expect(run.status, run.stderr).toBe(0);
-}
 
 /** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */
 const orgOf = (spotId: string) => `(SELECT org_id FROM spots WHERE id = '${spotId}')`;
@@ -30,7 +14,7 @@ const orgOf = (spotId: string) => `(SELECT org_id FROM spots WHERE id = '${spotI
 function pollFound(spotId: string, sourceId: string, data: unknown) {
   const now = Date.now();
   const json = JSON.stringify(data).replaceAll("'", "''");
-  sql(
+  d1(
     `INSERT INTO data_snapshots (org_id, data_source_id, version, fetched_at, checked_at, data_json) VALUES (${orgOf(spotId)}, '${sourceId}', 'e2e-${now}', ${now}, ${now}, '${json}') ` +
       'ON CONFLICT (org_id, data_source_id) DO UPDATE SET version = excluded.version, fetched_at = excluded.fetched_at, checked_at = excluded.checked_at, data_json = excluded.data_json',
   );
@@ -38,26 +22,7 @@ function pollFound(spotId: string, sourceId: string, data: unknown) {
 
 /** As if every poll of the source had timed out. */
 const pollFailed = (spotId: string, sourceId: string) =>
-  sql(`UPDATE data_sources SET failures = 3, last_error = 'timeout' WHERE org_id = ${orgOf(spotId)} AND id = '${sourceId}'`);
-
-/** Whether any frame on the page (the player's template frames included) shows `text`. */
-async function stageShows(page: Page, text: string) {
-  for (const frame of page.frames())
-    if (
-      (await frame
-        .getByText(text, { exact: false })
-        .count()
-        .catch(() => 0)) > 0
-    )
-      return true;
-  return false;
-}
-
-async function tool(page: Page, name: string, input: unknown) {
-  const res = await page.request.post(`/api/tools/${name}`, { data: input });
-  expect(res.status(), await res.text()).toBe(200);
-  return res.json();
-}
+  d1(`UPDATE data_sources SET failures = 3, last_error = 'timeout' WHERE org_id = ${orgOf(spotId)} AND id = '${sourceId}'`);
 
 const spotIdOf = (page: Page) => new URL(page.url()).pathname.split('/').at(-1) ?? '';
 
