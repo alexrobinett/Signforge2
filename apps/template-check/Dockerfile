@@ -7,8 +7,9 @@ ARG RUNNER_PLATFORM=linux/amd64
 FROM --platform=${RUNNER_PLATFORM} node:24-trixie-slim
 WORKDIR /runner
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-# The Playwright version in pnpm-lock.yaml, so the container runs the browser the tests ran.
-RUN npm install --no-save --no-package-lock --no-fund --no-audit playwright-core@1.65.1 \
+# dist/package.json names playwright-core at the version the tests ran (build.ts writes it).
+COPY dist/package.json ./
+RUN npm install --no-package-lock --no-fund --no-audit \
   && npx playwright-core install --with-deps --only-shell chromium \
   && rm -rf /var/lib/apt/lists/* /root/.npm
 COPY dist/runner.mjs ./

@@ -1,16 +1,17 @@
 /**
  * The runner's HTTP API, inside the container. Only the check Worker's Durable Object reaches it.
  *
- *   GET  /health  { image, browser, network }; it listens only once the browser is up
+ *   GET  /health  { image, browser, network, canary }; it listens only once the browser is up
  *   POST /check   { manifest, html } -> TemplateRuntimeReport; `?startMs=` is the container's start, which the Worker timed
  *
- * It probes the network once at start. The container must have none: if the probe gets an answer,
- * every check is refused (503), so a container started with Internet access never passes a template.
+ * Two things must hold or every check is refused (503), so a broken container never passes a template:
+ * - the network is closed: it probes an outside host, which must not answer;
+ * - the check still sees a blocked request: its canary (./check.ts) must be reported.
  */
 import { parseTemplateManifest, TEMPLATE_BUDGET, type TemplateRuntimeReport } from '@signforge/contract';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { launchBrowser } from './browser';
-import { checkTemplate } from './check';
+import { canary, checkTemplate } from './check';
 
 export interface RunnerOptions {
   port: number;
@@ -52,13 +53,18 @@ const send = (res: ServerResponse, status: number, body: unknown) => {
 };
 
 export async function startRunner(opts: RunnerOptions): Promise<Server> {
-  const [browser, network] = await Promise.all([launchBrowser(), probe(opts.probeUrl)]);
+  const browser = await launchBrowser();
+  const [network, canaryResult] = await Promise.all([probe(opts.probeUrl), canary(browser)]);
   const runner = { image: opts.image, browser: `Chromium ${browser.version()}` };
+  const unavailable = [
+    ...(network.closed ? [] : [`the check container can reach the network (${network.detail}); it must not`]),
+    ...(canaryResult.ok ? [] : [`the check did not see its canary's blocked request (it saw: ${canaryResult.problems.join('; ') || 'nothing'})`]),
+  ];
   // One check at a time: two 1080p renders at once would slow both past the ready limit.
   let queue: Promise<unknown> = Promise.resolve();
 
   async function check(req: IncomingMessage, res: ServerResponse) {
-    if (!network.closed) return send(res, 503, { error: `the check container can reach the network (${network.detail}); it must not` });
+    if (unavailable.length) return send(res, 503, { error: unavailable.join('; ') });
     const text = await readBody(req);
     if (text === undefined) return send(res, 413, { error: `the body is over ${MAX_BODY_BYTES} bytes` });
     let body: unknown;
@@ -88,7 +94,7 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
   }
 
   const server = createServer((req, res) => {
-    if (req.method === 'GET' && req.url === '/health') return send(res, 200, { ...runner, network });
+    if (req.method === 'GET' && req.url === '/health') return send(res, 200, { ...runner, network, canary: canaryResult });
     if (req.method === 'POST' && req.url?.split('?')[0] === '/check')
       return void check(req, res).catch((e: unknown) => send(res, 500, { error: e instanceof Error ? e.message : String(e) }));
     return send(res, 404, { error: 'GET /health or POST /check' });

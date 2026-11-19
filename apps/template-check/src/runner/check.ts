@@ -272,3 +272,35 @@ export async function checkTemplate(browser: Browser, manifest: TemplateManifest
   }
   return { problems: [...problems], renders };
 }
+
+/** A template that makes one request the policy blocks, with a quote in its URL. Protocol 1, no SDK. */
+const CANARY_URL = "https://canary.invalid/a'b";
+const CANARY_HTML = `<!doctype html><script>
+addEventListener('message', (e) => {
+  if (e.source !== parent || e.data?.type !== 'init') return;
+  fetch(${JSON.stringify(CANARY_URL)}).catch(() => {});
+  setTimeout(() => parent.postMessage({ sf: 1, type: 'ready' }, '*'), 50);
+});
+parent.postMessage({ sf: 1, type: 'loaded' }, '*');
+</script>`;
+const CANARY_MANIFEST: TemplateManifest = {
+  id: 'canary',
+  version: '1.0.0',
+  name: 'Canary',
+  fields: {},
+  duration: { defaultMs: 4000, minMs: 4000, maxMs: 4000 },
+  orientations: ['landscape'],
+  uses: [],
+  background: '#000',
+  protocol: 1,
+};
+
+/**
+ * Whether this browser still shows the check a blocked request: the canary must come back with
+ * exactly its one problem. Detection reads Chromium's console lines, whose wording a new Chromium
+ * may change; the runner refuses every check until its canary passes.
+ */
+export async function canary(browser: Browser): Promise<{ ok: boolean; problems: string[] }> {
+  const { problems } = await checkTemplate(browser, CANARY_MANIFEST, CANARY_HTML);
+  return { ok: problems.length === 1 && problems[0] === `requested ${CANARY_URL} (blocked)`, problems };
+}

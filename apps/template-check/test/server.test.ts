@@ -39,6 +39,11 @@ describe('a runner with no network', () => {
     expect(health.network.detail).toMatch(/could not be reached/);
   });
 
+  it('has proved at start that it still sees a blocked request: its canary was reported', async () => {
+    const health = await (await fetch(`${url}/health`)).json();
+    expect(health.canary).toEqual({ ok: true, problems: ["requested https://canary.invalid/a'b (blocked)"] });
+  });
+
   it('checks a template and answers with a report the contract accepts', async () => {
     const res = await fetch(`${url}/check`, { method: 'POST', body: JSON.stringify(clock) });
     expect(res.status).toBe(200);

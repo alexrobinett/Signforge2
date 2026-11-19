@@ -10,7 +10,7 @@
   "preview_urls": false,
   "observability": { "enabled": true },
   "upload_source_maps": true,
-  // Bundles the runner into dist/runner.mjs, which the image copies.
+  // Bundles the runner into dist/runner.mjs and writes dist/package.json (build.ts), which the image copies.
   "build": { "command": "pnpm build", "watch_dir": "src/runner" },
   "containers": [
     {
