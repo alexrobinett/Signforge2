@@ -1,23 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, shots, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.41';
 
-async function tool(page: Page, name: string, input: unknown) {
-  const res = await page.request.post(`/api/tools/${name}`, { data: input });
-  expect(res.status(), await res.text()).toBe(200);
-  return res.json();
-}
-
 /** A brand colour as the SDK set it in a template frame of the kit page's previews (`--sf-<name>`), from every frame that has one. */
 async function themed(page: Page, name: string) {
   const values: string[] = [];
   for (const frame of page.frames()) {
-    const v = await frame
-      .evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(`--sf-${n}`).trim(), name)
-      .catch(() => '');
+    const v = await frame.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(`--sf-${n}`).trim(), name).catch(() => '');
     if (v) values.push(v);
   }
   return values;

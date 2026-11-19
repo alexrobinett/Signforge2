@@ -4,8 +4,8 @@
  * duplicating sends, the contrast of each pair a template draws text with, in words, and a fix for
  * one that fails. The contrast maths is the compiler's, so the page says what the tools say.
  */
-import { BRAND_PAIRS, contrastRatio, fontById, HEX_COLOR, MIN_CONTRAST, onColor } from '@signforge/compiler';
-import type { BrandColor, BrandColors, BrandFont, BrandKit, BrandShape, Orientation } from '@signforge/contract';
+import { BRAND_PAIRS, brandFont, contrastRatio, HEX_COLOR, MIN_CONTRAST, onColor } from '@signforge/compiler';
+import type { BrandColor, BrandColors, BrandKit, BrandShape, Orientation } from '@signforge/contract';
 import type { AssetView } from './assets';
 import { assetFile, type SpotPreview } from './spots';
 
@@ -109,12 +109,6 @@ export function withDraftKit(opts: {
   const colors = draftColors(draft);
   if (!colors) return undefined;
   const files = { ...opts.preview.files };
-  const font = (id: string | null): BrandFont | undefined => {
-    const f = id ? fontById(id) : undefined;
-    if (!f?.files.length) return undefined;
-    for (const x of f.files) files[x.file] = { size: x.size, type: 'font/woff2' };
-    return { id: f.id, family: f.family, files: f.files.map(({ weight, style, file }) => ({ weight, style, file })) };
-  };
   const logo = (assetId: string | null) => {
     const a = assetId ? opts.assets.find((x) => x.id === assetId) : undefined;
     const f = a && assetFile(a, orientation);
@@ -122,8 +116,8 @@ export function withDraftKit(opts: {
     files[f.sha] = { size: f.size, type: f.type };
     return f.sha;
   };
-  const display = font(draft.displayFontId);
-  const body = font(draft.bodyFontId);
+  const display = brandFont(draft.displayFontId, files);
+  const body = brandFont(draft.bodyFontId, files);
   const onDark = logo(draft.logoOnDarkAssetId);
   const onLight = logo(draft.logoOnLightAssetId);
   const kit: BrandKit = {

@@ -88,6 +88,13 @@ export async function signInAs(page: Page, email: string, address: string) {
   await request.dispose();
 }
 
+/** A tool's output, called from the page as the signed-in member; fails the test on a refusal. */
+export async function tool(page: Page, name: string, input: unknown) {
+  const res = await page.request.post(`/api/tools/${name}`, { data: input });
+  expect(res.status(), await res.text()).toBe(200);
+  return res.json();
+}
+
 const sha256 = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
 
 /** Publish one image spot, called `spot`, to the screen, as `sf push` does until the CMS publishes (M3-18). */
