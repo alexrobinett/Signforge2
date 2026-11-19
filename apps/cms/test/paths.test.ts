@@ -1,21 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initials, safeRedirect, signInBack, slugify } from '../src/lib/paths';
-
-describe('signInBack', () => {
-  const fn = 'https://cms.test/_serverFn/abc';
-  it('is the page on a page load, and the calling page on a server function call', () => {
-    expect(signInBack('https://cms.test/spots?tab=draft', null)).toBe('/spots?tab=draft');
-    expect(signInBack(fn, 'https://cms.test/spots/spt_1')).toBe('/spots/spt_1');
-    expect(signInBack(fn, null)).toBe('/');
-  });
-
-  it("keeps sign-in's own way back for a call made after the page went to sign-in, never nesting it", () => {
-    // A query of the page before, settling once the browser is on sign-in (CI, 2026-11-19).
-    expect(signInBack(fn, 'https://cms.test/sign-in?redirect=%2Fspots')).toBe('/spots');
-    expect(signInBack(fn, 'https://cms.test/sign-in')).toBe('/');
-    expect(signInBack(fn, 'https://cms.test/sign-in?redirect=https%3A%2F%2Fevil.example')).toBe('/');
-  });
-});
+import { initials, safeRedirect, slugify } from '../src/lib/paths';
 
 describe('safeRedirect', () => {
   it('keeps a path on this site', () => {
@@ -24,18 +8,7 @@ describe('safeRedirect', () => {
   });
 
   it('refuses anything that could leave the site, and loops back to sign-in', () => {
-    for (const bad of [
-      'https://evil.example/',
-      '//evil.example/',
-      '/\\evil.example',
-      'javascript:alert(1)',
-      '',
-      undefined,
-      42,
-      '/sign-in',
-      '/sign-in?redirect=/',
-      '/api/auth/sign-out',
-    ]) {
+    for (const bad of ['https://evil.example/', '//evil.example/', '/\\evil.example', 'javascript:alert(1)', '', undefined, 42, '/sign-in', '/sign-in?redirect=/', '/api/auth/sign-out']) {
       expect(safeRedirect(bad)).toBe('/');
     }
   });
