@@ -8,7 +8,7 @@
  */
 import type { Transition } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, notFound } from '@tanstack/react-router';
+import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ArrowDownIcon, ArrowUpIcon, GripVerticalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
 import { EditorHeader, EditorSection, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
@@ -22,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '~/components/ui/alert-dialog';
+import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { useCanManage, useOrgId } from '~/lib/live';
@@ -84,6 +85,7 @@ function PlaylistEditor() {
   const savedAt = useAppStore((s) => (mine(s) ? s.playlistEditor.savedAt : null));
   const saveError = useAppStore((s) => (mine(s) ? s.playlistEditor.saveError : null));
   const stale = useAppStore((s) => mine(s) && s.playlistEditor.stale);
+  const gone = useAppStore((s) => mine(s) && s.playlistEditor.gone);
   const leftOutList = useAppStore((s) => s.playlistEditor.leftOut);
   const dragging = useAppStore((s) => s.playlistEditor.dragging);
   const deleting = useAppStore((s) => s.playlistEditor.deleting);
@@ -133,6 +135,16 @@ function PlaylistEditor() {
         )}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload()} />
+      {gone && (
+        <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            This playlist was deleted, by someone else or in another tab. Your changes here are not saved.
+            <Link to="/playlists" className="font-medium underline underline-offset-4">
+              Back to playlists
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="flex flex-1 flex-wrap items-stretch">
         <form
           aria-label="Playlist"

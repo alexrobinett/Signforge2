@@ -7,14 +7,17 @@
  * draft (`compilePlaylistPreview`) and played by the real player on the spot editor's stage
  * (src/state/spot-editor.ts). The save to the server (`update_playlist`) waits a second after the
  * last edit and sends the whole order with the version the editor opened with as `ifVersion`, so
- * an order made from an old read is refused rather than dropping someone else's change; each save
- * chains the version it returns. A removed spot can be put back from the toast (docs/research/cms-ux.md).
+ * an order made from an old read is refused rather than dropping someone else's change. Saves run
+ * one at a time, each for the playlist it was made for: a save builds on the version the one before
+ * it returned for that playlist, its answer reaches the editor only while that playlist is still
+ * open, and a draft waiting to be saved is sent before another playlist is edited. A removed spot
+ * can be put back from the toast (docs/research/cms-ux.md).
  */
 import type { ScreenManifest } from '@signforge/contract';
 import { toast } from 'sonner';
 import { playlistDraftOf, type PlaylistDraft, type PlaylistView } from '~/lib/playlists';
 import { compilePlaylistPreview, versionsById, type SpotPreview } from '~/lib/spots';
-import { callTool, playlistOf, saveRefused, toolMessage } from '~/lib/tools';
+import { callTool, isGone, playlistOf, saveRefused, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery } from '~/queries/playlists';
 import { assetsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { StageTarget } from './spot-editor';
@@ -36,6 +39,8 @@ interface PlaylistEditorState {
   saveError: string | null;
   /** The last save was refused because someone else changed the playlist: the editor offers a reload. */
   stale: boolean;
+  /** The playlist was deleted, by someone else or in another tab: nothing more is saved. */
+  gone: boolean;
   /** Spots the stage leaves out, by id, with why: a screen could not play them yet. */
   leftOut: [string, string[]][];
   /** The spot picker: open, and its search. */
@@ -86,6 +91,7 @@ const initial: PlaylistEditorState = {
   savedAt: null,
   saveError: null,
   stale: false,
+  gone: false,
   leftOut: [],
   adding: false,
   addQuery: '',
@@ -103,6 +109,17 @@ function moved<T>(list: T[], from: number, to: number): T[] {
   return out;
 }
 
+/** A draft to save, with the playlist it belongs to. */
+interface Pending {
+  orgId: string;
+  playlistId: string;
+  draft: PlaylistDraft;
+  version: number;
+}
+
+/** Why a draft cannot be saved as it is: no name, or a transition length a screen would refuse. */
+const unsaveable = ({ name, transition: t }: PlaylistDraft) => !name.trim() || (t.type !== 'cut' && !(t.ms >= 1 && t.ms <= 10_000));
+
 /** One compile input from the previews of several template versions: their templates and files together. */
 const merged = (previews: SpotPreview[]): SpotPreview['preview'] =>
   previews.reduce<SpotPreview['preview']>(
@@ -113,13 +130,48 @@ const merged = (previews: SpotPreview[]): SpotPreview['preview'] =>
 export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set, get, { router, queryClient }) => {
   const editor = (change: (e: PlaylistEditorState) => PlaylistEditorState) => set((s) => ({ playlistEditor: change(s.playlistEditor) }));
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let saving = false;
+  /** The saves, run one at a time in the order they were asked for. */
+  let queue: Promise<void> = Promise.resolve();
+  /** The version each playlist's last save returned, so a save queued behind it builds on it. Versions only grow. */
+  const savedVersions = new Map<string, number>();
 
   const savedPlaylist = (orgId: string, playlistId: string) => queryClient.getQueryData(playlistQuery(orgId, playlistId).queryKey);
   const saveLater = () => {
     clearTimeout(timer);
     timer = setTimeout(() => void get().savePlaylistDraft(), SAVE_DELAY_MS);
   };
+  /** The edit being made, if it is waiting to be saved. */
+  const waiting = (): Pending | undefined => {
+    const { orgId, playlistId, draft, version, status, stale, gone } = get().playlistEditor;
+    if (!orgId || !playlistId || !draft || version === null || status !== 'unsaved' || stale || gone || unsaveable(draft)) return undefined;
+    return { orgId, playlistId, draft, version };
+  };
+
+  async function send(p: Pending) {
+    const open = () => get().playlistEditor.playlistId === p.playlistId;
+    const ifVersion = Math.max(p.version, savedVersions.get(p.playlistId) ?? 0);
+    try {
+      const { name, transition, spotIds } = p.draft;
+      const saved = playlistOf(await callTool('update_playlist', { playlistId: p.playlistId, name: name.trim(), transition, spotIds, ifVersion }));
+      savedVersions.set(p.playlistId, saved.version);
+      const key = playlistKeys.one(p.orgId, p.playlistId);
+      // A playlist deleted meanwhile has left the cache: it is not written back.
+      if (queryClient.getQueryData(key)) queryClient.setQueryData(key, saved);
+      void queryClient.invalidateQueries({ queryKey: playlistKeys.all(p.orgId), exact: true });
+      if (open()) editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === p.draft ? 'saved' : 'unsaved' }));
+    } catch (err) {
+      if (open()) editor((e) => (isGone(err) ? { ...e, status: 'unsaved', gone: true, saveError: null } : { ...e, status: 'unsaved', ...saveRefused(err) }));
+    }
+    const after = get().playlistEditor;
+    if (open() && after.status === 'unsaved' && !after.saveError && !after.gone) saveLater();
+  }
+
+  /** Queues the save of `p`, after any save already asked for. */
+  const enqueue = (p: Pending) => {
+    queue = queue.then(() => send(p));
+    return queue;
+  };
+
   /** The draft of `playlist` as it stands: the one being edited, else the saved one. */
   const current = (playlist: PlaylistView) => {
     const e = get().playlistEditor;
@@ -130,6 +182,10 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     playlistEditor: initial,
 
     editPlaylist(orgId, playlist, change) {
+      const before = get().playlistEditor.playlistId;
+      // Another playlist's edit, still waiting out its second: it is saved, not dropped.
+      const left = before !== playlist.id ? waiting() : undefined;
+      if (left) void enqueue(left);
       editor((e) => {
         const fresh = e.playlistId !== playlist.id || !e.draft;
         // The picker stays as it is: the first spot added from it is the edit that starts the draft.
@@ -146,8 +202,11 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
       const spotId = current(playlist).spotIds[index];
       if (spotId === undefined) return;
       get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(index, 1) }));
-      // Back at its place in the order as it is by then, so what was done since stays.
-      const undo = () => get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(Math.min(index, d.spotIds.length), 0, spotId) }));
+      // Back at its place in the order as it is by then, so what was done since stays; only while this playlist is open.
+      const undo = () => {
+        if (get().playlistEditor.playlistId !== playlist.id) return;
+        get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(Math.min(index, d.spotIds.length), 0, spotId) }));
+      };
       toast(`Removed ${name}`, { action: { label: 'Undo', onClick: undo } });
     },
 
@@ -166,36 +225,23 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
 
     async savePlaylistDraft() {
       clearTimeout(timer);
-      const { orgId, playlistId, draft, version, stale } = get().playlistEditor;
-      if (!orgId || !playlistId || !draft || version === null || stale) return;
-      if (saving) return saveLater();
-      const t = draft.transition;
-      if (!draft.name.trim() || (t.type !== 'cut' && !(t.ms >= 1 && t.ms <= 10_000))) {
+      const { draft, stale, gone } = get().playlistEditor;
+      if (!draft || stale || gone) return;
+      if (unsaveable(draft)) {
         editor((e) => ({ ...e, status: 'invalid' }));
         return;
       }
-      saving = true;
+      const p = waiting();
+      if (!p) return;
       editor((e) => ({ ...e, status: 'saving', saveError: null }));
-      try {
-        const saved = playlistOf(
-          await callTool('update_playlist', { playlistId, name: draft.name.trim(), transition: draft.transition, spotIds: draft.spotIds, ifVersion: version }),
-        );
-        queryClient.setQueryData(playlistKeys.one(orgId, playlistId), saved);
-        void queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
-        editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === draft ? 'saved' : 'unsaved' }));
-      } catch (err) {
-        editor((e) => ({ ...e, status: 'unsaved', ...saveRefused(err) }));
-      } finally {
-        saving = false;
-      }
-      const after = get().playlistEditor;
-      if (after.status === 'unsaved' && !after.saveError) saveLater();
+      await enqueue(p);
     },
 
     async reloadPlaylist() {
       const { orgId, playlistId } = get().playlistEditor;
       clearTimeout(timer);
       editor(() => initial);
+      if (playlistId) savedVersions.delete(playlistId);
       if (orgId && playlistId) await queryClient.invalidateQueries({ queryKey: playlistKeys.one(orgId, playlistId) });
       get().redrawStage();
     },
@@ -247,10 +293,11 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     askDeletePlaylist: (open) => editor((e) => ({ ...e, deleting: { ...closedDelete(), open } })),
 
     async deletePlaylist(orgId, playlistId) {
-      clearTimeout(timer);
       editor((e) => ({ ...e, deleting: { ...e.deleting, pending: true, error: null } }));
       try {
         await callTool('delete_playlist', { playlistId });
+        // Only once it is gone: a refused delete leaves the waiting save to run.
+        clearTimeout(timer);
         await router.navigate({ to: '/playlists' });
         queryClient.removeQueries({ queryKey: playlistKeys.one(orgId, playlistId), exact: true });
         await queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });

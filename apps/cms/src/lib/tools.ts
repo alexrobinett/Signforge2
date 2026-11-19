@@ -56,6 +56,9 @@ export const isStale = (err: unknown) =>
 /** A tool's refusal as a sentence for the page. */
 export const toolMessage = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');
 
+/** Whether a refusal says the row is gone: deleted, by someone else or in another tab. */
+export const isGone = (err: unknown) => err instanceof ToolCallError && err.code === 'not_found';
+
 /** An editor's state after a refused save: `stale` when someone else changed the row since, which the editor offers to reload. */
 export const saveRefused = (err: unknown) =>
   isStale(err) ? { stale: true, saveError: 'This changed since you opened it.' } : { stale: false, saveError: toolMessage(err) };
