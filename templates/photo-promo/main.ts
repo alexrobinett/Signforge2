@@ -10,9 +10,10 @@ defineTemplate({
     const primary = kit.getPropertyValue('--sf-primary');
     if (primary) {
       kit.setProperty('--sf-on-primary', readableOn(primary, kit.getPropertyValue('--sf-on-primary')));
-      // The eyebrow is the kit's accent on a shade of its background: amber, for one, does not read
-      // on a light kit. It is large text at 1080p (3.4vmin, bold), where 3:1 reads.
-      kit.setProperty('--accent-text', readableOn(kit.getPropertyValue('--sf-bg'), kit.getPropertyValue('--sf-accent'), { large: true }));
+      // The eyebrow is the kit's accent on a shade of its background over the photo: amber, for one,
+      // does not read on a light kit. It is large text, but measured on the background and not on
+      // the photo, so it keeps 4.5:1 there rather than 3:1 (#124).
+      kit.setProperty('--accent-text', readableOn(kit.getPropertyValue('--sf-bg'), kit.getPropertyValue('--sf-accent')));
     }
   },
 });
