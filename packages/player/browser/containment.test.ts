@@ -7,7 +7,8 @@ import { createSocket } from 'node:dgram';
 import { createServer, type AddressInfo } from 'node:net';
 import type { Frame } from 'playwright';
 import { describe, expect, it } from 'vitest';
-import type { FixtureMode } from './content';
+import { buildContent, type FixtureMode } from './content';
+import { attribute, childPage } from './fixtures/child';
 import { spotsPlayed, useHarness, type Player } from './harness';
 
 // As on the Pi, so a template frame that shares the player's process is seen (the last test).
@@ -18,11 +19,11 @@ const h = useHarness({ siteIsolation: true });
  * popup. (Playwright also reports requests CSP blocked before they were sent, so its request
  * events are not evidence.)
  */
-async function hostile(mode: FixtureMode, target?: string) {
+async function hostile(mode: FixtureMode, target?: string, templateHtml = h.templateHtml) {
   const popups: string[] = [];
   const p = await h.openPlayer((server) => {
     server.publish(
-      h.content([
+      buildContent(templateHtml, [
         { id: 'a', durationMs: 800 },
         { id: 'evil', mode, target: target ?? `${server.url}/leak/${mode}`, durationMs: 800 },
         { id: 'b', durationMs: 800 },
@@ -84,7 +85,19 @@ describe('a template that loads from the network', () => {
 
 describe('a template that opens a peer connection', () => {
   // The CSP has no say over WebRTC: a STUN request leaves over UDP, a TURN allocation over TCP.
-  for (const mode of ['webrtc', 'webrtc-frame'] as const) {
+  // Its own window; a frame it adds whose constructor it reads; a frame it adds, or that its markup
+  // holds, running script of its own (fixtures/child.ts).
+  const modes = [
+    'webrtc',
+    'webrtc-frame',
+    'webrtc-srcdoc',
+    'webrtc-srcdoc-sandboxed',
+    'webrtc-srcdoc-same-origin',
+    'webrtc-javascript-url',
+    'webrtc-grandchild',
+    'webrtc-markup',
+  ] as const;
+  for (const mode of modes) {
     it(`gathers no candidate and sends nothing: ${mode}`, async () => {
       const udp = createSocket('udp4');
       const datagrams: Buffer[] = [];
@@ -98,7 +111,8 @@ describe('a template that opens a peer connection', () => {
       await new Promise<void>((resolve) => tcp.listen(0, '127.0.0.1', resolve));
       try {
         const servers = `stun:127.0.0.1:${udp.address().port} turn:127.0.0.1:${(tcp.address() as AddressInfo).port}?transport=tcp`;
-        const { p, leaks } = await hostile(mode, servers);
+        const html = mode === 'webrtc-markup' ? h.templateHtml.replace('<body>', `<body><iframe srcdoc="${attribute(childPage(servers, 1))}"></iframe>`) : undefined;
+        const { p, leaks } = await hostile(mode, servers, html);
         const s = await afterEvil(p);
         expect({ leaks: leaks(), datagrams: datagrams.length, connections }).toEqual({ leaks: [], datagrams: 0, connections: [] });
         expect(s.lastError).toMatch(new RegExp(`^evil: .*${mode} was refused`));

@@ -11,6 +11,7 @@
  * the SDK must hold until play, and marks `play`.
  */
 import { defineTemplate } from '@signforge/template-sdk';
+import { attribute, childPage, childScript } from './child';
 
 const forever = () => new Promise<never>(() => {});
 const after = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -58,7 +59,32 @@ const attacks: Record<string, (target: string) => unknown> = {
     document.body.appendChild(f);
     return gather((f.contentWindow as typeof window).RTCPeerConnection, t);
   },
+  // A frame the template adds runs script of its own (fixtures/child.ts), in a realm of its own.
+  'webrtc-srcdoc': (t) => addChild((f) => (f.srcdoc = childPage(t, 1))),
+  'webrtc-srcdoc-sandboxed': (t) => addChild((f) => ((f.sandbox.value = 'allow-scripts'), (f.srcdoc = childPage(t, 1)))),
+  'webrtc-srcdoc-same-origin': (t) => addChild((f) => ((f.sandbox.value = 'allow-scripts allow-same-origin'), (f.srcdoc = childPage(t, 1)))),
+  'webrtc-javascript-url': (t) => addChild((f) => (f.src = `javascript:void ${encodeURIComponent(childScript(t, 1))}`)),
+  'webrtc-grandchild': (t) => addChild((f) => (f.srcdoc = `<iframe srcdoc="${attribute(childPage(t, 2))}"></iframe>`)),
+  // The frame is in the bundle's markup (the test puts it there); the template only listens.
+  'webrtc-markup': () => fromChild(),
 };
+/** Add a frame, set up by `set`, and wait for what its script reports. */
+function addChild(set: (f: HTMLIFrameElement) => unknown): Promise<string | undefined> {
+  const reported = fromChild();
+  const f = document.createElement('iframe');
+  set(f);
+  document.body.appendChild(f);
+  return reported;
+}
+/** What a frame below reports within 1.2 s: `gathered …`, or undefined if it found nothing or never ran. */
+function fromChild(): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    addEventListener('message', (e: MessageEvent<{ sfChild?: unknown }>) => {
+      if (typeof e.data?.sfChild === 'string') resolve(e.data.sfChild ? `gathered ${e.data.sfChild}` : undefined);
+    });
+    setTimeout(() => resolve(undefined), 1200);
+  });
+}
 /**
  * Open a peer connection to the ICE servers in `t` (space-separated) and collect candidates for a
  * second. Resolves with what it gathered, if anything: the test reads it in the spot's error.

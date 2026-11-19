@@ -38,7 +38,13 @@ export type FixtureMode =
   | 'image'
   | 'font'
   | 'webrtc'
-  | 'webrtc-frame';
+  | 'webrtc-frame'
+  | 'webrtc-srcdoc'
+  | 'webrtc-srcdoc-sandboxed'
+  | 'webrtc-srcdoc-same-origin'
+  | 'webrtc-javascript-url'
+  | 'webrtc-grandchild'
+  | 'webrtc-markup';
 
 export interface FixtureSpot {
   id: string;
