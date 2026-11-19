@@ -124,10 +124,22 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
  * (results axe cannot decide, such as text over a gradient, are not failures). Transitions and
  * animations are off in the top document while it runs: else it reads colours halfway through the
  * theme change, or a dialog's fade. The spot editor's preview is checked too: the real player
- * showing a template, so every base template's text must read on its colours (#57).
+ * showing a template, so every base template's text must read on its colours (#57). Its template
+ * frames keep playing, so each is held at rest, after its intro and before its outro (which starts
+ * at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70). The next play
+ * restarts them.
  */
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
+  for (const frame of page.frames())
+    await frame.evaluate(() => {
+      const ms = Number.parseFloat(document.documentElement.style.getPropertyValue('--sf-duration'));
+      if (!ms) return;
+      for (const a of document.getAnimations()) {
+        a.pause();
+        a.currentTime = ms - 1500;
+      }
+    });
   const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
   for (const dark of [false, true]) {
     await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), dark);

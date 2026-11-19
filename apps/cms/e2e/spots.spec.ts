@@ -109,6 +109,40 @@ test('a change someone else made while the editor was open is not overwritten', 
   await expect(page.getByLabel('Message')).toHaveValue('From the agent');
 });
 
+/**
+ * The weather preview at every time of day, each checked by axe: its scene follows sunrise, sunset
+ * and the clock (#70), so they are set around the test's own clock, and every phase shows whenever
+ * the test runs. Each phase is named in the city field, so the stage is known to show it.
+ */
+async function weatherAllDay() {
+  const now = Math.floor(Date.now() / 1000);
+  const h = 3600;
+  const phases: [string, Record<string, number>][] = [
+    ['Day', { code: 1, isDay: 1, sunrise: 0, sunset: 0 }],
+    ['Night', { code: 71, isDay: 0, sunrise: 0, sunset: 0 }],
+    ['Dawn', { code: 0, sunrise: now + 600, sunset: now + 10 * h }],
+    ['Midday', { code: 2, sunrise: now - 5 * h, sunset: now + 5 * h }],
+    ['Dusk', { code: 63, sunrise: now - 10 * h, sunset: now - 600 }],
+    ['Midnight', { code: 0, sunrise: now - 14 * h, sunset: now - 4 * h }],
+  ];
+  for (const [phase, values] of phases) {
+    for (const [field, value] of Object.entries(values)) await page.locator(`#field-${field}`).fill(String(value));
+    await page.locator('#field-city').fill(phase);
+    await expect.poll(() => stageShows(page, phase), { message: `weather at ${phase}`, timeout: 10_000 }).toBe(true);
+    // Where CI's axe once caught the preview (run 44430579357): 0.87 s into a play, the forecast's last
+    // row a third of the way into its fade-in, at 2.68:1. axe must read text as it rests, not mid-fade.
+    for (const frame of page.frames())
+      await frame.evaluate(() => {
+        if (!document.documentElement.style.getPropertyValue('--sf-duration')) return;
+        for (const a of document.getAnimations()) {
+          a.pause();
+          a.currentTime = 870;
+        }
+      });
+    await axe(page);
+  }
+}
+
 test('every base template can be configured and previewed', async () => {
   test.setTimeout(300_000);
   // One image for the templates' image fields.
@@ -150,6 +184,7 @@ test('every base template can be configured and previewed', async () => {
     }
     await axe(page);
     await shots(page, `33-template-${t.key}`);
+    if (t.key === 'weather') await weatherAllDay();
   }
   // At phone width the form and the stage stack.
   await page.setViewportSize({ width: 390, height: 844 });

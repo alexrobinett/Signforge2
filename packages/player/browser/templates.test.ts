@@ -70,6 +70,18 @@ const cases: Record<string, { a: Data; b: Data; assetsA?: Record<string, string>
   },
 };
 
+/** examples/demo/brand.json, with the on-colours the brand tools derive for it. */
+const DEMO_KIT: BrandColors = {
+  primary: '#1d4ed8',
+  onPrimary: '#ffffff',
+  accent: '#f97316',
+  onAccent: '#000000',
+  background: '#0b1020',
+  surface: '#18213a',
+  text: '#f8fafc',
+  muted: '#a5b4cb',
+};
+
 const built = new Map<string, { html: string; manifest: TemplateManifest }>();
 beforeAll(async () => {
   for (const name of names) built.set(name, await buildTemplate(join(templatesDir, name)));
@@ -307,6 +319,77 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
     expect(seen).toEqual([['day'], ['day', 'dusk'], ['dusk', 'night'], ['night']]);
   });
 
+  it('every text reads on its card (AA) at every time of day, in every condition, with and without a kit', async () => {
+    const t = built.get('weather')!;
+    const hst = await host();
+    await hst.open('fresh', t.html);
+    const light: BrandColors = {
+      primary: '#0f766e',
+      onPrimary: '#ffffff',
+      accent: '#b45309',
+      onAccent: '#ffffff',
+      background: '#f8fafc',
+      surface: '#ffffff',
+      text: '#0f172a',
+      muted: '#475569',
+    };
+    const kits: [string, FrameTheme | undefined][] = [
+      ['no kit', undefined],
+      ['the demo kit', { colors: DEMO_KIT, shape: 'soft', fonts: {} }],
+      ['a light kit', { colors: light, shape: 'soft', fonts: {} }],
+    ];
+    const phases: [string, Data, string][] = [
+      ['day', { isDay: 1 }, '2026-11-17T17:00:00Z'],
+      ['night', { isDay: 0 }, '2026-11-17T17:00:00Z'],
+      ['dawn', { sunrise, sunset }, '2026-11-17T11:50:00Z'],
+      ['midday', { sunrise, sunset }, '2026-11-17T17:00:00Z'],
+      ['dusk', { sunrise, sunset }, '2026-11-17T22:10:00Z'],
+      ['midnight', { sunrise, sunset }, '2026-11-18T05:00:00Z'],
+    ];
+    const codes = [0, 2, 3, 45, 63, 71, 95];
+    const found: string[] = [];
+    let inits = 0;
+    for (const [kit, theme] of kits)
+      for (const [phase, data, at] of phases)
+        for (const code of codes) {
+          await hst.init('fresh', spotData(t.manifest, { ...data, code }), {}, clock(at), theme);
+          await hst.waitFor('fresh', 'ready', ++inits);
+          const low = await hst.page
+            .mainFrame()
+            .childFrames()[0]!
+            .evaluate(() => {
+              // At rest: after the intro, before the outro.
+              for (const a of document.getAnimations()) a.currentTime = 2000;
+              // rgb()/rgba() in 0-255; a color-mix with transparent computes to color(srgb r g b / a), in 0-1.
+              const rgba = (c: string) => {
+                const v = c.match(/[\d.]+/g)!.map(Number);
+                return c.startsWith('color(srgb') ? [...v.slice(0, 3).map((x) => x * 255), ...v.slice(3)] : v;
+              };
+              const lum = (c: number[]) => {
+                const [r, g, b] = c.slice(0, 3).map((v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+                return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+              };
+              const card = rgba(getComputedStyle(document.querySelector('.info')!).backgroundColor);
+              const out: string[] = [];
+              for (const el of document.querySelectorAll<HTMLElement>('.info, .info *')) {
+                if (![...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim())) continue;
+                const s = getComputedStyle(el);
+                // Text colour with its alpha, over the card's opaque colour.
+                const [r, g, b, a = 1] = rgba(s.color);
+                const fg = [r!, g!, b!].map((v, i) => v * a + card[i]! * (1 - a));
+                const [hi, lo] = [lum(fg), lum(card)].sort((x, y) => y - x);
+                const ratio = (hi! + 0.05) / (lo! + 0.05);
+                const size = Number.parseFloat(s.fontSize);
+                const large = size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700);
+                if (ratio < (large ? 3 : 4.5)) out.push(`${el.id || el.className || el.tagName}: ${ratio.toFixed(2)}:1`);
+              }
+              return out;
+            });
+          for (const l of low) found.push(`${kit}, ${phase}, code ${code}: ${l}`);
+        }
+    expect(found).toEqual([]);
+  });
+
   it('without sunrise and sunset, follows isDay as before, whatever the clock says', async () => {
     const scene = await weather();
     const day = await scene({ code: 0, isDay: 1 }, clock('2026-11-18T03:00:00Z'));
@@ -383,17 +466,7 @@ function contrast(a: string, b: string): number {
 }
 
 describe('text on a brand colour (#57)', () => {
-  /** examples/demo/brand.json, with the on-colours the brand tools derive for it. */
-  const demo: BrandColors = {
-    primary: '#1d4ed8',
-    onPrimary: '#ffffff',
-    accent: '#f97316',
-    onAccent: '#000000',
-    background: '#0b1020',
-    surface: '#18213a',
-    text: '#f8fafc',
-    muted: '#a5b4cb',
-  };
+  const demo = DEMO_KIT;
   // A kit may set its on-colours by hand; the brand tools only warn when a pair fails.
   const poor: BrandColors = { ...demo, onPrimary: '#2563eb', onAccent: '#ffffff' };
   const kit = (colors: BrandColors): FrameTheme => ({ colors, shape: 'soft', fonts: {} });
