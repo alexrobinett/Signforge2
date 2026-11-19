@@ -9,7 +9,7 @@
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
 import type { ScreenKind } from '@signforge/contract';
-import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
@@ -49,6 +49,8 @@ interface AuditPage {
   from?: number;
   to?: number;
   query?: string;
+  /** Actions whose detail `query` must not read, because the caller is not shown it. */
+  hideDetailOf?: readonly string[];
 }
 
 /** D1 binds at most 100 parameters per statement; leave one for the org. */
@@ -1341,7 +1343,8 @@ export function scoped(d1: D1Database, orgId: string) {
        * `after` (the `[at, seq]` of the last row of the page before), each with its `seq` (its
        * `rowid`, which breaks ties within a millisecond; audit_log_org_at_idx holds it, so the
        * order needs no sort). Every filter is optional; `query` matches the action, the actor's
-       * and the target's ids and the detail, as text, ignoring ASCII case.
+       * and the target's ids and the detail (but not that of `hideDetailOf`'s actions), as text,
+       * ignoring ASCII case.
        */
       page: (p: AuditPage) => {
         const a = s.auditLog;
@@ -1359,8 +1362,10 @@ export function scoped(d1: D1Database, orgId: string) {
         if (p.from != null) where.push(sql`${a.at} >= ${p.from}`);
         if (p.to != null) where.push(lt(a.at, p.to));
         if (p.query) {
-          const like = `%${p.query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-          where.push(or(...[a.action, a.actorId, a.targetId, a.detailJson].map((c) => sql`${c} LIKE ${like} ESCAPE '\\'`))!);
+          // instr, not LIKE: D1 refuses a LIKE pattern over 50 bytes, and instr has no wildcards to escape.
+          const has = (c: SQLiteColumn) => sql`instr(lower(${c}), lower(${p.query})) > 0`;
+          const detail = p.hideDetailOf?.length ? and(has(a.detailJson), notInArray(a.action, [...p.hideDetailOf]))! : has(a.detailJson);
+          where.push(or(has(a.action), has(a.actorId), has(a.targetId), detail)!);
         }
         return db
           .select({ ...getTableColumns(a), seq })

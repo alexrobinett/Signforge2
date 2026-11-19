@@ -128,4 +128,20 @@ describe('list_audit_log', () => {
     const forged = btoa(JSON.stringify(['a', 'b'])).replace(/=+$/, '');
     expect(await dispatch(registry, 'list_audit_log', { cursor: forged }, as('viewer'))).toMatchObject({ ok: false, error: 'invalid_input' });
   });
+
+  it('searches with the longest text it takes, in any script and with wildcard characters', async () => {
+    // D1 refuses a LIKE pattern over 50 bytes; this text is 200 bytes in UTF-8.
+    const long = `${'Ä_%'.repeat(33)}Ä`;
+    expect(long).toHaveLength(100);
+    await scoped(env.DB, o.orgId).auditLog.append({
+      at: T + 2000,
+      actorKind: 'user',
+      actorId: 'usr_jun',
+      clientId: 'cms',
+      action: 'rename_spot',
+      detailJson: JSON.stringify({ input: { name: `Menu ${long}` } }),
+    });
+    expect((await all({ query: long })).map((e) => e.action)).toEqual(['rename_spot']);
+    expect(await all({ query: 'z'.repeat(100) })).toEqual([]);
+  });
 });
