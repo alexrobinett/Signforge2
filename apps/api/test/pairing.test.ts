@@ -4,7 +4,7 @@ import type { PairPollResponse, PairStartResponse } from '@signforge/contract';
 import { validatePairPollResponse, validatePairStartResponse } from '@signforge/contract';
 import { env, exports } from 'cloudflare:workers';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { Client, email, nextIp, testApp } from './client';
+import { Client, email, inOneLimiterWindow, nextIp, testApp } from './client';
 
 const BASE = 'https://api.test/v1/device';
 const CODE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
@@ -108,13 +108,7 @@ describe('pairing', () => {
 });
 
 describe('rate limits', () => {
-  // The limiters count in one-minute windows fixed to the wall clock, so a test that ran across a minute
-  // boundary would count in two windows (600 polls, then a 601st that passes). Each starts with at least
-  // its timeout left in the window: a run that finishes, passing or failing, counted in one window.
-  beforeEach(async (ctx) => {
-    const left = 60_000 - (Date.now() % 60_000);
-    if (left < ctx.task.timeout) await new Promise((resolve) => setTimeout(resolve, left));
-  });
+  beforeEach(inOneLimiterWindow);
 
   it('lets one member try 10 codes a minute, then refuses every claim, the right code included', async () => {
     const guesser = new Client(t);

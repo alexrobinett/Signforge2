@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ToolError } from '@signforge/tools';
 import { openMeteoPlaces } from '../src/data/places';
-import { Client, email, testApp } from './client';
+import { Client, email, inOneLimiterWindow, testApp } from './client';
 
 /** A fetch that answers `body` and records the URL it was asked for. */
 function stub(body: unknown, status = 200) {
@@ -73,11 +73,7 @@ describe('a busy geocoder', () => {
 
 describe('find_places through /api/tools', () => {
   const t = testApp();
-  // The limiters count in one-minute windows fixed to the wall clock: start with the test's timeout left in the window.
-  beforeEach(async (ctx) => {
-    const left = 60_000 - (Date.now() % 60_000);
-    if (left < ctx.task.timeout) await new Promise((resolve) => setTimeout(resolve, left));
-  });
+  beforeEach(inOneLimiterWindow);
 
   it('lets one member search 30 times a minute, then refuses with rate_limited', async () => {
     const member = new Client(t);
