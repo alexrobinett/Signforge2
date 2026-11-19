@@ -1,4 +1,5 @@
 import { dayKey, defineTemplate, formatter, now as clockNow } from '@signforge/template-sdk';
+import { readableOn } from '@signforge/template-sdk/contrast';
 
 interface Event {
   title: string;
@@ -8,12 +9,31 @@ interface Event {
   location: string;
 }
 
+/**
+ * The colour `el`'s background paints over the page's, as `#rrggbb`: a card is a `color-mix`,
+ * which `readableOn` cannot measure as CSS gives it.
+ */
+function painted(el: Element): string {
+  const g = new OffscreenCanvas(1, 1).getContext('2d')!;
+  for (const fill of [getComputedStyle(document.documentElement).getPropertyValue('--bg'), getComputedStyle(el).backgroundColor]) {
+    g.fillStyle = fill;
+    g.fillRect(0, 0, 1, 1);
+  }
+  return `#${[...g.getImageData(0, 0, 1, 1).data.slice(0, 3)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
 /** An all-day `YYYY-MM-DD` is a calendar date, not an instant: read it at noon UTC so no time zone moves it. */
 const asDate = (s: string, allDay: boolean) => (allDay ? new Date(`${s.slice(0, 10)}T12:00:00Z`) : new Date(s));
 
 defineTemplate({
   prepare(ctx) {
-    document.documentElement.style.setProperty('--accent', String(ctx.data.accent));
+    const root = document.documentElement;
+    const accent = String(ctx.data.accent);
+    root.style.setProperty('--accent', accent);
+    // Accent text must read where it sits (amber, for one, does not on a light kit): the date on
+    // the background and on the surface its gradient starts from.
+    const style = getComputedStyle(root);
+    root.style.setProperty('--accent-text', readableOn(style.getPropertyValue('--surface'), readableOn(style.getPropertyValue('--bg'), accent)));
     const now = clockNow();
     const today = dayKey(ctx, now);
     const tomorrow = dayKey(ctx, new Date(now.getTime() + 864e5));
@@ -52,5 +72,8 @@ defineTemplate({
     });
     // Show only whole rows: drop from the end until the list fits its space.
     while (list.children.length > 1 && list.scrollHeight > list.clientHeight + 1) list.lastElementChild!.remove();
+    // A row's day is the accent on its card, which mixes the surface with the text (or, happening
+    // now, with the accent).
+    for (const li of list.children) (li as HTMLElement).style.setProperty('--day-text', readableOn(painted(li), accent));
   },
 });

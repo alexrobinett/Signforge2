@@ -69,7 +69,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--sf-accent, #ffd84a);
+  color: var(--accent-text, #ffd84a);
   animation-delay: 0.3s, var(--out);
 }
 .headline {

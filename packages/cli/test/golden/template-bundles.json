@@ -1,9 +1,9 @@
 {
-  "base/agenda@1.3.0": "401eb524f0e3a48e093ff6abb58e3376e25f38f8b99c6e05132f0e074e280304",
-  "base/clock@1.2.1": "bf95013ac1d31c52b5dc75640b9cc11d55c972e5f5fb458a174e6c3ec9e89e69",
-  "base/cstore-promo@1.2.2": "eb16dfac26ea0fe1939b5f007d28727e78c7f1e9ea6e0bce6e1ef30e667bebc8",
-  "base/menu-board@1.2.1": "f6ff3b3ef02e46803b38c08ca2e6cfe7a153c1771990e00381839e9878d71d9f",
-  "base/news@1.4.0": "44d29f9431411aab372f7a77ade3afa38f4e66f76877481c81fbbab0d5b34406",
-  "base/photo-promo@1.2.1": "3a1c2be9a3e2f7f700e1bfc8e1c2d71d6cc6020ee300e9befb3cf2af7b69c1bd",
+  "base/agenda@1.3.0": "4d15f33bd516fdb8ca00d389d19872e2c7eb0e191f3bfad7aae396ddc442b217",
+  "base/clock@1.2.2": "a26323a4266ee3bf7a26eeaadd66d802e4f804459ef3bc4026ac782b2f418ed2",
+  "base/cstore-promo@1.2.3": "13b1494d404b0e75d71400ab7a19c5586e74822483edf3f3c721cad9bc63c1a9",
+  "base/menu-board@1.2.2": "8e1319646ed2f74e48a12b76b5b51e5c4bd4b61d054a29b450d6a064fd73515a",
+  "base/news@1.4.0": "479f77409dda317adc0dcd0163323b66540804f64c9c183207aeca8f5e6e4f42",
+  "base/photo-promo@1.2.2": "5863e25699d425bf73d47076fe6361042469eda28417b91f76eb9129cf1bf1a5",
   "base/weather@1.4.0": "19f93988c7682e3fd3bdcbd4248b4bfde6f6527a61d2c902671213f2bcb7e9b3"
 }
