@@ -395,7 +395,7 @@ news 1.3.3, agenda 1.2.2, clock 1.2.2, cstore-promo 1.2.3, photo-promo 1.2.2 and
 
 Prepares over both sets and kits (ms, before / after): meeting-room (agenda) median 194 / 214, 151-220 / 175-287; holidays (agenda) 166 / 163; clock 176 / 177; news 158 / 161; sport-drinks (cstore-promo) 192 / 195; menu 167 / 167; photo-berries 200 / 201; photo-river 213 / 214.
 
-No cost in frames: the ranges overlap run for run, and the one 83 ms frame was in set 1's second after run, while a spot loaded. Agenda's meeting room, the spot with the most rows, prepares about 20 ms slower, the canvas read per row; well within 500 ms. The other templates are within run-to-run noise. Nothing was skipped.
+No cost in frames: the ranges overlap run for run, and the one 83 ms frame was in set 1's second after run with no kit. Agenda's meeting room, the spot with the most rows, prepares about 20 ms slower, the canvas read per row; well within 500 ms. The other templates are within run-to-run noise. Nothing was skipped.
 
 ## Baseline: the same player on a Mac (2026-11-17)
 
