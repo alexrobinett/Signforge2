@@ -6,7 +6,7 @@
  *
  * Built template bundles are compared by key, not by bytes or size: their hash follows the minifier, which
  * renames variables whenever the SDK or contract code it bundles changes. The template build is
- * checked by its own budget and lint, not here. The bundle's entry in `files` is normalised the
+ * checked by its own budget and lint, and its bytes by templates.test.ts, not here. The bundle's entry in `files` is normalised the
  * same way.
  *
  * The id is compared too. A golden's stored id must be the hash of its own body, so a test can
