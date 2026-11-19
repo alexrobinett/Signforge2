@@ -227,15 +227,19 @@ describe('a provider data source', () => {
     expect(await org().dataSources.get('rooms-a')).toMatchObject({ failures: 2, lastError: 'needs-reconnect' });
   });
 
-  it('reads again once reconnected in place', async () => {
+  it('reads again once reconnected in place: its sources are polled at once, their backoff gone', async () => {
+    // Backed off by the failed polls: not due for a while yet.
+    for (const id of ['rooms-a', 'rooms-b']) expect((await org().dataSources.get(id))?.nextPollAt).toBeGreaterThan(Date.now());
     const back = await connect(owner, { provider: 'fake', connectionId });
     expect(back.searchParams.get('connected')).toBe(connectionId);
     expect(await org().connections.get(connectionId)).toMatchObject({ status: 'active', lastError: null });
+    for (const id of ['rooms-a', 'rooms-b']) expect(await org().dataSources.get(id)).toMatchObject({ nextPollAt: 0, failures: 0, lastError: null });
     fake.resources.set('rooms', { events: [{ title: 'Retro' }] });
-    await due('rooms-a');
     await poll(Date.now());
-    expect(await org().dataSources.get('rooms-a')).toMatchObject({ failures: 0, lastError: null });
-    expect(JSON.parse((await org().dataSources.snapshot('rooms-a'))?.dataJson ?? 'null')).toEqual({ events: [{ title: 'Retro' }] });
+    for (const id of ['rooms-a', 'rooms-b']) {
+      expect(await org().dataSources.get(id)).toMatchObject({ failures: 0, lastError: null });
+      expect(JSON.parse((await org().dataSources.snapshot(id))?.dataJson ?? 'null')).toEqual({ events: [{ title: 'Retro' }] });
+    }
   });
 
   it('uses the grant another run refreshed when a rotating provider refuses the old refresh token', async () => {

@@ -1121,6 +1121,18 @@ export function scoped(d1: D1Database, orgId: string) {
           await checkConnection(patch.connectionId);
           return dataSources.stage.update(current, patch, ifVersion);
         },
+        /**
+         * The sources reading through `connectionId` polled again at once, their failures and backoff
+         * gone: for a connection reconnected. Their versions stay, as with a poll.
+         */
+        pollAgain: (connectionId: string): Staged =>
+          staged(
+            undefined,
+            db
+              .update(s.dataSources)
+              .set(updateSet(s.dataSources, { nextPollAt: 0, failures: 0, lastError: null }))
+              .where(and(eq(s.dataSources.orgId, orgId), eq(s.dataSources.connectionId, connectionId))),
+          ),
       },
       /** The sources that read through `connectionId`. */
       usingConnection: (connectionId: string) =>

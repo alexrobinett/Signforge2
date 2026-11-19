@@ -168,6 +168,8 @@ const finishConnection = defineTool({
     }
     const grant = await providers.finish(pending.provider, pending, input.code, { orgId: org.orgId, id: target.id });
     if (fresh) write(fresh);
+    // Its sources failed while it needed reconnecting, backing off for hours: poll them now.
+    else write(org.dataSources.stage.pollAgain(target.id));
     const connection = write(
       org.connections.stage.update(target, {
         account: grant.account,
