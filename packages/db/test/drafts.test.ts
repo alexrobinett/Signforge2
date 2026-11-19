@@ -242,6 +242,45 @@ describe('rollout history in the publish batch (review 5)', () => {
   });
 });
 
+describe('playlist edits (M3-17)', () => {
+  it('changes the fields and the items in one change, moving the version on once', async () => {
+    const e = await seedOrg(env.DB, 'drafts-pl-edit');
+    const org = scoped(env.DB, e.orgId);
+    const read = (await org.playlists.get(e.playlist))!;
+    const fade = JSON.stringify({ type: 'fade', ms: 600 });
+    const s = await org.playlists.stage.update(read, { name: 'Lunch', transitionJson: fade }, read.rowVersion, [e.imageSpot, e.templateSpot, e.imageSpot]);
+    await org.commit(s.writes);
+    const now = (await org.playlists.get(e.playlist))!;
+    expect(now).toMatchObject({ name: 'Lunch', transitionJson: fade, rowVersion: read.rowVersion + 1 });
+    expect(s.row.rowVersion).toBe(now.rowVersion);
+    expect(await org.playlists.items(e.playlist)).toEqual([e.imageSpot, e.templateSpot, e.imageSpot]);
+
+    // Items alone move the version on too.
+    await org.commit((await org.playlists.stage.update(now, {}, now.rowVersion, [])).writes);
+    expect((await org.playlists.get(e.playlist))!.rowVersion).toBe(now.rowVersion + 1);
+    expect(await org.playlists.items(e.playlist)).toEqual([]);
+  });
+
+  it('refuses an order made from an old read, in the batch, and leaves the items as they are', async () => {
+    const e = await seedOrg(env.DB, 'drafts-pl-stale');
+    const org = scoped(env.DB, e.orgId);
+    const read = (await org.playlists.get(e.playlist))!;
+    const mine = await org.playlists.stage.update(read, {}, read.rowVersion, [e.imageSpot]);
+    await org.commit((await org.playlists.stage.update(read, { name: 'Theirs' }, read.rowVersion)).writes);
+    await expect(org.commit(mine.writes)).rejects.toMatchObject({ name: 'StaleVersionError', version: read.rowVersion + 1 });
+    expect(await org.playlists.items(e.playlist)).toEqual([e.templateSpot, e.imageSpot]);
+  });
+
+  it("refuses a spot the org does not have, and another org's spot", async () => {
+    const e = await seedOrg(env.DB, 'drafts-pl-spots');
+    const other = await seedOrg(env.DB, 'drafts-pl-spots-other');
+    const org = scoped(env.DB, e.orgId);
+    const read = (await org.playlists.get(e.playlist))!;
+    for (const spot of ['spt_missing', other.imageSpot])
+      await expect(org.playlists.stage.update(read, {}, read.rowVersion, [spot])).rejects.toBeInstanceOf(NotInOrgError);
+  });
+});
+
 describe('versions across delete and make-again (#64)', () => {
   let t: SeededOrg;
   beforeAll(async () => {

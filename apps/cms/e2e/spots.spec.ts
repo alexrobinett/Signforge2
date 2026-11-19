@@ -1,22 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { png } from '@signforge/media/testing';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.31';
-
-/** Whether any frame on the page (the player's template frames included) shows `text`. */
-async function stageShows(page: Page, text: string) {
-  for (const frame of page.frames())
-    if (
-      (await frame
-        .getByText(text, { exact: false })
-        .count()
-        .catch(() => 0)) > 0
-    )
-      return true;
-  return false;
-}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -25,10 +12,7 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-spots-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Northside Market', level: 1 })).toBeVisible();
+  await createOrg(page, 'Northside Market');
 });
 
 test.afterAll(() => page.context().close());

@@ -7,6 +7,7 @@ import { seedOrganization, seedScreen } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import stressGolden from '@signforge/cli/golden/stress.json';
+import { editorCalls, ok } from './calls';
 import { loadCompileInput, loadOrg, publishOrg } from '../src/publishing';
 
 const hash = async (text: string) =>
@@ -378,15 +379,10 @@ describe('concurrent publishes (R09)', () => {
 });
 
 describe('loadCompileInput', () => {
-  /**
-   * The stress project as the database would hold it after upload: base templates, assets with
-   * renditions, spots, a playlist and data sources, all published. The golden is `sf build`'s
-   * output for examples/stress (packages/cli/test/golden.test.ts keeps it honest).
-   */
-  async function seedStress(orgId: string) {
-    const golden = stressGolden as unknown as ScreenManifest;
-    await seedOrganization(env.DB, orgId);
-    const org = scoped(env.DB, orgId);
+  const golden = stressGolden as unknown as ScreenManifest;
+  /** The golden's templates as base ones, registered once for the file's database: their keys are unique. */
+  let base: Promise<Map<string, string>> | undefined;
+  async function baseTemplates() {
     const p = platform(env.DB);
     const versionIds = new Map<string, string>();
     for (const [key, t] of Object.entries(golden.templates)) {
@@ -401,6 +397,21 @@ describe('loadCompileInput', () => {
       });
       versionIds.set(key, v.id);
     }
+    return versionIds;
+  }
+
+  /**
+   * The stress project as the database would hold it after upload: base templates, assets with
+   * renditions, spots, a playlist and data sources, all published. The golden is `sf build`'s
+   * output for examples/stress (packages/cli/test/golden.test.ts keeps it honest).
+   * `playlists: false` leaves out the playlist and the default; a second org in the file needs
+   * its own `screenId`, since screen ids are global.
+   */
+  async function seedStress(orgId: string, { playlists = true, screenId = golden.screen.id } = {}) {
+    await seedOrganization(env.DB, orgId);
+    const org = scoped(env.DB, orgId);
+    base ??= baseTemplates();
+    const versionIds = await base;
     const assetIds = new Map<string, string>();
     const assetFor = async (file: string) => {
       if (!assetIds.has(file)) {
@@ -423,7 +434,7 @@ describe('loadCompileInput', () => {
       return assetIds.get(file)!;
     };
     // The golden names its screen; a screen's id is otherwise always the server's.
-    await seedScreen(env.DB, orgId, golden.screen);
+    await seedScreen(env.DB, orgId, { ...golden.screen, id: screenId });
     for (const s of Object.values(golden.spots)) {
       if (s.kind === 'template') {
         const assetMap: Record<string, string> = {};
@@ -444,7 +455,7 @@ describe('loadCompileInput', () => {
         await org.spots.insert({ id: s.id, name: s.name, kind: 'url', durationMs: s.durationMs, url: s.url });
       }
     }
-    for (const pl of Object.values(golden.playlists)) {
+    for (const pl of playlists ? Object.values(golden.playlists) : []) {
       await org.playlists.insert({ id: pl.id, name: pl.name, transitionJson: JSON.stringify(pl.transition) });
       await org.playlists.setItems(
         pl.id,
@@ -454,12 +465,12 @@ describe('loadCompileInput', () => {
     for (const d of Object.values(golden.dataSources)) {
       await org.dataSources.insert({ id: d.id, name: d.id, format: 'json', urlEncrypted: 'enc:test', refreshS: d.refreshS });
     }
-    await org.commit((await org.settings.stage.set({ defaultPlaylistId: golden.defaultPlaylist })).writes);
-    return { org, golden };
+    if (playlists) await org.commit((await org.settings.stage.set({ defaultPlaylistId: golden.defaultPlaylist })).writes);
+    return { org };
   }
 
   it('with the compiler, produces the manifest sf build produces for examples/stress', async () => {
-    const { org, golden } = await seedStress('stress-org');
+    const { org } = await seedStress('stress-org');
     const promotion = await publishOrg(org, opts);
     expect(promotion.drafts.held).toEqual([]);
     await org.commit(promotion.writes);
@@ -470,6 +481,27 @@ describe('loadCompileInput', () => {
     // golden.test.ts checks the golden's id is the hash of its body, so compare it whole.
     const { generatedAt: _a, ...compiled } = manifest!;
     expect(compiled).toEqual(golden);
+  });
+
+  it('compiles a playlist built with the playlist tools, as the CMS builds it, to the one sf build makes for examples/stress (M3-17)', async () => {
+    const { org } = await seedStress('stress-tools', { playlists: false, screenId: 'stress-tools-screen' });
+    const tool = editorCalls(org);
+    const call = async (name: string, input: unknown) => (await ok(tool(name, input))).playlist as { id: string; version: number };
+    // The editor's path: make it empty, then add the spots and pick the transition, each an edit.
+    const want = golden.playlists[golden.defaultPlaylist]!;
+    const made = await call('create_playlist', { name: want.name, transition: { type: 'cut' } });
+    const added = await call('update_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot).toReversed(), ifVersion: made.version });
+    const ordered = await call('update_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot), ifVersion: added.version });
+    await call('update_playlist', { playlistId: made.id, transition: want.transition, ifVersion: ordered.version });
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: made.id })).writes);
+
+    const promotion = await publishOrg(org, opts);
+    expect(promotion.drafts.held).toEqual([]);
+    await org.commit(promotion.writes);
+    const { manifest, problems } = await compileScreen((await loadCompileInput(org, 'stress-tools-screen'))!, opts);
+    expect(problems).toEqual([]);
+    expect(manifest!.playlists).toEqual({ [made.id]: { ...want, id: made.id } });
+    expect(manifest!.spots).toEqual(golden.spots);
   });
 
   it('reads only the published graph, and nothing for a screen the org does not have', async () => {
