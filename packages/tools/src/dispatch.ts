@@ -47,6 +47,7 @@ import {
   type AlertDeliverer,
   type AlertSecretSealer,
   type ScreenNotifier,
+  type TemplateChecker,
   type ToolErrorCode,
 } from './tool';
 
@@ -68,6 +69,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   alertSecrets?: AlertSecretSealer;
   /** Sends a test or a retry at once. Without it, they go at the next delivery run. */
   deliveries?: AlertDeliverer;
+  /** The runtime check of uploaded templates. Registering an org template needs it. */
+  templateCheck?: TemplateChecker;
   /** Providers' OAuth. The connection tools need it. */
   connectors?: Connectors;
   /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
@@ -234,6 +237,7 @@ export async function dispatch<D extends DataScope>(
         uploads: caller.uploads,
         feedUrls: caller.feedUrls,
         alertSecrets: caller.alertSecrets,
+        templateCheck: caller.templateCheck,
         connectors: caller.connectors,
         write,
         notify,

@@ -20,6 +20,7 @@ import {
   parseSyncRequest,
   parseSyncResponse,
   parseTemplateManifest,
+  parseTemplateRuntimeReport,
   requiredFiles,
   validateBrandKit,
   displayHoursProblems,
@@ -44,6 +45,7 @@ import {
   MAX_SNAPSHOT_BYTES,
   validateSyncResponse,
   validateTemplateManifest,
+  validateTemplateRuntimeReport,
   type BrandKit,
   type FieldDef,
   type ScreenManifest,
@@ -235,6 +237,17 @@ const totalOn = (name: string, arb: fc.Arbitrary<unknown>, run: (v: unknown) => 
     );
   });
 
+const runtimeReport = () => ({
+  ok: false,
+  problems: ['requested https://example.com/x (blocked)'],
+  runner: { image: 'registry.cloudflare.com/acct/template-check@sha256:00', browser: 'HeadlessChrome/146.0.0.0' },
+  renders: [
+    { orientation: 'landscape', viewport: { width: 1920, height: 1080 }, readyMs: 84.5, frames: { count: 60, longestMs: 17.1 } },
+    { orientation: 'portrait', viewport: { width: 1080, height: 1920 }, readyMs: null, frames: null },
+  ],
+  cost: { startMs: 0, checkMs: 2310 },
+});
+
 const validators: [string, (v: unknown) => string[], (() => unknown)?][] = [
   ['validateManifest', validateManifest, validManifest],
   ['validateTemplateManifest', validateTemplateManifest, () => structuredClone(template)],
@@ -255,6 +268,7 @@ const validators: [string, (v: unknown) => string[], (() => unknown)?][] = [
     validatePreviewHostMessage,
     () => ({ sfPreview: 1, type: 'draft', manifest: validManifest(), data: validSyncResponse().snapshots }),
   ],
+  ['validateTemplateRuntimeReport', validateTemplateRuntimeReport, runtimeReport],
 ];
 
 describe('every validator is total', () => {
@@ -290,6 +304,7 @@ const parsers: [string, (v: unknown) => unknown, (v: unknown) => string[]][] = [
   ['parseServerSocketMessage', parseServerSocketMessage, validateServerSocketMessage],
   ['parseDeviceSocketMessage', parseDeviceSocketMessage, validateDeviceSocketMessage],
   ['parsePreviewHostMessage', parsePreviewHostMessage, validatePreviewHostMessage],
+  ['parseTemplateRuntimeReport', parseTemplateRuntimeReport, validateTemplateRuntimeReport],
 ];
 
 describe('every parser gives back what its validator accepts', () => {
@@ -317,7 +332,21 @@ describe('every parser gives back what its validator accepts', () => {
 
 // ------------------------------------------------------------------ behaviour
 
+describe('validateTemplateRuntimeReport', () => {
+  it('holds ok to the problems: a report cannot pass with problems or fail without one', () => {
+    expect(validateTemplateRuntimeReport({ ...runtimeReport(), ok: true })).toEqual(['ok must be true exactly when there are no problems']);
+    expect(validateTemplateRuntimeReport({ ...runtimeReport(), problems: [] })).toEqual(['ok must be true exactly when there are no problems']);
+    expect(validateTemplateRuntimeReport({ ...runtimeReport(), ok: true, problems: [] })).toEqual([]);
+  });
+});
+
 describe('validateTemplateManifest', () => {
+  it('lists each orientation once: a repeat would be rendered again by every check of the template', () => {
+    expect(validateTemplateManifest({ ...structuredClone(template), orientations: ['landscape', 'landscape', 'portrait'] })).toEqual([
+      'orientations must not repeat',
+    ]);
+  });
+
   it('checks each field definition, so the spot check can trust it', () => {
     const bad = structuredClone(template) as unknown as { fields: Record<string, unknown> };
     bad.fields.price = { type: 'number', label: 'Price', min: 10, max: 1, step: 0 };

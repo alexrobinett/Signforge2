@@ -4,7 +4,7 @@
  * the MCP server and WebMCP all call tools through `dispatch` (./dispatch.ts); none of them
  * reaches the database another way.
  */
-import type { DeviceCommand } from '@signforge/contract';
+import type { DeviceCommand, TemplateManifest, TemplateRuntimeReport } from '@signforge/contract';
 import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
 import type { UploadSigner } from './upload';
@@ -85,6 +85,14 @@ export interface AlertDeliverer {
 }
 
 /**
+ * Runs the runtime check on a built template: a headless render in a container with no network
+ * (`apps/template-check`), the org's own, so one org's template never shares a browser with
+ * another's. `orgId` is the scope's, never the input's. Implemented by the API with the check
+ * Worker. Rejects when the check could not run; a template that fails it resolves with `ok: false`.
+ */
+export type TemplateChecker = (template: { orgId: string; manifest: TemplateManifest; html: string }) => Promise<TemplateRuntimeReport>;
+
+/**
  * What the connection tools need from the API (apps/api/src/connectors): each provider's OAuth
  * and the CONNECTION_KEY that seals credentials. Tokens never leave it: a tool handles only
  * sealed values, the account's name and the scopes granted.
@@ -125,6 +133,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   feedUrls?: FeedUrlSealer;
   /** Seals alert channels' URLs and secrets (./alert-channels.ts). Undefined where no channel tool runs. */
   alertSecrets?: AlertSecretSealer;
+  /** The runtime check (./templates.ts). Registering an org template refuses to run without it. */
+  templateCheck?: TemplateChecker;
   /** Providers' OAuth (./connections.ts). Undefined where no connection tool runs. */
   connectors?: Connectors;
   /**
@@ -149,13 +159,14 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   rateLimit?: RateLimiter;
 }
 
-export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited';
+export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable';
 
 /**
  * What the adapter counts against a rate limit, keyed by what it knows of the caller (the API: the
  * member and the address). `pairing_claim`: every claim of a pairing code, right or wrong.
+ * `template_check`: every runtime check of an org's template, keyed by the org, whose container it uses.
  */
-export type RateLimitBucket = 'pairing_claim';
+export type RateLimitBucket = 'pairing_claim' | 'template_check';
 /** Counts one attempt in `bucket`; false once the caller is over its limit. */
 export type RateLimiter = (bucket: RateLimitBucket) => Promise<boolean>;
 
