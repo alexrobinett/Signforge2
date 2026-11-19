@@ -11,7 +11,7 @@
  * before anything else in it runs. Inline modules, external scripts, inline event handlers and
  * `javascript:` URLs do not run at all.
  */
-import { INLINE_SCRIPT, isClassicScript, TEMPLATE_SCRIPT_START } from '@signforge/contract';
+import { bundleScripts, TEMPLATE_SCRIPT_START } from '@signforge/contract';
 import { Sha256 } from './sha256';
 
 /** A spot that has not reported ready by this point is skipped. */
@@ -39,21 +39,24 @@ const hashSource = (text: string): string =>
   )}'`;
 
 /**
- * The wrapper and the template's document for a bundle. A script this does not recognise as one (an
- * odd end tag, a script in SVG with character references) keeps its text but does not match any
- * hash, so it is refused: the template fails, nothing more.
+ * The wrapper and the template's document for a bundle. Its scripts are read as the browser reads
+ * them (`bundleScripts`): each one that runs gets the guard right after its first bytes and a hash,
+ * and nothing else in the bundle changes. Any other script gets no hash, so it does not run.
  */
 export function containedFrames(bundle: string): { wrapper: string; template: string } {
+  const { html, scripts: found } = bundleScripts(bundle);
   const scripts = [RELAY];
-  // The parser reads CR LF and CR as LF before a script's text is hashed.
-  const template = bundle.replace(/\r\n?/g, '\n').replace(INLINE_SCRIPT, (_, start: string, text: string) => {
-    // Any other script keeps its text and gets no hash, so it does not run: the bundle check refuses
-    // it first. No parsing: the guard goes right after those exact bytes, a complete directive.
-    if (!isClassicScript(start) || !text.startsWith(TEMPLATE_SCRIPT_START)) return start + text;
-    const armed = TEMPLATE_SCRIPT_START + DISARM + text.slice(TEMPLATE_SCRIPT_START.length);
+  let template = '';
+  let at = 0;
+  for (const s of found) {
+    if (!s.runs) continue;
+    // `runs` means the text starts with exactly TEMPLATE_SCRIPT_START, a complete directive: no parsing.
+    const armed = TEMPLATE_SCRIPT_START + DISARM + html.slice(s.start + TEMPLATE_SCRIPT_START.length, s.end);
     scripts.push(armed);
-    return start + armed;
-  });
+    template += html.slice(at, s.start) + armed;
+    at = s.end;
+  }
+  template += html.slice(at);
   // No network at all: styles are inline, media arrives as blobs. No `frame-src`, so it falls back
   // to `'none'`: the template cannot load a frame or navigate its own.
   const policy = `default-src 'none'; script-src ${scripts.map(hashSource).join(' ')}; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; font-src data:`;
