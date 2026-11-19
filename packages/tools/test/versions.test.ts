@@ -7,7 +7,13 @@ import { dispatch, registry, type Caller } from '../src';
 
 let o: SeededOrg;
 let n = 0;
-const as = (org: OrgScope, kind: 'user' | 'agent'): Caller => ({ org, role: 'owner', actor: { kind, id: `${kind}-1` }, blobs: env.BLOBS });
+const as = (org: OrgScope, kind: 'user' | 'agent'): Caller => ({
+  org,
+  role: 'owner',
+  actor: { kind, id: `${kind}-1` },
+  blobs: env.BLOBS,
+  agentLimiter: { take: async () => ({ ok: true }), audited: async () => {} },
+});
 let person: Caller;
 let agent: Caller;
 

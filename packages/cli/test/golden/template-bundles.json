@@ -1,0 +1,9 @@
+{
+  "base/agenda@1.2.1": "401eb524f0e3a48e093ff6abb58e3376e25f38f8b99c6e05132f0e074e280304",
+  "base/clock@1.2.1": "bf95013ac1d31c52b5dc75640b9cc11d55c972e5f5fb458a174e6c3ec9e89e69",
+  "base/cstore-promo@1.2.2": "eb16dfac26ea0fe1939b5f007d28727e78c7f1e9ea6e0bce6e1ef30e667bebc8",
+  "base/menu-board@1.2.1": "f6ff3b3ef02e46803b38c08ca2e6cfe7a153c1771990e00381839e9878d71d9f",
+  "base/news@1.3.2": "44d29f9431411aab372f7a77ade3afa38f4e66f76877481c81fbbab0d5b34406",
+  "base/photo-promo@1.2.1": "3a1c2be9a3e2f7f700e1bfc8e1c2d71d6cc6020ee300e9befb3cf2af7b69c1bd",
+  "base/weather@1.2.1": "19f93988c7682e3fd3bdcbd4248b4bfde6f6527a61d2c902671213f2bcb7e9b3"
+}

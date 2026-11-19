@@ -25,6 +25,8 @@
     // The fixture template is bundled by the browser tests' global setup; sw.js is served as is.
     // templates.test.ts plays every template from templates/: declared as for apps/api.
     "packages/player": { "entry": ["browser/fixtures/template.ts", "public/sw.js"], "ignoreDependencies": ["@signforge/template-(?!sdk).*"] },
+    // templates.test.ts builds every template from templates/: declared as for apps/api.
+    "packages/cli": { "ignoreDependencies": ["@signforge/template-.*"] },
     // Bundled into a Worker by the upload e2e test.
     "packages/tools": { "entry": ["test/harness-worker.ts"] },
     // Read by url() in each template's style.css; the template build inlines it as a data URL.
