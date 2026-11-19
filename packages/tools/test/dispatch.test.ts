@@ -596,7 +596,12 @@ describe('screen notices', () => {
   });
 
   it('do not fail a committed change when the screen cannot be told', async () => {
-    const screens: ScreenNotifier = { manifest: async () => {}, manifests: async () => {}, command: async () => {}, revoked: async () => Promise.reject(new Error('object unreachable')) };
+    const screens: ScreenNotifier = {
+      manifest: async () => {},
+      manifests: async () => {},
+      command: async () => {},
+      revoked: async () => Promise.reject(new Error('object unreachable')),
+    };
     const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '7'.repeat(64) });
     const r = await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
     expect(r.ok).toBe(true);

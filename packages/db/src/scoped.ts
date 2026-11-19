@@ -333,7 +333,9 @@ const statusColumns = {
   reportedManifestId: s.screens.reportedManifestId,
   lastSeenAt: s.screens.lastSeenAt,
   heartbeatJson: s.screens.heartbeatJson,
-  credentialsRevoked: sql<boolean>`EXISTS (${statusCredentials()}) AND NOT EXISTS (${statusCredentials(isNull(s.screenCredentials.revokedAt))})`.mapWith(Boolean),
+  credentialsRevoked: sql<boolean>`EXISTS (${statusCredentials()}) AND NOT EXISTS (${statusCredentials(isNull(s.screenCredentials.revokedAt))})`.mapWith(
+    Boolean,
+  ),
 };
 
 export function scoped(d1: D1Database, orgId: string) {

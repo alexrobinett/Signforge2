@@ -130,7 +130,11 @@ const publish = defineTool({
     const changed = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.manifest] : []));
     if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report };
     write({ row: undefined, writes: result.writes });
-    const made = switchScreens(ctx, result.revision + 1, changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id })));
+    const made = switchScreens(
+      ctx,
+      result.revision + 1,
+      changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id })),
+    );
     // Stored before the switch commits, so a screen told of a manifest can fetch it. Keyed by
     // content: one stored by a publish that then lost its commit is the same object again.
     await Promise.all(
@@ -230,7 +234,7 @@ function outcomeOf(r: { manifestId: string; desiredManifestId: string | null; re
 const getPublish = defineTool({
   name: 'get_publish',
   description:
-    "Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. offline: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since. Returns { publish, screens }, or { publish: null } if there has been no publish.",
+    'Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. offline: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since. Returns { publish, screens }, or { publish: null } if there has been no publish.',
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -249,7 +253,7 @@ const getPublish = defineTool({
       }),
     ),
   }),
-  example: { publishId: 'pub_example' },
+  example: {},
   handler: async ({ org, input }) => {
     let beforeRevision: number | undefined;
     if (input.publishId) {

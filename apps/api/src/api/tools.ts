@@ -14,6 +14,7 @@ import { type ConnectorDeps, connectorDeps, connectorsFor } from '../connectors'
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
 import { feedUrlSealer } from '../data/cipher';
+import { publishLock } from '../publish';
 import { templateCheckAllowed, templateChecker } from '../template-check';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
@@ -46,6 +47,7 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     connectors: connectorsFor(c.env, connectors ?? connectorDeps(c.env), new URL(CALLBACK_PATH, c.req.url).href),
     templateCheck: templateChecker(c.env),
     screens: screenNotifier(c.env),
+    publishLock: publishLock(c.env, c.var.org.orgId),
     // A claim counts against the member and against the address, so many accounts on one address share a limit.
     // A template check counts against the org, whose one container it uses.
     rateLimit: async (bucket) => {

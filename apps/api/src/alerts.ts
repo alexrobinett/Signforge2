@@ -5,7 +5,7 @@
  * incident row is written before the email, and only by the check that wrote it, so an alert is
  * sent at most once per incident however the runs overlap.
  */
-import { findAlertWork, orgMembers, scoped } from '@signforge/db';
+import { findAlertWork, finishPublishes, orgMembers, scoped } from '@signforge/db';
 import { orgSettings, UNREACHABLE_AFTER_MS, type Audience } from '@signforge/tools';
 import type { EmailMessage, EmailSender } from './email';
 
@@ -76,4 +76,15 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB'>, email: EmailSender
       text: `${s.screenName} in ${s.orgName} is back at ${time(s.lastSeenAt)}, after ${minutes(s.lastSeenAt - s.since)} without a heartbeat.`,
     });
   }
+}
+
+/**
+ * Mark finished every publish whose rollout is over (`finishPublishes`), in the same five-minute
+ * run. This is where the `publish_finished` alert is to be sent: once the alert queue lands (#94,
+ * gh-88), build a `publish.finished` event for each publish returned and enqueue it with
+ * `org.alertDeliveries.enqueue` to the channels the org's rule names, as its notes describe.
+ */
+export async function finishRollouts(env: Pick<Env, 'DB'>, now: number): Promise<void> {
+  const finished = await finishPublishes(env.DB, now);
+  if (finished.length) console.log(`[publish] ${finished.length} rollouts finished`);
 }

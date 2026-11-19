@@ -81,7 +81,9 @@ export async function finishPublishes(d1: D1Database, now: number): Promise<{ or
       .select({ one: sql`1` })
       .from(ps)
       .innerJoin(sc, and(eq(sc.orgId, ps.orgId), eq(sc.id, ps.screenId)))
-      .where(and(eq(ps.orgId, p.orgId), eq(ps.publishId, p.id), eq(sc.desiredManifestId, ps.manifestId), sql`${sc.reportedManifestId} IS NOT ${ps.manifestId}`)),
+      .where(
+        and(eq(ps.orgId, p.orgId), eq(ps.publishId, p.id), eq(sc.desiredManifestId, ps.manifestId), sql`${sc.reportedManifestId} IS NOT ${ps.manifestId}`),
+      ),
   );
   return db
     .update(p)
