@@ -7,7 +7,7 @@
  */
 import { type LiveData, SNAPSHOT_STALE_MS, type TemplateManifest } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { Link2Icon } from 'lucide-react';
+import { ChevronRightIcon, Link2Icon, TriangleAlertIcon } from 'lucide-react';
 import { FieldForm } from '~/components/spots/field-form';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
@@ -30,6 +30,7 @@ import {
 } from '~/lib/live-data';
 import { ago } from '~/lib/screen-status';
 import { fieldProblems, type SpotDraft, type SpotView } from '~/lib/spots';
+import { cn } from '~/lib/utils';
 import { dataSourceQuery, dataSourcesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 import { sourceStateOf, type SourceTarget } from '~/state/spot-source';
@@ -42,16 +43,26 @@ const INTRO: Record<LiveData['source'], string> = {
   ical: 'Pick a calendar: the events come from it and update by themselves.',
 };
 
-/** A live value as the read-only list shows it; Open-Meteo's codes in words. */
-function shown(path: string, value: unknown): string {
-  if (path === 'current.weather_code' && typeof value === 'number') return `${value} (${weatherWords(value) ?? 'unknown'})`;
-  if (path === 'current.is_day' && typeof value === 'number') return value === 1 ? 'Day' : 'Night';
-  if (value === undefined || value === null) return 'No value yet';
+/** Open-Meteo's values with their units; the condition and day or night are in the summary instead. */
+const WEATHER_SUFFIX: [RegExp, (u: WeatherUnits) => string][] = [
+  [/temperature/, (u) => u.temperature],
+  [/wind_speed/, (u) => ` ${u.wind}`],
+  [/humidity/, () => '%'],
+];
+const IN_SUMMARY = new Set(['current.weather_code', 'current.is_day']);
+
+/** A live value as the read-only list shows it. */
+function shown(value: unknown, suffix = ''): string {
+  if (value === undefined || value === null) return 'No value';
   if (Array.isArray(value)) return `${value.length} ${value.length === 1 ? 'item' : 'items'}`;
   if (typeof value === 'string') return value || 'None';
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'number') return `${value}${suffix}`;
+  if (typeof value === 'boolean') return String(value);
   return JSON.stringify(value);
 }
+
+/** A field's label without its help in brackets: "Feed language (BCP 47, e.g. fr-FR)" is "Feed language". */
+const shortLabel = (label: string) => label.replace(/\s*\(.*\)$/, '');
 
 /** The first rows of a live list, by their first text: headlines, events. */
 function firstRows(value: unknown): string[] {
@@ -62,6 +73,10 @@ function firstRows(value: unknown): string[] {
   });
 }
 
+/** Whether screens show the snapshot: one confirmed within `SNAPSHOT_STALE_MS`. */
+const isFresh = (snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
+  snapshot !== null && now - Date.parse(snapshot.checkedAt) <= SNAPSHOT_STALE_MS;
+
 /** How fresh the source's data is, and what screens do about it. */
 function freshness(source: DataSourceView, snapshot: SnapshotView | null, now: number): string {
   const failing = source.lastError ? pollErrorWords(source.lastError) : undefined;
@@ -69,9 +84,9 @@ function freshness(source: DataSourceView, snapshot: SnapshotView | null, now: n
     return failing
       ? `The first check failed: ${failing}. Screens show the fallback values until it works.`
       : 'Waiting for the first check, within a minute. Until then screens show the fallback values.';
-  const checked = Date.parse(snapshot.checkedAt);
-  if (now - checked > SNAPSHOT_STALE_MS) return `Not confirmed for ${ago(now - checked)}: screens show the fallback values.`;
-  const when = `Checked ${ago(now - checked)} ago.`;
+  const since = now - Date.parse(snapshot.checkedAt);
+  if (!isFresh(snapshot, now)) return `Not confirmed for ${ago(since)}: screens show the fallback values.`;
+  const when = since < 60_000 ? 'Checked just now.' : `Checked ${ago(since)} ago.`;
   return failing ? `${when} The last check failed: ${failing}. Screens keep this data for a day, then show the fallback values.` : when;
 }
 
@@ -80,7 +95,7 @@ function LiveValues({
   dataSourceId,
   manifest,
   live,
-  unit,
+  units,
   canManage,
   onChange,
 }: {
@@ -88,8 +103,8 @@ function LiveValues({
   dataSourceId: string;
   manifest: TemplateManifest;
   live: LiveData;
-  /** The temperature unit the spot shows. */
-  unit: string;
+  /** The units the spot shows a forecast in. */
+  units: WeatherUnits;
   canManage: boolean;
   onChange: () => void;
 }) {
@@ -107,34 +122,54 @@ function LiveValues({
       </p>
     );
   const { dataSource, snapshot } = read;
-  const temperature = live.source === 'open-meteo' ? liveValue(snapshot, 'current.temperature_2m') : undefined;
+  const fresh = isFresh(snapshot, now);
+  const weather = live.source === 'open-meteo';
+  const temperature = weather ? liveValue(snapshot, 'current.temperature_2m') : undefined;
   const summary =
     typeof temperature === 'number'
-      ? [`${Math.round(temperature)}${unit}`, weatherWords(liveValue(snapshot, 'current.weather_code'))].filter(Boolean).join(', ')
+      ? [
+          `${Math.round(temperature)}${units.temperature}`,
+          weatherWords(liveValue(snapshot, 'current.weather_code')),
+          liveValue(snapshot, 'current.is_day') === 0 ? 'night' : undefined,
+        ]
+          .filter(Boolean)
+          .join(', ')
       : undefined;
+  const rows = Object.entries(live.fields).filter(([, path]) => !(weather && IN_SUMMARY.has(path)));
   return (
-    <div className="flex flex-col gap-2.5 rounded-[10px] border border-primary/25 bg-accent p-3">
-      <div className="flex items-start justify-between gap-2">
-        <span className="min-w-0 font-medium break-words">{dataSource.name}</span>
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-accent-foreground">
+    <div
+      className={cn(
+        'flex flex-col gap-2.5 rounded-[10px] border p-3',
+        fresh ? 'border-primary/25 bg-accent' : 'border-status-updating/50 bg-status-updating-muted',
+      )}
+    >
+      {fresh ? (
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-foreground">
           <Link2Icon className="size-3.5" aria-hidden />
           Live data
         </span>
-      </div>
-      {summary && <p className="text-[15px] font-semibold">{summary}</p>}
-      {snapshot && (
+      ) : (
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-status-updating-foreground">
+          <TriangleAlertIcon className="size-3.5" aria-hidden />
+          Showing the fallback
+        </span>
+      )}
+      <span className="font-medium break-words">{dataSource.name}</span>
+      {fresh && summary && <p className="text-[15px] font-semibold">{summary}</p>}
+      {fresh && (
         <dl aria-label="Live values" className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-sm">
-          {Object.entries(live.fields).map(([field, path]) => {
+          {rows.map(([field, path]) => {
             const value = liveValue(snapshot, path);
-            const rows = firstRows(value);
+            const first = firstRows(value);
+            const suffix = weather ? WEATHER_SUFFIX.find(([p]) => p.test(path))?.[1](units) : undefined;
             return (
               <div key={field} className="contents">
-                <dt className="text-muted-foreground">{manifest.fields[field]?.label ?? field}</dt>
-                <dd className="text-right font-mono">{shown(path, value)}</dd>
-                {rows.length > 0 && (
+                <dt className="text-muted-foreground">{shortLabel(manifest.fields[field]?.label ?? field)}</dt>
+                <dd className="text-right tabular-nums">{shown(value, suffix)}</dd>
+                {first.length > 0 && (
                   <dd className="col-span-2 mb-1">
                     <ul className="flex flex-col gap-0.5 border-l-2 border-primary/25 pl-2">
-                      {rows.map((r, i) => (
+                      {first.map((r, i) => (
                         // biome-ignore lint/suspicious/noArrayIndexKey: the rows are a read-only snapshot, in its order.
                         <li key={i} className="truncate">
                           {r}
@@ -150,7 +185,7 @@ function LiveValues({
       )}
       <p className="text-[13px] leading-snug text-foreground">{freshness(dataSource, snapshot, now)}</p>
       {canManage && (
-        <Button type="button" variant="outline" size="sm" className="self-start" onClick={onChange}>
+        <Button type="button" variant="outline" size="sm" className="self-start border-primary/30 text-primary" onClick={onChange}>
           Change source
         </Button>
       )}
@@ -266,58 +301,61 @@ function FeedPicker({ target, sources, boundId }: { target: SourceTarget; source
         </div>
       )}
       {st.adding || mine.length === 0 ? (
-        <fieldset className="flex flex-col gap-3 rounded-lg border p-3">
-          <legend className="px-1 font-medium">Add a {word}</legend>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="source-url" className="text-sm font-medium">
-              Address
-            </label>
-            <Input
-              id="source-url"
-              type="url"
-              inputMode="url"
-              value={st.feedUrl}
-              onChange={(e) => editFeed(spot.id, { feedUrl: e.target.value })}
-              aria-describedby="source-url-help"
-            />
-            <p id="source-url-help" className="text-sm text-muted-foreground">
-              {format === 'ical'
-                ? 'An https iCal address (.ics), such as a Google or Outlook calendar shared by link. It is stored encrypted and never shown again.'
-                : 'An https RSS or Atom address. It is stored encrypted and never shown again.'}
-            </p>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="source-name" className="text-sm font-medium">
-              Name
-            </label>
-            <Input id="source-name" value={st.feedName} maxLength={100} onChange={(e) => editFeed(spot.id, { feedName: e.target.value })} />
-          </div>
-          {format === 'ical' && (
-            <div className="flex items-center justify-between gap-3">
-              <label htmlFor="source-horizon" className="text-sm font-medium">
-                Days ahead
+        <fieldset className="rounded-[10px] border p-3">
+          {/* Floated, so it sits inside the frame instead of cutting its border. */}
+          <legend className="float-left mb-3 font-medium">Add a {word}</legend>
+          <div className="clear-left flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="source-url" className="text-sm font-medium">
+                Address
               </label>
               <Input
-                id="source-horizon"
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={366}
-                value={st.horizonDays}
-                onChange={(e) => editFeed(spot.id, { horizonDays: Math.round(e.target.valueAsNumber) || 1 })}
-                className="w-24 text-center font-mono"
+                id="source-url"
+                type="url"
+                inputMode="url"
+                value={st.feedUrl}
+                onChange={(e) => editFeed(spot.id, { feedUrl: e.target.value })}
+                aria-describedby="source-url-help"
               />
+              <p id="source-url-help" className="text-sm text-muted-foreground">
+                {format === 'ical'
+                  ? 'An https iCal address (.ics), such as a Google or Outlook calendar shared by link. It is stored encrypted and never shown again.'
+                  : 'An https RSS or Atom address. It is stored encrypted and never shown again.'}
+              </p>
             </div>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" disabled={st.pending || !st.feedUrl.trim()} onClick={() => void addFeed(target)}>
-              {st.pending ? 'Adding…' : `Add ${word}`}
-            </Button>
-            {mine.length > 0 && (
-              <Button type="button" variant="ghost" onClick={() => openForm(spot.id, false)}>
-                Cancel
-              </Button>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="source-name" className="text-sm font-medium">
+                Name
+              </label>
+              <Input id="source-name" value={st.feedName} maxLength={100} onChange={(e) => editFeed(spot.id, { feedName: e.target.value })} />
+            </div>
+            {format === 'ical' && (
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="source-horizon" className="text-sm font-medium">
+                  Days ahead
+                </label>
+                <Input
+                  id="source-horizon"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={366}
+                  value={st.horizonDays}
+                  onChange={(e) => editFeed(spot.id, { horizonDays: Math.round(e.target.valueAsNumber) || 1 })}
+                  className="w-24 text-center font-mono"
+                />
+              </div>
             )}
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" disabled={st.pending || !st.feedUrl.trim()} onClick={() => void addFeed(target)}>
+                {st.pending ? 'Adding…' : `Add ${word}`}
+              </Button>
+              {mine.length > 0 && (
+                <Button type="button" variant="ghost" onClick={() => openForm(spot.id, false)}>
+                  Cancel
+                </Button>
+              )}
+            </div>
           </div>
         </fieldset>
       ) : (
@@ -371,7 +409,7 @@ export function SourceSection({
           dataSourceId={boundId}
           manifest={manifest}
           live={live}
-          unit={unitsOf(manifest, draft.data).temperature}
+          units={unitsOf(manifest, draft.data)}
           canManage={canManage}
           onChange={() => changeSource(spot.id, true, typeof place === 'string' ? place : '')}
         />
@@ -388,8 +426,11 @@ export function SourceSection({
           {error}
         </p>
       )}
-      <details className="rounded-lg border" open={fallbackBad || undefined}>
-        <summary className="cursor-pointer rounded-lg px-3 py-2.5 font-medium">If the source is down</summary>
+      <details className="group rounded-[10px] border" open={fallbackBad || undefined}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-[10px] px-3 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden">
+          <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden />
+          If the source is down
+        </summary>
         <div className="flex flex-col gap-4 px-3 pb-4">
           <p className="text-sm text-muted-foreground">What screens show while the source has no fresh data. They start as the template's own values.</p>
           <FieldForm fields={fallback} draft={draft} assets={assets} onChange={onChange} />

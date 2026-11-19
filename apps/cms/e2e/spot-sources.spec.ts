@@ -122,7 +122,7 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
   await page.reload();
   await hydrated(page);
   await expect(form.getByText('88°F, overcast')).toBeVisible();
-  await expect(form.getByText(/Checked .* ago\./)).toBeVisible();
+  await expect(form.getByText(/Checked (just now|.* ago)\./)).toBeVisible();
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   await expect.poll(() => stageShows(page, '91°'), { timeout: 10_000 }).toBe(true);
   await axe(page);
