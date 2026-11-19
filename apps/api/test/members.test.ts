@@ -180,3 +180,16 @@ describe('the audit log', () => {
     for (const r of rows) expect(r.detailJson).not.toContain(SECRET);
   });
 });
+
+describe('list_audit_log over /api/tools', () => {
+  it("refuses a cursor from the org the member switched away from, so no page mixes two orgs' rows", async () => {
+    const { owner } = await team();
+    const first = await owner.tool('list_audit_log', { limit: 1 });
+    const { next } = (await first.json()) as { next: string };
+    expect(next).toBeTruthy();
+    await owner.createOrg('Second Co');
+    const res = await owner.tool('list_audit_log', { limit: 1, cursor: next });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_input', message: expect.stringContaining('another organization') });
+  });
+});

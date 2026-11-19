@@ -23,12 +23,12 @@ async function list(input: Record<string, unknown>, role: Caller['role'] = 'view
   return r.output as { entries: Entry[]; next: string | null };
 }
 
-/** Every page of the log for `input`, in order. */
-async function all(input: Record<string, unknown>) {
+/** Every page of the log for `input`, in order, as `role` reads it. */
+async function all(input: Record<string, unknown>, role: Caller['role'] = 'viewer') {
   const out: Entry[] = [];
   let cursor: string | undefined;
   do {
-    const p = await list({ ...input, ...(cursor ? { cursor } : {}) });
+    const p = await list({ ...input, ...(cursor ? { cursor } : {}) }, role);
     out.push(...p.entries);
     cursor = p.next ?? undefined;
   } while (cursor);
@@ -122,6 +122,14 @@ describe('list_audit_log', () => {
     expect(JSON.stringify(await all({}))).not.toContain('hunter2');
     // Search reads what was stored, so a secret cannot be found by guessing it either.
     expect(await all({ query: 'hunter2' })).toEqual([]);
+  });
+
+  it("refuses a cursor made in another org, so a member who switched org cannot page one org's log into another's", async () => {
+    const other = await seedOrg(env.DB, 'audit-other-org');
+    const first = await list({ limit: 1 });
+    expect(first.next).not.toBeNull();
+    const r = await dispatch(registry, 'list_audit_log', { limit: 1, cursor: first.next }, member(other.orgId, 'viewer'));
+    expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'cursor' }] });
   });
 
   it('refuses a cursor it did not make', async () => {

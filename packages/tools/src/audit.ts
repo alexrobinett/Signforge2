@@ -4,7 +4,7 @@
  * redacted when the row was written (`redact()` in ./dispatch.ts) and are returned as stored.
  *
  * An entry carries no id of its own: an agent-limit row's id is longer than the contract's id rules
- * allow (#77), and the cursor, made from each row's time and `rowid`, is what pages.
+ * allow (#77), and the cursor, made from each row's time and `rowid` and the org, is what pages.
  */
 import { z } from 'zod';
 import { keysetPage, nextOutput, pageInput } from './paging';
@@ -57,7 +57,7 @@ const listAuditLog = defineTool({
       (after, limit) =>
         org.auditLog.page({
           limit,
-          after: after && seqKey(after),
+          after: after && seqKey(after, org.orgId),
           actorKind: actor?.kind,
           actorId: actor?.id,
           action,
@@ -67,7 +67,7 @@ const listAuditLog = defineTool({
           to,
           query,
         }),
-      (e) => [e.at, e.seq],
+      (e) => [e.at, e.seq, org.orgId],
     );
     const entries = rows.map((e) => ({
       at: e.at,
@@ -80,13 +80,16 @@ const listAuditLog = defineTool({
   },
 });
 
-/** A cursor's key as this list makes it: a time and a rowid. */
-function seqKey(key: readonly (string | number)[]): [number, number] {
-  const [at, seq] = key;
-  if (key.length === 2 && typeof at === 'number' && typeof seq === 'number') return [at, seq];
-  throw new ToolError('invalid_input', 'cursor is not one this list returned; start again without it', [
-    { path: 'cursor', message: 'not a cursor from this list' },
-  ]);
+/**
+ * A cursor's key as this list makes it: a time, a rowid and the org it was made in. The org is
+ * refused anywhere else: the caller's org is the session's, so a member who switched org would
+ * otherwise page one org's log on into another's.
+ */
+function seqKey(key: readonly (string | number)[], orgId: string | null): [number, number] {
+  const [at, seq, org] = key;
+  if (key.length === 3 && typeof at === 'number' && typeof seq === 'number' && org === orgId) return [at, seq];
+  const why = key.length === 3 && typeof org === 'string' ? 'it was made in another organization' : 'it is not one this list returned';
+  throw new ToolError('invalid_input', `cursor cannot be used: ${why}; start again without it`, [{ path: 'cursor', message: why }]);
 }
 
 export const auditTools = [listAuditLog];
