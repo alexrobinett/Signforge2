@@ -35,7 +35,9 @@ describe('a rollout', () => {
     ]);
     expect(segs[0]!.label).toBe('playing v15');
     expect(segs[1]!.why).toBe('5 files still to fetch, then they switch.');
-    expect(segments({ revision: 4, restoresRevision: 2 }, [screen('Deli', 'playing'), screen('Window', 'downloading')], NOW).map((s) => [s.label, s.why])).toEqual([
+    expect(
+      segments({ revision: 4, restoresRevision: 2 }, [screen('Deli', 'playing'), screen('Window', 'downloading')], NOW).map((s) => [s.label, s.why]),
+    ).toEqual([
       ['playing v2 again', 'Confirmed by their last check-in.'],
       ['downloading', 'Fetching their files, then they switch.'],
     ]);
