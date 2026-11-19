@@ -10,11 +10,13 @@
  */
 import { describeTools, dispatch, grantOf, registry, type Caller, type RateLimitBucket, type ToolErrorCode } from '@signforge/tools';
 import type { Context, Hono } from 'hono';
-import { type ConnectorDeps, connectorDeps, connectorsFor } from '../connectors';
+import { type ConnectorDeps, connectorDeps, connectorsFor, workerFetch } from '../connectors';
 import { clientIp } from '../device/pairing';
 import { screenNotifier } from '../device/screens';
 import { feedUrlSealer } from '../data/cipher';
+import { feedGuards } from '../data/fetch';
 import { openMeteoPlaces } from '../data/places';
+import { tableReader } from '../data/tables';
 import { templateCheckAllowed, templateChecker } from '../template-check';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
@@ -33,6 +35,7 @@ const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = {
 const LIMITS: Record<Exclude<RateLimitBucket, 'template_check'>, (env: Env) => RateLimit> = {
   pairing_claim: (env) => env.PAIR_CLAIM_LIMIT,
   place_search: (env) => env.PLACE_SEARCH_LIMIT,
+  table_read: (env) => env.TABLE_READ_LIMIT,
 };
 
 /** The CMS's client id in the audit log. */
@@ -51,6 +54,7 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     uploads: uploadSigner(c.env, c.req.url),
     feedUrls: feedUrlSealer(c.env),
     places: openMeteoPlaces(c.env),
+    tables: tableReader(feedGuards(c.env, workerFetch)),
     connectors: connectorsFor(c.env, connectors ?? connectorDeps(c.env), new URL(CALLBACK_PATH, c.req.url).href),
     templateCheck: templateChecker(c.env),
     screens: screenNotifier(c.env),

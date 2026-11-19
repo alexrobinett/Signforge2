@@ -170,3 +170,24 @@ export function dohResolver(fetcher: typeof fetch): FetchGuards['resolve'] {
     return (await Promise.all([ask('A'), ask('AAAA')])).flat();
   };
 }
+
+/** What a stubbed name resolves to in dev: a public address (TEST-NET would be refused as reserved). */
+const STUB_ADDRESS = '93.184.215.14';
+
+/**
+ * The guards every feed fetch uses: the poller's and `read_table`'s. In dev only, `FEED_STUB_URL`
+ * names an origin (the CMS e2e's file server) that answers for every host, the path and query
+ * kept, with each name resolving to a public address, so the URL checks still run on what was
+ * typed: a deployed API never sends a feed request elsewhere, as GEOCODING_URL.
+ */
+export function feedGuards(env: { ENVIRONMENT: string; FEED_STUB_URL?: string }, fetcher: typeof fetch): FetchGuards {
+  const stub = env.ENVIRONMENT === 'dev' ? env.FEED_STUB_URL : undefined;
+  if (!stub) return { fetch: fetcher, resolve: dohResolver(fetcher) };
+  return {
+    resolve: async () => [STUB_ADDRESS],
+    fetch: (input, init) => {
+      const { pathname, search } = new URL(input instanceof Request ? input.url : input);
+      return fetcher(new URL(`${pathname}${search}`, stub), init);
+    },
+  };
+}

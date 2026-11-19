@@ -29,6 +29,8 @@ interface DataSourceSettings {
   DATA_SOURCE_KEY?: string;
   /** Dev only: where `find_places` searches instead of Open-Meteo's geocoding (src/data/places.ts). The CMS e2e points it at a stub. */
   GEOCODING_URL?: string;
+  /** Dev only: the origin that answers every feed fetch, path and query kept (src/data/fetch.ts `feedGuards`). The CMS e2e points it at its file server. */
+  FEED_STUB_URL?: string;
 }
 /** Connected accounts (src/connectors). */
 interface ConnectorSettings {
