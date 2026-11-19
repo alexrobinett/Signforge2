@@ -144,7 +144,10 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
     source(t.spot.id, (s) => ({ ...initial, units: s.units, fallbackOpen: s.fallbackOpen }));
   }
 
-  /** Makes a source, or finds the one made with the same id meanwhile. */
+  /**
+   * Makes a source and reads the org's list again. One made with the same id since the list was
+   * read (another tab, a teammate) is refused as a conflict, shown as the error; picking again finds it.
+   */
   async function create(orgId: string, input: Record<string, unknown> & { id?: string }): Promise<string> {
     try {
       return sourceIdOf(await callTool('create_data_source', { ...input, idempotencyKey: crypto.randomUUID() }));
