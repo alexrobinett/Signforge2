@@ -155,11 +155,13 @@ test('the table source on a phone: no sideways scroll, light and dark', async ()
   await page.setViewportSize({ width: 412, height: 915 });
   await form.getByRole('combobox', { name: 'Only rows where' }).scrollIntoViewIfNeeded();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
   await shots(page, '43-spot-source-table-phone');
   await form.getByRole('button', { name: 'Change source' }).click();
   await readLink(page);
   await expect(form.getByRole('table', { name: 'First rows of the file' })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
   await shots(page, '44-spot-source-table-read-phone');
   await page.setViewportSize({ width: 1920, height: 1200 });
   expect(spotId).toBeTruthy();

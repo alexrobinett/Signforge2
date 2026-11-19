@@ -86,6 +86,11 @@ describe('a table template (issue #84)', () => {
   it('guesses each column by its name or a usual other word, and gives each property without a default a column', () => {
     expect(guessMapping(items, ['Section', 'Item', 'Cost', 'Notes'])).toEqual({ columns: { name: 'Item', price: 'Cost' } });
     expect(guessMapping(items, ['A', 'B', 'Description'])).toEqual({ columns: { name: 'A', price: 'B', description: 'Description' } });
+    // Property names an org template chose, which are also every object's keys.
+    const odd: Extract<FieldDef, { type: 'list' }> = JSON.parse(
+      '{"type":"list","label":"Rows","item":{"constructor":{"type":"text","label":"Maker"},"toString":{"type":"text","label":"Label","default":""}}}',
+    );
+    expect(guessMapping(odd, ['Maker', 'Label'])).toEqual({ columns: { constructor: 'Maker', toString: 'Label' } });
   });
 
   it('types its list fields until they are bound, then they are live', () => {
