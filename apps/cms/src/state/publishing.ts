@@ -73,7 +73,9 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     const previous = made.previousId;
     toast.success(made.screens ? `Published ${v} to ${screensWord(made.screens)}` : `Published ${v}`, {
       description: notes.join(' '),
-      ...(previous && made.screens ? { action: { label: 'Undo', onClick: () => void get().rollBackTo(orgId, { id: previous, revision: made.revision - 1 }) } } : {}),
+      ...(previous && made.screens
+        ? { action: { label: 'Undo', onClick: () => void get().rollBackTo(orgId, { id: previous, revision: made.revision - 1 }) } }
+        : {}),
       cancel: viewRollout(made.id),
       duration: 10_000,
     });

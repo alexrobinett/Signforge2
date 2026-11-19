@@ -10,7 +10,7 @@ import { displayHours, ifVersion, locale, timezone, version } from './fields';
 import { UNREACHABLE_AFTER_MS } from './screen-state';
 import { defineTool } from './tool';
 
-/** The alerts there are. Only `screen_offline` is sent today; publishing (M3-18) and agents (Milestone 4) send the others. */
+/** The alerts there are. Only `screen_offline` is sent today; `publish_finished` waits for the alert queue (#94), `agent_refused` for agents (Milestone 4). */
 const ALERT_KINDS = ['screen_offline', 'publish_finished', 'agent_refused'] as const;
 type AlertKind = (typeof ALERT_KINDS)[number];
 

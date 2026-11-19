@@ -8,7 +8,7 @@ import { getPublish, getPublishes } from '~/server/publishes.functions';
 
 const POLL_MS = 15_000;
 
-export const publishKeys = {
+const publishKeys = {
   all: (orgId: string) => ['org', orgId, 'publishes'] as const,
   /** null: the latest publish. */
   one: (orgId: string, publishId: string | null) => ['org', orgId, 'publishes', publishId ?? 'latest'] as const,

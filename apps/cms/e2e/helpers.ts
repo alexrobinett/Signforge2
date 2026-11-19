@@ -90,7 +90,7 @@ export async function signInAs(page: Page, email: string, address: string) {
 
 const sha256 = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
 
-/** Publish one image spot, called `spot`, to the screen, as `sf push` does until the CMS publishes (M3-18). */
+/** Publish one image spot, called `spot`, to the screen, as `sf push` does: a manifest built outside the CMS. */
 export async function publishImage(page: Page, screenId: string, spot = 'Welcome'): Promise<string> {
   const admin = `http://127.0.0.1:${API_PORT}/admin/screens/${screenId}`;
   const headers = { authorization: `Bearer ${ADMIN_TOKEN}` };

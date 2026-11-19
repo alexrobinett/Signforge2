@@ -8,7 +8,7 @@
  *     and is reported; it never blocks the rest.
  *   - `compileInputFor(graph, screenId)` is a screen's published graph as `compileScreen` takes it.
  *   - `publishOrg(org, opts)` does all three and compiles every screen. It stages its writes and
- *     never commits; the caller (M3-18's publish tool) does, through the dispatcher, in one batch
+ *     never commits; the caller (the publish tool, ./publish.ts) does, through the dispatcher, in one batch
  *     with the screens' desired-manifest switches, which the writes put in order.
  *
  * Brand: `screenInput` gives the compiler the kits this screen may get (its own, its groups',

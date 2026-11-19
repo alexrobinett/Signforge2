@@ -12,7 +12,7 @@ const port = (name: string, fallback: number) => {
 export const API_PORT = port('E2E_API_PORT', 8797);
 export const CMS_PORT = port('E2E_CMS_PORT', 3997);
 export const CMS_URL = `http://localhost:${CMS_PORT}`;
-/** The dev API's deploy secret for this run, which turns on `/admin` (how `sf push` publishes until M3-18). */
+/** The dev API's deploy secret for this run, which turns on `/admin` (how `sf push` publishes, and seeding templates). */
 export const ADMIN_TOKEN = 'e2e-admin-token';
 
 /** Scratch space for one run: the API's log, local D1 state and the dev registry. */
