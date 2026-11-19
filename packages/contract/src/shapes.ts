@@ -1,11 +1,5 @@
 /** Every shape in the contract, with the constants that go with it. The checks for them are in `validate.ts`. */
 
-/**
- * The frame protocol this build of the SDK speaks. Stamped into every template bundle.
- *   1  init, play, stop
- *   2  adds `clock` and `theme` to init, and `reset`: a template can take new data without a reload
- */
-export const PROTOCOL_VERSION = 2;
 /** Frame protocols this player can drive. */
 export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
 /**
@@ -376,21 +370,6 @@ export type BrandColor = (typeof BRAND_COLORS)[number];
 export type BrandColors = Record<BrandColor, string>;
 export const BRAND_SHAPES = ['square', 'soft', 'round'] as const;
 export type BrandShape = (typeof BRAND_SHAPES)[number];
-
-/** The CSS custom properties the SDK sets on a template's root from a theme. */
-export const BRAND_CSS_VARS = {
-  primary: '--sf-primary',
-  onPrimary: '--sf-on-primary',
-  accent: '--sf-accent',
-  onAccent: '--sf-on-accent',
-  background: '--sf-bg',
-  surface: '--sf-surface',
-  text: '--sf-text',
-  muted: '--sf-muted',
-  radius: '--sf-radius',
-  fontDisplay: '--sf-font-display',
-  fontBody: '--sf-font-body',
-} as const;
 
 /** A field default of `$brand.<colour>` names a brand colour; the compiler replaces it. */
 export const BRAND_TOKEN = /^\$brand\.([A-Za-z]+)$/;
