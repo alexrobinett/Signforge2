@@ -10,7 +10,7 @@ import { displayHours, ifVersion, locale, timezone, version } from './fields';
 import { UNREACHABLE_AFTER_MS } from './screen-state';
 import { defineTool } from './tool';
 
-/** The alerts there are. Only `screen_offline` is sent today; publishing (M3-18) and agents (Milestone 4) send the others. */
+/** The alerts there are. Only `screen_offline` is sent today (by email, to Slack and to the webhook); publishing (M3-18) and agents (Milestone 4) send the others. */
 const ALERT_KINDS = ['screen_offline', 'publish_finished', 'agent_refused'] as const;
 type AlertKind = (typeof ALERT_KINDS)[number];
 
@@ -18,14 +18,30 @@ type AlertKind = (typeof ALERT_KINDS)[number];
 const AUDIENCES = ['owners', 'editors', 'everyone'] as const;
 export type Audience = (typeof AUDIENCES)[number];
 
-const rule = z.object({ who: z.enum(AUDIENCES), email: z.boolean().describe('Send it by email') });
+/** Who gets the email, and which channels get it: `who` is for email only, as Slack and the webhook post to one place (#88). */
+const rule = z.object({
+  who: z.enum(AUDIENCES).describe('Who gets it by email'),
+  email: z.boolean().describe('Send it by email'),
+  slack: z.boolean().describe("Post it to the org's Slack channel, if one is set (set_slack_alert_channel)"),
+  webhook: z.boolean().describe("Send it to the org's webhook, if one is set (set_webhook_alert_channel)"),
+});
 type AlertRule = z.output<typeof rule>;
 
 const DEFAULT_ALERTS: Record<AlertKind, AlertRule> = {
-  screen_offline: { who: 'editors', email: true },
-  publish_finished: { who: 'editors', email: true },
-  agent_refused: { who: 'owners', email: true },
+  screen_offline: { who: 'editors', email: true, slack: false, webhook: false },
+  publish_finished: { who: 'editors', email: true, slack: false, webhook: false },
+  agent_refused: { who: 'owners', email: true, slack: false, webhook: false },
 };
+
+/**
+ * Each kind's rule with `change`'s fields over `base`'s. Stored rules are read over the defaults,
+ * so a rule stored before Slack and the webhook existed has them off.
+ */
+const mergeRules = (base: Record<AlertKind, AlertRule>, change: Partial<Record<AlertKind, Partial<AlertRule>>>): Record<AlertKind, AlertRule> => ({
+  screen_offline: { ...base.screen_offline, ...change.screen_offline },
+  publish_finished: { ...base.publish_finished, ...change.publish_finished },
+  agent_refused: { ...base.agent_refused, ...change.agent_refused },
+});
 
 const DEFAULT_UPDATE_WINDOW = { from: '02:00', to: '04:00' };
 
@@ -76,7 +92,7 @@ export async function unreachableAfterMs(org: OrgScope): Promise<number> {
 }
 
 function settingsOf(row: OrgSettings | undefined): SettingsView {
-  const stored: Partial<Record<AlertKind, AlertRule>> = row?.alertsJson ? JSON.parse(row.alertsJson) : {};
+  const stored: Partial<Record<AlertKind, Partial<AlertRule>>> = row?.alertsJson ? JSON.parse(row.alertsJson) : {};
   return {
     timezone: row?.timezone ?? null,
     locale: row?.locale ?? null,
@@ -85,7 +101,7 @@ function settingsOf(row: OrgSettings | undefined): SettingsView {
     unreachableAfterMinutes: (row?.unreachableAfterMs ?? UNREACHABLE_AFTER_MS) / 60_000,
     editorsPublish: row?.editorsPublish ?? true,
     auditRetentionDays: row?.auditRetentionDays ?? DEFAULT_AUDIT_RETENTION_DAYS,
-    alerts: { ...DEFAULT_ALERTS, ...stored },
+    alerts: mergeRules(DEFAULT_ALERTS, stored),
     version: row?.rowVersion ?? 1,
     updatedAt: row?.updatedAt ?? null,
   };
@@ -107,7 +123,7 @@ const getOrgSettings = defineTool({
 const updateOrgSettings = defineTool({
   name: 'update_org_settings',
   description:
-    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts sets the rule for each alert kind given. editorsPublish false lets only owners publish. auditRetentionDays is how long audit rows are kept, 30 to 3650 days. Settings for new screens apply to screens paired afterwards. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { settings }.",
+    "Change the organization's settings; owners only. Changes only the fields given; null clears timezone, locale or displayHours. alerts changes the given fields of each alert kind's rule (who gets the email, and whether it goes by email, to Slack and to the webhook). editorsPublish false lets only owners publish. auditRetentionDays is how long audit rows are kept, 30 to 3650 days. Settings for new screens apply to screens paired afterwards. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { settings }.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
@@ -120,7 +136,10 @@ const updateOrgSettings = defineTool({
       unreachableAfterMinutes: unreachableAfterMinutes.optional(),
       editorsPublish: editorsPublish.optional(),
       auditRetentionDays: auditRetentionDays.optional(),
-      alerts: z.object({ screen_offline: rule.optional(), publish_finished: rule.optional(), agent_refused: rule.optional() }).optional(),
+      alerts: z
+        .object({ screen_offline: rule.partial().optional(), publish_finished: rule.partial().optional(), agent_refused: rule.partial().optional() })
+        .optional()
+        .describe('Per kind, the fields of its rule to change; the rest stay'),
       ifVersion,
     })
     .refine((v) => Object.keys(v).some((k) => k !== 'ifVersion'), 'nothing to change'),
@@ -139,7 +158,7 @@ const updateOrgSettings = defineTool({
           ...(input.unreachableAfterMinutes ? { unreachableAfterMs: input.unreachableAfterMinutes * 60_000 } : {}),
           ...(input.editorsPublish !== undefined ? { editorsPublish: input.editorsPublish } : {}),
           ...(input.auditRetentionDays ? { auditRetentionDays: input.auditRetentionDays } : {}),
-          ...(input.alerts ? { alertsJson: JSON.stringify({ ...settingsOf(current).alerts, ...input.alerts }) } : {}),
+          ...(input.alerts ? { alertsJson: JSON.stringify(mergeRules(settingsOf(current).alerts, input.alerts)) } : {}),
         },
         input.ifVersion,
       ),

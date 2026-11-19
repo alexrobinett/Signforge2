@@ -19,6 +19,7 @@
  *    the org's own or a base one.
  *  - `pairing_codes` exist before any org claims them, so `claimed_org_id` is nullable.
  *  - `platform_audit_log` records changes made outside any org (base templates); it has no org.
+ *  - `alert_deliveries_due_idx` leads with the next attempt: the delivery run looks across orgs.
  *
  * Every tenant `org_id` references Better Auth's `organization` table, with no cascade: an org
  * cannot be deleted while it holds content.
@@ -598,6 +599,75 @@ export const screenIncidents = sqliteTable(
     uniqueIndex('screen_incidents_org_id_uq').on(t.orgId, t.id),
     uniqueIndex('screen_incidents_open_uq').on(t.orgId, t.screenId, t.kind).where(sql`${t.clearedAt} IS NULL`),
     foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
+  ],
+);
+
+/**
+ * Where an org's alerts go besides email (#88): at most one Slack incoming webhook and one
+ * outgoing webhook, so keyed `(org_id, kind)` as `org_settings` is keyed by org. The URLs, and the
+ * webhook's signing secret, are sealed as feed URLs are (apps/api src/data/cipher.ts); `host` is
+ * what Settings shows of them.
+ */
+export const alertChannels = sqliteTable(
+  'alert_channels',
+  {
+    orgId: orgId(),
+    kind: text('kind', { enum: ['slack', 'webhook'] }).notNull(),
+    host: text('host').notNull(),
+    urlEncrypted: text('url_encrypted').notNull(),
+    /** The webhook's signing secret, sealed; null for Slack, which signs nothing. */
+    secretEncrypted: text('secret_encrypted'),
+    secretSetAt: integer('secret_set_at'),
+    /** The actor id that last set it. */
+    connectedBy: text('connected_by').notNull(),
+    rowVersion: rowVersion(),
+    createdAt: created(),
+    updatedAt: updated(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.kind] })],
+);
+
+/**
+ * One alert event on its way to one channel (#88), queued by the alert check or a test send and
+ * sent by the delivery run (apps/api src/deliveries.ts), which retries with backoff until
+ * `give_up_at`. Kept 7 days, as the delivery log (./retention.ts). `event_json` is the event as a
+ * webhook receives it, with no secret in it.
+ */
+export const alertDeliveries = sqliteTable(
+  'alert_deliveries',
+  {
+    id: text('id').primaryKey(),
+    orgId: orgId(),
+    channel: text('channel', { enum: ['email', 'slack', 'webhook'] }).notNull(),
+    eventId: text('event_id').notNull(),
+    eventType: text('event_type').notNull(),
+    eventJson: text('event_json').notNull(),
+    /** Email only (a test send): the member it goes to. */
+    toUserId: text('to_user_id'),
+    status: text('status', { enum: ['pending', 'delivered', 'failed'] })
+      .notNull()
+      .default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    giveUpAt: integer('give_up_at').notNull(),
+    lastAttemptAt: integer('last_attempt_at'),
+    /** While an attempt is being sent: until when its claim holds. Null once it is settled. A retry is refused while it holds. */
+    leasedUntil: integer('leased_until'),
+    /** The receiver's HTTP status on the last attempt; null for none (no answer, or email). */
+    lastHttpStatus: integer('last_http_status'),
+    /** Why the last attempt failed, as a category; never the receiver's body. */
+    lastError: text('last_error'),
+    createdAt: created(),
+    updatedAt: updated(),
+  },
+  (t) => [
+    uniqueIndex('alert_deliveries_org_id_uq').on(t.orgId, t.id),
+    // One delivery per event and channel, so an event queued twice is sent once.
+    uniqueIndex('alert_deliveries_event_uq').on(t.orgId, t.eventId, t.channel),
+    index('alert_deliveries_org_created_idx').on(t.orgId, t.createdAt),
+    // Not led by the org, deliberately: the delivery run finds what is due in every org, and this
+    // index holds only the pending rows, so it stays small however long the log is.
+    index('alert_deliveries_due_idx').on(t.nextAttemptAt).where(sql`${t.status} = 'pending'`),
   ],
 );
 

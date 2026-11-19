@@ -56,8 +56,11 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByLabel('Keep entries for')).toHaveValue('90');
 
   // Screens & groups: the offline alert waits 30 minutes.
-  await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
+  // After a reload, a click before hydration is lost: the router never sees it (CI, 2026-11-19).
   await hydrated(page);
+  await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
+  // The body is hydrated already from the page before, so wait for the navigation itself.
+  await expect(page).toHaveURL(/\/settings\/screens$/);
   await page.getByLabel('Alert after').fill('30');
   await page.getByLabel('From').fill('03:00');
   await axe(page);
@@ -84,17 +87,76 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
 
   // Notifications: everyone hears when a screen goes offline.
   await settingsNav(page).getByRole('link', { name: 'Notifications' }).click();
-  await hydrated(page);
-  await expect(page.getByText('After 30 minutes; one email each way')).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/notifications$/);
+  await expect(page.getByText('After 30 minutes; one alert each way')).toBeVisible();
+  // Slack and the webhook can be chosen once they are set.
+  await expect(page.getByLabel('Slack for: A screen goes offline, and when it is back')).toBeDisabled();
   await page.getByLabel('Who hears: A screen goes offline, and when it is back').selectOption('everyone');
   await page.getByLabel('Email for: An agent is refused').uncheck();
-  await axe(page);
-  await shots(page, '42-settings-notifications');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText('Saved')).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Who hears: A screen goes offline, and when it is back')).toHaveValue('everyone');
   await expect(page.getByLabel('Email for: An agent is refused')).not.toBeChecked();
+
+  // Slack, by an incoming-webhook URL, which is never shown again.
+  await hydrated(page);
+  const slackUrl = 'https://hooks.slack.com/services/T0E2E0000/B0E2E0000/e2eSecretPart000000000';
+  await page.getByLabel('Slack incoming-webhook URL').fill(slackUrl);
+  await page.getByRole('button', { name: 'Connect Slack' }).click();
+  await expect(page.getByText('Slack connected')).toBeVisible();
+  await expect(page.getByText(/Connected by/).first()).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('e2eSecretPart');
+
+  // A webhook: its signing secret is shown once, then gone.
+  await page.getByLabel('Webhook URL', { exact: true }).fill('https://ops.example.com/hooks/signforge');
+  await page.getByRole('button', { name: 'Add webhook' }).click();
+  const secretBox = page.getByRole('region', { name: "The webhook's signing secret" });
+  await expect(secretBox).toContainText(/whsec_[A-Za-z0-9_-]{43}/);
+  const secret = (await secretBox.locator('code').textContent()) ?? '';
+  await axe(page);
+  await shots(page, '42-settings-notifications');
+  await secretBox.getByRole('button', { name: 'I have saved it' }).click();
+  await expect(secretBox).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('ops.example.com')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(secret);
+
+  // A new URL, kept and not shown: the field is empty once it is saved.
+  await hydrated(page);
+  await page.getByText('Manage').nth(1).click();
+  const webhookField = page.getByLabel('Webhook URL', { exact: true });
+  await webhookField.fill('https://ops2.example.com/hooks/signforge');
+  await page.getByRole('button', { name: 'Save URL' }).click();
+  await expect(page.getByText('ops2.example.com')).toBeVisible();
+  await expect(webhookField).toHaveValue('');
+
+  // Offline alerts go to both; a test email shows in the log.
+  await hydrated(page);
+  await page.getByLabel('Slack for: A screen goes offline, and when it is back').check();
+  await page.getByLabel('Webhook for: A screen goes offline, and when it is back').check();
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText('Saved')).toBeVisible();
+  await page.getByRole('button', { name: 'Email me a test' }).click();
+  await expect(page.getByText('Test sent.')).toBeVisible();
+  await expect(async () => {
+    await page.reload();
+    await expect(page.getByRole('list', { name: 'Recent deliveries' })).toContainText('Delivered', { timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
+  await expect(page.getByLabel('Slack for: A screen goes offline, and when it is back')).toBeChecked();
+  await expect(page.getByLabel('Webhook for: A screen goes offline, and when it is back')).toBeChecked();
+  await toTop(page.getByRole('region', { name: 'Recent deliveries' }));
+  await axe(page);
+  await shots(page, '42b-settings-notifications-log');
+
+  // Removing Slack asks once more, then it is unset and its rule's box is disabled.
+  await hydrated(page);
+  await page.getByText('Manage').first().click();
+  await page.getByRole('button', { name: 'Remove Slack' }).click();
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(page.getByText('Slack removed')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect Slack' })).toBeVisible();
+  await expect(page.getByLabel('Slack for: A screen goes offline, and when it is back')).toBeDisabled();
 
   // A new screen starts in the org's time zone (the empty fleet shows the pairing form).
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
@@ -214,4 +276,8 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.goto('/settings/notifications');
   await axe(page);
   await shots(page, '47-settings-notifications-phone');
+  await toTop(page.getByRole('region', { name: 'Who hears about what' }));
+  await shots(page, '47b-settings-notifications-rules-phone');
+  await toTop(page.getByRole('region', { name: 'Recent deliveries' }));
+  await shots(page, '47c-settings-notifications-log-phone');
 });
