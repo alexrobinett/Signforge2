@@ -3,6 +3,7 @@
  * See README.md for the route the CMS uses and how to add a tool.
  */
 export {
+  AGENT_LIMITS,
   SCOPES,
   ROLES,
   ROLE_SCOPES,
@@ -11,6 +12,10 @@ export {
   defineSharedTool,
   notFound,
   type Actor,
+  type AgentAllowance,
+  type AgentLimit,
+  type AgentLimiter,
+  type AgentLimitWindow,
   type AnyTool,
   type DataScope,
   type FeedUrlSealer,

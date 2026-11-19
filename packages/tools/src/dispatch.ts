@@ -1,7 +1,8 @@
 /**
  * The dispatcher: the one door to every tool.
  *
- *   1. Find the tool by name.
+ *   1. For an agent, count the call against its grant's limits (`AGENT_LIMITS`) and refuse it
+ *      with `rate_limited` over one, before anything else runs. Then find the tool by name.
  *   2. Check the caller's role reaches the tool's minimum and its scopes include the tool's. An
  *      editor's scopes are read per call from the org's settings: with `editorsPublish` off, they
  *      lack `content:publish` (owner decision Q7).
@@ -28,10 +29,13 @@ import { checkOutput } from './output';
 import { orgSettings } from './settings';
 import type { UploadSigner } from './upload';
 import {
+  AGENT_LIMITS,
   ROLE_SCOPES,
   ROLES,
   ToolError,
   type Actor,
+  type AgentLimit,
+  type AgentLimiter,
   type AnyTool,
   type DataScope,
   type Role,
@@ -63,6 +67,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   screens?: ScreenNotifier;
   /** Counts attempts against the caller's rate limits. `claim_screen` refuses without one. */
   rateLimit?: RateLimiter;
+  /** Counts an agent's calls against its grant's limits. Required when the actor is an agent: dispatch throws without it. */
+  agentLimiter?: AgentLimiter;
 }
 
 export type DispatchResult = { ok: true; output: unknown } | { ok: false; error: ToolErrorCode; message: string; details?: unknown };
@@ -127,6 +133,11 @@ export async function dispatch<D extends DataScope>(
   caller: Caller<D>,
 ): Promise<DispatchResult> {
   const tool = registry.get(name);
+  // Before the name is checked: a call to no tool still counts, as a call.
+  if (caller.actor.kind === 'agent') {
+    const refused = await overLimit(name, tool?.mutates ?? false, caller);
+    if (refused) return refused;
+  }
   if (!tool) return fail('unknown_tool', `no tool named ${JSON.stringify(name)}`);
   const grant = await grantOf(caller);
   if (!permits(grant, tool)) {
@@ -230,6 +241,48 @@ export async function dispatch<D extends DataScope>(
   }
   await tell();
   return { ok: true, output };
+}
+
+const OVER: Record<AgentLimit, string> = {
+  calls_per_minute: `made ${AGENT_LIMITS.calls_per_minute} calls this minute`,
+  writes_per_minute: `made ${AGENT_LIMITS.writes_per_minute} changes this minute`,
+  writes_per_day: `made ${AGENT_LIMITS.writes_per_day} changes today (UTC)`,
+};
+
+/**
+ * An agent's call counted against its grant's limits, before anything else is read or run. A
+ * refused call writes nothing, except the audit row of the first one refused in each window.
+ */
+async function overLimit(name: string, write: boolean, caller: Caller<DataScope>): Promise<DispatchResult | undefined> {
+  if (!caller.agentLimiter) throw new Error(`an agent called ${JSON.stringify(name)} without a limiter for its grant`);
+  const allowance = await caller.agentLimiter.take(caller.actor.id, write);
+  if (allowance.ok) return undefined;
+  const { limit, retryAfterSeconds } = allowance;
+  const message = `this agent grant ${OVER[limit]}, its limit; try again in ${retryAfterSeconds} s`;
+  const details = { limit, retryAfterSeconds };
+  const { agentLimiter, actor, org } = caller;
+  if (allowance.audit) {
+    if (!('appendOnce' in org.auditLog)) throw new Error('an agent acts only in an org');
+    const { window, start } = allowance.audit;
+    try {
+      // One row per grant and window, however many refused calls race to write it.
+      await org.auditLog.appendOnce(`rate_limited_${actor.id}_${window}_${start}`, {
+        actorKind: 'agent',
+        actorId: actor.id,
+        clientId: actor.clientId ?? null,
+        action: 'rate_limited',
+        targetKind: null,
+        targetId: null,
+        // The name as the agent sent it, which may name no tool.
+        detailJson: JSON.stringify({ tool: redact(name), refused: { error: 'rate_limited', message, details } }),
+      });
+      await agentLimiter.audited(actor.id, allowance.audit);
+    } catch (err) {
+      // Still a refusal, not an error: the window keeps asking for its row, and its next refused call writes it.
+      console.warn(`[tools] could not record that agent grant ${actor.id} was refused`, err);
+    }
+  }
+  return fail('rate_limited', message, details);
 }
 
 /**

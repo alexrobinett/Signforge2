@@ -31,7 +31,7 @@ Lists the tools the caller's role may use:
 | 404 | `unknown_tool` | No tool has that name. |
 | 404 | `not_found` | An id names nothing in this org, including another org's ids. |
 | 409 | `conflict` | The change would break something else, or (with `ifVersion`) the row changed since the caller read it. `details` says what. |
-| 429 | `rate_limited` | Too many attempts (`claim_screen`); try again in a minute. |
+| 429 | `rate_limited` | Too many attempts (`claim_screen`); try again in a minute. For an agent, its grant is over a limit (see Agent limits): `details` is `{ limit, retryAfterSeconds }`. |
 | 401, 403 | `unauthenticated`, `no_active_organization`, `not_a_member` | Returned by `requireOrg`, before any tool runs. |
 
 The CMS should keep every cookie a response sets (see M3-09). Times in outputs are milliseconds since the epoch.
@@ -155,15 +155,16 @@ Owner decision Q7 (can editors publish?), decided 2026-11-18: an owner chooses, 
 
 `dispatch(registry, name, input, caller)` (`src/dispatch.ts`) runs these steps in order:
 
-1. Finds the tool.
-2. Checks the role and scopes.
-3. Validates the input.
-4. For a keyed creation, returns the first result if the key was used before (see Idempotency keys above).
-5. Runs the handler with `{ org: scoped(db, orgId), actor, input, blobs, uploads, write, notify }`.
+1. For an agent, counts the call against its grant's limits, and refuses it over one (see Agent limits).
+2. Finds the tool.
+3. Checks the role and scopes.
+4. Validates the input.
+5. For a keyed creation, returns the first result if the key was used before (see Idempotency keys above).
+6. Runs the handler with `{ org: scoped(db, orgId), actor, input, blobs, uploads, write, notify }`.
    A handler reads through `ctx.org` but never writes: it stages each change with `ctx.write(org.<repo>.stage.<op>(...))`, which returns the row as it will be (see `packages/db`'s README).
    In tests it then parses the output with the tool's output schema and throws on a mismatch, before anything is written (`setOutputChecks(true)`, called by `test/setup.ts` here and in `apps/api`). Production skips the parse.
-   A handler that changes something a screen should hear of at once queues it with `ctx.notify((screens) => screens.manifest(...) | screens.revoked(...) | screens.command(...))`. The notices go out after step 6, only if the commit succeeded, through the caller's `screens` (`ScreenNotifier`; the API's reaches each screen's Durable Object). A notice that fails is logged, not returned: the screen catches up at its next sync.
-6. Commits the staged writes in one D1 `batch()`, together with an `audit_log` row and, for a keyed creation, its idempotency record. The batch is atomic: if the audit row cannot be written, the change is not made either, and the request fails. The audit row holds:
+   A handler that changes something a screen should hear of at once queues it with `ctx.notify((screens) => screens.manifest(...) | screens.revoked(...) | screens.command(...))`. The notices go out after step 7, only if the commit succeeded, through the caller's `screens` (`ScreenNotifier`; the API's reaches each screen's Durable Object). A notice that fails is logged, not returned: the screen catches up at its next sync.
+7. Commits the staged writes in one D1 `batch()`, together with an `audit_log` row and, for a keyed creation, its idempotency record. The batch is atomic: if the audit row cannot be written, the change is not made either, and the request fails. The audit row holds:
    - actor kind and id;
    - client id (`cms`, `sf-push`, or an agent's OAuth client);
    - action (the tool name);
@@ -171,6 +172,14 @@ Owner decision Q7 (can editors publish?), decided 2026-11-18: an owner chooses, 
    - `detail_json` holding the input, with secret-looking fields redacted (`redact()`).
 
 A call that staged nothing changed nothing, and writes nothing: no audit row either (publishing the current manifest again, revoking a revoked credential). The exception is a tool marked `alwaysAudited`, whose effect is a command to a screen (`identify_screen`, `restart_screen`): it is audited every time. This is deliberate (decided 2026-11-17): the audit log answers "what changed, and who changed it"; an agent retrying a call, or a person publishing twice, would otherwise fill it with rows that describe nothing. Reads are not audited. A refusal (`ToolError`) or any other error discards what was staged, except a refusal that changed something on the way: a handler marks one with `new ToolError(code, message, details, true)`, and what it staged is committed, audited with `refused: { error, message }` in its detail. So far only `finalize_asset` does this, when it rejects an upload. Files in R2 are not part of the batch: `finalize_asset` moves or deletes uploads before its batch, so a failed batch can leave a verified file in place (harmless; finalize finds it again) or a rejected upload deleted with its asset still pending (finalize then reports it not uploaded).
+
+### Agent limits
+
+Each agent grant (`actor.kind === 'agent'`, counted by `actor.id`, its grant id) may make 120 tool calls a minute, and 30 changes a minute and 2,000 a UTC day (`AGENT_LIMITS` in `src/tool.ts`; owner decision on #39, constants rather than settings). A change is a call to a tool that `mutates`, counted when it is made, even if it is refused later or changes nothing; reads count only as calls. People are not counted. The windows are fixed, the minute and the UTC day, by the counter's clock when the call reaches it.
+
+The call is counted before anything else, even before the name is looked up (a name that is no tool counts as a call): over a limit it is refused with `rate_limited`, a message naming the limit and when it resets, and `details: { limit, retryAfterSeconds }` (`limit` is `calls_per_minute`, `writes_per_minute` or `writes_per_day`). The grant is not read, the handler does not run, nothing is written, and an idempotency key is left unused, so a retry after `retryAfterSeconds` works. A call refused by a write limit still counts as a call; one refused by the call limit counts for nothing, and a refused write is not counted as a write. Each window, the minute or the UTC day, gets one audit row for the calls refused in it, whichever limit refused them: action `rate_limited`, no target, and `{ tool, refused: { error, message, details } }` in its detail, from the first refused call (`tool` is the name the agent called). So the log shows a grant hitting its limits once per minute or day, not once per retry. The row's id is made from the org, the grant and the window (`auditLog.appendOnce` in `packages/db`), so calls racing to write it write one, and the counter is told it is written (`AgentLimiter.audited`) only once it is: if the write fails, the call is still refused, the failure is logged, and the window's next refused call writes it.
+
+The adapter passes the counter as `caller.agentLimiter` (`AgentLimiter`); an agent caller without one throws, so no adapter can skip it. The API's is one Durable Object per grant (`apps/api/src/agents/grant-object.ts`, `agentLimiter(env)`): one count for every location, and a read writes nothing, to D1 or to the object's storage. The minute's and the day's writes are stored with every counted write, so they survive the object hibernating, being evicted or redeployed. The minute's calls are in memory, kept there to the minute's end by a timer the minute's first call sets (an object with nothing pending is hibernated about 10 s after its last call, and loses its memory); a deploy forgets them, forgiving at most that minute's calls. Milestone 4: `tools/list` (`describeTools`) does not go through `dispatch`, so the MCP adapter must count it itself if it should count.
 
 ### The platform registry
 
