@@ -96,7 +96,20 @@ Rive was evaluated as an alternative template format because it has a native App
 
 The CMS preview runs the same bundle the player runs.
 
-The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) are a lint that catches mistakes; string matching can be evaded. Before agents can submit templates, add a runtime control: the headless render in step 3 runs with request and navigation logging, and any attempt fails the check. The sandbox and its policy stay the boundary on screens.
+The source checks (`FORBIDDEN_TEMPLATE_CODE` and the network-reference check) are a lint that catches mistakes; string matching can be evaded. The runtime check is the control behind it.
+
+### Runtime check
+
+`apps/template-check` renders an org's new template version before it is registered (`register_template_version`), because template code is untrusted:
+
+- **Where it runs**: a Cloudflare Container started with no Internet access, behind a Worker of its own (`signforge-template-check`) that has no bindings but the container's Durable Object and no public URL. The API reaches it only through its `TEMPLATE_CHECK` service binding: it sends the manifest and bundle in and reads the report back. The runner inside also probes an outside host when it starts and refuses every check if it gets an answer, so a container started with network access never passes a template.
+- **What it renders**: the bundle in headless Chromium (Playwright's shell, sites isolated as on the Pi), in the player's own wrapper frame, policy and sandbox (`WRAPPER_HTML` and `TEMPLATE_SANDBOX` in `packages/player-core`, which `slot.ts` uses too), with each field's default (brand tokens resolved as for a screen with no kit, a small PNG for each image field), at 1920x1080 in each orientation the template supports. It sends `init`, waits for `ready` as the player does (2 s), sends `play` and watches the first second.
+- **What it refuses**: every request (Chromium logs each one the policy blocks, and the host page's route aborts anything that gets past it), navigating its own frame or the page, a popup or form, any use of WebRTC (`RTCPeerConnection`, which the policy does not cover), an uncaught error, a failed prepare, and no `ready` within 2 s. Each is one sentence in the report, such as `requested https://example.com/leak (blocked)`, and the version is refused with them (`invalid_input`).
+- **What it records**: a pass is stored on the version (`checkReport.runtime`, the contract's `TemplateRuntimeReport`): the runner image and browser, ms from `init` to `ready` and the first second's frames for each render, and the check's cost (container start and render). The ready time is not gated on the 500 ms budget, and the frames are counted in the template's own frame: both are information, since the budgets are measured on the Pi.
+- **What it costs**: about 2.8 s per push with the container running (two renders, each with a second of play), plus the container's start when it was idle (about 0.6 s locally; it stays up 5 minutes after a check). One container checks one template at a time.
+- **Base templates** are not checked at push or seed: CI renders every template in `templates/` through the same runner (`apps/template-check/test/check.test.ts`), so a failure fails a build, not a deploy.
+
+A template can still behave differently in the check than on a screen (wait it out, or detect the headless browser); the sandbox and its policy stay the boundary on screens.
 
 ## Content delivery
 
@@ -150,6 +163,7 @@ Each template runs two frames deep. The slot holds a **wrapper frame**: a `srcdo
 - The template's frame inherits the wrapper's policy before any of its markup runs, and a document cannot drop a policy it was given. So the template cannot fetch, load media or fonts from the network, or open frames.
 - Where the template's frame may navigate is decided by the **wrapper's** policy (`frame-src`, falling back to `'none'`), not by the template's. A template that sets `location`, follows a link, or adds a `<meta http-equiv=refresh>` gets an error page and no request is made. The player sees that frame load a second time, fails the spot (or blanks it if it is already playing) and moves on.
 - The sandbox stops the rest: no popups, no form submission, no navigating the wrapper or the top page, and an opaque origin, so no access to the player's DOM, Cache Storage or local storage.
+- Not covered: WebRTC. A content security policy has no directive for it, so a template frame can open an `RTCPeerConnection` and reach a STUN or TURN server over UDP. The runtime check refuses a template that uses it; on screens it is not blocked yet (see Open items).
 - The SDK accepts messages only from its `parent`, which is now the wrapper. The player posts through the wrapper's `relay`, so messages come from the right window, and listens for the template's messages on the wrapper's window. Published bundles are unchanged.
 
 Alternatives considered:
@@ -178,6 +192,7 @@ Uploaded video must match one strict profile (1080p H.264, capped bitrate). The 
 - **Cloudflare Workers**: API and MCP server.
 - **D1 with Drizzle**: relational data.
 - **R2**: assets, template bundles and manifests.
+- **Containers**: the runtime check of uploaded templates, headless Chromium with no network (`apps/template-check`; see Runtime check under Templates).
 - **Durable Objects**: one per screen, holding a sleeping WebSocket; the desired manifest is in D1, and the one the screen reports is written through to D1. This gives the CMS rollout status per publish. Alarms drive timed publishes.
 - **CMS**: TanStack Start, React 19, Tailwind, shadcn.
 - **Auth**: Better Auth with its organization plugin.
@@ -236,7 +251,7 @@ Built (tickets in `docs/tickets/`):
 - **Drafts** (M3-34): spots, playlists and schedule entries have a draft and a published state; a publish promotes the drafts that pass their checks and reports the rest.
 - **Server compiler** (`packages/compiler`), golden-tested against `sf build`.
 - **Assets** (M3-14, M3-21): presigned upload, browser-made renditions, a server-side check on finalize, and the library page. Video is checked against its one profile in the browser and again on the server.
-- **Templates**: pushed, checked again on the server, versioned and approved; base templates are seeded on deploy.
+- **Templates**: pushed, checked again on the server, versioned and approved; base templates are seeded on deploy. An org's new version is also rendered by the runtime check in a container with no network (#40).
 - **Brand kits** (M3-38, M3-39, M3-25): several per org, applied by the compiler at publish; templates draw with the kit's colours, fonts and logo. There is no CMS page for them yet (M3-40).
 - **CMS**: the Screens pages (claim, settings, display hours, wake and sleep now, identify, revoke; M3-11; live status, polled every 15 s, #35), a browser test screen (M3-41), org settings, members and offline alerts by email (M3-42), the command menu (M3-43), and the spot editor: a form made from the template's fields beside the real player (M3-16, first PR).
 - **Player resilience** (M3-26 to M3-30, M3-36): browser tests, the wrapper frame around templates, last known good, pinned files and streamed downloads, checked live data, and the preview content source the spot editor uses.
@@ -259,4 +274,5 @@ Next: the playlist editor, publishing and rollout from the CMS, schedules and ti
 
 - Which hardware, if any, v1 supports for 4K. A Pi 5 is the obvious candidate and is untested.
 - Current browser support for WebMCP has not been checked.
+- WebRTC from a template frame on screens: the policy cannot block it. Not yet tried: a Chromium enterprise policy on the kiosk (`WebRtcIPHandling`, or removing the API from frames another way), and whether it closes TURN over TCP too.
 - Replacement artwork and fonts for the C-Store template: the SignForge 1 repo contains Petro-Points artwork and Gibson and Minion font files that should not be reused without a licence.

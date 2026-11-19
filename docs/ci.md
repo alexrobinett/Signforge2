@@ -6,7 +6,7 @@ One job, `check`, in `.github/workflows/ci.yml`, on every pull request and every
 
 1. Install, with the pnpm store restored from the cache.
 2. The repo-wide checks, a few seconds each, on every run: Biome lint, the format check on changed files, knip, jscpd, `turbo boundaries`, the contract-commit check and the template-dependency check.
-3. The plan: `turbo run … --affected --dry=json` lists the tasks that will run. Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media and tools).
+3. The plan: `turbo run … --affected --dry=json` lists the tasks that will run. Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media, tools and template-check).
 4. The stress media, only if the cli's or the tools' tests run (see [Stress media](#stress-media)).
 5. `turbo run typecheck test test:e2e lint --affected --summarize`, with Turbo's cache restored from earlier runs.
 6. The timing summary on the run's page: each step's time, then each Turbo task's time and whether it came from the cache (`scripts/ci-summary.sh`).
@@ -23,7 +23,7 @@ A lockfile change affects only the packages whose dependencies changed.
 
 Turbo decides what is affected from the package graph alone. It ignores a task's `inputs` that point outside its package. So a test that reads another package's files has to declare that package as a dependency, or a change there will not run the test:
 - The CMS e2e starts the API, so `apps/cms` has `@signforge/api` as a devDependency.
-- The API's tests build every template with the SDK, and the player's browser tests play every template. So `apps/api` and `packages/player` list each `templates/*` package (and the API lists `@signforge/template-sdk`) as devDependencies. **A new template goes into both lists**: the repo-wide step `scripts/check-template-deps.sh` fails until it does.
+- The API's tests build every template with the SDK, and the player's browser tests and the runtime check's tests (`apps/template-check`) play every template. So `apps/api`, `packages/player` and `apps/template-check` list each `templates/*` package (and the API and the check list `@signforge/template-sdk`) as devDependencies. **A new template goes into all three lists**: the repo-wide step `scripts/check-template-deps.sh` fails until it does. The check's container tests (`pnpm --filter @signforge/template-check test:container`) need Docker and do not run in CI.
 
 knip lists these dependencies as ones it cannot see used.
 
