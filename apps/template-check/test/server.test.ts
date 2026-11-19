@@ -120,6 +120,25 @@ describe('a runner that can reach the network', () => {
     }
   });
 
+  it('refuses the checks it had already admitted once the probe answers, the one rendering included', async () => {
+    const later = await closedPort();
+    const runner = await startRunner({ port: 0, image: 'test-image', probeUrls: [`${later}/probe`], probeEveryMs: 200 });
+    const outside = createServer((_req, res) => res.end('hello'));
+    try {
+      const url = `http://127.0.0.1:${(runner.address() as AddressInfo).port}`;
+      const admitted = [1, 2, 3].map(() => fetch(`${url}/check`, { method: 'POST', body: JSON.stringify(clock) }));
+      // The first is rendering (a check takes about 2.8 s) when the network opens.
+      await new Promise((r) => setTimeout(r, 400));
+      await new Promise<void>((resolve) => outside.listen(Number(new URL(later).port), '127.0.0.1', resolve));
+      const answers = await Promise.all(admitted);
+      expect(answers.map((r) => r.status)).toEqual([503, 503, 503]);
+      for (const r of answers) expect((await r.json()).error).toMatch(/can reach the network/);
+    } finally {
+      await close(runner);
+      await close(outside);
+    }
+  });
+
   it('refuses every check', async () => {
     const outside = createServer((_req, res) => res.end('hello'));
     const probeUrl = `${await listening(outside)}/probe`;

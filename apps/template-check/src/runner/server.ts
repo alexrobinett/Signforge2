@@ -104,9 +104,13 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
     }
     const startMs = Number(new URL(req.url ?? '/', 'http://runner').searchParams.get('startMs') ?? 0);
     pending++;
-    const run = queue.then(async () => {
+    // Read again when the check starts and when its render ends: a probe that answered while the
+    // check waited or rendered means this container must not pass it.
+    const run = queue.then(async (): Promise<TemplateRuntimeReport | undefined> => {
+      if (unavailable().length) return undefined;
       const started = performance.now();
       const { problems, renders } = await checkTemplate(browser, manifest.value, html);
+      if (unavailable().length) return undefined;
       const report: TemplateRuntimeReport = {
         ok: !problems.length,
         problems,
@@ -118,7 +122,9 @@ export async function startRunner(opts: RunnerOptions): Promise<Server> {
     });
     queue = run.catch(() => undefined);
     try {
-      send(res, 200, await run);
+      const report = await run;
+      if (report) send(res, 200, report);
+      else send(res, 503, { error: unavailable().join('; ') });
     } finally {
       pending--;
     }
