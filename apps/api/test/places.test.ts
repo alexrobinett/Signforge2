@@ -25,26 +25,33 @@ const atlanta = {
   admin1: 'Georgia',
 };
 
+/** A deployed environment, where GEOCODING_URL is never read. */
+const PROD = { ENVIRONMENT: 'prod' };
+
 describe('openMeteoPlaces', () => {
   it("asks Open-Meteo's geocoding for the name and gives back each place with what a forecast needs", async () => {
     const { fetch, urls } = stub({ results: [atlanta, { ...atlanta, id: 1, name: 'Atlanta', admin1: undefined, country: 'Canada' }], generationtime_ms: 1 });
-    expect(await openMeteoPlaces(undefined, fetch).search('Atlanta')).toEqual([
+    expect(await openMeteoPlaces(PROD, fetch).search('Atlanta')).toEqual([
       { id: 4180439, name: 'Atlanta', region: 'Georgia', country: 'United States', latitude: 33.749, longitude: -84.38798, timezone: 'America/New_York' },
       { id: 1, name: 'Atlanta', region: '', country: 'Canada', latitude: 33.749, longitude: -84.38798, timezone: 'America/New_York' },
     ]);
     expect(urls).toEqual(['https://geocoding-api.open-meteo.com/v1/search?name=Atlanta&count=10&language=en&format=json']);
   });
 
-  it('asks the geocoder it is given (a stub in the CMS e2e)', async () => {
+  it('asks the geocoder GEOCODING_URL names in dev (a stub in the CMS e2e), and Open-Meteo anywhere else', async () => {
     const { fetch, urls } = stub({});
-    expect(await openMeteoPlaces('http://127.0.0.1:9/v1/search', fetch).search('Nowhere')).toEqual([]);
-    expect(urls).toEqual(['http://127.0.0.1:9/v1/search?name=Nowhere&count=10&language=en&format=json']);
+    expect(await openMeteoPlaces({ ENVIRONMENT: 'dev', GEOCODING_URL: 'http://127.0.0.1:9/v1/search' }, fetch).search('Nowhere')).toEqual([]);
+    await openMeteoPlaces({ ENVIRONMENT: 'prod', GEOCODING_URL: 'http://127.0.0.1:9/v1/search' }, fetch).search('Nowhere');
+    expect(urls).toEqual([
+      'http://127.0.0.1:9/v1/search?name=Nowhere&count=10&language=en&format=json',
+      'https://geocoding-api.open-meteo.com/v1/search?name=Nowhere&count=10&language=en&format=json',
+    ]);
   });
 
   it('leaves out a result a forecast could not be made for, and fails on an answer that is not one', async () => {
     const { fetch } = stub({ results: [{ ...atlanta, timezone: undefined }, { ...atlanta, latitude: 'north' }, 'x', atlanta] });
-    expect((await openMeteoPlaces(undefined, fetch).search('Atlanta')).map((p) => p.id)).toEqual([4180439]);
-    await expect(openMeteoPlaces(undefined, stub({ error: true, reason: 'busy' }, 429).fetch).search('Atlanta')).rejects.toThrow('geocoding answered 429');
+    expect((await openMeteoPlaces(PROD, fetch).search('Atlanta')).map((p) => p.id)).toEqual([4180439]);
+    await expect(openMeteoPlaces(PROD, stub({ error: true, reason: 'busy' }, 429).fetch).search('Atlanta')).rejects.toThrow('geocoding answered 429');
   });
 });
 

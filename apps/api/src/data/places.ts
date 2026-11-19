@@ -32,8 +32,12 @@ function placeOf(r: unknown): Place[] {
   ];
 }
 
-/** Searches `url` (Open-Meteo's, unless a test or the e2e names a stub with `GEOCODING_URL`). */
-export function openMeteoPlaces(url = OPEN_METEO_GEOCODING, fetcher: typeof fetch = workerFetch): PlaceFinder {
+/**
+ * Searches Open-Meteo's geocoding. In dev only, `GEOCODING_URL` names another (the CMS e2e's stub,
+ * the tests' closed port), as the other dev overrides do: a deployed API never sends a query elsewhere.
+ */
+export function openMeteoPlaces(env: { ENVIRONMENT: string; GEOCODING_URL?: string }, fetcher: typeof fetch = workerFetch): PlaceFinder {
+  const url = (env.ENVIRONMENT === 'dev' && env.GEOCODING_URL) || OPEN_METEO_GEOCODING;
   return {
     async search(query) {
       const q = new URL(url);

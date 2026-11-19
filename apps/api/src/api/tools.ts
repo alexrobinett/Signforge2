@@ -48,7 +48,7 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     blobs: c.env.BLOBS,
     uploads: uploadSigner(c.env, c.req.url),
     feedUrls: feedUrlSealer(c.env),
-    places: openMeteoPlaces(c.env.GEOCODING_URL),
+    places: openMeteoPlaces(c.env),
     connectors: connectorsFor(c.env, connectors ?? connectorDeps(c.env), new URL(CALLBACK_PATH, c.req.url).href),
     screens: screenNotifier(c.env),
     // Counted against the member and against the address, so many accounts on one address share a limit.
