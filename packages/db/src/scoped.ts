@@ -467,6 +467,16 @@ export function scoped(d1: D1Database, orgId: string) {
         ? and(eq(ba.orgId, orgId), eq(ba.groupId, t.groupId))
         : and(eq(ba.orgId, orgId), eq(ba.screenId, t.screenId));
   const pi = s.playlistItems;
+  /** Throws `NotInOrgError` unless every spot is the org's. */
+  const checkSpots = async (spotIds: readonly string[]) => {
+    const found = new Set((await spotRows.getMany([...new Set(spotIds)])).map((r) => r.id));
+    for (const id of spotIds) if (!found.has(id)) throw new NotInOrgError('spot', id);
+  };
+  const itemRows = (playlistId: string, spotIds: readonly string[]) =>
+    chunk(
+      spotIds.map((spotId, position) => ({ orgId, playlistId, position, spotId })),
+      4,
+    ).map((part) => db.insert(pi).values(part));
   const ps = s.publishScreens;
   const snap = s.dataSnapshots;
   const pc = s.playCounts;
@@ -926,9 +936,7 @@ export function scoped(d1: D1Database, orgId: string) {
       /** Replace a playlist's items: an edit of its draft, so its version moves on. */
       setItems: async (playlistId: string, spotIds: readonly string[]) => {
         if (!(await playlists.get(playlistId))) throw new NotInOrgError('playlist', playlistId);
-        const found = new Set((await spotRows.getMany([...new Set(spotIds)])).map((r) => r.id));
-        for (const id of spotIds) if (!found.has(id)) throw new NotInOrgError('spot', id);
-        const rows = spotIds.map((spotId, position) => ({ orgId, playlistId, position, spotId }));
+        await checkSpots(spotIds);
         const pl = s.playlists;
         await db.batch([
           db
@@ -936,8 +944,38 @@ export function scoped(d1: D1Database, orgId: string) {
             .set({ rowVersion: sql`${pl.rowVersion} + 1` })
             .where(and(eq(pl.orgId, orgId), eq(pl.id, playlistId))),
           db.delete(pi).where(and(eq(pi.orgId, orgId), eq(pi.playlistId, playlistId))),
-          ...chunk(rows, 4).map((part) => db.insert(pi).values(part)),
+          ...itemRows(playlistId, spotIds),
         ]);
+      },
+      stage: {
+        ...playlists.stage,
+        /** A new playlist with its spots in play order. Throws `NotInOrgError` for a spot the org does not have. */
+        insert: async (values: NewRow<typeof s.playlists>, items: readonly string[] = []): Promise<Staged<typeof s.playlists.$inferSelect>> => {
+          await checkSpots(items);
+          const made = await playlists.stage.insert(values);
+          return { row: made.row, writes: [...made.writes, ...staged(undefined, ...itemRows(made.row.id, items)).writes] };
+        },
+        /**
+         * A change to `current`, the draft as read: its fields, and with `items` its spots in play
+         * order, replaced whole. The version moves on once, guarded by `ifVersion` as every
+         * versioned row's `stage.update` is, so an order made from an old read is refused rather
+         * than dropping someone else's change. Throws `NotInOrgError` for a spot the org does not have.
+         */
+        update: async (
+          current: typeof s.playlists.$inferSelect,
+          patch: RowPatch<typeof s.playlists>,
+          ifVersion?: number,
+          items?: readonly string[],
+        ): Promise<Staged<typeof s.playlists.$inferSelect>> => {
+          if (!items) return playlists.stage.update(current, patch, ifVersion);
+          await checkSpots(items);
+          // An empty patch stages nothing, so the items alone move the version on with `touch`.
+          const row = Object.values(patch).some((v) => v !== undefined)
+            ? playlists.stage.update(current, patch, ifVersion)
+            : playlists.stage.touch(current, ifVersion);
+          const replace = staged(undefined, db.delete(pi).where(and(eq(pi.orgId, orgId), eq(pi.playlistId, current.id))), ...itemRows(current.id, items));
+          return { row: row.row, writes: [...row.writes, ...replace.writes] };
+        },
       },
     },
 

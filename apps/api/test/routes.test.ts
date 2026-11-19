@@ -88,6 +88,7 @@ describe('requests', () => {
   let assetId: string;
   let brandKitId: string;
   let spotId: string;
+  let playlistId: string;
   let baseTemplate: string;
   let baseVersion: string;
 
@@ -109,6 +110,7 @@ describe('requests', () => {
       })
     ).id;
     spotId = (await scoped(env.DB, org.id).spots.insert({ name: 'Site', kind: 'url', durationMs: 10_000, url: 'https://example.com' })).id;
+    playlistId = (await scoped(env.DB, org.id).playlists.insert({ name: 'Main', transitionJson: JSON.stringify({ type: 'cut' }) })).id;
     // get_data_source's example names `weather`.
     await scoped(env.DB, org.id).dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
     // The same session, on a D1 binding that records writes.
@@ -147,7 +149,7 @@ describe('requests', () => {
       writes.length = 0;
       const example = tool.example as Record<string, unknown>;
       // Each id the example names, as one of this org's (or a base template's).
-      const orgIds: Record<string, string> = { screenId, templateId: baseTemplate, templateVersionId: baseVersion, assetId, brandKitId, spotId };
+      const orgIds: Record<string, string> = { screenId, templateId: baseTemplate, templateVersionId: baseVersion, assetId, brandKitId, spotId, playlistId };
       const input = Object.fromEntries(Object.entries(example).map(([k, v]) => [k, orgIds[k] ?? v]));
       expect((await owner.tool(tool.name, input)).status, tool.name).toBe(200);
       expect(ours(), tool.name).toEqual([]);
@@ -231,7 +233,7 @@ describe('POST /api/tools/:name', () => {
   it('lists what the caller may use', async () => {
     const names = async (c: Client) => ((await (await c.get('/api/tools')).json()) as { tools: { name: string }[] }).tools.map((x) => x.name);
     expect(await names(owner)).toHaveLength(registry.size);
-    // The literal list is pinned in packages/tools (dispatch.test.ts); here, that the route gives a viewer just the reads a viewer may make.
+    // A viewer gets the tools a viewer may run: the read tools (packages/tools test/dispatch.test.ts names them).
     const reads = [...registry.values()].filter((t) => t.minRole === 'viewer' && t.scope === 'content:read').map((t) => t.name);
     expect(reads.length).toBeGreaterThan(10);
     expect((await names(viewer)).sort()).toEqual(reads.sort());

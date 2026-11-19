@@ -26,6 +26,7 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   template: (o) => o.template,
   templateVersion: (o) => o.templateVersion,
   spot: (o) => o.templateSpot,
+  playlist: (o) => o.playlist,
   bundle: (o) => files(o).bundle,
   sources: (o) => files(o).sources,
   asset: (o) => o.asset,
