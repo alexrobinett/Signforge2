@@ -27,7 +27,15 @@ const STRICT = /^\s*(["'])use strict\1/;
 
 /** A CSP hash source. The player's own SHA-256: WebCrypto exists only in a secure context. */
 const hashSource = (text: string): string =>
-  `'sha256-${btoa(String.fromCharCode(...(new Sha256().update(new TextEncoder().encode(text)).hex().match(/../g)!).map((b) => parseInt(b, 16))))}'`;
+  `'sha256-${btoa(
+    String.fromCharCode(
+      ...new Sha256()
+        .update(new TextEncoder().encode(text))
+        .hex()
+        .match(/../g)!
+        .map((b) => parseInt(b, 16)),
+    ),
+  )}'`;
 
 /**
  * The wrapper and the template's document for a bundle. A script this does not recognise as one (an

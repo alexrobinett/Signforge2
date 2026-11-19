@@ -111,7 +111,8 @@ describe('a template that opens a peer connection', () => {
       await new Promise<void>((resolve) => tcp.listen(0, '127.0.0.1', resolve));
       try {
         const servers = `stun:127.0.0.1:${udp.address().port} turn:127.0.0.1:${(tcp.address() as AddressInfo).port}?transport=tcp`;
-        const html = mode === 'webrtc-markup' ? h.templateHtml.replace('<body>', `<body><iframe srcdoc="${attribute(childPage(servers, 1))}"></iframe>`) : undefined;
+        const html =
+          mode === 'webrtc-markup' ? h.templateHtml.replace('<body>', `<body><iframe srcdoc="${attribute(childPage(servers, 1))}"></iframe>`) : undefined;
         const { p, leaks } = await hostile(mode, servers, html);
         const s = await afterEvil(p);
         expect({ leaks: leaks(), datagrams: datagrams.length, connections }).toEqual({ leaks: [], datagrams: 0, connections: [] });
