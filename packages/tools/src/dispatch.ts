@@ -41,6 +41,7 @@ import {
   type Role,
   type Scope,
   type RateLimiter,
+  type Connectors,
   type FeedUrlSealer,
   type ScreenNotifier,
   type ToolErrorCode,
@@ -60,6 +61,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Seals feed URLs. The data source tools that take a URL need it. */
   feedUrls?: FeedUrlSealer;
+  /** Providers' OAuth. The connection tools need it. */
+  connectors?: Connectors;
   /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
   screens?: ScreenNotifier;
   /** Counts attempts against the caller's rate limits. `claim_screen` refuses without one. */
@@ -94,7 +97,8 @@ export async function grantOf(caller: Pick<Caller<DataScope>, 'org' | 'role' | '
   return { role: caller.role, scopes: caller.scopes, editorsPublish };
 }
 
-const SECRET_KEY = /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|pairing_?code|^code$/i;
+const SECRET_KEY =
+  /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|pairing_?code|oauth_?state|^code$|^resource$/i;
 const REDACTED = '[redacted]';
 
 /**
@@ -202,6 +206,7 @@ export async function dispatch<D extends DataScope>(
       blobs: caller.blobs,
       uploads: caller.uploads,
       feedUrls: caller.feedUrls,
+      connectors: caller.connectors,
       write,
       notify,
       rateLimit: caller.rateLimit,
@@ -303,7 +308,7 @@ function idempotencyOf(org: DataScope, action: string, input: unknown) {
   };
 }
 
-async function sha256Hex(text: string) {
+export async function sha256Hex(text: string) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

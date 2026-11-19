@@ -8,7 +8,7 @@ import { seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing'
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { dispatch, manifestKey, orgBlobKey, r2Presigner, registry, TOOLS, type AnyTool, type Caller } from '../src';
+import { dispatch, manifestKey, orgBlobKey, r2Presigner, registry, TOOLS, type AnyTool, type Caller, type Connectors } from '../src';
 
 /** Each org's manifest for its screen, and its uploaded template bundle and sources. */
 const FILES = {
@@ -32,6 +32,7 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   logoOnDarkAsset: (o) => o.asset,
   logoOnLightAsset: (o) => o.asset,
   dataSource: (o) => o.dataSource,
+  connection: (o) => o.connection,
 };
 const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
 
@@ -130,7 +131,32 @@ const REACHED_BY: Record<string, (s: Seeded) => unknown> = {
   'create_spot.templateVersionId': (s) => ({ name: 'Menu', kind: 'template', templateVersionId: s.a.templateVersion }),
   'create_spot.assetId': (s) => ({ name: 'Logo', kind: 'image', assetId: s.a.asset }),
   'update_spot.assetId': (s) => ({ spotId: s.b.imageSpot, assetId: s.a.asset }),
+  // A provider source takes a resource with its connection, and no feed URL.
+  'create_data_source.connectionId': (s) => ({ name: 'Rooms', format: 'provider', connectionId: s.a.connection, resource: 'calendar-1' }),
 };
+
+/** The API's OAuth, stubbed: no provider is reached. */
+const connectors: Connectors = {
+  providers: ['google'],
+  begin: async (_provider, _authorization, state) => ({ authorizeUrl: `https://accounts.test/authorize?state=${state}`, verifierSealed: 'sealed-verifier' }),
+  finish: async () => ({ credentialsSealed: 'sealed-grant', account: 'someone@example.test', scopes: ['read'], expiresAt: null }),
+  revoke: async () => undefined,
+};
+
+/** A pending authorization of `orgId`'s, started by `actorId`, for finish_connection's example state. */
+async function pendingFor(orgId: string, actorId: string) {
+  const example = registry.get('finish_connection')!.example as { oauthState: string };
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(example.oauthState));
+  const stateHash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  await scoped(env.DB, orgId).connections.authorizations.insert({
+    provider: 'google',
+    stateHash,
+    verifierSealed: 'sealed-verifier',
+    actorKind: 'user',
+    actorId,
+    expiresAt: Date.now() + 600_000,
+  });
+}
 
 let s: Seeded;
 let callerB: Caller;
@@ -152,6 +178,8 @@ async function orgAState() {
     brandKits: await a.brandKits.list(),
     brandAssignments: await a.brandKits.assignments.list(),
     dataSources: await a.dataSources.list(),
+    connections: await a.connections.list(),
+    authorizations: await a.connections.authorizations.list(),
     snapshots: await a.dataSources.snapshots([s.a.dataSource]),
     spots: await a.spots.list(),
   };
@@ -172,7 +200,10 @@ beforeAll(async () => {
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
     rateLimit: async () => true,
     feedUrls: { seal: async (_source, url) => `sealed:${url}` },
+    connectors,
   };
+  // finish_connection's example state, pending for org B's owner.
+  await pendingFor('org-b', 'user-b');
   // claim_screen's example code, open to claim.
   await startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() });
   before = await orgAState();

@@ -65,6 +65,34 @@ export interface FeedUrlSealer {
   seal(source: { orgId: string; id: string }, url: string): Promise<string>;
 }
 
+/**
+ * What the connection tools need from the API (apps/api/src/connectors): each provider's OAuth
+ * and the CONNECTION_KEY that seals credentials. Tokens never leave it: a tool handles only
+ * sealed values, the account's name and the scopes granted.
+ */
+export interface Connectors {
+  /** The providers this deployment can connect. */
+  providers: readonly string[];
+  /**
+   * The URL to send the person to for a new authorization: the provider's authorize endpoint
+   * with `state` and a fresh PKCE challenge (S256). Also its code verifier, sealed for the
+   * authorization (the org and the state's SHA-256), to store until it is finished.
+   */
+  begin(provider: string, authorization: { orgId: string; stateHash: string }, state: string): Promise<{ authorizeUrl: string; verifierSealed: string }>;
+  /**
+   * Exchange the provider's authorization code, with the authorization's verifier, for a grant,
+   * sealed for `connection`. A provider's refusal is a `ToolError`.
+   */
+  finish(
+    provider: string,
+    authorization: { orgId: string; stateHash: string; verifierSealed: string },
+    code: string,
+    connection: { orgId: string; id: string },
+  ): Promise<{ credentialsSealed: string; account: string; scopes: string[]; expiresAt: number | null }>;
+  /** Revoke the sealed grant at the provider, where it can. A failure there is logged, not thrown: the credentials are deleted anyway. */
+  revoke(provider: string, connection: { orgId: string; id: string }, credentialsSealed: string): Promise<void>;
+}
+
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
 export interface ToolContext<I, D extends DataScope = OrgScope> {
   org: D;
@@ -74,8 +102,10 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   blobs: R2Bucket;
   /** Signs direct uploads to that bucket (./upload.ts). Undefined where uploads are not configured. */
   uploads?: UploadSigner;
-  /** Seals feed URLs (./data-sources.ts). Undefined where no data source tool runs. */
+  /** Seals feed URLs and provider resources (./data-sources.ts). Undefined where no data source tool runs. */
   feedUrls?: FeedUrlSealer;
+  /** Providers' OAuth (./connections.ts). Undefined where no connection tool runs. */
+  connectors?: Connectors;
   /**
    * Add a staged change (a repository's `stage.*`) to this call's writes, and get its row back.
    * A tool never writes to D1 itself: the dispatcher runs the writes and the audit row in one
