@@ -162,6 +162,13 @@
       "when": 1795047545295,
       "tag": "0022_audit_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1795054878868,
+      "tag": "0023_connections",
+      "breakpoints": true
     }
   ]
 }
