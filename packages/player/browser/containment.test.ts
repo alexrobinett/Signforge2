@@ -3,6 +3,8 @@
  * the spot fails and the next one plays. Templates navigating their own frame are the case the
  * wrapper frame exists for (review A1); the rest were already stopped by the sandbox and the CSP.
  */
+import { createSocket } from 'node:dgram';
+import { createServer, type AddressInfo } from 'node:net';
 import type { Frame } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import type { FixtureMode } from './content';
@@ -16,13 +18,13 @@ const h = useHarness({ siteIsolation: true });
  * popup. (Playwright also reports requests CSP blocked before they were sent, so its request
  * events are not evidence.)
  */
-async function hostile(mode: FixtureMode) {
+async function hostile(mode: FixtureMode, target?: string) {
   const popups: string[] = [];
   const p = await h.openPlayer((server) => {
     server.publish(
       h.content([
         { id: 'a', durationMs: 800 },
-        { id: 'evil', mode, target: `${server.url}/leak/${mode}`, durationMs: 800 },
+        { id: 'evil', mode, target: target ?? `${server.url}/leak/${mode}`, durationMs: 800 },
         { id: 'b', durationMs: 800 },
       ]),
     );
@@ -76,6 +78,35 @@ describe('a template that loads from the network', () => {
       expect(leaks()).toEqual([]);
       expect(spotsPlayed(s)).toEqual(['a', 'b']);
       expect(s.lastError).toMatch(/^evil: /);
+    });
+  }
+});
+
+describe('a template that opens a peer connection', () => {
+  // The CSP has no say over WebRTC: a STUN request leaves over UDP, a TURN allocation over TCP.
+  for (const mode of ['webrtc', 'webrtc-frame'] as const) {
+    it(`gathers no candidate and sends nothing: ${mode}`, async () => {
+      const udp = createSocket('udp4');
+      const datagrams: Buffer[] = [];
+      udp.on('message', (m) => datagrams.push(m));
+      await new Promise<void>((resolve) => udp.bind(0, '127.0.0.1', resolve));
+      const connections: string[] = [];
+      const tcp = createServer((socket) => {
+        connections.push(String(socket.remoteAddress));
+        socket.destroy();
+      });
+      await new Promise<void>((resolve) => tcp.listen(0, '127.0.0.1', resolve));
+      try {
+        const servers = `stun:127.0.0.1:${udp.address().port} turn:127.0.0.1:${(tcp.address() as AddressInfo).port}?transport=tcp`;
+        const { p, leaks } = await hostile(mode, servers);
+        const s = await afterEvil(p);
+        expect({ leaks: leaks(), datagrams: datagrams.length, connections }).toEqual({ leaks: [], datagrams: 0, connections: [] });
+        expect(s.lastError).toMatch(new RegExp(`^evil: .*${mode} was refused`));
+        expect(spotsPlayed(s)).toEqual(['a', 'b']);
+      } finally {
+        udp.close();
+        tcp.close();
+      }
     });
   }
 });

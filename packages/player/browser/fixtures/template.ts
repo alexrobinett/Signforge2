@@ -51,7 +51,28 @@ const attacks: Record<string, (target: string) => unknown> = {
     return img.decode();
   },
   font: (t) => new FontFace('leak', `url(${t})`).load(),
+  webrtc: async (t) => gather(RTCPeerConnection, t),
+  // A frame of its own is a fresh realm: if it shared the template's origin, its RTCPeerConnection would be another way in.
+  'webrtc-frame': async (t) => {
+    const f = document.createElement('iframe');
+    document.body.appendChild(f);
+    return gather((f.contentWindow as typeof window).RTCPeerConnection, t);
+  },
 };
+/**
+ * Open a peer connection to the ICE servers in `t` (space-separated) and collect candidates for a
+ * second. Resolves with what it gathered, if anything: the test reads it in the spot's error.
+ */
+async function gather(PeerConnection: typeof RTCPeerConnection, t: string): Promise<string | undefined> {
+  const found: string[] = [];
+  const pc = new PeerConnection({ iceServers: t.split(' ').map((urls) => ({ urls, username: 'sf', credential: 'sf' })) });
+  pc.onicecandidate = (e) => void (e.candidate && found.push(e.candidate.candidate));
+  pc.createDataChannel('leak');
+  await pc.setLocalDescription();
+  await after(1000);
+  pc.close();
+  return found.length ? `gathered ${found.join(' | ')}` : undefined;
+}
 const navigates = new Set(['navigate', 'navigate-data', 'navigate-top', 'refresh', 'link']);
 
 defineTemplate({
@@ -66,8 +87,9 @@ defineTemplate({
     if (mode === 'navigate-on-play') (window as unknown as { sfTarget: string }).sfTarget = target;
     const attack = attacks[mode];
     if (attack) {
-      await Promise.resolve(attack(target)).catch(() => undefined);
+      const leaked = await Promise.resolve(attack(target)).catch(() => undefined);
       if (navigates.has(mode)) await forever();
+      if (typeof leaked === 'string') throw new Error(`${mode} went through: ${leaked}`);
       await after(200);
       throw new Error(`${mode} was refused`);
     }
