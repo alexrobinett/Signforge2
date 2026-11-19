@@ -82,9 +82,11 @@ export interface TemplateManifest {
 
 /**
  * The kinds of feed a template's live fields come from: an Open-Meteo forecast (a JSON source),
- * or a news (`rss`) or calendar (`ical`) feed, which the server converts to `NewsFeed` and `CalendarFeed`.
+ * a news (`rss`) or calendar (`ical`) feed, which the server converts to `NewsFeed` and
+ * `CalendarFeed`, or a `table` (a CSV file or a JSON list, converted to `TableFeed`) whose rows
+ * fill a list field through a `TableMapping`.
  */
-export const LIVE_SOURCES = ['open-meteo', 'rss', 'ical'] as const;
+export const LIVE_SOURCES = ['open-meteo', 'rss', 'ical', 'table'] as const;
 export type LiveSource = (typeof LIVE_SOURCES)[number];
 
 /** The units an Open-Meteo forecast is fetched in, as a weather template's unit fields write them. */
@@ -100,7 +102,10 @@ export const BINDING_PATH = /^[^.\s]+(?:\.[^.\s]+)*$/;
  */
 export interface LiveData {
   source: LiveSource;
-  /** Field name to its path in the source's snapshot, as a `Binding` names it. */
+  /**
+   * Field name to its path in the source's snapshot, as a `Binding` names it. A `table` source
+   * fills list fields only, each at `rows` (`TABLE_ROWS_PATH`), mapped by the spot's binding.
+   */
   fields: Record<string, string>;
   /** Open-Meteo: the text field naming the place, which starts as the place picked. */
   place?: string;
@@ -527,10 +532,43 @@ export interface NewsFeed {
   items: { title: string; published: string; source: string }[];
 }
 
+/**
+ * A CSV file or a JSON list of objects, as the server converts a `csv` or `json-table` source.
+ * `columns` in the file's order (a CSV's header row; for JSON every key, in the order first
+ * seen); each row has one cell per column, `''` where it had none. CSV cells are text as written,
+ * so "$4.50" and "02134" keep their form; JSON numbers stay numbers.
+ */
+export interface TableFeed {
+  columns: string[];
+  rows: (string | number)[][];
+}
+
+/** A table binding's path: the rows of a `TableFeed`. */
+export const TABLE_ROWS_PATH = 'rows';
+
+/**
+ * How a table's rows fill a list field (`Binding.table`). Each row becomes an item: the column
+ * named for each item property fills it, converted to the property's type (a number written as
+ * text in the screen's locale, as a price: 4.5 is "4.50"; a select matched to its options in any
+ * case). A property with no column takes its default. A row that does not fit the item, or leaves
+ * a property with no default empty, is left out. The rows kept are filtered, then sorted, then
+ * cut to the field's `maxItems`.
+ */
+export interface TableMapping {
+  /** Item property to the column that fills it. Every property without a default needs one. */
+  columns: Record<string, string>;
+  /** Only rows whose cell in `column` is `equals`, ignoring case and surrounding spaces: `section` = `Mains`. */
+  filter?: { column: string; equals: string };
+  /** Rows in the order of `column`: numbers by value, text in the screen's locale with its digits as numbers. Absent: the file's order. */
+  sort?: { column: string; descending?: boolean };
+}
+
 export interface Binding {
   source: string;
-  /** Dot path into the snapshot's data. Numbers index arrays: `daily.temperature_2m_max.0`. */
+  /** Dot path into the snapshot's data. Numbers index arrays: `daily.temperature_2m_max.0`. With `table`, `rows`. */
   path: string;
+  /** A list field filled from a `TableFeed`'s rows. Players before #84 ignore it, and their bound value does not fit: they show the fallback. */
+  table?: TableMapping;
 }
 
 // ------------------------------------------------------------ screen manifest

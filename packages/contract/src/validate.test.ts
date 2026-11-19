@@ -25,6 +25,9 @@ import {
   validateBrandKit,
   displayHoursProblems,
   readPath,
+  boundValue,
+  tableItems,
+  validateTableFeed,
   validateBoundValue,
   fitsScreenBox,
   imageSizeProblem,
@@ -254,6 +257,12 @@ const validators: [string, (v: unknown) => string[], (() => unknown)?][] = [
   ['validateDataSnapshot', validateDataSnapshot, () => validSyncResponse().snapshots[0]],
   ['validateBrandKit', validateBrandKit, validBrand],
   ['validateBoundValue', (v) => validateBoundValue(template.fields, 'items', v), () => [{ name: 'Soup', hot: true }]],
+  ['validateTableFeed', validateTableFeed, () => ({ columns: ['Item', 'Price'], rows: [['Soup', 4.5]] })],
+  [
+    'boundValue',
+    (v) => boundValue(template.fields, 'items', v, { columns: ['Item'], rows: [['Soup']] }, 'en-US').problems,
+    () => ({ ...tableBinding(), table: { columns: { name: 'Item' } } }),
+  ],
   ['displayHoursProblems', displayHoursProblems, () => validManifest().screen.displayHours],
   ['validatePairStartRequest', validatePairStartRequest, () => ({ kind: 'browser' })],
   ['validatePairStartResponse', validatePairStartResponse, () => ({ code: 'ABC123', pollToken: 'p', expiresAt: '2026-11-17T13:15:00Z' })],
@@ -403,7 +412,7 @@ describe('validateTemplateManifest', () => {
       'live: field "high": "" is not a dot path such as current.temperature_2m',
     ]);
     expect(validateTemplateManifest({ ...weather(), live: { source: 'weather.com', fields: {} } })).toEqual([
-      'live: source must be one of open-meteo, rss, ical',
+      'live: source must be one of open-meteo, rss, ical, table',
       'live: fields must name at least one field',
     ]);
   });
@@ -469,6 +478,134 @@ describe('live values for bound fields', () => {
     expect(readPath(data, 'current.constructor')).toBeUndefined();
     expect(readPath(data, 'daily.max.length')).toBeUndefined();
     expect(readPath('text', 'length')).toBeUndefined();
+  });
+});
+
+const menuItems: Extract<FieldDef, { type: 'list' }> = {
+  type: 'list',
+  label: 'Items',
+  maxItems: 3,
+  item: {
+    name: { type: 'text', label: 'Name', maxLength: 12 },
+    price: { type: 'text', label: 'Price', maxLength: 10 },
+    tag: { type: 'select', label: 'Tag', options: ['', 'New', 'Vegan'], default: '' },
+    hot: { type: 'boolean', label: 'Hot', default: false },
+  },
+};
+const menuTable = {
+  columns: ['Item', 'Price', 'Section', 'Tag', 'Hot'],
+  rows: [
+    ['Soup', 4.5, 'Starters', 'vegan', 'yes'],
+    ['Steak', '$21', 'Mains', '', 'no'],
+    ['Pie', 12, 'Mains', 'NEW', ''],
+    ['Bread', '3', 'starters', 'Spicy', 'no'],
+    ['', '2', 'Mains', '', ''],
+  ],
+};
+const tableBinding = () => ({ source: 'menu', path: 'rows', table: { columns: { name: 'Item', price: 'Price' } } });
+
+describe('table bindings', () => {
+  it('checks a TableFeed: distinct names, one text or number cell per column', () => {
+    expect(validateTableFeed(menuTable)).toEqual([]);
+    expect(validateTableFeed({ columns: ['A', 'A'], rows: [['x', 'y']] })).toEqual(['table columns must have distinct names']);
+    expect(validateTableFeed({ columns: ['A', 'B'], rows: [['x', 'y'], ['x']] })).toEqual(['table row 2 must have 2 cells of text or numbers']);
+    expect(validateTableFeed({ columns: ['A'], rows: [[true]] })).toEqual(['table row 1 must have 1 cells of text or numbers']);
+    expect(validateTableFeed({ columns: [''], rows: [] })).toEqual(['table columns must be a list of names']);
+  });
+
+  it('maps rows onto items: numbers as prices in the locale, selects in any case, empty cells to defaults', () => {
+    const columns = { name: 'Item', price: 'Price', tag: 'Tag', hot: 'Hot' };
+    expect(tableItems({ ...menuItems, maxItems: 10 }, { columns }, menuTable, 'en-US')).toEqual({
+      items: [
+        { name: 'Soup', price: '4.50', tag: 'Vegan', hot: true },
+        { name: 'Steak', price: '$21', tag: '', hot: false },
+        { name: 'Pie', price: '12', tag: 'New', hot: false },
+      ],
+      problems: ['row 4: tag must be one of , New, Vegan', 'row 5 has no name'],
+    });
+    expect(tableItems(menuItems, { columns: { name: 'Item', price: 'Price' } }, menuTable, 'fr-FR').items?.[0]).toEqual({
+      name: 'Soup',
+      price: '4,50',
+      tag: '',
+      hot: false,
+    });
+  });
+
+  it('filters, sorts, then keeps maxItems rows', () => {
+    const columns = { name: 'Item', price: 'Price' };
+    const names = (t: Parameters<typeof tableItems>[1]) => tableItems(menuItems, t, menuTable, 'en-US').items?.map((i) => i.name);
+    expect(names({ columns, filter: { column: 'Section', equals: ' starters ' } })).toEqual(['Soup', 'Bread']);
+    expect(names({ columns, sort: { column: 'Item' } })).toEqual(['Bread', 'Pie', 'Soup']);
+    expect(names({ columns, sort: { column: 'Price', descending: true } })).toEqual(['Steak', 'Pie', 'Soup']);
+    expect(names({ columns, filter: { column: 'Section', equals: 'Mains' }, sort: { column: 'Item' } })).toEqual(['Pie', 'Steak']);
+  });
+
+  it('gives no items for a table without a mapped column, or not a table at all', () => {
+    expect(tableItems(menuItems, { columns: { name: 'Dish', price: 'Price' }, sort: { column: 'Rank' } }, menuTable, 'en-US')).toEqual({
+      problems: ['the table has no column "Dish", "Rank"'],
+    });
+    expect(tableItems(menuItems, { columns: { name: 'Item', price: 'Price' } }, { items: [] }, 'en-US')).toEqual({
+      problems: ['table columns must be a list of names'],
+    });
+  });
+
+  it('reads a bound value by path, or by a table mapping', () => {
+    const fields = { title: { type: 'text', label: 'Title' }, items: menuItems };
+    expect(boundValue(fields, 'title', { source: 'menu', path: 'rows.1.0' }, menuTable, 'en-US')).toEqual({ value: 'Steak', problems: [] });
+    expect(boundValue(fields, 'title', { source: 'menu', path: 'rows.9.0' }, menuTable, 'en-US')).toEqual({
+      problems: ['field "title" has no value at the bound path'],
+    });
+    expect(boundValue(fields, 'items', tableBinding(), menuTable, 'en-US')).toEqual({
+      value: [
+        { name: 'Soup', price: '4.50', tag: '', hot: false },
+        { name: 'Steak', price: '$21', tag: '', hot: false },
+        { name: 'Pie', price: '12', tag: '', hot: false },
+      ],
+      problems: [],
+    });
+    expect(boundValue(fields, 'items', { ...tableBinding(), table: { columns: { name: 'Dish', price: 'Price' } } }, menuTable, 'en-US')).toEqual({
+      problems: ['field "items": the table has no column "Dish"'],
+    });
+    // Without its table, the rows are lists, which no list field takes: a player before #84 shows the fallback.
+    expect(boundValue(fields, 'items', { source: 'menu', path: 'rows' }, menuTable, 'en-US').value).toBeUndefined();
+  });
+
+  it("holds a spot's table binding to a list field, its item properties, and a column for each property without a default", () => {
+    const fields = { title: { type: 'text', label: 'Title', default: 'Menu' }, items: { ...menuItems, default: [] } };
+    expect(validateSpotData(fields, {}, {}, { items: tableBinding() })).toEqual([]);
+    expect(validateSpotData(fields, {}, {}, { title: tableBinding() })).toEqual([
+      'binding for "title" maps a table, which fills a list field only, and "title" is a text field',
+    ]);
+    expect(
+      validateSpotData(
+        fields,
+        {},
+        {},
+        {
+          items: {
+            source: 'menu',
+            path: 'items',
+            table: { columns: { colour: 'C', price: '' }, filter: { column: 'S' }, sort: { column: 'X', descending: 'yes' } },
+          },
+        },
+      ),
+    ).toEqual([
+      'binding for "items": a table binding\'s path is "rows"',
+      'binding for "items": "colour" is not a property of its items (name, price, tag, hot)',
+      'binding for "items": the column for "price" must be a column name',
+      'binding for "items" needs a column for "name"',
+      'binding for "items": filter needs a column and the text it equals',
+      'binding for "items": sort needs a column, and descending true or false',
+    ]);
+  });
+
+  it('lets a template declare list fields a table fills, at rows', () => {
+    const m = { ...structuredClone(template), live: { source: 'table', fields: { items: 'rows' } } };
+    expect(validateTemplateManifest(m)).toEqual([]);
+    expect(validateTemplateManifest({ ...m, live: { source: 'table', fields: { title: 'rows', items: 'items' } } })).toEqual([
+      'live: field "title": a table fills list fields only, at "rows"',
+      'live: field "items": a table fills list fields only, at "rows"',
+    ]);
   });
 });
 
