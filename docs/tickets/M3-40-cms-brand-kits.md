@@ -1,6 +1,6 @@
 # M3-40 CMS: brand kits
 
-Status: open  ·  Size: S  ·  Depends on: M3-38, M3-36, the chosen CMS design
+Status: done except the Pi box, which waits on M3-18 (branch t3/m3-40-cms-brand-kit-pages)  ·  Size: S  ·  Depends on: M3-38, M3-36, the chosen CMS design; the Pi box on M3-18
 
 ## Goal
 
@@ -18,11 +18,21 @@ Create and edit brand kits in the CMS, and see them on real templates while edit
 - A preview strip of two or three templates themed by the kit, through the real player (M3-36).
 - "Edits reach these screens at the next publish."
 
-- **From the design canvas (2026-11-17).** Design: the design canvas (https://claude.ai/artifact/JUMHm7PCsat6RV8yDXNb3H), `docs/proposals/cms-ui.md` and `docs/research/cms-ux.md`. Picking a colour re-themes the org's own spots live, through `PlayerStage`, with a contrast verdict (word, not colour) beside every pair and a one-click fix. "Affects N spots on M screens" (M3-38's `reach`) sits beside Publish. Fonts are only the six in the catalogue.
-
+- **From the design canvas (2026-11-17).** Design: the design canvas (https://claude.ai/artifact/JUMHm7PCsat6RV8yDXNb3H), `docs/proposals/cms-ui.md` and `docs/research/cms-ux.md`. Picking a colour re-themes the org's own spots live, on the real player, with a contrast verdict (word, not colour) beside every pair and a one-click fix. The screens the kit reaches at the next publish (M3-38's `reach`) sit beside Save. Fonts are only the six in the catalogue.
+- **Read against master, 2026-11-19.** Changed from the text above: kits have no drafts (M3-38), so the page saves a kit and screens get it at their next publish; there is no publish in the CMS until M3-18, so the button beside the reach is Save, not Publish. `reach` counts screens, not spots ("affects N spots" would need the publish's own view, M3-18). The previews are the player in an iframe per spot, not the spot editor's `PlayerStage`, which carries the editor's toggles. Pairs below 4.5:1 are warnings and never block a save (M3-38; the template side of contrast is #68, #78 and #92).
 
 ## Done when
 
-- [ ] A kit can be made, assigned to a group, published, and seen on the Pi.
-- [ ] Playwright test of the kit flow, in the root test run.
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [ ] A kit can be made, assigned to a group, published, and seen on the Pi. **Made and assigned to a group: yes** (the Playwright test below; the group's screen is in the kit's `reach`). **Published and seen on the Pi: not possible yet.** No tool compiles the org's screens with their kits: `publishOrg` exists, but its publish tool is M3-18, and `sf push` publishes a manifest built from a local project, without the org's kits. Once M3-18 lands: make a kit in the CMS with a primary the base templates show (say `#c8102e`), give it to a group holding the Pi's screen, publish from the CMS, and on the Pi read the template frame's `--sf-primary` with `python3 ~/signforge/sfstate.py` (the spot on screen wears the kit), under `device/pi/pi-lock.sh`.
+- [x] Playwright test of the kit flow, in the root test run. `apps/cms/e2e/brand-kits.spec.ts` (two tests, in `pnpm --filter @signforge/cms test:e2e`, which root `pnpm test` runs): from the empty Brand kits page, make a kit (the org's first, so its default, reaching the org's screen), see the org's clock spot on the real player wear it, change the primary and see the template frame's `--sf-primary` change before anything is saved (about 50 ms on a Mac), set the on-accent by hand to a failing white and see "1.8:1 Fail", fix it in one click ("Use #000000 (11.5:1)", derived again), pick Montserrat, save, reload and see it kept; duplicate it, give the copy to the group "Café screens" and see "Edits reach 1 screen at the next publish: Coffee bar.", save a muted colour below 4.5:1 and see the list's contrast warning (the tool's own words), make the copy the default. axe (light and dark) on the empty list, the editor and the list. Pure parts in `apps/cms/test/brand-kits.test.ts`: verdicts and ratios checked against values computed outside the code, the fix, the draft, what Save and Duplicate send, and the draft kit laid over a spot's preview input.
+- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated. Docs: `apps/cms/README.md` (layout, the e2e), `docs/architecture.md` (Brand kits), `docs/proposals/brand-and-editor.md` (status), this ticket and `docs/tickets/README.md`.
+
+## Notes (M3-40, 2026-11-19)
+
+- **Pages.** `/settings/brand-kits` (board SettingsBrandKits): each kit as a tile in its own colours and display font, its fonts, where it is used and what it reaches, its contrast warnings, Edit, Duplicate and Make default; the curated fonts, each drawn in itself (the CMS loads the catalogue's WOFF2 files from the session blob route). `/settings/brand-kits/<id>` (board Idea 11, with BrandKit's fonts and logos): name, the eight colours (a colour picker and a hex field each; an on-colour shows when it is derived and can be derived again), the five pairs with ratio, verdict (Pass, Large text only, Fail) and a fix, fonts with samples, corners, logos on dark and light from the library (SVG or PNG only), the previews, and "Where it is used" (default, groups, screens on their own, and a warning for screens whose groups disagree).
+- **The editor is outside the settings layout** (`routes/_app/settings_/`). Beside the settings navigation, at a 1280 px window the previews wrapped below the form, off screen, and Chromium throttles an off-screen cross-origin frame: the template missed the player's 2 s ready timeout on every retry. On a narrow window they still sit below the form and play once scrolled to.
+- **Previews.** Up to three of the org's newest template spots, each a player in an iframe at 1920 × 1080 scaled to its column. The store compiles each spot in the browser with the draft kit laid over its `get_spot_preview` input (`withDraftKit`: catalogue fonts with their files, the logo's rendition) and posts it over the preview channel, 40 ms after an edit. A hex being typed holds the last frame. With no template spots, the page links to Spots.
+- **Fix.** For an on-colour, derive it again (black or white, as the tools do). For text or muted, move it toward that black or white in 5% steps only as far as 4.5:1 needs, so a grey stays a grey. A fix can make another pair fail (text on background against text on surface); the verdicts update as it does.
+- **Contrast words.** "Large text only" for 3 to 4.5:1 (WCAG's large text). The tools' warning line stays 4.5:1; the list page shows the tools' own `warnings`.
+- `BRAND_PAIRS` is exported from the compiler, so the page and `brandWarnings` judge the same pairs.
+- Not built: deleting a kit (no tool, M3-38); a kit per screen from the screen's own page (the kit page does it); the CMS wearing the org's brand (out of scope since 2026-11-17).
