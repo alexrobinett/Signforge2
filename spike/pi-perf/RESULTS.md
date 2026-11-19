@@ -397,6 +397,26 @@ Prepares over both sets and kits (ms, before / after): meeting-room (agenda) med
 
 No cost in frames: the ranges overlap run for run, and the one 83 ms frame was in set 1's second after run with no kit. Agenda's meeting room, the spot with the most rows, prepares about 20 ms slower, the canvas read per row; well within 500 ms. The other templates are within run-to-run noise. Nothing was skipped.
 
+## No WebRTC in template frames (issue #91, 2026-11-18)
+
+The player puts one script first in each template's document that deletes `RTCPeerConnection` and `webkitRTCPeerConnection` (see Template containment in `docs/architecture.md`). Master's player (`535e172`) and this branch's (`564f386`) at subdirectories of the rig, served on `http://localhost:8090` so the kiosk's own origin and caches were not touched.
+
+WebRTC, in a new tab of the kiosk's Chromium 156: the browser tests' `webrtc` spot (the fixture template opening a peer connection to a STUN server on UDP 34780 and a TURN server on TCP 34781, both on the Pi's loopback), 14 s, so it came up three times.
+
+| Build | The spot's error | STUN datagrams | TURN connections |
+| --- | --- | --- | --- |
+| Master | `webrtc went through: gathered candidate:… udp … typ host` | 9 | 3 |
+| This branch | `webrtc was refused` | 0 | 0 |
+
+Frames: the full 16-spot `examples/stress` playlist, cut, 120 s per run after 10 s to settle, HTTP cache cleared, the service worker bypassed and the origin's storage cleared before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order: master, branch, branch, master.
+
+| Build | Overall | Playing | Loading next | Worst frame | Prepares, median and max (13 each) |
+| --- | --- | --- | --- | --- | --- |
+| Master | 0.62, 0.29% | 0.11, 0.11% | 17.9, 7.0% | 300, 100 ms | 243 / 635, 260 / 394 ms |
+| This branch | 0.33, 0.40% | 0.10, 0.14% | 9.2, 10.0% | 100, 100 ms | 232 / 383, 225 / 375 ms |
+
+No cost: the ranges overlap, and the one 300 ms frame (a prepare) was in master's first run. Nothing was skipped.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
