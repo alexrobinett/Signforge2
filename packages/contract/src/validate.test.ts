@@ -775,11 +775,29 @@ describe('script check', () => {
       expect(problems(`<script>${text}</script>`), JSON.stringify(text)).toEqual(START);
   });
 
-  it('refuses a module and an external script, which do not run', () => {
-    expect(problems('<script type="module">"use strict";x()</script>')).toEqual([
-      'a module script does not run in a template; sf build makes one classic script',
+  it('refuses a module, another executable type and an external script, read as the browser reads them', () => {
+    const type = (t: string) => [`a script with type "${t}" does not run in a template: use no type (sf build makes a classic script)`];
+    const external = ['a script must be inline: an external script does not run in a template'];
+    expect(problems('<script type="module">"use strict";x()</script>')).toEqual(type('module'));
+    expect(problems('<script type="&#109;odule">"use strict";x()</script>')).toEqual(type('module'));
+    expect(problems('<script type=" MODULE ">"use strict";x()</script>')).toEqual(type('module'));
+    expect(problems('<script type="text/ecmascript">"use strict";x()</script>')).toEqual(type('text/ecmascript'));
+    expect(problems('<script language="javascript1.5">"use strict";x()</script>')).toEqual(type('text/javascript1.5'));
+    expect(problems('<script type="importmap">{}</script>')).toEqual(type('importmap'));
+    expect(problems('<script src="x.js"></script>')).toEqual(external);
+    expect(problems('<svg><script href="x.js"/></svg>')).toEqual(external);
+    expect(problems('<svg><script xlink:href="x.js"></script></svg>')).toEqual(external);
+  });
+
+  it('reads a script in SVG and in a template element, and refuses SVG script text that is not plain', () => {
+    expect(problems('<svg><script>"use strict";x()</script></svg><template><script>y()</script></template>')).toEqual(START);
+    expect(problems('<svg><script>"use strict";a &lt; b</script></svg>')).toEqual([
+      'a script must be plain text: no character references, CDATA or elements in it',
     ]);
-    expect(problems('<script src="x.js"></script>')).toEqual(['a script must be inline: an external script does not run in a template']);
+  });
+
+  it('passes text that only looks like a script: in a textarea, a comment, an attribute', () => {
+    expect(problems('<textarea><script>x()</script></textarea><!-- <script>y()</script> --><p title="<script>z()</script>">')).toEqual([]);
   });
 });
 

@@ -17,8 +17,6 @@ import {
   brandColourWarnings,
   FORBIDDEN_CSS,
   FORBIDDEN_TEMPLATE_CODE,
-  INLINE_SCRIPT,
-  isClassicScript,
   ID_PATTERN,
   LIVE_SOURCES,
   MAX_IDENTIFY_SECONDS,
@@ -29,7 +27,6 @@ import {
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
   TEMPLATE_BUDGET,
-  TEMPLATE_SCRIPT_START,
   templateKey,
   WEATHER_UNITS,
   type BrandKit,
@@ -40,6 +37,7 @@ import {
   type TemplateCheckReport,
   type TemplateManifest,
 } from './shapes.ts';
+import { bundleScripts } from './scripts.ts';
 
 // ------------------------------------------------------------------ helpers
 
@@ -853,15 +851,8 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
     .join('\n');
   const source = Object.keys(sources).length ? matches(FORBIDDEN_TEMPLATE_CODE, authored) : ['no source files were given'];
 
-  // What the player runs (`containedFrames` in packages/player-core): classic scripts that start with
-  // exactly TEMPLATE_SCRIPT_START, as the browser reads them (CR LF as LF). Anything else would not run.
-  const scripts: string[] = [];
-  for (const [, start = '', text = ''] of html.replace(/\r\n?/g, '\n').matchAll(INLINE_SCRIPT)) {
-    if (/\ssrc\s*=/i.test(start)) scripts.push('a script must be inline: an external script does not run in a template');
-    else if (/\stype\s*=\s*["']?module\b/i.test(start)) scripts.push('a module script does not run in a template; sf build makes one classic script');
-    else if (isClassicScript(start) && !text.startsWith(TEMPLATE_SCRIPT_START))
-      scripts.push(`every script must start with exactly ${TEMPLATE_SCRIPT_START} (sf build makes it so): one that does not, does not run`);
-  }
+  // What the player runs (`containedFrames` in packages/player-core), read as the browser reads it.
+  const scripts = bundleScripts(html).scripts.flatMap((s) => (s.problem ? [s.problem] : []));
 
   const checks: TemplateCheckReport['checks'] = [
     { check: 'manifest', ok: !manifestProblems.length, problems: manifestProblems },

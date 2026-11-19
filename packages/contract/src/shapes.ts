@@ -253,16 +253,6 @@ export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
  * parses a template's code (Template containment in docs/architecture.md).
  */
 export const TEMPLATE_SCRIPT_START = '"use strict";';
-/** An inline script's start tag and its text, up to its end tag. Shared by the bundle check and the player. */
-export const INLINE_SCRIPT = /(<script\b[^>]*>)([\s\S]*?)(?=<\/script[\s/>])/gi;
-const SCRIPT_TYPE = /\stype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))/i;
-/** Whether a script's start tag makes it classic JavaScript: no `type`, an empty one, or JavaScript's. Not a module or a data block. */
-export function isClassicScript(startTag: string): boolean {
-  const m = SCRIPT_TYPE.exec(startTag);
-  const type = (m?.[1] ?? m?.[2] ?? m?.[3] ?? '').trim().toLowerCase();
-  return type === '' || type === 'text/javascript' || type === 'application/javascript';
-}
-
 /** CSS a template may not ship. Each entry was measured as too slow on the baseline device. */
 export const FORBIDDEN_CSS: { pattern: RegExp; reason: string }[] = [
   { pattern: /backdrop-filter\s*:/i, reason: '`backdrop-filter` drops about a fifth of frames over moving content' },
