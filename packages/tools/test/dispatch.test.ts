@@ -426,7 +426,9 @@ describe("an agent grant's limits", () => {
     });
     const before = (await audits()).length;
     for (let i = 0; i < 3; i++) {
-      expect(await dispatch(registry, 'rename_group', { groupId: o.group, name: 'Over' }, { ...caller('editor', undefined, agent), agentLimiter })).toMatchObject({
+      expect(
+        await dispatch(registry, 'rename_group', { groupId: o.group, name: 'Over' }, { ...caller('editor', undefined, agent), agentLimiter }),
+      ).toMatchObject({
         ok: false,
         error: 'rate_limited',
         message: 'this agent grant made 2000 changes today (UTC), its limit; try again in 3600 s',
@@ -459,7 +461,9 @@ describe("an agent grant's limits", () => {
 
   it('never count a person', async () => {
     const { asked, agentLimiter } = scripted(() => ({ ok: false, limit: 'calls_per_minute', retryAfterSeconds: 1, first: true }));
-    expect(await dispatch(registry, 'rename_group', { groupId: o.group, name: 'By a person' }, { ...caller('editor'), agentLimiter })).toMatchObject({ ok: true });
+    expect(await dispatch(registry, 'rename_group', { groupId: o.group, name: 'By a person' }, { ...caller('editor'), agentLimiter })).toMatchObject({
+      ok: true,
+    });
     expect(asked).toEqual([]);
   });
 

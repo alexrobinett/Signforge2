@@ -27,15 +27,9 @@
       // One Durable Object per screen, holding its nudge socket (src/device/screen-object.ts), and one
       // per agent grant, counting its calls against its limits (src/agents/grant-object.ts).
       "durable_objects": {
-        "bindings": [
-          { "name": "SCREENS", "class_name": "ScreenObject" },
-          { "name": "AGENT_GRANTS", "class_name": "AgentGrantObject" }
-        ]
+        "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }, { "name": "AGENT_GRANTS", "class_name": "AgentGrantObject" }]
       },
-      "migrations": [
-        { "tag": "v1", "new_sqlite_classes": ["ScreenObject"] },
-        { "tag": "v2", "new_sqlite_classes": ["AgentGrantObject"] }
-      ],
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }, { "tag": "v2", "new_sqlite_classes": ["AgentGrantObject"] }],
       // The data-source poller (src/data/poller.ts) every minute and the offline alert check (src/alerts.ts) every 5;
       // src/index.ts routes on the schedule. Locally: `wrangler dev --env dev --test-scheduled`, then GET /__scheduled?cron=*/5+*+*+*+*.
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
@@ -71,15 +65,9 @@
       ],
       "send_email": [{ "name": "EMAIL" }],
       "durable_objects": {
-        "bindings": [
-          { "name": "SCREENS", "class_name": "ScreenObject" },
-          { "name": "AGENT_GRANTS", "class_name": "AgentGrantObject" }
-        ]
+        "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }, { "name": "AGENT_GRANTS", "class_name": "AgentGrantObject" }]
       },
-      "migrations": [
-        { "tag": "v1", "new_sqlite_classes": ["ScreenObject"] },
-        { "tag": "v2", "new_sqlite_classes": ["AgentGrantObject"] }
-      ],
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }, { "tag": "v2", "new_sqlite_classes": ["AgentGrantObject"] }],
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       "d1_databases": [
         {
@@ -104,15 +92,9 @@
       ],
       "send_email": [{ "name": "EMAIL" }],
       "durable_objects": {
-        "bindings": [
-          { "name": "SCREENS", "class_name": "ScreenObject" },
-          { "name": "AGENT_GRANTS", "class_name": "AgentGrantObject" }
-        ]
+        "bindings": [{ "name": "SCREENS", "class_name": "ScreenObject" }, { "name": "AGENT_GRANTS", "class_name": "AgentGrantObject" }]
       },
-      "migrations": [
-        { "tag": "v1", "new_sqlite_classes": ["ScreenObject"] },
-        { "tag": "v2", "new_sqlite_classes": ["AgentGrantObject"] }
-      ],
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ScreenObject"] }, { "tag": "v2", "new_sqlite_classes": ["AgentGrantObject"] }],
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       "d1_databases": [
         {
