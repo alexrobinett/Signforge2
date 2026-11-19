@@ -30,7 +30,16 @@ interface DataSourceSettings {
   /** Where `find_places` searches (src/data/places.ts). Default: Open-Meteo's geocoding. The CMS e2e points it at a stub. */
   GEOCODING_URL?: string;
 }
-interface Env extends AuthSettings, UploadSettings, DataSourceSettings {}
+/** Connected accounts (src/connectors). */
+interface ConnectorSettings {
+  /**
+   * Encrypts connections' credentials (OAuth grants, API keys) and pending PKCE verifiers at rest
+   * (src/connectors/vault.ts), 32+ random bytes, separate from DATA_SOURCE_KEY. Required outside dev;
+   * changing it loses every connection's credentials (each then needs reconnecting).
+   */
+  CONNECTION_KEY?: string;
+}
+interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings {}
 declare namespace Cloudflare {
-  interface Env extends AuthSettings, UploadSettings, DataSourceSettings {}
+  interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings {}
 }

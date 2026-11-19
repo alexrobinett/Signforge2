@@ -1,7 +1,9 @@
 /**
  * Data source tools. A data source is a feed the server polls (docs/backend-plan.md, Data
  * sources); spots bind fields to paths in its snapshots. The feed URL can be a secret (a private
- * calendar), so it is sealed before it is stored and never shown again.
+ * calendar), so it is sealed before it is stored and never shown again. A provider source reads
+ * a resource (a calendar id, a sheet range) through one of the org's connections
+ * (./connections.ts) instead of a URL; its resource is sealed the same way.
  */
 import type { DataSnapshot } from '@signforge/contract';
 import { type DataSourceRow, newId, type OrgScope, published } from '@signforge/db';
@@ -36,17 +38,39 @@ const horizonDays = z
   .min(1)
   .max(366)
   .describe('Calendars only: how many days ahead events reach (default 30). A holiday board wants months, a meeting room days');
-const format = z.enum(['json', 'ical', 'rss']).describe('json passes through; ical becomes a CalendarFeed, rss (RSS 2.0 or Atom) a NewsFeed');
+const format = z
+  .enum(['json', 'ical', 'rss', 'provider'])
+  .describe(
+    "json passes through; ical becomes a CalendarFeed, rss (RSS 2.0 or Atom) a NewsFeed; provider reads a resource through a connection, shaped by the connection's provider",
+  );
+const resource = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1024)
+  .describe('Provider sources only: what to read at the provider, such as a calendar id or a sheet range. Stored encrypted and never shown again');
+const PROVIDER_FIELDS = 'a provider source takes connectionId and resource, and no feedUrl; any other format takes feedUrl only';
+
+/** What a new source reads: a provider source a resource through its connection, a feed its URL; refused if it is given the other's fields. */
+function locatorOf(v: { format: string; feedUrl?: string; connectionId?: string; resource?: string }): string {
+  const locator = v.format === 'provider' ? !v.feedUrl && v.connectionId && v.resource : !v.connectionId && !v.resource && v.feedUrl;
+  if (!locator) throw new ToolError('invalid_input', PROVIDER_FIELDS);
+  return locator;
+}
 
 const dataSourceOutput = z.object({
   id: z.string(),
   name: z.string(),
   format,
+  connectionId: z.string().nullable().describe('A provider source: the connection it reads through'),
   refreshS: z.number(),
   horizonDays: z.number().nullable(),
   nextPollAt: z.number(),
   failures: z.number().describe('Polls in a row that failed; the poller backs off, up to 6 hours'),
-  lastError: z.string().nullable().describe('Why the last poll failed, as a category (timeout, http-status, private-address, ...)'),
+  lastError: z
+    .string()
+    .nullable()
+    .describe('Why the last poll failed, as a category (timeout, http-status, private-address, ...; for a provider source needs-reconnect or disconnected)'),
   version: version.describe('Moves on when the source is changed (not with polls); pass it as ifVersion to update only what you read'),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -57,6 +81,7 @@ const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   id: d.id,
   name: d.name,
   format: d.format,
+  connectionId: d.connectionId,
   refreshS: d.refreshS,
   horizonDays: d.horizonDays,
   nextPollAt: d.nextPollAt,
@@ -147,7 +172,9 @@ const createDataSource = defineTool({
       id: id('data source').optional().describe('The id spots bind with, such as weather; made for you if absent'),
       name: name('data source'),
       format,
-      feedUrl,
+      feedUrl: feedUrl.optional().describe('Feeds: the URL, https, on the default port, naming a public host. Stored encrypted and never shown again'),
+      connectionId: id('connection').optional().describe('Provider sources only: the connection to read through'),
+      resource: resource.optional(),
       refreshS: refreshS.default(MIN_REFRESH_S),
       horizonDays: horizonDays.optional(),
       idempotencyKey,
@@ -165,15 +192,16 @@ const createDataSource = defineTool({
     const existing = await org.dataSources.list();
     if (existing.length >= MAX_DATA_SOURCES) throw new ToolError('conflict', `an organization has at most ${MAX_DATA_SOURCES} data sources`);
     if (input.id && existing.some((d) => d.id === input.id)) throw new ToolError('conflict', `data source ${input.id} exists`);
-    // The URL is sealed to the row's id, so the id is chosen first.
+    // The URL (or resource) is sealed to the row's id, so the id is chosen first.
     const sourceId = input.id ?? newId('src');
-    const urlEncrypted = await sealerOf(feedUrls).seal({ orgId: org.orgId, id: sourceId }, input.feedUrl);
+    const urlEncrypted = await sealerOf(feedUrls).seal({ orgId: org.orgId, id: sourceId }, locatorOf(input));
     const row = write(
-      org.dataSources.stage.insert({
+      await org.dataSources.stage.insert({
         id: sourceId,
         name: input.name,
         format: input.format,
         urlEncrypted,
+        connectionId: input.connectionId ?? null,
         refreshS: input.refreshS,
         horizonDays: input.horizonDays ?? null,
       }),
@@ -185,7 +213,7 @@ const createDataSource = defineTool({
 const updateDataSource = defineTool({
   name: 'update_data_source',
   description:
-    'Change a data source: its name, feed URL, refresh or calendar look-ahead (null clears it). A new URL is polled afresh within a minute. Only what is given changes. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { dataSource }.',
+    'Change a data source: its name, feed URL (a provider source: its resource), refresh or calendar look-ahead (null clears it). A new URL or resource is polled afresh within a minute. Only what is given changes. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { dataSource }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -193,6 +221,7 @@ const updateDataSource = defineTool({
     dataSourceId: id('data source'),
     name: name('data source').optional(),
     feedUrl: feedUrl.optional(),
+    resource: resource.optional(),
     refreshS: refreshS.optional(),
     horizonDays: horizonDays.nullable().optional(),
     ifVersion,
@@ -203,10 +232,12 @@ const updateDataSource = defineTool({
   handler: async ({ org, input, write, feedUrls }) => {
     const row = await requireSource(org, input.dataSourceId);
     if (!calendarOnly(row.format, input.horizonDays)) throw new ToolError('invalid_input', HORIZON_ONLY_ICAL);
+    if ((row.format === 'provider' && input.feedUrl) || (row.format !== 'provider' && input.resource)) throw new ToolError('invalid_input', PROVIDER_FIELDS);
     // A new feed starts clean: the old one's validators and failures say nothing about it.
-    const fresh = input.feedUrl
+    const locator = input.feedUrl ?? input.resource;
+    const fresh = locator
       ? {
-          urlEncrypted: await sealerOf(feedUrls).seal({ orgId: org.orgId, id: row.id }, input.feedUrl),
+          urlEncrypted: await sealerOf(feedUrls).seal({ orgId: org.orgId, id: row.id }, locator),
           etag: null,
           lastModified: null,
           failures: 0,
@@ -215,7 +246,7 @@ const updateDataSource = defineTool({
         }
       : {};
     const updated = write(
-      org.dataSources.stage.update(row, { name: input.name, refreshS: input.refreshS, horizonDays: input.horizonDays, ...fresh }, input.ifVersion),
+      await org.dataSources.stage.update(row, { name: input.name, refreshS: input.refreshS, horizonDays: input.horizonDays, ...fresh }, input.ifVersion),
     );
     return { dataSource: viewOf(updated) };
   },

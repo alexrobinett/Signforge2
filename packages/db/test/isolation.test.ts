@@ -58,6 +58,8 @@ describe("a call made for org B with org A's ids", () => {
       ['publishes.screens', () => b.publishes.screens(a.publish)],
       ['dataSources.get', () => b.dataSources.get(a.dataSource)],
       ['dataSources.snapshot', () => b.dataSources.snapshot(a.dataSource)],
+      ['dataSources.usingConnection', () => b.dataSources.usingConnection(a.connection)],
+      ['connections.get', () => b.connections.get(a.connection)],
       ['dataSources.snapshots', () => b.dataSources.snapshots([a.dataSource])],
       ['playCounts.list', () => b.playCounts.list({ from: a.hour, to: a.hour + 3_600_000, screenId: a.screen })],
       ['brandKits.get', () => b.brandKits.get(a.brandKit)],
@@ -89,6 +91,7 @@ describe("a call made for org B with org A's ids", () => {
       scheduleEntries: await b.scheduleEntries.list(),
       publishes: await b.publishes.list(),
       dataSources: await b.dataSources.list(),
+      connections: await b.connections.list(),
       auditLog: await b.auditLog.list(),
       playCounts: await b.playCounts.list({ from: 0, to: Number.MAX_SAFE_INTEGER }),
       brandKits: await b.brandKits.list(),
@@ -118,6 +121,7 @@ describe("a call made for org B with org A's ids", () => {
       }),
     ).toBeUndefined();
     expect(await b.spots.update(a.imageSpot, { name: 'hijacked' })).toBeUndefined();
+    expect(await b.connections.update(a.connection, { status: 'disconnected', credentialsSealed: null })).toBeUndefined();
     expect(await b.templates.update(a.template, { name: 'hijacked' })).toBeUndefined();
     expect(await b.screenGroups.removeMember(a.group, a.screen)).toBe(false);
     for (const del of [
@@ -133,6 +137,7 @@ describe("a call made for org B with org A's ids", () => {
       () => b.scheduleEntries.delete(a.scheduleEntry),
       () => b.publishes.delete(a.publish),
       () => b.dataSources.delete(a.dataSource),
+      () => b.connections.delete(a.connection),
       () => b.brandKits.delete(a.brandKit),
     ])
       expect(await del()).toBe(false);

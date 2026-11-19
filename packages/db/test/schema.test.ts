@@ -35,6 +35,8 @@ describe('schema', () => {
       'audit_log',
       'brand_assignments',
       'brand_kits',
+      'connection_authorizations',
+      'connections',
       'data_snapshots',
       'data_sources',
       'draft_tombstones',

@@ -9,6 +9,7 @@ import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { dispatch, manifestKey, orgBlobKey, r2Presigner, registry, TOOLS, type AnyTool, type Caller } from '../src';
+import { connectors, pendingFor } from './connectors-stub';
 
 /** Each org's manifest for its screen, and its uploaded template bundle and sources. */
 const FILES = {
@@ -32,6 +33,7 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   logoOnDarkAsset: (o) => o.asset,
   logoOnLightAsset: (o) => o.asset,
   dataSource: (o) => o.dataSource,
+  connection: (o) => o.connection,
 };
 const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
 
@@ -146,6 +148,8 @@ const REACHED_BY: Record<string, (s: Seeded) => unknown> = {
     bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } },
   }),
   'update_spot.bindings.*.dataSourceId': (s) => ({ spotId: s.b.templateSpot, bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } } }),
+  // A provider source takes a resource with its connection, and no feed URL.
+  'create_data_source.connectionId': (s) => ({ name: 'Rooms', format: 'provider', connectionId: s.a.connection, resource: 'calendar-1' }),
 };
 
 let s: Seeded;
@@ -168,6 +172,8 @@ async function orgAState() {
     brandKits: await a.brandKits.list(),
     brandAssignments: await a.brandKits.assignments.list(),
     dataSources: await a.dataSources.list(),
+    connections: await a.connections.list(),
+    authorizations: await a.connections.authorizations.list(),
     snapshots: await a.dataSources.snapshots([s.a.dataSource]),
     spots: await a.spots.list(),
   };
@@ -189,7 +195,10 @@ beforeAll(async () => {
     rateLimit: async () => true,
     feedUrls: { seal: async (_source, url) => `sealed:${url}` },
     places: { search: async () => [] },
+    connectors,
   };
+  // finish_connection's example state, pending for org B's owner.
+  await pendingFor('org-b', 'user-b');
   // claim_screen's example code, open to claim.
   await startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() });
   before = await orgAState();
