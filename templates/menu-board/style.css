@@ -45,6 +45,7 @@ body {
   position: fixed;
   inset: 0;
   overflow: hidden;
+  --on-accent: var(--sf-on-accent, var(--bg));
   color: var(--ink);
   background: var(--bg);
   padding: calc(var(--u) * 6) calc(var(--u) * 8);
@@ -122,7 +123,7 @@ h1::after {
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--sf-on-accent, var(--bg));
+  color: var(--on-accent);
   background: var(--accent);
   padding: 0.2em 0.55em;
   border-radius: 0.4em;
@@ -140,7 +141,7 @@ h1::after {
 .price {
   font-size: calc(var(--u) * 3.7);
   font-weight: 800;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .desc {
   font-size: calc(var(--u) * 2.4);
