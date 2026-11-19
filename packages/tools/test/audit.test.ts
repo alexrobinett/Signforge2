@@ -4,14 +4,10 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
+import { member } from './member';
 
 let o: SeededOrg;
-const as = (role: Caller['role']): Caller => ({
-  org: scoped(env.DB, o.orgId),
-  role,
-  actor: { kind: 'user', id: `user-${role}`, clientId: 'cms' },
-  blobs: env.BLOBS,
-});
+const as = (role: Caller['role']) => member(o.orgId, role);
 
 interface Entry {
   at: number;
