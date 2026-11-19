@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Frame, type Page } from '@playwright/test';
 import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -131,6 +131,81 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
   await axe(page);
   await shots(page, '44-playlist-editor-phone');
   await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(page.getByText(/Saved \d/)).toBeVisible();
+});
+
+test('axe reads the stage only once a fade between spots is over (#95)', async () => {
+  test.setTimeout(90_000);
+  await page.getByRole('radio', { name: /^Fade/ }).check();
+  await page.getByRole('spinbutton', { name: 'Length' }).fill('2');
+  await expect(page.getByText(/Saved \d/)).toBeVisible();
+  // The player's own document on the stage: the frame that holds the slots.
+  let stage: Frame | undefined;
+  await expect
+    .poll(async () => {
+      for (const f of page.frames()) if (await f.evaluate(() => document.querySelectorAll('.slot').length > 0).catch(() => false)) stage = f;
+      return stage !== undefined;
+    })
+    .toBe(true);
+  // Each time axe scans the player's document, note every slot's opacity then.
+  await stage!.evaluate(() => {
+    const root = document.documentElement;
+    root.dataset.scans = '';
+    // axe-core sets `runPartial` after `window.axe`: wrap whatever `runPartial` is when axe is read.
+    type Run = (...args: unknown[]) => unknown;
+    type Axe = { runPartial?: Run };
+    let real: Axe | undefined;
+    const wrappers = new WeakSet<Run>();
+    Object.defineProperty(window, 'axe', {
+      configurable: true,
+      get() {
+        const run = real?.runPartial;
+        if (real && run && !wrappers.has(run)) {
+          const probe: Run = function (this: unknown, ...args: unknown[]) {
+            const opacities = [...document.querySelectorAll('.slot')].map((el) => getComputedStyle(el).opacity).join('/');
+            root.dataset.scans = `${root.dataset.scans} ${opacities}`.trim();
+            return run.apply(this, args);
+          };
+          wrappers.add(probe);
+          real.runPartial = probe;
+        }
+        return real;
+      },
+      set(v: Axe) {
+        real = v;
+      },
+    });
+  });
+  // Catch a fade as it starts: 1 s out, then 1 s in, longer than both analyses together. Its 4 s
+  // clocks leave the stage still for about 2 s a loop.
+  await expect
+    .poll(
+      () =>
+        stage!.evaluate(() =>
+          document
+            .getAnimations()
+            .some(
+              (a) => a.playState === 'running' && a.effect instanceof KeyframeEffect && a.effect.target instanceof Element && a.effect.target.matches('.slot'),
+            ),
+        ),
+      { intervals: [20], timeout: 20_000 },
+    )
+    .toBe(true);
+  await axe(page);
+  const scans = (await stage!.evaluate(() => document.documentElement.dataset.scans ?? '')).split(' ');
+  expect(scans.length).toBeGreaterThanOrEqual(2);
+  // Every scan saw each slot fully shown or fully hidden, and one shown.
+  for (const scan of scans) {
+    const opacities = scan.split('/').map(Number);
+    expect(
+      opacities.every((o) => o === 0 || o === 1),
+      `slot opacities during a scan: ${scan}`,
+    ).toBe(true);
+    expect(opacities, `slot opacities during a scan: ${scan}`).toContain(1);
+  }
+  // Back to the 0.8 s crossfade the next test expects.
+  await page.getByRole('radio', { name: /^Crossfade/ }).check();
+  await page.getByRole('spinbutton', { name: 'Length' }).fill('0.8');
   await expect(page.getByText(/Saved \d/)).toBeVisible();
 });
 
