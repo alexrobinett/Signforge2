@@ -61,6 +61,7 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   logoOnDarkAsset: (o) => o.asset,
   logoOnLightAsset: (o) => o.asset,
   dataSource: (o) => o.dataSource,
+  alertDelivery: (o) => o.alertDelivery,
   // An R2 multipart upload's id, not a row.
   upload: () => 'upload-id',
   // Catalogue ids, the same for every org.
@@ -135,6 +136,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
     rateLimit: async () => true,
     feedUrls: { seal: async (_source, url) => `sealed:${url}` },
+    alertSecrets: { seal: async (_channel, _field, value) => `sealed:${value}` },
   };
   const reg = new Map([[tool.name, tool]]);
   const result = await dispatch(reg, tool.name, input ?? withOwnIds(tool.example, o), caller);

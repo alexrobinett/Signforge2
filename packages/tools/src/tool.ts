@@ -65,6 +65,25 @@ export interface FeedUrlSealer {
   seal(source: { orgId: string; id: string }, url: string): Promise<string>;
 }
 
+/**
+ * Seals an alert channel's URL or signing secret for storage (`alert_channels`, #88), bound to the
+ * org, the channel and the field, so a sealed value copied elsewhere does not open. Implemented by
+ * the API with its key; only the delivery run unseals.
+ */
+export interface AlertSecretSealer {
+  seal(channel: { orgId: string; kind: 'slack' | 'webhook' }, field: 'url' | 'secret', value: string): Promise<string>;
+}
+
+/**
+ * Sends a queued alert delivery now rather than at the next delivery run (a test send, a retry).
+ * Implemented by the API, which sends it after the response; absent in tests and scripts, where it
+ * waits for the run.
+ */
+export interface AlertDeliverer {
+  /** The delivery, in the caller's org. */
+  now(deliveryId: string): void;
+}
+
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
 export interface ToolContext<I, D extends DataScope = OrgScope> {
   org: D;
@@ -76,6 +95,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   uploads?: UploadSigner;
   /** Seals feed URLs (./data-sources.ts). Undefined where no data source tool runs. */
   feedUrls?: FeedUrlSealer;
+  /** Seals alert channels' URLs and secrets (./alert-channels.ts). Undefined where no channel tool runs. */
+  alertSecrets?: AlertSecretSealer;
   /**
    * Add a staged change (a repository's `stage.*`) to this call's writes, and get its row back.
    * A tool never writes to D1 itself: the dispatcher runs the writes and the audit row in one
@@ -87,6 +108,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
    * writes are committed, so a screen never hears of a change that was rolled back.
    */
   notify: (send: (screens: ScreenNotifier) => Promise<void>) => void;
+  /** Send a delivery this call queues as soon as its writes are committed (`AlertDeliverer`). */
+  deliverNow: (deliveryId: string) => void;
   /** The caller's rate limits. A tool that guards a guessable secret refuses without it. */
   rateLimit?: RateLimiter;
 }
