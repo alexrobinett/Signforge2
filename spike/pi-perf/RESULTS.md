@@ -397,6 +397,21 @@ Prepares over both sets and kits (ms, before / after): meeting-room (agenda) med
 
 No cost in frames: the ranges overlap run for run, and the one 83 ms frame was in set 1's second after run with no kit. Agenda's meeting room, the spot with the most rows, prepares about 20 ms slower, the canvas read per row; well within 500 ms. The other templates are within run-to-run noise. Nothing was skipped.
 
+## Accent text measured on its real backdrop, 3:1 for large text (issue #92, 2026-11-19)
+
+agenda 1.2.3, menu-board 1.2.3 and cstore-promo 1.2.4 measure accent-coloured text against what it sits on, resolved with the SDK's `painted` on a 1x1 canvas: menu-board reads its card's style once after the rows are in, agenda paints each kind of card (ordinary, happening now) over both ends of its gradient, four reads at most instead of one per row, and cstore-promo paints the kit's surface over both ends of its stage. Every template with accent text passes `{ large: true }` to `readableOn` (news 1.3.4, clock 1.2.3 and photo-promo 1.2.3 change only that). Same method as #69: this branch's player at a subdirectory of the rig on its own origin (`http://localhost:8090`, so the kiosk's caches are untouched), `examples/stress` built from master's templates (before) and this branch's (after), with no kit and with the demo kit's colours (a scratch copy with a `brand.json`). Cut, 60 s per run after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Two playlists: sport-drinks, energy, menu, clock; and meeting-room, holidays, news, photo-berries. Order alternated (before, after, after, before), then menu's playlist again for the variants below. The supervisor was stopped during the runs: its liveness check restarts the kiosk 30 s after the kiosk's player stops beating, which it does as soon as the page is navigated away.
+
+| Content | Build | Runs | Overall | Playing | Loading next | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- |
+| stress, no kit | before | 6 | 0.06-0.22% | 0.00-0.03% | 1.6-11.1% | 50 ms |
+| | after | 7 | 0.06-0.33% | 0.00-0.09% | 0.0-17.1% | 67 ms |
+| stress, demo kit | before | 5 | 0.06-0.22% | 0.00-0.06% | 1.6-11.4% | 50 ms |
+| | after | 4 | 0.06-0.25% | 0.00% | 3.1-12.2% | 67 ms |
+
+Prepares (ms, median before / after, over both kits): meeting-room (agenda) 185 / 178, holidays (agenda) 150 / 146, menu (menu-board) 192 / 203, sport-drinks (cstore-promo) 220 / 211, energy (cstore-promo) 225 / 234, clock 167 / 167, news 151 / 149, photo-berries 199 / 198.
+
+No cost in frames: the ranges overlap and nothing was skipped. Agenda's meeting room is about 7 ms faster than master and gives back about a third of #69's 20 ms, now that a card is read once per kind and not per row. Menu-board prepares about 11 ms slower (before 167-201, after 197-229, 14 prepares each), well within 500 ms. Four variants did not move it, so it is not the canvas: `willReadFrequently: true` (200 ms), compositing the colours arithmetically with no canvas (204), reading the first card before the other rows are in (202, 234), and a registered `@property --card` read from the stage's style with no row's style read at all (193-221). cstore-promo's two prepares move in opposite directions, run-to-run noise.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
