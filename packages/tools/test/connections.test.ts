@@ -160,8 +160,9 @@ describe('connecting an account', () => {
     expect(await result('disconnect', { connectionId: o.connection }, viewer)).toMatchObject({ ok: false, error: 'forbidden' });
   });
 
-  it('lets viewers list the connections, without their credentials', async () => {
-    const { connections } = await call('list_connections', {}, viewer);
+  it('lets viewers list the connections, without their credentials, and the providers this deployment connects', async () => {
+    const { connections, providers } = await call('list_connections', {}, viewer);
+    expect(providers).toEqual(['fake']);
     expect(connections.length).toBeGreaterThan(1);
     expect(JSON.stringify(connections)).not.toMatch(/grant:|sealed:/);
   });

@@ -82,7 +82,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `create_data_source` | content:draft | editor | `{ id?, name, format, feedUrl? \| connectionId? and resource?, refreshS?, horizonDays?, idempotencyKey? }` | `{ dataSource }`; 409 past 10 per org |
 | `update_data_source` | content:draft | editor | `{ dataSourceId, name?, feedUrl? \| resource?, refreshS?, horizonDays? \| null, ifVersion? }` | `{ dataSource }` |
 | `delete_data_source` | content:draft | editor | `{ dataSourceId }` | `{ deleted }`, or 409 while a spot binds it |
-| `list_connections` | content:read | viewer | `{ limit?, cursor? }` | `{ connections: Connection[], next }`, by id |
+| `list_connections` | content:read | viewer | `{ limit?, cursor? }` | `{ connections: Connection[], providers, next }`, by id; `providers`: what `start_connection` takes in this deployment |
 | `start_connection` | content:draft | editor | `{ provider, connectionId? }` | `{ authorizationId, authorizeUrl, expiresAt }` |
 | `finish_connection` | content:draft | editor | `{ oauthState, code }` | `{ connection }`; 404 for a state that is not pending for the caller |
 | `disconnect` | content:draft | editor | `{ connectionId }` | `{ deleted, dataSourceIds }` |
