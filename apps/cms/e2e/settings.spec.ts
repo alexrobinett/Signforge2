@@ -43,6 +43,8 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByLabel('Time zone').selectOption('Europe/London');
   await page.getByLabel('Locale').selectOption('en-GB');
   await page.getByText('Set hours').click();
+  await expect(page.getByLabel('Keep entries for')).toHaveValue('365');
+  await page.getByLabel('Keep entries for').fill('90');
   await axe(page);
   await shots(page, '40-settings-general');
   await page.getByRole('button', { name: 'Save changes' }).click();
@@ -51,6 +53,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Northside Market Co');
   await expect(page.getByLabel('Time zone')).toHaveValue('Europe/London');
   await expect(page.getByLabel('Locale')).toHaveValue('en-GB');
+  await expect(page.getByLabel('Keep entries for')).toHaveValue('90');
 
   // Screens & groups: the offline alert waits 30 minutes.
   await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
@@ -123,6 +126,8 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   // An editor reads the settings but cannot change them, or anyone's role.
   await invitee.goto('/settings/general');
   await expect(invitee.getByLabel('Name', { exact: true })).toBeDisabled();
+  await expect(invitee.getByLabel('Keep entries for')).toBeDisabled();
+  await expect(invitee.getByLabel('Keep entries for')).toHaveValue('90');
   await expect(invitee.getByText('Only owners can change these.')).toBeVisible();
   await expect(invitee.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
   await invitee.goto('/settings/members');
