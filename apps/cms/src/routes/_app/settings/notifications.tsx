@@ -9,15 +9,6 @@ import { useId, type ReactNode, type SubmitEvent } from 'react';
 import { toast } from 'sonner';
 import { PageHeader } from '~/components/page';
 import { ActionError, SaveRow, SettingsSection } from '~/components/settings/parts';
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -75,7 +66,6 @@ function NotificationSettings() {
       >
         <DeliveryLog deliveries={deliveries} canEdit={canEdit} at={data.at} />
       </SettingsSection>
-      <RemoveChannelDialog />
     </div>
   );
 }
@@ -113,16 +103,6 @@ function Connected({ channel, names, last, now }: { channel: AlertChannel; names
 /** "just now", or "14 min ago". */
 const since = (ms: number) => (ms < 60_000 ? 'just now' : `${ago(ms)} ago`);
 
-/** A set channel's rarer actions, folded away so the card stays a summary. */
-function Manage({ children }: { children: ReactNode }) {
-  return (
-    <details className="w-full">
-      <summary className="cursor-pointer text-sm font-medium">Manage</summary>
-      <div className="mt-2 flex flex-wrap items-center gap-2">{children}</div>
-    </details>
-  );
-}
-
 interface CardProps {
   channel: AlertChannel | null;
   last: AlertDelivery | undefined;
@@ -131,109 +111,133 @@ interface CardProps {
   at: number;
 }
 
-function SlackCard({ channel, last, names, canEdit, at }: CardProps) {
+const CHANNEL_COPY = {
+  slack: {
+    title: 'Slack',
+    unset: 'Post to a channel through an incoming webhook you make in Slack',
+    field: 'Slack incoming-webhook URL',
+    placeholder: 'https://hooks.slack.com/services/…',
+    add: 'Connect Slack',
+    change: 'Replace',
+  },
+  webhook: {
+    title: 'Webhook',
+    unset: 'POST each alert as signed JSON to your own system',
+    field: 'Webhook URL',
+    placeholder: 'https://example.com/hooks/signforge',
+    add: 'Add webhook',
+    change: 'Save URL',
+  },
+} as const;
+
+/** Slack or the webhook: how to set it, or what it is, with a test and its rarer actions (`extra`) folded away. */
+function ChannelOf({
+  kind,
+  channel,
+  last,
+  names,
+  canEdit,
+  at,
+  onUrl,
+  extra,
+}: CardProps & { kind: AlertChannel['kind']; onUrl: (url: string) => void; extra?: ReactNode }) {
   const now = useNow(at);
-  const connectSlack = useAppStore((s) => s.connectSlack);
-  const ask = useAppStore((s) => s.askToRemoveAlertChannel);
-  const submit = (e: SubmitEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    void connectSlack(String(new FormData(e.currentTarget).get('url') ?? ''), channel?.version);
-  };
-  const form = (label: string) => (
-    <UrlForm name="Slack incoming-webhook URL" placeholder="https://hooks.slack.com/services/…" button={label} at="slack" onSubmit={submit} />
-  );
+  const copy = CHANNEL_COPY[kind];
+  const form = (button: string) => <UrlForm name={copy.field} placeholder={copy.placeholder} button={button} at={kind} onUrl={onUrl} />;
   if (!channel)
     return (
-      <ChannelCard
-        title="Slack"
-        detail="Post to a channel through an incoming webhook you make in Slack"
-        state={<span className="text-muted-foreground">Not set</span>}
-      >
-        {canEdit && form('Connect Slack')}
+      <ChannelCard title={copy.title} detail={copy.unset} state={<span className="text-muted-foreground">Not set</span>}>
+        {canEdit && form(copy.add)}
       </ChannelCard>
     );
   return (
     <ChannelCard
-      title="Slack"
+      title={copy.title}
       detail={<span className="font-mono">{channel.host}</span>}
       state={<Connected channel={channel} names={names} last={last} now={now} />}
     >
       {canEdit && (
         <>
-          <TestButton channel="slack" label="Send a test" />
-          <Manage>
-            {form('Replace')}
-            <Button type="button" variant="ghost" className="text-destructive" onClick={() => ask('slack')}>
-              Remove Slack
-            </Button>
-          </Manage>
+          <TestButton channel={kind} label="Send a test" />
+          <details className="w-full">
+            <summary className="cursor-pointer text-sm font-medium">Manage</summary>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {extra}
+              <RemoveChannel kind={kind} />
+              {form(copy.change)}
+            </div>
+          </details>
         </>
       )}
     </ChannelCard>
   );
 }
 
-function WebhookCard({ channel, last, names, canEdit, at }: CardProps) {
-  const now = useNow(at);
+function SlackCard(props: CardProps) {
+  const connectSlack = useAppStore((s) => s.connectSlack);
+  return <ChannelOf kind="slack" {...props} onUrl={(url) => void connectSlack(url, props.channel?.version)} />;
+}
+
+function WebhookCard(props: CardProps) {
   const setWebhook = useAppStore((s) => s.setWebhook);
   const rotate = useAppStore((s) => s.rotateSigningSecret);
-  const ask = useAppStore((s) => s.askToRemoveAlertChannel);
   const pending = useAppStore((s) => s.settings.pending === 'webhook');
-  const submit = (e: SubmitEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    void setWebhook(String(new FormData(e.currentTarget).get('url') ?? ''), channel?.version);
-  };
-  const form = (label: string) => (
-    <UrlForm name="Webhook URL" placeholder="https://example.com/hooks/signforge" button={label} at="webhook" onSubmit={submit} />
+  const { channel } = props;
+  return (
+    <ChannelOf
+      kind="webhook"
+      {...props}
+      onUrl={(url) => void setWebhook(url, channel?.version)}
+      extra={
+        channel && (
+          <Button type="button" variant="outline" disabled={pending} onClick={() => void rotate(channel.version)}>
+            <RotateCwIcon aria-hidden /> New signing secret
+          </Button>
+        )
+      }
+    />
   );
-  if (!channel)
+}
+
+/** Remove, then a second click to confirm: the URL (and secret) are forgotten. */
+function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
+  const asking = useAppStore((s) => s.settings.removingChannel === kind);
+  const ask = useAppStore((s) => s.askToRemoveAlertChannel);
+  const remove = useAppStore((s) => s.removeAlertChannel);
+  const pending = useAppStore((s) => s.settings.pending === `remove:${kind}`);
+  const name = CHANNEL_COPY[kind].title;
+  if (!asking)
     return (
-      <ChannelCard title="Webhook" detail="POST each alert as signed JSON to your own system" state={<span className="text-muted-foreground">Not set</span>}>
-        {canEdit && form('Add webhook')}
-      </ChannelCard>
+      <Button type="button" variant="ghost" className="text-destructive" onClick={() => ask(kind)}>
+        Remove {name}
+      </Button>
     );
   return (
-    <ChannelCard
-      title="Webhook"
-      detail={<span className="font-mono">{channel.host}</span>}
-      state={<Connected channel={channel} names={names} last={last} now={now} />}
-    >
-      {canEdit && (
-        <>
-          <TestButton channel="webhook" label="Send a test" />
-          <Manage>
-            <Button type="button" variant="outline" disabled={pending} onClick={() => void rotate(channel.version)}>
-              <RotateCwIcon aria-hidden /> New signing secret
-            </Button>
-            <Button type="button" variant="ghost" className="text-destructive" onClick={() => ask('webhook')}>
-              Remove webhook
-            </Button>
-            {form('Save URL')}
-          </Manage>
-        </>
-      )}
-    </ChannelCard>
+    <div className="w-full space-y-2 rounded-lg border border-destructive/40 p-3">
+      <p>Stop sending alerts to {name}? Its URL is forgotten, and alerts still waiting for it are not sent.</p>
+      <ActionError at={`remove:${kind}`} />
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="destructive" disabled={pending} onClick={() => void remove(kind)}>
+          Remove
+        </Button>
+        <Button type="button" variant="outline" onClick={() => ask(null)}>
+          Keep it
+        </Button>
+      </div>
+    </div>
   );
 }
 
 /** A channel's URL, which SignForge stores sealed and never shows again. */
-function UrlForm({
-  name,
-  placeholder,
-  button,
-  at,
-  onSubmit,
-}: {
-  name: string;
-  placeholder: string;
-  button: string;
-  at: string;
-  onSubmit: (e: SubmitEvent<HTMLFormElement>) => void;
-}) {
+function UrlForm({ name, placeholder, button, at, onUrl }: { name: string; placeholder: string; button: string; at: string; onUrl: (url: string) => void }) {
   const id = useId();
   const pending = useAppStore((s) => s.settings.pending === at);
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    onUrl(String(new FormData(e.currentTarget).get('url') ?? ''));
+  };
   return (
-    <form onSubmit={onSubmit} className="mt-2 w-full space-y-2" noValidate>
+    <form onSubmit={submit} className="mt-2 w-full space-y-2" noValidate>
       <Label htmlFor={id}>{name}</Label>
       <Input id={id} name="url" type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
       <p className="text-xs text-muted-foreground">Kept encrypted, and never shown again.</p>
@@ -435,32 +439,5 @@ function DeliveryLog({ deliveries, canEdit, at }: { deliveries: AlertDelivery[];
         })}
       </ul>
     </>
-  );
-}
-
-function RemoveChannelDialog() {
-  const kind = useAppStore((s) => s.settings.removingChannel);
-  const ask = useAppStore((s) => s.askToRemoveAlertChannel);
-  const remove = useAppStore((s) => s.removeAlertChannel);
-  const pending = useAppStore((s) => s.settings.pending === `remove:${kind}`);
-  const name = kind === 'slack' ? 'Slack' : 'the webhook';
-  return (
-    <AlertDialog open={kind !== null} onOpenChange={(open) => !open && ask(null)}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Stop sending alerts to {name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Its URL{kind === 'webhook' ? ' and signing secret are' : ' is'} forgotten, and alerts still waiting for it are not sent. You can set it again later.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        {kind && <ActionError at={`remove:${kind}`} />}
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button variant="destructive" disabled={pending} onClick={() => kind && void remove(kind)}>
-            Remove
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }

@@ -43,16 +43,18 @@ async function pairedScreen(orgId: string, name: string, lastSeenAt: number) {
 /** Guards whose fetch answers each URL from `answers` in turn (the last one again once they run out), recording every request. */
 function receivers(answers: Record<string, number[]>, dns: Record<string, string[]> = {}) {
   const requests: Request[] = [];
+  const answer = (url: string) => {
+    const queue = answers[url];
+    if (!queue) throw new TypeError(`no receiver at ${url}`);
+    return queue.length > 1 ? queue.shift()! : queue[0]!;
+  };
   const guards: FetchGuards = {
+    resolve: async (host) => dns[host] ?? ['93.184.216.34'],
     fetch: async (input, init) => {
-      const req = new Request(input, init);
-      requests.push(req.clone());
-      const queue = answers[req.url];
-      if (!queue) throw new TypeError(`no route for ${req.url}`);
-      const status = queue.length > 1 ? queue.shift()! : queue[0]!;
+      requests.push(new Request(input, init));
+      const status = answer(requests.at(-1)!.url);
       return new Response(status === 200 ? 'ok' : 'no', { status });
     },
-    resolve: async (host) => dns[host] ?? ['93.184.216.34'],
   };
   return { guards, to: (url: string) => requests.filter((r) => r.url === url) };
 }

@@ -137,6 +137,14 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await axe(page);
   await shots(page, '42b-settings-notifications-log');
 
+  // Removing Slack asks once more, then it is unset and its rule's box is disabled.
+  await page.getByText('Manage').first().click();
+  await page.getByRole('button', { name: 'Remove Slack' }).click();
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(page.getByText('Slack removed')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect Slack' })).toBeVisible();
+  await expect(page.getByLabel('Slack for: A screen goes offline, and when it is back')).toBeDisabled();
+
   // A new screen starts in the org's time zone (the empty fleet shows the pairing form).
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
   await expect(page.getByLabel('Time zone')).toHaveValue('Europe/London');

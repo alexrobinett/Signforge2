@@ -24,7 +24,7 @@ interface SettingsState {
   hours: { value: DisplayHours | null } | null;
   /** The member the remove dialog asks about. */
   removing: Member | null;
-  /** The alert channel the remove dialog asks about. */
+  /** The alert channel whose Remove is waiting for its confirmation. */
   removingChannel: AlertChannel['kind'] | null;
   /**
    * The webhook signing secret just set, shown until dismissed and never again: the page made it,
