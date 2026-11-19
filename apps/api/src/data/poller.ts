@@ -34,7 +34,7 @@ import { type BoundField, fitsBoundFields } from './fit';
  * claimed the next.
  */
 const POLLS_PER_RUN = 12;
-/** How long a claimed source is held for its run: past the fetch's 5 seconds, with redirects. */
+/** How long a claimed source is held for its run at least: past the fetch's 5 seconds, with redirects. The claim holds it for its next backoff when that is longer. */
 const LEASE_MS = 2 * 60_000;
 export const BACKOFF_MAX_MS = 6 * 3_600_000;
 /** Fetches in flight to one host at once (docs/backend-plan.md, Limits), or through one connection. */
@@ -93,7 +93,7 @@ export async function pollDataSources(
     connectors = connectorDeps(env),
   }: { now?: number; guards?: FetchGuards; connectors?: ConnectorDeps } = {},
 ): Promise<void> {
-  const claimed = await claimDueDataSources(env.DB, now, { limit: POLLS_PER_RUN, leaseMs: LEASE_MS });
+  const claimed = await claimDueDataSources(env.DB, now, { limit: POLLS_PER_RUN, leaseMs: LEASE_MS, backoffMaxMs: BACKOFF_MAX_MS });
   const pass: Run = { env, now, guards, connectors, grants: new Map() };
   const hosts = new Map<string, Promise<void>[]>();
   const one = async ({ orgId, id }: { orgId: string; id: string }) => {

@@ -134,6 +134,10 @@ describe('a menu-board spot fed by a CSV link', () => {
       ['Item,Price,Section,Tag\r\n"Dish 1,4,Mains,\r\n', 'malformed'],
       [csv(3, undefined, 'Dish,Price,Section,Tag'), 'missing-column'],
       [csv(3000), 'too-large'],
+      // 20 kB, short rows under a 3000-column header: refused before 9M cells are built.
+      [[Array.from({ length: 3000 }, (_, i) => `c${i}`).join(','), ...Array(3000).fill('x')].join('\n'), 'too-large'],
+      // Every row read, none fits (each price longer than the item's 10): not an empty menu.
+      [csv(4, () => 'Twelve dollars fifty'), 'unfit'],
     ];
     let at = NOW + 10 * MIN;
     for (const [body, error] of cases) {
@@ -145,6 +149,15 @@ describe('a menu-board spot fed by a CSV link', () => {
       at += 10 * MIN;
     }
     expect(played(held, at)[1]?.price).toBe('$11');
+  });
+});
+
+describe('a player from before #84', () => {
+  it("is told to reload to play menu-board 1.3.0's table source, which it would refuse: a player that knows it is not", async () => {
+    // What master's player reports before #84: schemas 2 and 3. Menu-board 1.3.0 declares live.source 'table', which its validator refuses.
+    const before = await syncAs(credential, syncBody({ player: { version: '1.0.0', manifestSchemas: [2, 3], protocols: [1, 2] } }));
+    expect(before.commands).toEqual([{ type: 'reload' }]);
+    expect((await sync()).commands).toEqual([]);
   });
 });
 
@@ -162,6 +175,13 @@ describe('read_table', () => {
       details: { reason: 'not-a-table' },
     });
     expect(JSON.stringify(refusal)).not.toContain('abc');
+    // 71 kB of objects each with a key of its own: 36M cells, refused before they are built.
+    const sparse = JSON.stringify(Array.from({ length: 6000 }, (_, i) => ({ [`k${i}`]: 1 })));
+    await expect(tableReader(serving(() => sparse)).read({ url: URL_, format: 'json-table' })).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: 'Could not read the table: the file is larger than a screen may hold',
+      details: { reason: 'too-large' },
+    });
     const local = await tableReader({ ...guards, resolve: async () => ['10.0.0.8'] })
       .read({ url: URL_, format: 'csv' })
       .catch((e: unknown) => e);
