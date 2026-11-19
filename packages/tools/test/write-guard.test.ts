@@ -54,6 +54,7 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   template: (o) => o.template,
   templateVersion: (o) => o.templateVersion,
   spot: (o) => o.templateSpot,
+  playlist: (o) => o.playlist,
   bundle: () => 'b'.repeat(64),
   sources: () => 'c'.repeat(64),
   asset: (o) => o.asset,
@@ -90,6 +91,7 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   // Its example code, open to claim.
   claim_screen: () => startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() }),
   delete_group: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
+  delete_playlist: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
   delete_asset: async (o) => {
     await o.scope.playlists.setItems(o.playlist, [o.templateSpot]);
     await o.scope.spots.delete(o.imageSpot);
