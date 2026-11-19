@@ -1,6 +1,6 @@
 {
   "id": "agenda",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "name": "Agenda",
   "description": "Upcoming events from a calendar. Bind the events field to an iCal data source (Google Calendar, Outlook, and others).",
   "fields": {
@@ -26,5 +26,6 @@
   "duration": { "defaultMs": 10000, "minMs": 5000, "maxMs": 120000 },
   "orientations": ["landscape", "portrait"],
   "uses": [],
-  "background": "#0d1117"
+  "background": "#0d1117",
+  "live": { "source": "ical", "fields": { "events": "events" } }
 }
