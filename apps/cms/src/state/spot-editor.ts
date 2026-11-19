@@ -11,9 +11,13 @@
  *
  * Which spot, orientation and kit the stage shows lives in the URL and the Query cache; the stage
  * component hands them over with `attachStage` from its ref callback.
+ *
+ * A spot bound to data sources plays their latest snapshots, posted with the draft, as a screen
+ * would; a new snapshot in the Query cache redraws it. With `live` off (the stage's Data switch)
+ * the draft is compiled without its bindings, so the stage shows the fallback values.
  */
-import { PREVIEW_PROTOCOL, safeUrl } from '@signforge/contract';
-import { assetsQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
+import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl } from '@signforge/contract';
+import { assetsQuery, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
 import { callTool, isStale, spotOf, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
@@ -32,6 +36,8 @@ export interface StageTarget {
   orientation: 'landscape' | 'portrait';
   templateVersionId?: string;
   brandKitId?: string;
+  /** Play the bound sources' data (true), or the spot's fallback values. */
+  live: boolean;
 }
 
 interface NewSpotDraft {
@@ -157,13 +163,16 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     const e = get().spotEditor;
     const draft = e.spotId === spot.id && e.draft ? e.draft : draftOf(spot);
     const version = spot.templateVersionId ? versionsById(templates).get(spot.templateVersionId) : undefined;
-    const result = await compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation });
+    const result = await compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation, live: t.live });
+    const sources = t.live ? [...new Set(Object.values(draft.bindings).map((b) => b.dataSourceId))] : [];
+    const read = await Promise.all(sources.map((id) => queryClient.query({ ...dataSourceQuery(t.orgId, id), staleTime: 'static' }).catch(() => null)));
+    const data: DataSnapshot[] = read.flatMap((r) => (r?.snapshot ? [r.snapshot] : []));
     if (seq !== stage.seq || stage.target?.frame !== t.frame) return;
     if (!result.manifest) {
       editor((x) => ({ ...x, holding: true }));
       return;
     }
-    t.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest: result.manifest }, location.origin);
+    t.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest: result.manifest, data }, location.origin);
     editor((x) => ({ ...x, holding: false }));
   }
 
@@ -217,7 +226,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       editor((e) => ({ ...e, status: 'saving', saveError: null }));
       const kindFields =
         spot.kind === 'template'
-          ? { data: draft.data, assets: draft.assets }
+          ? { data: draft.data, assets: draft.assets, bindings: draft.bindings }
           : spot.kind === 'url'
             ? { url: draft.url }
             : { fit: draft.fit, ...(draft.assetId ? { assetId: draft.assetId } : {}) };
@@ -254,6 +263,12 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       // Called from a ref callback, so only in the browser; the listener is added once.
       if (target && !hearing) {
         window.addEventListener('message', hear);
+        // A source's new snapshot (its query read again) redraws the stage with it.
+        queryClient.getQueryCache().subscribe((event) => {
+          const key = event.query.queryKey;
+          if (event.type === 'updated' && event.action.type === 'success' && key[2] === 'dataSources' && key.length === 4)
+            later('stage', STAGE_DELAY_MS, redraw);
+        });
         hearing = true;
       }
       const changed = stage.target?.frame !== target?.frame;

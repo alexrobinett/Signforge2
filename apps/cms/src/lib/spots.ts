@@ -15,6 +15,7 @@ import {
   type TemplateManifest,
 } from '@signforge/contract';
 import type { AssetView } from './assets';
+import type { BindingInput } from './live-data';
 
 export type SpotKind = 'template' | 'image' | 'video' | 'url';
 type Fit = 'cover' | 'contain';
@@ -28,7 +29,7 @@ export interface SpotView {
   templateVersionId: string | null;
   data: Record<string, unknown> | null;
   assets: Record<string, string> | null;
-  bindings: Record<string, { source: string; path: string }> | null;
+  bindings: Record<string, BindingInput> | null;
   assetId: string | null;
   fit: Fit | null;
   url: string | null;
@@ -76,6 +77,8 @@ export interface SpotDraft {
   durationMs: number;
   data: Record<string, unknown>;
   assets: Record<string, string>;
+  /** Fields bound to a data source; their `data` is the fallback. */
+  bindings: Record<string, BindingInput>;
   assetId: string | null;
   fit: Fit;
   url: string;
@@ -86,6 +89,7 @@ export const draftOf = (s: SpotView): SpotDraft => ({
   durationMs: s.durationMs,
   data: s.data ?? {},
   assets: s.assets ?? {},
+  bindings: s.bindings ?? {},
   assetId: s.assetId,
   fit: s.fit ?? 'cover',
   url: s.url ?? '',
@@ -154,6 +158,7 @@ const PREVIEW_PLAYLIST = 'preview';
 /**
  * The draft compiled for the stage: a screen of this orientation playing just this spot, with
  * the brand kit and template `preview` holds. Problems are the compiler's, as a publish would see them.
+ * With `live` false the spot is compiled without its bindings, so the player shows the fallback.
  */
 export async function compilePreview(opts: {
   spot: SpotView;
@@ -162,6 +167,7 @@ export async function compilePreview(opts: {
   preview: SpotPreview['preview'];
   assets: AssetView[];
   orientation: Orientation;
+  live: boolean;
 }): Promise<{ manifest?: ScreenManifest; problems: string[] }> {
   const { spot, draft, preview, orientation } = opts;
   const files: CompileInput['files'] = { ...preview.files };
@@ -178,7 +184,15 @@ export async function compilePreview(opts: {
   if (spot.kind === 'template') {
     if (!opts.version) return { problems: ['the template is not available'] };
     const assets = Object.fromEntries(Object.entries(draft.assets).map(([field, id]) => [field, file(id)]));
-    content = { ...base, kind: 'template', template: opts.version.key, data: draft.data, assets, ...(spot.bindings ? { bindings: spot.bindings } : {}) };
+    const bindings = Object.fromEntries(Object.entries(draft.bindings).map(([field, b]) => [field, { source: b.dataSourceId, path: b.path }]));
+    content = {
+      ...base,
+      kind: 'template',
+      template: opts.version.key,
+      data: draft.data,
+      assets,
+      ...(opts.live && Object.keys(bindings).length ? { bindings } : {}),
+    };
   } else if (spot.kind === 'url') content = { ...base, kind: 'url', url: draft.url };
   else content = { ...base, kind: spot.kind, file: file(draft.assetId), fit: draft.fit };
   return compileScreen(

@@ -3,6 +3,7 @@
  * Switching to a client cache later (docs/research/cms-data-layer.md) changes this and the
  * loaders, not the pages.
  */
+import type { DataSourceView } from '~/lib/live-data';
 import type { AssetView } from '~/lib/assets';
 import type { BrandKitView, SpotView, TemplateView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
@@ -46,6 +47,7 @@ interface ListPage {
   spots?: SpotView[];
   templates?: TemplateView[];
   brandKits?: BrandKitView[];
+  dataSources?: DataSourceView[];
 }
 
 /** Every page of a list tool, the rows `rows` picks from each. A list whose rows are not `ListPage`'s names its page in `rows`. */

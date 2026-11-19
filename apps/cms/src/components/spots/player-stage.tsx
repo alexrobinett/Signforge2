@@ -2,7 +2,8 @@
  * `PlayerStage` (docs/proposals/cms-ui.md, canvas boards Spot editor A and "Stage is the player"):
  * the real player build in an iframe, at the screen's true resolution, scaled to fit or shown at
  * 100%. The CMS serves the build at /player/ (apps/cms README); the store's actions post it the
- * draft (src/state/spot-editor.ts). Orientation, scale and brand kit are in the URL.
+ * draft (src/state/spot-editor.ts). Orientation, scale, brand kit and, for a spot bound to data
+ * sources, live data or the fallback are in the URL.
  */
 import { SCREEN_BOX } from '@signforge/contract';
 import { TriangleAlertIcon } from 'lucide-react';
@@ -59,6 +60,7 @@ export function PlayerStage({
   onOrientation,
   onScale,
   onKit,
+  onLive,
 }: {
   target: Omit<StageTarget, 'frame'>;
   scale: Scale;
@@ -67,6 +69,8 @@ export function PlayerStage({
   onOrientation: (o: Orientation) => void;
   onScale: (s: Scale) => void;
   onKit: (id: string) => void;
+  /** For a spot bound to data sources: switches the stage between their data and the fallback. */
+  onLive?: (live: boolean) => void;
 }) {
   const attach = useAppStore((s) => s.attachStage);
   const measure = useAppStore((s) => s.measureStage);
@@ -76,7 +80,7 @@ export function PlayerStage({
   const playing = useAppStore((s) => s.spotEditor.playing);
   // The player says once that it is listening; a frame in the server's HTML could say it before the store hears.
   const hydrated = useHydrated();
-  const { orgId, spotId, orientation, templateVersionId, brandKitId } = target;
+  const { orgId, spotId, orientation, templateVersionId, brandKitId, live } = target;
   const size = SCREEN_BOX[orientation];
   const fit = box ? Math.min(box.w / size.w, box.h / size.h, 1) : 0;
   const shown = scale === 'fit' ? fit : 1;
@@ -86,10 +90,10 @@ export function PlayerStage({
     (el: HTMLIFrameElement | null) => {
       const frame = el?.contentWindow;
       if (!frame) return;
-      attach({ frame, orgId, spotId, orientation, templateVersionId, brandKitId });
+      attach({ frame, orgId, spotId, orientation, templateVersionId, brandKitId, live });
       return () => attach(null);
     },
-    [attach, orgId, spotId, orientation, templateVersionId, brandKitId],
+    [attach, orgId, spotId, orientation, templateVersionId, brandKitId, live],
   );
   // The room the stage has, for scaling to fit.
   const roomRef = useCallback(
@@ -123,6 +127,17 @@ export function PlayerStage({
           ]}
           onChange={onScale}
         />
+        {onLive && (
+          <Toggle
+            label="Data"
+            value={live ? 'live' : 'fallback'}
+            options={[
+              { value: 'live', label: 'Live data' },
+              { value: 'fallback', label: 'Fallback' },
+            ]}
+            onChange={(v) => onLive(v === 'live')}
+          />
+        )}
         {kits.length > 0 && (
           <span className="flex items-center gap-2 text-sm text-[#d4d4d4]">
             <label htmlFor="stage-kit">Brand kit</label>
