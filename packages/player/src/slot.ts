@@ -48,6 +48,7 @@ type TemplateSpot = Extract<Spot, { kind: 'template' }>;
 /** A slot's template frame, and what its next `init` sends. */
 interface LiveFrame {
   frame: HTMLIFrameElement;
+  wrapperFrame: HTMLIFrameElement;
   /** The wrapper frame's window: the template's `parent`. */
   wrapper: WrapperWindow;
   protocol: number;
@@ -255,6 +256,7 @@ export class Slot {
 
     const live: LiveFrame = (this.live = {
       frame,
+      wrapperFrame,
       wrapper,
       protocol,
       html: t.html,
@@ -334,6 +336,8 @@ export class Slot {
     const theme = await brandTheme(manifest);
     alive(signal);
     Object.assign(live, { spot, manifest, assets, theme });
+    // The frames are reused, so a rename in the editor must reach their titles too.
+    live.frame.title = live.wrapperFrame.title = spot.name;
     this.spot = spot;
     let timer = 0;
     try {
