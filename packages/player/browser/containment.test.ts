@@ -8,7 +8,7 @@ import { createServer, type AddressInfo } from 'node:net';
 import type { Frame } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import { buildContent, type FixtureMode } from './content';
-import { attribute, childPage } from './fixtures/child';
+import { attribute, childPage, childScript } from './fixtures/child';
 import { spotsPlayed, useHarness, type Player } from './harness';
 
 // As on the Pi, so a template frame that shares the player's process is seen (the last test).
@@ -45,6 +45,31 @@ async function afterEvil(p: Player) {
   return s;
 }
 
+/**
+ * A STUN server (UDP) and a TURN server (TCP) on loopback, as `iceServers` URLs, and what reached
+ * them. The CSP has no say over WebRTC: a STUN request leaves over UDP, a TURN allocation over TCP.
+ */
+async function iceServers() {
+  const udp = createSocket('udp4');
+  let datagrams = 0;
+  udp.on('message', () => datagrams++);
+  await new Promise<void>((resolve) => udp.bind(0, '127.0.0.1', resolve));
+  const connections: string[] = [];
+  const tcp = createServer((socket) => {
+    connections.push(String(socket.remoteAddress));
+    socket.destroy();
+  });
+  await new Promise<void>((resolve) => tcp.listen(0, '127.0.0.1', resolve));
+  return {
+    servers: `stun:127.0.0.1:${udp.address().port} turn:127.0.0.1:${(tcp.address() as AddressInfo).port}?transport=tcp`,
+    sent: () => ({ datagrams, connections }),
+    async [Symbol.asyncDispose]() {
+      udp.close();
+      await new Promise((resolve) => tcp.close(resolve));
+    },
+  };
+}
+
 describe('a template that navigates its own frame', () => {
   const navigations: FixtureMode[] = ['navigate', 'navigate-data', 'navigate-top', 'refresh', 'link'];
   for (const mode of navigations) {
@@ -71,7 +96,7 @@ describe('a template that navigates its own frame', () => {
 });
 
 describe('a template that loads from the network', () => {
-  const loads: FixtureMode[] = ['form', 'open', 'iframe', 'fetch', 'image', 'font'];
+  const loads: FixtureMode[] = ['form', 'open', 'iframe', 'fetch', 'image', 'font', 'external-script'];
   for (const mode of loads) {
     it(`makes no request and is skipped: ${mode}`, async () => {
       const { p, leaks } = await hostile(mode);
@@ -84,7 +109,6 @@ describe('a template that loads from the network', () => {
 });
 
 describe('a template that opens a peer connection', () => {
-  // The CSP has no say over WebRTC: a STUN request leaves over UDP, a TURN allocation over TCP.
   // Its own window; a frame it adds whose constructor it reads; a frame it adds, or that its markup
   // holds, running script of its own (fixtures/child.ts).
   const modes = [
@@ -99,29 +123,38 @@ describe('a template that opens a peer connection', () => {
   ] as const;
   for (const mode of modes) {
     it(`gathers no candidate and sends nothing: ${mode}`, async () => {
-      const udp = createSocket('udp4');
-      const datagrams: Buffer[] = [];
-      udp.on('message', (m) => datagrams.push(m));
-      await new Promise<void>((resolve) => udp.bind(0, '127.0.0.1', resolve));
-      const connections: string[] = [];
-      const tcp = createServer((socket) => {
-        connections.push(String(socket.remoteAddress));
-        socket.destroy();
-      });
-      await new Promise<void>((resolve) => tcp.listen(0, '127.0.0.1', resolve));
-      try {
-        const servers = `stun:127.0.0.1:${udp.address().port} turn:127.0.0.1:${(tcp.address() as AddressInfo).port}?transport=tcp`;
-        const html =
-          mode === 'webrtc-markup' ? h.templateHtml.replace('<body>', `<body><iframe srcdoc="${attribute(childPage(servers, 1))}"></iframe>`) : undefined;
-        const { p, leaks } = await hostile(mode, servers, html);
-        const s = await afterEvil(p);
-        expect({ leaks: leaks(), datagrams: datagrams.length, connections }).toEqual({ leaks: [], datagrams: 0, connections: [] });
-        expect(s.lastError).toMatch(new RegExp(`^evil: .*${mode} was refused`));
-        expect(spotsPlayed(s)).toEqual(['a', 'b']);
-      } finally {
-        udp.close();
-        tcp.close();
-      }
+      await using ice = await iceServers();
+      const html =
+        mode === 'webrtc-markup' ? h.templateHtml.replace('<body>', `<body><iframe srcdoc="${attribute(childPage(ice.servers, 1))}"></iframe>`) : undefined;
+      const { p, leaks } = await hostile(mode, ice.servers, html);
+      const s = await afterEvil(p);
+      expect({ leaks: leaks(), ...ice.sent() }).toEqual({ leaks: [], datagrams: 0, connections: [] });
+      expect(s.lastError).toMatch(new RegExp(`^evil: .*${mode} was refused`));
+      expect(spotsPlayed(s)).toEqual(['a', 'b']);
+    });
+  }
+});
+
+describe('a template whose script shadows the names of the global object', () => {
+  // Scripts added to the template's markup ahead of its own, which still plays. Each opens a peer
+  // connection with `RTCPeerConnection` after binding `window`, `self` and `globalThis` itself.
+  const shadowing: Record<string, (servers: string) => string> = {
+    'classic, unwrapped': (s) => `<script>var window, self; globalThis = {}; ${childScript(s, 0)}</script>`,
+    'classic, wrapped': (s) => `<script>(function (window, self, globalThis) { ${childScript(s, 0)} })({}, {}, {})</script>`,
+    module: (s) => `<script type="module">function window() {} const self = {}, globalThis = {}; ${childScript(s, 0)}</script>`,
+    // A hash allows a text whatever the script's type: this copies one of the template's own classic
+    // scripts (which cannot run as one: it declares a global `window`) into a frame, as a module.
+    'module copy of its own classic script, in a frame it adds': (s) =>
+      `<script id="copied">function window() {} var self, globalThis; ${childScript(s, 1)}</script>` +
+      `<script>const f = document.createElement('iframe'); f.srcdoc = '<script type="module">' + document.getElementById('copied').textContent + '</scr' + 'ipt>'; document.body.appendChild(f);</script>`,
+  };
+  for (const [name, scripts] of Object.entries(shadowing)) {
+    it(`gathers no candidate and sends nothing: ${name}`, async () => {
+      await using ice = await iceServers();
+      const { p } = await hostile('webrtc-markup', ice.servers, h.templateHtml.replace('<body>', `<body>${scripts(ice.servers)}`));
+      const s = await afterEvil(p);
+      expect(ice.sent()).toEqual({ datagrams: 0, connections: [] });
+      expect(spotsPlayed(s)).toEqual(['a', 'b']);
     });
   }
 });

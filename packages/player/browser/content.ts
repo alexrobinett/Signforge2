@@ -37,6 +37,7 @@ export type FixtureMode =
   | 'fetch'
   | 'image'
   | 'font'
+  | 'external-script'
   | 'webrtc'
   | 'webrtc-frame'
   | 'webrtc-srcdoc'

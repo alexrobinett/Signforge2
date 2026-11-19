@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createContext, runInContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { containedFrames } from './frame';
 
@@ -22,5 +23,23 @@ describe('containedFrames', () => {
     const { wrapper, template } = containedFrames('<script type="application/json">{"a":1}</script>');
     expect(template).toBe('<script type="application/json">{"a":1}</script>');
     expect(policyOf(wrapper)).not.toContain(hash('{"a":1}'));
+  });
+
+  it('keeps a script strict however its directive prologue starts, and a sloppy one sloppy', () => {
+    const probe = 'this.strict = (function () { return this === undefined; })();';
+    const strictness = (prologue: string) => {
+      const [armed] = scriptsOf(containedFrames(`<script>${prologue}${probe}</script>`).template);
+      const global = createContext({});
+      runInContext('this.window = this', global);
+      runInContext(armed!, global);
+      return runInContext('this.strict', global) as boolean;
+    };
+    expect(strictness('"use strict";')).toBe(true);
+    expect(strictness('/* licence */\n"use strict";\n')).toBe(true);
+    expect(strictness("// built by esbuild\n'use strict'\n")).toBe(true);
+    expect(strictness('\uFEFF"use strict";')).toBe(true);
+    expect(strictness('"a directive"; /* between */ "use strict";')).toBe(true);
+    expect(strictness('/* licence */\n')).toBe(false);
+    expect(strictness('')).toBe(false);
   });
 });

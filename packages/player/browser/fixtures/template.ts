@@ -10,6 +10,7 @@
  * the shape (so `items: {}` throws), marks whether it received asset `file`, runs a CSS animation
  * the SDK must hold until play, and marks `play`.
  */
+import { Sha256 } from '@signforge/player-core';
 import { defineTemplate } from '@signforge/template-sdk';
 import { attribute, childPage, childScript } from './child';
 
@@ -52,6 +53,18 @@ const attacks: Record<string, (target: string) => unknown> = {
     return img.decode();
   },
   font: (t) => new FontFace('leak', `url(${t})`).load(),
+  // A hash source also allows an external script whose `integrity` names it (CSP3 §8.4): the request
+  // would be made before the response is checked. This names the hash of the template's own script.
+  'external-script': (t) =>
+    new Promise((resolve, reject) => {
+      const own = new Sha256().update(new TextEncoder().encode(document.scripts[0]!.textContent)).hex();
+      const s = document.createElement('script');
+      s.src = t;
+      s.integrity = `sha256-${btoa(String.fromCharCode(...own.match(/../g)!.map((b) => parseInt(b, 16))))}`;
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    }),
   webrtc: async (t) => gather(RTCPeerConnection, t),
   // A frame of its own is a fresh realm: if it shared the template's origin, its RTCPeerConnection would be another way in.
   'webrtc-frame': async (t) => {
