@@ -22,9 +22,9 @@ describe('org settings', () => {
           editorsPublish: true,
           auditRetentionDays: 365,
           alerts: {
-            screen_offline: { who: 'editors', email: true },
-            publish_finished: { who: 'editors', email: true },
-            agent_refused: { who: 'owners', email: true },
+            screen_offline: { who: 'editors', email: true, slack: false, webhook: false },
+            publish_finished: { who: 'editors', email: true, slack: false, webhook: false },
+            agent_refused: { who: 'owners', email: true, slack: false, webhook: false },
           },
           version: 1,
         },
@@ -65,6 +65,30 @@ describe('org settings', () => {
     });
     const audit = await scoped(env.DB, o.orgId).auditLog.list();
     expect(audit.filter((a) => a.action === 'update_org_settings')).toHaveLength(2);
+  });
+
+  it("turns Slack or the webhook on for one kind, keeping the rest of its rule and the others'", async () => {
+    const r = await dispatch(registry, 'update_org_settings', { alerts: { screen_offline: { slack: true }, agent_refused: { webhook: true } } }, as('owner'));
+    expect(r).toMatchObject({
+      ok: true,
+      output: {
+        settings: {
+          alerts: {
+            screen_offline: { who: 'everyone', email: false, slack: true, webhook: false },
+            publish_finished: { who: 'editors', email: true, slack: false, webhook: false },
+            agent_refused: { who: 'owners', email: true, slack: false, webhook: true },
+          },
+        },
+      },
+    });
+  });
+
+  it('reads a rule stored before Slack and the webhook with both off', async () => {
+    const org = scoped(env.DB, 'legacy-rules-org');
+    await seedOrg(env.DB, 'legacy-rules-org');
+    await org.commit((await org.settings.stage.set({ alertsJson: JSON.stringify({ screen_offline: { who: 'owners', email: false } }) })).writes);
+    const r = await dispatch(registry, 'get_org_settings', {}, { ...as('viewer'), org });
+    expect(r).toMatchObject({ output: { settings: { alerts: { screen_offline: { who: 'owners', email: false, slack: false, webhook: false } } } } });
   });
 
   it('lets an owner stop editors publishing, and back', async () => {

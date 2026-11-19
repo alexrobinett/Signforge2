@@ -34,6 +34,7 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   logoOnDarkAsset: (o) => o.asset,
   logoOnLightAsset: (o) => o.asset,
   dataSource: (o) => o.dataSource,
+  alertDelivery: (o) => o.alertDelivery,
   connection: (o) => o.connection,
 };
 const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
@@ -185,6 +186,8 @@ async function orgAState() {
     authorizations: await a.connections.authorizations.list(),
     snapshots: await a.dataSources.snapshots([s.a.dataSource]),
     spots: await a.spots.list(),
+    alertChannels: await a.alertChannels.list(),
+    alertDeliveries: await a.alertDeliveries.list({ take: 100 }),
   };
 }
 
@@ -203,6 +206,7 @@ beforeAll(async () => {
     uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
     rateLimit: async () => true,
     feedUrls: { seal: async (_source, url) => `sealed:${url}` },
+    alertSecrets: { seal: async (_channel, _field, value) => `sealed:${value}` },
     places: { search: async () => [] },
     connectors,
   };

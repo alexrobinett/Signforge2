@@ -12,6 +12,7 @@ import { connectCommandMenu, createCommandMenuSlice, type CommandMenuSlice } fro
 import { connectUi, createUiSlice, type UiSlice } from './ui';
 import { createAssetsSlice, type AssetsSlice } from './assets';
 import { createAuditSlice, type AuditSlice } from './audit';
+import { createIntegrationsSlice, type IntegrationsSlice } from './integrations';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
 import { createScreensSlice, type ScreensSlice } from './screens';
@@ -29,8 +30,9 @@ export type AppState = UiSlice &
   SettingsSlice &
   SpotEditorSlice &
   PlaylistEditorSlice &
-  AuditSlice &
-  SpotSourceSlice;
+  SpotSourceSlice &
+  IntegrationsSlice &
+  AuditSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -55,6 +57,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createSpotEditorSlice(set, get, deps),
     ...createSpotSourceSlice(set, get, deps),
     ...createPlaylistEditorSlice(set, get, deps),
+    ...createIntegrationsSlice(set, get, deps),
     ...createAuditSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {

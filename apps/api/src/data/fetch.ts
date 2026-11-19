@@ -77,6 +77,31 @@ export async function guardedFetch(url: string, last: { etag?: string | null; la
   }
 }
 
+/**
+ * POST `body` to a URL a user gave (an alert channel, #88), with the same guards as a feed: the URL
+ * and every address its host resolves to checked, 5 seconds in all, Cloudflare's refusal reported as
+ * a blocked address. A redirect is not followed, as the body would go somewhere not checked when it
+ * was set; it is a failure with its status. Resolves with the receiver's 2xx status; the body it
+ * answers with is read no further.
+ */
+export async function guardedPost(url: string, body: string, headers: Headers, guards: FetchGuards): Promise<number> {
+  const signal = AbortSignal.timeout(guards.timeoutMs ?? FETCH_TIMEOUT_MS);
+  try {
+    const res = await guards.fetch(await checkedUrl(url, guards, signal), { method: 'POST', headers, body, redirect: 'manual', signal });
+    if (res.ok) {
+      await res.body?.cancel();
+      return res.status;
+    }
+    const text = await capped(res, 256).catch(() => '');
+    if (/^error code: 10(03|16)\b/.test(text)) throw new FetchError('Cloudflare refused to reach the address', { code: 'blocked-address', status: res.status });
+    throw new FetchError(`the receiver answered ${res.status}`, { code: 'http-status', status: res.status });
+  } catch (e) {
+    if (e instanceof FetchError) throw e;
+    if (signal.aborted) throw new FetchError(`no answer in ${(guards.timeoutMs ?? FETCH_TIMEOUT_MS) / 1000} seconds`, { code: 'timeout', cause: e });
+    throw new FetchError('the receiver could not be reached', { code: 'network', cause: e });
+  }
+}
+
 /** `url` if it may be fetched; otherwise the guard it fails. */
 async function checkedUrl(url: string, guards: FetchGuards, signal: AbortSignal): Promise<string> {
   const problem = feedUrlProblem(url);

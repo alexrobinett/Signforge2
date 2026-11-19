@@ -51,6 +51,21 @@ describe('data sources', () => {
     });
   });
 
+  it('lists each source with its last good check and the spots that bind it, as drafted or as published', async () => {
+    await owner.org.spots.update(o.templateSpot, { bindingsJson: JSON.stringify({ title: { source: 'holidays', path: 'events.0.title' } }) });
+    const { dataSources } = await call('list_data_sources', {});
+    const holidays = dataSources.find((d: { id: string }) => d.id === 'holidays');
+    expect(holidays).toMatchObject({ lastCheckedAt: 2000, spots: [{ id: o.templateSpot, name: expect.any(String) }] });
+    expect(holidays).not.toHaveProperty('lastFetchedAt');
+    const unpolled = await call('create_data_source', { id: 'unpolled', name: 'Not polled yet', format: 'rss', feedUrl: 'https://news.example.com/rss' });
+    expect((await call('list_data_sources', {})).dataSources.find((d: { id: string }) => d.id === unpolled.dataSource.id)).toMatchObject({
+      lastCheckedAt: null,
+      spots: [],
+    });
+    await owner.org.spots.update(o.templateSpot, { bindingsJson: null });
+    await call('delete_data_source', { dataSourceId: 'unpolled' });
+  });
+
   it('updates, polling a changed URL afresh', async () => {
     await owner.org.dataSources.update('holidays', { etag: '"old"', failures: 3, lastError: 'timeout', nextPollAt: 99 });
     const { dataSource } = await call('update_data_source', { dataSourceId: 'holidays', feedUrl: 'https://other.example.com/h.ics', horizonDays: null });

@@ -4,7 +4,7 @@
  * Writes go from the browser (src/state/settings.ts).
  */
 import { createServerFn } from '@tanstack/react-start';
-import type { Invitation, Member, OrgSettings, SessionRow } from '~/lib/settings';
+import type { AlertChannel, AlertDelivery, Invitation, Member, OrgSettings, SessionRow } from '~/lib/settings';
 import { callApi } from './api.server';
 import type { Role } from './shell.functions';
 import { inOrg, tool } from './tools.server';
@@ -19,6 +19,23 @@ async function read<T>(path: `/api/${string}`): Promise<T> {
 
 export const getOrgSettings = createServerFn({ method: 'GET' }).handler(() =>
   inOrg(async () => (await tool<{ settings: OrgSettings }>('get_org_settings', {})).settings, null),
+);
+
+/**
+ * The Notifications page: the alert rules, the Slack and webhook channels, the 20 newest deliveries,
+ * and members' names by user id, for who set each channel.
+ */
+export const getNotifications = createServerFn({ method: 'GET' }).handler(() =>
+  inOrg(async () => {
+    const [{ settings }, channels, { deliveries }, { members }] = await Promise.all([
+      tool<{ settings: OrgSettings }>('get_org_settings', {}),
+      tool<{ slack: AlertChannel | null; webhook: AlertChannel | null }>('get_alert_channels', {}),
+      tool<{ deliveries: AlertDelivery[] }>('list_alert_deliveries', { limit: 20 }),
+      read<{ members: Member[] }>('/api/auth/organization/list-members?limit=200'),
+    ]);
+    const names: Record<string, string> = Object.fromEntries(members.map((m) => [m.userId, m.user.name || m.user.email]));
+    return { settings, channels, deliveries, names, at: Date.now() };
+  }, null),
 );
 
 /** The members, and for an owner the invitations waiting: Better Auth lets only owners list them. */
