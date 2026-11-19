@@ -1,5 +1,5 @@
 import { defineTemplate } from '@signforge/template-sdk';
-import { readableOn } from '@signforge/template-sdk/contrast';
+import { painted, readableOn } from '@signforge/template-sdk/contrast';
 
 interface Item {
   name: string;
@@ -18,8 +18,6 @@ defineTemplate({
     // kit is the theme's background, light in the light theme: the text is chosen against the fill.
     const style = getComputedStyle(stage);
     stage.style.setProperty('--on-accent', readableOn(accent, style.getPropertyValue('--on-accent')));
-    // Prices are the accent on the theme's background: amber, for one, does not read on a light one.
-    stage.style.setProperty('--accent-text', readableOn(style.getPropertyValue('--bg'), accent));
     const items = (ctx.data.items as Item[]) ?? [];
     // A short menu reads better as one centred column.
     if (items.length <= 5) stage.classList.add('one-col');
@@ -34,5 +32,9 @@ defineTemplate({
       li.querySelector('.desc')!.textContent = it.description;
       list.appendChild(li);
     });
+    // Prices are the accent on a card, which is lighter than the theme's background, or darker in
+    // the light theme: amber, for one, does not read on a light one. Every card is the same colour.
+    const card = list.firstElementChild;
+    if (card) stage.style.setProperty('--accent-text', readableOn(painted(style.getPropertyValue('--bg'), getComputedStyle(card).backgroundColor), accent));
   },
 });

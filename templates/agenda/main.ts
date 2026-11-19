@@ -1,5 +1,5 @@
 import { dayKey, defineTemplate, formatter, now as clockNow } from '@signforge/template-sdk';
-import { readableOn } from '@signforge/template-sdk/contrast';
+import { painted, readableOn } from '@signforge/template-sdk/contrast';
 
 interface Event {
   title: string;
@@ -7,19 +7,6 @@ interface Event {
   end: string;
   allDay: boolean;
   location: string;
-}
-
-/**
- * The colour `el`'s background paints over the page's, as `#rrggbb`: a card is a `color-mix`,
- * which `readableOn` cannot measure as CSS gives it.
- */
-function painted(el: Element): string {
-  const g = new OffscreenCanvas(1, 1).getContext('2d')!;
-  for (const fill of [getComputedStyle(document.documentElement).getPropertyValue('--bg'), getComputedStyle(el).backgroundColor]) {
-    g.fillStyle = fill;
-    g.fillRect(0, 0, 1, 1);
-  }
-  return `#${[...g.getImageData(0, 0, 1, 1).data.slice(0, 3)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
 }
 
 /** An all-day `YYYY-MM-DD` is a calendar date, not an instant: read it at noon UTC so no time zone moves it. */
@@ -33,7 +20,9 @@ defineTemplate({
     // Accent text must read where it sits (amber, for one, does not on a light kit): the date on
     // the background and on the surface its gradient starts from.
     const style = getComputedStyle(root);
-    root.style.setProperty('--accent-text', readableOn(style.getPropertyValue('--surface'), readableOn(style.getPropertyValue('--bg'), accent)));
+    const bg = style.getPropertyValue('--bg');
+    const surface = style.getPropertyValue('--surface');
+    root.style.setProperty('--accent-text', readableOn(surface, readableOn(bg, accent)));
     const now = clockNow();
     const today = dayKey(ctx, now);
     const tomorrow = dayKey(ctx, new Date(now.getTime() + 864e5));
@@ -73,7 +62,13 @@ defineTemplate({
     // Show only whole rows: drop from the end until the list fits its space.
     while (list.children.length > 1 && list.scrollHeight > list.clientHeight + 1) list.lastElementChild!.remove();
     // A row's day is the accent on its card, which mixes the surface with the text (or, happening
-    // now, with the accent).
-    for (const li of list.children) (li as HTMLElement).style.setProperty('--day-text', readableOn(painted(li), accent));
+    // now, is the accent over the stage): a translucent card is measured over both ends of the
+    // stage's gradient. Rows share two kinds of card, so each is read once.
+    const days = new Map<string, string>();
+    for (const li of list.children) {
+      const card = getComputedStyle(li).backgroundColor;
+      if (!days.has(card)) days.set(card, readableOn(painted(surface, card), readableOn(painted(bg, card), accent)));
+      (li as HTMLElement).style.setProperty('--day-text', days.get(card)!);
+    }
   },
 });
