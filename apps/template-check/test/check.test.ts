@@ -78,6 +78,11 @@ describe('a template that misbehaves', () => {
     });
   }
 
+  it('renders each orientation once, however often the manifest lists it', async () => {
+    const result = await checkTemplate(browser, { ...inMode('ok'), orientations: ['portrait', 'portrait', 'landscape', 'portrait'] }, hostile.html);
+    expect(result.renders.map((r) => r.orientation)).toEqual(['portrait', 'landscape']);
+  });
+
   it('passes a change of its own fragment, which is not a navigation', async () => {
     expect((await checkTemplate(browser, inMode('hash'), hostile.html)).problems).toEqual([]);
   });

@@ -270,7 +270,8 @@ async function render(
 export async function checkTemplate(browser: Browser, manifest: TemplateManifest, html: string): Promise<CheckResult> {
   const problems = new Set<string>();
   const renders: TemplateRender[] = [];
-  for (const orientation of manifest.orientations) {
+  // Each once: a repeat in the list (the contract refuses one) would only make the check longer.
+  for (const orientation of new Set(manifest.orientations)) {
     const r = await render(browser, manifest, html, orientation);
     renders.push(r.render);
     for (const p of r.problems) problems.add(clip(p));
