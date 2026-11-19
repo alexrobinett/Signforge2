@@ -277,4 +277,34 @@ describe('a provider data source', () => {
     expect(await o.connections.get(conn)).toMatchObject({ status: 'active', lastError: null });
     expect(await o.dataSources.get('rot')).toMatchObject({ failures: 0, lastError: null });
   });
+
+  it('stores the second refresh of a run over the first, keeping the rotated refresh token', async () => {
+    const rotating = fakeProvider({ rotateRefreshTokens: true });
+    const who = new Client(testApp({ connectors: { adapters: [rotating.adapter], fetch: rotating.fetch } }));
+    await who.signIn(email('twice'));
+    const id = (await who.createOrg('Twice')).id;
+    const o = scoped(env.DB, id);
+    const { authorizeUrl } = await json(await who.tool('start_connection', { provider: 'fake' }));
+    const back = rotating.consent(authorizeUrl);
+    const conn = new URL((await who.get(`${back.pathname}${back.search}`)).headers.get('location') ?? '', 'https://x').searchParams.get('connected') ?? '';
+    await json(await who.tool('create_data_source', { id: 'twice', name: 'twice', format: 'provider', connectionId: conn, resource: 'rooms' }));
+    const expiry = (await o.connections.get(conn))?.expiresAt ?? 0;
+    for (const other of ['rooms-a', 'rooms-b']) await org().dataSources.update(other, { nextPollAt: Number.MAX_SAFE_INTEGER });
+
+    // The access token the first refresh brings is refused at once: the run refreshes a second time.
+    let refreshes = 0;
+    const refusingOnce: typeof fetch = async (input, init) => {
+      const req = new Request(input, init);
+      const isRefresh = new URLSearchParams(await req.clone().text()).get('grant_type') === 'refresh_token';
+      const res = await rotating.fetch(req);
+      if (isRefresh && ++refreshes === 1) rotating.expireAccessTokens();
+      return res;
+    };
+    await pollDataSources(env, { now: expiry - REFRESH_MARGIN_MS + 1000, connectors: { adapters: [rotating.adapter], fetch: refusingOnce } });
+    expect(refreshes).toBe(2);
+    expect(await o.dataSources.get('twice')).toMatchObject({ failures: 0, lastError: null });
+    const row = await o.connections.get(conn);
+    const stored = await openGrant(env, { orgId: id, id: conn }, row?.credentialsSealed ?? '');
+    expect(rotating.liveRefreshTokens()).toContain(stored?.refreshToken);
+  });
 });

@@ -77,7 +77,13 @@ interface Run {
   guards: FetchGuards;
   connectors: ConnectorDeps;
   /** Per connection, the grant this run uses (and per connection again, `!` after its id, the one it refreshed after a refusal): shared by its sources. */
-  grants: Map<string, Promise<Grant>>;
+  grants: Map<string, Promise<Held>>;
+}
+
+/** A grant, and as it is stored: what a refresh of it is saved over. */
+interface Held {
+  grant: Grant;
+  sealed: string;
 }
 
 /** Run one poll pass at `now`. */
@@ -166,36 +172,37 @@ async function providerData(run: Run, org: OrgScope, connectionId: string, resou
   if (conn.status === 'needs_reconnect') throw new PollFailure('needs-reconnect');
   const adapter = run.connectors.adapters.find((a) => a.provider === conn.provider);
   if (!adapter) throw new PollFailure('provider-unavailable');
-  const live = { ...conn, credentialsSealed: conn.credentialsSealed };
   const http = providerFetch(adapter, run.connectors.fetch);
-  const shared = (key: string, make: () => Promise<Grant>) => {
-    let grant = run.grants.get(key);
-    if (!grant) {
-      grant = make();
-      run.grants.set(key, grant);
+  const sealed = conn.credentialsSealed;
+  const shared = (key: string, make: () => Promise<Held>) => {
+    let held = run.grants.get(key);
+    if (!held) {
+      held = make();
+      run.grants.set(key, held);
     }
-    return grant;
+    return held;
   };
-  const grant = await shared(conn.id, () => usableGrant(run, org, live, adapter, http));
+  const held = await shared(conn.id, () => usableGrant(run, org, conn, adapter, http, sealed));
   try {
-    return await adapter.fetch(resource, grant, http);
+    return await adapter.fetch(resource, held.grant, http);
   } catch (e) {
     if (!(e instanceof ProviderError && e.code === 'unauthorized')) throw e;
-    // Refused before its time (revoked, or expired early): refresh once, and try once more.
-    const fresh = await shared(`${conn.id}!`, () => refreshed(run, org, live, adapter, http, grant));
-    return adapter.fetch(resource, fresh, http);
+    // Refused before its time (revoked, or expired early): refresh once, over what this run stored, and try once more.
+    const fresh = await shared(`${conn.id}!`, () => refreshed(run, org, conn, adapter, http, held));
+    return adapter.fetch(resource, fresh.grant, http);
   }
 }
 
-type LiveConnection = NonNullable<Awaited<ReturnType<OrgScope['connections']['get']>>> & { credentialsSealed: string };
+type Connection = { orgId: string; id: string };
 
 /** The connection's grant, refreshed first if it runs out within the margin. */
-async function usableGrant(run: Run, org: OrgScope, conn: LiveConnection, adapter: ProviderAdapter, http: ProviderFetch): Promise<Grant> {
-  const grant = await openGrant(run.env, conn, conn.credentialsSealed);
+async function usableGrant(run: Run, org: OrgScope, conn: Connection, adapter: ProviderAdapter, http: ProviderFetch, sealed: string): Promise<Held> {
+  const grant = await openGrant(run.env, conn, sealed);
   // Sealed under another key (CONNECTION_KEY changed): only reconnecting gives it a grant again.
   if (!grant) throw new PollFailure('sealed-credentials');
-  if (grant.expiresAt !== null && grant.expiresAt - REFRESH_MARGIN_MS <= run.now) return refreshed(run, org, conn, adapter, http, grant);
-  return grant;
+  const held = { grant, sealed };
+  if (grant.expiresAt !== null && grant.expiresAt - REFRESH_MARGIN_MS <= run.now) return refreshed(run, org, conn, adapter, http, held);
+  return held;
 }
 
 /**
@@ -203,20 +210,20 @@ async function usableGrant(run: Run, org: OrgScope, conn: LiveConnection, adapte
  * marks the connection `needs_reconnect`, unless another run refreshed it meanwhile (a provider
  * that rotates refresh tokens refuses the old one): then that run's grant is used.
  */
-async function refreshed(run: Run, org: OrgScope, conn: LiveConnection, adapter: ProviderAdapter, http: ProviderFetch, grant: Grant): Promise<Grant> {
+async function refreshed(run: Run, org: OrgScope, conn: Connection, adapter: ProviderAdapter, http: ProviderFetch, from: Held): Promise<Held> {
   try {
-    const fresh = await adapter.refresh(grant, http, run.now);
-    await org.connections.saveGrant(conn.id, conn.credentialsSealed, { credentialsSealed: await sealGrant(run.env, conn, fresh), expiresAt: fresh.expiresAt });
-    return fresh;
+    const grant = await adapter.refresh(from.grant, http, run.now);
+    const sealed = await sealGrant(run.env, conn, grant);
+    await org.connections.saveGrant(conn.id, from.sealed, { credentialsSealed: sealed, expiresAt: grant.expiresAt });
+    return { grant, sealed };
   } catch (e) {
     if (!(e instanceof ProviderError && e.code === 'invalid_grant')) throw e;
     const now = await org.connections.get(conn.id);
-    const other =
-      now?.status === 'active' && now.credentialsSealed && now.credentialsSealed !== conn.credentialsSealed
-        ? await openGrant(run.env, now, now.credentialsSealed)
-        : undefined;
-    if (other) return other;
-    await org.connections.markNeedsReconnect(conn.id, conn.credentialsSealed, e.code);
+    if (now?.status === 'active' && now.credentialsSealed && now.credentialsSealed !== from.sealed) {
+      const other = await openGrant(run.env, now, now.credentialsSealed);
+      if (other) return { grant: other, sealed: now.credentialsSealed };
+    }
+    await org.connections.markNeedsReconnect(conn.id, from.sealed, e.code);
     throw new PollFailure('needs-reconnect', { cause: e });
   }
 }
