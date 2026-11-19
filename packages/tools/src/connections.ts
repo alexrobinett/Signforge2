@@ -109,7 +109,8 @@ const startConnection = defineTool({
     expiresAt: z.number(),
   }),
   example: { provider: 'google' },
-  target: (input, output) => ({ kind: 'connection', id: input.connectionId ?? output.authorizationId }),
+  target: (input, output) =>
+    input.connectionId ? { kind: 'connection', id: input.connectionId } : { kind: 'connection_authorization', id: output.authorizationId },
   handler: async ({ org, actor, input, write, connectors }) => {
     const providers = connectorsOf(connectors);
     if (!providers.providers.includes(input.provider))

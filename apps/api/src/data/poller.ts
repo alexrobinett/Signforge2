@@ -51,6 +51,7 @@ type PollError =
   | ProviderError['code']
   | 'unfit'
   | 'sealed-url'
+  | 'sealed-credentials'
   | 'needs-reconnect'
   | 'disconnected'
   | 'provider-unavailable';
@@ -191,7 +192,8 @@ type LiveConnection = NonNullable<Awaited<ReturnType<OrgScope['connections']['ge
 /** The connection's grant, refreshed first if it runs out within the margin. */
 async function usableGrant(run: Run, org: OrgScope, conn: LiveConnection, adapter: ProviderAdapter, http: ProviderFetch): Promise<Grant> {
   const grant = await openGrant(run.env, conn, conn.credentialsSealed);
-  if (!grant) throw new PollFailure('sealed-url');
+  // Sealed under another key (CONNECTION_KEY changed): only reconnecting gives it a grant again.
+  if (!grant) throw new PollFailure('sealed-credentials');
   if (grant.expiresAt !== null && grant.expiresAt - REFRESH_MARGIN_MS <= run.now) return refreshed(run, org, conn, adapter, http, grant);
   return grant;
 }
