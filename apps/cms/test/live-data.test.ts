@@ -3,7 +3,7 @@
 import { canonicalJson, readPath } from '@signforge/contract';
 import { parseCalendar, parseNews } from '@signforge/feeds';
 import { describe, expect, it } from 'vitest';
-import { rowTitles } from '../src/lib/live-data';
+import { madeByEditor, rowTitles, weatherSource } from '../src/lib/live-data';
 
 /** What the poller writes as a snapshot's data (apps/api/src/data/poller.ts). */
 const stored = (feed: unknown): unknown => JSON.parse(canonicalJson(feed));
@@ -34,5 +34,27 @@ describe('rowTitles', () => {
     ].join('\r\n');
     const feed = parseCalendar(ics, { now: new Date('2026-11-19T00:00:00Z') });
     expect(rowTitles(readPath(stored(feed), 'events'))).toEqual(['Staff meeting']);
+  });
+});
+
+describe('madeByEditor', () => {
+  it('knows the weather sources the editor makes from a place and units, and nothing a person typed', async () => {
+    const live = { source: 'open-meteo' as const, fields: { temp: 'current.temperature_2m', high: 'daily.temperature_2m_max.0' } };
+    const place = {
+      id: 4180439,
+      name: 'Atlanta',
+      region: 'Georgia',
+      country: 'United States',
+      latitude: 33.749,
+      longitude: -84.38798,
+      timezone: 'America/New_York',
+    };
+    for (const units of [
+      { temperature: '°F', wind: 'mph' },
+      { temperature: '°C', wind: 'km/h' },
+    ] as const)
+      expect(madeByEditor((await weatherSource(live, place, units)).id)).toBe(true);
+    // A feed or calendar added by its address gets the server's id, or one a person or agent chose.
+    for (const id of ['src_8f2k3j4h5g6f7d8s', 'weather', 'news-bbc', 'weather-atlanta', 'weather-4180439-f-mph']) expect(madeByEditor(id), id).toBe(false);
   });
 });

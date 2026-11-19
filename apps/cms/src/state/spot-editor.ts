@@ -21,6 +21,7 @@
 import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } from '@signforge/contract';
 import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
+import { madeByEditor } from '~/lib/live-data';
 import { callTool, saveRefused, spotOf, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 
@@ -155,14 +156,15 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   const sourcesOf = (s: SpotView) => new Set(Object.values(s.bindings ?? {}).map((b) => b.dataSourceId));
 
   /**
-   * Deletes each source the save stopped binding, so a source nobody uses no longer counts against
-   * the org's ten or gets polled. `delete_data_source` refuses one any other spot's draft or
-   * published version still binds; that refusal, or any other, leaves the source, which is all a
-   * failed cleanup costs.
+   * Deletes each weather source the editor made that the save stopped binding, so one nobody uses
+   * no longer counts against the org's ten or gets polled; picking the place again makes it again.
+   * A feed or calendar someone typed stays (`madeByEditor`). `delete_data_source` refuses one any
+   * other spot's draft or published version still binds; that refusal, or any other, leaves the
+   * source, which is all a failed cleanup costs.
    */
   async function dropUnbound(orgId: string, before: SpotView, after: SpotView) {
     const kept = sourcesOf(after);
-    const dropped = [...sourcesOf(before)].filter((id) => !kept.has(id));
+    const dropped = [...sourcesOf(before)].filter((id) => !kept.has(id) && madeByEditor(id));
     if (!dropped.length) return;
     await Promise.allSettled(dropped.map((dataSourceId) => callTool('delete_data_source', { dataSourceId })));
     await queryClient.invalidateQueries({ queryKey: dataSourceKeys.all(orgId), exact: true });

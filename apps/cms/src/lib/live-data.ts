@@ -102,6 +102,16 @@ export function withUnit(units: WeatherUnits, kind: keyof WeatherUnits, value: s
   return isWind(value) ? { ...units, wind: value } : units;
 }
 
+/** The ids `weatherSource` makes. */
+const WEATHER_SOURCE_ID = /^weather-\d+-[cf]-(?:mph|kmh)-[0-9a-f]{6}$/;
+
+/**
+ * Whether the editor made this source from a place and units (`weatherSource`), so picking the
+ * place again makes it again. A feed or calendar was added by its address, which is never shown
+ * again: that one a person deletes, not the editor.
+ */
+export const madeByEditor = (dataSourceId: string) => WEATHER_SOURCE_ID.test(dataSourceId);
+
 async function shortHash(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return [...new Uint8Array(digest).slice(0, 3)].map((b) => b.toString(16).padStart(2, '0')).join('');

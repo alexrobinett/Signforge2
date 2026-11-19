@@ -210,6 +210,26 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
   await form.getByRole('button', { name: 'Use this feed' }).click();
   await expect(form.getByRole('listitem').filter({ hasText: 'Harbour bridge reopens after repairs' })).toBeVisible();
   await expect(form.getByRole('button', { name: 'Change source' })).toBeFocused();
+
+  // A feed someone typed is kept when its last spot moves away: its address is never shown again, so it
+  // would have to be found and typed again. (A weather source the editor made is deleted: the second test.)
+  await form.getByRole('button', { name: 'Change source' }).click();
+  await form.getByRole('button', { name: 'Add a feed by its address' }).click();
+  await form.getByLabel('Address').fill('https://feeds.example.com/local.rss');
+  await form.getByLabel('Name', { exact: true }).last().fill('Local desk');
+  await form.getByRole('button', { name: 'Add feed' }).click();
+  await expect(form.getByText('Local desk')).toBeVisible();
+  await expect(page.getByText(/Saved \d/)).toBeVisible();
+  await form.getByRole('button', { name: 'Change source' }).click();
+  await form.getByLabel('News feed').selectOption({ label: 'World desk' });
+  await form.getByRole('button', { name: 'Use this feed' }).click();
+  await expect(form.getByRole('listitem').filter({ hasText: 'Harbour bridge reopens after repairs' })).toBeVisible();
+  await expect(page.getByText(/Saved \d/)).toBeVisible();
+  // Long enough for a cleanup after the save to have run.
+  await page.waitForTimeout(2_000);
+  const names = async () => ((await tool(page, 'list_data_sources', {})).dataSources as { name: string }[]).map((d) => d.name);
+  expect(await names()).toContain('Local desk');
+
   await page.setViewportSize({ width: 390, height: 844 });
   await axe(page);
   await shots(page, '38-spot-source-phone');
