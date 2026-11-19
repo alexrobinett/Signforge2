@@ -1,8 +1,8 @@
 /**
  * The dispatcher: the one door to every tool.
  *
- *   1. Find the tool by name. For an agent, count the call against its grant's limits
- *      (`AGENT_LIMITS`) and refuse it with `rate_limited` over one, before anything else runs.
+ *   1. For an agent, count the call against its grant's limits (`AGENT_LIMITS`) and refuse it
+ *      with `rate_limited` over one, before anything else runs. Then find the tool by name.
  *   2. Check the caller's role reaches the tool's minimum and its scopes include the tool's. An
  *      editor's scopes are read per call from the org's settings: with `editorsPublish` off, they
  *      lack `content:publish` (owner decision Q7).
@@ -130,11 +130,12 @@ export async function dispatch<D extends DataScope>(
   caller: Caller<D>,
 ): Promise<DispatchResult> {
   const tool = registry.get(name);
-  if (!tool) return fail('unknown_tool', `no tool named ${JSON.stringify(name)}`);
+  // Before the name is checked: a call to no tool still counts, as a call.
   if (caller.actor.kind === 'agent') {
-    const refused = await overLimit(tool, caller);
+    const refused = await overLimit(name, tool?.mutates ?? false, caller);
     if (refused) return refused;
   }
+  if (!tool) return fail('unknown_tool', `no tool named ${JSON.stringify(name)}`);
   const grant = await grantOf(caller);
   if (!permits(grant, tool)) {
     if (permits({ ...grant, editorsPublish: true }, tool)) return fail('forbidden', 'Only owners publish in this organization');
@@ -248,9 +249,9 @@ const OVER: Record<AgentLimit, string> = {
  * An agent's call counted against its grant's limits, before anything else is read or run. A
  * refused call writes nothing, except the audit row of the first one refused in each window.
  */
-async function overLimit(tool: AnyTool<any>, caller: Caller<DataScope>): Promise<DispatchResult | undefined> {
-  if (!caller.agentLimiter) throw new Error(`an agent called ${tool.name} without a limiter for its grant`);
-  const allowance = await caller.agentLimiter.take(caller.actor.id, tool.mutates);
+async function overLimit(name: string, write: boolean, caller: Caller<DataScope>): Promise<DispatchResult | undefined> {
+  if (!caller.agentLimiter) throw new Error(`an agent called ${JSON.stringify(name)} without a limiter for its grant`);
+  const allowance = await caller.agentLimiter.take(caller.actor.id, write);
   if (allowance.ok) return undefined;
   const { limit, retryAfterSeconds } = allowance;
   const message = `this agent grant ${OVER[limit]}, its limit; try again in ${retryAfterSeconds} s`;
@@ -260,10 +261,11 @@ async function overLimit(tool: AnyTool<any>, caller: Caller<DataScope>): Promise
       actorKind: 'agent',
       actorId: caller.actor.id,
       clientId: caller.actor.clientId ?? null,
-      action: tool.name,
+      action: 'rate_limited',
       targetKind: null,
       targetId: null,
-      detailJson: JSON.stringify({ refused: { error: 'rate_limited', message, details } }),
+      // The name as the agent sent it, which may name no tool.
+      detailJson: JSON.stringify({ tool: redact(name), refused: { error: 'rate_limited', message, details } }),
     });
     await caller.org.commit(audit.writes);
   }

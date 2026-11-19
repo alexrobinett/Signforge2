@@ -436,8 +436,9 @@ describe("an agent grant's limits", () => {
     }
     const all = await audits();
     expect(all).toHaveLength(before + 1);
-    expect(all[0]).toMatchObject({ actorKind: 'agent', actorId: 'grant-limits', clientId: 'agent-app', action: 'rename_group', targetKind: null });
+    expect(all[0]).toMatchObject({ actorKind: 'agent', actorId: 'grant-limits', clientId: 'agent-app', action: 'rate_limited', targetKind: null });
     expect(JSON.parse(all[0]!.detailJson!)).toEqual({
+      tool: 'rename_group',
       refused: {
         error: 'rate_limited',
         message: 'this agent grant made 2000 changes today (UTC), its limit; try again in 3600 s',
@@ -470,6 +471,20 @@ describe("an agent grant's limits", () => {
   it('refuse to run an agent without its limiter', async () => {
     const { agentLimiter: _, ...noLimiter } = caller('editor', undefined, agent);
     await expect(dispatch(registry, 'list_screens', {}, noLimiter)).rejects.toThrow(/limiter/);
+    await expect(dispatch(registry, 'drop_tables', {}, noLimiter)).rejects.toThrow(/limiter/);
+  });
+
+  it('count a call to a tool that does not exist, and refuse it over the limit', async () => {
+    let over = false;
+    const { asked, agentLimiter } = scripted(() => (over ? { ok: false, limit: 'calls_per_minute', retryAfterSeconds: 5, first: true } : { ok: true }));
+    const as = { ...caller('editor', undefined, agent), agentLimiter };
+    expect(await dispatch(registry, 'drop_tables', {}, as)).toMatchObject({ ok: false, error: 'unknown_tool' });
+    expect(asked).toEqual([{ grantId: 'grant-limits', write: false }]);
+    over = true;
+    expect(await dispatch(registry, 'drop_tables', {}, as)).toMatchObject({ ok: false, error: 'rate_limited', details: { limit: 'calls_per_minute' } });
+    const [entry] = await audits();
+    expect(entry).toMatchObject({ actorId: 'grant-limits', action: 'rate_limited' });
+    expect(JSON.parse(entry!.detailJson!)).toMatchObject({ tool: 'drop_tables' });
   });
 });
 

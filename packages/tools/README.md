@@ -155,8 +155,8 @@ Owner decision Q7 (can editors publish?), decided 2026-11-18: an owner chooses, 
 
 `dispatch(registry, name, input, caller)` (`src/dispatch.ts`) runs these steps in order:
 
-1. Finds the tool.
-2. For an agent, counts the call against its grant's limits, and refuses it over one (see Agent limits).
+1. For an agent, counts the call against its grant's limits, and refuses it over one (see Agent limits).
+2. Finds the tool.
 3. Checks the role and scopes.
 4. Validates the input.
 5. For a keyed creation, returns the first result if the key was used before (see Idempotency keys above).
@@ -177,7 +177,7 @@ A call that staged nothing changed nothing, and writes nothing: no audit row eit
 
 Each agent grant (`actor.kind === 'agent'`, counted by `actor.id`, its grant id) may make 120 tool calls a minute, and 30 changes a minute and 2,000 a UTC day (`AGENT_LIMITS` in `src/tool.ts`; owner decision on #39, constants rather than settings). A change is a call to a tool that `mutates`, counted when it is made, even if it is refused later or changes nothing; reads count only as calls. People are not counted. The windows are fixed: the clock's minute, and the UTC day.
 
-The call is counted after the tool is found and before anything else: over a limit it is refused with `rate_limited`, a message naming the limit and when it resets, and `details: { limit, retryAfterSeconds }` (`limit` is `calls_per_minute`, `writes_per_minute` or `writes_per_day`). The grant is not read, the handler does not run, nothing is written, and an idempotency key is left unused, so a retry after `retryAfterSeconds` works. A refused call does not count. The first call refused by each limit in each window is audited, with no target and `refused: { error, message, details }` in its detail, so the log shows a grant hitting its limit once per minute or day, not once per retry.
+The call is counted before anything else, even before the name is looked up (a name that is no tool counts as a call): over a limit it is refused with `rate_limited`, a message naming the limit and when it resets, and `details: { limit, retryAfterSeconds }` (`limit` is `calls_per_minute`, `writes_per_minute` or `writes_per_day`). The grant is not read, the handler does not run, nothing is written, and an idempotency key is left unused, so a retry after `retryAfterSeconds` works. A refused call does not count. The first call refused by each limit in each window is audited, as action `rate_limited` with no target and `{ tool, refused: { error, message, details } }` in its detail (`tool` is the name the agent called), so the log shows a grant hitting its limit once per minute or day, not once per retry.
 
 The adapter passes the counter as `caller.agentLimiter` (`AgentLimiter`); an agent caller without one throws, so no adapter can skip it. The API's is one Durable Object per grant (`apps/api/src/agents/grant-object.ts`, `agentLimiter(env)`): one count for every location, and a read writes nothing, to D1 or to the object's storage.
 
