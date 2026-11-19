@@ -56,8 +56,11 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByLabel('Keep entries for')).toHaveValue('90');
 
   // Screens & groups: the offline alert waits 30 minutes.
-  await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
+  // After a reload, a click before hydration is lost: the router never sees it (CI, 2026-11-19).
   await hydrated(page);
+  await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
+  // The body is hydrated already from the page before, so wait for the navigation itself.
+  await expect(page).toHaveURL(/\/settings\/screens$/);
   await page.getByLabel('Alert after').fill('30');
   await page.getByLabel('From').fill('03:00');
   await axe(page);
@@ -84,7 +87,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
 
   // Notifications: everyone hears when a screen goes offline.
   await settingsNav(page).getByRole('link', { name: 'Notifications' }).click();
-  await hydrated(page);
+  await expect(page).toHaveURL(/\/settings\/notifications$/);
   await expect(page.getByText('After 30 minutes; one alert each way')).toBeVisible();
   // Slack and the webhook can be chosen once they are set.
   await expect(page.getByLabel('Slack for: A screen goes offline, and when it is back')).toBeDisabled();
@@ -147,6 +150,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await shots(page, '42b-settings-notifications-log');
 
   // Removing Slack asks once more, then it is unset and its rule's box is disabled.
+  await hydrated(page);
   await page.getByText('Manage').first().click();
   await page.getByRole('button', { name: 'Remove Slack' }).click();
   await page.getByRole('button', { name: 'Remove', exact: true }).click();
