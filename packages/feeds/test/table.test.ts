@@ -58,6 +58,27 @@ describe('CSV (RFC 4180, header row)', () => {
     expect(parseCsv(wide(16, 2000)).rows).toHaveLength(2000);
   });
 
+  // A Worker has 30 s of CPU, and a poll run carries other orgs' sources: every refusal is quick, whatever the header's width.
+  it('reads a wide header in time linear in the body: each refusal well under a second', () => {
+    const timed = (body: string) => {
+      expect(body.length).toBeLessThanOrEqual(LIMITS.maxBytes);
+      const t0 = performance.now();
+      const result = code(() => parseCsv(body));
+      return { result, fast: performance.now() - t0 < 1000 };
+    };
+    // 300 kB: a named column and 100,000 unnamed ones, over 100,000 short rows (12.9 s with a scan of every row per column).
+    expect(timed(`a${','.repeat(100_000)}\n${'x\n'.repeat(100_000)}`)).toEqual({ result: 'too-large', fast: true });
+    // 1 MB: the same with 500,000 unnamed columns and 250,000 rows (over 45 s).
+    expect(timed(`a${','.repeat(500_000)}\n${'x\n'.repeat(249_999)}`)).toEqual({ result: 'too-large', fast: true });
+    // 1 MB: one line of 135,000 distinct names, the last a repeat (22.9 s with a scan of every name per name).
+    const names = Array.from({ length: 135_000 }, (_, i) => `c${i}`);
+    expect(timed([...names, 'c0'].join(','))).toEqual({ result: 'malformed', fast: true });
+    // A cell under an unnamed column is still found, wherever it is.
+    expect(timed(`a,,b\n1,,2\n3,x,4\n`)).toEqual({ result: 'malformed', fast: true });
+    // 1 MB of one-character lines: refused once there are more rows than any snapshot can hold.
+    expect(timed(`a\n${'x\n'.repeat(499_000)}`)).toEqual({ result: 'too-large', fast: true });
+  });
+
   it('refuses a body over the size limit before reading it', () => {
     expect(code(() => parseCsv(`Item\n${'x'.repeat(50)}`, { maxBytes: 40 }))).toBe('too-large');
   });
@@ -87,7 +108,17 @@ describe('JSON (a list of objects, or a path to one)', () => {
     // 71 kB: 6000 objects with one distinct key each would be 6000 x 6000 = 36M cells.
     const sparse = JSON.stringify(Array.from({ length: 6000 }, (_, i) => ({ [`k${i}`]: 1 })));
     expect(sparse.length).toBeLessThan(80_000);
+    const t0 = performance.now();
     expect(code(() => parseJsonTable(sparse))).toBe('too-large');
+    expect(performance.now() - t0).toBeLessThan(1000);
+    // 1 MB: one object with 100,000 keys, and 333,000 empty objects.
+    const wide = JSON.stringify([Object.fromEntries(Array.from({ length: 100_000 }, (_, i) => [`k${i}`, 1]))]);
+    const many = JSON.stringify(Array(333_000).fill({}));
+    for (const body of [wide, many]) {
+      const t1 = performance.now();
+      code(() => parseJsonTable(body));
+      expect(performance.now() - t1).toBeLessThan(1000);
+    }
   });
 
   it('refuses JSON that does not parse as malformed, and a path to anything but a list of objects as not-a-table', () => {

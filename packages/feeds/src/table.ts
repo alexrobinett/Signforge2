@@ -26,9 +26,19 @@ function refuseOversized(columns: number, rows: number): void {
   if (columns * rows > MAX_CELLS) throw new FeedError('too-large', `${columns} columns by ${rows} rows cannot fit a snapshot`);
 }
 
-/** RFC 4180 records: commas between cells, quotes around a cell that holds commas, quotes or line breaks, CRLF or LF between records. */
+/**
+ * RFC 4180 records: commas between cells, quotes around a cell that holds commas, quotes or line
+ * breaks, CRLF or LF between records. Blank records are skipped. More records than `MAX_CELLS`
+ * (a header and a row per cell) can never fit a snapshot, so reading stops there as `too-large`
+ * rather than hold an array for each of a million one-character lines.
+ */
 function records(text: string): string[][] {
   const out: string[][] = [];
+  const keep = (r: string[]) => {
+    if (!r.some((c) => c.trim() !== '')) return;
+    if (out.length > MAX_CELLS) throw new FeedError('too-large', `more than ${MAX_CELLS} rows cannot fit a snapshot`);
+    out.push(r);
+  };
   let row: string[] = [];
   let cell = '';
   /** The cell was quoted: an empty one is still a cell at the end of the file. */
@@ -65,7 +75,7 @@ function records(text: string): string[][] {
       i++;
     } else if (c === '\r' || c === '\n') {
       end();
-      out.push(row);
+      keep(row);
       row = [];
       i += c === '\r' && text[i + 1] === '\n' ? 2 : 1;
     } else {
@@ -75,7 +85,7 @@ function records(text: string): string[][] {
   }
   if (cell !== '' || quoted || row.length) {
     end();
-    out.push(row);
+    keep(row);
   }
   return out;
 }
@@ -83,20 +93,24 @@ function records(text: string): string[][] {
 /** A CSV file as a TableFeed. Blank lines are skipped, short rows padded with empty cells, and empty columns with no name dropped. */
 export function parseCsv(body: string, options: TableOptions = {}): TableFeed {
   checkSize(body, options.maxBytes ?? LIMITS.maxBytes);
-  const [header, ...rest] = records(body.replace(/^﻿/, '')).filter((r) => r.some((c) => c.trim() !== ''));
+  const [header, ...rest] = records(body.replace(/^﻿/, ''));
   if (!header) throw malformed('the file has no header row');
   rest.forEach((r, i) => {
     if (r.length > header.length && r.slice(header.length).some((c) => c.trim() !== ''))
       throw malformed(`row ${i + 1} has ${r.length} cells and the header ${header.length}`);
   });
   const names = header.map((h) => h.trim());
-  const keep = names.flatMap((name, k) => {
-    if (name) return [k];
-    if (rest.some((r) => r[k]?.trim())) throw malformed(`column ${k + 1} has cells but no name`);
-    return [];
-  });
+  // One pass over the cells, and one over the names: a scan of every row per column, or of every
+  // name per name, takes seconds on a wide header, past a Worker's CPU limit before the size check.
+  // Cells past the header are known blank (above).
+  for (const r of rest)
+    r.forEach((c, k) => {
+      if (k < names.length && !names[k] && c.trim()) throw malformed(`column ${k + 1} has cells but no name`);
+    });
+  const keep = names.flatMap((name, k) => (name ? [k] : []));
   const columns = keep.map((k) => names[k] ?? '');
-  const twice = columns.find((c, k) => columns.indexOf(c) !== k);
+  const seen = new Set<string>();
+  const twice = columns.find((c) => seen.size === seen.add(c).size);
   if (twice !== undefined) throw malformed(`two columns are named "${twice.slice(0, 40)}"`);
   refuseOversized(columns.length, rest.length);
   // Short rows padded with empty cells.
