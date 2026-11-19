@@ -13,24 +13,11 @@ import {
   type Spot,
   type TemplateMessage,
 } from '@signforge/contract';
-import { resolveSpotData } from '@signforge/player-core';
+import { READY_TIMEOUT_MS, resolveSpotData, TEMPLATE_SANDBOX, WRAPPER_HTML } from '@signforge/player-core';
 import { clock, now } from './clock';
 import { liveData, reportRejected } from './data';
 import { getFile } from './source';
 
-/** A spot that has not reported ready by this point is skipped. */
-const READY_TIMEOUT_MS = 2000;
-
-// A template gets no network at all: scripts and styles are inline, media arrives as blobs. No
-// `frame-src`, so it falls back to `'none'`: the template cannot load a frame or navigate its own.
-const TEMPLATE_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; media-src blob:; font-src data:";
-// The document around each template; see `template()`. Its one script is `relay`: templates
-// accept messages only from their `parent`, which is now the wrapper, and a message's source is
-// the window whose code called postMessage. So the player posts through a function of the wrapper.
-const WRAPPER_HTML =
-  `<!doctype html><meta http-equiv="Content-Security-Policy" content="${TEMPLATE_CSP}">` +
-  '<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style>' +
-  "<script>relay=(w,m)=>w.postMessage(m,'*')</script>";
 type WrapperWindow = Window & { relay: (to: Window, m: HostMessage) => void };
 
 /** Corrected time and the offset the SDK's `now()` adds to the frame's own clock (src/clock.ts). */
@@ -250,7 +237,7 @@ export class Slot {
     const frame = wrapper.document.createElement('iframe');
     // Scripts only: an opaque origin, so no access to the player, the wrapper or their storage;
     // no popups, forms, or navigating any frame but its own.
-    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.setAttribute('sandbox', TEMPLATE_SANDBOX);
     frame.title = spot.name;
     frame.srcdoc = html;
 
