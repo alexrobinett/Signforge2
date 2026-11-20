@@ -6,7 +6,9 @@ import { jpegWithOrientation, png, rotatedPhoto, webpAlpha, webpLossless, webpLo
 const info = (b: Buffer) => readImageInfo(new Uint8Array(b));
 
 describe('readImageInfo', () => {
-  it('reads a JPEG, turning the size by its EXIF orientation', async () => {
+  // sharp encodes a 4K photo here: 0.3 s on a laptop, 2.9 to 3.7 s in CI beside the other packages'
+  // tests, and once over the default 5 s. Ten times that, so a busy machine is never a failure.
+  it('reads a JPEG, turning the size by its EXIF orientation', { timeout: 60_000 }, async () => {
     expect(info(await rotatedPhoto())).toEqual({ type: 'image/jpeg', width: 3840, height: 2160, orientation: 6 });
     for (const o of [1, 2, 3, 4]) expect(info(await jpegWithOrientation(64, 32, o))).toEqual({ type: 'image/jpeg', width: 64, height: 32, orientation: o });
     for (const o of [5, 6, 7, 8]) expect(info(await jpegWithOrientation(64, 32, o))).toEqual({ type: 'image/jpeg', width: 32, height: 64, orientation: o });
