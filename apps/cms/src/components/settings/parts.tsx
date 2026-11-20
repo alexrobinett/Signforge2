@@ -71,13 +71,15 @@ export function useRunning(scope: SettingsScope): string | undefined {
 /** The error of the action `at`, in the org on screen; a reload when the settings changed since the edits were made. */
 export function ActionError({ at }: { at: string }) {
   const orgId = useOrgOnScreen();
-  const error = useAppStore((s) => errorOf(s.settings, at, orgId));
+  // One value per selector: errorOf builds the error of a form's save afresh each time.
+  const text = useAppStore((s) => errorOf(s.settings, at, orgId)?.text);
+  const stale = useAppStore((s) => errorOf(s.settings, at, orgId)?.stale);
   const reload = useAppStore((s) => s.reloadSettings);
   return (
     <div role="alert" className="flex flex-wrap items-center gap-2 text-sm font-medium text-destructive empty:hidden">
-      {error?.text}
-      {error?.stale && (
-        <Button type="button" variant="outline" size="sm" onClick={() => void reload(error.orgId, at)}>
+      {text}
+      {stale && (
+        <Button type="button" variant="outline" size="sm" onClick={() => void reload(orgId ?? null, at)}>
           <RotateCwIcon aria-hidden /> Reload
         </Button>
       )}

@@ -4,9 +4,11 @@
  * comes from the route loaders; each action reloads them.
  *
  * The settings forms are controlled: a field shows its edit if there is one, else what the page
- * read, so a reload refreshes every field the member has not touched. A save sends only the edited
- * fields, with the version they were made on, and a change made since is refused, never
- * overwritten. Edits, running actions and errors belong to the org they were made in.
+ * read, so a reload refreshes every field the member has not touched. Each form's edits are a
+ * versioned draft of the org's settings (./versioned-draft.ts): a save sends only the edited
+ * fields, with the version they were made on, a change made since is refused, never overwritten,
+ * and the forms' saves run one at a time. Edits, running actions and errors belong to the org they
+ * were made in.
  */
 import type { AnyRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
@@ -14,9 +16,10 @@ import { authClient, authErrorMessage } from '~/lib/auth-client';
 import { orgOnScreen } from '~/lib/live';
 import type { AlertChannel, AlertDelivery, AlertKind, AlertRule, Member, OrgSettings } from '~/lib/settings';
 import type { DisplayHours } from '~/lib/screen-types';
-import { callTool, isStale, settingsVersionOf, toolMessage } from '~/lib/tools';
+import { callTool, isStale, toolMessage, versionOf } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
 import type { SliceCreator } from './store';
+import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
 
 /** A page whose actions run one at a time. Account and the invitation page belong to no org. */
 type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'account' | 'invitation';
@@ -28,8 +31,9 @@ export interface SettingsScope {
 const scopeKey = ({ page, orgId }: SettingsScope) => `${orgId ?? ''}/${page}`;
 
 /** A form whose edits are kept until saved: General, Screens & groups, the alert rules, Who publishes. */
-export type SettingsForm = 'general' | 'screens' | 'notifications' | 'publishing';
+type SettingsForm = 'general' | 'screens' | 'notifications' | 'publishing';
 const FORM_PAGE: Record<SettingsForm, SettingsPage> = { general: 'general', screens: 'screens', notifications: 'notifications', publishing: 'members' };
+const FORMS: SettingsForm[] = ['general', 'screens', 'notifications', 'publishing'];
 
 /** A form's fields as edited, numbers as typed. `name` renames the org; the rest are `update_org_settings`' fields. */
 export interface SettingsEdits {
@@ -48,13 +52,6 @@ export interface SettingsEdits {
   editorsPublish?: boolean;
 }
 
-/** A form's edits, and the version of the settings they were made on: what its save sends as `ifVersion`. */
-interface SettingsDraft {
-  orgId: string;
-  version: number;
-  edits: SettingsEdits;
-}
-
 interface SettingsState {
   /** The action running in each scope (`general`, `invite`, `role:<memberId>`, ...). Another there is ignored. */
   pending: Record<string, string>;
@@ -63,7 +60,8 @@ interface SettingsState {
    * `stale`: the settings changed since the edits were made, and the form offers a reload.
    */
   errors: Record<string, { orgId: string | null; text: string; stale: boolean }>;
-  drafts: Partial<Record<SettingsForm, SettingsDraft>>;
+  /** Each form's edits, by form: drafts of one record, the org's settings. */
+  drafts: Drafts<SettingsEdits>;
   /** The role a member's running change gives them, so their select shows where it is going. */
   roleChange: { memberId: string; role: Role } | null;
   /** The member the remove dialog asks about. */
@@ -125,22 +123,25 @@ export interface SettingsSlice {
   declineInvitation: (invitationId: string) => Promise<void>;
 }
 
-/** The action running in `scope`, if one is. */
-export const runningIn = (settings: SettingsState, scope: SettingsScope): string | undefined => settings.pending[scopeKey(scope)];
+/** The action running in `scope`, if one is: one of its own, or the save of a form on its page. */
+export const runningIn = (settings: SettingsState, scope: SettingsScope): string | undefined =>
+  settings.pending[scopeKey(scope)] ??
+  FORMS.find((f) => FORM_PAGE[f] === scope.page && settings.drafts[f]?.orgId === scope.orgId && settings.drafts[f].pending);
 
 const NO_EDITS: SettingsEdits = {};
-/** Whether the form saved as `at` has edits not yet saved in `orgId`. */
-export const hasEdits = (settings: SettingsState, at: string, orgId: string | null) =>
-  Object.entries(settings.drafts).some(([form, d]) => form === at && d.orgId === orgId && Object.keys(d.edits).length > 0);
-
-/** A form's edits in `orgId`; another org's are never shown. */
-export function editsIn(settings: SettingsState, form: SettingsForm, orgId: string): SettingsEdits {
+/** A form's edits not yet saved in `orgId`; another org's are never shown. */
+export function editsIn(settings: SettingsState, form: string, orgId: string | null): SettingsEdits {
   const draft = settings.drafts[form];
-  return draft?.orgId === orgId ? draft.edits : NO_EDITS;
+  return draft?.orgId === orgId && draft.status !== 'saved' ? draft.edit : NO_EDITS;
 }
 
-/** The error of the action `at`, if it failed in the org on screen (or belongs to none). */
+/** Whether the form saved as `at` has edits not yet saved in `orgId`. */
+export const hasEdits = (settings: SettingsState, at: string, orgId: string | null) => Object.keys(editsIn(settings, at, orgId)).length > 0;
+
+/** The error of the action `at`, if it failed in the org on screen (or belongs to none): a form's save's, else the action's. */
 export function errorOf(settings: SettingsState, at: string, orgId: string | undefined) {
+  const draft = settings.drafts[at];
+  if (draft?.error && draft.orgId === orgId) return { orgId: draft.orgId, text: draft.error, stale: draft.stale };
   const error = settings.errors[at];
   return error && (error.orgId === null || error.orgId === orgId) ? error : undefined;
 }
@@ -187,6 +188,28 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
   const patch = (change: (s: SettingsState) => SettingsState) => set((s) => ({ settings: change(s.settings) }));
   const withoutKey = <T>(record: Record<string, T>, key: string) => Object.fromEntries(Object.entries(record).filter(([k]) => k !== key));
 
+  /** The forms' edits. A save stays pending until the page's loaders have finished, as `run`'s actions do. */
+  const drafts = createVersionedDrafts<SettingsEdits, { settings: OrgSettings; renamed: { id: string; name: string } | undefined }>({
+    state: { read: () => get().settings.drafts, write: (change) => patch((s) => ({ ...s, drafts: change(s.drafts) })) },
+    async save({ draft, context: { settings, renamed }, moved }) {
+      const { name, ...fields } = draft.edit;
+      if (name !== undefined && !name.trim()) throw new Error('The organization needs a name.');
+      const change = changeOf(fields, settings);
+      // The versioned write first: a stale save changes nothing, the name included.
+      if (Object.keys(change).length) moved(versionOf(await callTool('update_org_settings', { ...change, ifVersion: draft.version }), 'settings'));
+      if (name !== undefined && renamed && name.trim() !== renamed.name)
+        await auth(authClient.organization.update({ organizationId: renamed.id, data: { name: name.trim() } }), 'Could not rename the organization.');
+      if (orgOnScreen(router) === draft.orgId) {
+        toast.success('Saved');
+        await router.invalidate({ sync: true });
+      }
+      return {};
+    },
+    makeId: () => crypto.randomUUID(),
+    currentOrg: () => orgOnScreen(router),
+    clock: realClock,
+  });
+
   /**
    * Runs one action in `scope`, unless one is running there: marks it pending, says how it went,
    * and reloads the page's data. It stays pending until the page's loaders have finished (`sync`;
@@ -196,7 +219,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
    */
   async function run(scope: SettingsScope, at: string, work: () => Promise<unknown>, done: string) {
     const key = scopeKey(scope);
-    if (get().settings.pending[key] !== undefined) return false;
+    if (runningIn(get().settings, scope) !== undefined) return false;
     patch((s) => ({ ...s, pending: { ...s.pending, [key]: at }, errors: withoutKey(s.errors, at) }));
     try {
       await work();
@@ -223,46 +246,17 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
   return {
     settings: { pending: {}, errors: {}, drafts: {}, roleChange: null, removing: null, removingChannel: null, signingSecret: null },
 
-    editSettings: (orgId, form, version, change) =>
-      patch((s) => {
-        const draft = s.drafts[form];
-        const base = draft?.orgId === orgId ? draft : { orgId, version, edits: {} };
-        return { ...s, drafts: { ...s.drafts, [form]: { ...base, edits: { ...base.edits, ...change } } } };
-      }),
+    editSettings: (orgId, form, version, change) => drafts.edit(form, { orgId, record: 'settings', version, edit: {} }, (e) => ({ ...e, ...change })),
 
     async saveSettings(orgId, form, settings, renamed) {
-      const draft = get().settings.drafts[form];
-      if (draft?.orgId !== orgId) {
+      if (!hasEdits(get().settings, form, orgId)) {
         toast('Nothing to save');
         return;
       }
-      const { name, ...fields } = draft.edits;
-      const change = changeOf(fields, settings);
-      const saved = await run(
-        org(FORM_PAGE[form], orgId),
-        form,
-        async () => {
-          if (name !== undefined && !name.trim()) throw new Error('The organization needs a name.');
-          // The versioned write first: a stale save changes nothing, the name included.
-          if (Object.keys(change).length) {
-            const version = settingsVersionOf(await callTool('update_org_settings', { ...change, ifVersion: draft.version }));
-            // This save alone took the settings from the drafts' version to this one, and its fields
-            // are no other form's: every draft of the org still on the old version moves with it, so
-            // an edit left on another page does not conflict with this page's save.
-            patch((s) => ({
-              ...s,
-              drafts: Object.fromEntries(
-                Object.entries(s.drafts).map(([f, d]) => [f, d.orgId === orgId && d.version === draft.version ? { ...d, version } : d]),
-              ),
-            }));
-          }
-          if (name !== undefined && renamed && name.trim() !== renamed.name)
-            await auth(authClient.organization.update({ organizationId: renamed.id, data: { name: name.trim() } }), 'Could not rename the organization.');
-        },
-        'Saved',
-      );
-      // Its edits are saved; edits made while it ran stay, on the version it made.
-      if (saved) patch((s) => (s.drafts[form]?.edits === draft.edits ? { ...s, drafts: withoutKey(s.drafts, form) } : s));
+      // Its page's other actions wait for it, as it waits for them. The forms' fields are each one
+      // form's: a save moves every other form's draft on its version to the one it made.
+      if (runningIn(get().settings, org(FORM_PAGE[form], orgId)) !== undefined) return;
+      await drafts.save(form, { settings, renamed });
     },
 
     connectSlack: (orgId, webhookUrl, ifVersion) =>
@@ -322,14 +316,14 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     async reloadSettings(orgId, at) {
       await router.invalidate({ sync: true });
       // Only the refused form's edits go: another page's are kept, and its own save says if they conflict.
-      patch((s) => ({
-        ...s,
-        drafts: Object.fromEntries(Object.entries(s.drafts).filter(([form, d]) => !(form === at && d.orgId === orgId))),
-        errors: withoutKey(s.errors, at),
-      }));
+      if (get().settings.drafts[at]?.orgId === orgId) drafts.drop(at);
+      patch((s) => ({ ...s, errors: withoutKey(s.errors, at) }));
       toast('Reloaded. Make your change again on what is there now.');
     },
-    forgetOrgSettings: () => patch((s) => ({ ...s, drafts: {}, removing: null, removingChannel: null, signingSecret: null })),
+    forgetOrgSettings() {
+      drafts.forget();
+      patch((s) => ({ ...s, removing: null, removingChannel: null, signingSecret: null }));
+    },
 
     inviteMembers(orgId, emails, role) {
       return run(
@@ -401,7 +395,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       void (await run(account, 'sessions', () => auth(authClient.revokeOtherSessions(), 'Could not sign them out.'), 'Signed out everywhere else')),
     async connectGithub() {
       const key = scopeKey(account);
-      if (get().settings.pending[key] !== undefined) return;
+      if (runningIn(get().settings, account) !== undefined) return;
       patch((s) => ({ ...s, pending: { ...s.pending, [key]: 'github' }, errors: withoutKey(s.errors, 'github') }));
       try {
         // On success the browser leaves for GitHub and comes back to the account page.

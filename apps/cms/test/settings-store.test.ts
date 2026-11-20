@@ -192,11 +192,11 @@ describe('a settings save (re-check of #143, 1)', () => {
     write.resolve(saved(2));
     await saving;
     expect(calls).toEqual([{ name: 'update_org_settings', input: { auditRetentionDays: 100, ifVersion: 1 } }]);
-    expect(store.getState().settings.drafts.general).toEqual({ orgId: A, version: 2, edits: { auditRetentionDays: '120' } });
+    expect(store.getState().settings.drafts.general).toMatchObject({ orgId: A, version: 2, edit: { auditRetentionDays: '120' } });
 
     await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'Northside' });
     expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 120, ifVersion: 2 } });
-    expect(store.getState().settings.drafts.general).toBeUndefined();
+    expect(editsIn(store.getState().settings, 'general', A)).toEqual({});
   });
 
   it("a change someone else made since is refused and shown, never overwritten; Reload drops the org's edits", async () => {
@@ -230,10 +230,30 @@ describe('the settings pages share one version (third re-check of #143)', () => 
     store.getState().editSettings(A, 'screens', 1, { unreachableAfterMinutes: '17' });
     await store.getState().saveSettings(A, 'screens', settings);
     expect(lastCall()).toEqual({ name: 'update_org_settings', input: { unreachableAfterMinutes: 17, ifVersion: 1 } });
-    expect(store.getState().settings.drafts.general).toEqual({ orgId: A, version: 2, edits: { auditRetentionDays: '111' } });
+    expect(store.getState().settings.drafts.general).toMatchObject({ orgId: A, version: 2, edit: { auditRetentionDays: '111' } });
     await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'A' });
     expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 111, ifVersion: 2 } });
     expect(errorOf(store.getState().settings, 'general', A)).toBeUndefined();
+  });
+
+  it('two forms saved at once take turns: the second sends the version the first made, not a conflict (versioned draft)', async () => {
+    const first = held<Reply>();
+    replies.push(first.promise, saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '111' });
+    store.getState().editSettings(A, 'screens', 1, { unreachableAfterMinutes: '17' });
+    const general = store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
+    const screens = store.getState().saveSettings(A, 'screens', settings);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(calls).toHaveLength(1);
+    expect(runningIn(store.getState().settings, { page: 'screens', orgId: A })).toBe('screens');
+    first.resolve(saved(2));
+    await Promise.all([general, screens]);
+    expect(calls.map((c) => c.input)).toEqual([
+      { auditRetentionDays: 111, ifVersion: 1 },
+      { unreachableAfterMinutes: 17, ifVersion: 2 },
+    ]);
+    expect(errorOf(store.getState().settings, 'screens', A)).toBeUndefined();
   });
 
   it("leaves a draft on an older version, or another org's, where it is: those really were changed since", async () => {

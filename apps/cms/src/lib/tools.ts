@@ -74,10 +74,11 @@ export function brandKitVersionOf(output: unknown): number {
   throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
 }
 
-/** The version of the settings in `update_org_settings`' output: what the next save of edits made meanwhile sends as `ifVersion`. */
-export function settingsVersionOf(output: unknown): number {
-  if (isRecord(output) && isRecord(output.settings) && typeof output.settings.version === 'number') return output.settings.version;
-  throw new ToolCallError('error', 'SignForge answered without the settings. Reload the page to see them.');
+/** The version of the row in a `{ [of]: { version } }` output, such as `update_org_settings`' (`settings`): what the next save sends as `ifVersion`. */
+export function versionOf(output: unknown, of: string): number {
+  const row = isRecord(output) ? output[of] : undefined;
+  if (isRecord(row) && typeof row.version === 'number') return row.version;
+  throw new ToolCallError('error', 'SignForge answered without what it saved. Reload the page to see it.');
 }
 
 /** Whether a refusal is an `ifVersion` conflict: someone changed the thing since the page read it. */
