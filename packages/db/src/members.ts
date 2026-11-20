@@ -3,7 +3,7 @@
  * user may act in, before there is a scope. `apps/api` uses it to re-check the active org on
  * every request.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { member, organization, user } from './schema';
 
@@ -14,6 +14,17 @@ export async function findMembership(d1: D1Database, orgId: string, userId: stri
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, userId)))
     .get();
+}
+
+/** The names of those orgs the user is a member of, by id: an org they are not in stays unnamed. */
+export async function memberOrgNames(d1: D1Database, userId: string, orgIds: string[]): Promise<Map<string, string>> {
+  const rows = await drizzle(d1)
+    .select({ id: organization.id, name: organization.name })
+    .from(member)
+    .innerJoin(organization, eq(organization.id, member.organizationId))
+    .where(and(eq(member.userId, userId), inArray(member.organizationId, orgIds)))
+    .all();
+  return new Map(rows.map((r) => [r.id, r.name]));
 }
 
 /** Whether an organization exists. The deploy-secret tree checks the org it is told to write to. */
