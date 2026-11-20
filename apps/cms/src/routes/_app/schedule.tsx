@@ -45,7 +45,9 @@ function aimedAt(e: ScheduleEntryView, screens: ScreenView[], groups: GroupView[
 
 const stateWord = (e: ScheduleEntryView) => (!e.published ? 'Draft, not published' : e.draftChanged ? 'Changes not published' : 'Published');
 
-const timeWord = (iso: string) => new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+/** In the viewer's time zone, as the takeover dialog takes it, on the week view's 24-hour clock. */
+const timeWord = (iso: string) =>
+  new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
 
 function SchedulePage() {
   const orgId = useOrgId();
@@ -73,21 +75,23 @@ function SchedulePage() {
     <EditorFields>
       <div className="space-y-8">
         <PageHeader title={section.label} description={section.description}>
-          {canPublish && (
-            <Button variant="outline" onClick={() => openTakeover()} disabled={!playlists.length}>
-              Take over screens
-            </Button>
-          )}
-          {canManage && (
-            <Button variant="outline" onClick={() => openNewEntry()} disabled={!playlists.length}>
-              Schedule a playlist
-            </Button>
-          )}
-          {canPublish && (
-            <Button onClick={() => void publishSchedule(orgId)} disabled={publishing}>
-              {publishing && <LoaderCircleIcon className="animate-spin" aria-hidden />} Publish
-            </Button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {canPublish && (
+              <Button variant="outline" onClick={() => openTakeover()} disabled={!playlists.length}>
+                Take over screens
+              </Button>
+            )}
+            {canManage && (
+              <Button variant="outline" onClick={() => openNewEntry()} disabled={!playlists.length}>
+                Schedule a playlist
+              </Button>
+            )}
+            {canPublish && (
+              <Button onClick={() => void publishSchedule(orgId)} disabled={publishing}>
+                {publishing && <LoaderCircleIcon className="animate-spin" aria-hidden />} Publish
+              </Button>
+            )}
+          </div>
         </PageHeader>
 
         <p className="text-sm">
@@ -114,8 +118,8 @@ function SchedulePage() {
                     <div className="min-w-0 flex-1">
                       <p className="font-medium">{names.get(e.playlistId) ?? 'A removed playlist'}</p>
                       <p className="text-sm text-muted-foreground">
-                        {aimedAt(e, screens, groups)} · {started ? 'Playing' : `From ${timeWord(e.startsAt ?? '')}`} until {timeWord(e.endsAt ?? '')} ·{' '}
-                        {stateWord(e)}
+                        {aimedAt(e, screens, groups)} · {started ? 'Playing' : `From ${timeWord(e.startsAt ?? '')}`} until {timeWord(e.endsAt ?? '')} your time
+                        · {stateWord(e)}
                       </p>
                     </div>
                     {canPublish && (
@@ -130,7 +134,7 @@ function SchedulePage() {
           </Part>
         )}
 
-        <Part title="Schedule">
+        <Part title="Entries">
           {scheduled.length ? (
             <ul className="divide-y overflow-hidden rounded-xl border bg-card">
               {scheduled.map((e) => (

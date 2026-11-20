@@ -109,12 +109,20 @@ export function WeekView({
                   const continues = above?.playlistId === cell.playlistId && above.takeover === cell.takeover;
                   const current = now >= cell.at.getTime() && now < cell.at.getTime() + 3_600_000;
                   return (
-                    <td key={d.date} aria-current={current ? 'time' : undefined} className={cn('p-0', current && 'outline-2 outline-ring')}>
-                      <div className="flex h-7 items-center gap-1.5 border-l-4 px-1.5" style={{ borderColor: colour.get(cell.playlistId) }}>
-                        <span className={cn('truncate', continues && 'sr-only', cell.takeover && 'font-semibold')}>
+                    <td key={d.date} aria-current={current ? 'time' : undefined} className="p-0">
+                      <div
+                        className={cn('flex h-7 items-center gap-1.5 border-l-4 px-1.5', current && 'ring-2 ring-ring ring-inset')}
+                        // A tint of the playlist's colour, stronger for a takeover, so the week's blocks read at a glance.
+                        style={{
+                          borderColor: colour.get(cell.playlistId),
+                          background: `color-mix(in oklab, ${colour.get(cell.playlistId)} ${cell.takeover ? 30 : 14}%, transparent)`,
+                        }}
+                      >
+                        <span className={cn('min-w-0 truncate', continues && 'sr-only', cell.takeover && 'font-semibold')}>
                           {cell.takeover && 'Takeover: '}
                           {names.get(cell.playlistId) ?? cell.playlistId}
                         </span>
+                        {current && <span className="ml-auto shrink-0 rounded bg-foreground px-1 text-[10px] font-semibold text-background">Now</span>}
                       </div>
                     </td>
                   );

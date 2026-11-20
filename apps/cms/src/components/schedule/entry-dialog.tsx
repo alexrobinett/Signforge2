@@ -69,7 +69,7 @@ export function EntryDialog({ orgId, playlists, screens, groups }: { orgId: stri
                     aria-pressed={on}
                     onClick={() => edit({ days: on ? d.days.filter((x) => x !== day) : [...d.days, day] })}
                     className={cn(
-                      'h-8 min-w-11 rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                      'h-10 min-w-11 rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
                       on ? 'border-primary bg-primary text-primary-foreground' : 'border-border-strong bg-card text-foreground hover:bg-accent',
                     )}
                   >
@@ -83,7 +83,7 @@ export function EntryDialog({ orgId, playlists, screens, groups }: { orgId: stri
           <fieldset className="grid gap-1.5">
             <legend className="mb-1.5 text-sm font-medium">Time of day</legend>
             <p className="text-xs text-muted-foreground">Leave both empty for all day. An end at or before the start runs past midnight.</p>
-            <div className="flex flex-wrap gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <Field label="From" type="time" value={d.from} onChange={(from) => edit({ from })} />
               <Field label="Until" type="time" value={d.to} onChange={(to) => edit({ to })} />
             </div>
@@ -91,7 +91,7 @@ export function EntryDialog({ orgId, playlists, screens, groups }: { orgId: stri
           <fieldset className="grid gap-1.5">
             <legend className="mb-1.5 text-sm font-medium">Dates</legend>
             <p className="text-xs text-muted-foreground">Leave empty to play every week.</p>
-            <div className="flex flex-wrap gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <Field label="First date" type="date" value={d.startDate} onChange={(startDate) => edit({ startDate })} />
               <Field label="Last date" type="date" value={d.endDate} onChange={(endDate) => edit({ endDate })} />
             </div>
@@ -139,7 +139,14 @@ function Field({ label, type, value, onChange }: { label: string; type: 'time' |
   return (
     <div className="grid gap-1 text-xs font-medium">
       <label htmlFor={id}>{label}</label>
-      <Input id={id} type={type} step={type === 'time' ? 60 : undefined} value={value} onChange={(e) => onChange(e.target.value)} className="w-40 font-mono" />
+      <Input
+        id={id}
+        type={type}
+        step={type === 'time' ? 60 : undefined}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full font-mono"
+      />
     </div>
   );
 }

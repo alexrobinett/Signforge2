@@ -93,7 +93,7 @@ test('schedule a playlist for a group, see its week, and publish it to the scree
   await dialog.getByRole('button', { name: 'Save draft' }).click();
   await expect(toastSays('Scheduled, as a draft')).toBeVisible();
 
-  const entries = page.getByRole('region', { name: 'Schedule' }).getByRole('listitem');
+  const entries = page.getByRole('region', { name: 'Entries' }).getByRole('listitem');
   await expect(entries).toHaveCount(1);
   await expect(entries.first()).toContainText('Breakfast');
   await expect(entries.first()).toContainText('Group Front · Always · Draft, not published');
