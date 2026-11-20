@@ -224,6 +224,45 @@ describe('rows a scope writes', () => {
     expect(await s.a.scope.screenGroups.get(row.id)).toBeUndefined();
   });
 
+  // Each repository that upserts or updates from a caller's values, handed a row whose org, key or
+  // id point elsewhere (as a row read back from `get` does): nothing moves out of org B.
+  it('stay in its org when an upsert or update is handed another org, key or id', async () => {
+    const { a } = s;
+    const b = s.b.scope;
+    const ra = s.a.scope;
+
+    const channel = { host: 'hooks.slack.test', urlEncrypted: 'sealed:url', secretEncrypted: null, secretSetAt: null, connectedBy: 'u' };
+    await b.commit((await b.alertChannels.stage.put('slack', channel)).writes);
+    // A full row, retargeted: the conflict update must not move org B's channel to org A's webhook.
+    const retargeted = { ...(await b.alertChannels.get('slack'))!, orgId: a.orgId, kind: 'webhook' as const, host: 'moved.test' };
+    const put = await b.alertChannels.stage.put('slack', retargeted);
+    expect(put.row).toMatchObject({ orgId: 'org-b', kind: 'slack', host: 'moved.test' });
+    await b.commit(put.writes);
+    expect(await b.alertChannels.get('slack')).toMatchObject({ orgId: 'org-b', kind: 'slack', host: 'moved.test', rowVersion: 2 });
+    expect(await ra.alertChannels.get('webhook')).toBeUndefined();
+
+    await b.commit((await b.settings.stage.set({ locale: 'en-GB', orgId: a.orgId, publishRevision: 99 } as never)).writes);
+    expect(await b.settings.get()).toMatchObject({ orgId: 'org-b', locale: 'en-GB', publishRevision: 0 });
+    expect(await ra.settings.get()).toBeUndefined();
+
+    const elsewhere = { orgId: a.orgId, dataSourceId: a.dataSource };
+    await b.dataSources.putSnapshot(s.b.dataSource, { version: 'put', fetchedAt: 2, checkedAt: 2, dataJson: '{}', ...elsewhere } as never);
+    await b.dataSources.savePoll(s.b.dataSource, {
+      source: { nextPollAt: 0, ...elsewhere, id: a.dataSource } as never,
+      snapshot: { version: 'poll', fetchedAt: 3, checkedAt: 3, dataJson: '{}', ...elsewhere } as never,
+    });
+    expect(await ra.dataSources.snapshot(a.dataSource)).toMatchObject({ version: 'v1' });
+    expect(await b.dataSources.snapshot(s.b.dataSource)).toMatchObject({ orgId: 'org-b', version: 'poll' });
+    expect(await b.dataSources.get(s.b.dataSource)).toMatchObject({ orgId: 'org-b' });
+
+    await b.playCounts.add(s.b.screen, [{ hour: a.hour, spotId: a.templateSpot, plays: 1, ms: 1, orgId: a.orgId, screenId: a.screen } as never]);
+    expect((await ra.playCounts.list({ from: a.hour, to: a.hour + 3_600_000 })).map((c) => c.plays)).toEqual([3]);
+
+    await b.connections.saveGrant(s.b.connection, 'sealed:grant', { credentialsSealed: 'sealed:new', expiresAt: null, orgId: a.orgId, id: 'stolen' } as never);
+    expect(await b.connections.get(s.b.connection)).toMatchObject({ orgId: 'org-b', credentialsSealed: 'sealed:new' });
+    expect(await ra.connections.get(s.b.connection)).toBeUndefined();
+  });
+
   it('are staged the same way: stamped with its org, and changing nothing of another org', async () => {
     const { a } = s;
     const b = s.b.scope;
