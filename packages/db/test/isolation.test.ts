@@ -341,6 +341,9 @@ describe('base templates', () => {
       await o.commit([...o.templates.stage.update(base, { name: 'hijacked' }).writes, ...o.templates.versions.stage.delete(s.base.templateVersion).writes]);
       expect(await o.templates.get(s.base.template)).toEqual(base);
       expect(await o.templates.versions.get(s.base.templateVersion)).toBeDefined();
+      // A test's direct writes (testScope) refuse them too.
+      expect(await o.templates.update(s.base.template, { name: 'hijacked' })).toBeUndefined();
+      expect(await o.templates.versions.delete(s.base.templateVersion)).toBe(false);
     }
     expect(await s.b.scope.spots.get(s.b.templateSpot)).toMatchObject({ templateVersionId: s.base.templateVersion });
   });
