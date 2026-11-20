@@ -2,19 +2,25 @@
 // the claim_screen tool, and the screen's next poll collects its credential, once.
 import type { PairPollResponse, PairStartResponse } from '@signforge/contract';
 import { validatePairPollResponse, validatePairStartResponse } from '@signforge/contract';
+import { createExecutionContext } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { Client, email, inOneLimiterWindow, nextIp, testApp } from './client';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { app } from '../src/index';
+import { Client, clockLimits, email, nextIp, testApp } from './client';
 
 const BASE = 'https://api.test/v1/device';
 const CODE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/;
 
-const device = (path: string, body: unknown, ip: string, headers: Record<string, string> = {}) =>
-  exports.default.fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip, ...headers },
-    body: JSON.stringify(body),
-  });
+// The rate limits count on the tests' clock, so the rate limit tests say which minute each call falls in.
+const bindings = clockLimits();
+
+const device = async (path: string, body: unknown, ip: string, headers: Record<string, string> = {}) =>
+  app.request(
+    `${BASE}${path}`,
+    { method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip, ...headers }, body: JSON.stringify(body) },
+    bindings,
+    createExecutionContext(),
+  );
 
 async function start(ip = nextIp()): Promise<PairStartResponse & { ip: string }> {
   const res = await device('/pair/start', {}, ip);
@@ -108,50 +114,64 @@ describe('pairing', () => {
 });
 
 describe('rate limits', () => {
-  beforeEach(inOneLimiterWindow);
+  // Each test starts on a minute and crosses into the next: the last moment of a window, then the first of the next.
+  const MINUTE = Date.parse('2026-11-20T12:00:00Z');
+  beforeEach(() => vi.setSystemTime(MINUTE));
+  afterEach(() => vi.useRealTimers());
 
-  it('lets one member try 10 codes a minute, then refuses every claim, the right code included', async () => {
-    const guesser = new Client(t);
+  it('lets one member try 10 codes a minute, then refuses every claim, the right code included, until the next minute', async () => {
+    const guesser = new Client(t, nextIp(), bindings);
     await guesser.signIn(email('pair-guesser'));
     await guesser.setActive((await guesser.createOrg('Guesser')).id);
     const p = await start();
     const wrong = p.code.startsWith('A') ? 'BBBBBB' : 'AAAAAA';
     for (let i = 0; i < 10; i++) expect((await guesser.tool('claim_screen', claimInput(wrong))).status, `guess ${i + 1}`).toBe(404);
+    vi.setSystemTime(MINUTE + 59_999);
     const refused = await guesser.tool('claim_screen', claimInput(p.code));
     expect(refused.status).toBe(429);
     expect(await refused.json()).toMatchObject({ error: 'rate_limited' });
     // The code is still open for its owner, who has a limit of their own.
     expect(await poll(p)).toEqual({ status: 'waiting' });
+    vi.setSystemTime(MINUTE + 60_000);
+    expect((await guesser.tool('claim_screen', claimInput(p.code))).status).toBe(200);
   });
 
   it('counts guesses per address too, across accounts', async () => {
     const ip = nextIp();
-    const guessers = [new Client(t, ip), new Client(t, ip)];
+    const guessers = [new Client(t, ip, bindings), new Client(t, ip, bindings)];
     for (const g of guessers) {
       await g.signIn(email('pair-ip'));
       await g.setActive((await g.createOrg('Same address')).id);
     }
-    const statuses: number[] = [];
-    for (let i = 0; i < 12; i++) statuses.push((await guessers[i % 2]!.tool('claim_screen', claimInput('CCCCCC'))).status);
-    expect(statuses.slice(0, 10)).toEqual(Array(10).fill(404));
-    expect(statuses.slice(10)).toEqual([429, 429]);
+    const guess = async (i: number) => (await guessers[i % 2]!.tool('claim_screen', claimInput('CCCCCC'))).status;
+    for (let i = 0; i < 10; i++) expect(await guess(i), `guess ${i + 1}`).toBe(404);
+    vi.setSystemTime(MINUTE + 59_999);
+    expect([await guess(10), await guess(11)]).toEqual([429, 429]);
+    vi.setSystemTime(MINUTE + 60_000);
+    expect([await guess(12), await guess(13)]).toEqual([404, 404]);
   });
 
   it('lets one address start 10 codes a minute', async () => {
     const ip = nextIp();
     for (let i = 0; i < 10; i++) expect((await device('/pair/start', {}, ip)).status, `start ${i + 1}`).toBe(200);
+    vi.setSystemTime(MINUTE + 59_999);
     const refused = await device('/pair/start', {}, ip);
     expect(refused.status).toBe(429);
     expect(refused.headers.get('retry-after')).toBe('60');
     // Another address is unaffected.
     expect((await device('/pair/start', {}, nextIp())).status).toBe(200);
+    vi.setSystemTime(MINUTE + 60_000);
+    expect((await device('/pair/start', {}, ip)).status).toBe(200);
   });
 
   it('lets one address poll 600 times a minute', async () => {
     const p = await start();
     const polls = await Promise.all(Array.from({ length: 600 }, () => device('/pair/poll', { pollToken: p.pollToken }, p.ip)));
     expect(polls.map((r) => r.status).filter((s) => s !== 200)).toEqual([]);
+    vi.setSystemTime(MINUTE + 59_999);
     expect((await device('/pair/poll', { pollToken: p.pollToken }, p.ip)).status).toBe(429);
+    vi.setSystemTime(MINUTE + 60_000);
+    expect((await device('/pair/poll', { pollToken: p.pollToken }, p.ip)).status).toBe(200);
   });
 });
 

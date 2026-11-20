@@ -28,7 +28,7 @@ pnpm --filter @signforge/player exec playwright install chromium
 - `global-setup.ts` also builds the player with `CMS_ORIGIN=http://cms.test` (provided as `cmsOrigin`), so a page on that made-up host may drive the preview. Playwright's routing answers `cms.test` and `evil.test`; the browser runs with Chromium's local network access checks off so those pages can frame the player on 127.0.0.1.
 - `harness.ts` gives each test file one browser (`useHarness({ siteIsolation: true })` runs it with `--site-per-process`, as Chromium on the Pi isolates sites by default and the headless shell does not; `containment.test.ts` does) and each test a fresh context (empty Cache Storage, no service worker until the player registers one) and fixture server. `openPlayer` opens the player with `?poll=1` (with `clockAt`, on Playwright's clock from that instant) (pass `query` as a function of the server to build options from its URLs); `until(predicate)` waits on `window.__sf`; `onScreen()` reads the label, the listed item titles and the play flag of the template drawn on top. `playerServer()` starts a fixture server alone, for a page to frame the player. Templates sit inside a wrapper frame (see Template containment in `docs/architecture.md`), so `page.frames()` lists two frames per template.
 
-Testing-only query options the tests use: `?poll=<s>`, `?stall=<s>` (the download stall timeout, 30 s by default), `?spots=` and `?transition=` (see `src/main.ts`).
+Testing-only query options the tests use: `?poll=<s>`, `?stall=<s>` (the download stall timeout, 30 s by default), `?spots=` and `?transition=` (`cut`, `crossfade`, `fade`, `fade<ms>` or `<ms>`; see `src/main.ts`).
 
 ## Tests
 

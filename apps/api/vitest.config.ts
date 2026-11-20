@@ -4,6 +4,7 @@ import { buildTemplate } from '@signforge/cli/template';
 import { FONTS, fontFilePath } from '@signforge/compiler/fonts';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
+import { unstable_readConfig } from 'wrangler';
 
 // Tests run inside workerd with the bindings of wrangler.jsonc's `dev` environment, backed by local storage.
 // ADMIN_TOKEN is a fixed test value here, so a local .dev.vars never changes what the tests see.
@@ -60,6 +61,13 @@ async function templateCheck(request: Request): Promise<Response> {
   });
 }
 
+// RATE_LIMITS: each rate limit binding's limit and period in the `dev` environment, by name, for
+// test/client.ts's `clockLimits`, which counts them on the tests' clock.
+function rateLimits() {
+  const { ratelimits } = unstable_readConfig({ config: new URL('wrangler.jsonc', import.meta.url).pathname, env: 'dev' }, { hideWarnings: true });
+  return JSON.stringify(Object.fromEntries(ratelimits.map((r: { name: string; simple: { limit: number; period: number } }) => [r.name, r.simple])));
+}
+
 // FONT_FILES: the catalogue's WOFF2 files from fonts/, by repo path, base64, for `sf fonts push`.
 function fontFiles() {
   const root = new URL('../../', import.meta.url).pathname;
@@ -81,6 +89,7 @@ export default defineConfig({
           TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname),
           TEMPLATE_BUILDS: await templateBuilds(),
           FONT_FILES: fontFiles(),
+          RATE_LIMITS: rateLimits(),
         },
         serviceBindings: { TEMPLATE_CHECK: templateCheck },
       },
