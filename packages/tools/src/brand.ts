@@ -6,12 +6,13 @@
  */
 import { brandWarnings, chooseBrandKit, FONTS, fontById, HEX_COLOR, onColor } from '@signforge/compiler';
 import { unverified } from '@signforge/compiler/draft';
-import { BRAND_SHAPES, type BrandColors } from '@signforge/contract';
+import type { BrandColors } from '@signforge/contract';
 import type { BrandAssignment, BrandKitRow, OrgScope } from '@signforge/db';
 import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name, version } from './fields';
-import { nextOutput, page, pageInput } from './paging';
+import { id, idempotencyKey, ifVersion, name } from './fields';
+import { page, pageInput } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
+import { brandShape, outputs, type BrandKitView } from './outputs';
 
 // ------------------------------------------------------------------ colours
 
@@ -67,53 +68,7 @@ const fontId = (role: string) =>
     .string()
     .refine((v) => fontById(v) !== undefined, 'not a font in the catalogue; see list_fonts')
     .describe(`The ${role} font's catalogue id, such as base/inter. See list_fonts`);
-const shape = z.enum(BRAND_SHAPES).describe('Corner radius scale');
-
 // ------------------------------------------------------------------ views
-
-const fontOutput = z.object({
-  id: z.string(),
-  family: z.string(),
-  roles: z.array(z.enum(['display', 'body'])).describe('What it suits: headlines, running text, or both'),
-  weights: z.array(z.number()),
-  licence: z.object({ spdx: z.literal('OFL-1.1'), copyright: z.string(), source: z.string() }),
-  available: z.boolean().describe('False until its files are added: a kit may choose it, and screens draw with the template font until then'),
-});
-
-const fontRef = z.object({ id: z.string(), family: z.string() }).nullable();
-
-const brandKitOutput = z.object({
-  id: z.string(),
-  name: z.string(),
-  colors: z.object({
-    primary: z.string(),
-    onPrimary: z.string(),
-    accent: z.string(),
-    onAccent: z.string(),
-    background: z.string(),
-    surface: z.string(),
-    text: z.string(),
-    muted: z.string(),
-  }),
-  derived: z.array(z.enum(['onPrimary', 'onAccent'])).describe('On-colours derived for contrast rather than set by hand'),
-  shape,
-  displayFont: fontRef,
-  bodyFont: fontRef,
-  logo: z.object({ onDarkAssetId: z.string(), onLightAssetId: z.string().nullable() }).nullable(),
-  isDefault: z.boolean(),
-  groupIds: z.array(z.string()).describe('Groups that chose this kit'),
-  screenIds: z.array(z.string()).describe('Screens that chose this kit themselves'),
-  reach: z.array(z.string()).describe('Screens that get this kit at the next publish: where an edit to it will show'),
-  conflicts: z
-    .array(z.object({ screenId: z.string(), problem: z.string() }))
-    .describe('Screens whose groups choose this kit and another, with no choice of their own: they cannot publish until one is chosen'),
-  warnings: z.array(z.string()).describe('Colour pairs below 4.5:1 contrast. Warnings only'),
-  version,
-  createdAt: z.number(),
-  updatedAt: z.number(),
-});
-export type BrandKitView = z.infer<typeof brandKitOutput>;
-const kitResult = z.object({ brandKit: brandKitOutput });
 
 /** A choice staged in this call but not committed yet, so a view can show the result. */
 interface Pending {
@@ -206,7 +161,7 @@ const listFonts = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ fonts: z.array(fontOutput), next: nextOutput }),
+  output: outputs.list_fonts,
   example: {},
   handler: async ({ input }) => {
     const { rows, next } = page(FONTS, (f) => [f.id], input);
@@ -232,7 +187,7 @@ const listBrandKits = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ brandKits: z.array(brandKitOutput), next: nextOutput }),
+  output: outputs.list_brand_kits,
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = page(await org.brandKits.list(), (k) => [k.id], input);
@@ -249,7 +204,7 @@ const getBrandKit = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ brandKitId: id('brand kit') }),
-  output: kitResult,
+  output: outputs.get_brand_kit,
   example: { brandKitId: 'bk_example' },
   handler: async ({ org, input }) => ({ brandKit: kitView(await requireKit(org, input.brandKitId), await brandContext(org)) }),
 });
@@ -266,7 +221,7 @@ const createBrandKit = defineTool({
     .object({
       name: name('brand kit'),
       colors: colorsInput,
-      shape: shape.default('soft'),
+      shape: brandShape.default('soft'),
       displayFontId: fontId('display').optional(),
       bodyFontId: fontId('body').optional(),
       logoOnDarkAssetId: logoFields.logoOnDarkAssetId.optional(),
@@ -275,7 +230,7 @@ const createBrandKit = defineTool({
       idempotencyKey,
     })
     .refine((v) => !v.logoOnLightAssetId || v.logoOnDarkAssetId, { message: 'a light logo needs a dark one', path: ['logoOnLightAssetId'] }),
-  output: kitResult,
+  output: outputs.create_brand_kit,
   example: {
     name: 'House style',
     colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
@@ -316,14 +271,14 @@ const updateBrandKit = defineTool({
     brandKitId: id('brand kit'),
     name: name('brand kit').optional(),
     colors: colorsPatch.optional(),
-    shape: shape.optional(),
+    shape: brandShape.optional(),
     displayFontId: fontId('display').nullable().optional(),
     bodyFontId: fontId('body').nullable().optional(),
     logoOnDarkAssetId: logoFields.logoOnDarkAssetId.nullable().optional(),
     logoOnLightAssetId: logoFields.logoOnLightAssetId.nullable().optional(),
     ifVersion,
   }),
-  output: kitResult,
+  output: outputs.update_brand_kit,
   example: { brandKitId: 'bk_example', colors: { accent: '#e11d48' }, shape: 'round' },
   target: (input) => ({ kind: 'brand_kit', id: input.brandKitId }),
   handler: async ({ org, input, write }) => {
@@ -367,7 +322,7 @@ const setDefaultBrandKit = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ brandKitId: id('brand kit') }),
-  output: kitResult,
+  output: outputs.set_default_brand_kit,
   example: { brandKitId: 'bk_example' },
   target: (input) => ({ kind: 'brand_kit', id: input.brandKitId }),
   handler: async ({ org, input, write }) => {
@@ -391,7 +346,7 @@ const assignBrandKit = defineTool({
       groupId: id('group').optional(),
     })
     .refine((v) => (v.screenId === undefined) !== (v.groupId === undefined), 'give exactly one of screenId and groupId'),
-  output: z.object({ brandKit: brandKitOutput.nullable() }),
+  output: outputs.assign_brand_kit,
   example: { brandKitId: 'bk_example', screenId: 'scr_example' },
   target: (input) => (input.screenId ? { kind: 'screen', id: input.screenId } : { kind: 'group', id: input.groupId! }),
   handler: async ({ org, input, write }) => {

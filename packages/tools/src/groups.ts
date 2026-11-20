@@ -1,21 +1,11 @@
 /** Screen group tools. A group is a named set of screens that schedules can target. */
 import type { OrgScope, ScreenGroup } from '@signforge/db';
 import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name, version } from './fields';
-import { nextOutput, page, pageInput } from './paging';
+import { id, idempotencyKey, ifVersion, name } from './fields';
+import { page, pageInput } from './paging';
 import { ended } from './schedule';
 import { defineTool, notFound, ToolError } from './tool';
-
-const groupOutput = z.object({
-  id: z.string(),
-  name: z.string(),
-  screenIds: z.array(z.string()).describe('The screens in the group, ordered by id'),
-  version: version.describe('Moves on when the name or the screens change; pass it as ifVersion to update only what you read'),
-  createdAt: z.number(),
-  updatedAt: z.number(),
-});
-export type GroupView = z.infer<typeof groupOutput>;
-const groupResult = z.object({ group: groupOutput });
+import { outputs, type GroupView } from './outputs';
 
 const viewOf = (g: ScreenGroup, screenIds: string[]): GroupView => ({
   id: g.id,
@@ -44,7 +34,7 @@ const listGroups = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ groups: z.array(groupOutput), next: nextOutput }),
+  output: outputs.list_groups,
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = page(await org.screenGroups.list(), (g) => [g.id], input);
@@ -61,7 +51,7 @@ const createGroup = defineTool({
   mutates: true,
   idempotent: true,
   input: z.object({ name: name('group'), screenIds: z.array(id('screen')).max(1000).optional().describe('Screens to put in the group'), idempotencyKey }),
-  output: groupResult,
+  output: outputs.create_group,
   example: { name: 'Front of house', screenIds: ['scr_example'] },
   target: (_input, output) => ({ kind: 'group', id: output.group.id }),
   handler: async ({ org, input, write }) => {
@@ -80,7 +70,7 @@ const renameGroup = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ groupId: id('group'), name: name('group'), ifVersion }),
-  output: groupResult,
+  output: outputs.rename_group,
   example: { groupId: 'grp_example', name: 'Drive-through' },
   target,
   handler: async ({ org, input, write }) => {
@@ -97,7 +87,7 @@ const deleteGroup = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ groupId: id('group') }),
-  output: z.object({ deleted: z.string().describe("The deleted group's id") }),
+  output: outputs.delete_group,
   example: { groupId: 'grp_example' },
   target,
   handler: async ({ org, input, write }) => {
@@ -121,7 +111,7 @@ const setGroupMembers = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ groupId: id('group'), screenIds: z.array(id('screen')).max(1000), ifVersion }),
-  output: groupResult,
+  output: outputs.set_group_members,
   example: { groupId: 'grp_example', screenIds: ['scr_example'] },
   target,
   handler: async ({ org, input, write }) => {
@@ -141,7 +131,7 @@ const addGroupMembers = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ groupId: id('group'), screenIds: memberIds.describe('Screens to add') }),
-  output: groupResult,
+  output: outputs.add_group_members,
   example: { groupId: 'grp_example', screenIds: ['scr_example'] },
   target,
   handler: async ({ org, input, write }) => {
@@ -160,7 +150,7 @@ const removeGroupMembers = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ groupId: id('group'), screenIds: memberIds.describe('Screens to remove') }),
-  output: groupResult,
+  output: outputs.remove_group_members,
   example: { groupId: 'grp_example', screenIds: ['scr_example'] },
   target,
   handler: async ({ org, input, write }) => {

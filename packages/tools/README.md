@@ -264,8 +264,8 @@ The API's five-minute check marks a rollout finished once every screen it switch
    - Give it the narrowest scope and role.
    - Set `mutates: true` if it changes anything.
    - Give a `target` for the audit log.
-   - Give an `output` schema: what it returns, as zod. The handler's return type is checked against it at compile time, and every output against it in tests.
-   - A `list_*` tool pages: spread `pageInput` (`src/paging.ts`) into its input, add `next: nextOutput` to its output, and cut the rows with `page()`.
+   - Give an `output` schema: what it returns, as zod, written in `src/outputs.ts` under the tool's name and given as `output: outputs.<name>`. The handler's return type is checked against it at compile time, and every output against it in tests. `src/outputs.ts` holds only zod and the contract, as the CMS types its calls from it in the browser (`@signforge/tools/outputs`, types only); a schema the input shares goes there too.
+   - A `list_*` tool pages: spread `pageInput` (`src/paging.ts`) into its input, add `next: nextOutput` (`src/outputs.ts`) to its output, and cut the rows with `page()`.
    - Give an `example`.
    - Name in `needs` the tool services its handler uses (see Tool services), and read them from `ctx.services`. Do not check for them yourself: the dispatcher refuses a call without one.
 2. Name id fields after their kind, such as `screenId` or `playlistIds`.
@@ -283,7 +283,7 @@ The API's five-minute check marks a rollout finished once every screen it switch
 ## Tests
 
 - `test/isolation.test.ts`: generated from the registry, as above.
-- `test/conventions.test.ts`: fails on a tool without an output schema, a `list_*` tool without paging, or an update tool without `ifVersion` in its input and `version` in its output, and checks the output check and paging itself.
+- `test/conventions.test.ts`: fails on a tool without an output schema or whose output is not its entry in `src/outputs.ts`, a `list_*` tool without paging, or an update tool without `ifVersion` in its input and `version` in its output, and checks the output check and paging itself.
 - `test/versions.test.ts`: a stale `ifVersion` is refused and writes nothing, even when the change lands between the read and the commit; group members added and removed without dropping anyone's.
 - `test/write-guard.test.ts`: generated from the registry. It runs every tool that changes data on a D1 that records any write sent outside `batch()`, and fails if there is one. A tool whose example refuses before writing is set up to get further in `PREPARE`.
 - `test/screen-status.test.ts`: `list_screen_status` gives the states `list_screens` does, reads no manifest, and reads one page's rows from D1 (counted from D1's own `rows_read`) however many screens the org has.

@@ -21,20 +21,18 @@
 import { scheduleEntryProblems, type ScheduleEntry } from '@signforge/contract';
 import { draftChanged, published, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
 import { z } from 'zod';
-import { draftOutput, id, idempotencyKey, ifVersion, version } from './fields';
-import { nextOutput, page, pageInput } from './paging';
+import { id, idempotencyKey, ifVersion } from './fields';
+import { page, pageInput } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
+import { type entryOutput, type fieldsOutput, outputs, scheduleTarget } from './outputs';
 
 /** The longest takeover: past a day it is a schedule, and a screen that misses its end would run it too long. */
 const TAKEOVER_MAX_MS = 24 * 3_600_000;
 /** A takeover's priority: above every schedule entry's (at most 99). */
 const TAKEOVER_PRIORITY = 100;
 
-const target = z
-  .enum(['org', 'group', 'screen'])
-  .describe('Whom it is aimed at: org (every screen), group (groupId), screen (screenId). Of equal priority, the more specific wins');
 const aim = {
-  target,
+  target: scheduleTarget,
   groupId: id('group').optional().describe('For a group entry: the group'),
   screenId: id('screen').optional().describe('For a screen entry: the screen'),
 };
@@ -56,31 +54,7 @@ const when = {
 };
 const instant = (what: string) => z.string().describe(`${what}, an ISO 8601 time`);
 
-const fieldsOutput = z.object({
-  playlistId: z.string(),
-  target,
-  groupId: z.string().nullable(),
-  screenId: z.string().nullable(),
-  priority: z.number().int(),
-  startDate: z.string().nullable(),
-  endDate: z.string().nullable(),
-  days: z.array(z.number().int()).nullable(),
-  from: z.string().nullable(),
-  to: z.string().nullable(),
-  startsAt: z.string().nullable().describe("A takeover's start, ISO 8601"),
-  endsAt: z.string().nullable().describe("A takeover's end, ISO 8601"),
-  takeover: z.boolean().describe('Whether it is a takeover (start_takeover)'),
-});
-const entryOutput = z.object({
-  id: z.string(),
-  ...fieldsOutput.shape,
-  deleted: z.boolean().describe('Deleted, waiting for a publish to take it off screens: they keep the published version until then'),
-  live: fieldsOutput.nullable().describe('The published version, what screens play; null if it was never published'),
-  version: version.describe('Moves on with every edit of the draft; pass it as ifVersion to update only what you read'),
-  ...draftOutput,
-});
 type EntryView = z.infer<typeof entryOutput>;
-const entryResult = z.object({ entry: entryOutput });
 
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
 
@@ -204,7 +178,7 @@ const listEntries = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ entries: z.array(entryOutput), next: nextOutput }),
+  output: outputs.list_schedule_entries,
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = page(await org.scheduleEntries.list(), (e) => [e.id], input);
@@ -221,7 +195,7 @@ const createEntry = defineTool({
   mutates: true,
   idempotent: true,
   input: z.object({ playlistId: id('playlist'), ...aim, priority: priority.optional(), ...when, idempotencyKey }).refine(aimed, AIMED),
-  output: entryResult,
+  output: outputs.create_schedule_entry,
   example: { playlistId: 'pls_example', target: 'group', groupId: 'grp_example', days: [1, 2, 3, 4, 5], from: '06:00', to: '10:30' },
   target: (_input, output) => ({ kind: 'schedule_entry', id: output.entry.id }),
   handler: async ({ org, input, write }) => {
@@ -261,7 +235,7 @@ const startTakeover = defineTool({
       idempotencyKey,
     })
     .refine(aimed, AIMED),
-  output: entryResult,
+  output: outputs.start_takeover,
   example: { playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
   target: (_input, output) => ({ kind: 'schedule_entry', id: output.entry.id }),
   handler: async ({ org, input, write }) => {
@@ -299,7 +273,7 @@ const updateEntry = defineTool({
     .object({
       scheduleEntryId: id('schedule entry'),
       playlistId: id('playlist').optional(),
-      target: target.optional(),
+      target: scheduleTarget.optional(),
       groupId: aim.groupId,
       screenId: aim.screenId,
       priority: priority.optional(),
@@ -309,7 +283,7 @@ const updateEntry = defineTool({
       ifVersion,
     })
     .refine(aimed, AIMED),
-  output: entryResult,
+  output: outputs.update_schedule_entry,
   example: { scheduleEntryId: 'sch_example', playlistId: 'pls_example', ifVersion: 1 },
   target: entryTarget,
   handler: async ({ org, input, write }) => {
@@ -355,10 +329,7 @@ const deleteEntry = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ scheduleEntryId: id('schedule entry') }),
-  output: z.object({
-    deleted: z.string().describe("The deleted entry's id"),
-    version: version.nullable().describe("The deletion's version, to pin in a publish; null when it was never published and went at once"),
-  }),
+  output: outputs.delete_schedule_entry,
   example: { scheduleEntryId: 'sch_example' },
   target: entryTarget,
   handler: async ({ org, input, write, scopes }) => {
