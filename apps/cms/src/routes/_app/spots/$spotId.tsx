@@ -57,8 +57,8 @@ function SpotEditor() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
-  // This route's code arrives after the page's: until it has hydrated, its fields are the server's
-  // HTML, and a choice made there is lost when React takes them over (a select set back to its value).
+  // This subtree hydrates after the page: until it has, its fields are the server's HTML, and a
+  // choice made there is lost when React takes them over (a select set back to its value).
   const hydrated = useHydrated();
   const spot: SpotView | null = useSuspenseQuery(spotQuery(orgId, spotId)).data;
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;

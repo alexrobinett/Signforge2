@@ -50,7 +50,9 @@ async function readLink(on: Page) {
  */
 async function stageBetweenFades(on: Page): Promise<boolean> {
   let seen = false;
+  // The stage's frames only: the CMS's own page may animate (a spinner) without end.
   for (const frame of on.frames()) {
+    if (frame === on.mainFrame()) continue;
     const state = await frame
       .evaluate(() =>
         document.getAnimations().map((a) => ({
@@ -185,7 +187,8 @@ test("the editor's fields are disabled in the server's HTML: a choice made befor
   const fieldset = html.match(/<form[^>]*aria-label="Spot fields"[^>]*>\s*<fieldset([^>]*)>/)?.[1];
   expect(fieldset).toBeDefined();
   expect(fieldset).toMatch(/\bdisabled=""/);
-  // Once it has hydrated, they are enabled.
+  // Loaded from the server, they are enabled once the editor has hydrated.
+  await page.reload();
   await expect(page.getByRole('form', { name: 'Spot fields' }).getByLabel('Name', { exact: true }).first()).toBeEnabled();
 });
 
