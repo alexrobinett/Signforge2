@@ -17,7 +17,7 @@ const h = useHarness();
 const CMS = inject('cmsOrigin');
 const EVIL = 'http://evil.test';
 
-type Message = { sfPreview: number; type: string; spot?: string; message?: string };
+type Message = { sfPreview: number; type: string; manifest?: string; spot?: string; message?: string };
 
 interface Preview {
   page: Page;
@@ -237,6 +237,30 @@ describe('preview content source', () => {
     await expect.poll(p.onScreen, { timeout: 3000 }).toEqual({ label: 'After', items: '', marked: true });
     await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'playing', manifest: next.manifest.id, spot: 'draft' });
     expect((await p.state()).played).toBe(1);
+  });
+
+  it('plays no frame of an older draft after a new one arrives, though the next spot was prepared from it (#123)', async () => {
+    // Past the 3 s lead, so the next play of the spot is prepared from A while A's first play is on screen.
+    const spot = (label: string) => h.content([{ id: 'draft', durationMs: 4000, label }]);
+    const p = await openPreview(CMS);
+    await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'listening' });
+    const a = spot('A');
+    await p.post(a);
+    await p.until((s) => s.prepares.length >= 2);
+
+    const b = spot('B');
+    await p.post(b);
+    // Ordered by the player's own answers, not by time: B reaches the spot on screen, then the stage
+    // crosses a play boundary. Every play from B's answer on is B's.
+    const sinceB = async () => {
+      const plays = (await p.messages()).filter((m) => m.type === 'playing').map((m) => m.manifest);
+      const i = plays.indexOf(b.manifest.id);
+      return i < 0 ? [] : plays.slice(i);
+    };
+    await expect.poll(async () => (await sinceB()).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    const since = await sinceB();
+    expect(since).toEqual(since.map(() => b.manifest.id));
+    await expect.poll(p.onScreen).toMatchObject({ label: 'B' });
   });
 
   it('titles the frames with the spot name a draft renames it to (#69)', async () => {

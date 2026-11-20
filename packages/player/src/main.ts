@@ -503,6 +503,14 @@ async function playbackLoop(): Promise<never> {
     // Hold the current spot for its full length; a crossfade overlaps its last moments.
     if (currentSpot) await hold(startedAt + currentSpot.durationMs - fadeMs - performance.now());
     if (!state.displayOn) return;
+    // Preview: a draft posted while this spot loaded or waited has made it old. The spot on screen
+    // took the draft at once (adoptDraft); this place is loaded again from it, so the stage never
+    // shows an older draft (#123). A screen plays it: a new manifest shows from the next spot.
+    if (SOURCE === 'preview' && manifest !== m) {
+      slot.clear();
+      sequencer.again();
+      return;
+    }
     status('');
     startedAt = performance.now();
     spotStartedAt = startedAt;
