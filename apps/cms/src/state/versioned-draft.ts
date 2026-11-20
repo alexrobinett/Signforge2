@@ -12,15 +12,25 @@
  * merged or overwritten. A draft is saved only in its own org, and an answer that comes after the
  * tab has left that org changes nothing there. A create's idempotency key is made with the draft
  * and kept for every retry until a save is answered, so a retry after a lost answer makes no
- * second one. Autosave is a debounce on top (`autosave`).
+ * second one. A save belongs to the draft it was asked for: a draft dropped and started again at
+ * the same key (a dialog closed and opened) is another, with saves and outcomes of its own.
+ * Autosave is a debounce on top (`autosave`).
+ *
+ * A saved draft stands for the record at the version it saved. While the record the page holds is
+ * still at that version, the page shows the draft and the next edit builds on it; once the record
+ * has moved on (someone else saved, and the page read it), the page shows the record and the next
+ * edit starts from it. `shown` and `edit` decide this the same way, so what a page shows is what
+ * its next save sends.
  */
-import { isGone, isStale, toolMessage } from '~/lib/tools';
+import { isStale, toolMessage } from '~/lib/tools';
 
 /** How the draft's save is going: `invalid` when the server would refuse it as it is, so it is not sent. */
 type DraftStatus = 'unsaved' | 'saving' | 'saved' | 'invalid';
 
 /** One draft, as the store keeps it. */
 export interface Draft<E> {
+  /** Which draft this is: one dropped and started again at the same key is another. */
+  id: string;
   /** The org it was made in: it is saved there only. */
   orgId: string;
   /** The record it edits, which several drafts can share (two settings forms); null for a create not yet answered. */
@@ -38,7 +48,7 @@ export interface Draft<E> {
   error: string | null;
   /** Someone else changed the record since: the edit stays, nothing more is saved, and Reload is offered. */
   stale: boolean;
-  /** The record was deleted, by someone else or in another tab: nothing more is saved. */
+  /** The record itself was deleted (the store's `gone` says when): nothing more is saved. */
   gone: boolean;
 }
 
@@ -89,29 +99,38 @@ export interface DraftsOptions<E, C> {
   state: { read: () => Drafts<E>; write: (change: (drafts: Drafts<E>) => Drafts<E>) => void };
   /** Sends one save. A refusal is thrown, as `callTool` throws it. */
   save: (call: SaveCall<E, C>) => Promise<Saved>;
-  /** Makes an idempotency key. */
+  /** Makes an id: a draft's own, and its idempotency key. */
   makeId: () => string;
   /** The org the tab shows now, or undefined outside the app shell. */
   currentOrg: () => string | undefined;
   clock: Clock;
   /** Whether the server would refuse the draft as it is: then it is marked invalid, not sent. */
   invalid?: (draft: Draft<E>, key: string) => boolean;
+  /**
+   * Whether a refusal says the record itself was deleted, for a page that says so: then nothing
+   * more is saved. Without it, every refusal is only shown. A create is never gone.
+   */
+  gone?: (err: unknown, key: string) => boolean;
 }
 
 /** The drafts of one store. */
 export interface VersionedDrafts<E, C> {
   /** Starts the draft at `key` with `start`, or replaces it: a dialog or editor opened afresh. */
   open: (key: string, start: DraftStart<E>) => void;
-  /** Changes the draft at `key`, starting it from `start` when there is none in that org, or the last one is saved. */
+  /**
+   * Changes the draft at `key`. With none in that org, or a saved one whose record has moved on
+   * from the version it saved (`start.version` is the version the page holds), it starts from `start`.
+   */
   edit: (key: string, start: DraftStart<E>, change: (edit: E) => E) => void;
   /** Changes the draft at `key`, if there is one. */
   update: (key: string, change: (edit: E) => E) => void;
   /**
    * Saves the draft at `key` now, with what the page knows (`context`). Resolves once the save in
-   * flight, if any, and the one asked for here are done; at once when there is nothing to save.
+   * flight, if any, and the one asked for here are done, with that draft as they left it, even if
+   * it has been dropped since; at once when there is nothing to save. Undefined with no draft.
    */
-  save: (key: string, context: C) => Promise<void>;
-  /** Drops the draft at `key`: Reload after a conflict, Discard, a closed dialog. A save on its way finishes and changes nothing. */
+  save: (key: string, context: C) => Promise<Draft<E> | undefined>;
+  /** Drops the draft at `key`: Reload after a conflict, Discard, a closed dialog. A save on its way finishes and changes nothing here. */
   drop: (key: string) => void;
   /** Drops every draft, as after an org switch. */
   forget: () => void;
@@ -120,27 +139,39 @@ export interface VersionedDrafts<E, C> {
 /** The conflict's words, the same on every page. */
 const STALE = 'This changed since you opened it.';
 
-/** A save running for one draft, and the follow-up asked for meanwhile, with the context it was asked with. */
-interface Flight<C> {
+/** Whether a saved draft still stands for the record the page holds at `version`. */
+const current = <E>(d: Draft<E>, version: number | null) => d.status !== 'saved' || d.version === version;
+
+/**
+ * The edit a page shows for the record it holds at `version`: the draft's, unless there is none or
+ * it is saved and the record has moved on since. Null means the page shows the record.
+ */
+export const shown = <E>(draft: Draft<E> | undefined, version: number | null): E | null => (draft && current(draft, version) ? draft.edit : null);
+
+/** The saves of one draft: the one running, the follow-up asked for meanwhile, and the draft as they leave it. */
+interface Flight<E, C> {
   next: { context: C } | null;
-  done: Promise<void>;
+  done: Promise<Draft<E>>;
+  result: Draft<E>;
 }
 
 export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>): VersionedDrafts<E, C> {
   const { state, clock } = options;
-  /** By org and key: a draft key can be used again in another org (a settings form). */
-  const flights = new Map<string, Flight<C>>();
+  /** By draft id. */
+  const flights = new Map<string, Flight<E, C>>();
   /** The last save queued on each record that is still to finish, by org and record: the next one waits for it. */
-  const lanes = new Map<string, Promise<void>>();
+  const lanes = new Map<string, Promise<unknown>>();
 
-  const change = (key: string, orgId: string, f: (d: Draft<E>) => Draft<E>) =>
+  /** Changes the draft `id` at `key`, if it is still there. */
+  const change = (key: string, id: string, f: (d: Draft<E>) => Draft<E>) =>
     state.write((drafts) => {
       const d = drafts[key];
-      return d?.orgId === orgId ? { ...drafts, [key]: f(d) } : drafts;
+      return d?.id === id ? { ...drafts, [key]: f(d) } : drafts;
     });
 
   const fresh = (start: DraftStart<E>): Draft<E> => ({
     ...start,
+    id: options.makeId(),
     idempotencyKey: options.makeId(),
     status: 'unsaved',
     pending: false,
@@ -162,37 +193,37 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
     );
 
   /** Sends the draft as it stands now: the first save, or the follow-up with the latest edit. */
-  async function attempt(key: string, orgId: string, context: C, flight: Flight<C>) {
-    const d = state.read()[key];
-    if (d?.orgId !== orgId || d.status === 'saved') return;
-    // The answer is this draft's: one dropped and started again meanwhile (a dialog reopened) has a key of its own.
-    const mine = (f: (x: Draft<E>) => Draft<E>) => change(key, orgId, (x) => (x.idempotencyKey === d.idempotencyKey ? f(x) : x));
+  async function attempt(key: string, flight: Flight<E, C>, context: C) {
+    const { id, orgId } = flight.result;
+    const d = state.read()[key]?.id === id ? state.read()[key] : undefined;
+    // Dropped (a dialog closed), or saved by the save before: nothing more to send.
+    if (!d || d.status === 'saved') return;
+    /** Applies `f` to this draft, in the store if it is still there, and to the outcome its saves resolve with. */
+    const settle = (f: (x: Draft<E>) => Draft<E>) => {
+      change(key, id, f);
+      const now = state.read()[key];
+      flight.result = now?.id === id ? now : f(flight.result);
+    };
     const here = () => options.currentOrg() === orgId;
-    if (!here()) {
-      mine((x) => ({ ...x, status: 'unsaved' }));
-      return;
-    }
-    if (options.invalid?.(d, key)) {
-      mine((x) => ({ ...x, status: 'invalid' }));
-      return;
-    }
-    mine((x) => ({ ...x, status: 'saving', error: null }));
+    if (!here()) return settle((x) => ({ ...x, status: 'unsaved' }));
+    if (options.invalid?.(d, key)) return settle((x) => ({ ...x, status: 'invalid' }));
+    settle((x) => ({ ...x, status: 'saving', error: null }));
     const sent = d.edit;
     let at = d.version;
     const moved = (version: number) => {
       if (!here()) return;
       advance(key, orgId, d.record, at, version);
       at = version;
+      flight.result = { ...flight.result, version };
     };
     try {
       const answer = await options.save({ key, draft: d, context, moved });
       if (!here()) {
         flight.next = null;
-        mine((x) => ({ ...x, status: 'unsaved' }));
-        return;
+        return settle((x) => ({ ...x, status: 'unsaved' }));
       }
       if (answer.version !== undefined) moved(answer.version);
-      mine((x) => ({
+      settle((x) => ({
         ...x,
         record: answer.record ?? x.record,
         status: x.edit === sent ? 'saved' : flight.next ? 'saving' : 'unsaved',
@@ -202,49 +233,43 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
     } catch (err) {
       // A refused save is not tried again until it is asked for again.
       flight.next = null;
-      if (!here()) {
-        mine((x) => ({ ...x, status: 'unsaved' }));
-        return;
-      }
-      mine((x) => ({
-        ...x,
-        status: 'unsaved',
-        stale: isStale(err),
-        gone: isGone(err),
-        error: isStale(err) ? STALE : isGone(err) ? null : toolMessage(err),
-      }));
+      if (!here()) return settle((x) => ({ ...x, status: 'unsaved' }));
+      const gone = d.record !== null && (options.gone?.(err, key) ?? false);
+      settle((x) => ({ ...x, status: 'unsaved', stale: isStale(err), gone, error: isStale(err) ? STALE : toolMessage(err) }));
     }
   }
 
-  function save(key: string, context: C): Promise<void> {
+  function save(key: string, context: C): Promise<Draft<E> | undefined> {
     const d = state.read()[key];
-    if (!d || d.orgId !== options.currentOrg()) return Promise.resolve();
-    const id = `${d.orgId}/${key}`;
-    const flight = flights.get(id);
-    const inFlight = flight?.done ?? Promise.resolve();
+    if (!d || d.orgId !== options.currentOrg()) return Promise.resolve(d);
+    const flight = flights.get(d.id);
+    const inFlight = flight?.done ?? Promise.resolve(d);
     // `saving` with no edit since: the save in flight already sends the latest.
     if (d.stale || d.gone || d.status === 'saved' || d.status === 'saving') return inFlight;
     if (options.invalid?.(d, key)) {
-      change(key, d.orgId, (x) => ({ ...x, status: 'invalid' }));
-      return inFlight;
+      change(key, d.id, (x) => ({ ...x, status: 'invalid' }));
+      return flight?.done ?? Promise.resolve(state.read()[key]);
     }
-    change(key, d.orgId, (x) => ({ ...x, status: 'saving', pending: true, error: null }));
+    change(key, d.id, (x) => ({ ...x, status: 'saving', pending: true, error: null }));
     if (flight) {
       flight.next = { context };
       return flight.done;
     }
-    const orgId = d.orgId;
-    const lane = `${orgId}/${d.record ?? key}`;
-    const started: Flight<C> = { next: { context }, done: Promise.resolve() };
-    flights.set(id, started);
+    const started: Flight<E, C> = { next: { context }, done: Promise.resolve(d), result: { ...d, status: 'saving', pending: true, error: null } };
+    flights.set(d.id, started);
+    const lane = `${d.orgId}/${d.record ?? key}`;
     const run = async () => {
       for (let n = started.next; n; n = started.next) {
         started.next = null;
-        await attempt(key, orgId, n.context, started);
+        await attempt(key, started, n.context);
       }
-      flights.delete(id);
+      flights.delete(d.id);
       if (lanes.get(lane) === started.done) lanes.delete(lane);
-      change(key, orgId, (x) => ({ ...x, pending: false }));
+      // Every way out leaves the draft able to save again: no save of it is on its way now.
+      const done = (x: Draft<E>): Draft<E> => ({ ...x, pending: false, status: x.status === 'saving' ? 'unsaved' : x.status });
+      change(key, d.id, done);
+      started.result = done(started.result);
+      return started.result;
     };
     // With the record free, the save goes now, with the edit as it is when it was asked for.
     const before = lanes.get(lane);
@@ -259,8 +284,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
     edit: (key, start, f) =>
       state.write((drafts) => {
         const d = drafts[key];
-        // A saved draft is done with: the next edit builds on the record as the page holds it now.
-        const base = d?.orgId !== start.orgId ? fresh(start) : d.status === 'saved' ? { ...fresh(start), savedAt: d.savedAt } : d;
+        const base = d?.orgId !== start.orgId ? fresh(start) : current(d, start.version) ? d : { ...fresh(start), savedAt: d.savedAt };
         return { ...drafts, [key]: { ...base, edit: f(base.edit), status: 'unsaved' } };
       }),
 
@@ -279,7 +303,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
 }
 
 /** Autosave: `save(key)` runs `ms` after the last edit of each draft, unless it is edited again first. */
-export function autosave(clock: Clock, ms: number, save: (key: string) => Promise<void>): (key: string) => void {
+export function autosave(clock: Clock, ms: number, save: (key: string) => Promise<unknown>): (key: string) => void {
   const timers = new Map<string, () => void>();
   return (key) => {
     timers.get(key)?.();

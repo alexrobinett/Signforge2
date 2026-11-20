@@ -154,7 +154,7 @@ function PlaylistEditor() {
         )}
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
       </EditorHeader>
-      <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} />
+      <SaveAlert error={gone ? null : saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} />
       {gone && (
         <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
           <AlertDescription className="flex flex-wrap items-center gap-3">

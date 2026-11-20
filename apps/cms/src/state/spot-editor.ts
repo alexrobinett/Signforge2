@@ -272,7 +272,9 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       saveSoon(spot.id);
     },
 
-    saveSpotDraft: (spotId) => drafts.save(spotId),
+    async saveSpotDraft(spotId) {
+      await drafts.save(spotId);
+    },
 
     async reloadSpot(orgId, spotId) {
       drafts.drop(spotId);

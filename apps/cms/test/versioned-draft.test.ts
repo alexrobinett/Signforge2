@@ -3,7 +3,7 @@
 // Nothing waits on real time.
 import { describe, expect, it, vi } from 'vitest';
 import { ToolCallError } from '../src/lib/tools';
-import { autosave, createVersionedDrafts, type Clock, type Draft, type Drafts, type Saved } from '../src/state/versioned-draft';
+import { autosave, createVersionedDrafts, shown, type Clock, type Draft, type Drafts, type Saved } from '../src/state/versioned-draft';
 
 // tools.ts names the tab's org from the page's router, which this test has none of.
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
@@ -46,7 +46,7 @@ interface Sent {
 
 type Edit = { name: string };
 
-function setup({ invalid }: { invalid?: (d: Draft<Edit>) => boolean } = {}) {
+function setup({ invalid, gone }: { invalid?: (d: Draft<Edit>) => boolean; gone?: (err: unknown, key: string) => boolean } = {}) {
   let drafts: Drafts<Edit> = {};
   let org: string | undefined = A;
   let ids = 0;
@@ -60,6 +60,7 @@ function setup({ invalid }: { invalid?: (d: Draft<Edit>) => boolean } = {}) {
     currentOrg: () => org,
     clock,
     ...(invalid ? { invalid } : {}),
+    ...(gone ? { gone } : {}),
   });
   return {
     module,
@@ -209,6 +210,30 @@ describe('after a save', () => {
     expect(draft('screens')?.version).toBe(2);
   });
 
+  it('a saved draft is shown and built on while the record is at its version; once the record moves on, the record is (review of #153, 1)', async () => {
+    const { module, sent, draft } = setup();
+    module.edit('spt_1', start('spt_1', 4, 'Old'), named('Mine '));
+    void module.save('spt_1', '');
+    await settle();
+    sent[0]!.answer({ version: 5 });
+    await settle();
+    // The record as saved (trimmed, at 5): the page keeps showing what was typed, and builds on it.
+    expect(shown(draft('spt_1'), 5)).toEqual({ name: 'Mine ' });
+    module.edit('spt_1', start('spt_1', 5, 'Mine'), (e) => ({ name: `${e.name}!` }));
+    void module.save('spt_1', '');
+    await settle();
+    expect(sent[1]!.draft).toMatchObject({ edit: { name: 'Mine !' }, version: 5 });
+    sent[1]!.answer({ version: 6 });
+    await settle();
+
+    // Someone else renames it, and the page reads it at 7: the page shows theirs, and the next edit builds on theirs.
+    expect(shown(draft('spt_1'), 7)).toBeNull();
+    module.edit('spt_1', start('spt_1', 7, 'Theirs'), (e) => ({ name: `${e.name}!` }));
+    void module.save('spt_1', '');
+    await settle();
+    expect(sent[2]!.draft).toMatchObject({ edit: { name: 'Theirs!' }, version: 7 });
+  });
+
   it('the next edit of a saved draft starts from the record as the page holds it now', async () => {
     const { module, sent, draft } = setup();
     module.edit('bk_1', start('bk_1', 1, 'old'), (e) => ({ name: `${e.name}!` }));
@@ -255,17 +280,53 @@ describe('a conflict', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('a deleted record is gone: nothing more is saved', async () => {
-    const { module, sent, draft } = setup();
+  it('a record the store says is deleted is gone: its refusal is shown, and nothing more is saved', async () => {
+    const { module, sent, draft } = setup({ gone: (err) => err instanceof ToolCallError && err.message === 'playlist pls_1 not found' });
     module.edit('pls_1', start('pls_1', 1), named('One'));
     void module.save('pls_1', '');
     await settle();
     sent[0]!.refuse(new ToolCallError('not_found', 'playlist pls_1 not found'));
     await settle();
-    expect(draft('pls_1')).toMatchObject({ gone: true, error: null });
+    expect(draft('pls_1')).toMatchObject({ gone: true, error: 'playlist pls_1 not found' });
     module.update('pls_1', named('Two'));
     await module.save('pls_1', '');
     expect(sent).toHaveLength(1);
+  });
+
+  it('a not_found about a row the edit refers to (a deleted playlist) is shown, and a fixed save is sent (review of #153, 3)', async () => {
+    const { module, sent, draft } = setup({ gone: (err) => err instanceof ToolCallError && err.message === 'playlist pls_1 not found' });
+    module.edit('pls_1', start('pls_1', 1), named('One'));
+    void module.save('pls_1', '');
+    await settle();
+    sent[0]!.refuse(new ToolCallError('not_found', 'spot spt_9 not found'));
+    await settle();
+    expect(draft('pls_1')).toMatchObject({ gone: false, error: 'spot spt_9 not found', status: 'unsaved' });
+    module.update('pls_1', named('Two'));
+    void module.save('pls_1', '');
+    await settle();
+    expect(sent).toHaveLength(2);
+  });
+
+  it('without a `gone` rule, and for a create, a not_found is only shown (review of #153, 3)', async () => {
+    const plain = setup();
+    plain.module.open('dialog', start(null, null, 'Breakfast'));
+    void plain.module.save('dialog', '');
+    await settle();
+    plain.sent[0]!.refuse(new ToolCallError('not_found', 'playlist pls_deleted not found'));
+    await settle();
+    expect(plain.draft('dialog')).toMatchObject({ gone: false, error: 'playlist pls_deleted not found' });
+    plain.module.update('dialog', named('Lunch'));
+    void plain.module.save('dialog', '');
+    await settle();
+    expect(plain.sent).toHaveLength(2);
+
+    const creating = setup({ gone: () => true });
+    creating.module.open('dialog', start(null, null, 'Breakfast'));
+    void creating.module.save('dialog', '');
+    await settle();
+    creating.sent[0]!.refuse(new ToolCallError('not_found', 'playlist pls_deleted not found'));
+    await settle();
+    expect(creating.draft('dialog')).toMatchObject({ gone: false, error: 'playlist pls_deleted not found' });
   });
 
   it('another refusal says why and is sent again only when asked', async () => {
@@ -333,6 +394,57 @@ describe('the org guard', () => {
   });
 });
 
+describe('a draft dropped and opened again at the same key (review of #153, 2)', () => {
+  it('saves on its own, after the old one; the old refusal neither clears its save nor leaves it stuck', async () => {
+    const { module, sent, draft } = setup();
+    module.open('dialog', start(null, null, 'First'));
+    const first = module.save('dialog', 'first');
+    await settle();
+    module.open('dialog', start(null, null, 'Second'));
+    const second = module.save('dialog', 'second');
+    await settle();
+    expect(sent.map((s) => s.draft.edit.name)).toEqual(['First']);
+
+    sent[0]!.refuse(new ToolCallError('error', 'Refused'));
+    expect(await first).toMatchObject({ status: 'unsaved', pending: false, error: 'Refused', edit: { name: 'First' } });
+    await settle();
+    expect(sent.map((s) => s.draft.edit.name)).toEqual(['First', 'Second']);
+    expect(draft('dialog')).toMatchObject({ status: 'saving', pending: true, error: null, edit: { name: 'Second' } });
+    sent[1]!.answer({ record: 'sch_2' });
+    expect(await second).toMatchObject({ status: 'saved', pending: false, record: 'sch_2' });
+  });
+
+  it("each save resolves with its own draft's outcome: the old create's record, though its dialog was closed", async () => {
+    const { module, sent } = setup();
+    module.open('dialog', start(null, null, 'First'));
+    const first = module.save('dialog', '');
+    await settle();
+    module.open('dialog', start(null, null, 'Second'));
+    const second = module.save('dialog', '');
+    sent[0]!.answer({ record: 'sch_1' });
+    await settle();
+    sent[1]!.answer({ record: 'sch_2' });
+    expect([(await first)?.record, (await second)?.record]).toEqual(['sch_1', 'sch_2']);
+  });
+
+  it('a draft refused while a new one waits is not left saving: Save sends it again', async () => {
+    const { module, sent, draft } = setup();
+    module.open('dialog', start(null, null, 'First'));
+    void module.save('dialog', '');
+    await settle();
+    module.open('dialog', start(null, null, 'Second'));
+    void module.save('dialog', '');
+    sent[0]!.refuse(new ToolCallError('error', 'Refused'));
+    await settle();
+    sent[1]!.refuse(new ToolCallError('error', 'Refused too'));
+    await settle();
+    expect(draft('dialog')).toMatchObject({ status: 'unsaved', pending: false, error: 'Refused too' });
+    void module.save('dialog', '');
+    await settle();
+    expect(sent).toHaveLength(3);
+  });
+});
+
 describe('a create', () => {
   it('keeps one idempotency key across retries until a save is answered, then names the record it made', async () => {
     const { module, sent, draft } = setup();
@@ -343,11 +455,11 @@ describe('a create', () => {
     await settle();
     void module.save('dialog', '');
     await settle();
-    expect(sent.map((s) => s.draft.idempotencyKey)).toEqual(['key_1', 'key_1']);
+    expect(sent[1]!.draft.idempotencyKey).toBe(sent[0]!.draft.idempotencyKey);
     sent[1]!.answer({ record: 'sch_1' });
     await settle();
     expect(draft('dialog')).toMatchObject({ status: 'saved', record: 'sch_1' });
-    expect(draft('dialog')?.idempotencyKey).not.toBe('key_1');
+    expect(draft('dialog')?.idempotencyKey).not.toBe(sent[0]!.draft.idempotencyKey);
   });
 
   it('a dialog opened again is a new create, and the old one’s late answer does not reach it', async () => {

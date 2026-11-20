@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 import { playlistDraftOf, rowKeys, type PlaylistDraft, type PlaylistView } from '~/lib/playlists';
 import { compilePlaylistPreview, versionsById, type SpotPreview } from '~/lib/spots';
 import { orgOnScreen } from '~/lib/live';
-import { callTool, playlistOf, toolMessage } from '~/lib/tools';
+import { callTool, isGone, playlistOf, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery } from '~/queries/playlists';
 import { assetsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { StageTarget } from './spot-editor';
@@ -129,6 +129,8 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
       return { version: saved.version };
     },
     invalid: ({ edit }) => unsaveable(edit),
+    // Only a refusal about the playlist itself: one about a spot in it is shown, and the next save goes.
+    gone: (err, playlistId) => isGone(err) && toolMessage(err) === `playlist ${playlistId} not found`,
     makeId: () => crypto.randomUUID(),
     currentOrg: () => orgOnScreen(router),
     clock: realClock,
@@ -193,7 +195,9 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     openAddSpots: (adding) => editor((e) => ({ ...e, adding, addQuery: '' })),
     searchAddSpots: (addQuery) => editor((e) => ({ ...e, addQuery })),
 
-    savePlaylistDraft: (playlistId) => drafts.save(playlistId),
+    async savePlaylistDraft(playlistId) {
+      await drafts.save(playlistId);
+    },
 
     async reloadPlaylist(orgId, playlistId) {
       drafts.drop(playlistId);
