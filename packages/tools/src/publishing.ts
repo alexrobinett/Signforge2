@@ -246,6 +246,8 @@ function toEntry(e: ScheduleEntryRow): TargetedEntry {
     ...(days ? { days } : {}),
     ...(e.fromTime ? { from: e.fromTime } : {}),
     ...(e.toTime ? { to: e.toTime } : {}),
+    ...(e.startsAt !== null ? { startsAt: new Date(e.startsAt).toISOString() } : {}),
+    ...(e.endsAt !== null ? { endsAt: new Date(e.endsAt).toISOString() } : {}),
   };
 }
 

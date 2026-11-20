@@ -106,7 +106,7 @@ async function switchScreens(
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist (set_default_playlist). Returns { publish, promoted, held, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
+    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist (set_default_playlist). Returns { publish, promoted, held, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -114,10 +114,11 @@ const publish = defineTool({
   input: z.object({
     drafts: z
       .array(draftRef.extend({ version: z.number().int().positive().describe('The version you chose it at') }))
-      .min(1)
       .max(500)
       .optional()
-      .describe('The drafts to publish, each at the version you chose it at; omit to publish every changed draft'),
+      .describe(
+        'The drafts to publish, each at the version you chose it at; omit to publish every changed draft. An empty list publishes no draft and compiles every screen again: for a deleted schedule entry or a new default playlist',
+      ),
   }),
   output: z.object({
     publish: madeOutput,

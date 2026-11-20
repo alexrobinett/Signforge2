@@ -56,6 +56,7 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   templateVersion: (o) => o.templateVersion,
   spot: (o) => o.templateSpot,
   playlist: (o) => o.playlist,
+  scheduleEntry: (o) => o.scheduleEntry,
   bundle: () => 'b'.repeat(64),
   sources: () => 'c'.repeat(64),
   asset: (o) => o.asset,
@@ -124,6 +125,10 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     await env.BLOBS.put(uploadKey(o.orgId, o.asset, asset!.sha256), 'not a video');
   },
 };
+/** Inputs a fixed example cannot give: a takeover must end in the future, whenever the test runs. */
+const INPUT: Record<string, (o: SeededOrg, example: unknown) => unknown> = {
+  start_takeover: (o, example) => ({ ...(withOwnIds(example, o) as object), endsAt: new Date(Date.now() + 3_600_000).toISOString() }),
+};
 /** Tools whose example is refused on purpose, changing the asset as it does so. */
 const REJECTS = new Set(['finalize_asset', 'finalize_video_upload']);
 /** Tools whose example still cannot get as far as writing: their bundle is not uploaded. They are covered in templates.test.ts. */
@@ -147,7 +152,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
     connectors,
   };
   const reg = new Map([[tool.name, tool]]);
-  const result = await dispatch(reg, tool.name, input ?? withOwnIds(tool.example, o), caller);
+  const result = await dispatch(reg, tool.name, input ?? INPUT[tool.name]?.(o, tool.example) ?? withOwnIds(tool.example, o), caller);
   if (REJECTS.has(tool.name)) expect((await o.scope.assets.get(o.asset))?.status).toBe('rejected');
   const audit = await scoped(env.DB, o.orgId).auditLog.list({ limit: 10 });
   return { result, outside, audited: audit.some((e) => e.action === tool.name) };
