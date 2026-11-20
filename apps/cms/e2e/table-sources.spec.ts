@@ -188,6 +188,7 @@ test("the editor's fields and Publish are disabled in the server's HTML: a choic
   expect(await disabledOnServer(page, `/spots/${spotId}`, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   // Loaded from the server, they are enabled once the editor has hydrated (Save draft waits for a change).
   await page.reload();
+  await hydrated(page);
   await expect(page.getByRole('form', { name: 'Spot fields' }).getByLabel('Name', { exact: true }).first()).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
 });

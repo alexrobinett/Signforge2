@@ -191,6 +191,7 @@ test("the kit's fields and actions are disabled in the server's HTML, until the 
   expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   // Rendered by the server, they are enabled once the editor has hydrated.
   await page.goto(path);
+  await hydrated(page);
   await expect(page.getByLabel('Name', { exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Duplicate' })).toBeEnabled();
 });

@@ -347,5 +347,6 @@ test("a screen's actions are disabled in the server's HTML, until the page has h
   expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   // Rendered by the server, they are enabled once the page has hydrated.
   await page.goto(path);
+  await hydrated(page);
   await expect(page.getByRole('button', { name: 'Restart player' })).toBeEnabled();
 });
