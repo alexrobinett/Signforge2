@@ -500,6 +500,9 @@ export const scheduleEntries = sqliteTable(
     /** Local `HH:MM`. */
     fromTime: text('from_time'),
     toTime: text('to_time'),
+    /** A takeover's absolute bounds, epoch ms: `starts_at` inclusive, `ends_at` exclusive. An entry with `ends_at` is a takeover. */
+    startsAt: integer('starts_at'),
+    endsAt: integer('ends_at'),
     /** Moves on with every edit of the draft; publishing does not move it. */
     rowVersion: rowVersion(),
     incarnation: incarnation(),
