@@ -43,7 +43,8 @@ function aimedAt(e: ScheduleEntryView, screens: ScreenView[], groups: GroupView[
   return 'Every screen';
 }
 
-const stateWord = (e: ScheduleEntryView) => (!e.published ? 'Draft, not published' : e.draftChanged ? 'Changes not published' : 'Published');
+const stateWord = (e: ScheduleEntryView) =>
+  e.deleted ? 'Removed, not published' : !e.published ? 'Draft, not published' : e.draftChanged ? 'Changes not published' : 'Published';
 
 /** In the viewer's time zone, as the takeover dialog takes it, on the week view's 24-hour clock. */
 const timeWord = (iso: string) =>
@@ -67,7 +68,9 @@ function SchedulePage() {
 
   const names = new Map(playlists.map((p) => [p.id, p.name]));
   const fallback = playlists.find((p) => p.isDefault);
-  const takeovers = entries.filter((e) => e.takeover && e.endsAt && Date.parse(e.endsAt) > now);
+  const runsOn = (e: { endsAt: string | null } | null) => !!e?.endsAt && Date.parse(e.endsAt) > now;
+  // Running or to come, as drafted or as screens have it.
+  const takeovers = entries.filter((e) => e.takeover && (runsOn(e) || runsOn(e.live)));
   const scheduled = entries.filter((e) => !e.takeover);
 
   return (
@@ -112,18 +115,20 @@ function SchedulePage() {
           <Part title="Takeovers">
             <ul className="divide-y overflow-hidden rounded-xl border bg-card">
               {takeovers.map((e) => {
-                const started = e.startsAt !== null && Date.parse(e.startsAt) <= now;
+                // What screens have, else the draft: only a published takeover is playing.
+                const shown = e.live ?? e;
+                const playing = e.live !== null && Date.parse(e.live.startsAt ?? '') <= now && runsOn(e.live);
                 return (
                   <li key={e.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                     <div className="min-w-0 flex-1">
                       <p className="font-medium">{names.get(e.playlistId) ?? 'A removed playlist'}</p>
                       <p className="text-sm text-muted-foreground">
-                        {aimedAt(e, screens, groups)} · {started ? 'Playing' : `From ${timeWord(e.startsAt ?? '')}`} until {timeWord(e.endsAt ?? '')} your time
-                        · {stateWord(e)}
+                        {aimedAt(e, screens, groups)} · {playing ? 'Playing' : `From ${timeWord(shown.startsAt ?? '')}`} until {timeWord(shown.endsAt ?? '')}{' '}
+                        your time · {stateWord(e)}
                       </p>
                     </div>
                     {canPublish && (
-                      <Button variant="outline" size="sm" onClick={() => void endTakeover(orgId, e)} disabled={publishing}>
+                      <Button variant="outline" size="sm" onClick={() => void endTakeover(orgId, e.id)} disabled={publishing}>
                         End now
                       </Button>
                     )}
@@ -146,7 +151,8 @@ function SchedulePage() {
                       {e.priority > 0 && ` · priority ${e.priority}`} · {stateWord(e)}
                     </p>
                   </div>
-                  {canManage && (
+                  {/* Removing what screens play needs the right to publish; a removal waits for the next publish. */}
+                  {canManage && !e.deleted && (
                     <div className="flex gap-1">
                       <Button
                         variant="ghost"
@@ -156,14 +162,16 @@ function SchedulePage() {
                       >
                         <PencilIcon aria-hidden />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Remove ${names.get(e.playlistId) ?? 'entry'} on ${aimedAt(e, screens, groups)}`}
-                        onClick={() => void removeEntry(orgId, e)}
-                      >
-                        <Trash2Icon aria-hidden />
-                      </Button>
+                      {(!e.published || canPublish) && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Remove ${names.get(e.playlistId) ?? 'entry'} on ${aimedAt(e, screens, groups)}`}
+                          onClick={() => void removeEntry(orgId, e)}
+                        >
+                          <Trash2Icon aria-hidden />
+                        </Button>
+                      )}
                     </div>
                   )}
                 </li>

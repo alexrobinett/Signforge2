@@ -2,10 +2,10 @@
  * The Schedule page (M3-19): the dialogs that make and change a schedule entry or start a
  * takeover, removing one, ending a takeover, and which screen the week view shows.
  *
- * An entry is a draft until it is published (the page's Publish, `publishSchedule`). A takeover is
- * sent at once: started, then published with the playlist and spots it needs. Ending one removes
- * it and publishes, so screens drop it straight away. A dialog checks its entry with the contract's
- * `scheduleEntryProblems`, so the CMS refuses what a screen would.
+ * An entry is a draft until it is published (the page's Publish, `publishSchedule`), and so is a
+ * removal of one screens play. A takeover is sent at once: started, then published with the
+ * playlist and spots it needs; End now is `endTakeover` (./publishing.ts). A dialog checks its
+ * entry with the contract's `scheduleEntryProblems`, so the CMS refuses what a screen would.
  */
 import { scheduleEntryProblems } from '@signforge/contract';
 import { toast } from 'sonner';
@@ -62,14 +62,12 @@ export interface ScheduleSlice {
   editEntry: (patch: Partial<EntryDraft>) => void;
   /** Saves the entry as a draft. */
   saveEntry: (orgId: string) => Promise<void>;
-  /** Removes an entry or a takeover's draft and published version; the next publish takes it off screens. */
+  /** Removes an entry: at once if it was never published, else at the next publish. */
   removeEntry: (orgId: string, entry: ScheduleEntryView) => Promise<void>;
   openTakeover: (preset?: Partial<TakeoverDraft>) => void;
   editTakeover: (patch: Partial<TakeoverDraft>) => void;
   /** Starts the takeover and publishes it, so screens cut in at once. */
   startTakeover: (orgId: string) => Promise<void>;
-  /** Removes a takeover and publishes, so screens drop it at once. */
-  endTakeover: (orgId: string, entry: ScheduleEntryView) => Promise<void>;
   closeScheduleDialog: () => void;
   chooseWeekScreen: (screenId: string) => void;
 }
@@ -228,16 +226,6 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { que
         await get().publishSchedule(orgId, [entryIdOf(made)]);
       } catch (err) {
         patch((s) => ({ ...s, saving: false, error: toolMessage(err) }));
-      }
-    },
-
-    async endTakeover(orgId, e) {
-      try {
-        await callTool('delete_schedule_entry', { scheduleEntryId: e.id });
-        await refresh(orgId);
-        await get().publishSchedule(orgId, []);
-      } catch (err) {
-        toast.error('Not ended', { description: toolMessage(err) });
       }
     },
 

@@ -1,7 +1,8 @@
 // The Schedule page (M3-19): schedule a playlist for a group of screens, see the week, publish it
 // to a real test screen; take the screen over and see it cut in, end the takeover, and remove the
 // entry. No entry has days or times, and the takeover's end is the page's own "an hour from now",
-// so nothing depends on the hour the test runs at.
+// so nothing depends on the hour the test runs at. What the screen's page says it plays is what
+// was published, not the draft; a takeover's publish offers no Undo, and a removal waits for Publish.
 import { expect, test, type Page } from '@playwright/test';
 import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, tool } from './helpers';
 
@@ -14,6 +15,7 @@ let page: Page;
 /** A test screen in its own tab: the real player, paired to the org. */
 let screen: Page;
 const playlist: Record<string, string> = {};
+let screenId = '';
 
 /** What the player in the tab says it plays (`window.__sf`). */
 const playing = (tab: Page) =>
@@ -53,6 +55,7 @@ test.beforeAll(async ({ browser }) => {
     timezone: 'UTC',
     orientation: 'landscape',
   });
+  screenId = paired.id;
   await page.goto(`/screens/${paired.id}`);
   await hydrated(page);
   await page.getByRole('button', { name: /More actions/ }).click();
@@ -108,13 +111,19 @@ test('schedule a playlist for a group, see its week, and publish it to the scree
   // The week, as drafted: Breakfast every hour of every day on the screen of group Front.
   const week = page.getByRole('table', { name: /What Front window plays each hour this week/ });
   await expect(week.getByRole('cell', { name: /Breakfast/ })).toHaveCount(7 * 24);
-  // Drafted only: the screen still plays the default.
+  // Drafted only: the screen still plays the default, and its page says so.
   expect(await playlistOn()).toBe(playlist['All day']);
   await axe(page);
   await shots(page, '52-schedule');
+  await page.goto(`/screens/${screenId}`);
+  await expect(page.getByRole('link', { name: 'plays All day now' })).toBeVisible();
+  await page.getByRole('link', { name: 'plays All day now' }).click();
+  await hydrated(page);
 
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(toastSays(/Published v\d+ to 1 screen/)).toBeVisible();
+  // A publish of schedule entries alone can be undone from its toast.
+  await expect(toastSays(/Published v\d+ to 1 screen/).getByRole('button', { name: 'Undo' })).toBeVisible();
   await expect(entries.first()).toContainText('Published');
   await expect.poll(playlistOn, { timeout: 30_000 }).toBe(playlist.Breakfast);
 });
@@ -128,6 +137,8 @@ test('take the screens over: the screen cuts in at once, and goes back when it e
   await shots(page, '53-schedule-takeover-dialog');
   await dialog.getByRole('button', { name: 'Take over now' }).click();
   await expect(toastSays(/Published v\d+ to 1 screen/)).toBeVisible();
+  // No Undo: a roll back would leave the takeover published, to cut in again at the next publish. End now ends it.
+  await expect(toastSays(/Published v\d+ to 1 screen/).getByRole('button', { name: 'Undo' })).toHaveCount(0);
 
   const takeovers = page.getByRole('region', { name: 'Takeovers' }).getByRole('listitem');
   await expect(takeovers).toHaveCount(1);
@@ -139,6 +150,7 @@ test('take the screens over: the screen cuts in at once, and goes back when it e
 
   await takeovers.first().getByRole('button', { name: 'End now' }).click();
   await expect(page.getByRole('region', { name: 'Takeovers' })).toHaveCount(0);
+  await expect(toastSays(/Published v\d+ to 1 screen/).getByRole('button', { name: 'Undo' })).toHaveCount(0);
   await expect.poll(playlistOn, { timeout: 30_000 }).toBe(playlist.Breakfast);
 });
 
@@ -146,9 +158,12 @@ test('remove the entry and publish: the screen goes back to the default; the pag
   test.setTimeout(180_000);
   await page.getByRole('button', { name: 'Remove Breakfast on Group Front' }).click();
   await expect(toastSays('Removed')).toContainText('Screens keep it until you publish.');
-  await expect(page.getByRole('heading', { name: 'Nothing scheduled' })).toBeVisible();
+  // Removed as a draft: listed so until the publish that takes it off screens.
+  await expect(page.getByRole('region', { name: 'Entries' }).getByRole('listitem').first()).toContainText('Removed, not published');
+  expect(await playlistOn()).toBe(playlist.Breakfast);
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(toastSays(/Published v\d+ to 1 screen/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Nothing scheduled' })).toBeVisible();
   // Not a takeover: the minute-long Breakfast spot on screen plays to its end first.
   await expect.poll(playlistOn, { timeout: 90_000 }).toBe(playlist['All day']);
 

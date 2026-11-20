@@ -57,6 +57,8 @@ export interface ScreenView {
     asleep: boolean;
     wakesAt: string | null;
     playlist: { id: string; name: string } | null;
+    /** Whether a takeover plays that playlist. */
+    takeover: boolean;
     spot: { id: string; name: string; kind: 'template' | 'image' | 'video' | 'url'; template: string | null; image: string | null } | null;
     spots: number;
   } | null;

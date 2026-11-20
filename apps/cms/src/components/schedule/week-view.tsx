@@ -1,7 +1,8 @@
 /**
- * The week view (M3-19): what one screen plays each hour of this week, in its time zone, as
- * drafted (`weekOf`, which asks player-core's `resolvePlaylist`, as the screen does). Hours run
- * down, days across; a playlist's name shows where it starts and is read for every hour.
+ * The week view (M3-19): what one screen plays through this week, in its time zone, as drafted
+ * (`weekOf`, which asks player-core's `resolvePlaylist`, as the screen does). Hours run down, days
+ * across; within an hour each playlist fills the minutes it plays. A playlist's name shows where it
+ * starts, with the time when that is not on the hour, and is read for every hour.
  */
 import { useId } from 'react';
 import { NativeSelect } from '~/components/ui/select';
@@ -11,8 +12,17 @@ import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 
-/** The chart tokens, the default playlist on the neutral one. */
-const COLOURS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-5)'];
+/** The chart tokens, the default playlist on the neutral one; past four, mixes of them. */
+const COLOURS = [
+  'var(--chart-1)',
+  'var(--chart-2)',
+  'var(--chart-3)',
+  'var(--chart-5)',
+  'color-mix(in oklab, var(--chart-1) 50%, var(--chart-3))',
+  'color-mix(in oklab, var(--chart-2) 50%, var(--chart-5))',
+  'color-mix(in oklab, var(--chart-1) 50%, var(--chart-5))',
+  'color-mix(in oklab, var(--chart-2) 50%, var(--chart-3))',
+];
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
 export function WeekView({
@@ -38,8 +48,10 @@ export function WeekView({
 
   const week = weekOf({ screen, groups, entries, defaultPlaylistId, at: new Date(now) });
   const names = new Map(playlists.map((p) => [p.id, p.name]));
-  const shown = [...new Set(week.flatMap((d) => d.hours.flatMap((h) => (h ? [h.playlistId] : []))))];
+  const shown = [...new Set(week.flatMap((d) => d.hours.flatMap((h) => h?.segments.map((g) => g.playlistId) ?? [])))];
   const colour = new Map(shown.map((p, i) => [p, p === defaultPlaylistId ? 'var(--chart-4)' : COLOURS[i % COLOURS.length]!]));
+  const name = (id: string) => names.get(id) ?? id;
+  const hhmm = (hour: number, minute: number) => `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   const dayName = (date: string) =>
     new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
 
@@ -105,25 +117,43 @@ export function WeekView({
                         Skipped
                       </td>
                     );
-                  const above = hour > 0 ? d.hours[hour - 1] : null;
-                  const continues = above?.playlistId === cell.playlistId && above.takeover === cell.takeover;
-                  const current = now >= cell.at.getTime() && now < cell.at.getTime() + 3_600_000;
+                  // A block starts here unless the hour before ends with the same playlist.
+                  const before = hour > 0 ? d.hours[hour - 1]?.segments.at(-1) : undefined;
+                  const starts = cell.segments.filter((g, i) => i > 0 || !before || before.playlistId !== g.playlistId || before.takeover !== g.takeover);
+                  const label = (g: (typeof cell.segments)[number]) =>
+                    `${g.from ? `${hhmm(hour, g.from)} ` : ''}${g.takeover ? 'Takeover: ' : ''}${name(g.playlistId)}`;
+                  const into = (now - cell.at.getTime()) / 60_000;
+                  const current = into >= 0 && into < 60;
                   return (
-                    <td key={d.date} aria-current={current ? 'time' : undefined} className="p-0">
-                      <div
-                        className={cn('flex h-7 items-center gap-1.5 border-l-4 px-1.5', current && 'ring-2 ring-ring ring-inset')}
-                        // A tint of the playlist's colour, stronger for a takeover, so the week's blocks read at a glance.
-                        style={{
-                          borderColor: colour.get(cell.playlistId),
-                          background: `color-mix(in oklab, ${colour.get(cell.playlistId)} ${cell.takeover ? 30 : 14}%, transparent)`,
-                        }}
-                      >
-                        <span className={cn('min-w-0 truncate', continues && 'sr-only', cell.takeover && 'font-semibold')}>
-                          {cell.takeover && 'Takeover: '}
-                          {names.get(cell.playlistId) ?? cell.playlistId}
-                        </span>
-                        {current && <span className="ml-auto shrink-0 rounded bg-foreground px-1 text-[10px] font-semibold text-background">Now</span>}
-                      </div>
+                    <td key={d.date} aria-current={current ? 'time' : undefined} className="relative h-8 p-0 align-top">
+                      {cell.segments.map((g) => (
+                        <div
+                          key={g.from}
+                          aria-hidden
+                          className="absolute inset-x-0 border-l-4"
+                          // A tint of the playlist's colour, stronger for a takeover, so the week's blocks read at a glance.
+                          style={{
+                            top: `${(g.from / 60) * 100}%`,
+                            height: `${((g.to - g.from) / 60) * 100}%`,
+                            borderColor: colour.get(g.playlistId),
+                            background: `color-mix(in oklab, ${colour.get(g.playlistId)} ${g.takeover ? 30 : 14}%, transparent)`,
+                          }}
+                        />
+                      ))}
+                      {current && (
+                        <div aria-hidden className="absolute inset-x-0 h-0.5 bg-foreground" style={{ top: `${(into / 60) * 100}%` }}>
+                          <span className="absolute -top-2 right-0.5 rounded bg-foreground px-1 text-[10px] font-semibold leading-4 text-background">Now</span>
+                        </div>
+                      )}
+                      <span className={cn('relative block truncate px-1.5 py-1.5 leading-4', !starts.length && 'sr-only')}>
+                        {(starts.length ? starts : cell.segments).map((g, i) => (
+                          <span key={g.from} className={cn(g.takeover && 'font-semibold')}>
+                            {i > 0 && ' · '}
+                            {label(g)}
+                          </span>
+                        ))}
+                        {current && <span className="sr-only"> (now)</span>}
+                      </span>
                     </td>
                   );
                 })}

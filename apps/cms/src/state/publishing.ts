@@ -8,7 +8,9 @@
  * unfinished drafts. A playlist publishes with its spots that have unpublished changes, since its
  * stage plays their saved drafts. The toast says what reached screens, with Undo (a roll back to
  * the publish before) and a link to the rollout. Confirmation dialogs are kept for revoking and
- * deleting: a publish is undone instead (docs/research/cms-ux.md).
+ * deleting: a publish is undone instead (docs/research/cms-ux.md). A publish that starts or ends a
+ * takeover offers no Undo: a roll back would leave it published, to cut in again at the next
+ * publish of anything; End now is the way back.
  */
 import { toast } from 'sonner';
 import { publishResultOf, madeOf, versionName, type PublishResult } from '~/lib/publishes';
@@ -40,11 +42,12 @@ export interface PublishingSlice {
   /** Makes the playlist the one every screen plays when no schedule says otherwise. */
   makeDefaultPlaylist: (orgId: string, playlistId: string) => Promise<void>;
   /**
-   * Publishes schedule entries (`entryIds`, else every one with a changed draft) with their changed
-   * playlists and those playlists' changed spots. With none to pin it still compiles every screen,
-   * so an entry removed since the last publish leaves them.
+   * Publishes schedule entries (`entryIds`, else every one with a changed draft, removals too) with
+   * their changed playlists and those playlists' changed spots.
    */
   publishSchedule: (orgId: string, entryIds?: string[]) => Promise<void>;
+  /** Ends a takeover now: deleted and published alone, in one call (`end_takeover`). */
+  endTakeover: (orgId: string, entryId: string) => Promise<void>;
 }
 
 const TOAST_ID = 'publish';
@@ -57,8 +60,8 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: ['org', orgId] });
   const viewRollout = (id: string) => ({ label: 'View rollout', onClick: () => void router.navigate({ to: '/publishes', search: { id } }) });
 
-  /** The toast for a publish's answer: what reached screens, else why nothing did. */
-  function told(orgId: string, r: PublishResult) {
+  /** The toast for a publish's answer: what reached screens, else why nothing did; with Undo unless `undo` is false. */
+  function told(orgId: string, r: PublishResult, undo = true) {
     const held = r.held.flatMap((h) => h.problems)[0];
     const noDefault = r.screens.some((s) => s.problems.includes('the organization has no default playlist'));
     // Every screen refused it: say the screens' own reason, not a guess.
@@ -88,9 +91,11 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     const previous = made.previousId;
     toast.success(made.screens ? `Published ${v} to ${screensWord(made.screens)}` : `Published ${v}`, {
       description: notes.join(' '),
-      ...(previous && made.screens
-        ? { action: { label: 'Undo', onClick: () => void get().rollBackTo(orgId, { id: previous, revision: made.revision - 1 }, made.id) } }
-        : {}),
+      // Always set: this toast replaces the last one, and an action left out would keep that one's Undo.
+      action:
+        undo && previous && made.screens
+          ? { label: 'Undo', onClick: () => void get().rollBackTo(orgId, { id: previous, revision: made.revision - 1 }, made.id) }
+          : undefined,
       cancel: viewRollout(made.id),
       duration: 10_000,
       // One publish toast at a time: the next replaces it.
@@ -98,10 +103,10 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     });
   }
 
-  async function publish(orgId: string, pins: Pin[]) {
+  async function publish(orgId: string, pins: Pin[], undo = true) {
     pending(true);
     try {
-      told(orgId, publishResultOf(await callTool('publish', { drafts: pins })));
+      told(orgId, publishResultOf(await callTool('publish', { drafts: pins })), undo);
       await refresh(orgId);
     } catch (err) {
       toast.error('Not published', {
@@ -176,14 +181,30 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         queryClient.query({ ...spotsQuery(orgId), staleTime: 0 }),
       ]);
       const chosen = entries.filter((e) => (entryIds ? entryIds.includes(e.id) : e.draftChanged));
-      const needed = new Set(chosen.map((e) => e.playlistId));
+      const needed = new Set(chosen.filter((e) => !e.deleted).map((e) => e.playlistId));
       const lists = playlists.filter((p) => needed.has(p.id));
       const inThem = new Set(lists.flatMap((p) => p.spotIds));
-      await publish(orgId, [
-        ...chosen.map((e): Pin => ({ kind: 'schedule_entry', id: e.id, version: e.version })),
-        ...lists.filter((p) => p.draftChanged).map((p): Pin => ({ kind: 'playlist', id: p.id, version: p.version })),
-        ...spots.filter((s) => inThem.has(s.id) && s.draftChanged).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
-      ]);
+      await publish(
+        orgId,
+        [
+          ...chosen.map((e): Pin => ({ kind: 'schedule_entry', id: e.id, version: e.version })),
+          ...lists.filter((p) => p.draftChanged).map((p): Pin => ({ kind: 'playlist', id: p.id, version: p.version })),
+          ...spots.filter((s) => inThem.has(s.id) && s.draftChanged).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+        ],
+        !chosen.some((e) => e.takeover),
+      );
+    },
+
+    async endTakeover(orgId, entryId) {
+      pending(true);
+      try {
+        told(orgId, publishResultOf(await callTool('end_takeover', { scheduleEntryId: entryId })), false);
+        await refresh(orgId);
+      } catch (err) {
+        toast.error('Not ended', { description: toolMessage(err) });
+      } finally {
+        pending(false);
+      }
     },
 
     async makeDefaultPlaylist(orgId, playlistId) {

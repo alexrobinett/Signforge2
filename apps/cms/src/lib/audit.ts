@@ -116,6 +116,7 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   start_takeover: { group: 'Schedule', words: 'Takeover made' },
   update_schedule_entry: { group: 'Schedule', words: 'Schedule changed' },
   delete_schedule_entry: { group: 'Schedule', words: 'Unscheduled' },
+  end_takeover: { group: 'Schedule', words: 'Takeover ended' },
   publish: { group: 'Publishes', words: 'Published' },
   roll_back_publish: { group: 'Publishes', words: 'Rolled back' },
   create_asset_upload: { group: 'Assets', words: 'Image upload started' },
