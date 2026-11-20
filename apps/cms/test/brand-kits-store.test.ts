@@ -15,6 +15,8 @@ import { getSpotPreview } from '../src/server/spots.functions';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '../src/queries/spots';
 import { createBrandKitsSlice, previewKey, type BrandKitsSlice } from '../src/state/brand-kits';
 
+// The tab's org comes from the page's router, which a store test has none of.
+vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/server/spots.functions', () => ({ getBrandKits: vi.fn(), getSpot: vi.fn(), getSpotPreview: vi.fn(), getSpots: vi.fn(), getTemplates: vi.fn() }));
 vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
 

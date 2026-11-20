@@ -22,13 +22,10 @@ class ToolCallError extends Error {
 
 /** A tool's answer: its output, or on a refusal `{ error, message, details }`. Read with the guards below. */
 export async function callTool(name: string, input: unknown): Promise<unknown> {
+  const headers = { 'content-type': 'application/json', ...(await tabOrgHeaders()) };
   let res: Response;
   try {
-    res = await fetch(`/api/tools/${name}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...(await tabOrgHeaders()) },
-      body: JSON.stringify(input),
-    });
+    res = await fetch(`/api/tools/${name}`, { method: 'POST', headers, body: JSON.stringify(input) });
   } catch (cause) {
     // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
     throw new ToolCallError('network', 'Could not reach SignForge. Check your connection and try again.', undefined, { cause });

@@ -8,6 +8,8 @@ import type { PlaylistView } from '../src/lib/playlists';
 import { playlistKeys } from '../src/queries/playlists';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from '../src/state/playlist-editor';
 
+// The tab's org comes from the page's router, which a store test has none of.
+vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/server/playlists.functions', () => ({ getPlaylists: vi.fn(), getPlaylist: vi.fn() }));
 vi.mock('~/server/spots.functions', () => ({ getBrandKits: vi.fn(), getSpot: vi.fn(), getSpotPreview: vi.fn(), getSpots: vi.fn(), getTemplates: vi.fn() }));
 vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
