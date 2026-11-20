@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type Locator, type Page } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs } from './helpers';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
+import { axe, createOrg, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool } from './helpers';
 import { API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -16,6 +16,30 @@ async function invitePathFor(email: string): Promise<string> {
     expect(path).toBeTruthy();
   }).toPass({ timeout: 10_000 });
   return path!;
+}
+
+/** Holds every request to the app's server functions (the loaders' reads) from now until `release`. */
+async function holdReads(page: Page) {
+  const held: Route[] = [];
+  let waiting = { n: Number.POSITIVE_INFINITY, done: () => {} };
+  const hold = (route: Route) => {
+    held.push(route);
+    if (held.length >= waiting.n) waiting.done();
+  };
+  await page.route('**/_serverFn/**', hold);
+  /** Resolves once `n` reads are held. */
+  const holding = (n: number) =>
+    new Promise<void>((done) => {
+      waiting = { n, done };
+      if (held.length >= n) done();
+    });
+  /** Lets them go; resolves once each has its whole answer and the page has drawn two frames since. */
+  const release = async () => {
+    await page.unroute('**/_serverFn/**', hold);
+    for (const route of held) await route.fulfill({ response: await route.fetch() });
+    await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+  };
+  return { holding, release };
 }
 
 const settingsNav = (page: Page) => page.getByRole('navigation', { name: 'Settings' });
@@ -45,7 +69,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await axe(page);
   await shots(page, '40-settings-general');
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Northside Market Co');
   await expect(page.getByLabel('Time zone')).toHaveValue('Europe/London');
@@ -63,7 +87,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await axe(page);
   await shots(page, '41-settings-screens');
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Alert after')).toHaveValue('30');
   await expect(page.getByLabel('From')).toHaveValue('03:00');
@@ -80,7 +104,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByLabel('Alert after')).toHaveValue('45');
   await page.getByLabel('Alert after').fill('30');
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
   // Notifications: everyone hears when a screen goes offline.
   await settingsNav(page).getByRole('link', { name: 'Notifications' }).click();
@@ -91,7 +115,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByLabel('Who hears: A screen goes offline, and when it is back').selectOption('everyone');
   await page.getByLabel('Email for: An agent is refused').uncheck();
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Who hears: A screen goes offline, and when it is back')).toHaveValue('everyone');
   await expect(page.getByLabel('Email for: An agent is refused')).not.toBeChecked();
@@ -133,7 +157,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByLabel('Slack for: A screen goes offline, and when it is back').check();
   await page.getByLabel('Webhook for: A screen goes offline, and when it is back').check();
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Email me a test' }).click();
   await expect(page.getByText('Test sent.')).toBeVisible();
   await expect(async () => {
@@ -215,7 +239,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await page.getByLabel('Editors can publish').uncheck();
   await page.getByRole('region', { name: 'Who publishes' }).getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await expect(
     page
       .getByRole('row', { name: /Publish to screens/ })
@@ -243,7 +267,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await page.getByLabel('Editors can publish').check();
   await page.getByRole('region', { name: 'Who publishes' }).getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await publishOption(1);
 
   // The owner makes them a viewer, then removes them.
@@ -263,7 +287,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await page.getByLabel('Name', { exact: true }).fill('Maria Okafor');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await expect(page.getByText('This browser')).toBeVisible();
   await page.getByText('Dark', { exact: true }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
@@ -288,6 +312,367 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await shots(page, '47c-settings-notifications-log-phone');
 });
 
+test('a role select or an invitation button keeps keyboard focus while its change runs, and a second change meanwhile is ignored (#126)', async ({
+  page,
+  browser,
+}) => {
+  // A control disabled while its own action ran lost focus to the page (Chromium moves it to body),
+  // so the next Tab started from the top. Each answer is held until the test lets it go.
+  test.setTimeout(120_000);
+  const stamp = Date.now();
+  const editorEmail = `e2e-settings-focus-editor-${stamp}@example.com`;
+  const waitingEmail = `e2e-settings-focus-waiting-${stamp}@example.com`;
+  await signInAs(page, `e2e-settings-focus-owner-${stamp}@example.com`, '192.0.2.37');
+  await createOrg(page, 'Northside Market');
+  await page.goto('/settings/members');
+  await hydrated(page);
+  await page.getByLabel('Emails, separated by commas').fill(`${editorEmail}, ${waitingEmail}`);
+  await page.getByRole('button', { name: 'Send invites' }).click();
+  await expect(page.getByText('2 invites sent')).toBeVisible();
+  const invitee = await browser.newContext();
+  const joining = await invitee.newPage();
+  await signInAs(joining, editorEmail, '192.0.2.38');
+  await joining.goto(await invitePathFor(editorEmail));
+  await hydrated(joining);
+  await joining.getByRole('button', { name: 'Accept' }).click();
+  await expect(joining).toHaveURL(/\/$/);
+  await invitee.close();
+
+  // The role, by keyboard: Editor to Viewer. The select shows where it is going until the page has
+  // read the members again; a change meanwhile (o, to Owner) is ignored, while the write runs and
+  // while the page reads (review of #143, 1).
+  await page.reload();
+  await hydrated(page);
+  const role = page.getByRole('region', { name: 'People' }).getByLabel(new RegExp(`Role for ${editorEmail.split('@')[0]}`));
+  // Enabled once its part of the page has hydrated (#136), after body[data-hydrated].
+  await expect(role).toBeEnabled();
+  await expect(role).toHaveValue('editor');
+  // Every choice the select fires, so the test knows each second one was really made: Chromium's
+  // type-ahead joins letters pressed close together, and "vo" chooses nothing (re-check of #143, 5).
+  await role.evaluate((select: HTMLSelectElement) => {
+    select.dataset.chosen = '';
+    select.addEventListener('change', () => {
+      select.dataset.chosen += ` ${select.value}`;
+    });
+  });
+  const chosen = async () => (await role.getAttribute('data-chosen'))?.trim().split(' ');
+  /** Owner, by keyboard, after Tab away and back, which starts the type-ahead again. */
+  const chooseOwner = async () => {
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await expect(role).toBeFocused();
+    await page.keyboard.press('o');
+  };
+  const roleChange = await holdFirst(page, '/api/auth/organization/update-member-role');
+  await role.focus();
+  await expect(role).toBeFocused();
+  await page.keyboard.press('v');
+  const roleAnswer = await roleChange.arrived;
+  await expect(role).toBeFocused();
+  await expect(role).toHaveAttribute('aria-disabled', 'true');
+  await expect(role).toHaveValue('viewer');
+  await chooseOwner();
+  expect(await chosen()).toEqual(['viewer', 'owner']);
+  await expect(role).toHaveValue('viewer');
+  const reads = await holdReads(page);
+  await roleAnswer.continue();
+  await reads.holding(1);
+  await expect(page.getByText('Role changed')).toBeVisible();
+  await expect(role).toHaveAttribute('aria-disabled', 'true');
+  await expect(role).toHaveValue('viewer');
+  await chooseOwner();
+  expect(await chosen()).toEqual(['viewer', 'owner', 'owner']);
+  await expect(role).toHaveValue('viewer');
+  await reads.release();
+  await expect(role).not.toHaveAttribute('aria-disabled');
+  await expect(role).toBeFocused();
+  await expect(role).toHaveValue('viewer');
+  expect(roleChange.calls()).toBe(1);
+
+  // Resend, by keyboard: a second Enter while it runs sends nothing more.
+  const waiting = page.getByRole('region', { name: 'Waiting for a reply' }).getByRole('listitem').filter({ hasText: waitingEmail });
+  const resend = waiting.getByRole('button', { name: 'Resend' });
+  const resending = await holdFirst(page, '/api/auth/organization/invite-member');
+  await resend.focus();
+  await page.keyboard.press('Enter');
+  const resendAnswer = await resending.arrived;
+  await expect(resend).toBeFocused();
+  await expect(resend).toHaveAttribute('aria-disabled', 'true');
+  await expect(waiting.getByRole('button', { name: 'Revoke' })).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Enter');
+  await resendAnswer.continue();
+  await expect(page.getByText('Invite sent again')).toBeVisible();
+  await expect(resend).not.toHaveAttribute('aria-disabled');
+  await expect(resend).toBeFocused();
+  expect(resending.calls()).toBe(1);
+
+  await page.reload();
+  await hydrated(page);
+  await expect(role).toHaveValue('viewer');
+  await expect(waiting).toBeVisible();
+
+  // Removing them, its answer held: the dialog says it is waiting, and Escape closes it, focus back
+  // on the page, the removal going on and the row saying so (re-check of #143, 3).
+  const row = page.getByRole('region', { name: 'People' }).getByRole('listitem').filter({ hasText: editorEmail });
+  await row.getByRole('button', { name: 'Remove' }).click();
+  const dialog = page.getByRole('alertdialog');
+  const removal = await holdFirst(page, '/api/auth/organization/remove-member');
+  await dialog.getByRole('button', { name: 'Remove' }).click();
+  const removeAnswer = await removal.arrived;
+  await expect(dialog.getByRole('status')).toHaveText('Removing… Waiting for SignForge to answer. You can close this; it goes on.');
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(row.getByRole('button', { name: 'Removing…' })).toBeVisible();
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => document.activeElement?.closest('[role="alertdialog"]') ?? null)).toBeNull();
+  await removeAnswer.continue();
+  await expect(page.getByText('Removed', { exact: true })).toBeVisible();
+  await expect(row).toHaveCount(0);
+});
+
+test("an edit typed while its save runs is kept: the next addresses to invite, and General's retention (review of #143, 4)", async ({ page }) => {
+  // The invite form cleared itself once sent, and General remounted on the version its save made:
+  // either wiped what was typed while the save ran.
+  const stamp = Date.now();
+  await signInAs(page, `e2e-settings-kept-${stamp}@example.com`, '192.0.2.39');
+  await createOrg(page, 'Northside Market');
+  await page.goto('/settings/members');
+  await hydrated(page);
+  const emails = page.getByLabel('Emails, separated by commas');
+  await expect(emails).toBeEnabled();
+  const first = `e2e-kept-first-${stamp}@example.com`;
+  const next = `e2e-kept-next-${stamp}@example.com`;
+  await emails.fill(first);
+  const inviting = await holdFirst(page, '/api/auth/organization/invite-member');
+  await emails.press('Enter');
+  const inviteAnswer = await inviting.arrived;
+  await emails.fill(next);
+  await emails.press('Enter');
+  await inviteAnswer.continue();
+  await expect(page.getByText('Invite sent')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send invites' })).not.toHaveAttribute('aria-disabled');
+  await expect(emails).toHaveValue(next);
+  expect(inviting.calls()).toBe(1);
+  const waiting = page.getByRole('region', { name: 'Waiting for a reply' });
+  await expect(waiting).toContainText(first);
+  await expect(waiting).not.toContainText(next);
+
+  await page.goto('/settings/general');
+  await hydrated(page);
+  const retention = page.getByLabel('Keep entries for');
+  const timezone = page.getByLabel('Time zone');
+  await expect(retention).toBeEnabled();
+  await retention.fill('100');
+  const saving = await holdFirst(page, '/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const saveAnswer = await saving.arrived;
+  await retention.fill('120');
+  // Someone else sets the time zone once this save is written, before the page reads again.
+  const reads = await holdReads(page);
+  await saveAnswer.continue();
+  await reads.holding(1);
+  await tool(page, 'update_org_settings', { timezone: 'Europe/London' });
+  await reads.release();
+  // The page has drawn its reload when the time zone, untouched here, shows the other change
+  // (re-check of #143, 6); the retention typed meanwhile is kept.
+  await expect(timezone).toHaveValue('Europe/London');
+  await expect(retention).toHaveValue('120');
+  await expect(page.getByRole('button', { name: 'Save changes' })).not.toHaveAttribute('aria-disabled');
+
+  // Saved again, it sends only the retention, on the version this page saved: the time zone set
+  // since makes it a conflict, shown, never an overwrite of it (re-check of #143, 1).
+  const sent = page.waitForRequest('**/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  expect(Object.keys((await sent).postDataJSON()).sort()).toEqual(['auditRetentionDays', 'ifVersion']);
+  await expect(page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(retention).toHaveValue('100');
+  await expect(timezone).toHaveValue('Europe/London');
+  await page.reload();
+  await hydrated(page);
+  await expect(timezone).toHaveValue('Europe/London');
+  await expect(retention).toHaveValue('100');
+});
+
+test('edits belong to the org they were made in: after a switch, a late answer for the old org changes nothing in the new one (re-check of #143, 2)', async ({
+  page,
+}) => {
+  // Display hours edited while a General save ran in one org followed a switch, and the next org
+  // saved them as its own.
+  test.setTimeout(90_000);
+  await signInAs(page, `e2e-settings-orgs-${Date.now()}@example.com`, '192.0.2.47');
+  await createOrg(page, 'Alpha Market');
+  const switcher = orgSwitcher(page);
+  await switcher.click();
+  await page.getByRole('menuitem', { name: 'Create organization' }).click();
+  const create = page.getByRole('dialog', { name: 'Create organization' });
+  await create.getByLabel('Organization name').fill('Beta Market');
+  await create.getByRole('button', { name: 'Create organization' }).click();
+  await expect(switcher).toContainText('Beta Market');
+  const switchTo = async (name: string) => {
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name }).click();
+    await expect(switcher).toContainText(name);
+  };
+  await switchTo('Alpha Market');
+
+  await page.goto('/settings/general');
+  await hydrated(page);
+  const retention = page.getByLabel('Keep entries for');
+  await expect(retention).toBeEnabled();
+  await retention.fill('100');
+  // Alpha's save is written; its answer is held on its way back.
+  const saving = await holdFirst(page, '/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const saveAnswer = await saving.arrived;
+  const written = await saveAnswer.fetch();
+  await page.getByText('Set hours', { exact: true }).click();
+  await expect(page.getByRole('radio', { name: 'Set hours' })).toBeChecked();
+
+  await switchTo('Beta Market');
+  await saveAnswer.fulfill({ response: written });
+  await expect(page.getByRole('radio', { name: 'Always on' })).toBeChecked();
+  await expect(retention).toHaveValue('365');
+  await retention.fill('200');
+  const sent = page.waitForRequest('**/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  expect(Object.keys((await sent).postDataJSON()).sort()).toEqual(['auditRetentionDays', 'ifVersion']);
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+  await page.reload();
+  await hydrated(page);
+  await expect(retention).toHaveValue('200');
+  await expect(page.getByRole('radio', { name: 'Always on' })).toBeChecked();
+  await switchTo('Alpha Market');
+  await expect(retention).toHaveValue('100');
+  await expect(page.getByRole('radio', { name: 'Always on' })).toBeChecked();
+});
+
+test("an edit left on one settings page still saves after another page saved, and Reload on one keeps the other's (third re-check of #143)", async ({
+  page,
+}) => {
+  // The pages share one settings version. A save moved only its own edits to the version it made,
+  // so an edit left on General was refused as changed since, and Reload dropped every page's.
+  await signInAs(page, `e2e-settings-pages-${Date.now()}@example.com`, '192.0.2.48');
+  await createOrg(page, 'Northside Market');
+  await page.goto('/settings/general');
+  await hydrated(page);
+  const retention = page.getByLabel('Keep entries for');
+  await expect(retention).toBeEnabled();
+  await retention.fill('111');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+
+  // Screens & groups saves, its answer held, then From is edited and left.
+  await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
+  const minutes = page.getByLabel('Alert after');
+  await expect(minutes).toBeEnabled();
+  await minutes.fill('17');
+  const saving = await holdFirst(page, '/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const saveAnswer = await saving.arrived;
+  expect(Object.keys(saveAnswer.request().postDataJSON()).sort()).toEqual(['ifVersion', 'unreachableAfterMinutes']);
+  await saveAnswer.continue();
+  await expect(page.getByRole('button', { name: 'Save changes' })).not.toHaveAttribute('aria-disabled');
+  await expect(page.getByText('Unsaved changes')).toBeHidden();
+  await page.getByLabel('From').fill('03:15');
+
+  // Back on General, the edit left there saves.
+  await settingsNav(page).getByRole('link', { name: 'General' }).click();
+  await expect(retention).toHaveValue('111');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  const sent = page.waitForRequest('**/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const request = await sent;
+  expect(request.postDataJSON()).toMatchObject({ auditRetentionDays: 111 });
+  expect((await request.response())?.status()).toBe(200);
+  await expect(page.getByText('Unsaved changes')).toBeHidden();
+  await expect(page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' })).toHaveCount(0);
+
+  // Someone else sets the time zone: General's next save is refused, and its Reload drops only
+  // General's edit. Screens & groups' From is kept.
+  await tool(page, 'update_org_settings', { timezone: 'Europe/London' });
+  await retention.fill('222');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(retention).toHaveValue('111');
+  await expect(page.getByLabel('Time zone')).toHaveValue('Europe/London');
+  await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
+  await expect(page.getByLabel('From')).toHaveValue('03:15');
+  await expect(minutes).toHaveValue('17');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+});
+
+test('Keep it waits for a webhook removal that has been sent, and says so (review of #143, 5)', async ({ page }) => {
+  // Keep it closed the confirmation while the removal it could no longer stop went on.
+  await signInAs(page, `e2e-settings-keep-${Date.now()}@example.com`, '192.0.2.40');
+  await createOrg(page, 'Northside Market');
+  await page.goto('/settings/notifications');
+  await hydrated(page);
+  await expect(page.getByLabel('Webhook URL', { exact: true })).toBeEnabled();
+  await page.getByLabel('Webhook URL', { exact: true }).fill('https://example.com/hooks/e2e-keep-it');
+  await page.getByRole('button', { name: 'Add webhook' }).click();
+  await expect(page.getByText('Webhook saved')).toBeVisible();
+  await page.getByRole('button', { name: 'I have saved it' }).click();
+  await page.getByRole('listitem').filter({ hasText: 'example.com' }).getByText('Manage').click();
+  await page.getByRole('button', { name: 'Remove Webhook' }).click();
+  const asking = page.getByText('Stop sending alerts to Webhook?');
+  await expect(asking).toBeVisible();
+
+  const removing = await holdFirst(page, '/api/tools/remove_alert_channel');
+  await page.getByRole('button', { name: 'Remove', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const removeAnswer = await removing.arrived;
+  const keep = page.getByRole('button', { name: 'Keep it' });
+  await page.keyboard.press('Tab');
+  await expect(keep).toBeFocused();
+  await expect(keep).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Enter');
+  await expect(asking).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Removing…' })).toBeVisible();
+
+  // It holds up only its own page: General still saves (re-check of #143, 3).
+  await settingsNav(page).getByRole('link', { name: 'General' }).click();
+  const retention = page.getByLabel('Keep entries for');
+  await expect(retention).toBeEnabled();
+  await retention.fill('95');
+  const sent = page.waitForRequest('**/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await sent;
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await removeAnswer.continue();
+  await expect(page.getByText('Webhook removed')).toBeVisible();
+  await settingsNav(page).getByRole('link', { name: 'Notifications' }).click();
+  await expect(page.getByRole('button', { name: 'Add webhook' })).toBeVisible();
+});
+
+test("a refused sign-out of another session says why, on that session's row (review of #143, 6)", async ({ page, browser }) => {
+  const email = `e2e-settings-sessions-${Date.now()}@example.com`;
+  await signInAs(page, email, '192.0.2.45');
+  await createOrg(page, 'Northside Market');
+  const elsewhere = await browser.newContext();
+  await signInAs(await elsewhere.newPage(), email, '192.0.2.46');
+  await page.goto('/account');
+  await hydrated(page);
+  const other = page
+    .getByRole('region', { name: "Where you're signed in" })
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('button', { name: 'Sign out' }) });
+  await expect(other).toHaveCount(1);
+  await page.route('**/api/auth/revoke-session', (route) =>
+    route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 'FORBIDDEN', message: 'That session cannot be signed out from here.' }),
+    }),
+  );
+  await other.getByRole('button', { name: 'Sign out' }).click();
+  await expect(other.getByRole('alert')).toHaveText('That session cannot be signed out from here.');
+  await expect(other.getByRole('button', { name: 'Sign out' })).not.toHaveAttribute('aria-disabled');
+  await elsewhere.close();
+});
+
 test("settings fields that save or show at once, or hold a URL or an email, are disabled in the server's HTML, until the page has hydrated (#136)", async ({
   page,
 }) => {
@@ -299,8 +684,12 @@ test("settings fields that save or show at once, or hold a URL or an email, are 
   await createOrg(page, 'Northside Market');
   const pages: [path: string, names: string[]][] = [
     ['/settings/general', ['Name', 'Always on', 'Set hours', 'Save changes']],
-    ['/settings/members', ['Emails, separated by commas', 'Send invites', `Role for ${email}`]],
-    ['/settings/notifications', ['Slack incoming-webhook URL', 'Connect Slack', 'Webhook URL', 'Add webhook']],
+    ['/settings/screens', ['From', 'Alert after', 'Save changes']],
+    ['/settings/members', ['Emails, separated by commas', 'Send invites', `Role for ${email}`, 'Save']],
+    [
+      '/settings/notifications',
+      ['Slack incoming-webhook URL', 'Connect Slack', 'Webhook URL', 'Add webhook', 'Email for: A screen goes offline, and when it is back'],
+    ],
     ['/account', ['Name', 'Save', 'Light', 'Dark', 'System']],
   ];
   for (const [path, names] of pages) {

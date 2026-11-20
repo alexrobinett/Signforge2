@@ -13,6 +13,7 @@ export function NameDialog({
   description,
   placeholder,
   draft,
+  busy,
   onOpenChange,
   onName,
   onCreate,
@@ -25,6 +26,8 @@ export function NameDialog({
   placeholder?: string;
   /** The dialog's draft, from the store. */
   draft: { open: boolean; name: string; pending: boolean; error: string | null };
+  /** Another action is on its way, so Create is ignored (by the store) and says so. */
+  busy?: boolean;
   onOpenChange: (open: boolean) => void;
   onName: (name: string) => void;
   onCreate: () => void;
@@ -55,7 +58,7 @@ export function NameDialog({
             {draft.error}
           </p>
           <div className="flex justify-end">
-            <Button type="submit" disabled={!draft.name.trim() || draft.pending}>
+            <Button type="submit" disabled={!draft.name.trim() || draft.pending} aria-disabled={busy || undefined}>
               {draft.pending ? 'Creating…' : `Create ${thing}`}
             </Button>
           </div>

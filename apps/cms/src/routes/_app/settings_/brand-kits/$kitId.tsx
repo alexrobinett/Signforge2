@@ -25,7 +25,7 @@ import { versionsById, type SpotView } from '~/lib/spots';
 import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
-import { NO_EDIT, previewKey } from '~/state/brand-kits';
+import { kitActionRunning, NO_EDIT, previewKey } from '~/state/brand-kits';
 
 /** How many of the org's template spots the page plays: each is a player on the page. */
 const PREVIEWS = 3;
@@ -88,6 +88,7 @@ function KitUse({
 }) {
   const orgId = useOrgId();
   const pending = useAppStore((s) => s.brandKits.pending);
+  const busy = useAppStore(kitActionRunning);
   const assign = useAppStore((s) => s.assignKit);
   const makeDefault = useAppStore((s) => s.makeDefaultKit);
   const nameOf = (id: string) => screens.find((s) => s.id === id)?.name ?? id;
@@ -97,16 +98,15 @@ function KitUse({
     const chosen = pending === `assign:${key}` ? !saved : saved;
     return (
       <li key={key}>
-        <label className="flex min-h-10 items-center gap-3 text-sm">
+        {/* Dimmed while an action runs, as a disabled box would be, so Space doing nothing is seen. */}
+        <label className="flex min-h-10 items-center gap-3 text-sm has-[[aria-disabled=true]]:opacity-60">
           <input
             type="checkbox"
             checked={chosen}
             // Not disabled while an action runs: a disabled box loses keyboard focus. A change then is ignored.
             disabled={!canManage}
-            aria-disabled={pending !== null || undefined}
-            onChange={(e) => {
-              if (pending === null) void assign(orgId, kit, e.target.checked, target);
-            }}
+            aria-disabled={busy || undefined}
+            onChange={(e) => void assign(orgId, kit, e.target.checked, target)}
             className="size-4 accent-primary"
           />
           <span className="min-w-0">
@@ -131,7 +131,7 @@ function KitUse({
           )}
         </p>
         {canManage && !kit.isDefault && (
-          <Button variant="outline" disabled={pending !== null} onClick={() => void makeDefault(orgId, kit.id)}>
+          <Button variant="outline" aria-disabled={busy || undefined} onClick={() => void makeDefault(orgId, kit.id)}>
             Make default
           </Button>
         )}
@@ -204,7 +204,7 @@ function KitEditor() {
 
   const { draft: editing, saving, savedAt, error: saveError, stale } = useAppStore((s) => s.brandKits.edits[kitId] ?? NO_EDIT);
   const actionError = useAppStore((s) => (s.brandKits.actionError?.kitId === kitId ? s.brandKits.actionError.text : null));
-  const pending = useAppStore((s) => s.brandKits.pending);
+  const busy = useAppStore(kitActionRunning);
   const logoFor = useAppStore((s) => s.brandKits.logoFor);
   const edit = useAppStore((s) => s.editKit);
   const fix = useAppStore((s) => s.fixKitPair);
@@ -220,7 +220,7 @@ function KitEditor() {
   const colors = shownColors(draft, kit.colors);
   const change = (c: (d: KitDraft) => KitDraft) => edit(kit, c);
   const set = (patch: Partial<KitDraft>) => change((d) => ({ ...d, ...patch }));
-  const ready = editing !== null && draftColors(draft) !== null && draft.name.trim() !== '' && !saving && !stale;
+  const ready = editing !== null && draftColors(draft) !== null && draft.name.trim() !== '' && !stale;
   const versions = versionsById(templates);
   const withTemplates = previewSpots(spots);
   const reach = kit.reach.map((id) => screens.find((s) => s.id === id)?.name ?? id);
@@ -256,13 +256,13 @@ function KitEditor() {
           </p>
           {canManage && (
             <EditorFields>
-              <Button variant="outline" disabled={pending !== null} onClick={() => void duplicate(orgId, kit)}>
+              <Button variant="outline" aria-disabled={busy || undefined} onClick={() => void duplicate(orgId, kit)}>
                 Duplicate
               </Button>
               <Button variant="outline" disabled={!editing || saving} onClick={() => discard(kit.id)}>
                 Discard changes
               </Button>
-              <Button disabled={!ready} onClick={() => void save(orgId, kit)}>
+              <Button disabled={!ready} aria-disabled={busy || undefined} onClick={() => void save(orgId, kit)}>
                 {saving ? 'Saving…' : 'Save kit'}
               </Button>
             </EditorFields>

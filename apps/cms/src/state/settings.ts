@@ -1,79 +1,122 @@
 /**
  * The Settings and Account pages: saving org settings (`update_org_settings`), members and
- * invitations, the profile and sessions (Better Auth's endpoints), and the invitation page. The
- * forms are uncontrolled and read on submit, so the only draft kept is the default display hours,
- * which the hours editor needs. Data comes from the route loaders; each action reloads them.
+ * invitations, the profile and sessions (Better Auth's endpoints), and the invitation page. Data
+ * comes from the route loaders; each action reloads them.
+ *
+ * The settings forms are controlled: a field shows its edit if there is one, else what the page
+ * read, so a reload refreshes every field the member has not touched. A save sends only the edited
+ * fields, with the version they were made on, and a change made since is refused, never
+ * overwritten. Edits, running actions and errors belong to the org they were made in.
  */
+import type { AnyRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { authClient, authErrorMessage } from '~/lib/auth-client';
-import type { AlertChannel, AlertDelivery, AlertKind, AlertRule, Member } from '~/lib/settings';
+import { orgOnScreen } from '~/lib/live';
+import type { AlertChannel, AlertDelivery, AlertKind, AlertRule, Member, OrgSettings } from '~/lib/settings';
 import type { DisplayHours } from '~/lib/screen-types';
-import { callTool, isStale, toolMessage } from '~/lib/tools';
+import { callTool, isStale, settingsVersionOf, toolMessage } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
 import type { SliceCreator } from './store';
 
+/** A page whose actions run one at a time. Account and the invitation page belong to no org. */
+type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'account' | 'invitation';
+/** Where an action runs: its page, in the org it was started in (null for Account and the invitation page). */
+export interface SettingsScope {
+  page: SettingsPage;
+  orgId: string | null;
+}
+const scopeKey = ({ page, orgId }: SettingsScope) => `${orgId ?? ''}/${page}`;
+
+/** A form whose edits are kept until saved: General, Screens & groups, the alert rules, Who publishes. */
+export type SettingsForm = 'general' | 'screens' | 'notifications' | 'publishing';
+const FORM_PAGE: Record<SettingsForm, SettingsPage> = { general: 'general', screens: 'screens', notifications: 'notifications', publishing: 'members' };
+
+/** A form's fields as edited, numbers as typed. `name` renames the org; the rest are `update_org_settings`' fields. */
+export interface SettingsEdits {
+  name?: string;
+  /** '' for none: the browser's when pairing. */
+  timezone?: string;
+  /** '' for none: the player's default. */
+  locale?: string;
+  displayHours?: DisplayHours | null;
+  auditRetentionDays?: string;
+  updateFrom?: string;
+  updateTo?: string;
+  unreachableAfterMinutes?: string;
+  /** Per alert kind, the fields of its rule changed. */
+  alerts?: Partial<Record<AlertKind, Partial<AlertRule>>>;
+  editorsPublish?: boolean;
+}
+
+/** A form's edits, and the version of the settings they were made on: what its save sends as `ifVersion`. */
+interface SettingsDraft {
+  orgId: string;
+  version: number;
+  edits: SettingsEdits;
+}
+
 interface SettingsState {
-  /** The action running (`general`, `invite`, `role:<memberId>`, ...), or null. */
-  pending: string | null;
+  /** The action running in each scope (`general`, `invite`, `role:<memberId>`, ...). Another there is ignored. */
+  pending: Record<string, string>;
   /**
-   * Why the last action failed, and which one it was, so the form it came from shows it. `stale`:
-   * the settings changed since the page read them, and the form offers a reload.
+   * Why an action failed, by the action, so the form it came from shows it, in its org only.
+   * `stale`: the settings changed since the edits were made, and the form offers a reload.
    */
-  error: { at: string; text: string; stale: boolean } | null;
-  /** The General page's default hours as edited; null until edited (the saved value shows). */
-  hours: { value: DisplayHours | null } | null;
+  errors: Record<string, { orgId: string | null; text: string; stale: boolean }>;
+  drafts: Partial<Record<SettingsForm, SettingsDraft>>;
+  /** The role a member's running change gives them, so their select shows where it is going. */
+  roleChange: { memberId: string; role: Role } | null;
   /** The member the remove dialog asks about. */
-  removing: Member | null;
+  removing: { orgId: string; member: Member } | null;
   /** The alert channel whose Remove is waiting for its confirmation. */
-  removingChannel: AlertChannel['kind'] | null;
+  removingChannel: { orgId: string; kind: AlertChannel['kind'] } | null;
   /**
    * The webhook signing secret just set, shown until dismissed and never again: the page made it,
    * and SignForge keeps it only sealed. Not kept anywhere else.
    */
-  signingSecret: string | null;
+  signingSecret: { orgId: string; secret: string } | null;
 }
 
 export interface SettingsSlice {
   settings: SettingsState;
-  editDefaultHours: (hours: DisplayHours | null) => void;
+  /** Edits a form's fields in `orgId`; the first edit notes the version of the settings they are made on. */
+  editSettings: (orgId: string, form: SettingsForm, version: number, change: SettingsEdits) => void;
   /**
-   * Saves the org's defaults for new screens and how long its audit log is kept, and renames it if the name changed. This and the two
-   * below send `ifVersion`, the settings' version when the page read them, so a save cannot
-   * overwrite a change made since.
+   * Saves a form's edits: only the fields edited, with the version they were made on, so a change
+   * made since is refused rather than overwritten. General also renames the org (`org`).
    */
-  saveGeneral: (
-    org: { id: string; name: string },
-    values: { name: string; timezone: string | null; locale: string | null; auditRetentionDays: number },
-    ifVersion: number,
-  ) => Promise<void>;
-  saveScreenDefaults: (values: { updateWindow: { from: string; to: string }; unreachableAfterMinutes: number }, ifVersion: number) => Promise<void>;
-  saveAlerts: (alerts: Record<AlertKind, AlertRule>, ifVersion: number) => Promise<void>;
-  /** Whether editors publish, or only owners. */
-  saveEditorsPublish: (editorsPublish: boolean, ifVersion: number) => Promise<void>;
+  saveSettings: (orgId: string, form: SettingsForm, settings: OrgSettings, org?: { id: string; name: string }) => Promise<void>;
   /** Post alerts to Slack through an incoming-webhook URL; `ifVersion` when replacing one. True once saved, so the form can clear. */
-  connectSlack: (webhookUrl: string, ifVersion?: number) => Promise<boolean>;
+  connectSlack: (orgId: string, webhookUrl: string, ifVersion?: number) => Promise<boolean>;
   /**
    * Send alerts to a webhook. A new one gets a signing secret made here, shown once; changing the
    * URL keeps the secret. True once saved, so the form can clear.
    */
-  setWebhook: (webhookUrl: string, ifVersion?: number) => Promise<boolean>;
+  setWebhook: (orgId: string, webhookUrl: string, ifVersion?: number) => Promise<boolean>;
   /** A new signing secret for the webhook, shown once. */
-  rotateSigningSecret: (ifVersion: number) => Promise<void>;
+  rotateSigningSecret: (orgId: string, ifVersion: number) => Promise<void>;
   dismissSigningSecret: () => void;
-  askToRemoveAlertChannel: (kind: AlertChannel['kind'] | null) => void;
-  removeAlertChannel: (kind: AlertChannel['kind']) => Promise<void>;
+  /**
+   * Opens or closes a channel's removal confirmation. It opens only while nothing runs on the page,
+   * and stays open while its removal runs: once sent it cannot be called back.
+   */
+  askToRemoveAlertChannel: (orgId: string, kind: AlertChannel['kind'] | null) => void;
+  removeAlertChannel: (orgId: string, kind: AlertChannel['kind']) => Promise<void>;
   /** Send a test alert now; email goes to the member asking. */
-  testAlertChannel: (channel: AlertDelivery['channel']) => Promise<void>;
-  retryAlertDelivery: (deliveryId: string) => Promise<void>;
-  /** After a stale save: reads the settings again, dropping what the form held. */
-  reloadSettings: () => Promise<void>;
+  testAlertChannel: (orgId: string, channel: AlertDelivery['channel']) => Promise<void>;
+  retryAlertDelivery: (orgId: string, deliveryId: string) => Promise<void>;
+  /** After a stale save of `at`: reads the settings again, dropping that form's edits and error. */
+  reloadSettings: (orgId: string | null, at: string) => Promise<void>;
+  /** After a switch: the old org's edits and confirmations go. Its running actions finish, and change nothing here. */
+  forgetOrgSettings: () => void;
   /** True once every invite is sent, so the form can clear. */
-  inviteMembers: (emails: string[], role: Role) => Promise<boolean>;
-  resendInvitation: (email: string, role: Role) => Promise<void>;
-  cancelInvitation: (invitationId: string) => Promise<void>;
-  changeMemberRole: (memberId: string, role: Role) => Promise<void>;
-  askToRemoveMember: (member: Member | null) => void;
-  removeMember: (memberId: string) => Promise<void>;
+  inviteMembers: (orgId: string, emails: string[], role: Role) => Promise<boolean>;
+  resendInvitation: (orgId: string, email: string, role: Role) => Promise<void>;
+  cancelInvitation: (orgId: string, invitationId: string) => Promise<void>;
+  changeMemberRole: (orgId: string, memberId: string, role: Role) => Promise<void>;
+  /** Opens the remove dialog while nothing runs on the page; closes it at any time, a removal sent going on. */
+  askToRemoveMember: (orgId: string, member: Member | null) => void;
+  removeMember: (orgId: string, memberId: string) => Promise<void>;
   saveProfile: (name: string) => Promise<void>;
   signOutSession: (token: string) => Promise<void>;
   signOutOtherSessions: () => Promise<void>;
@@ -82,9 +125,48 @@ export interface SettingsSlice {
   declineInvitation: (invitationId: string) => Promise<void>;
 }
 
-/** Better Auth's client answers `{ error }` rather than throwing. */
+/** The action running in `scope`, if one is. */
+export const runningIn = (settings: SettingsState, scope: SettingsScope): string | undefined => settings.pending[scopeKey(scope)];
+
+const NO_EDITS: SettingsEdits = {};
+/** Whether the form saved as `at` has edits not yet saved in `orgId`. */
+export const hasEdits = (settings: SettingsState, at: string, orgId: string | null) =>
+  Object.entries(settings.drafts).some(([form, d]) => form === at && d.orgId === orgId && Object.keys(d.edits).length > 0);
+
+/** A form's edits in `orgId`; another org's are never shown. */
+export function editsIn(settings: SettingsState, form: SettingsForm, orgId: string): SettingsEdits {
+  const draft = settings.drafts[form];
+  return draft?.orgId === orgId ? draft.edits : NO_EDITS;
+}
+
+/** The error of the action `at`, if it failed in the org on screen (or belongs to none). */
+export function errorOf(settings: SettingsState, at: string, orgId: string | undefined) {
+  const error = settings.errors[at];
+  return error && (error.orgId === null || error.orgId === orgId) ? error : undefined;
+}
+
+/** `update_org_settings`' input for the edited fields: every other field is left as it is. */
+function changeOf(edits: SettingsEdits, settings: OrgSettings) {
+  const { timezone, locale, displayHours, auditRetentionDays, updateFrom, updateTo, unreachableAfterMinutes, alerts, editorsPublish } = edits;
+  return {
+    ...(timezone !== undefined ? { timezone: timezone || null } : {}),
+    ...(locale !== undefined ? { locale: locale || null } : {}),
+    ...(displayHours !== undefined ? { displayHours } : {}),
+    ...(auditRetentionDays !== undefined ? { auditRetentionDays: Number(auditRetentionDays) } : {}),
+    ...(updateFrom !== undefined || updateTo !== undefined
+      ? { updateWindow: { from: updateFrom ?? settings.updateWindow.from, to: updateTo ?? settings.updateWindow.to } }
+      : {}),
+    ...(unreachableAfterMinutes !== undefined ? { unreachableAfterMinutes: Number(unreachableAfterMinutes) } : {}),
+    ...(alerts !== undefined ? { alerts } : {}),
+    ...(editorsPublish !== undefined ? { editorsPublish } : {}),
+  };
+}
+
+/** Better Auth's client answers `{ error }`, and rejects only when the request did not get an answer. */
 async function auth<T extends { error: { message?: string; code?: string; status?: number } | null }>(call: Promise<T>, fallback: string): Promise<T> {
-  const res = await call;
+  const res = await call.catch((cause: unknown) => {
+    throw new Error(fallback, { cause });
+  });
   if (res.error) throw new Error(authErrorMessage(res.error, fallback));
   return res;
 }
@@ -98,95 +180,160 @@ function newSigningSecret(): string {
     .replace(/=+$/, '')}`;
 }
 
+/** Whether `scope` is what the tab shows: an answer for an org it has left is not announced or reloaded. */
+const onScreen = (router: AnyRouter, scope: SettingsScope) => scope.orgId === null || orgOnScreen(router) === scope.orgId;
+
 export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { router }) => {
   const patch = (change: (s: SettingsState) => SettingsState) => set((s) => ({ settings: change(s.settings) }));
+  const withoutKey = <T>(record: Record<string, T>, key: string) => Object.fromEntries(Object.entries(record).filter(([k]) => k !== key));
 
-  /** Runs one action: marks it pending, says how it went, and reloads the page's data. */
-  async function run(at: string, work: () => Promise<unknown>, done: string) {
-    patch((s) => ({ ...s, pending: at, error: null }));
+  /**
+   * Runs one action in `scope`, unless one is running there: marks it pending, says how it went,
+   * and reloads the page's data. It stays pending until the page's loaders have finished (`sync`;
+   * without it the router reloads in the background), so a control never shows the old value, or
+   * takes another change, in between. Every way out releases it. Other pages, and other orgs, are
+   * not held up by it.
+   */
+  async function run(scope: SettingsScope, at: string, work: () => Promise<unknown>, done: string) {
+    const key = scopeKey(scope);
+    if (get().settings.pending[key] !== undefined) return false;
+    patch((s) => ({ ...s, pending: { ...s.pending, [key]: at }, errors: withoutKey(s.errors, at) }));
     try {
       await work();
-      patch((s) => ({ ...s, pending: null }));
-      toast.success(done);
-      await router.invalidate();
+      if (onScreen(router, scope)) {
+        toast.success(done);
+        await router.invalidate({ sync: true });
+      }
       return true;
     } catch (err) {
-      const error = isStale(err) ? { at, text: 'This changed since you opened it.', stale: true } : { at, text: toolMessage(err), stale: false };
-      patch((s) => ({ ...s, pending: null, error }));
+      const error = { orgId: scope.orgId, text: isStale(err) ? 'This changed since you opened it.' : toolMessage(err), stale: isStale(err) };
+      patch((s) => ({ ...s, errors: { ...s.errors, [at]: error } }));
       return false;
+    } finally {
+      patch((s) => ({ ...s, pending: withoutKey(s.pending, key) }));
     }
   }
 
-  return {
-    settings: { pending: null, error: null, hours: null, removing: null, removingChannel: null, signingSecret: null },
-    editDefaultHours: (value) => patch((s) => ({ ...s, hours: { value } })),
+  const org = (page: SettingsPage, orgId: string): SettingsScope => ({ page, orgId });
+  const notifications = (orgId: string) => org('notifications', orgId);
+  const members = (orgId: string) => org('members', orgId);
+  const account: SettingsScope = { page: 'account', orgId: null };
+  const invitation: SettingsScope = { page: 'invitation', orgId: null };
 
-    async saveGeneral(org, values, ifVersion) {
-      const hours = get().settings.hours;
+  return {
+    settings: { pending: {}, errors: {}, drafts: {}, roleChange: null, removing: null, removingChannel: null, signingSecret: null },
+
+    editSettings: (orgId, form, version, change) =>
+      patch((s) => {
+        const draft = s.drafts[form];
+        const base = draft?.orgId === orgId ? draft : { orgId, version, edits: {} };
+        return { ...s, drafts: { ...s.drafts, [form]: { ...base, edits: { ...base.edits, ...change } } } };
+      }),
+
+    async saveSettings(orgId, form, settings, renamed) {
+      const draft = get().settings.drafts[form];
+      if (draft?.orgId !== orgId) {
+        toast('Nothing to save');
+        return;
+      }
+      const { name, ...fields } = draft.edits;
+      const change = changeOf(fields, settings);
       const saved = await run(
-        'general',
+        org(FORM_PAGE[form], orgId),
+        form,
         async () => {
-          const name = values.name.trim();
-          if (!name) throw new Error('The organization needs a name.');
+          if (name !== undefined && !name.trim()) throw new Error('The organization needs a name.');
           // The versioned write first: a stale save changes nothing, the name included.
-          await callTool('update_org_settings', {
-            timezone: values.timezone,
-            locale: values.locale,
-            auditRetentionDays: values.auditRetentionDays,
-            ...(hours ? { displayHours: hours.value } : {}),
-            ifVersion,
-          });
-          if (name !== org.name) await auth(authClient.organization.update({ organizationId: org.id, data: { name } }), 'Could not rename the organization.');
+          if (Object.keys(change).length) {
+            const version = settingsVersionOf(await callTool('update_org_settings', { ...change, ifVersion: draft.version }));
+            // This save alone took the settings from the drafts' version to this one, and its fields
+            // are no other form's: every draft of the org still on the old version moves with it, so
+            // an edit left on another page does not conflict with this page's save.
+            patch((s) => ({
+              ...s,
+              drafts: Object.fromEntries(
+                Object.entries(s.drafts).map(([f, d]) => [f, d.orgId === orgId && d.version === draft.version ? { ...d, version } : d]),
+              ),
+            }));
+          }
+          if (name !== undefined && renamed && name.trim() !== renamed.name)
+            await auth(authClient.organization.update({ organizationId: renamed.id, data: { name: name.trim() } }), 'Could not rename the organization.');
         },
         'Saved',
       );
-      if (saved) patch((s) => ({ ...s, hours: null }));
+      // Its edits are saved; edits made while it ran stay, on the version it made.
+      if (saved) patch((s) => (s.drafts[form]?.edits === draft.edits ? { ...s, drafts: withoutKey(s.drafts, form) } : s));
     },
 
-    saveScreenDefaults: async (values, ifVersion) => void (await run('screens', () => callTool('update_org_settings', { ...values, ifVersion }), 'Saved')),
-    saveAlerts: async (alerts, ifVersion) => void (await run('notifications', () => callTool('update_org_settings', { alerts, ifVersion }), 'Saved')),
-    saveEditorsPublish: async (editorsPublish, ifVersion) =>
-      void (await run('publishing', () => callTool('update_org_settings', { editorsPublish, ifVersion }), 'Saved')),
-    connectSlack: (webhookUrl, ifVersion) =>
-      run('slack', () => callTool('set_slack_alert_channel', { webhookUrl: webhookUrl.trim(), ifVersion }), 'Slack connected'),
-    async setWebhook(webhookUrl, ifVersion) {
-      const signingSecret = ifVersion === undefined ? newSigningSecret() : undefined;
+    connectSlack: (orgId, webhookUrl, ifVersion) =>
+      run(notifications(orgId), 'slack', () => callTool('set_slack_alert_channel', { webhookUrl: webhookUrl.trim(), ifVersion }), 'Slack connected'),
+    async setWebhook(orgId, webhookUrl, ifVersion) {
+      const secret = ifVersion === undefined ? newSigningSecret() : undefined;
       const saved = await run(
+        notifications(orgId),
         'webhook',
-        () => callTool('set_webhook_alert_channel', { webhookUrl: webhookUrl.trim(), signingSecret, ifVersion }),
+        () => callTool('set_webhook_alert_channel', { webhookUrl: webhookUrl.trim(), signingSecret: secret, ifVersion }),
         'Webhook saved',
       );
-      if (saved && signingSecret) patch((s) => ({ ...s, signingSecret }));
+      if (saved && secret) patch((s) => ({ ...s, signingSecret: { orgId, secret } }));
       return saved;
     },
-    async rotateSigningSecret(ifVersion) {
-      const signingSecret = newSigningSecret();
-      const saved = await run('webhook', () => callTool('set_webhook_alert_channel', { signingSecret, ifVersion }), 'New signing secret set');
-      if (saved) patch((s) => ({ ...s, signingSecret }));
+    async rotateSigningSecret(orgId, ifVersion) {
+      const secret = newSigningSecret();
+      const saved = await run(
+        notifications(orgId),
+        'webhook',
+        () => callTool('set_webhook_alert_channel', { signingSecret: secret, ifVersion }),
+        'New signing secret set',
+      );
+      if (saved) patch((s) => ({ ...s, signingSecret: { orgId, secret } }));
     },
     dismissSigningSecret: () => patch((s) => ({ ...s, signingSecret: null })),
-    askToRemoveAlertChannel: (kind) => patch((s) => ({ ...s, removingChannel: kind, error: null })),
-    async removeAlertChannel(kind) {
+    askToRemoveAlertChannel: (orgId, kind) =>
+      patch((s) => {
+        const running = runningIn(s, notifications(orgId));
+        if (kind ? running !== undefined : running === `remove:${s.removingChannel?.kind}`) return s;
+        return { ...s, removingChannel: kind && { orgId, kind }, errors: withoutKey(s.errors, `remove:${kind ?? s.removingChannel?.kind}`) };
+      }),
+    async removeAlertChannel(orgId, kind) {
       const removed = await run(
+        notifications(orgId),
         `remove:${kind}`,
         () => callTool('remove_alert_channel', { channel: kind }),
         kind === 'slack' ? 'Slack removed' : 'Webhook removed',
       );
-      if (removed) patch((s) => ({ ...s, removingChannel: null }));
+      if (removed) patch((s) => (s.removingChannel?.orgId === orgId && s.removingChannel.kind === kind ? { ...s, removingChannel: null } : s));
     },
-    testAlertChannel: async (channel) =>
-      void (await run(`test:${channel}`, () => callTool('test_alert_channel', { channel }), 'Test sent. How it went shows under Recent deliveries.')),
-    retryAlertDelivery: async (deliveryId) =>
-      void (await run(`retry:${deliveryId}`, () => callTool('retry_alert_delivery', { alertDeliveryId: deliveryId }), 'Sending it again')),
+    testAlertChannel: async (orgId, channel) =>
+      void (await run(
+        notifications(orgId),
+        `test:${channel}`,
+        () => callTool('test_alert_channel', { channel }),
+        'Test sent. How it went shows under Recent deliveries.',
+      )),
+    retryAlertDelivery: async (orgId, deliveryId) =>
+      void (await run(
+        notifications(orgId),
+        `retry:${deliveryId}`,
+        () => callTool('retry_alert_delivery', { alertDeliveryId: deliveryId }),
+        'Sending it again',
+      )),
 
-    async reloadSettings() {
-      await router.invalidate();
-      patch((s) => ({ ...s, error: null, hours: null }));
+    async reloadSettings(orgId, at) {
+      await router.invalidate({ sync: true });
+      // Only the refused form's edits go: another page's are kept, and its own save says if they conflict.
+      patch((s) => ({
+        ...s,
+        drafts: Object.fromEntries(Object.entries(s.drafts).filter(([form, d]) => !(form === at && d.orgId === orgId))),
+        errors: withoutKey(s.errors, at),
+      }));
       toast('Reloaded. Make your change again on what is there now.');
     },
+    forgetOrgSettings: () => patch((s) => ({ ...s, drafts: {}, removing: null, removingChannel: null, signingSecret: null })),
 
-    inviteMembers(emails, role) {
+    inviteMembers(orgId, emails, role) {
       return run(
+        members(orgId),
         'invite',
         async () => {
           if (!emails.length) throw new Error('Enter at least one email address.');
@@ -195,36 +342,52 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         emails.length === 1 ? 'Invite sent' : `${emails.length} invites sent`,
       );
     },
-    resendInvitation: async (email, role) =>
+    resendInvitation: async (orgId, email, role) =>
       void (await run(
+        members(orgId),
         `resend:${email}`,
         () => auth(authClient.organization.inviteMember({ email, role, resend: true }), 'Could not resend it.'),
         'Invite sent again',
       )),
-    cancelInvitation: async (invitationId) =>
+    cancelInvitation: async (orgId, invitationId) =>
       void (await run(
+        members(orgId),
         `cancel:${invitationId}`,
         () => auth(authClient.organization.cancelInvitation({ invitationId }), 'Could not revoke it.'),
         'Invite revoked',
       )),
-    changeMemberRole: async (memberId, role) =>
-      void (await run(
+    async changeMemberRole(orgId, memberId, role) {
+      if (runningIn(get().settings, members(orgId)) !== undefined) return;
+      const change = { memberId, role };
+      patch((s) => ({ ...s, roleChange: change }));
+      await run(
+        members(orgId),
         `role:${memberId}`,
         () => auth(authClient.organization.updateMemberRole({ memberId, role }), 'Could not change the role.'),
         'Role changed',
-      )),
-    askToRemoveMember: (member) => patch((s) => ({ ...s, removing: member, error: null })),
-    async removeMember(memberId) {
+      );
+      // Another change may have started once this one let go.
+      patch((s) => (s.roleChange === change ? { ...s, roleChange: null } : s));
+    },
+    askToRemoveMember: (orgId, member) =>
+      patch((s) =>
+        member && runningIn(s, members(orgId)) !== undefined
+          ? s
+          : { ...s, removing: member && { orgId, member }, errors: member ? withoutKey(s.errors, `remove:${member.id}`) : s.errors },
+      ),
+    async removeMember(orgId, memberId) {
       const removed = await run(
+        members(orgId),
         `remove:${memberId}`,
         () => auth(authClient.organization.removeMember({ memberIdOrEmail: memberId }), 'Could not remove them.'),
         'Removed',
       );
-      if (removed) patch((s) => ({ ...s, removing: null }));
+      if (removed) patch((s) => (s.removing?.member.id === memberId ? { ...s, removing: null } : s));
     },
 
     saveProfile: async (name) =>
       void (await run(
+        account,
         'profile',
         async () => {
           if (!name.trim()) throw new Error('Enter your name.');
@@ -233,23 +396,40 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         'Saved',
       )),
     signOutSession: async (token) =>
-      void (await run(`session:${token}`, () => auth(authClient.revokeSession({ token }), 'Could not sign it out.'), 'Signed out')),
+      void (await run(account, `session:${token}`, () => auth(authClient.revokeSession({ token }), 'Could not sign it out.'), 'Signed out')),
     signOutOtherSessions: async () =>
-      void (await run('sessions', () => auth(authClient.revokeOtherSessions(), 'Could not sign them out.'), 'Signed out everywhere else')),
+      void (await run(account, 'sessions', () => auth(authClient.revokeOtherSessions(), 'Could not sign them out.'), 'Signed out everywhere else')),
     async connectGithub() {
-      patch((s) => ({ ...s, pending: 'github', error: null }));
-      // On success the browser leaves for GitHub and comes back to the account page.
-      const res = await authClient.linkSocial({ provider: 'github', callbackURL: '/account' });
-      if (res.error)
-        patch((s) => ({ ...s, pending: null, error: { at: 'github', text: authErrorMessage(res.error, 'Could not connect GitHub.'), stale: false } }));
+      const key = scopeKey(account);
+      if (get().settings.pending[key] !== undefined) return;
+      patch((s) => ({ ...s, pending: { ...s.pending, [key]: 'github' }, errors: withoutKey(s.errors, 'github') }));
+      try {
+        // On success the browser leaves for GitHub and comes back to the account page.
+        await auth(authClient.linkSocial({ provider: 'github', callbackURL: '/account' }), 'Could not connect GitHub.');
+      } catch (err) {
+        patch((s) => ({ ...s, errors: { ...s.errors, github: { orgId: null, text: toolMessage(err), stale: false } } }));
+      } finally {
+        // Released as the browser leaves too: a page the back button restores from its cache is not locked.
+        patch((s) => ({ ...s, pending: withoutKey(s.pending, key) }));
+      }
     },
 
     async acceptInvitation(invitationId) {
-      const joined = await run('invitation', () => auth(authClient.organization.acceptInvitation({ invitationId }), 'Could not accept it.'), 'You joined');
+      const joined = await run(
+        invitation,
+        'invitation',
+        () => auth(authClient.organization.acceptInvitation({ invitationId }), 'Could not accept it.'),
+        'You joined',
+      );
       if (joined) await router.navigate({ to: '/' });
     },
     async declineInvitation(invitationId) {
-      const declined = await run('invitation', () => auth(authClient.organization.rejectInvitation({ invitationId }), 'Could not decline it.'), 'Declined');
+      const declined = await run(
+        invitation,
+        'invitation',
+        () => auth(authClient.organization.rejectInvitation({ invitationId }), 'Could not decline it.'),
+        'Declined',
+      );
       if (declined) await router.navigate({ to: '/' });
     },
   };

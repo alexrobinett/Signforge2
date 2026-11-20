@@ -5,7 +5,7 @@
  */
 import { createFileRoute, Link, redirect } from '@tanstack/react-router';
 import { Logo } from '~/components/logo';
-import { ActionError } from '~/components/settings/parts';
+import { ActionError, useRunning } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
 import { getInvitation } from '~/server/settings.functions';
@@ -25,7 +25,7 @@ export const Route = createFileRoute('/accept-invitation/$invitationId')({
 
 function InvitationPage() {
   const { invitation, open, email } = Route.useLoaderData();
-  const pending = useAppStore((s) => s.settings.pending === 'invitation');
+  const pending = useRunning({ page: 'invitation', orgId: null }) !== undefined;
   const acceptInvitation = useAppStore((s) => s.acceptInvitation);
   const declineInvitation = useAppStore((s) => s.declineInvitation);
   return (

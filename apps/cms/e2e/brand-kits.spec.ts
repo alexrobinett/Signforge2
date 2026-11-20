@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, holdFirst, hydrated, shots, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -194,4 +194,48 @@ test("the kit's fields and actions are disabled in the server's HTML, until the 
   await hydrated(page);
   await expect(page.getByLabel('Name', { exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Duplicate' })).toBeEnabled();
+});
+
+test('kit actions run one at a time: Duplicate during a save is ignored, then copies what was saved; New kit waits for Duplicate (review of #143, 3)', async () => {
+  // A Duplicate during Save copied the colours from before it; New kit and Duplicate both ran,
+  // and both navigate when they finish.
+  test.setTimeout(60_000);
+  const { brandKit } = await tool(page, 'create_brand_kit', {
+    name: 'Serial kit',
+    colors: { primary: '#2563eb', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
+    idempotencyKey: `serial-kit-${Date.now()}`,
+  });
+  await page.goto(`/settings/brand-kits/${brandKit.id}`);
+  await hydrated(page);
+  await expect(page.getByLabel('Primary', { exact: true })).toBeEnabled();
+  await page.getByLabel('Primary', { exact: true }).fill('#335577');
+  const copies = await holdFirst(page, '/api/tools/create_brand_kit');
+  const saving = await holdFirst(page, '/api/tools/update_brand_kit');
+  await page.getByRole('button', { name: 'Save kit' }).click();
+  const saveAnswer = await saving.arrived;
+  const duplicate = page.getByRole('button', { name: 'Duplicate' });
+  await expect(duplicate).toHaveAttribute('aria-disabled', 'true');
+  await duplicate.focus();
+  await page.keyboard.press('Enter');
+  await saveAnswer.continue();
+  // Default kit or not (this test may run alone, its kit the org's first), it reads Saved and a time.
+  await expect(page.getByText(/ · Saved \d/)).toBeVisible();
+  await expect(duplicate).not.toHaveAttribute('aria-disabled');
+  expect(copies.calls()).toBe(0);
+
+  // From the list: Duplicate copies the saved colour, and New kit is ignored until it is done.
+  await page.getByRole('link', { name: 'Brand kits' }).first().click();
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Duplicate Serial kit' }).focus();
+  await page.keyboard.press('Enter');
+  const copy = await copies.arrived;
+  expect(copy.request().postDataJSON()).toMatchObject({ name: 'Serial kit copy', colors: { primary: '#335577' } });
+  await page.getByRole('button', { name: 'New kit' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New brand kit' });
+  await dialog.getByLabel('Name').fill('Spring');
+  await expect(dialog.getByRole('button', { name: 'Create kit' })).toHaveAttribute('aria-disabled', 'true');
+  await dialog.getByLabel('Name').press('Enter');
+  await copy.continue();
+  await expect(page.getByRole('heading', { name: 'Serial kit copy', level: 1 })).toBeVisible();
+  expect(copies.calls()).toBe(1);
 });

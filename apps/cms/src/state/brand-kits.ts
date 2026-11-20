@@ -13,6 +13,7 @@
 import { DEFAULT_BRAND_COLORS } from '@signforge/compiler';
 import { PREVIEW_PROTOCOL, type BrandColor, type ScreenManifest } from '@signforge/contract';
 import { duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
+import { orgOnScreen } from '~/lib/live';
 import { playerMessage } from '~/lib/preview';
 import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/spots';
 import { brandKitIdOf, brandKitVersionOf, callTool, isStale, toolMessage } from '~/lib/tools';
@@ -59,7 +60,11 @@ interface BrandKitsState {
   edits: Record<string, KitEdit>;
   /** Which logo's picker is open. */
   logoFor: 'dark' | 'light' | null;
-  /** The kit action running (`default:<kit>`, `duplicate:<kit>`, `assign:<group or screen>`), or null. */
+  /**
+   * The kit action running (`default:<kit>`, `duplicate:<kit>`, `assign:<group or screen>`), or
+   * null. While one runs, or a kit saves or is created (`kitActionRunning`), another is ignored;
+   * its controls say so with `aria-disabled`, since a disabled control loses keyboard focus.
+   */
   pending: string | null;
   /** Why the last kit action failed, for the kit whose page or row it was started from. */
   actionError: { kitId: string; text: string } | null;
@@ -81,11 +86,12 @@ export interface BrandKitsSlice {
   /** After a refused save: reads the kits again and drops the kit's draft. */
   reloadKit: (orgId: string, kitId: string) => Promise<void>;
   pickLogo: (which: 'dark' | 'light' | null) => void;
+  /** Opens or closes the New kit dialog. A create on its way goes on with it closed, and keeps its name and key. */
   openNewKit: (open: boolean) => void;
   nameNewKit: (name: string) => void;
-  /** Creates a kit with the no-kit palette and opens it. */
+  /** Creates a kit with the no-kit palette, and opens it if the member is still where they asked. */
   createKit: (orgId: string) => Promise<void>;
-  /** Makes a copy and opens it. A retry after a lost answer sends the same key, so it never makes two. */
+  /** Makes a copy, and opens it if the member is still where they asked. A retry after a lost answer sends the same key, so it never makes two. */
   duplicateKit: (orgId: string, kit: BrandKitView) => Promise<void>;
   makeDefaultKit: (orgId: string, kitId: string) => Promise<void>;
   /** Gives a group or a screen `kit` (`chosen`), or takes its choice away. */
@@ -115,6 +121,12 @@ interface PreviewLink {
   /** The newest draft compiled while the player had one unanswered: sent when it answers. */
   next: { manifest: ScreenManifest; seq: number } | null;
 }
+
+/**
+ * Whether a kit action, a save or a new kit is on its way. They run one at a time: a Duplicate
+ * during a save would copy the colours from before it, and two that navigate would race.
+ */
+export const kitActionRunning = ({ brandKits: k }: BrandKitsSlice) => k.pending !== null || k.newKit.pending || Object.values(k.edits).some((e) => e.saving);
 
 export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { router, queryClient }) => {
   const kits = (change: (k: BrandKitsState) => BrandKitsState) => set((s) => ({ brandKits: change(s.brandKits) }));
@@ -215,17 +227,27 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     }));
   };
 
-  /** Runs one kit action for `kitId`'s page or row, marking it pending and showing its refusal there, then reads the kits again. */
+  // A create that finishes after the member has moved on (another page, another org) does not take
+  // them away from what they are doing there; the new kit is on the list.
+  const where = () => router.state.location.href;
+  const stillAt = (from: string, orgId: string) => router.state.location.href === from && orgOnScreen(router) === orgId;
+
+  /**
+   * Runs one kit action for `kitId`'s page or row, unless one is running, marking it pending and
+   * showing its refusal there, then reads the kits again. Every way out releases it.
+   */
   async function act(orgId: string, kitId: string, at: string, work: () => Promise<unknown>): Promise<boolean> {
+    if (kitActionRunning(get())) return false;
     kits((k) => ({ ...k, pending: at, actionError: null }));
     try {
       await work();
       await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
-      kits((k) => ({ ...k, pending: null }));
       return true;
     } catch (err) {
-      kits((k) => ({ ...k, pending: null, actionError: { kitId, text: toolMessage(err) } }));
+      kits((k) => ({ ...k, actionError: { kitId, text: toolMessage(err) } }));
       return false;
+    } finally {
+      kits((k) => ({ ...k, pending: null }));
     }
   }
 
@@ -251,7 +273,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
 
     async saveKit(orgId, kit) {
       const { draft, version } = get().brandKits.edits[kit.id] ?? NO_EDIT;
-      if (!draft || version === null) return;
+      if (!draft || version === null || kitActionRunning(get())) return;
       edit(kit.id, (e) => ({ ...e, saving: true, error: null }));
       try {
         const saved = brandKitVersionOf(await callTool('update_brand_kit', updateInput(kit.id, draft, version)));
@@ -283,16 +305,18 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
 
     pickLogo: (logoFor) => kits((k) => ({ ...k, logoFor })),
 
-    openNewKit: (open) => kits((k) => ({ ...k, newKit: { ...newKit(), open } })),
+    openNewKit: (open) => kits((k) => ({ ...k, newKit: k.newKit.pending ? { ...k.newKit, open } : { ...newKit(), open } })),
     nameNewKit: (name) => kits((k) => ({ ...k, newKit: { ...k.newKit, name, error: null } })),
 
     async createKit(orgId) {
+      if (kitActionRunning(get())) return;
       const key = get().brandKits.newKit.key ?? crypto.randomUUID();
       kits((k) => ({ ...k, newKit: { ...k.newKit, key, pending: true, error: null } }));
+      const from = where();
       try {
         const out = await callTool('create_brand_kit', { name: get().brandKits.newKit.name.trim(), colors: NEW_KIT_COLORS, idempotencyKey: key });
         await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
-        await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId: brandKitIdOf(out) } });
+        if (stillAt(from, orgId)) await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId: brandKitIdOf(out) } });
         kits((k) => ({ ...k, newKit: newKit() }));
       } catch (err) {
         kits((k) => ({ ...k, newKit: { ...k.newKit, pending: false, error: toolMessage(err) } }));
@@ -304,12 +328,13 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       const key = duplicateKeys.get(of) ?? crypto.randomUUID();
       duplicateKeys.set(of, key);
       let kitId: string | undefined;
+      const from = where();
       const done = await act(orgId, kit.id, `duplicate:${kit.id}`, async () => {
         kitId = brandKitIdOf(await callTool('create_brand_kit', duplicateInput(kit, key)));
       });
       if (!done || !kitId) return;
       duplicateKeys.delete(of);
-      await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId } });
+      if (stillAt(from, orgId)) await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId } });
     },
 
     async makeDefaultKit(orgId, brandKitId) {

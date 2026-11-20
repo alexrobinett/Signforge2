@@ -7,7 +7,7 @@ import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { ActionError, SettingsSection } from '~/components/settings/parts';
+import { ActionError, SettingsSection, useRunning } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -38,7 +38,7 @@ function AccountPage() {
   const { sessions, github, at } = Route.useLoaderData();
   const { user } = app.useLoaderData();
   const id = useId();
-  const pending = useAppStore((s) => s.settings.pending);
+  const busy = useRunning({ page: 'account', orgId: null }) !== undefined;
   const saveProfile = useAppStore((s) => s.saveProfile);
   const signOutSession = useAppStore((s) => s.signOutSession);
   const signOutOtherSessions = useAppStore((s) => s.signOutOtherSessions);
@@ -80,7 +80,7 @@ function AccountPage() {
             </div>
             <ActionError at="profile" />
             <div>
-              <Button type="submit" disabled={pending === 'profile'}>
+              <Button type="submit" aria-disabled={busy || undefined}>
                 Save
               </Button>
             </div>
@@ -104,7 +104,7 @@ function AccountPage() {
                 <span className="block text-sm text-muted-foreground">{github.linked ? 'Connected' : 'Not connected'}</span>
               </span>
               {!github.linked && (
-                <Button variant="outline" disabled={pending === 'github'} onClick={() => void connectGithub()}>
+                <Button variant="outline" aria-disabled={busy || undefined} onClick={() => void connectGithub()}>
                   Connect GitHub
                 </Button>
               )}
@@ -127,9 +127,15 @@ function AccountPage() {
                 </span>
               </span>
               {s.token !== null && (
-                <Button variant="ghost" size="sm" disabled={pending === `session:${s.token}`} onClick={() => s.token && void signOutSession(s.token)}>
-                  Sign out
-                </Button>
+                <>
+                  <Button variant="ghost" size="sm" aria-disabled={busy || undefined} onClick={() => s.token && void signOutSession(s.token)}>
+                    Sign out
+                  </Button>
+                  {/* Its refusal shows on its row; a row with none takes no space. */}
+                  <div className="basis-full has-[>:empty]:hidden">
+                    <ActionError at={`session:${s.token}`} />
+                  </div>
+                </>
               )}
             </li>
           ))}
@@ -137,7 +143,7 @@ function AccountPage() {
         {others.length > 0 && (
           <div className="space-y-2">
             <ActionError at="sessions" />
-            <Button variant="outline" disabled={pending === 'sessions'} onClick={() => void signOutOtherSessions()}>
+            <Button variant="outline" aria-disabled={busy || undefined} onClick={() => void signOutOtherSessions()}>
               Sign out everywhere else
             </Button>
           </div>

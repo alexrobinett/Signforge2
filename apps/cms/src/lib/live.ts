@@ -3,7 +3,7 @@
  * navigation and after an action; the Screens page also polls what each screen is doing
  * (src/queries/screens.ts).
  */
-import { getRouteApi } from '@tanstack/react-router';
+import { getRouteApi, useRouterState, type AnyRouter } from '@tanstack/react-router';
 import { useSyncExternalStore } from 'react';
 
 /** How often the clock the pages read from ticks. */
@@ -35,6 +35,23 @@ export function useRole() {
 export function useOrgId(): string {
   return app.useLoaderData().organization?.id ?? '';
 }
+
+type Matches = AnyRouter['state']['matches'];
+function shellOrg(matches: Matches): string | undefined {
+  const shell: unknown = matches.find((m) => m.routeId === '/_app')?.loaderData;
+  if (typeof shell !== 'object' || shell === null || !('organization' in shell)) return undefined;
+  const org = shell.organization;
+  return typeof org === 'object' && org !== null && 'id' in org && typeof org.id === 'string' ? org.id : undefined;
+}
+
+/**
+ * The org the page shows, or undefined outside the app shell: a store action checks a late answer
+ * against it, so an answer for the org the tab has left changes nothing in the one it shows.
+ */
+export const orgOnScreen = (router: AnyRouter) => shellOrg(router.state.matches);
+
+/** The same, for a component that may render outside the app shell (the invitation page). */
+export const useOrgOnScreen = () => useRouterState({ select: (s) => shellOrg(s.matches) });
 
 /** Editors and owners manage screens; viewers read. */
 export const useCanManage = () => useRole() !== 'viewer';

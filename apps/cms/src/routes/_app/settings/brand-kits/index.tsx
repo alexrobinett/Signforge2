@@ -16,6 +16,7 @@ import { useCanManage, useOrgId } from '~/lib/live';
 import type { GroupView } from '~/lib/screen-types';
 import { screensQuery } from '~/queries/screens';
 import { brandKitsQuery } from '~/queries/spots';
+import { kitActionRunning } from '~/state/brand-kits';
 import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/_app/settings/brand-kits/')({
@@ -52,6 +53,7 @@ function NewKitDialog({ orgId }: { orgId: string }) {
   const open = useAppStore((s) => s.openNewKit);
   const name = useAppStore((s) => s.nameNewKit);
   const create = useAppStore((s) => s.createKit);
+  const busy = useAppStore(kitActionRunning);
   return (
     <NameDialog
       id="new-kit-name"
@@ -59,6 +61,7 @@ function NewKitDialog({ orgId }: { orgId: string }) {
       title="New brand kit"
       description="It starts with the colours screens use without a kit. No screen wears it until it is used and published."
       draft={draft}
+      busy={busy}
       onOpenChange={open}
       onName={name}
       onCreate={() => void create(orgId)}
@@ -71,7 +74,7 @@ function BrandKitsPage() {
   const canManage = useCanManage();
   const { brandKits } = useSuspenseQuery(brandKitsQuery(orgId)).data;
   const { groups } = useSuspenseQuery(screensQuery(orgId)).data;
-  const pending = useAppStore((s) => s.brandKits.pending);
+  const busy = useAppStore(kitActionRunning);
   const actionError = useAppStore((s) => s.brandKits.actionError);
   const edits = useAppStore((s) => s.brandKits.edits);
   const duplicate = useAppStore((s) => s.duplicateKit);
@@ -136,12 +139,17 @@ function BrandKitsPage() {
                   </Link>
                 </Button>
                 {canManage && (
-                  <Button variant="outline" disabled={pending !== null} onClick={() => void duplicate(orgId, k)} aria-label={`Duplicate ${k.name}`}>
+                  <Button variant="outline" aria-disabled={busy || undefined} onClick={() => void duplicate(orgId, k)} aria-label={`Duplicate ${k.name}`}>
                     Duplicate
                   </Button>
                 )}
                 {canManage && !k.isDefault && (
-                  <Button variant="outline" disabled={pending !== null} onClick={() => void makeDefault(orgId, k.id)} aria-label={`Make default: ${k.name}`}>
+                  <Button
+                    variant="outline"
+                    aria-disabled={busy || undefined}
+                    onClick={() => void makeDefault(orgId, k.id)}
+                    aria-label={`Make default: ${k.name}`}
+                  >
                     Make default
                   </Button>
                 )}

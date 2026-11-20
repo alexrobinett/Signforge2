@@ -80,6 +80,12 @@ const preview = (brandKitId: string): SpotPreview => ({
 
 let hear: (e: unknown) => void = () => {};
 
+/** The router as the store reads it: where the member is, in which org, and where it was sent. */
+const router = {
+  state: { location: { href: '' }, matches: [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }] },
+  navigate: vi.fn(async () => {}),
+};
+
 /** Hashes held back by the test, by a text their input contains; every other hash is done at once. */
 const held = new Map<string, Promise<void>>();
 
@@ -104,6 +110,8 @@ beforeEach(() => {
   vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
   vi.stubGlobal('location', { origin: 'http://cms.test' });
   held.clear();
+  router.state.location.href = '/settings/brand-kits';
+  router.navigate.mockClear();
   vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (_: AlgorithmIdentifier, data: BufferSource) => {
     const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);
     const text = new TextDecoder().decode(bytes);
@@ -130,7 +138,7 @@ function page(kits: BrandKitView[]) {
   // The page's components observe these reads (useSuspenseQuery), so they are kept.
   const observe = (q: object) => new QueryObserver(queryClient, q as never).subscribe(() => {});
   for (const q of [brandKitsQuery(ORG), spotsQuery(ORG), templatesQuery(ORG), assetsQuery(ORG)]) observe(q);
-  const store = createStore<BrandKitsSlice>()((set, get) => createBrandKitsSlice(set as never, get as never, { router: {}, queryClient } as never));
+  const store = createStore<BrandKitsSlice>()((set, get) => createBrandKitsSlice(set as never, get as never, { router, queryClient } as never));
   const posted: string[] = [];
   const frame: Window = {
     postMessage: (m: { manifest: { brand?: { colors: { primary: string } } } }) => posted.push(m.manifest.brand?.colors.primary ?? 'none'),
@@ -265,5 +273,101 @@ describe('drafts to one player across a kit switch and a reload (re-check of #10
     await vi.advanceTimersByTimeAsync(100);
     await new Promise((r) => setImmediate(r));
     expect(posted).toEqual(['#2563eb', '#111111']);
+  });
+});
+
+describe('kit actions run one at a time (review of #143)', () => {
+  /** `fetch` for the tools: each call is recorded, and its answer waits until the test gives one. */
+  function heldTools() {
+    const calls: { name: string; input: unknown; answer: (status: number, body: unknown) => void }[] = [];
+    let arrived: () => void = () => {};
+    vi.stubGlobal('fetch', (url: string, init: { body: string }) => {
+      const answer = new Promise<Response>((resolve) => {
+        calls.push({
+          name: url.split('/').at(-1) ?? '',
+          input: JSON.parse(init.body),
+          answer: (status, body) => resolve(new Response(JSON.stringify(body), { status })),
+        });
+      });
+      arrived();
+      return answer;
+    });
+    /** Resolves once the tools have been called `n` times in all. */
+    const called = (n: number) =>
+      new Promise<void>((resolve) => {
+        arrived = () => calls.length >= n && resolve();
+        arrived();
+      });
+    return { calls, called };
+  }
+  const refused = { error: 'error', message: 'Refused' };
+
+  it('a Duplicate, or a new kit, while the kit saves is ignored; so is a save while Duplicate runs', async () => {
+    const { calls, called } = heldTools();
+    const a = kit('bk_a', '#2563eb');
+    const { store } = page([a]);
+    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
+    const saving = store.getState().saveKit(ORG, a);
+    await called(1);
+    await store.getState().duplicateKit(ORG, a);
+    store.getState().nameNewKit('Spring');
+    await store.getState().createKit(ORG);
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+    calls[0]!.answer(409, refused);
+    await saving;
+
+    const duplicating = store.getState().duplicateKit(ORG, a);
+    await called(2);
+    await store.getState().saveKit(ORG, a);
+    await store.getState().createKit(ORG);
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit', 'create_brand_kit']);
+    calls[1]!.answer(409, refused);
+    await duplicating;
+    expect(store.getState().brandKits.pending).toBeNull();
+  });
+
+  it('a request that gets no answer releases the action, with its message', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    const a = kit('bk_a', '#2563eb');
+    const { store } = page([a]);
+    await store.getState().makeDefaultKit(ORG, a.id);
+    expect(store.getState().brandKits).toMatchObject({
+      pending: null,
+      actionError: { kitId: 'bk_a', text: 'Could not reach SignForge. Check your connection and try again.' },
+    });
+  });
+
+  it('a new kit on its way goes on with its dialog closed: Escape and a second Create make no second kit (re-check of #143, 4)', async () => {
+    const { calls, called } = heldTools();
+    const { store } = page([kit('bk_a', '#2563eb')]);
+    store.getState().openNewKit(true);
+    store.getState().nameNewKit('One');
+    const creating = store.getState().createKit(ORG);
+    await called(1);
+    store.getState().openNewKit(false);
+    store.getState().openNewKit(true);
+    expect(store.getState().brandKits.newKit).toMatchObject({ open: true, pending: true, name: 'One' });
+    store.getState().nameNewKit('Two');
+    await store.getState().createKit(ORG);
+    expect(calls.map((c) => c.name)).toEqual(['create_brand_kit']);
+    calls[0]!.answer(200, { brandKit: { ...kit('bk_one', '#2563eb'), name: 'One' } });
+    await creating;
+    expect(router.navigate).toHaveBeenCalledTimes(1);
+    expect(router.navigate).toHaveBeenCalledWith({ to: '/settings/brand-kits/$kitId', params: { kitId: 'bk_one' } });
+  });
+
+  it('a copy that is made after the member has moved on does not take them away from where they are now', async () => {
+    const { calls, called } = heldTools();
+    const a = kit('bk_a', '#2563eb');
+    const { store } = page([a]);
+    const duplicating = store.getState().duplicateKit(ORG, a);
+    await called(1);
+    router.state.location.href = '/settings/general';
+    calls[0]!.answer(200, { brandKit: kit('bk_copy', '#2563eb') });
+    await duplicating;
+    expect(router.navigate).not.toHaveBeenCalled();
+    expect(store.getState().brandKits.pending).toBeNull();
   });
 });

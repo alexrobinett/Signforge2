@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { expect, request as playwrightRequest, type Page } from '@playwright/test';
+import { expect, request as playwrightRequest, type Page, type Route } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
 import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor, RUN_DIR } from './servers';
@@ -109,6 +109,12 @@ export async function signInAs(page: Page, email: string, address: string) {
     }),
   );
   await request.dispose();
+  // The page's calls come from `address` too (the CMS passes it to the API). Better Auth counts a
+  // path's calls per address until 10 s pass with none, so on one shared address every spec's
+  // shell read added up and a long run got 429.
+  await page
+    .context()
+    .route(`${CMS_URL}/**`, async (route) => route.fallback({ headers: { ...(await route.request().allHeaders()), 'cf-connecting-ip': address } }));
 }
 
 const sha256 = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
@@ -309,4 +315,19 @@ export async function newSpot(page: Page, template: string, name: string) {
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
   await hydrated(page);
   return spotIdOf(page);
+}
+
+/** Holds the first request to `path` until the test continues it; later ones go through, counted. */
+export async function holdFirst(page: Page, path: string) {
+  let calls = 0;
+  let hold: (route: Route) => void = () => {};
+  const arrived = new Promise<Route>((resolve) => {
+    hold = resolve;
+  });
+  await page.route(`**${path}`, (route) => {
+    calls += 1;
+    if (calls === 1) hold(route);
+    else void route.continue();
+  });
+  return { arrived, calls: () => calls };
 }
