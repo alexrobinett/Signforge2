@@ -98,6 +98,8 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   // Its example code, open to claim.
   claim_screen: () => startPairing(env.DB, { code: 'ABC234', pollTokenHash: 'a'.repeat(64), now: Date.now() }),
   delete_group: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
+  // The seeded entry, made a takeover.
+  end_takeover: (o) => o.scope.scheduleEntries.update(o.scheduleEntry, { priority: 100, startsAt: Date.now(), endsAt: Date.now() + 3_600_000 }),
   delete_playlist: (o) => o.scope.scheduleEntries.delete(o.scheduleEntry),
   delete_asset: async (o) => {
     await o.scope.playlists.setItems(o.playlist, [o.templateSpot]);

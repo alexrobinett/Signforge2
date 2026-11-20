@@ -250,6 +250,7 @@ export async function dispatch<D extends DataScope>(
         org: caller.org,
         actor: caller.actor,
         role: caller.role,
+        scopes: effectiveScopes(grant),
         input: parsed.data,
         blobs: caller.blobs,
         uploads: caller.uploads,

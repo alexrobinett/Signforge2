@@ -72,6 +72,7 @@ describe('the registry', () => {
       'delete_playlist',
       'delete_schedule_entry',
       'disconnect',
+      'end_takeover',
       'finalize_asset',
       'finalize_video_upload',
       'find_places',

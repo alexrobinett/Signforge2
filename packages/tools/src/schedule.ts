@@ -11,8 +11,12 @@
  *
  * An entry is a draft: screens get it at the next publish, which holds it back until its playlist
  * is published. Each is checked with the contract's `scheduleEntryProblems` before it is stored.
- * Deletes and creates go through `packages/db`'s repository, so an entry made again with a deleted
- * one's id continues its versions (`draft_tombstones`).
+ * Deleting a published entry needs the right to publish, and waits like an edit: screens keep it
+ * until a publish of everything, or one that pins the deletion, applies it (`deleted_at`).
+ * `end_takeover` (./publish.ts) deletes a takeover and publishes that alone, in one batch. A
+ * takeover that has ended is left out of every compile, and its row goes at the next publish
+ * (`ended`). Deletes and creates go through `packages/db`'s repository, so an entry made again
+ * with a deleted one's id continues its versions (`draft_tombstones`).
  */
 import { scheduleEntryProblems, type ScheduleEntry } from '@signforge/contract';
 import { draftChanged, published, type OrgScope, type ScheduleEntryRow } from '@signforge/db';
@@ -52,8 +56,7 @@ const when = {
 };
 const instant = (what: string) => z.string().describe(`${what}, an ISO 8601 time`);
 
-const entryOutput = z.object({
-  id: z.string(),
+const fieldsOutput = z.object({
   playlistId: z.string(),
   target,
   groupId: z.string().nullable(),
@@ -67,6 +70,12 @@ const entryOutput = z.object({
   startsAt: z.string().nullable().describe("A takeover's start, ISO 8601"),
   endsAt: z.string().nullable().describe("A takeover's end, ISO 8601"),
   takeover: z.boolean().describe('Whether it is a takeover (start_takeover)'),
+});
+const entryOutput = z.object({
+  id: z.string(),
+  ...fieldsOutput.shape,
+  deleted: z.boolean().describe('Deleted, waiting for a publish to take it off screens: they keep the published version until then'),
+  live: fieldsOutput.nullable().describe('The published version, what screens play; null if it was never published'),
   version: version.describe('Moves on with every edit of the draft; pass it as ifVersion to update only what you read'),
   ...draftOutput,
 });
@@ -75,8 +84,8 @@ const entryResult = z.object({ entry: entryOutput });
 
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
 
-const entryView = (row: ScheduleEntryRow): EntryView => ({
-  id: row.id,
+/** An entry's content as the tools show it, from its draft or its published version. */
+const fieldsView = (row: ScheduleEntryRow): z.infer<typeof fieldsOutput> => ({
   playlistId: row.playlistId,
   target: row.target,
   groupId: row.groupId,
@@ -91,13 +100,33 @@ const entryView = (row: ScheduleEntryRow): EntryView => ({
   startsAt: iso(row.startsAt),
   endsAt: iso(row.endsAt),
   takeover: row.endsAt !== null,
-  version: row.rowVersion,
-  published: published(row) !== undefined,
-  draftChanged: draftChanged(row),
-  publishedAt: row.publishedAt,
-  createdAt: row.createdAt,
-  updatedAt: row.updatedAt,
 });
+
+const entryView = (row: ScheduleEntryRow): EntryView => {
+  const live = published(row);
+  return {
+    id: row.id,
+    ...fieldsView(row),
+    deleted: row.deletedAt !== null,
+    live: live ? fieldsView(live) : null,
+    version: row.rowVersion,
+    published: live !== undefined,
+    draftChanged: draftChanged(row),
+    publishedAt: row.publishedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+};
+
+/**
+ * Whether a takeover is over for good at `now`: its draft and its published version (if any) have
+ * both ended. It plays nowhere again, so a publish leaves it out and deletes it.
+ */
+export const ended = (row: ScheduleEntryRow, now: number): boolean => {
+  const over = (e: Pick<ScheduleEntryRow, 'endsAt'>) => e.endsAt !== null && e.endsAt <= now;
+  const live = published(row);
+  return over(row) && (!live || over(live));
+};
 
 type Stored = Pick<
   ScheduleEntryRow,
@@ -121,6 +150,7 @@ function check(id: string, e: Stored): void {
   };
   const problems = scheduleEntryProblems(entry).map((p) => p.replace(`schedule entry "${id}": `, ''));
   if (e.daysJson !== null && new Set(JSON.parse(e.daysJson)).size !== JSON.parse(e.daysJson).length) problems.push('days must not repeat');
+  if (e.startDate !== null && e.endDate !== null && e.endDate < e.startDate) problems.push('endDate is before startDate');
   if (problems.length) throw new ToolError('invalid_input', problems.join('; '), { problems });
 }
 
@@ -155,9 +185,10 @@ async function missingAim(org: OrgScope, e: { playlistId?: string; groupId?: str
   return undefined;
 }
 
+/** The entry, refused when it does not exist or is deleted, waiting for a publish. */
 async function requireEntry(org: OrgScope, scheduleEntryId: string) {
   const row = await org.scheduleEntries.get(scheduleEntryId);
-  if (!row) throw notFound('schedule entry', scheduleEntryId);
+  if (!row || row.deletedAt !== null) throw notFound('schedule entry', scheduleEntryId);
   return row;
 }
 
@@ -216,7 +247,7 @@ const createEntry = defineTool({
 const startTakeover = defineTool({
   name: 'start_takeover',
   description:
-    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. End one early with update_schedule_entry (endsAt) or delete_schedule_entry, and publish. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
+    "Take over screens with a playlist, as a draft: from startsAt (default now) until endsAt, at most 24 hours later, on every screen (target org), a group's screens or one screen, above every schedule entry. Publish it to send it: a screen then ends the spot on screen at once instead of at its end, and ends the takeover on time with the network down. Of two takeovers on the same screens, the one that starts later wins, so a new one replaces one running. End one now with end_takeover, or early with update_schedule_entry (endsAt) and publish. Once over, it is left out of every publish and deleted at the next. Pass an idempotencyKey so a retry cannot create it twice. Returns { entry }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -260,7 +291,7 @@ const TAKEOVER_ONLY = ['startsAt', 'endsAt'] as const;
 const updateEntry = defineTool({
   name: 'update_schedule_entry',
   description:
-    "Change a schedule entry's or takeover's draft. Give only what changes: the playlist, whom it is aimed at (target with groupId or screenId), and for a schedule entry its priority, dates, weekdays and window (null clears one), or for a takeover its startsAt and endsAt (end it early, or extend it to at most 24 hours from its start). Screens keep the published version until the next publish. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { entry }.",
+    "Change a schedule entry's or takeover's draft. Give only what changes: the playlist, whom it is aimed at (target with groupId or screenId), and for a schedule entry its priority, dates, weekdays and window (null clears one), or for a takeover its startsAt and endsAt (end it early, or extend it to at most 24 hours from its start). Screens keep the published version until the next publish. A takeover's new playlist reaches a screen at the end of the spot on screen; a new takeover (start_takeover) cuts in at once. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { entry }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -319,18 +350,26 @@ const updateEntry = defineTool({
 const deleteEntry = defineTool({
   name: 'delete_schedule_entry',
   description:
-    'Delete a schedule entry or takeover, its draft and its published version. Screens keep what they play until the next publish; publish with drafts: [] to apply only that. Returns { deleted: scheduleEntryId }.',
+    'Delete a schedule entry or takeover. One never published goes at once. A published one needs the right to publish (refused to editors where only owners publish), and waits like an edit: screens keep it until a publish of every change, or one that pins it (kind schedule_entry at the version returned), applies the deletion; until then it is listed with deleted: true. To end a takeover now, use end_takeover. Returns { deleted: scheduleEntryId, version }, version null when it went at once.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
   input: z.object({ scheduleEntryId: id('schedule entry') }),
-  output: z.object({ deleted: z.string().describe("The deleted entry's id") }),
+  output: z.object({
+    deleted: z.string().describe("The deleted entry's id"),
+    version: version.nullable().describe("The deletion's version, to pin in a publish; null when it was never published and went at once"),
+  }),
   example: { scheduleEntryId: 'sch_example' },
   target: entryTarget,
-  handler: async ({ org, input, write }) => {
-    await requireEntry(org, input.scheduleEntryId);
-    write(org.scheduleEntries.stage.delete(input.scheduleEntryId));
-    return { deleted: input.scheduleEntryId };
+  handler: async ({ org, input, write, scopes }) => {
+    const row = await requireEntry(org, input.scheduleEntryId);
+    if (!published(row)) {
+      write(org.scheduleEntries.stage.delete(row.id));
+      return { deleted: row.id, version: null };
+    }
+    if (!scopes.includes('content:publish')) throw new ToolError('forbidden', 'Screens play this entry: deleting it needs the right to publish');
+    const marked = write(org.scheduleEntries.stage.update(row, { deletedAt: Date.now() }, row.rowVersion));
+    return { deleted: row.id, version: marked.rowVersion };
   },
 });
 
