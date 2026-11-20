@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
-const ADDRESS = '192.0.2.41';
+const ADDRESS = '192.0.2.44';
 
 test.describe.configure({ mode: 'serial' });
 
