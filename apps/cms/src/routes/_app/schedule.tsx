@@ -80,12 +80,12 @@ function SchedulePage() {
         <PageHeader title={section.label} description={section.description}>
           <div className="flex flex-wrap gap-2">
             {canPublish && (
-              <Button variant="outline" onClick={() => openTakeover()} disabled={!playlists.length}>
+              <Button variant="outline" onClick={() => openTakeover(orgId)} disabled={!playlists.length}>
                 Take over screens
               </Button>
             )}
             {canManage && (
-              <Button variant="outline" onClick={() => openNewEntry()} disabled={!playlists.length}>
+              <Button variant="outline" onClick={() => openNewEntry(orgId)} disabled={!playlists.length}>
                 Schedule a playlist
               </Button>
             )}
@@ -158,7 +158,7 @@ function SchedulePage() {
                         variant="ghost"
                         size="icon"
                         aria-label={`Change ${names.get(e.playlistId) ?? 'entry'} on ${aimedAt(e, screens, groups)}`}
-                        onClick={() => openEditEntry(e)}
+                        onClick={() => openEditEntry(orgId, e)}
                       >
                         <PencilIcon aria-hidden />
                       </Button>

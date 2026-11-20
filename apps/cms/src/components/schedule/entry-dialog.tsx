@@ -3,7 +3,7 @@
  * one screen), and when (weekdays, a daily window, dates), with a priority for where entries
  * overlap. Saved as a draft; the page's Publish sends it.
  */
-import { LoaderCircleIcon } from 'lucide-react';
+import { LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '~/components/ui/dialog';
@@ -14,18 +14,19 @@ import type { PlaylistView } from '~/lib/playlists';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
-import { entryProblems } from '~/state/schedule';
+import { DIALOG, entryProblems } from '~/state/schedule';
 import { TargetFields } from './target-fields';
 
 export function EntryDialog({ orgId, playlists, screens, groups }: { orgId: string; playlists: PlaylistView[]; screens: ScreenView[]; groups: GroupView[] }) {
-  const d = useAppStore((s) => s.schedule.entry);
-  const saving = useAppStore((s) => s.schedule.saving);
-  const error = useAppStore((s) => s.schedule.error);
+  const draft = useAppStore((s) => s.schedule.entries[DIALOG]);
   const edit = useAppStore((s) => s.editEntry);
   const save = useAppStore((s) => s.saveEntry);
+  const reload = useAppStore((s) => s.reloadEntry);
   const close = useAppStore((s) => s.closeScheduleDialog);
   const id = useId();
-  if (!d) return null;
+  // A dialog opened in another org is not this page's.
+  if (draft?.orgId !== orgId) return null;
+  const { edit: d, pending: saving, error, stale } = draft;
   const problems = entryProblems(d);
 
   function submit(e: SubmitEvent) {
@@ -37,7 +38,7 @@ export function EntryDialog({ orgId, playlists, screens, groups }: { orgId: stri
     <Dialog open onOpenChange={(open) => !open && close()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{d.id ? 'Change schedule entry' : 'Schedule a playlist'}</DialogTitle>
+          <DialogTitle>{draft.record ? 'Change schedule entry' : 'Schedule a playlist'}</DialogTitle>
           <DialogDescription>Days and times are each screen's own, in its time zone. Saved as a draft: Publish sends it.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-4">
@@ -116,8 +117,13 @@ export function EntryDialog({ orgId, playlists, screens, groups }: { orgId: stri
             </p>
           </div>
           {(error || problems.length > 0) && (
-            <div role="alert" className="text-sm text-destructive">
-              {error ?? problems[0]}
+            <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+              {problems[0] ?? error}
+              {stale && (
+                <Button type="button" variant="outline" size="sm" onClick={() => void reload(orgId)}>
+                  <RotateCwIcon aria-hidden /> Reload
+                </Button>
+              )}
             </div>
           )}
           <DialogFooter>
