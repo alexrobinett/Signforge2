@@ -350,3 +350,27 @@ test("a screen's actions are disabled in the server's HTML, until the page has h
   await hydrated(page);
   await expect(page.getByRole('button', { name: 'Restart player' })).toBeEnabled();
 });
+
+test("the Screens page's pairing form, and its search and filters, are disabled in the server's HTML, until the page has hydrated (#140)", async ({
+  page,
+  request,
+}) => {
+  // The page hydrates after the app (body[data-hydrated]): a field changed in between was set back
+  // by React, and a filter chosen in between went nowhere.
+  await signInAs(page, `e2e-screens-server-${Date.now()}@example.com`, '192.0.2.18');
+  await createOrg(page, 'Northside Market');
+  // No screens yet: the pairing form is on the page.
+  const pairing = [...Array.from({ length: 6 }, (_, i) => `Character ${i + 1} of 6`), 'Name it', 'Time zone', 'Orientation', 'Pair'];
+  expect(await disabledOnServer(page, '/screens', pairing)).toEqual(Object.fromEntries(pairing.map((n) => [n, [true]])));
+  await page.goto('/screens');
+  await hydrated(page);
+  await expect(page.getByLabel('Name it')).toBeEnabled();
+
+  const { code } = await startPairing(request);
+  await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
+  const filters = ['Search screens', 'Status', 'Tiles', 'Table'];
+  expect(await disabledOnServer(page, '/screens', filters)).toEqual(Object.fromEntries(filters.map((n) => [n, [true]])));
+  await page.goto('/screens');
+  await hydrated(page);
+  await expect(page.getByLabel('Status', { exact: true })).toBeEnabled();
+});

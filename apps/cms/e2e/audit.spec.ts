@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, tool } from './helpers';
 import { API_PORT, CMS_URL } from './servers';
 
 /** This spec's own client addresses, so its sign-in and pairing have their own rate limits. */
@@ -130,4 +130,18 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
     'Could not load older entries: This tab is on Northside Market; you switched to Other Co in another tab. Reload.',
   );
   await expect(rows).toHaveCount(50);
+});
+
+test("the audit log's filters are disabled in the server's HTML, until the page has hydrated (#140)", async ({ page }) => {
+  // The page hydrates after the app (body[data-hydrated]): a filter chosen in between was set back
+  // by React. The search is not held: until then it is the browser's own GET of `?q=`, which the page reads.
+  await signInAs(page, `e2e-audit-server-${Date.now()}@example.com`, '192.0.2.49');
+  await createOrg(page, 'Northside Market');
+  const names = ['Who', 'What', 'Target', 'When', 'Search'];
+  expect(await disabledOnServer(page, '/audit', names)).toEqual({ Who: [true], What: [true], Target: [true], When: [true], Search: [false] });
+  expect(await disabledOnServer(page, '/audit?q=menu', ['Clear filters'])).toEqual({ 'Clear filters': [true] });
+  // Rendered by the server, they are enabled once the page has hydrated.
+  await page.goto('/audit');
+  await hydrated(page);
+  await expect(page.getByLabel('When', { exact: true })).toBeEnabled();
 });

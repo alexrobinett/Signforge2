@@ -9,6 +9,7 @@ import { useSuspenseInfiniteQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link, useRouter } from '@tanstack/react-router';
 import { DownloadIcon, LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
 import { useId, useMemo, type MouseEvent, type SubmitEvent } from 'react';
+import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { SettingsNav } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
@@ -257,71 +258,77 @@ function Filters({ members }: { members: { id: string; name: string }[] }) {
   return (
     <search aria-label="Filter the audit log">
       <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
-        <div className="grid w-full gap-1.5 sm:w-52">
-          <Label htmlFor={`${id}-who`}>Who</Label>
-          <NativeSelect className="w-full" id={`${id}-who`} value={search.who ?? ''} onChange={(e) => set('who', e.target.value)}>
-            <option value="">Everyone</option>
-            {WHO_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-            {members.length > 0 && (
-              <optgroup label="Members">
-                {members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </NativeSelect>
-        </div>
-        <div className="grid w-full gap-1.5 sm:w-52">
-          <Label htmlFor={`${id}-what`}>What</Label>
-          <NativeSelect className="w-full" id={`${id}-what`} value={search.what ?? ''} onChange={(e) => set('what', e.target.value)}>
-            <option value="">All changes</option>
-            {ACTION_GROUPS.map((g) => (
-              <optgroup key={g.group} label={g.group}>
-                {g.actions.map((a) => (
-                  <option key={a.value} value={a.value}>
-                    {g.group}: {a.label}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </NativeSelect>
-        </div>
-        <div className="grid w-[calc(50%-0.375rem)] gap-1.5 sm:w-40">
-          <Label htmlFor={`${id}-target`}>Target</Label>
-          <NativeSelect className="w-full" id={`${id}-target`} value={search.target ?? ''} onChange={(e) => set('target', e.target.value)}>
-            <option value="">Everything</option>
-            {TARGET_KINDS.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
-        <div className="grid w-[calc(50%-0.375rem)] gap-1.5 sm:w-40">
-          <Label htmlFor={`${id}-when`}>When</Label>
-          <NativeSelect className="w-full" id={`${id}-when`} value={search.when ?? ''} onChange={(e) => set('when', e.target.value)}>
-            <option value="">Any time</option>
-            {WHENS.map((w) => (
-              <option key={w.value} value={w.value}>
-                {w.label}
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
+        {/* The selects and Clear filters navigate, so they wait for the page to hydrate (#140). The
+            search is the browser's own GET of `?q=` until then, which the page reads. */}
+        <EditorFields>
+          <div className="grid w-full gap-1.5 sm:w-52">
+            <Label htmlFor={`${id}-who`}>Who</Label>
+            <NativeSelect className="w-full" id={`${id}-who`} value={search.who ?? ''} onChange={(e) => set('who', e.target.value)}>
+              <option value="">Everyone</option>
+              {WHO_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+              {members.length > 0 && (
+                <optgroup label="Members">
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </NativeSelect>
+          </div>
+          <div className="grid w-full gap-1.5 sm:w-52">
+            <Label htmlFor={`${id}-what`}>What</Label>
+            <NativeSelect className="w-full" id={`${id}-what`} value={search.what ?? ''} onChange={(e) => set('what', e.target.value)}>
+              <option value="">All changes</option>
+              {ACTION_GROUPS.map((g) => (
+                <optgroup key={g.group} label={g.group}>
+                  {g.actions.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {g.group}: {a.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </NativeSelect>
+          </div>
+          <div className="grid w-[calc(50%-0.375rem)] gap-1.5 sm:w-40">
+            <Label htmlFor={`${id}-target`}>Target</Label>
+            <NativeSelect className="w-full" id={`${id}-target`} value={search.target ?? ''} onChange={(e) => set('target', e.target.value)}>
+              <option value="">Everything</option>
+              {TARGET_KINDS.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <div className="grid w-[calc(50%-0.375rem)] gap-1.5 sm:w-40">
+            <Label htmlFor={`${id}-when`}>When</Label>
+            <NativeSelect className="w-full" id={`${id}-when`} value={search.when ?? ''} onChange={(e) => set('when', e.target.value)}>
+              <option value="">Any time</option>
+              {WHENS.map((w) => (
+                <option key={w.value} value={w.value}>
+                  {w.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+        </EditorFields>
         <div className="grid min-w-48 flex-1 gap-1.5">
           <Label htmlFor={`${id}-q`}>Search</Label>
           <Input id={`${id}-q`} name="q" type="search" defaultValue={search.q} placeholder="Screen, spot, name, agent…" />
         </div>
         {Object.values(search).some(Boolean) && (
-          <Button type="button" variant="ghost" onClick={clear}>
-            Clear filters
-          </Button>
+          <EditorFields>
+            <Button type="button" variant="ghost" onClick={clear}>
+              Clear filters
+            </Button>
+          </EditorFields>
         )}
       </form>
     </search>

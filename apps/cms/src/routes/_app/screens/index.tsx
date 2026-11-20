@@ -8,6 +8,7 @@ import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { CloudOffIcon, LayoutGridIcon, PlusIcon, SearchIcon, TableIcon } from 'lucide-react';
 import { useMemo } from 'react';
+import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { EmptyFleet } from '~/components/screens/empty-fleet';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
@@ -106,71 +107,74 @@ function ScreensPage() {
 
       {groups.length > 0 && <Locations groups={groups} screens={screens} onPick={(group) => set({ group })} />}
 
+      {/* The search and filters navigate, so they wait for the page to hydrate (#140). */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative max-w-sm flex-[1_1_16rem]">
-          <label htmlFor="screen-search" className="sr-only">
-            Search screens
-          </label>
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input
-            id="screen-search"
-            type="search"
-            placeholder="Search by name or spot"
-            defaultValue={search.q}
-            onChange={(e) => set({ q: e.target.value || undefined })}
-            className="pl-9"
-          />
-        </div>
-        {groups.length > 0 && (
-          <fieldset className="flex flex-wrap gap-1.5">
-            <legend className="sr-only">Filter by group</legend>
-            <Chip pressed={!search.group} onClick={() => set({ group: undefined })}>
-              All {screens.length}
-            </Chip>
-            {groups.map((g) => (
-              <Chip key={g.id} pressed={search.group === g.id} onClick={() => set({ group: search.group === g.id ? undefined : g.id })}>
-                {g.name} {g.screenIds.length}
+        <EditorFields>
+          <div className="relative max-w-sm flex-[1_1_16rem]">
+            <label htmlFor="screen-search" className="sr-only">
+              Search screens
+            </label>
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Input
+              id="screen-search"
+              type="search"
+              placeholder="Search by name or spot"
+              defaultValue={search.q}
+              onChange={(e) => set({ q: e.target.value || undefined })}
+              className="pl-9"
+            />
+          </div>
+          {groups.length > 0 && (
+            <fieldset className="flex flex-wrap gap-1.5">
+              <legend className="sr-only">Filter by group</legend>
+              <Chip pressed={!search.group} onClick={() => set({ group: undefined })}>
+                All {screens.length}
               </Chip>
+              {groups.map((g) => (
+                <Chip key={g.id} pressed={search.group === g.id} onClick={() => set({ group: search.group === g.id ? undefined : g.id })}>
+                  {g.name} {g.screenIds.length}
+                </Chip>
+              ))}
+            </fieldset>
+          )}
+          <div className="flex items-center gap-2 text-sm text-muted-foreground sm:ml-auto">
+            <label htmlFor="screen-status">Status</label>
+            <NativeSelect
+              id="screen-status"
+              value={search.status ?? ''}
+              onChange={(e) => set({ status: isStateKind(e.target.value) ? e.target.value : undefined })}
+            >
+              <option value="">Any</option>
+              {STATE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {KIND_WORD[k]}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <fieldset className="flex rounded-lg border border-border-strong bg-card p-0.5">
+            <legend className="sr-only">View</legend>
+            {(
+              [
+                ['tiles', 'Tiles', LayoutGridIcon],
+                ['table', 'Table', TableIcon],
+              ] as const
+            ).map(([v, label, Icon]) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={view === v}
+                onClick={() => set({ view: v === 'tiles' ? undefined : v })}
+                className={cn(
+                  'flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                  view === v ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Icon className="size-4" aria-hidden /> {label}
+              </button>
             ))}
           </fieldset>
-        )}
-        <div className="flex items-center gap-2 text-sm text-muted-foreground sm:ml-auto">
-          <label htmlFor="screen-status">Status</label>
-          <NativeSelect
-            id="screen-status"
-            value={search.status ?? ''}
-            onChange={(e) => set({ status: isStateKind(e.target.value) ? e.target.value : undefined })}
-          >
-            <option value="">Any</option>
-            {STATE_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {KIND_WORD[k]}
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
-        <fieldset className="flex rounded-lg border border-border-strong bg-card p-0.5">
-          <legend className="sr-only">View</legend>
-          {(
-            [
-              ['tiles', 'Tiles', LayoutGridIcon],
-              ['table', 'Table', TableIcon],
-            ] as const
-          ).map(([v, label, Icon]) => (
-            <button
-              key={v}
-              type="button"
-              aria-pressed={view === v}
-              onClick={() => set({ view: v === 'tiles' ? undefined : v })}
-              className={cn(
-                'flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                view === v ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Icon className="size-4" aria-hidden /> {label}
-            </button>
-          ))}
-        </fieldset>
+        </EditorFields>
       </div>
 
       {shown.length === 0 ? (
