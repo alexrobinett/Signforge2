@@ -99,6 +99,7 @@ describe('the registry', () => {
       'list_spots',
       'list_templates',
       'publish_manifest_to_screen',
+      'read_table',
       'register_template_version',
       'remove_alert_channel',
       'remove_group_members',
@@ -223,6 +224,7 @@ describe('roles and scopes', () => {
       'list_screens',
       'list_spots',
       'list_templates',
+      'read_table',
     ]);
     expect(names('editor')).not.toContain('revoke_screen_credential');
     expect(names('editor')).not.toContain('set_template_version_status');

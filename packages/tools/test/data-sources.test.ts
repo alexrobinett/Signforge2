@@ -3,7 +3,7 @@ import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { dispatch, registry, type Caller, type FeedUrlSealer, type PlaceFinder } from '../src';
+import { dispatch, registry, type Caller, type FeedUrlSealer, type PlaceFinder, type TableReader, ToolError } from '../src';
 
 let o: SeededOrg;
 let owner: Caller;
@@ -110,6 +110,88 @@ describe('data sources', () => {
     await owner.org.spots.update(o.templateSpot, { bindingsJson: null });
     expect(await call('delete_data_source', { dataSourceId: 'holidays' })).toEqual({ deleted: 'holidays' });
     expect(await owner.org.dataSources.snapshot('holidays')).toBeUndefined();
+  });
+});
+
+describe('table sources', () => {
+  it('adds a csv source, and a json-table source with the path to its rows, which only json-table takes', async () => {
+    await call('delete_data_source', {
+      dataSourceId: (await call('create_data_source', { name: 'x', format: 'json', feedUrl: 'https://a.example.com/x' })).dataSource.id,
+    });
+    const ids = (await owner.org.dataSources.list()).map((d) => d.id);
+    for (const id of ids.slice(0, 2)) await owner.org.dataSources.delete(id);
+    const { dataSource: csv } = await call('create_data_source', { id: 'menu', name: 'Menu', format: 'csv', feedUrl: 'https://menu.example.com/menu.csv' });
+    expect(csv).toMatchObject({ format: 'csv', rowsPath: null });
+    const { dataSource: json } = await call('create_data_source', {
+      id: 'stock',
+      name: 'Stock',
+      format: 'json-table',
+      feedUrl: 'https://shop.example.com/stock.json',
+      rowsPath: 'data.items',
+    });
+    expect(json).toMatchObject({ format: 'json-table', rowsPath: 'data.items' });
+    expect(await refusal('create_data_source', { name: 'x', format: 'csv', feedUrl: 'https://a.example.com/', rowsPath: 'a' })).toMatchObject({
+      error: 'invalid_input',
+      details: [{ path: 'rowsPath', message: 'rowsPath is for json-table sources only' }],
+    });
+    expect(await refusal('update_data_source', { dataSourceId: 'menu', rowsPath: 'a' })).toMatchObject({ error: 'invalid_input' });
+  });
+
+  it('polls a json-table source afresh when the path to its rows changes', async () => {
+    await owner.org.dataSources.update('stock', { etag: '"e"', failures: 2, lastError: 'not-a-table', nextPollAt: 99 });
+    expect(await call('update_data_source', { dataSourceId: 'stock', rowsPath: null })).toMatchObject({
+      dataSource: { rowsPath: null, failures: 0, lastError: null },
+    });
+    expect(await owner.org.dataSources.get('stock')).toMatchObject({ etag: null, nextPollAt: 0 });
+  });
+});
+
+describe('read_table', () => {
+  const table = { columns: ['Item', 'Price'], rows: [['Soup', '4.50']] };
+  const asked: unknown[] = [];
+  const tables: TableReader = {
+    read: async (source) => {
+      asked.push(source);
+      if (source.url.endsWith('bad.csv')) throw new ToolError('invalid_input', 'the file is not a table SignForge can read');
+      return table;
+    },
+  };
+  const rateLimit = async (bucket: string) => bucket === 'table_read';
+
+  it('reads a table at a URL now, storing nothing, for a viewer too', async () => {
+    const before = (await owner.org.dataSources.list()).length;
+    const r = await dispatch(
+      registry,
+      'read_table',
+      { feedUrl: 'https://menu.example.com/m.json', format: 'json-table', rowsPath: 'items' },
+      { ...owner, role: 'viewer', tables, rateLimit },
+    );
+    expect(r).toEqual({ ok: true, output: { table } });
+    expect(asked).toEqual([{ url: 'https://menu.example.com/m.json', format: 'json-table', rowsPath: 'items' }]);
+    expect((await owner.org.dataSources.list()).length).toBe(before);
+    expect(
+      await dispatch(registry, 'read_table', { feedUrl: 'https://menu.example.com/bad.csv', format: 'csv' }, { ...owner, tables, rateLimit }),
+    ).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      message: 'the file is not a table SignForge can read',
+    });
+  });
+
+  it('refuses a URL the poller would refuse, a caller over its limit or with none, without fetching', async () => {
+    asked.length = 0;
+    expect(await dispatch(registry, 'read_table', { feedUrl: 'https://10.0.0.1/m.csv', format: 'csv' }, { ...owner, tables, rateLimit })).toMatchObject({
+      error: 'invalid_input',
+    });
+    expect(
+      await dispatch(registry, 'read_table', { feedUrl: 'https://a.example.com/m.csv', format: 'csv' }, { ...owner, tables, rateLimit: async () => false }),
+    ).toMatchObject({
+      error: 'rate_limited',
+    });
+    expect(await dispatch(registry, 'read_table', { feedUrl: 'https://a.example.com/m.csv', format: 'csv' }, { ...owner, tables })).toMatchObject({
+      error: 'forbidden',
+    });
+    expect(asked).toEqual([]);
   });
 });
 

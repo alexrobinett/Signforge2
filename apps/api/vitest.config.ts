@@ -76,6 +76,8 @@ export default defineConfig({
           ADMIN_TOKEN: 'test-admin-token',
           // find_places's geocoder: a closed port, so no test reaches Open-Meteo.
           GEOCODING_URL: 'http://127.0.0.1:9/v1/search',
+          // Every feed fetch (the poller's default guards, read_table): a closed port too.
+          FEED_STUB_URL: 'http://127.0.0.1:9',
           TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname),
           TEMPLATE_BUILDS: await templateBuilds(),
           FONT_FILES: fontFiles(),

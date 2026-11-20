@@ -26,6 +26,7 @@ import {
   SCREEN_KINDS,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
+  TABLE_ROWS_PATH,
   TEMPLATE_BUDGET,
   templateKey,
   WEATHER_UNITS,
@@ -34,6 +35,8 @@ import {
   type FieldDef,
   type ScalarFieldDef,
   type ScreenManifest,
+  type TableFeed,
+  type TableMapping,
   type TemplateCheckReport,
   type TemplateManifest,
 } from './shapes.ts';
@@ -249,6 +252,8 @@ function liveProblems(live: unknown, fields: Obj): string[] {
     if (type === undefined) out.push(`field "${name}" is not a field of the template`);
     else if (type === 'image') out.push(`field "${name}" is an image, which cannot take live data`);
     else if (!isStr(path) || !BINDING_PATH.test(path)) out.push(`field "${name}": "${show(path)}" is not a dot path such as current.temperature_2m`);
+    else if (live.source === 'table' && (type !== 'list' || path !== TABLE_ROWS_PATH))
+      out.push(`field "${name}": a table fills list fields only, at "${TABLE_ROWS_PATH}"`);
   }
   if (live.place === undefined && live.units === undefined) return out;
   if (live.source !== 'open-meteo') return [...out, 'place and units are for open-meteo sources only'];
@@ -273,6 +278,27 @@ function liveProblems(live: unknown, fields: Obj): string[] {
 const bindingProblem = (name: string, b: unknown): string | undefined =>
   isObj(b) && isIdValue(b.source) && isText(b.path) ? undefined : `binding for "${name}" needs a data source id and a path`;
 
+/** What is wrong with a table binding (`Binding.table`) for the field it fills. `def` is already known valid. */
+function tableBindingProblems(name: string, def: FieldDef, path: unknown, t: unknown): string[] {
+  const where = `binding for "${name}"`;
+  if (def.type !== 'list') return [`${where} maps a table, which fills a list field only, and "${name}" is a ${def.type} field`];
+  if (!isObj(t) || !isObj(t.columns)) return [`${where}: table needs columns, mapping item properties to columns`];
+  const out: string[] = [];
+  if (path !== TABLE_ROWS_PATH) out.push(`${where}: a table binding's path is "${TABLE_ROWS_PATH}"`);
+  const props = Object.keys(def.item);
+  for (const [prop, column] of Object.entries(t.columns)) {
+    if (!Object.hasOwn(def.item, prop)) out.push(`${where}: "${prop}" is not a property of its items (${props.join(', ')})`);
+    else if (!isText(column)) out.push(`${where}: the column for "${prop}" must be a column name`);
+  }
+  for (const [prop, d] of Object.entries(def.item))
+    if (d.default === undefined && !Object.hasOwn(t.columns, prop)) out.push(`${where} needs a column for "${prop}"`);
+  if (t.filter !== undefined && !(isObj(t.filter) && isText(t.filter.column) && isStr(t.filter.equals)))
+    out.push(`${where}: filter needs a column and the text it equals`);
+  if (t.sort !== undefined && !(isObj(t.sort) && isText(t.sort.column) && (t.sort.descending === undefined || typeof t.sort.descending === 'boolean')))
+    out.push(`${where}: sort needs a column, and descending true or false`);
+  return out;
+}
+
 /**
  * Check a spot's data against the template's fields. Returns problems; empty means valid. Total
  * over any input; a malformed field definition is reported rather than trusted.
@@ -294,6 +320,9 @@ export function validateSpotData(fields: unknown, data: unknown, assets: unknown
     else if (own(def, 'type') === 'image') errors.push(`image field "${name}" cannot be bound to live data`);
     const e = bindingProblem(name, binding);
     if (e) errors.push(e);
+    const table = own(binding, 'table');
+    if (table !== undefined && def && !fieldDefProblems(name, def).length)
+      errors.push(...tableBindingProblems(name, def as FieldDef, own(binding, 'path'), table));
   }
   for (const [name, raw] of Object.entries(fields)) {
     if (fieldDefProblems(name, raw).length) {
@@ -353,6 +382,134 @@ export function validateBoundValue(fields: unknown, name: unknown, value: unknow
   if (def.type === 'list') return listProblems(field, def, value);
   const e = scalarProblem(field, def, value);
   return e ? [e] : [];
+}
+
+/** Check a `TableFeed`: distinct column names, and one text or number cell per column in every row. */
+export function validateTableFeed(t: unknown): string[] {
+  if (!isObj(t)) return ['table is not an object'];
+  if (!Array.isArray(t.columns) || !t.columns.every(isText)) return ['table columns must be a list of names'];
+  const errors: string[] = [];
+  if (new Set(t.columns).size !== t.columns.length) errors.push('table columns must have distinct names');
+  const n = t.columns.length;
+  if (!Array.isArray(t.rows)) return [...errors, 'table rows must be a list'];
+  const bad = t.rows.findIndex((r: unknown) => !Array.isArray(r) || r.length !== n || !r.every((c) => isStr(c) || isNum(c)));
+  if (bad >= 0) errors.push(`table row ${bad + 1} must have ${n} cells of text or numbers`);
+  return errors;
+}
+
+/** The columns a mapping names (its properties', its filter's, its sort's) that `columns` lacks. */
+export function missingColumns(columns: readonly string[], t: TableMapping): string[] {
+  const named = [...Object.values(t.columns), ...(t.filter ? [t.filter.column] : []), ...(t.sort ? [t.sort.column] : [])];
+  return [...new Set(named.filter((c) => !columns.includes(c)))];
+}
+
+const TRUE = new Set(['true', 'yes', 'y', '1']);
+const FALSE = new Set(['false', 'no', 'n', '0', '']);
+
+/** A cell as an item property's value, before the property's check; undefined when it does not convert. */
+function cellValue(def: ScalarFieldDef, cell: string | number, locale: string): unknown {
+  const text = isStr(cell) ? cell.trim() : '';
+  if (text === '' && isStr(cell) && def.default !== undefined) return def.default;
+  switch (def.type) {
+    case 'text':
+      // A price: 4.5 is "4.50", 12 is "12".
+      return isStr(cell)
+        ? text
+        : new Intl.NumberFormat(locale, { minimumFractionDigits: Number.isInteger(cell) ? 0 : 2, maximumFractionDigits: 2 }).format(cell);
+    case 'color':
+      return isStr(cell) ? text : undefined;
+    case 'number':
+      return isStr(cell) ? (text === '' ? undefined : Number(text)) : cell;
+    case 'boolean': {
+      const word = String(cell).trim().toLowerCase();
+      return TRUE.has(word) ? true : FALSE.has(word) ? false : undefined;
+    }
+    case 'select':
+      return def.options.find((o) => o.toLowerCase() === String(cell).trim().toLowerCase());
+  }
+}
+
+/**
+ * A table's rows as a list field's items, by a `TableMapping` (see it for the rules), with what
+ * was wrong: a table that is not a `TableFeed`, lacks a mapped column, or whose rows all fail
+ * gives no items; a row that does not fit is left out and named. `def` and the mapping are
+ * already known valid.
+ */
+export function tableItems(
+  def: Extract<FieldDef, { type: 'list' }>,
+  t: TableMapping,
+  feed: unknown,
+  locale: string,
+): { items?: Record<string, unknown>[]; problems: string[] } {
+  const shape = validateTableFeed(feed);
+  if (shape.length) return { problems: shape };
+  const { columns, rows } = feed as TableFeed;
+  const missing = missingColumns(columns, t);
+  if (missing.length) return { problems: [`the table has no column ${missing.map((c) => `"${c}"`).join(', ')}`] };
+  const at = (column: string) => columns.indexOf(column);
+  let kept = rows.map((cells, i) => ({ cells, line: i + 1 }));
+  if (t.filter) {
+    const col = at(t.filter.column);
+    const want = t.filter.equals.trim().toLowerCase();
+    kept = kept.filter(({ cells }) => String(cells[col]).trim().toLowerCase() === want);
+  }
+  if (t.sort) {
+    const col = at(t.sort.column);
+    const sign = t.sort.descending ? -1 : 1;
+    const collator = new Intl.Collator(locale, { numeric: true, sensitivity: 'base' });
+    // Numbers, and text that is one number, come first by value; other text after, by the collator.
+    const key = (cell: string | number | undefined) =>
+      isNum(cell) ? cell : isStr(cell) && cell.trim() !== '' && isNum(Number(cell)) ? Number(cell) : String(cell);
+    kept.sort(({ cells: a }, { cells: b }) => {
+      const x = key(a[col]);
+      const y = key(b[col]);
+      if (isNum(x) && isNum(y)) return sign * (x - y);
+      if (isNum(x) || isNum(y)) return sign * (isNum(x) ? -1 : 1);
+      return sign * collator.compare(x, y);
+    });
+  }
+  const items: Record<string, unknown>[] = [];
+  const problems: string[] = [];
+  for (const { cells, line } of kept) {
+    if (def.maxItems && items.length === def.maxItems) break;
+    const item: Record<string, unknown> = {};
+    let problem: string | undefined;
+    for (const [prop, d] of Object.entries(def.item)) {
+      const column = own(t.columns, prop);
+      const cell = isStr(column) ? cells[at(column)] : undefined;
+      // A cell that does not convert is checked as written, so the problem names what is wrong with it.
+      const v = cell === undefined ? d.default : (cellValue(d, cell, locale) ?? (isStr(cell) ? cell.trim() : cell));
+      problem ??=
+        v === undefined || (d.default === undefined && v === '')
+          ? `row ${line} has no ${prop}`
+          : scalarProblem(prop, d, v)?.replace(`field "${prop}"`, `row ${line}: ${prop}`);
+      item[prop] = v;
+    }
+    if (problem) problems.push(problem);
+    else items.push(item);
+  }
+  // Rows were read and none fit: a file broken by an edit, not an empty menu. Rows filtered away
+  // leave no problems, and stay an empty list.
+  return items.length || !problems.length ? { items, problems } : { problems };
+}
+
+/**
+ * A bound field's value in a snapshot's data, if it may replace the spot's static value, and
+ * what is wrong: the value at the binding's path (`readPath`) or, for a table binding, the rows it
+ * maps (`tableItems`), checked against the field (`validateBoundValue`). The player runs it on
+ * every bound field it plays, and the server before it stores or sends a snapshot.
+ */
+export function boundValue(fields: unknown, name: string, binding: unknown, data: unknown, locale: string): { value?: unknown; problems: string[] } {
+  const path = own(binding, 'path');
+  const table = own(binding, 'table');
+  const def = own(fields, name);
+  if (table === undefined || !isObj(def) || fieldDefProblems(name, def).length || tableBindingProblems(name, def as FieldDef, path, table).length) {
+    const value = isStr(path) ? readPath(data, path) : undefined;
+    const problems = validateBoundValue(fields, name, value);
+    return problems.length ? { problems } : { value, problems };
+  }
+  const { items, problems } = tableItems(def as Extract<FieldDef, { type: 'list' }>, table as TableMapping, data, locale);
+  return { ...(items ? { value: items } : {}), problems: prefix(`field "${name}"`, problems) };
 }
 
 // --------------------------------------------------------------- display hours

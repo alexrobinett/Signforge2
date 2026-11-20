@@ -33,7 +33,9 @@ function boundBySource(m: ScreenManifest): Map<string, BoundField[]> {
   for (const spot of Object.values(m.spots ?? {})) {
     if (spot.kind !== 'template') continue;
     const fields = m.templates[spot.template]?.manifest.fields;
-    for (const [field, b] of Object.entries(spot.bindings ?? {})) out.set(b.source, [...(out.get(b.source) ?? []), { fields, field, path: b.path }]);
+    const locale = m.screen?.locale ?? 'en-US';
+    for (const [field, binding] of Object.entries(spot.bindings ?? {}))
+      out.set(binding.source, [...(out.get(binding.source) ?? []), { fields, field, binding, locale }]);
   }
   return out;
 }

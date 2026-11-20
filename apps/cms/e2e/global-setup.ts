@@ -5,10 +5,11 @@
  */
 import { chromium } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdirSync, openSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, PLACES, RUN_DIR } from './servers';
+import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, FEEDS_DIR, PLACES, RUN_DIR } from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
 const cmsDir = fileURLToPath(new URL('../', import.meta.url));
@@ -43,6 +44,27 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
   return { url: `http://127.0.0.1:${address.port}/v1/search`, close: () => server.close() };
 }
 
+/**
+ * A file server for the links table sources read (issue #84): the dev API sends every feed fetch
+ * here (`FEED_STUB_URL`), and it answers with the file in FEEDS_DIR named by the URL's last path
+ * segment, which a test writes and edits. On a free port.
+ */
+async function feedServer(): Promise<{ url: string; close: () => void }> {
+  const server = createServer((req, res) => {
+    const file = join(FEEDS_DIR, basename(new URL(req.url ?? '/', 'http://stub').pathname));
+    if (!existsSync(file)) {
+      res.writeHead(404).end();
+      return;
+    }
+    res.writeHead(200, { 'content-type': file.endsWith('.json') ? 'application/json' : 'text/csv' });
+    res.end(readFileSync(file));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (typeof address !== 'object' || !address) throw new Error('the feed server is not listening');
+  return { url: `http://127.0.0.1:${address.port}`, close: () => server.close() };
+}
+
 /** True if something already answers on the port: another checkout's run, whose servers this run would otherwise use. */
 async function answers(url: string) {
   try {
@@ -61,7 +83,7 @@ export default async function globalSetup() {
     if (await answers(url)) throw new Error(`${url} is already in use (another e2e run?): set ${name} to a free port`);
   }
   rmSync(RUN_DIR, { recursive: true, force: true });
-  mkdirSync(RUN_DIR, { recursive: true });
+  mkdirSync(FEEDS_DIR, { recursive: true });
   const env = { ...process.env, CLOUDFLARE_DEV_REGISTRY_PATH: `${RUN_DIR}registry`, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' };
   const state = `${RUN_DIR}state`;
 
@@ -77,6 +99,7 @@ export default async function globalSetup() {
   if (player.status !== 0) throw new Error(`player build failed:\n${player.stdout}\n${player.stderr}`);
 
   const geocoding = await geocodingStub();
+  const feeds = await feedServer();
   const log = openSync(API_LOG, 'a');
   const children: ChildProcess[] = [
     spawn(
@@ -99,6 +122,10 @@ export default async function globalSetup() {
         `ADMIN_TOKEN:${ADMIN_TOKEN}`,
         '--var',
         `GEOCODING_URL:${geocoding.url}`,
+        '--var',
+        `FEED_STUB_URL:${feeds.url}`,
+        // GET /__scheduled runs the Cron Triggers' jobs: how a test makes the poller run now.
+        '--test-scheduled',
       ],
       {
         cwd: apiDir,
@@ -142,6 +169,7 @@ export default async function globalSetup() {
 
   return async () => {
     geocoding.close();
+    feeds.close();
     for (const child of children) {
       try {
         if (child.pid) process.kill(-child.pid, 'SIGTERM');

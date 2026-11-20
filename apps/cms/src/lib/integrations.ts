@@ -20,6 +20,10 @@ export interface ListedSource extends DataSourceView {
 
 export type SourceFormat = DataSourceView['format'];
 
+/** What the page groups sources by: their format, with a CSV and a JSON table one kind (issue #84). */
+export type SourceKind = Exclude<SourceFormat, 'csv' | 'json-table'> | 'table';
+export const kindOf = (format: SourceFormat): SourceKind => (format === 'csv' || format === 'json-table' ? 'table' : format);
+
 /** An account the org connected at a provider, as `list_connections` lists it; never its credentials. */
 export interface ConnectionView {
   id: string;
@@ -40,8 +44,8 @@ export interface Connector {
   name: string;
   does: string;
   state: ConnectorState;
-  /** A built connector that makes data sources: the format of the sources it makes. */
-  format?: SourceFormat;
+  /** A built connector that makes data sources: the kind of the sources it makes. */
+  kind?: SourceKind;
 }
 
 interface ConnectorGroup {
@@ -59,13 +63,13 @@ export const CATALOGUE: ConnectorGroup[] = [
     name: 'Live data for templates',
     why: 'Fill news, weather and agenda fields from a source, refreshed on a timer.',
     items: [
-      { mono: 'RSS', name: 'RSS / Atom', does: 'Headlines for the News template.', state: 'built', format: 'rss' },
-      { mono: 'WX', name: 'Weather', does: 'Current conditions and forecast for a place, into the Weather template.', state: 'built', format: 'json' },
-      { mono: 'iCal', name: 'iCal URL', does: 'Any calendar that publishes an .ics link, into the Agenda template.', state: 'built', format: 'ical' },
+      { mono: 'RSS', name: 'RSS / Atom', does: 'Headlines for the News template.', state: 'built', kind: 'rss' },
+      { mono: 'WX', name: 'Weather', does: 'Current conditions and forecast for a place, into the Weather template.', state: 'built', kind: 'json' },
+      { mono: 'iCal', name: 'iCal URL', does: 'Any calendar that publishes an .ics link, into the Agenda template.', state: 'built', kind: 'ical' },
       planned('GC', 'Google Calendar', 'Pick calendars and rooms after signing in with Google; no public links.'),
       planned('365', 'Microsoft 365 / Outlook', 'Calendars and room resources from Exchange Online.'),
       planned('GS', 'Google Sheets', 'A sheet as a menu or price list; one row per item.'),
-      planned('{ }', 'CSV or JSON URL', 'Any file on the web, mapped onto template fields.'),
+      { mono: '{ }', name: 'CSV or JSON URL', does: 'Any file on the web, its rows mapped onto a Menu Board’s items.', state: 'built', kind: 'table' },
       planned('AT', 'Airtable', 'A base and view as rows for menus, rotas or listings.'),
       planned('POST', 'Webhook push', 'Your system POSTs JSON into a data source when something changes.'),
     ],
@@ -122,7 +126,7 @@ export type Show = (typeof SHOW)[number];
 export const isShow = (v: unknown): v is Show => SHOW.some((s) => s === v);
 
 /** The sources a connector made. */
-export const sourcesOf = (c: Connector, sources: readonly ListedSource[]) => (c.format ? sources.filter((s) => s.format === c.format) : []);
+export const sourcesOf = (c: Connector, sources: readonly ListedSource[]) => (c.kind ? sources.filter((s) => kindOf(s.format) === c.kind) : []);
 
 /** Whether the connector passes the filter and the search. */
 export function shows(c: Connector, show: Show, q: string, sources: readonly ListedSource[]): boolean {
@@ -134,22 +138,22 @@ export function shows(c: Connector, show: Show, q: string, sources: readonly Lis
 }
 
 /**
- * The kind of a source, as the page names it. A JSON source is weather: Open-Meteo is the only
- * JSON feed the CMS offers (a CSV or JSON URL connector is planned), and agents that add another
- * see it named so too.
+ * The format of a source, as the page names it. A plain JSON source is weather: Open-Meteo is the
+ * only one the CMS makes, and agents that add another see it named so too. A JSON table is JSON.
  */
-export const KIND_WORD: Record<SourceFormat, string> = { rss: 'RSS', json: 'Weather', ical: 'iCal', provider: 'Account' };
+export const KIND_WORD: Record<SourceFormat, string> = { rss: 'RSS', json: 'Weather', ical: 'iCal', csv: 'CSV', 'json-table': 'JSON', provider: 'Account' };
 
-const NOUN: Record<SourceFormat, [one: string, many: string]> = {
+const NOUN: Record<SourceKind, [one: string, many: string]> = {
   rss: ['feed', 'feeds'],
   json: ['place', 'places'],
   ical: ['calendar', 'calendars'],
+  table: ['file', 'files'],
   provider: ['source', 'sources'],
 };
 
 /** "2 feeds", "1 calendar · failing": a built connector's sources, counted. */
-export function connectedWords(format: SourceFormat, sources: readonly ListedSource[]): string {
-  const [one, many] = NOUN[format];
+export function connectedWords(kind: SourceKind, sources: readonly ListedSource[]): string {
+  const [one, many] = NOUN[kind];
   const failing = sources.some((s) => s.failures > 0);
   return `${sources.length} ${sources.length === 1 ? one : many}${failing ? ' · failing' : ''}`;
 }
@@ -178,6 +182,10 @@ function failureWords(code: string | null): string {
       return 'is not a feed SignForge can read';
     case 'unfit':
       return 'sends data that does not fit the spots using it';
+    case 'missing-column':
+      return 'no longer has a column a spot uses';
+    case 'not-a-table':
+      return 'is not a list of objects at its path';
     case 'sealed-url':
       return 'has an address SignForge can no longer read';
     case 'needs-reconnect':
@@ -221,7 +229,7 @@ export function sourceState(s: ListedSource, clock: Clock): { word: string; tone
  * spots' fallback values, and so does the sentence.
  */
 export function failingWords(s: ListedSource, clock: Clock): string {
-  const what = `The ${s.name} ${s.format === 'json' ? 'forecast' : NOUN[s.format][0]} ${failureWords(s.lastError)}`;
+  const what = `The ${s.name} ${s.format === 'json' ? 'forecast' : NOUN[kindOf(s.format)][0]} ${failureWords(s.lastError)}`;
   const checks = s.failures === 1 ? 'its last check failed' : `its last ${s.failures} checks failed`;
   const meanwhile =
     s.lastCheckedAt === null
@@ -233,14 +241,14 @@ export function failingWords(s: ListedSource, clock: Clock): string {
 }
 
 /** What fixing a failing source is called: its address is what an editor can change. */
-export const FIX_WORD = { rss: 'Fix the feed URL', ical: 'Fix the iCal URL' } as const;
+export const FIX_WORD = { rss: 'Fix the feed URL', ical: 'Fix the iCal URL', csv: 'Fix the CSV URL', 'json-table': 'Fix the JSON URL' } as const;
 
 /**
  * The sources whose address a person types. A weather source is made from a place and its units
  * in the spot editor, which names and reuses it by them, so a typed address would make it serve
  * another place.
  */
-export const hasAddress = (s: Pick<ListedSource, 'format'>): s is { format: keyof typeof FIX_WORD } => s.format === 'rss' || s.format === 'ical';
+export const hasAddress = (s: Pick<ListedSource, 'format'>): s is { format: keyof typeof FIX_WORD } => s.format in FIX_WORD;
 
 /** Where the page came back from a provider's consent (the API's callback), in words; null for none. */
 export function connectionNotice(search: { connected?: string; connectionError?: string }, connections: readonly ConnectionView[]): string | null {

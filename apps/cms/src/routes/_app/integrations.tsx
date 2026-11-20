@@ -34,6 +34,7 @@ import {
   weatherFixWords,
   isShow,
   KIND_WORD,
+  kindOf,
   type ListedSource,
   providerName,
   SHOW,
@@ -221,10 +222,10 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
   const openSources = useAppStore((s) => s.openSources);
   const mine = sourcesOf(c, sources);
   const failing = mine.some((s) => s.failures > 0);
-  // Feeds and calendars are added here by their address; weather from a place, in a weather spot.
-  const addable = c.format === 'rss' || c.format === 'ical';
-  const action = !c.format ? null : mine.length ? (canManage ? 'Manage' : 'View') : canManage && addable ? 'Connect' : null;
-  const format = c.format;
+  // Feeds and calendars are added here by their address; weather from a place, in a weather spot; a table in a menu board spot.
+  const addable = c.kind === 'rss' || c.kind === 'ical';
+  const action = !c.kind ? null : mine.length ? (canManage ? 'Manage' : 'View') : canManage && addable ? 'Connect' : null;
+  const kind = c.kind;
 
   return (
     <li className="grid grid-cols-[40px_minmax(0,1fr)] items-center gap-x-3.5 gap-y-2 border-b py-2.5 sm:grid-cols-[40px_minmax(0,1fr)_auto]">
@@ -242,15 +243,15 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
       </span>
       {(mine.length > 0 || action) && (
         <span className="col-start-2 flex items-center gap-3 sm:col-start-3 sm:justify-end sm:text-right">
-          {format && mine.length > 0 && (
-            <span className={cn('text-sm', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>{connectedWords(format, mine)}</span>
+          {kind && mine.length > 0 && (
+            <span className={cn('text-sm', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>{connectedWords(kind, mine)}</span>
           )}
-          {format && action && (
+          {kind && action && (
             <Button
               variant={action === 'Connect' ? 'default' : 'outline'}
               className="min-h-10 px-3.5 text-[15px] font-semibold"
               aria-label={`${action} ${c.name}`}
-              onClick={() => openSources(format, { adding: action === 'Connect' })}
+              onClick={() => openSources(kind, { adding: action === 'Connect' })}
             >
               {action}
             </Button>
@@ -324,7 +325,7 @@ function FeedingNow({
             <button
               type="button"
               className="inline-flex min-h-10 items-center self-start text-[15px] text-primary underline underline-offset-4"
-              onClick={() => openSources(s.format, { editing: s.id })}
+              onClick={() => openSources(kindOf(s.format), { editing: s.id })}
             >
               {FIX_WORD[s.format]}
               <span className="sr-only"> for {s.name}</span>
