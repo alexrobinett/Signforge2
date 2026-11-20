@@ -10,7 +10,8 @@ import { tabOrgHeaders } from './tab-org';
 import type { PlaylistView } from './playlists';
 import type { SpotView } from './spots';
 
-class ToolCallError extends Error {
+/** A tool's refusal, or a call that got no answer (`code` network). */
+export class ToolCallError extends Error {
   constructor(
     readonly code: string,
     message: string,
