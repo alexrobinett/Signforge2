@@ -40,6 +40,7 @@ import {
   type TemplateCheckReport,
   type TemplateManifest,
 } from './shapes.ts';
+import { bundleScripts } from './scripts.ts';
 
 // ------------------------------------------------------------------ helpers
 
@@ -1007,6 +1008,9 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
     .join('\n');
   const source = Object.keys(sources).length ? matches(FORBIDDEN_TEMPLATE_CODE, authored) : ['no source files were given'];
 
+  // What the player runs (`containedFrames` in packages/player-core), read as the browser reads it.
+  const scripts = bundleScripts(html).scripts.flatMap((s) => (s.problem ? [s.problem] : []));
+
   const checks: TemplateCheckReport['checks'] = [
     { check: 'manifest', ok: !manifestProblems.length, problems: manifestProblems },
     { check: 'forbidden-css', ok: true, problems: matches(FORBIDDEN_CSS, html) },
@@ -1017,6 +1021,7 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
     },
     { check: 'network', ok: true, problems: network },
     { check: 'source-code', ok: true, problems: source },
+    { check: 'scripts', ok: true, problems: scripts },
   ];
   for (const c of checks) c.ok = !c.problems.length;
   return { ok: checks.every((c) => c.ok), bundleBytes, checks, warnings: brandColourWarnings(sources) };

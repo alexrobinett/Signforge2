@@ -24,3 +24,4 @@ export * from './frame.ts';
 export * from './shapes.ts';
 export * from './validate.ts';
 export * from './parse.ts';
+export * from './scripts.ts';

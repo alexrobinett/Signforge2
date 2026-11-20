@@ -69,7 +69,7 @@ describe('a template that misbehaves', () => {
     ['spin', ['did not report ready within 2000 ms']],
     ['throw', ['failed to prepare: prepare blew up']],
     ['uncaught', ['threw an uncaught error: late failure']],
-    ['webrtc', ["used WebRTC (RTCPeerConnection), which a template may not: the screen's policy does not block it"]],
+    ['webrtc', ['failed to prepare: RTCPeerConnection is not defined']],
   ];
   for (const [mode, problems] of cases) {
     it(`is refused: ${mode}`, async () => {
