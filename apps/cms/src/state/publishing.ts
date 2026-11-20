@@ -1,6 +1,7 @@
 /**
  * Publishing from the editors (canvas boards Spot editor A and Ideas 5-6): publish what is open,
- * undo it, roll back to an earlier publish, and choose the default playlist.
+ * undo it, roll back to an earlier publish, and choose the default playlist. The Schedule page
+ * publishes its entries with the playlists and spots they need (M3-19).
  *
  * A publish from an editor saves the draft first, then publishes it pinned at the version saved
  * (`publish` with `drafts`), so it publishes exactly what the person sees and nobody else's
@@ -12,12 +13,13 @@
 import { toast } from 'sonner';
 import { publishResultOf, madeOf, versionName, type PublishResult } from '~/lib/publishes';
 import { callTool, isConflict, isStale, playlistOf, toolMessage } from '~/lib/tools';
-import { playlistKeys, playlistQuery } from '~/queries/playlists';
+import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
+import { scheduleQuery } from '~/queries/schedule';
 import { spotQuery, spotsQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
 interface Pin {
-  kind: 'spot' | 'playlist';
+  kind: 'spot' | 'playlist' | 'schedule_entry';
   id: string;
   version: number;
 }
@@ -37,6 +39,12 @@ export interface PublishingSlice {
   rollBackTo: (orgId: string, publish: { id: string; revision: number }, undoing?: string) => Promise<void>;
   /** Makes the playlist the one every screen plays when no schedule says otherwise. */
   makeDefaultPlaylist: (orgId: string, playlistId: string) => Promise<void>;
+  /**
+   * Publishes schedule entries (`entryIds`, else every one with a changed draft) with their changed
+   * playlists and those playlists' changed spots. With none to pin it still compiles every screen,
+   * so an entry removed since the last publish leaves them.
+   */
+  publishSchedule: (orgId: string, entryIds?: string[]) => Promise<void>;
 }
 
 const TOAST_ID = 'publish';
@@ -158,6 +166,24 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       } finally {
         pending(false);
       }
+    },
+
+    async publishSchedule(orgId, entryIds) {
+      // Read now, not from the cache: something edited in another tab is pinned at its version now.
+      const [{ entries }, { playlists }, { spots }] = await Promise.all([
+        queryClient.query({ ...scheduleQuery(orgId), staleTime: 0 }),
+        queryClient.query({ ...playlistsQuery(orgId), staleTime: 0 }),
+        queryClient.query({ ...spotsQuery(orgId), staleTime: 0 }),
+      ]);
+      const chosen = entries.filter((e) => (entryIds ? entryIds.includes(e.id) : e.draftChanged));
+      const needed = new Set(chosen.map((e) => e.playlistId));
+      const lists = playlists.filter((p) => needed.has(p.id));
+      const inThem = new Set(lists.flatMap((p) => p.spotIds));
+      await publish(orgId, [
+        ...chosen.map((e): Pin => ({ kind: 'schedule_entry', id: e.id, version: e.version })),
+        ...lists.filter((p) => p.draftChanged).map((p): Pin => ({ kind: 'playlist', id: p.id, version: p.version })),
+        ...spots.filter((s) => inThem.has(s.id) && s.draftChanged).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+      ]);
     },
 
     async makeDefaultPlaylist(orgId, playlistId) {

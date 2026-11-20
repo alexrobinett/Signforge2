@@ -1,0 +1,248 @@
+/**
+ * The Schedule page (M3-19): the dialogs that make and change a schedule entry or start a
+ * takeover, removing one, ending a takeover, and which screen the week view shows.
+ *
+ * An entry is a draft until it is published (the page's Publish, `publishSchedule`). A takeover is
+ * sent at once: started, then published with the playlist and spots it needs. Ending one removes
+ * it and publishes, so screens drop it straight away. A dialog checks its entry with the contract's
+ * `scheduleEntryProblems`, so the CMS refuses what a screen would.
+ */
+import { scheduleEntryProblems } from '@signforge/contract';
+import { toast } from 'sonner';
+import type { ScheduleEntryView } from '~/lib/schedule';
+import { callTool, entryIdOf, isStale, toolMessage } from '~/lib/tools';
+import { scheduleKey } from '~/queries/schedule';
+import type { SliceCreator } from './store';
+
+type Target = ScheduleEntryView['target'];
+
+/** A schedule entry in its dialog. Empty strings are fields left out. */
+export interface EntryDraft {
+  /** The entry being changed, or null for a new one. */
+  id: string | null;
+  version: number | null;
+  playlistId: string;
+  target: Target;
+  groupId: string;
+  screenId: string;
+  priority: number;
+  /** Weekdays it plays, 0 = Sunday; all seven means every day. */
+  days: number[];
+  from: string;
+  to: string;
+  startDate: string;
+  endDate: string;
+}
+
+/** A takeover in its dialog: until when, as a `datetime-local` value in the browser's time zone. */
+export interface TakeoverDraft {
+  playlistId: string;
+  target: Target;
+  groupId: string;
+  screenId: string;
+  until: string;
+}
+
+interface ScheduleState {
+  entry: EntryDraft | null;
+  takeover: TakeoverDraft | null;
+  saving: boolean;
+  error: string | null;
+  /** The entry the dialog changes was changed elsewhere since it was opened. */
+  stale: boolean;
+  /** The screen the week view shows; null shows the first. */
+  weekScreenId: string | null;
+}
+
+export interface ScheduleSlice {
+  schedule: ScheduleState;
+  /** Opens a new entry, with what the page chose (a screen's own, say). */
+  openNewEntry: (preset?: Partial<EntryDraft>) => void;
+  openEditEntry: (entry: ScheduleEntryView) => void;
+  editEntry: (patch: Partial<EntryDraft>) => void;
+  /** Saves the entry as a draft. */
+  saveEntry: (orgId: string) => Promise<void>;
+  /** Removes an entry or a takeover's draft and published version; the next publish takes it off screens. */
+  removeEntry: (orgId: string, entry: ScheduleEntryView) => Promise<void>;
+  openTakeover: (preset?: Partial<TakeoverDraft>) => void;
+  editTakeover: (patch: Partial<TakeoverDraft>) => void;
+  /** Starts the takeover and publishes it, so screens cut in at once. */
+  startTakeover: (orgId: string) => Promise<void>;
+  /** Removes a takeover and publishes, so screens drop it at once. */
+  endTakeover: (orgId: string, entry: ScheduleEntryView) => Promise<void>;
+  closeScheduleDialog: () => void;
+  chooseWeekScreen: (screenId: string) => void;
+}
+
+const EVERY_DAY = [1, 2, 3, 4, 5, 6, 0];
+
+/** An hour from now, to the minute, as a `datetime-local` value in the browser's time zone. */
+function inAnHour(): string {
+  const d = new Date(Date.now() + 3_600_000);
+  d.setSeconds(0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Whom an entry is aimed at, as the tools take it. */
+const aim = (d: { target: Target; groupId: string; screenId: string }) => ({
+  target: d.target,
+  ...(d.target === 'group' ? { groupId: d.groupId } : {}),
+  ...(d.target === 'screen' ? { screenId: d.screenId } : {}),
+});
+
+/** The entry's when, as the tools take it: a field left out is null, every day is no days. */
+export const entryWhen = (d: EntryDraft) => ({
+  priority: d.priority,
+  days: d.days.length === 7 ? null : d.days,
+  from: d.from || null,
+  to: d.to || null,
+  startDate: d.startDate || null,
+  endDate: d.endDate || null,
+});
+
+/** What is wrong with the dialog's entry, as a screen or the tools would refuse it: empty when it can be saved. */
+export function entryProblems(d: EntryDraft): string[] {
+  const out: string[] = [];
+  if (!d.playlistId) out.push('Choose a playlist.');
+  if (d.target === 'group' && !d.groupId) out.push('Choose a group.');
+  if (d.target === 'screen' && !d.screenId) out.push('Choose a screen.');
+  if (!d.days.length) out.push('Choose at least one day.');
+  const w = entryWhen(d);
+  const entry = {
+    id: 'draft',
+    playlist: d.playlistId,
+    priority: w.priority,
+    target: d.target,
+    ...(w.days ? { days: w.days } : {}),
+    ...(w.from ? { from: w.from } : {}),
+    ...(w.to ? { to: w.to } : {}),
+    ...(w.startDate ? { startDate: w.startDate } : {}),
+    ...(w.endDate ? { endDate: w.endDate } : {}),
+  };
+  out.push(...scheduleEntryProblems(entry).map((p) => `${p.replace('schedule entry "draft": ', '').replace(/^./, (c) => c.toUpperCase())}.`));
+  if (w.startDate && w.endDate && w.endDate < w.startDate) out.push('The last date is before the first.');
+  return out;
+}
+
+export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { queryClient }) => {
+  const patch = (fn: (s: ScheduleState) => ScheduleState) => set((s) => ({ schedule: fn(s.schedule) }));
+  const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: scheduleKey(orgId) });
+  const closed = { entry: null, takeover: null, saving: false, error: null, stale: false };
+
+  return {
+    schedule: { ...closed, weekScreenId: null },
+
+    openNewEntry: (preset = {}) =>
+      patch((s) => ({
+        ...s,
+        ...closed,
+        entry: {
+          id: null,
+          version: null,
+          playlistId: '',
+          target: 'org',
+          groupId: '',
+          screenId: '',
+          priority: 0,
+          days: EVERY_DAY,
+          from: '',
+          to: '',
+          startDate: '',
+          endDate: '',
+          ...preset,
+        },
+      })),
+
+    openEditEntry: (e) =>
+      patch((s) => ({
+        ...s,
+        ...closed,
+        entry: {
+          id: e.id,
+          version: e.version,
+          playlistId: e.playlistId,
+          target: e.target,
+          groupId: e.groupId ?? '',
+          screenId: e.screenId ?? '',
+          priority: e.priority,
+          days: e.days ?? EVERY_DAY,
+          from: e.from ?? '',
+          to: e.to ?? '',
+          startDate: e.startDate ?? '',
+          endDate: e.endDate ?? '',
+        },
+      })),
+
+    editEntry: (change) => patch((s) => (s.entry ? { ...s, entry: { ...s.entry, ...change }, error: null } : s)),
+
+    async saveEntry(orgId) {
+      const d = get().schedule.entry;
+      if (!d) return;
+      patch((s) => ({ ...s, saving: true, error: null, stale: false }));
+      try {
+        const fields = { playlistId: d.playlistId, ...aim(d), ...entryWhen(d) };
+        if (d.id === null) await callTool('create_schedule_entry', { ...fields, idempotencyKey: crypto.randomUUID() });
+        else await callTool('update_schedule_entry', { scheduleEntryId: d.id, ...fields, ifVersion: d.version });
+        await refresh(orgId);
+        patch((s) => ({ ...s, ...closed }));
+        toast.success(d.id === null ? 'Scheduled, as a draft' : 'Saved, as a draft', { description: 'Publish to send it to screens.' });
+      } catch (err) {
+        patch((s) => ({
+          ...s,
+          saving: false,
+          stale: isStale(err),
+          error: isStale(err) ? 'It changed since you opened it. Reload it and make your change again.' : toolMessage(err),
+        }));
+      }
+    },
+
+    async removeEntry(orgId, e) {
+      try {
+        await callTool('delete_schedule_entry', { scheduleEntryId: e.id });
+        await refresh(orgId);
+        toast.success('Removed', { description: e.published ? 'Screens keep it until you publish.' : 'It was never published.' });
+      } catch (err) {
+        toast.error('Not removed', { description: toolMessage(err) });
+      }
+    },
+
+    openTakeover: (preset = {}) =>
+      patch((s) => ({ ...s, ...closed, takeover: { playlistId: '', target: 'org', groupId: '', screenId: '', until: inAnHour(), ...preset } })),
+
+    editTakeover: (change) => patch((s) => (s.takeover ? { ...s, takeover: { ...s.takeover, ...change }, error: null } : s)),
+
+    async startTakeover(orgId) {
+      const d = get().schedule.takeover;
+      if (!d) return;
+      patch((s) => ({ ...s, saving: true, error: null }));
+      try {
+        const made = await callTool('start_takeover', {
+          playlistId: d.playlistId,
+          ...aim(d),
+          endsAt: new Date(d.until).toISOString(),
+          idempotencyKey: crypto.randomUUID(),
+        });
+        await refresh(orgId);
+        patch((s) => ({ ...s, ...closed }));
+        await get().publishSchedule(orgId, [entryIdOf(made)]);
+      } catch (err) {
+        patch((s) => ({ ...s, saving: false, error: toolMessage(err) }));
+      }
+    },
+
+    async endTakeover(orgId, e) {
+      try {
+        await callTool('delete_schedule_entry', { scheduleEntryId: e.id });
+        await refresh(orgId);
+        await get().publishSchedule(orgId, []);
+      } catch (err) {
+        toast.error('Not ended', { description: toolMessage(err) });
+      }
+    },
+
+    closeScheduleDialog: () => patch((s) => ({ ...s, ...closed })),
+
+    chooseWeekScreen: (screenId) => patch((s) => ({ ...s, weekScreenId: screenId })),
+  };
+};

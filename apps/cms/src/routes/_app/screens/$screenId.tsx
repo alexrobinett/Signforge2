@@ -3,6 +3,7 @@
  * cache, display hours with exceptions, versions and recent events; Identify, Restart, wake or
  * sleep now; settings, and revoke behind a confirmation (the one thing here that cannot be undone).
  */
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link, notFound } from '@tanstack/react-router';
 import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon } from 'lucide-react';
 import { useId, type SubmitEvent, type ReactNode } from 'react';
@@ -25,16 +26,25 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
-import { useCanManage, useNow, useRole } from '~/lib/live';
+import { useCanManage, useNow, useOrgId, useRole } from '~/lib/live';
 import { eventText } from '~/lib/audit';
 import { ago, describeScreen, localClock } from '~/lib/screen-status';
 import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
+import { playingAt } from '~/lib/schedule';
+import { playlistsQuery } from '~/queries/playlists';
+import { scheduleQuery } from '~/queries/schedule';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/_app/screens/$screenId')({
-  loader: async ({ params }) => {
-    const detail = await getScreen({ data: params.screenId });
+  loader: async ({ params, context: { queryClient }, parentMatchPromise }) => {
+    const orgId = (await parentMatchPromise).loaderData?.organization?.id;
+    // What it plays now (M3-19): the schedule and the playlists, as the Schedule page reads them.
+    const [detail] = await Promise.all([
+      getScreen({ data: params.screenId }),
+      orgId && queryClient.query(scheduleQuery(orgId)),
+      orgId && queryClient.query(playlistsQuery(orgId)),
+    ]);
     if (!detail) throw notFound();
     return detail;
   },
@@ -61,6 +71,12 @@ function ScreenPage() {
   const canManage = useCanManage();
   const owner = useRole() === 'owner';
   const now = useNow(at);
+  const orgId = useOrgId();
+  const { entries } = useSuspenseQuery(scheduleQuery(orgId)).data;
+  const { playlists } = useSuspenseQuery(playlistsQuery(orgId)).data;
+  const chooseWeekScreen = useAppStore((s) => s.chooseWeekScreen);
+  const fallback = playlists.find((p) => p.isDefault);
+  const plays = fallback && playingAt({ screen, groups, entries, defaultPlaylistId: fallback.id, at: new Date(now) });
   const pageState = useAppStore((s) => s.screens.page);
   const actOnScreen = useAppStore((s) => s.actOnScreen);
   const openScreenSettings = useAppStore((s) => s.openScreenSettings);
@@ -173,6 +189,15 @@ function ScreenPage() {
         <p className="text-[15px] text-muted-foreground">
           {screen.orientation === 'portrait' ? 'Portrait 1080 × 1920' : 'Landscape 1920 × 1080'} ·{' '}
           {inGroups.length ? `group ${inGroups.map((g) => g.name).join(', ')}` : 'No group'} · {screen.timezone.replaceAll('_', ' ')}
+          {plays && (
+            <>
+              {' · '}
+              <Link to="/schedule" onClick={() => chooseWeekScreen(screen.id)} className="underline underline-offset-4">
+                {plays.takeover ? 'takeover: ' : 'plays '}
+                {playlists.find((p) => p.id === plays.playlistId)?.name ?? 'a removed playlist'} now
+              </Link>
+            </>
+          )}
         </p>
         <p role="status" className={notice?.ok === false ? 'text-sm font-medium text-destructive' : 'text-sm text-muted-foreground'}>
           {notice?.text}
