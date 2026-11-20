@@ -173,3 +173,49 @@ test('remove the entry and publish: the screen goes back to the default; the pag
   await shots(page, '55-schedule-phone');
   await page.setViewportSize({ width: 1280, height: 720 });
 });
+
+test('a create whose answer was lost, saved again, makes one entry, and a takeover started again makes one takeover (#149)', async () => {
+  test.setTimeout(120_000);
+  await page.goto('/schedule');
+  await hydrated(page);
+  /** Lets the first call to `tool` reach SignForge, which makes the row, and loses its answer on the way back. */
+  const loseFirstAnswer = async (name: string) => {
+    let first = true;
+    await page.route(`**/api/tools/${name}`, async (route) => {
+      if (!first) return route.continue();
+      first = false;
+      await route.fetch();
+      await route.abort('failed');
+    });
+  };
+  const count = async (kind: 'entries' | 'takeovers') =>
+    (await tool(page, 'list_schedule_entries', {})).entries.filter(
+      (e: { endsAt: string | null; deleted: boolean }) => !e.deleted && (kind === 'takeovers') === (e.endsAt !== null),
+    ).length;
+  const entriesBefore = await count('entries');
+
+  await loseFirstAnswer('create_schedule_entry');
+  await page.getByRole('button', { name: 'Schedule a playlist' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Schedule a playlist' });
+  await dialog.getByLabel('Playlist').selectOption({ label: 'Breakfast' });
+  await dialog.getByRole('button', { name: 'Save draft' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Could not reach SignForge');
+  await dialog.getByRole('button', { name: 'Save draft' }).click();
+  await expect(toastSays('Scheduled, as a draft')).toBeVisible();
+  await expect(dialog).toBeHidden();
+  expect(await count('entries')).toBe(entriesBefore + 1);
+
+  await loseFirstAnswer('start_takeover');
+  await page.getByRole('button', { name: 'Take over screens' }).click();
+  const takeover = page.getByRole('dialog', { name: 'Take over screens' });
+  await takeover.getByLabel('Playlist').selectOption({ label: 'Flash sale' });
+  await takeover.getByRole('button', { name: 'Take over now' }).click();
+  await expect(takeover.getByRole('alert')).toContainText('Could not reach SignForge');
+  await takeover.getByRole('button', { name: 'Take over now' }).click();
+  await expect(toastSays(/Published v\d+ to 1 screen/)).toBeVisible();
+  expect(await count('takeovers')).toBe(1);
+  await expect(page.getByRole('region', { name: 'Takeovers' }).getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('region', { name: 'Takeovers' }).getByRole('listitem').first().getByRole('button', { name: 'End now' }).click();
+  await expect(page.getByRole('region', { name: 'Takeovers' })).toHaveCount(0);
+  await page.unroute('**/api/tools/*');
+});

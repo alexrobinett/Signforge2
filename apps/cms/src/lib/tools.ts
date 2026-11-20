@@ -10,7 +10,8 @@ import { tabOrgHeaders } from './tab-org';
 import type { PlaylistView } from './playlists';
 import type { SpotView } from './spots';
 
-class ToolCallError extends Error {
+/** A tool's refusal, or a call that got no answer (`code` network). */
+export class ToolCallError extends Error {
   constructor(
     readonly code: string,
     message: string,
@@ -55,28 +56,17 @@ export function entryIdOf(output: unknown): string {
   throw new ToolCallError('error', 'SignForge answered without the schedule entry. Reload the page to see it.');
 }
 
-/** The version of the screen in a `{ screen }` output, such as `rename_screen`'s: what the next edit sends as `ifVersion`. */
-export function screenVersionOf(output: unknown): number {
-  if (isRecord(output) && isRecord(output.screen) && typeof output.screen.version === 'number') return output.screen.version;
-  throw new ToolCallError('error', 'SignForge answered without the screen. Reload the page to see it.');
-}
-
 /** The id of the kit in a `{ brandKit }` output, such as `create_brand_kit`'s. */
 export function brandKitIdOf(output: unknown): string {
   if (isRecord(output) && isRecord(output.brandKit) && typeof output.brandKit.id === 'string') return output.brandKit.id;
   throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
 }
 
-/** The version of the kit in a `{ brandKit }` output, such as `update_brand_kit`'s: what the next save sends as `ifVersion`. */
-export function brandKitVersionOf(output: unknown): number {
-  if (isRecord(output) && isRecord(output.brandKit) && typeof output.brandKit.version === 'number') return output.brandKit.version;
-  throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
-}
-
-/** The version of the settings in `update_org_settings`' output: what the next save of edits made meanwhile sends as `ifVersion`. */
-export function settingsVersionOf(output: unknown): number {
-  if (isRecord(output) && isRecord(output.settings) && typeof output.settings.version === 'number') return output.settings.version;
-  throw new ToolCallError('error', 'SignForge answered without the settings. Reload the page to see them.');
+/** The version of the row in a `{ [of]: { version } }` output, such as `update_org_settings`' (`settings`): what the next save sends as `ifVersion`. */
+export function versionOf(output: unknown, of: string): number {
+  const row = isRecord(output) ? output[of] : undefined;
+  if (isRecord(row) && typeof row.version === 'number') return row.version;
+  throw new ToolCallError('error', 'SignForge answered without what it saved. Reload the page to see it.');
 }
 
 /** Whether a refusal is an `ifVersion` conflict: someone changed the thing since the page read it. */
@@ -91,10 +81,6 @@ export const toolMessage = (err: unknown) => (err instanceof Error ? err.message
 
 /** Whether a refusal says the row is gone: deleted, by someone else or in another tab. */
 export const isGone = (err: unknown) => err instanceof ToolCallError && err.code === 'not_found';
-
-/** An editor's state after a refused save: `stale` when someone else changed the row since, which the editor offers to reload. */
-export const saveRefused = (err: unknown) =>
-  isStale(err) ? { stale: true, saveError: 'This changed since you opened it.' } : { stale: false, saveError: toolMessage(err) };
 
 /** The spot in a `{ spot }` output, such as `update_spot`'s, for the Query cache. */
 export function spotOf(output: unknown): SpotView {

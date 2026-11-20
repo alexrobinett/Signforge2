@@ -43,7 +43,7 @@ function GeneralSettings() {
   const canEdit = useRole() === 'owner';
   const id = useId();
   const orgId = useOrgId();
-  const edits = useAppStore((s) => editsIn(s.settings, 'general', orgId));
+  const edits = useAppStore((s) => editsIn(s.settings, 'general', orgId, settings?.version ?? null));
   const editSettings = useAppStore((s) => s.editSettings);
   const saveSettings = useAppStore((s) => s.saveSettings);
   if (!settings || !org) return null;

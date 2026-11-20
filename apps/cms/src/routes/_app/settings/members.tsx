@@ -246,7 +246,7 @@ function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdi
 function PublishingForm({ settings, canEdit }: { settings: OrgSettings; canEdit: boolean }) {
   const id = useId();
   const orgId = useOrgId();
-  const edited = useAppStore((s) => editsIn(s.settings, 'publishing', orgId).editorsPublish);
+  const edited = useAppStore((s) => editsIn(s.settings, 'publishing', orgId, settings.version).editorsPublish);
   const editSettings = useAppStore((s) => s.editSettings);
   const saveSettings = useAppStore((s) => s.saveSettings);
 
