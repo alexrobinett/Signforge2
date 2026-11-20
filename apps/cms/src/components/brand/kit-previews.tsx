@@ -61,7 +61,9 @@ function KitPreview({ orgId, kitId, spot, what }: { orgId: string; kitId: string
         <Link to="/spots/$spotId" params={{ spotId: spot.id }} className="font-semibold underline-offset-4 hover:underline">
           {spot.name}
         </Link>
-        <span className="text-muted-foreground">{status?.error ? `The player could not show it: ${status.error}` : what}</span>
+        <span className="text-muted-foreground">
+          {status?.error ? `The player could not show it: ${status.error}` : status?.refused ? `Not shown with this kit: ${status.refused}` : what}
+        </span>
       </figcaption>
     </figure>
   );

@@ -20,7 +20,7 @@
     // one changes, and build the player before the CMS.
     "apps/cms": {
       "ignoreIssues": { "src/components/ui/**": ["exports"] },
-      "ignoreDependencies": ["@signforge/player", "@signforge/cli", "@signforge/template-.*"]
+      "ignoreDependencies": ["@signforge/player", "@signforge/template-.*"]
     },
     // The fixture template is bundled by the browser tests' global setup; sw.js is served as is.
     // templates.test.ts plays every template from templates/: declared as for apps/api.

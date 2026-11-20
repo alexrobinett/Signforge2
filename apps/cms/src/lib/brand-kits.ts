@@ -5,9 +5,10 @@
  * one that fails. The contrast maths is the compiler's, so the page says what the tools say.
  */
 import { BRAND_PAIRS, brandFont, contrastRatio, HEX_COLOR, MIN_CONTRAST, onColor } from '@signforge/compiler';
+import { assetFile } from '@signforge/compiler/draft';
 import type { BrandColor, BrandColors, BrandKit, BrandShape, Orientation } from '@signforge/contract';
 import type { AssetView } from './assets';
-import { assetFile, type SpotPreview } from './spots';
+import type { SpotPreview } from './spots';
 
 type FontRef = { id: string; family: string } | null;
 
@@ -117,7 +118,8 @@ export function duplicateInput(kit: BrandKitView, idempotencyKey: string) {
 /**
  * A spot's preview input (`get_spot_preview`) wearing the draft instead of the saved kit, as the
  * publish would build it (packages/tools `toBrandKit`): catalogue fonts with their files, the
- * logo's rendition for the orientation. Undefined while a colour is not a hex colour yet.
+ * logo's file for the orientation (@signforge/compiler `assetFile`). Undefined while a colour is not a hex colour yet.
+ * A logo that is not verified refuses the kit, with the publish's reason: screens would get no such kit.
  */
 export function withDraftKit(opts: {
   preview: SpotPreview['preview'];
@@ -125,22 +127,24 @@ export function withDraftKit(opts: {
   draft: KitDraft;
   assets: AssetView[];
   orientation: Orientation;
-}): SpotPreview['preview'] | undefined {
+}): { preview: SpotPreview['preview'] } | { problems: string[] } | undefined {
   const { draft, orientation } = opts;
   const colors = draftColors(draft);
   if (!colors) return undefined;
   const files = { ...opts.preview.files };
+  const assets = { asset: (id: string) => opts.assets.find((x) => x.id === id) };
+  const problems: string[] = [];
   const logo = (assetId: string | null) => {
-    const a = assetId ? opts.assets.find((x) => x.id === assetId) : undefined;
-    const f = a && assetFile(a, orientation);
-    if (!f) return undefined;
-    files[f.sha] = { size: f.size, type: f.type };
+    if (!assetId) return undefined;
+    const f = assetFile(assets, assetId, orientation, files);
+    if (f.problem) problems.push(`logo ${f.problem}`);
     return f.sha;
   };
   const display = brandFont(draft.displayFontId, files);
   const body = brandFont(draft.bodyFontId, files);
   const onDark = logo(draft.logoOnDarkAssetId);
   const onLight = logo(draft.logoOnLightAssetId);
+  if (problems.length) return { problems };
   const kit: BrandKit = {
     id: opts.kitId,
     colors,
@@ -148,7 +152,7 @@ export function withDraftKit(opts: {
     fonts: { ...(display ? { display } : {}), ...(body ? { body } : {}) },
     ...(onDark ? { logo: { onDark, ...(onLight ? { onLight } : {}) } } : {}),
   };
-  return { ...opts.preview, files, brand: { kits: { [kit.id]: kit }, groups: {}, screen: kit.id } };
+  return { preview: { ...opts.preview, files, brand: { kits: { [kit.id]: kit }, groups: {}, screen: kit.id } } };
 }
 
 /** What WCAG allows below 4.5:1: text of 24 px, or 18.7 px bold, and up. */

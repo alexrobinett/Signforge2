@@ -134,7 +134,9 @@ describe('withDraftKit', () => {
 
   it('gives the preview screen the draft kit, with its catalogue fonts and the logo for the orientation', () => {
     const d = { ...kitDraftOf(view), displayFontId: 'base/oswald', bodyFontId: null, logoOnDarkAssetId: 'ast_logo' };
-    const out = withDraftKit({ preview, kitId: 'bk_1', draft: d, assets: [logo], orientation: 'portrait' })!;
+    const themed = withDraftKit({ preview, kitId: 'bk_1', draft: d, assets: [logo], orientation: 'portrait' });
+    if (!themed || !('preview' in themed)) throw new Error(`no preview: ${JSON.stringify(themed)}`);
+    const out = themed.preview;
     const kit = out.brand?.kits.bk_1;
     expect(out.brand?.screen).toBe('bk_1');
     expect(kit?.colors).toEqual({ ...northside, onAccent: '#000000' });
@@ -144,6 +146,13 @@ describe('withDraftKit', () => {
     expect(out.files['b'.repeat(64)]).toEqual({ size: 800, type: 'image/png' });
     for (const f of kit?.fonts.display?.files ?? []) expect(out.files[f.file]?.type).toBe('font/woff2');
     expect(out.files['c'.repeat(64)]).toEqual({ size: 10, type: 'text/html' });
+  });
+
+  it('refuses a kit whose logo is not verified, with the reason a publish leaves it out for', () => {
+    const d = { ...kitDraftOf(view), logoOnDarkAssetId: 'ast_logo' };
+    expect(withDraftKit({ preview, kitId: 'bk_1', draft: d, assets: [{ ...logo, status: 'pending' }], orientation: 'landscape' })).toEqual({
+      problems: ['logo asset ast_logo is still being checked'],
+    });
   });
 
   it('is undefined while a colour is half typed, so the players keep the last kit they drew', () => {

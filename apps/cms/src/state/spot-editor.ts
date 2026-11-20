@@ -72,6 +72,11 @@ interface SpotEditorState {
   picking: string | null;
   /** True while the draft cannot be drawn: the stage keeps the last frame it drew. */
   holding: boolean;
+  /**
+   * While holding, why the draft cannot be a spot at all when no field of the form is marked for
+   * it: an image still being checked, a template version not approved. Empty when a field explains it.
+   */
+  refusals: string[];
   /** Whether the player has said it plays the draft. */
   playing: boolean;
   /** The spot the player last said is on screen. */
@@ -122,6 +127,7 @@ const initial: SpotEditorState = {
   drafts: {},
   picking: null,
   holding: false,
+  refusals: [],
   playing: false,
   playingSpot: null,
   stageError: null,
@@ -182,15 +188,23 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   /** The spot target's draft, compiled; undefined while what it needs is not loaded. */
   async function spotDraft(
     t: StageTarget & { spotId: string; fallback?: boolean },
-  ): Promise<{ manifest?: ScreenManifest; problems: string[]; data?: DataSnapshot[] } | undefined> {
+  ): Promise<{ manifest?: ScreenManifest; problems: string[]; refusals?: string[]; data?: DataSnapshot[] } | undefined> {
     const spot = savedSpot(t.orgId, t.spotId);
     const preview = queryClient.getQueryData(spotPreviewQuery(t.orgId, t).queryKey);
     const templates = queryClient.getQueryData(templatesQuery(t.orgId).queryKey)?.templates;
     const assets = queryClient.getQueryData(assetsQuery(t.orgId).queryKey)?.assets;
     if (!spot || !preview || !templates || !assets) return undefined;
     const draft = spotShown(get().spotEditor, t.orgId, spot) ?? draftOf(spot);
-    const version = spot.templateVersionId ? versionsById(templates).get(spot.templateVersionId) : undefined;
-    const result = await compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation, live: !t.fallback });
+    const result = await compilePreview({
+      spot,
+      draft,
+      versions: versionsById(templates),
+      preview: preview.preview,
+      timezone: preview.timezone,
+      assets,
+      orientation: t.orientation,
+      live: !t.fallback,
+    });
     const sources = !t.fallback ? [...new Set(Object.values(draft.bindings).map((b) => b.dataSourceId))] : [];
     // A table added just now has no snapshot until its first poll: the stage plays what the editor read from it.
     const latest = async (id: string): Promise<DataSnapshot[]> => {
@@ -200,7 +214,9 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       const now = new Date().toISOString();
       return table ? [{ id, version: 0, fetchedAt: now, checkedAt: now, data: table }] : [];
     };
-    return { ...result, data: (await Promise.all(sources.map(latest))).flat() };
+    // The stage shows one spot: its reasons need no "spot <id>:" before them.
+    const refusals = result.refused ? result.problems.map((p) => p.replace(`spot ${spot.id}: `, '')) : [];
+    return { ...result, refusals, data: (await Promise.all(sources.map(latest))).flat() };
   }
 
   async function redraw() {
@@ -217,11 +233,11 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     }
     if (!result || seq !== stage.seq || stage.target?.frame !== t.frame) return;
     if (!result.manifest) {
-      editor((x) => ({ ...x, holding: true }));
+      editor((x) => ({ ...x, holding: true, refusals: result.refusals ?? [] }));
       return;
     }
     t.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest: result.manifest, data: result.data ?? [] }, location.origin);
-    editor((x) => ({ ...x, holding: false }));
+    editor((x) => ({ ...x, holding: false, refusals: [] }));
   }
 
   const stage: StageLink = { target: null, listening: null, seq: 0 };
@@ -309,7 +325,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       }
       const changed = stage.target?.frame !== target?.frame;
       stage.target = target;
-      if (changed) editor((e) => ({ ...e, holding: false, playing: false, playingSpot: null, stageError: null }));
+      if (changed) editor((e) => ({ ...e, holding: false, refusals: [], playing: false, playingSpot: null, stageError: null }));
       void redraw();
     },
 
