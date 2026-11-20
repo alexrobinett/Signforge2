@@ -9,6 +9,7 @@ import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { LoaderCircleIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { EditorFields } from '~/components/editor';
 import { EmptyState, PageHeader } from '~/components/page';
 import { EntryDialog } from '~/components/schedule/entry-dialog';
 import { TakeoverDialog } from '~/components/schedule/takeover-dialog';
@@ -68,116 +69,119 @@ function SchedulePage() {
   const scheduled = entries.filter((e) => !e.takeover);
 
   return (
-    <div className="space-y-8">
-      <PageHeader title={section.label} description={section.description}>
-        {canPublish && (
-          <Button variant="outline" onClick={() => openTakeover()} disabled={!playlists.length}>
-            Take over screens
-          </Button>
-        )}
-        {canManage && (
-          <Button variant="outline" onClick={() => openNewEntry()} disabled={!playlists.length}>
-            Schedule a playlist
-          </Button>
-        )}
-        {canPublish && (
-          <Button onClick={() => void publishSchedule(orgId)} disabled={publishing}>
-            {publishing && <LoaderCircleIcon className="animate-spin" aria-hidden />} Publish
-          </Button>
-        )}
-      </PageHeader>
+    // Until the page hydrates, a click on its controls would go nowhere (#136).
+    <EditorFields>
+      <div className="space-y-8">
+        <PageHeader title={section.label} description={section.description}>
+          {canPublish && (
+            <Button variant="outline" onClick={() => openTakeover()} disabled={!playlists.length}>
+              Take over screens
+            </Button>
+          )}
+          {canManage && (
+            <Button variant="outline" onClick={() => openNewEntry()} disabled={!playlists.length}>
+              Schedule a playlist
+            </Button>
+          )}
+          {canPublish && (
+            <Button onClick={() => void publishSchedule(orgId)} disabled={publishing}>
+              {publishing && <LoaderCircleIcon className="animate-spin" aria-hidden />} Publish
+            </Button>
+          )}
+        </PageHeader>
 
-      <p className="text-sm">
-        {fallback ? (
-          <>
-            Where no entry applies, every screen plays{' '}
-            <Link to="/playlists/$playlistId" params={{ playlistId: fallback.id }} className="font-medium underline underline-offset-4">
-              {fallback.name}
-            </Link>
-            , the default playlist.
-          </>
-        ) : (
-          <>No default playlist yet: open a playlist and choose Play on every screen, or no screen can be published to.</>
-        )}
-      </p>
+        <p className="text-sm">
+          {fallback ? (
+            <>
+              Where no entry applies, every screen plays{' '}
+              <Link to="/playlists/$playlistId" params={{ playlistId: fallback.id }} className="font-medium underline underline-offset-4">
+                {fallback.name}
+              </Link>
+              , the default playlist.
+            </>
+          ) : (
+            <>No default playlist yet: open a playlist and choose Play on every screen, or no screen can be published to.</>
+          )}
+        </p>
 
-      {takeovers.length > 0 && (
-        <Part title="Takeovers">
-          <ul className="divide-y overflow-hidden rounded-xl border bg-card">
-            {takeovers.map((e) => {
-              const started = e.startsAt !== null && Date.parse(e.startsAt) <= now;
-              return (
+        {takeovers.length > 0 && (
+          <Part title="Takeovers">
+            <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+              {takeovers.map((e) => {
+                const started = e.startsAt !== null && Date.parse(e.startsAt) <= now;
+                return (
+                  <li key={e.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium">{names.get(e.playlistId) ?? 'A removed playlist'}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {aimedAt(e, screens, groups)} · {started ? 'Playing' : `From ${timeWord(e.startsAt ?? '')}`} until {timeWord(e.endsAt ?? '')} ·{' '}
+                        {stateWord(e)}
+                      </p>
+                    </div>
+                    {canPublish && (
+                      <Button variant="outline" size="sm" onClick={() => void endTakeover(orgId, e)} disabled={publishing}>
+                        End now
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </Part>
+        )}
+
+        <Part title="Schedule">
+          {scheduled.length ? (
+            <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+              {scheduled.map((e) => (
                 <li key={e.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{names.get(e.playlistId) ?? 'A removed playlist'}</p>
                     <p className="text-sm text-muted-foreground">
-                      {aimedAt(e, screens, groups)} · {started ? 'Playing' : `From ${timeWord(e.startsAt ?? '')}`} until {timeWord(e.endsAt ?? '')} ·{' '}
-                      {stateWord(e)}
+                      {aimedAt(e, screens, groups)} · {describeWhen(e)}
+                      {e.priority > 0 && ` · priority ${e.priority}`} · {stateWord(e)}
                     </p>
                   </div>
-                  {canPublish && (
-                    <Button variant="outline" size="sm" onClick={() => void endTakeover(orgId, e)} disabled={publishing}>
-                      End now
-                    </Button>
+                  {canManage && (
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Change ${names.get(e.playlistId) ?? 'entry'} on ${aimedAt(e, screens, groups)}`}
+                        onClick={() => openEditEntry(e)}
+                      >
+                        <PencilIcon aria-hidden />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove ${names.get(e.playlistId) ?? 'entry'} on ${aimedAt(e, screens, groups)}`}
+                        onClick={() => void removeEntry(orgId, e)}
+                      >
+                        <Trash2Icon aria-hidden />
+                      </Button>
+                    </div>
                   )}
                 </li>
-              );
-            })}
-          </ul>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState icon={section.icon} title={section.empty.title}>
+              {section.empty.body}
+            </EmptyState>
+          )}
         </Part>
-      )}
 
-      <Part title="Schedule">
-        {scheduled.length ? (
-          <ul className="divide-y overflow-hidden rounded-xl border bg-card">
-            {scheduled.map((e) => (
-              <li key={e.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">{names.get(e.playlistId) ?? 'A removed playlist'}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {aimedAt(e, screens, groups)} · {describeWhen(e)}
-                    {e.priority > 0 && ` · priority ${e.priority}`} · {stateWord(e)}
-                  </p>
-                </div>
-                {canManage && (
-                  <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Change ${names.get(e.playlistId) ?? 'entry'} on ${aimedAt(e, screens, groups)}`}
-                      onClick={() => openEditEntry(e)}
-                    >
-                      <PencilIcon aria-hidden />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Remove ${names.get(e.playlistId) ?? 'entry'} on ${aimedAt(e, screens, groups)}`}
-                      onClick={() => void removeEntry(orgId, e)}
-                    >
-                      <Trash2Icon aria-hidden />
-                    </Button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <EmptyState icon={section.icon} title={section.empty.title}>
-            {section.empty.body}
-          </EmptyState>
+        {fallback && (
+          <Part title="Week">
+            <WeekView screens={screens} groups={groups} entries={entries} playlists={playlists} defaultPlaylistId={fallback.id} now={now} />
+          </Part>
         )}
-      </Part>
 
-      {fallback && (
-        <Part title="Week">
-          <WeekView screens={screens} groups={groups} entries={entries} playlists={playlists} defaultPlaylistId={fallback.id} now={now} />
-        </Part>
-      )}
-
-      <EntryDialog orgId={orgId} playlists={playlists} screens={screens} groups={groups} />
-      <TakeoverDialog orgId={orgId} playlists={playlists} screens={screens} groups={groups} now={now} />
-    </div>
+        <EntryDialog orgId={orgId} playlists={playlists} screens={screens} groups={groups} />
+        <TakeoverDialog orgId={orgId} playlists={playlists} screens={screens} groups={groups} now={now} />
+      </div>
+    </EditorFields>
   );
 }
 

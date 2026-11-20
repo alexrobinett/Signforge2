@@ -64,10 +64,10 @@ function toEntry(e: ScheduleEntryView): ScheduleEntry {
 }
 
 /** Whether an entry reaches the screen: aimed at every screen, one of its groups, or it. */
-export const reaches = (e: Pick<ScheduleEntryView, 'target' | 'groupId' | 'screenId'>, screenId: string, groupIds: readonly string[]) =>
+const reaches = (e: Pick<ScheduleEntryView, 'target' | 'groupId' | 'screenId'>, screenId: string, groupIds: readonly string[]) =>
   e.target === 'org' || (e.target === 'group' && groupIds.includes(e.groupId ?? '')) || (e.target === 'screen' && e.screenId === screenId);
 
-export interface WeekHour {
+interface WeekHour {
   /** The instant the hour starts. */
   at: Date;
   playlistId: string;

@@ -35,7 +35,7 @@ export interface EntryDraft {
 }
 
 /** A takeover in its dialog: until when, as a `datetime-local` value in the browser's time zone. */
-export interface TakeoverDraft {
+interface TakeoverDraft {
   playlistId: string;
   target: Target;
   groupId: string;
@@ -92,7 +92,7 @@ const aim = (d: { target: Target; groupId: string; screenId: string }) => ({
 });
 
 /** The entry's when, as the tools take it: a field left out is null, every day is no days. */
-export const entryWhen = (d: EntryDraft) => ({
+const entryWhen = (d: EntryDraft) => ({
   priority: d.priority,
   days: d.days.length === 7 ? null : d.days,
   from: d.from || null,

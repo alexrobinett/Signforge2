@@ -3,7 +3,7 @@
 // entry. No entry has days or times, and the takeover's end is the page's own "an hour from now",
 // so nothing depends on the hour the test runs at.
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.61';
@@ -66,6 +66,9 @@ test.afterAll(async () => {
 
 test('schedule a playlist for a group, see its week, and publish it to the screen', async () => {
   test.setTimeout(120_000);
+  // The page hydrates after the app (body[data-hydrated]): until then its controls are disabled (#136).
+  const names = ['Take over screens', 'Schedule a playlist', 'Publish', 'Screen'];
+  expect(await disabledOnServer(page, '/schedule', names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Schedule' }).click();
   await hydrated(page);
   await expect(page.getByRole('heading', { name: 'Nothing scheduled' })).toBeVisible();
