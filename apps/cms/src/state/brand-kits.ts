@@ -57,7 +57,8 @@ interface BrandKitsState {
   actionError: { kitId: string; text: string } | null;
   newKit: { open: boolean; name: string; pending: boolean; error: string | null; key: string | null };
   /** What each preview's player last said, by spot id. */
-  previews: Record<string, { playing: boolean; error: string | null }>;
+  /** Per spot: whether its player plays the kit, what the player said went wrong, and why the draft kit is not sent (a logo still being checked). */
+  previews: Record<string, { playing: boolean; error: string | null; refused: string | null }>;
   /** The width each preview has on the page, for scaling the screen to fit; null until measured. */
   previewWidth: number | null;
 }
@@ -168,14 +169,19 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     try {
       preview = await queryClient.query(spotPreviewQuery(t.orgId, previewKey(t)));
     } catch (err) {
-      kits((k) => ({ ...k, previews: { ...k.previews, [t.spotId]: { playing: false, error: `what it needs did not load (${toolMessage(err)})` } } }));
+      kits((k) => ({
+        ...k,
+        previews: { ...k.previews, [t.spotId]: { playing: false, error: `what it needs did not load (${toolMessage(err)})`, refused: null } },
+      }));
       return;
     }
     const draft = kitEditing(get().brandKits, kit) ?? kitDraftOf(kit);
     const themed = withDraftKit({ preview: preview.preview, kitId: kit.id, draft, assets, orientation: 'landscape' });
     if (!themed) return;
     if ('problems' in themed) {
-      kits((k) => ({ ...k, previews: { ...k.previews, [t.spotId]: { playing: false, error: themed.problems.join('; ') } } }));
+      // The player keeps the kit it last drew; the caption says why this one is not sent.
+      if (seq === link.seq && links.get(t.spotId) === link)
+        kits((k) => ({ ...k, previews: { ...k.previews, [t.spotId]: { playing: false, error: null, refused: themed.problems.join('; ') } } }));
       return;
     }
     const result = await compilePreview({
@@ -243,7 +249,10 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     answered(link.target.frame);
     kits((k) => ({
       ...k,
-      previews: { ...k.previews, [spotId]: msg.type === 'playing' ? { playing: true, error: null } : { playing: false, error: msg.message } },
+      previews: {
+        ...k.previews,
+        [spotId]: msg.type === 'playing' ? { playing: true, error: null, refused: null } : { playing: false, error: msg.message, refused: null },
+      },
     }));
   };
 
@@ -365,7 +374,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       if (was?.frame === target.frame && was.kitId === target.kitId) return;
       const link: PreviewLink = { target, seq: 0, next: null };
       links.set(spotId, link);
-      kits((k) => ({ ...k, previews: { ...k.previews, [spotId]: { playing: false, error: null } } }));
+      kits((k) => ({ ...k, previews: { ...k.previews, [spotId]: { playing: false, error: null, refused: null } } }));
       // A frame already listening (the same player, now for another kit) is posted its spot at once.
       void redraw(link);
     },

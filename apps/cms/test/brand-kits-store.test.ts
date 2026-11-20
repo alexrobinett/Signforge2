@@ -9,6 +9,7 @@ import clock from '@signforge/template-clock/template.json';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
+import type { AssetView } from '../src/lib/assets';
 import type { BrandKitView } from '../src/lib/brand-kits';
 import type { SpotPreview, SpotView, TemplateView } from '../src/lib/spots';
 import { getSpotPreview } from '../src/server/spots.functions';
@@ -129,12 +130,12 @@ afterEach(() => {
 });
 
 /** The kit page as the store sees it: what the page reads and observes, and a player frame that records its drafts. */
-function page(kits: BrandKitView[]) {
+function page(kits: BrandKitView[], assets: AssetView[] = []) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: 1000 } } });
   queryClient.setQueryData(brandKitsQuery(ORG).queryKey, { brandKits: kits });
   queryClient.setQueryData(spotsQuery(ORG).queryKey, { spots: [spot] });
   queryClient.setQueryData(templatesQuery(ORG).queryKey, { templates });
-  queryClient.setQueryData(assetsQuery(ORG).queryKey, { assets: [] });
+  queryClient.setQueryData(assetsQuery(ORG).queryKey, { assets });
   // The loader reads the first kit's preview input; nothing on the page observes it.
   queryClient.setQueryData(spotPreviewQuery(ORG, previewKey({ kitId: kits[0]!.id, templateVersionId: version.id })).queryKey, preview(kits[0]!.id));
   // The page's components observe these reads (useSuspenseQuery), so they are kept.
@@ -152,6 +153,31 @@ function page(kits: BrandKitView[]) {
 }
 
 describe("the kit page's previews (review of #103)", () => {
+  it('say why a kit whose logo is still being checked is not shown, and send the player nothing (review of #158)', async () => {
+    const logo: AssetView = {
+      id: 'ast_logo',
+      name: 'logo.png',
+      kind: 'image',
+      status: 'pending',
+      sha256: 'e'.repeat(64),
+      type: 'image/png',
+      size: 900,
+      width: 400,
+      height: 100,
+      renditions: [{ orientation: 'landscape', sha256: 'e'.repeat(64), type: 'image/png', size: 900, width: 400, height: 100 }],
+      createdAt: 0,
+      updatedAt: 0,
+      usageCount: 1,
+    };
+    const a = { ...kit('bk_a', '#2563eb'), logo: { onDarkAssetId: logo.id, onLightAssetId: null } };
+    const { store, posted, attach, listening } = page([a], [logo]);
+    attach(a.id);
+    listening();
+    await vi.waitFor(() => expect(store.getState().brandKits.previews[spot.id]?.refused).toBe('logo asset ast_logo is still being checked'));
+    expect(store.getState().brandKits.previews[spot.id]).toEqual({ playing: false, error: null, refused: 'logo asset ast_logo is still being checked' });
+    expect(posted).toEqual([]);
+  });
+
   it('keep re-theming after the page has been open longer than Query keeps an unobserved read (1)', async () => {
     const a = kit('bk_a', '#2563eb');
     const { store, posted, attach, listening, playing } = page([a]);

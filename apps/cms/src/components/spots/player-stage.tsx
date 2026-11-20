@@ -219,7 +219,7 @@ export function PlayerStage({
             {playlistId !== undefined
               ? 'Holding the last frame the player could show.'
               : refusals.length
-                ? `Holding the last valid frame: ${refusals.join('; ')}.`
+                ? `${playing ? 'Holding the last valid frame' : 'Not shown'}: ${refusals.join('; ')}.`
                 : 'Holding the last valid frame until the marked field is fixed.'}
           </span>
         ) : (
