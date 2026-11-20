@@ -1,14 +1,17 @@
 # CI
 
-One job, `check`, in `.github/workflows/ci.yml`, on every pull request and every push to `master`. It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks. A pull request runs only the tasks of the packages its diff affects. A push to `master` runs every task, so nothing a pull request skipped goes unchecked and the caches that pull requests read stay warm.
+One job, `check`, in `.github/workflows/ci.yml`, on every pull request and every push to `master`. It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks.
+
+- **A pull request** runs typecheck, test and lint for the packages its diff affects. It does not run the CMS end-to-end run (`test:e2e`): run that locally before opening or updating the pull request, on your own ports (`E2E_API_PORT=... E2E_CMS_PORT=... pnpm --filter @signforge/cms test:e2e`), and say in the pull request that it passed.
+- **A push to `master`** runs every task, the CMS end-to-end run included, so nothing a pull request skipped goes unchecked and the caches that pull requests read stay warm. A red `master` run is fixed first, before more merges.
 
 ## What runs
 
 1. Install, with the pnpm store restored from the cache.
 2. The repo-wide checks, a few seconds each, on every run: Biome lint, the format check on changed files, knip, jscpd, `turbo boundaries`, the contract-commit check and the template-dependency check.
-3. The plan: `turbo run … --affected --dry=json` lists the tasks that will run. Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media, tools and template-check).
+3. The plan: `turbo run … --dry=json` lists the tasks that will run (`--affected` and no `test:e2e` on a pull request). Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media, tools and template-check).
 4. The stress media, only if the cli's or the tools' tests run (see [Stress media](#stress-media)).
-5. `turbo run typecheck test test:e2e lint --affected --summarize`, with Turbo's cache restored from earlier runs.
+5. `turbo run typecheck test lint --affected --summarize` on a pull request, or `turbo run typecheck test test:e2e lint --summarize` on `master`, with Turbo's cache restored from earlier runs.
 6. The timing summary on the run's page: each step's time, then each Turbo task's time and whether it came from the cache (`scripts/ci-summary.sh`).
 
 ## What "affected" means

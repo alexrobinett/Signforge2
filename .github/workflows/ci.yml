@@ -82,8 +82,10 @@ jobs:
       - name: Plan
         id: plan
         run: |
-          affected=$([ "$GITHUB_EVENT_NAME" = pull_request ] && echo --affected || true)
-          pnpm exec turbo run typecheck test test:e2e lint $affected --dry=json > "$RUNNER_TEMP/plan.json"
+          # A pull request runs its affected packages' typecheck, tests and lint; the CMS e2e runs on
+          # master, and locally before a pull request is opened (docs/ci.md). A push to master runs everything.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then affected=--affected; tasks='typecheck test lint'; else affected=; tasks='typecheck test test:e2e lint'; fi
+          pnpm exec turbo run $tasks $affected --dry=json > "$RUNNER_TEMP/plan.json"
           browsers=false
           stress_media=false
           for dir in $(jq -r '.tasks[] | select(.command != "<NONEXISTENT>" and (.task == "test" or .task == "test:e2e")) | .directory' "$RUNNER_TEMP/plan.json" | sort -u); do
@@ -92,6 +94,7 @@ jobs:
           done
           {
             echo "affected=$affected"
+            echo "tasks=$tasks"
             echo "browsers=$browsers"
             echo "stress_media=$stress_media"
             echo "playwright=$(sed -n 's/^  playwright-core@\([^:(]*\):.*/\1/p' pnpm-lock.yaml | sort -u | paste -sd- -)"
@@ -150,7 +153,7 @@ jobs:
           key: turbo-${{ runner.os }}-${{ github.sha }}
           restore-keys: turbo-${{ runner.os }}-
       - name: Typecheck, test, e2e, lint
-        run: pnpm exec turbo run typecheck test test:e2e lint ${{ steps.plan.outputs.affected }} --summarize
+        run: pnpm exec turbo run ${{ steps.plan.outputs.tasks }} ${{ steps.plan.outputs.affected }} --summarize
       # Also after a failure, so a rerun replays the tasks that passed.
       - name: Save Turbo cache
         if: always() && steps.turbo-cache.outputs.cache-hit != 'true'
