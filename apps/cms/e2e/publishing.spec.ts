@@ -132,3 +132,32 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
   await shots(page, '55-phone-screens-latest-publish');
   await page.setViewportSize({ width: 1280, height: 720 });
 });
+
+test('Publish pressed while an autosave is on its way waits for it, and publishes the latest edit (#150)', async () => {
+  test.setTimeout(120_000);
+  await page.goto(`/spots/${spotId}`);
+  await hydrated(page);
+  // The first save's answer is held: the server has it, the page does not yet.
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  let first = true;
+  await page.route('**/api/tools/update_spot', async (route) => {
+    if (!first) return route.continue();
+    first = false;
+    const response = await route.fetch();
+    await held;
+    await route.fulfill({ response });
+  });
+  const saving = page.waitForRequest('**/api/tools/update_spot');
+  await page.getByLabel('Message').fill('Four for $6');
+  // The autosave, a second after the edit.
+  await saving;
+  await page.getByLabel('Message').fill('Five for $7');
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  release();
+  await expect(toastSays(/Published v\d+ to 1 screen/)).toBeVisible();
+  await expect(toastSays('Not published')).toHaveCount(0);
+  await expect.poll(() => stageShows(screen, 'Five for $7'), { timeout: 20_000 }).toBe(true);
+  expect((await tool(page, 'get_spot', { spotId })).spot).toMatchObject({ data: { message: 'Five for $7' }, draftChanged: false });
+  await page.unroute('**/api/tools/update_spot');
+});

@@ -65,11 +65,14 @@ function SpotEditor() {
   const templateVersionId = spot?.templateVersionId ?? undefined;
   const preview = useSuspenseQuery(spotPreviewQuery(orgId, { orientation, templateVersionId, brandKitId: search.kit })).data;
 
-  const editing = useAppStore((s) => (s.spotEditor.spotId === spotId ? s.spotEditor.draft : null));
-  const status = useAppStore((s) => (s.spotEditor.spotId === spotId ? s.spotEditor.status : 'saved'));
-  const savedAt = useAppStore((s) => (s.spotEditor.spotId === spotId ? s.spotEditor.savedAt : null));
-  const saveError = useAppStore((s) => (s.spotEditor.spotId === spotId ? s.spotEditor.saveError : null));
-  const stale = useAppStore((s) => s.spotEditor.spotId === spotId && s.spotEditor.stale);
+  const saved = useAppStore((s) => s.spotEditor.drafts[spotId]);
+  const mine = saved?.orgId === orgId ? saved : undefined;
+  // A saved draft is still shown: the page keeps what was typed, a trailing space included.
+  const editing = mine?.edit ?? null;
+  const status = mine?.status ?? 'saved';
+  const savedAt = mine?.savedAt ?? null;
+  const saveError = mine?.error ?? null;
+  const stale = mine?.stale ?? false;
   const picking = useAppStore((s) => s.spotEditor.picking === 'assetId');
   const edit = useAppStore((s) => s.editSpot);
   const save = useAppStore((s) => s.saveSpotDraft);
@@ -81,7 +84,7 @@ function SpotEditor() {
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
   const version = versionsById(templates).get(templateVersionId ?? '');
-  const change = (c: (d: SpotDraft) => SpotDraft) => edit(spot, c);
+  const change = (c: (d: SpotDraft) => SpotDraft) => edit(orgId, spot, c);
   const set = (patch: Partial<SpotDraft>) => change((d) => ({ ...d, ...patch }));
   const range = version?.manifest.duration;
   const durationBad = range ? draft.durationMs < range.minMs || draft.durationMs > range.maxMs : draft.durationMs < 1000;
@@ -96,10 +99,10 @@ function SpotEditor() {
         title={draft.name || spot.name}
         about={`${what} · ${saveWord(status, savedAt)} · ${publishWord(spot)}`}
       >
-        {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save()} />}
+        {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save(spotId)} />}
         {canPublish && <PublishButton pending={publishing} disabled={stale} onPublish={() => void publish(orgId, spotId)} />}
       </EditorHeader>
-      <SaveAlert error={saveError} stale={stale} onReload={() => void reload()} />
+      <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} />
       <div className="flex flex-1 flex-wrap items-stretch">
         <form
           aria-label="Spot fields"
