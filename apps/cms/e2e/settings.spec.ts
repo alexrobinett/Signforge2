@@ -69,7 +69,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await axe(page);
   await shots(page, '40-settings-general');
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Northside Market Co');
   await expect(page.getByLabel('Time zone')).toHaveValue('Europe/London');
@@ -87,7 +87,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await axe(page);
   await shots(page, '41-settings-screens');
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Alert after')).toHaveValue('30');
   await expect(page.getByLabel('From')).toHaveValue('03:00');
@@ -104,7 +104,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByLabel('Alert after')).toHaveValue('45');
   await page.getByLabel('Alert after').fill('30');
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
   // Notifications: everyone hears when a screen goes offline.
   await settingsNav(page).getByRole('link', { name: 'Notifications' }).click();
@@ -115,7 +115,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByLabel('Who hears: A screen goes offline, and when it is back').selectOption('everyone');
   await page.getByLabel('Email for: An agent is refused').uncheck();
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Who hears: A screen goes offline, and when it is back')).toHaveValue('everyone');
   await expect(page.getByLabel('Email for: An agent is refused')).not.toBeChecked();
@@ -157,7 +157,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByLabel('Slack for: A screen goes offline, and when it is back').check();
   await page.getByLabel('Webhook for: A screen goes offline, and when it is back').check();
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Email me a test' }).click();
   await expect(page.getByText('Test sent.')).toBeVisible();
   await expect(async () => {
@@ -239,7 +239,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await page.getByLabel('Editors can publish').uncheck();
   await page.getByRole('region', { name: 'Who publishes' }).getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await expect(
     page
       .getByRole('row', { name: /Publish to screens/ })
@@ -267,7 +267,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await page.getByLabel('Editors can publish').check();
   await page.getByRole('region', { name: 'Who publishes' }).getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await publishOption(1);
 
   // The owner makes them a viewer, then removes them.
@@ -287,7 +287,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await page.getByLabel('Name', { exact: true }).fill('Maria Okafor');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await expect(page.getByText('This browser')).toBeVisible();
   await page.getByText('Dark', { exact: true }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
