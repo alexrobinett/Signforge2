@@ -30,7 +30,7 @@ Left as Raspberry Pi OS ships them, each for a measured reason given in RESULTS.
 
 ## Measuring
 
-- `isolate.py <secs> <transition> <spots>`: one spot or a few, frames split by phase.
+- `isolate.py <secs> <transition> <spots>`: one spot or a few, frames split by phase. The transition is `cut`, `crossfade` or `fade` (500 ms), `fade<ms>`, or `<ms>` for a crossfade that long; anything else is refused with the usage text. A spot asked for that never played (an id the manifest lacks) is listed as NOT PLAYED.
 - `bench.sh <label> [runs] [restarts]` drives `bench.py`. It runs the whole stress playlist (alternating cut and fade 600, 290 s each, on a freshly started Chromium) and then kiosk restarts (launch, first prepare, first spot). Results go to `bench-<label>.txt`.
 - `bench.py boot`, run by `signforge-bootprobe.service` from early boot, stamps `/proc/uptime`. The wall clock can't be used: the Pi has no real-time clock, so it jumps when NTP first syncs, often after Chromium has started.
 - Pitfalls:
