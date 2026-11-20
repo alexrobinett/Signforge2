@@ -87,12 +87,14 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
   await page.getByRole('button', { name: 'Move Closing down' }).click();
   await expect.poll(names).toEqual(['Opening', 'Closing', 'Berries', 'Lunch']);
 
+  // Removed, and put back from its toast's Undo at once: the toast goes on its own after a few
+  // seconds, so nothing is checked in between. Then removed for good.
+  await page.getByRole('button', { name: 'Remove Berries' }).click();
+  await page.locator('[data-sonner-toast]').filter({ hasText: 'Removed Berries' }).getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Closing', 'Berries', 'Lunch']);
   await page.getByRole('button', { name: 'Remove Berries' }).click();
   await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
   await expect(page.getByText('3 spots · 12 s loop', { exact: false })).toBeVisible();
-  await page.getByRole('button', { name: 'Undo' }).click();
-  await expect.poll(names).toEqual(['Opening', 'Closing', 'Berries', 'Lunch']);
-  await page.getByRole('button', { name: 'Remove Berries' }).click();
 
   await page.getByRole('radio', { name: /^Crossfade/ }).check();
   await expect(page.getByText('a Raspberry Pi 4 drops about 1 frame in 10 while it runs')).toBeVisible();
