@@ -10,6 +10,8 @@ The CMS and the API are two Workers on one hostname, so the session cookie is sa
 - **The test screen** (M3-41) is the player build (`pnpm build:player`, in `dist/player`) at `/test-screen/`: `vite dev` serves it from there and `vite build` copies it into the site's assets (the `playerBuild` plugin in `vite.config.ts`, which serves the same build at `/player/` for the spot editor's stage). It talks to the device API on this origin, never with the session cookie (docs/architecture.md, "Browser test screen").
 - **Server code** (loaders, server functions) calls the API over the `API` service binding with the browser's cookies (`src/server/api.server.ts`). Any cookie the API sets on the way, such as Better Auth's refreshed cache cookie, is passed back to the browser.
 
+**The tab's org** (#129). Every call names the org the tab shows, in the API's `TAB_ORG_HEADER` (`src/lib/tab-org.ts`): `callTool` and Better Auth's client add it in the browser, every server function called from the browser adds it (`src/start.ts`), and `callApi` passes it on. The API refuses a call whose org is no longer the session's, so a tab left on the old org after a switch in another tab says to reload instead of acting on the new org. The tab's own switch or create reloads its data naming the new org (`reloadAs`). A server render sends none: it shows the session's org.
+
 The CMS changes data only through Better Auth's endpoints (sign-in, sign-out, create and switch organization; members, invitations and the org's name; your name and sessions) and the API's tool registry: pages call `POST /api/tools/:name` from the browser (`src/lib/tools.ts`), and loaders read through the same tools as the member (`src/server/screens.functions.ts`). Do not add data routes here.
 
 ## Look
