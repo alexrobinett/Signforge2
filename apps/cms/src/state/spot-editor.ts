@@ -28,7 +28,7 @@ import { orgOnScreen } from '~/lib/live';
 import { madeByEditor } from '~/lib/live-data';
 import { callTool, spotOf, ToolCallError, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
-import { autosave, createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
+import { autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 /** How long typing pauses before the stage redraws, and before the draft is saved. */
 const STAGE_DELAY_MS = 40;
@@ -66,7 +66,7 @@ interface NewSpotDraft {
 }
 
 interface SpotEditorState {
-  /** Each spot's draft, by spot id. One saved stays, so the page keeps showing what was typed. */
+  /** Each spot's draft, by spot id. A saved one is shown while the spot is at the version it saved. */
   drafts: Drafts<SpotDraft>;
   /** The image field whose picker is open (`assetId` for an image spot), or null. */
   picking: string | null;
@@ -134,6 +134,12 @@ interface StageLink {
   seq: number;
 }
 
+/** The draft the spot's page shows and edits in `orgId`, or null for the spot as read (`shown`). */
+export const spotShown = (e: SpotEditorState, orgId: string, spot: SpotView): SpotDraft | null => {
+  const d = e.drafts[spot.id];
+  return d?.orgId === orgId ? shown(d, spot.version) : null;
+};
+
 export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, { router, queryClient }) => {
   const editor = (change: (e: SpotEditorState) => SpotEditorState) => set((s) => ({ spotEditor: change(s.spotEditor) }));
   const timers: { stage?: ReturnType<typeof setTimeout> } = {};
@@ -179,8 +185,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     const templates = queryClient.getQueryData(templatesQuery(t.orgId).queryKey)?.templates;
     const assets = queryClient.getQueryData(assetsQuery(t.orgId).queryKey)?.assets;
     if (!spot || !preview || !templates || !assets) return undefined;
-    const d = get().spotEditor.drafts[spot.id];
-    const draft = d?.orgId === t.orgId ? d.edit : draftOf(spot);
+    const draft = spotShown(get().spotEditor, t.orgId, spot) ?? draftOf(spot);
     const version = spot.templateVersionId ? versionsById(templates).get(spot.templateVersionId) : undefined;
     const result = await compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation, live: !t.fallback });
     const sources = !t.fallback ? [...new Set(Object.values(draft.bindings).map((b) => b.dataSourceId))] : [];

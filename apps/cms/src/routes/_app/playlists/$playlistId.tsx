@@ -33,6 +33,7 @@ import { cn } from '~/lib/utils';
 import { playlistQuery } from '~/queries/playlists';
 import { assetsQuery, brandKitsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
+import { shown } from '~/state/versioned-draft';
 
 export const Route = createFileRoute('/_app/playlists/$playlistId')({
   validateSearch: stageSearch,
@@ -83,7 +84,8 @@ function PlaylistEditor() {
 
   const saved = useAppStore((s) => s.playlistEditor.drafts[playlistId]);
   const mine = saved?.orgId === orgId ? saved : undefined;
-  const editing = mine?.edit ?? null;
+  // A saved draft is shown while the playlist is still at the version it saved.
+  const editing = shown(mine, playlist?.version ?? null);
   const status = mine?.status ?? 'saved';
   const savedAt = mine?.savedAt ?? null;
   const saveError = mine?.error ?? null;

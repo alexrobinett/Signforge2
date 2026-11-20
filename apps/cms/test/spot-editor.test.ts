@@ -9,7 +9,8 @@ import { createStore } from 'zustand/vanilla';
 import type { SpotView } from '../src/lib/spots';
 import { spotKeys } from '../src/queries/spots';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
-import { createSpotEditorSlice, type SpotEditorSlice } from '../src/state/spot-editor';
+import { draftOf } from '../src/lib/spots';
+import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
 
 // The tab's org comes from the page's router, which a store test has none of.
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
@@ -119,7 +120,7 @@ describe('a save on its way (#150)', () => {
     expect(toasts.error).not.toHaveBeenCalled();
   });
 
-  it('opening another spot sends the edit left waiting on the first, not dropping it', async () => {
+  it('editing another spot sends the edit left waiting on the first, not dropping it', async () => {
     const { store, queryClient } = editorAndPublishing();
     const [a, b] = [spot('spt_a', 4), spot('spt_b', 1)];
     for (const s of [a, b]) queryClient.setQueryData(spotKeys.one(ORG, s.id), s);
@@ -145,5 +146,56 @@ describe('the stage (review of #97)', () => {
     hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, type: 'listening' } });
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().spotEditor.stageError).toBe('what it needs did not load (get_spot_preview failed: 500)');
+  });
+});
+
+describe('an edit after a save, once someone else has saved since (review of #153, 1)', () => {
+  it('builds on what the page shows, at the version it shows: never an old value with the newer version', async () => {
+    const queryClient = new QueryClient();
+    const store = createStore<SpotEditorSlice>()((set, get) => createSpotEditorSlice(set as never, get as never, { router, queryClient } as never));
+    const v4 = spot('spt_a', 4);
+    queryClient.setQueryData(spotKeys.one(ORG, v4.id), v4);
+    const cached = () => queryClient.getQueryData<SpotView>(spotKeys.one(ORG, v4.id))!;
+    /** What the page shows for the spot as the cache holds it. */
+    const onPage = () => spotShown(store.getState().spotEditor, ORG, cached()) ?? draftOf(cached());
+    /** A keystroke in the name field: what it shows, and one more character. */
+    const type = (key: string) => {
+      const name = `${onPage().name}${key}`;
+      store.getState().editSpot(ORG, cached(), (d) => ({ ...d, name }));
+    };
+
+    store.getState().editSpot(ORG, cached(), (d) => ({ ...d, name: 'Mine' }));
+    void store.getState().saveSpotDraft(v4.id);
+    await vi.advanceTimersByTimeAsync(0);
+    answers[0]!({ spot: { ...v4, name: 'Mine', version: 5 } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onPage().name).toBe('Mine');
+
+    // Someone else renames it; the page reads it again (focus, a publish).
+    queryClient.setQueryData(spotKeys.one(ORG, v4.id), { ...v4, name: 'Theirs', version: 6 });
+    expect(onPage().name).toBe('Theirs');
+    type('!');
+    void store.getState().saveSpotDraft(v4.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.at(-1)).toMatchObject({ name: 'update_spot', input: { name: 'Theirs!', ifVersion: 6 } });
+  });
+
+  it('with nobody else saving, the next edit builds on the saved draft, at the version it saved', async () => {
+    const queryClient = new QueryClient();
+    const store = createStore<SpotEditorSlice>()((set, get) => createSpotEditorSlice(set as never, get as never, { router, queryClient } as never));
+    const v4 = spot('spt_a', 4);
+    queryClient.setQueryData(spotKeys.one(ORG, v4.id), v4);
+    store.getState().editSpot(ORG, v4, (d) => ({ ...d, name: 'Mine ' }));
+    void store.getState().saveSpotDraft(v4.id);
+    await vi.advanceTimersByTimeAsync(0);
+    // The server trims the name; the page keeps the space just typed.
+    answers[0]!({ spot: { ...v4, name: 'Mine', version: 5 } });
+    await vi.advanceTimersByTimeAsync(0);
+    const v5 = queryClient.getQueryData<SpotView>(spotKeys.one(ORG, v4.id))!;
+    expect(spotShown(store.getState().spotEditor, ORG, v5)?.name).toBe('Mine ');
+    store.getState().editSpot(ORG, v5, (d) => ({ ...d, name: `${d.name}two` }));
+    void store.getState().saveSpotDraft(v4.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.at(-1)).toMatchObject({ name: 'update_spot', input: { name: 'Mine two', ifVersion: 5 } });
   });
 });

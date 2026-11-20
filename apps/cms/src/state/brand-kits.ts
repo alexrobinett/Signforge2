@@ -20,7 +20,7 @@ import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/s
 import { brandKitIdOf, callTool, toolMessage, versionOf } from '~/lib/tools';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
-import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
+import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 const PREVIEW_DELAY_MS = 40;
 
@@ -116,17 +116,15 @@ interface PreviewLink {
  */
 export const kitActionRunning = ({ brandKits: k }: BrandKitsSlice) => k.pending !== null || k.newKit.pending || Object.values(k.drafts).some((d) => d.pending);
 
-/** The kit's edit not yet saved, or null: a saved draft shows the kit as the page read it. */
-const kitEditing = (k: BrandKitsState, kitId: string): KitDraft | null => {
-  const d = k.drafts[kitId];
-  return d && d.status !== 'saved' ? d.edit : null;
-};
+/** The draft the kit's page shows and edits, or null for `kit` as read (`shown`). */
+const kitEditing = (k: BrandKitsState, kit: BrandKitView): KitDraft | null => shown(k.drafts[kit.id], kit.version);
 
 export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { router, queryClient }) => {
   const kits = (change: (k: BrandKitsState) => BrandKitsState) => set((s) => ({ brandKits: change(s.brandKits) }));
   const drafts = createVersionedDrafts<KitDraft>({
     state: { read: () => get().brandKits.drafts, write: (change) => kits((k) => ({ ...k, drafts: change(k.drafts) })) },
     async save({ key: kitId, draft }) {
+      // A kit's draft always starts from the kit, with its version (editKit): only a create has none.
       const version = versionOf(await callTool('update_brand_kit', updateInput(kitId, draft.edit, draft.version!)), 'brandKit');
       // Still saving until the page has the kit as saved, which the next edit builds on.
       await Promise.all([
@@ -172,7 +170,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       kits((k) => ({ ...k, previews: { ...k.previews, [t.spotId]: { playing: false, error: `what it needs did not load (${toolMessage(err)})` } } }));
       return;
     }
-    const draft = kitEditing(get().brandKits, kit.id) ?? kitDraftOf(kit);
+    const draft = kitEditing(get().brandKits, kit) ?? kitDraftOf(kit);
     const themed = withDraftKit({ preview: preview.preview, kitId: kit.id, draft, assets, orientation: 'landscape' });
     if (!themed) return;
     const version = versionsById(templates).get(t.templateVersionId);
@@ -270,7 +268,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     },
 
     fixKitPair(orgId, kit, fg, bg) {
-      const draft = kitEditing(get().brandKits, kit.id) ?? kitDraftOf(kit);
+      const draft = kitEditing(get().brandKits, kit) ?? kitDraftOf(kit);
       const value = fg === 'onPrimary' || fg === 'onAccent' ? null : pairFix(shownColors(draft, kit.colors), fg, bg).hex;
       get().editKit(orgId, kit, (d) => ({ ...d, colors: { ...d.colors, [fg]: value } }));
     },

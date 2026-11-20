@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { Member, OrgSettings } from '../src/lib/settings';
-import { createSettingsSlice, editsIn, errorOf, runningIn, type SettingsSlice } from '../src/state/settings';
+import { createSettingsSlice, editsIn, errorOf, hasEdits, runningIn, type SettingsSlice } from '../src/state/settings';
 
 const auth = vi.hoisted(() => ({
   organization: { updateMemberRole: vi.fn(), inviteMember: vi.fn(), removeMember: vi.fn(), acceptInvitation: vi.fn(), update: vi.fn() },
@@ -196,7 +196,7 @@ describe('a settings save (re-check of #143, 1)', () => {
 
     await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'Northside' });
     expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 120, ifVersion: 2 } });
-    expect(editsIn(store.getState().settings, 'general', A)).toEqual({});
+    expect(hasEdits(store.getState().settings, 'general', A)).toBe(false);
   });
 
   it("a change someone else made since is refused and shown, never overwritten; Reload drops the org's edits", async () => {
@@ -207,10 +207,10 @@ describe('a settings save (re-check of #143, 1)', () => {
     await store.getState().saveSettings(A, 'general', { ...settings, timezone: 'Europe/London', version: 3 }, { id: A, name: 'Northside' });
     expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 120, ifVersion: 2 } });
     expect(errorOf(store.getState().settings, 'general', A)).toMatchObject({ stale: true, text: 'This changed since you opened it.' });
-    expect(editsIn(store.getState().settings, 'general', A)).toEqual({ auditRetentionDays: '120' });
+    expect(editsIn(store.getState().settings, 'general', A, 3)).toEqual({ auditRetentionDays: '120' });
 
     await store.getState().reloadSettings(A, 'general');
-    expect(editsIn(store.getState().settings, 'general', A)).toEqual({});
+    expect(editsIn(store.getState().settings, 'general', A, 3)).toEqual({});
     expect(errorOf(store.getState().settings, 'general', A)).toBeUndefined();
   });
 
@@ -274,8 +274,8 @@ describe('the settings pages share one version (third re-check of #143)', () => 
     store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '222' });
     await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
     await store.getState().reloadSettings(A, 'general');
-    expect(editsIn(store.getState().settings, 'general', A)).toEqual({});
-    expect(editsIn(store.getState().settings, 'screens', A)).toEqual({ updateFrom: '03:15' });
+    expect(editsIn(store.getState().settings, 'general', A, 3)).toEqual({});
+    expect(editsIn(store.getState().settings, 'screens', A, 1)).toEqual({ updateFrom: '03:15' });
   });
 
   it('a rename that fails after the settings were written leaves the edits on the version written', async () => {
@@ -303,7 +303,7 @@ describe('edits and actions belong to their org (re-check of #143, 2)', () => {
     // The switch.
     store.getState().forgetOrgSettings();
     showOrg(B);
-    expect(editsIn(store.getState().settings, 'general', B)).toEqual({});
+    expect(editsIn(store.getState().settings, 'general', B, 7)).toEqual({});
 
     write.resolve(saved(2));
     await saving;

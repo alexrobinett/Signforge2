@@ -19,7 +19,7 @@ import type { DisplayHours } from '~/lib/screen-types';
 import { callTool, isStale, toolMessage, versionOf } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
 import type { SliceCreator } from './store';
-import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
+import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 /** A page whose actions run one at a time. Account and the invitation page belong to no org. */
 type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'account' | 'invitation';
@@ -129,14 +129,20 @@ export const runningIn = (settings: SettingsState, scope: SettingsScope): string
   FORMS.find((f) => FORM_PAGE[f] === scope.page && settings.drafts[f]?.orgId === scope.orgId && settings.drafts[f].pending);
 
 const NO_EDITS: SettingsEdits = {};
-/** A form's edits not yet saved in `orgId`; another org's are never shown. */
-export function editsIn(settings: SettingsState, form: string, orgId: string | null): SettingsEdits {
+/**
+ * A form's edits in `orgId`, over the settings the page read at `version`: a saved form's while the
+ * settings are still at the version it saved (`shown`). Another org's are never shown.
+ */
+export function editsIn(settings: SettingsState, form: string, orgId: string, version: number | null): SettingsEdits {
   const draft = settings.drafts[form];
-  return draft?.orgId === orgId && draft.status !== 'saved' ? draft.edit : NO_EDITS;
+  return (draft?.orgId === orgId ? shown(draft, version) : null) ?? NO_EDITS;
 }
 
 /** Whether the form saved as `at` has edits not yet saved in `orgId`. */
-export const hasEdits = (settings: SettingsState, at: string, orgId: string | null) => Object.keys(editsIn(settings, at, orgId)).length > 0;
+export const hasEdits = (settings: SettingsState, at: string, orgId: string | null) => {
+  const draft = settings.drafts[at];
+  return draft?.orgId === orgId && draft.status !== 'saved' && Object.keys(draft.edit).length > 0;
+};
 
 /** The error of the action `at`, if it failed in the org on screen (or belongs to none): a form's save's, else the action's. */
 export function errorOf(settings: SettingsState, at: string, orgId: string | undefined) {

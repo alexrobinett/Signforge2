@@ -22,6 +22,7 @@ import { boundSource, typedFields } from '~/lib/live-data';
 import { draftOf, publishWord, seconds, versionsById, type SpotDraft, type SpotView } from '~/lib/spots';
 import { assetsQuery, brandKitsQuery, dataSourceQuery, dataSourcesQuery, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
+import { spotShown } from '~/state/spot-editor';
 
 export const Route = createFileRoute('/_app/spots/$spotId')({
   validateSearch: stageSearch,
@@ -67,8 +68,8 @@ function SpotEditor() {
 
   const saved = useAppStore((s) => s.spotEditor.drafts[spotId]);
   const mine = saved?.orgId === orgId ? saved : undefined;
-  // A saved draft is still shown: the page keeps what was typed, a trailing space included.
-  const editing = mine?.edit ?? null;
+  // A saved draft is shown while the spot is still at the version it saved: what was typed stays, a trailing space included.
+  const editing = useAppStore((s) => (spot ? spotShown(s.spotEditor, orgId, spot) : null));
   const status = mine?.status ?? 'saved';
   const savedAt = mine?.savedAt ?? null;
   const saveError = mine?.error ?? null;
