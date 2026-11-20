@@ -73,7 +73,7 @@ test('a playlist reaches no screen until it is the default, then publishes from 
   expect((await tool(page, 'list_publishes', {})).publishes).toHaveLength(2);
 });
 
-test('an edit to a spot, published from the spot editor, is on the screen in seconds, and Undo takes it back', async () => {
+test('an edit to a spot, published from the spot editor, is on the screen in seconds, offers Undo, and a roll back takes it back', async () => {
   test.setTimeout(120_000);
   const before = (await playing(screen))!.manifestId;
   await page.goto(`/spots/${spotId}`);
@@ -81,17 +81,23 @@ test('an edit to a spot, published from the spot editor, is on the screen in sec
   await page.getByLabel('Message').fill('Three for $5');
   const started = Date.now();
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
-  await expect(toastSays('Published v3 to 1 screen')).toBeVisible();
+  const published = toastSays('Published v3 to 1 screen');
+  await expect(published).toBeVisible();
+  // It offers Undo, a roll back to v2: checked as it appears, since the toast goes on its own and a
+  // slow runner's screen can take longer than that. The roll back below comes from Publishes.
+  await expect(published.getByRole('button', { name: 'Undo' })).toBeVisible();
   // Logged, not asserted: CI's runners are many times slower than a laptop. The poll's limit is the bound.
   await expect.poll(() => stageShows(screen, 'Three for $5'), { timeout: 20_000, intervals: [100] }).toBe(true);
   const seconds = (Date.now() - started) / 1000;
   console.info(`publishing: edit saved, published and on the test screen in ${seconds.toFixed(1)} s`);
   await shots(page, '51-spot-published-toast');
 
-  // Undo: the screen goes back to the manifest it had, with nothing compiled again.
-  await toastSays('Published v3').getByRole('button', { name: 'Undo' }).click();
+  // Back to v2 from the history: the screen goes back to the manifest it had, with nothing compiled again.
+  await page.goto('/publishes');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Roll back to v2' }).click();
   await expect(toastSays('Screens pointed back at v2')).toBeVisible();
-  // A roll back cannot itself be undone from its toast: Undo belonged to the publish.
+  // A roll back cannot itself be undone from its toast: Undo belongs to a publish.
   await expect(toastSays('Screens pointed back at v2').getByRole('button', { name: 'Undo' })).toHaveCount(0);
   await expect.poll(async () => (await playing(screen))?.manifestId, { timeout: 20_000 }).toBe(before);
   await expect.poll(() => stageShows(screen, 'Two for $4'), { timeout: 20_000 }).toBe(true);
