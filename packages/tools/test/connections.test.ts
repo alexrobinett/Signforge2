@@ -5,7 +5,7 @@
 import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { dispatch, registry, type Caller, type Connectors, ToolError } from '../src';
 
 let o: SeededOrg;
@@ -69,10 +69,12 @@ beforeAll(async () => {
 
 describe('connecting an account', () => {
   it('starts with an authorize URL whose state is stored only as its hash', async () => {
+    vi.setSystemTime('2026-11-20T12:00:00Z');
+    onTestFinished(() => void vi.useRealTimers());
     const { authorizeUrl, expiresAt } = await call('start_connection', { provider: 'fake' });
     const state = stateOf(authorizeUrl);
     expect(state).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(expiresAt).toBeGreaterThan(Date.now() + 9 * 60_000);
+    expect(expiresAt).toBe(Date.parse('2026-11-20T12:10:00Z'));
     const rows = await owner.org.connections.authorizations.list();
     expect(JSON.stringify(rows)).not.toContain(state);
   });
