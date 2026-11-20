@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs } from './helpers';
+import { axe, createOrg, disabledOnServer, holdFirst, hydrated, shots, signInAs } from './helpers';
 import { API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -18,19 +18,23 @@ async function invitePathFor(email: string): Promise<string> {
   return path!;
 }
 
-/** Holds the first request to `path` until the test continues it; later ones go through, counted. */
-async function holdFirst(page: Page, path: string) {
-  let calls = 0;
-  let hold: (route: Route) => void = () => {};
+/** Holds every request to the app's server functions (the loaders' reads) from now until `release`. */
+async function holdReads(page: Page) {
+  const held: Route[] = [];
+  let first: (route: Route) => void = () => {};
   const arrived = new Promise<Route>((resolve) => {
-    hold = resolve;
+    first = resolve;
   });
-  await page.route(`**${path}`, (route) => {
-    calls += 1;
-    if (calls === 1) hold(route);
-    else void route.continue();
-  });
-  return { arrived, calls: () => calls };
+  const hold = (route: Route) => {
+    held.push(route);
+    first(route);
+  };
+  await page.route('**/_serverFn/**', hold);
+  const release = async () => {
+    await page.unroute('**/_serverFn/**', hold);
+    for (const route of held) await route.continue();
+  };
+  return { arrived, release };
 }
 
 const settingsNav = (page: Page) => page.getByRole('navigation', { name: 'Settings' });
@@ -329,29 +333,33 @@ test('a role select or an invitation button keeps keyboard focus while its chang
   await expect(joining).toHaveURL(/\/$/);
   await invitee.close();
 
-  // The role: Editor to Viewer. The select shows where it is going while it saves;
-  // a change meanwhile (to Owner) is ignored.
+  // The role, by keyboard: Editor to Viewer. The select shows where it is going until the page has
+  // read the members again; a change meanwhile (o, to Owner) is ignored, while the write runs and
+  // while the page reads (review of #143, 1).
   await page.reload();
   await hydrated(page);
   const role = page.getByRole('region', { name: 'People' }).getByLabel(new RegExp(`Role for ${editorEmail.split('@')[0]}`));
+  // Enabled once its part of the page has hydrated (#136), after body[data-hydrated].
+  await expect(role).toBeEnabled();
   await expect(role).toHaveValue('editor');
   const roleChange = await holdFirst(page, '/api/auth/organization/update-member-role');
-  // A native select's picker takes no keys in headless Chromium on macOS, so the choice is made on
-  // the focused select as the picker makes it.
   await role.focus();
-  await role.selectOption('viewer');
+  await page.keyboard.press('v');
   const roleAnswer = await roleChange.arrived;
   await expect(role).toBeFocused();
   await expect(role).toHaveAttribute('aria-disabled', 'true');
   await expect(role).toHaveValue('viewer');
-  // Playwright waits for a control that says it is disabled, so the second choice is made in the page.
-  await role.evaluate((select: HTMLSelectElement) => {
-    select.value = 'owner';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  await page.keyboard.press('o');
   await expect(role).toHaveValue('viewer');
+  const reads = await holdReads(page);
   await roleAnswer.continue();
+  await reads.arrived;
   await expect(page.getByText('Role changed')).toBeVisible();
+  await expect(role).toHaveAttribute('aria-disabled', 'true');
+  await expect(role).toHaveValue('viewer');
+  await page.keyboard.press('o');
+  await expect(role).toHaveValue('viewer');
+  await reads.release();
   await expect(role).not.toHaveAttribute('aria-disabled');
   await expect(role).toBeFocused();
   await expect(role).toHaveValue('viewer');
@@ -378,6 +386,110 @@ test('a role select or an invitation button keeps keyboard focus while its chang
   await hydrated(page);
   await expect(role).toHaveValue('viewer');
   await expect(waiting).toBeVisible();
+});
+
+test("an edit typed while its save runs is kept: the next addresses to invite, and General's retention (review of #143, 4)", async ({ page }) => {
+  // The invite form cleared itself once sent, and General remounted on the version its save made:
+  // either wiped what was typed while the save ran.
+  const stamp = Date.now();
+  await signInAs(page, `e2e-settings-kept-${stamp}@example.com`, '192.0.2.39');
+  await createOrg(page, 'Northside Market');
+  await page.goto('/settings/members');
+  await hydrated(page);
+  const emails = page.getByLabel('Emails, separated by commas');
+  await expect(emails).toBeEnabled();
+  const first = `e2e-kept-first-${stamp}@example.com`;
+  const next = `e2e-kept-next-${stamp}@example.com`;
+  await emails.fill(first);
+  const inviting = await holdFirst(page, '/api/auth/organization/invite-member');
+  await emails.press('Enter');
+  const inviteAnswer = await inviting.arrived;
+  await emails.fill(next);
+  await emails.press('Enter');
+  await inviteAnswer.continue();
+  await expect(page.getByText('Invite sent')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send invites' })).not.toHaveAttribute('aria-disabled');
+  await expect(emails).toHaveValue(next);
+  expect(inviting.calls()).toBe(1);
+  const waiting = page.getByRole('region', { name: 'Waiting for a reply' });
+  await expect(waiting).toContainText(first);
+  await expect(waiting).not.toContainText(next);
+
+  await page.goto('/settings/general');
+  await hydrated(page);
+  const retention = page.getByLabel('Keep entries for');
+  await expect(retention).toBeEnabled();
+  await retention.fill('100');
+  const saving = await holdFirst(page, '/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const saveAnswer = await saving.arrived;
+  await retention.fill('120');
+  await saveAnswer.continue();
+  await expect(page.getByText('Saved')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save changes' })).not.toHaveAttribute('aria-disabled');
+  await expect(retention).toHaveValue('120');
+  await page.reload();
+  await hydrated(page);
+  await expect(retention).toHaveValue('100');
+});
+
+test('Keep it waits for a webhook removal that has been sent, and says so (review of #143, 5)', async ({ page }) => {
+  // Keep it closed the confirmation while the removal it could no longer stop went on.
+  await signInAs(page, `e2e-settings-keep-${Date.now()}@example.com`, '192.0.2.40');
+  await createOrg(page, 'Northside Market');
+  await page.goto('/settings/notifications');
+  await hydrated(page);
+  await expect(page.getByLabel('Webhook URL', { exact: true })).toBeEnabled();
+  await page.getByLabel('Webhook URL', { exact: true }).fill('https://example.com/hooks/e2e-keep-it');
+  await page.getByRole('button', { name: 'Add webhook' }).click();
+  await expect(page.getByText('Webhook saved')).toBeVisible();
+  await page.getByRole('button', { name: 'I have saved it' }).click();
+  await page.getByRole('listitem').filter({ hasText: 'example.com' }).getByText('Manage').click();
+  await page.getByRole('button', { name: 'Remove Webhook' }).click();
+  const asking = page.getByText('Stop sending alerts to Webhook?');
+  await expect(asking).toBeVisible();
+
+  const removing = await holdFirst(page, '/api/tools/remove_alert_channel');
+  await page.getByRole('button', { name: 'Remove', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const removeAnswer = await removing.arrived;
+  const keep = page.getByRole('button', { name: 'Keep it' });
+  await page.keyboard.press('Tab');
+  await expect(keep).toBeFocused();
+  await expect(keep).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Enter');
+  await expect(asking).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Removing…' })).toBeVisible();
+  await removeAnswer.continue();
+  await expect(page.getByText('Webhook removed')).toBeVisible();
+  await expect(asking).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Add webhook' })).toBeVisible();
+});
+
+test("a refused sign-out of another session says why, on that session's row (review of #143, 6)", async ({ page, browser }) => {
+  const email = `e2e-settings-sessions-${Date.now()}@example.com`;
+  await signInAs(page, email, '192.0.2.45');
+  await createOrg(page, 'Northside Market');
+  const elsewhere = await browser.newContext();
+  await signInAs(await elsewhere.newPage(), email, '192.0.2.46');
+  await page.goto('/account');
+  await hydrated(page);
+  const other = page
+    .getByRole('region', { name: "Where you're signed in" })
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('button', { name: 'Sign out' }) });
+  await expect(other).toHaveCount(1);
+  await page.route('**/api/auth/revoke-session', (route) =>
+    route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 'FORBIDDEN', message: 'That session cannot be signed out from here.' }),
+    }),
+  );
+  await other.getByRole('button', { name: 'Sign out' }).click();
+  await expect(other.getByRole('alert')).toHaveText('That session cannot be signed out from here.');
+  await expect(other.getByRole('button', { name: 'Sign out' })).not.toHaveAttribute('aria-disabled');
+  await elsewhere.close();
 });
 
 test("settings fields that save or show at once, or hold a URL or an email, are disabled in the server's HTML, until the page has hydrated (#136)", async ({

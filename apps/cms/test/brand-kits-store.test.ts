@@ -265,3 +265,67 @@ describe('drafts to one player across a kit switch and a reload (re-check of #10
     expect(posted).toEqual(['#2563eb', '#111111']);
   });
 });
+
+describe('kit actions run one at a time (review of #143)', () => {
+  /** `fetch` for the tools: each call is recorded, and its answer waits until the test gives one. */
+  function heldTools() {
+    const calls: { name: string; input: unknown; answer: (status: number, body: unknown) => void }[] = [];
+    let arrived: () => void = () => {};
+    vi.stubGlobal('fetch', (url: string, init: { body: string }) => {
+      const answer = new Promise<Response>((resolve) => {
+        calls.push({
+          name: url.split('/').at(-1) ?? '',
+          input: JSON.parse(init.body),
+          answer: (status, body) => resolve(new Response(JSON.stringify(body), { status })),
+        });
+      });
+      arrived();
+      return answer;
+    });
+    /** Resolves once the tools have been called `n` times in all. */
+    const called = (n: number) =>
+      new Promise<void>((resolve) => {
+        arrived = () => calls.length >= n && resolve();
+        arrived();
+      });
+    return { calls, called };
+  }
+  const refused = { error: 'error', message: 'Refused' };
+
+  it('a Duplicate, or a new kit, while the kit saves is ignored; so is a save while Duplicate runs', async () => {
+    const { calls, called } = heldTools();
+    const a = kit('bk_a', '#2563eb');
+    const { store } = page([a]);
+    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
+    const saving = store.getState().saveKit(ORG, a);
+    await called(1);
+    await store.getState().duplicateKit(ORG, a);
+    store.getState().nameNewKit('Spring');
+    await store.getState().createKit(ORG);
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit']);
+    calls[0]!.answer(409, refused);
+    await saving;
+
+    const duplicating = store.getState().duplicateKit(ORG, a);
+    await called(2);
+    await store.getState().saveKit(ORG, a);
+    await store.getState().createKit(ORG);
+    expect(calls.map((c) => c.name)).toEqual(['update_brand_kit', 'create_brand_kit']);
+    calls[1]!.answer(409, refused);
+    await duplicating;
+    expect(store.getState().brandKits.pending).toBeNull();
+  });
+
+  it('a request that gets no answer releases the action, with its message', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    const a = kit('bk_a', '#2563eb');
+    const { store } = page([a]);
+    await store.getState().makeDefaultKit(ORG, a.id);
+    expect(store.getState().brandKits).toMatchObject({
+      pending: null,
+      actionError: { kitId: 'bk_a', text: 'Could not reach SignForge. Check your connection and try again.' },
+    });
+  });
+});

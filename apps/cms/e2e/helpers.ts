@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { expect, request as playwrightRequest, type Page } from '@playwright/test';
+import { expect, request as playwrightRequest, type Page, type Route } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
 import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor, RUN_DIR } from './servers';
@@ -309,4 +309,19 @@ export async function newSpot(page: Page, template: string, name: string) {
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
   await hydrated(page);
   return spotIdOf(page);
+}
+
+/** Holds the first request to `path` until the test continues it; later ones go through, counted. */
+export async function holdFirst(page: Page, path: string) {
+  let calls = 0;
+  let hold: (route: Route) => void = () => {};
+  const arrived = new Promise<Route>((resolve) => {
+    hold = resolve;
+  });
+  await page.route(`**${path}`, (route) => {
+    calls += 1;
+    if (calls === 1) hold(route);
+    else void route.continue();
+  });
+  return { arrived, calls: () => calls };
 }
