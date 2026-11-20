@@ -3,8 +3,9 @@ import { ToolError, type TemplateChecker } from '@signforge/tools';
 
 /**
  * Long enough for the worst case: a cold start (the check Worker allows 60 s), then the checks queued
- * before this one in the org's container (at most 3) and its own, each up to about 10 s (two renders
- * of a template that never gets ready). Past it the push is refused to retry rather than hang.
+ * before this one in the org's container (at most 3) and its own, each up to about 10.5 s (two renders
+ * of a template that is ready just inside 2 s and then wedged in `play`; one never ready takes about
+ * 4.6 s). Past it the push is refused to retry rather than hang.
  */
 const CHECK_TIMEOUT_MS = 120_000;
 
@@ -20,9 +21,12 @@ export const templateCheckAllowed = async (env: Pick<Env, 'TEMPLATE_CHECK_LIMIT'
 export const templateChecker =
   (env: Pick<Env, 'TEMPLATE_CHECK'>): TemplateChecker =>
   async (template) => {
-    // Not run, so not a verdict on the template: the push may simply be tried again.
-    const unavailable = (why: string, cause?: unknown) =>
-      new ToolError('unavailable', `the template check is not available (${why}); try again in a minute`, { retryAfterSeconds: 60 }, false, { cause });
+    // Not run, so not a verdict on the template: the push may simply be tried again. Why it failed (a
+    // timeout, probe URLs, a runner's error, a broken body) is for the operator's logs, not the member or agent.
+    const unavailable = (why: string, cause: unknown) => {
+      console.error(`template check for ${template.orgId}: ${why}`, cause);
+      return new ToolError('unavailable', `the template check is not available (${why}); try again in a minute`, { retryAfterSeconds: 60 }, false, { cause });
+    };
     let res: Response;
     let body: unknown;
     try {
@@ -36,11 +40,7 @@ export const templateChecker =
     } catch (e) {
       throw unavailable('it could not be reached', e);
     }
-    // Why it failed (probe URLs, a runner's error) is for the operator's logs, not the member or agent.
-    if (!res.ok) {
-      console.error(`template check for ${template.orgId} answered ${res.status}: ${(await res.text().catch(() => '')).slice(0, 500)}`);
-      throw unavailable(`it answered ${res.status}`);
-    }
+    if (!res.ok) throw unavailable(`it answered ${res.status}`, (await res.text().catch(() => '')).slice(0, 500));
     try {
       body = JSON.parse(await res.text());
     } catch (e) {
