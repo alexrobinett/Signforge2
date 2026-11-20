@@ -16,6 +16,7 @@
  * manifest. Kits have no drafts: a publish takes each kit as it is then.
  */
 import { brandFont, compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
+import { assetFile, compileProbe, spotFromDraft, type DraftReads, type Probe, type SpotDraft } from '@signforge/compiler/draft';
 import {
   templateKey,
   type Binding,
@@ -68,6 +69,8 @@ export interface OrgGraph {
   brandAssignments: BrandAssignment[];
   /** The org's publish revision as read with the rest: a publish commits only if it is still this. */
   publishRevision: number;
+  /** The org's time zone for new screens, if it has one: the probe screen's. */
+  timezone: string | null;
 }
 
 export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
@@ -113,25 +116,46 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     brandKits: new Map(brandKits.map((k) => [k.id, k])),
     brandAssignments,
     publishRevision: settings?.publishRevision ?? 0,
+    timezone: settings?.timezone ?? null,
   };
 }
 
 const json = <T>(text: string | null, fallback: T): T => (text == null ? fallback : (JSON.parse(text) as T));
 
-/** The file an asset plays as on a screen of this orientation: its rendition, or for a video the asset itself. */
-function assetFile(graph: OrgGraph, assetId: string, orientation: Orientation, files: CompileInput['files']): { sha?: string; problem?: string } {
-  const a = graph.assets.get(assetId);
-  if (!a) return { problem: `asset ${assetId} does not exist` };
-  if (a.asset.status !== 'verified') return { problem: `asset ${assetId} is not verified` };
-  if (a.asset.kind === 'video') {
-    files[a.asset.sha256] = { size: a.asset.size, type: a.asset.type };
-    return { sha: a.asset.sha256 };
-  }
-  const r = a.renditions.find((x) => x.orientation === orientation);
-  if (!r) return { problem: `asset ${assetId} has no ${orientation} rendition` };
-  files[r.sha256] = { size: r.size, type: r.type };
-  return { sha: r.sha256 };
+/** The org's assets and template versions as the draft-to-spot module reads them (@signforge/compiler `DraftReads`). */
+function graphReads(graph: OrgGraph): DraftReads {
+  return {
+    asset: (id) => {
+      const a = graph.assets.get(id);
+      return a && { ...a.asset, renditions: a.renditions };
+    },
+    templateVersion: (id) => graph.templateVersions.get(id),
+  };
 }
+
+/** Bindings as tools take them, from the contract's `Binding`s stored on the row. */
+function bindingsView(text: string | null): SpotDraft['bindings'] {
+  const stored = json<Record<string, Binding> | null>(text, null);
+  return (
+    stored &&
+    Object.fromEntries(Object.entries(stored).map(([field, b]) => [field, { dataSourceId: b.source, path: b.path, ...(b.table ? { table: b.table } : {}) }]))
+  );
+}
+
+/** A spot row (draft or published version) as `get_spot` gives it: what the draft-to-spot module takes. */
+export const spotDraft = (row: SpotRow): SpotDraft => ({
+  id: row.id,
+  name: row.name,
+  kind: row.kind,
+  durationMs: row.durationMs,
+  templateVersionId: row.templateVersionId,
+  data: json(row.dataJson, null),
+  assets: json(row.assetMapJson, null),
+  bindings: bindingsView(row.bindingsJson),
+  assetId: row.assetId,
+  fit: row.fit,
+  url: row.url,
+});
 
 /**
  * A kit as the manifest carries it for one orientation, or why it cannot be. A logo is its
@@ -142,7 +166,7 @@ function toBrandKit(graph: OrgGraph, row: BrandKitRow, orientation: Orientation,
   const problems: string[] = [];
   const logoFile = (assetId: string | null) => {
     if (!assetId) return undefined;
-    const f = assetFile(graph, assetId, orientation, files);
+    const f = assetFile(graphReads(graph), assetId, orientation, files);
     if (f.problem) problems.push(`logo ${f.problem}`);
     return f.sha;
   };
@@ -192,41 +216,6 @@ function brandInput(
   return { brand, unavailable };
 }
 
-/** A spot row (draft or published version) as the contract's `Spot` for one orientation, or why it cannot be. */
-function toSpot(
-  graph: OrgGraph,
-  row: SpotRow,
-  orientation: Orientation,
-  input: Pick<CompileInput, 'files' | 'templates'>,
-): { spot?: Spot; problems: string[] } {
-  const base = { id: row.id, name: row.name, durationMs: row.durationMs };
-  const problems: string[] = [];
-  const file = (assetId: string) => {
-    const f = assetFile(graph, assetId, orientation, input.files);
-    if (f.problem) problems.push(f.problem);
-    return f.sha ?? '';
-  };
-  let spot: Spot;
-  if (row.kind === 'template') {
-    const v = row.templateVersionId ? graph.templateVersions.get(row.templateVersionId) : undefined;
-    if (!v) return { problems: [`template version ${row.templateVersionId} does not exist`] };
-    if (v.status !== 'draft') {
-      input.templates[v.key] = { manifest: v.manifest, html: v.html };
-      input.files[v.html] = { size: v.size, type: 'text/html' };
-    }
-    const assets: Record<string, string> = {};
-    for (const [field, assetId] of Object.entries(json<Record<string, string>>(row.assetMapJson, {}))) assets[field] = file(assetId);
-    const bindings = json<Record<string, Binding> | null>(row.bindingsJson, null);
-    spot = { ...base, kind: 'template', template: v.key, data: json(row.dataJson, {}), assets, ...(bindings ? { bindings } : {}) };
-  } else if (row.kind === 'image' || row.kind === 'video') {
-    spot = { ...base, kind: row.kind, file: row.assetId ? file(row.assetId) : '', fit: row.fit ?? 'cover' };
-    if (!row.assetId) problems.push('no asset');
-  } else {
-    spot = { ...base, kind: 'url', url: row.url ?? '' };
-  }
-  return problems.length ? { problems } : { spot, problems };
-}
-
 const toPlaylist = (p: PublishedPlaylist): Playlist => ({
   id: p.id,
   name: p.name,
@@ -258,11 +247,12 @@ function screenInput(graph: OrgGraph, screen: Screen): { input: CompileInput; un
   const files: CompileInput['files'] = {};
   const spots: Spot[] = [];
   const unavailable = new Map<string, string[]>();
+  const reads = graphReads(graph);
   for (const row of graph.spots) {
     const pub = published(row);
     if (!pub) continue;
-    const { spot, problems } = toSpot(graph, pub, screen.orientation, { templates, files });
-    if (spot) spots.push(spot);
+    const { spot, problems } = spotFromDraft(spotDraft(pub), screen.orientation, reads, { templates, files });
+    if (spot && !problems.length) spots.push(spot);
     else unavailable.set(row.id, problems);
   }
   const playlists = graph.playlists.flatMap((row) => {
@@ -358,44 +348,13 @@ export interface DraftReport {
   removed: { kind: 'schedule_entry'; id: string }[];
 }
 
-const PROBE = 'draft-check';
-
 /**
- * Check a draft the way a screen would: compile a probe screen whose default playlist plays it.
- * Problems are the ones a screen reaching it would get.
+ * Check drafts the way a screen would: the draft-to-spot module's probe screen, of one
+ * orientation, in the org's time zone (UTC without one). Its problems are the ones a screen
+ * reaching the drafts would get; the CMS's stage compiles the same probe.
  */
-async function probe(
-  graph: OrgGraph,
-  orientation: Orientation,
-  opts: CompileOptions,
-  content: { spots: SpotRow[]; playlist: Playlist; entry?: TargetedEntry },
-): Promise<string[]> {
-  const templates: CompileInput['templates'] = {};
-  const files: CompileInput['files'] = {};
-  const spots: Spot[] = [];
-  const problems: string[] = [];
-  for (const row of content.spots) {
-    const r = toSpot(graph, row, orientation, { templates, files });
-    if (r.spot) spots.push(r.spot);
-    else problems.push(...r.problems.map((p) => `spot ${row.id}: ${p}`));
-  }
-  if (problems.length) return problems;
-  const result = await compileScreen(
-    {
-      screen: { id: PROBE, name: 'Draft check', timezone: 'UTC', orientation },
-      groups: [],
-      templates,
-      files,
-      spots,
-      playlists: [content.playlist],
-      dataSources: graph.dataSources,
-      schedule: content.entry ? [{ ...content.entry, target: 'org', targetId: undefined }] : [],
-      defaultPlaylist: content.playlist.id,
-    },
-    opts,
-  );
-  return result.problems;
-}
+export const probeDrafts = (graph: OrgGraph, orientation: Orientation, opts: CompileOptions, content: Pick<Probe, 'spots' | 'playlist' | 'entry'>) =>
+  compileProbe({ ...content, orientation, timezone: graph.timezone ?? 'UTC', dataSources: graph.dataSources }, graphReads(graph), opts);
 
 /**
  * Promote every changed draft that passes its checks, in dependency order: spots, then playlists
@@ -419,9 +378,9 @@ export async function promoteDrafts(
   const drafts: DraftReport = { promoted: [], held: [], removed: [] };
   // Every orientation a screen of this org has: a spot's files differ by orientation.
   const orientations = [...new Set<Orientation>(graph.screens.length ? graph.screens.map((s) => s.orientation) : ['landscape'])].sort();
-  const check = async (content: Parameters<typeof probe>[3]) => {
+  const check = async (content: { spots: SpotRow[]; playlist?: Playlist; entry?: TargetedEntry }) => {
     for (const o of orientations) {
-      const problems = await probe(graph, o, opts, content);
+      const { problems } = await probeDrafts(graph, o, opts, { ...content, spots: content.spots.map(spotDraft) });
       if (problems.length) return problems;
     }
     return [];
@@ -439,7 +398,7 @@ export async function promoteDrafts(
     if (v && v.status !== 'approved' && !(v.status === 'retired' && published(row)?.templateVersionId === row.templateVersionId)) {
       problems.push(`template ${v.key} is ${v.status}; only an approved version can be published`);
     } else {
-      problems.push(...(await check({ spots: [row], playlist: { id: PROBE, name: PROBE, transition: { type: 'cut' }, items: [{ spot: row.id }] } })));
+      problems.push(...(await check({ spots: [row] })));
     }
     if (problems.length) {
       drafts.held.push({ kind: 'spot', id: row.id, problems });

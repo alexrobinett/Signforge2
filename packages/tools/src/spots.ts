@@ -8,6 +8,7 @@
  * holds it back until then.
  */
 import { spotProblems } from '@signforge/compiler';
+import { bindingOf, DEFAULT_FIT } from '@signforge/compiler/draft';
 import {
   BINDING_PATH,
   missingColumns,
@@ -25,7 +26,7 @@ import { draftChanged, type OrgScope, type SpotRow } from '@signforge/db';
 import { z } from 'zod';
 import { draftOutput, id, idempotencyKey, ifVersion, name, orientation, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
-import { loadOrg, previewInput } from './publishing';
+import { loadOrg, previewInput, spotDraft } from './publishing';
 import { defineTool, notFound, ToolError } from './tool';
 
 const KINDS = ['template', 'image', 'video', 'url'] as const;
@@ -110,27 +111,8 @@ function parsed<T>(text: string | null): T | null {
   return value;
 }
 
-/** Bindings as tools take them, from the contract's `Binding`s stored on the row. */
-function bindingsView(json: string | null): SpotView['bindings'] {
-  const stored = parsed<Record<string, Binding>>(json);
-  return (
-    stored &&
-    Object.fromEntries(Object.entries(stored).map(([field, b]) => [field, { dataSourceId: b.source, path: b.path, ...(b.table ? { table: b.table } : {}) }]))
-  );
-}
-
 const spotView = (row: SpotRow): SpotView => ({
-  id: row.id,
-  name: row.name,
-  kind: row.kind,
-  durationMs: row.durationMs,
-  templateVersionId: row.templateVersionId,
-  data: parsed(row.dataJson),
-  assets: parsed(row.assetMapJson),
-  bindings: bindingsView(row.bindingsJson),
-  assetId: row.assetId,
-  fit: row.fit,
-  url: row.url,
+  ...spotDraft(row),
   version: row.rowVersion,
   published: row.publishedJson != null,
   draftChanged: draftChanged(row),
@@ -247,9 +229,7 @@ async function bindingsOf(org: OrgScope, input: z.infer<typeof bindings> | undef
       problems.push(`${dataSourceId} is ${feed.what}, which has no ${path} (it has ${Object.keys(feed.shape).join(', ')})`);
   }
   if (problems.length) throw invalid('bindings', problems);
-  return Object.fromEntries(
-    Object.entries(input).map(([field, b]) => [field, { source: b.dataSourceId, path: b.path, ...(b.table ? { table: b.table } : {}) }]),
-  );
+  return Object.fromEntries(Object.entries(input).map(([field, b]) => [field, bindingOf(b)]));
 }
 
 /** Bindings for the row: none is stored as no bindings at all. */
@@ -356,7 +336,7 @@ const createSpot = defineTool({
     await checkMedia(org, input.kind, input.assetId);
     return {
       spot: spotView(
-        write(await org.spots.stage.insert({ name: input.name, kind: input.kind, durationMs, assetId: input.assetId, fit: input.fit ?? 'cover' })),
+        write(await org.spots.stage.insert({ name: input.name, kind: input.kind, durationMs, assetId: input.assetId, fit: input.fit ?? DEFAULT_FIT })),
       ),
     };
   },
@@ -410,7 +390,7 @@ const updateSpot = defineTool({
 const getSpotPreview = defineTool({
   name: 'get_spot_preview',
   description:
-    "What a spot editor compiles a draft against to preview it on the real player, for one orientation: the template version's manifest and bundle, a brand kit as screens would get it (brandKitId, else the organization's default), and the data sources. Add the screen and the spot and compile with @signforge/compiler. A kit that cannot be built (an unverified logo) is left out and its problems listed. Returns { preview, brandKitId, problems }.",
+    "What a spot editor compiles a draft against to preview it on the real player, for one orientation: the template version's manifest and bundle, a brand kit as screens would get it (brandKitId, else the organization's default), and the data sources, plus the organization's time zone for new screens. Compile the draft on @signforge/compiler's probe screen (compileProbe), as a publish checks it. A kit that cannot be built (an unverified logo) is left out and its problems listed. Returns { preview, brandKitId, problems, timezone }.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
@@ -425,13 +405,15 @@ const getSpotPreview = defineTool({
       .describe("A compiler input without its screen and content: templates, files, dataSources and brand (the chosen kit as the screen's)"),
     brandKitId: z.string().nullable().describe('The kit the preview wears, or null for none'),
     problems: z.array(z.string()),
+    timezone: z.string().nullable().describe("The organization's time zone for new screens, or null for none set: the probe screen's"),
   }),
   example: { orientation: 'landscape', templateVersionId: 'tpv_example', brandKitId: 'bk_example' },
   handler: async ({ org, input }) => {
     if (input.templateVersionId) await requireVersion(org, input.templateVersionId);
     if (input.brandKitId && !(await org.brandKits.get(input.brandKitId))) throw notFound('brand kit', input.brandKitId);
-    const { input: preview, brandKitId, problems } = previewInput(await loadOrg(org), input.orientation, input);
-    return { preview, brandKitId, problems };
+    const graph = await loadOrg(org);
+    const { input: preview, brandKitId, problems } = previewInput(graph, input.orientation, input);
+    return { preview, brandKitId, problems, timezone: graph.timezone };
   },
 });
 
