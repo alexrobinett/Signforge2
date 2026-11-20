@@ -43,6 +43,38 @@ async function readLink(on: Page) {
   await form.getByRole('button', { name: 'Read the file' }).click();
 }
 
+/**
+ * Whether menu-board on the stage is between its intro and its outro: every intro animation
+ * (`rise-in`, `fade-in`) has finished and no outro (`fade-out`, delayed to the spot's end) has begun,
+ * so axe sees the template's own colours rather than a fade half done.
+ */
+async function stageBetweenFades(on: Page): Promise<boolean> {
+  let seen = false;
+  for (const frame of on.frames()) {
+    const state = await frame
+      .evaluate(() =>
+        document.getAnimations().map((a) => ({
+          name: a instanceof CSSAnimation ? a.animationName : '',
+          done: (a.currentTime ?? 0) >= (a.effect?.getComputedTiming().endTime ?? 0),
+          idle: a.effect?.getComputedTiming().progress === null,
+        })),
+      )
+      // A frame that went away while the stage redrew.
+      .catch(() => []);
+    for (const a of state) {
+      seen = true;
+      if (a.name === 'fade-out' ? !a.idle : !a.done) return false;
+    }
+  }
+  return seen;
+}
+
+/** The stage is playing the spot, past its intro (`stageBetweenFades`). */
+async function stageSettled(on: Page) {
+  await expect(on.getByText('Drawn by the player your screens run.')).toBeVisible();
+  await expect.poll(() => stageBetweenFades(on), { timeout: 15_000 }).toBe(true);
+}
+
 test.describe.configure({ mode: 'serial' });
 
 let page: Page;
@@ -71,7 +103,7 @@ test('a menu board fed by a CSV link: read it, map its columns, see its rows; th
   await form.locator('#table-name').fill('Lunch menu file');
   // The stage has drawn the spot's typed (empty) menu, past its intro animation.
   await expect.poll(() => stageShows(page, 'Menu'), { timeout: 15_000 }).toBe(true);
-  await page.waitForTimeout(1_500);
+  await stageSettled(page);
   await axe(page);
   await shots(page, '41-spot-source-table-read');
   await form.getByRole('button', { name: 'Use this file' }).click();
@@ -104,7 +136,7 @@ test('a menu board fed by a CSV link: read it, map its columns, see its rows; th
       sort: { column: 'Price', descending: true },
     },
   });
-  await page.waitForTimeout(1_500);
+  await stageSettled(page);
   await axe(page);
   await shots(page, '42-spot-source-table-mapped');
 
@@ -118,6 +150,7 @@ test('a menu board fed by a CSV link: read it, map its columns, see its rows; th
   await page.reload();
   await hydrated(page);
   await expect(form.getByRole('list', { name: 'First items' }).getByRole('listitem').last()).toHaveText('Dish 20');
+  // Waits for the editor to hydrate, after the page: until then the fields are disabled, as a change there would be lost.
   await form.getByRole('combobox', { name: 'Order' }).selectOption('');
   await expect(form.getByRole('list', { name: 'First items' }).getByRole('listitem').first()).toHaveText('Harvest bowl');
   await expect.poll(() => stageShows(page, 'Harvest bowl'), { timeout: 15_000 }).toBe(true);
@@ -142,6 +175,18 @@ test('a menu board fed by a CSV link: read it, map its columns, see its rows; th
   expect((await tool(page, 'get_spot', { spotId })).spot.bindings).toBeNull();
   expect((await tool(page, 'list_data_sources', {})).dataSources.map((d: { id: string }) => d.id)).toContain(sourceId);
   await expect(form.getByRole('combobox', { name: 'Table' })).toBeVisible();
+});
+
+test("the editor's fields are disabled in the server's HTML: a choice made before its code has hydrated would be lost", async () => {
+  // The spot editor is a route chunk that hydrates after the page (body[data-hydrated]); a select changed in
+  // between was set back by React to its value, and the choice dropped (CI run 44652707436).
+  const spotId = await newSpot(page, 'Menu Board', 'Server menu');
+  const html = await (await page.request.get(`/spots/${spotId}`)).text();
+  const fieldset = html.match(/<form[^>]*aria-label="Spot fields"[^>]*>\s*<fieldset([^>]*)>/)?.[1];
+  expect(fieldset).toBeDefined();
+  expect(fieldset).toMatch(/\bdisabled=""/);
+  // Once it has hydrated, they are enabled.
+  await expect(page.getByRole('form', { name: 'Spot fields' }).getByLabel('Name', { exact: true }).first()).toBeEnabled();
 });
 
 test('the table source on a phone: no sideways scroll, light and dark', async () => {
