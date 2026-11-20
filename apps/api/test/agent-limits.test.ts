@@ -69,7 +69,8 @@ describe("an agent grant's writes", () => {
     expect(await read(a)).toMatchObject({ ok: false, error: 'rate_limited', details: { limit: 'calls_per_minute' } });
   });
 
-  it('refuses the 2,001st write in a UTC day, counted in one place for every location, until the next day', async () => {
+  // 2,000 writes through the grant's object: about 5 s on CI's runners, over vitest's default.
+  it('refuses the 2,001st write in a UTC day, counted in one place for every location, until the next day', { timeout: 30_000 }, async () => {
     // Two limiters, as two Workers in two locations hold: each gets its own stub of the grant's object.
     const here = agentLimiter(env);
     const there = agentLimiter(env);
