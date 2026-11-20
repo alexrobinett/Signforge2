@@ -16,6 +16,7 @@ import { groupTools } from './groups';
 import { pairingTools } from './pairing';
 import { playlistTools } from './playlists';
 import { publishTools } from './publish';
+import { scheduleTools } from './schedule';
 import { screenTools } from './screens';
 import { settingsTools } from './settings';
 import { spotTools } from './spots';
@@ -38,6 +39,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...alertChannelTools,
   ...spotTools,
   ...playlistTools,
+  ...scheduleTools,
   ...auditTools,
 ];
 export const PLATFORM_TOOLS: readonly AnyTool<PlatformScope>[] = [...platformTemplateTools];

@@ -44,6 +44,7 @@ import {
   type Write,
 } from '@signforge/db';
 import { kitColors } from './brand';
+import { ended } from './schedule';
 import { ToolError } from './tool';
 
 type Orientation = Screen['orientation'];
@@ -246,6 +247,8 @@ function toEntry(e: ScheduleEntryRow): TargetedEntry {
     ...(days ? { days } : {}),
     ...(e.fromTime ? { from: e.fromTime } : {}),
     ...(e.toTime ? { to: e.toTime } : {}),
+    ...(e.startsAt !== null ? { startsAt: new Date(e.startsAt).toISOString() } : {}),
+    ...(e.endsAt !== null ? { endsAt: new Date(e.endsAt).toISOString() } : {}),
   };
 }
 
@@ -266,10 +269,14 @@ function screenInput(graph: OrgGraph, screen: Screen): { input: CompileInput; un
     const pub = published(row);
     return pub ? [toPlaylist(pub)] : [];
   });
-  const schedule = graph.entries.flatMap((row) => {
-    const pub = published(row);
-    return pub ? [toEntry(pub)] : [];
-  });
+  // In publish order, oldest first: of two otherwise tied entries a screen plays the later (the contract's ScheduleEntry).
+  const schedule = graph.entries
+    .flatMap((row) => {
+      const pub = published(row);
+      return pub ? [pub] : [];
+    })
+    .sort((a, b) => (a.publishedAt ?? 0) - (b.publishedAt ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map(toEntry);
   const displayHours = screen.displayHoursJson ? JSON.parse(screen.displayHoursJson) : undefined;
   const { brand, unavailable: unavailableKits } = brandInput(graph, screen, files);
   return {
@@ -347,6 +354,8 @@ export interface DraftReport {
   promoted: { kind: DraftKind; id: string }[];
   /** Drafts that failed their checks: they keep their published version, if any. For the CMS to show. */
   held: { kind: DraftKind; id: string; problems: string[] }[];
+  /** Schedule entries this publish deleted: deletions it applied, and takeovers over for good. */
+  removed: { kind: 'schedule_entry'; id: string }[];
 }
 
 const PROBE = 'draft-check';
@@ -391,18 +400,23 @@ async function probe(
 /**
  * Promote every changed draft that passes its checks, in dependency order: spots, then playlists
  * (every item must be a published spot), then schedule entries (their playlist must be published).
- * Returns the graph as it will be once `writes` are committed.
+ * Deleted schedule entries go too (`removals`), as their deletion's turn comes like an edit's, and
+ * so do the ids in `end` whatever the pins, and with any publish a takeover over for good. Returns
+ * the graph as it will be once the writes commit.
  */
 export async function promoteDrafts(
   org: OrgScope,
   graph: OrgGraph,
   opts: CompileOptions,
   pins?: ReadonlyMap<string, number>,
-): Promise<{ graph: OrgGraph; writes: Write[]; drafts: DraftReport }> {
+  end: ReadonlySet<string> = new Set(),
+): Promise<{ graph: OrgGraph; writes: Write[]; removals: Write[]; drafts: DraftReport }> {
   const writes: Write[] = [];
+  const removals: Write[] = [];
   // With pins, only the pinned drafts are candidates: every other draft stays as it is published.
-  const changed = (kind: DraftKind, row: DraftRow, items?: string[]) => (!pins || pins.has(pinKey(kind, row.id))) && draftChanged(row, items);
-  const drafts: DraftReport = { promoted: [], held: [] };
+  const chosen = (kind: DraftKind, row: DraftRow) => !pins || pins.has(pinKey(kind, row.id));
+  const changed = (kind: DraftKind, row: DraftRow, items?: string[]) => chosen(kind, row) && draftChanged(row, items);
+  const drafts: DraftReport = { promoted: [], held: [], removed: [] };
   // Every orientation a screen of this org has: a spot's files differ by orientation.
   const orientations = [...new Set<Orientation>(graph.screens.length ? graph.screens.map((s) => s.orientation) : ['landscape'])].sort();
   const check = async (content: Parameters<typeof probe>[3]) => {
@@ -475,7 +489,18 @@ export async function promoteDrafts(
 
   const entries: ScheduleEntryRow[] = [];
   for (const row of graph.entries) {
-    if (!changed('schedule_entry', row)) {
+    if (ended(row, opts.now.getTime())) {
+      removals.push(...org.scheduleEntries.stage.remove(row).writes);
+      drafts.removed.push({ kind: 'schedule_entry', id: row.id });
+      continue;
+    }
+    if (end.has(row.id) || (row.deletedAt !== null && chosen('schedule_entry', row))) {
+      removals.push(...org.scheduleEntries.stage.remove(row).writes);
+      drafts.removed.push({ kind: 'schedule_entry', id: row.id });
+      continue;
+    }
+    // A deletion this publish does not apply: screens keep the published version.
+    if (row.deletedAt !== null || !changed('schedule_entry', row)) {
       entries.push(row);
       continue;
     }
@@ -497,7 +522,8 @@ export async function promoteDrafts(
   const order = (a: { kind: string; id: string }, b: { kind: string; id: string }) => a.kind.localeCompare(b.kind) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   drafts.promoted.sort(order);
   drafts.held.sort(order);
-  return { graph: { ...graph, spots, playlists, entries }, writes, drafts };
+  drafts.removed.sort(order);
+  return { graph: { ...graph, spots, playlists, entries }, writes, removals, drafts };
 }
 
 export interface ScreenPublish {
@@ -527,14 +553,18 @@ const pinKey = (kind: DraftKind, id: string) => `${kind}:${id}`;
  *
  * With `pins`, only those drafts are promoted, and only at the version pinned: one that changed or
  * was deleted since is refused (`conflict`, details `{ id, version }`, the version now, 0 if gone).
- * `revision` is the org's publish revision as read; the publish moves it to the next. `read` is the
- * org as read, and `graph` as it will be once the writes commit, its drafts promoted.
+ * `end` names schedule entries this publish deletes, whatever the pins (`end_takeover`). A takeover
+ * that has ended is in no screen's manifest. `revision` is the org's publish revision as read; the
+ * publish moves it to the next. `read` is the org as read, and `graph` as it will be once the
+ * writes commit, its drafts promoted. `removals` delete schedule entries: commit them with the
+ * rest, and also when no draft was promoted and no screen changed, which makes no publish.
  */
 export async function publishOrg(
   org: OrgScope,
   opts: CompileOptions,
   pins?: readonly DraftPin[],
-): Promise<{ writes: Write[]; drafts: DraftReport; screens: ScreenPublish[]; revision: number; read: OrgGraph; graph: OrgGraph }> {
+  end: readonly string[] = [],
+): Promise<{ writes: Write[]; removals: Write[]; drafts: DraftReport; screens: ScreenPublish[]; revision: number; read: OrgGraph; graph: OrgGraph }> {
   const read = await loadOrg(org);
   const pinned = pins && new Map(pins.map((p) => [pinKey(p.kind, p.id), p.version]));
   if (pins) {
@@ -549,8 +579,11 @@ export async function publishOrg(
       }
     }
   }
-  const { graph, writes: promotions, drafts } = await promoteDrafts(org, read, opts, pinned);
+  const { graph, writes: promotions, removals, drafts } = await promoteDrafts(org, read, opts, pinned, new Set(end));
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
+  // A takeover whose published version has ended plays nowhere again, though its draft may run on.
+  const now = opts.now.getTime();
+  const compiled = { ...graph, entries: graph.entries.filter((r) => (published(r)?.endsAt ?? Number.POSITIVE_INFINITY) > now) };
   const screens: ScreenPublish[] = [];
   for (const screen of [...graph.screens].sort((a, b) => (a.id < b.id ? -1 : 1))) {
     const current = screen.desiredManifestId;
@@ -558,7 +591,7 @@ export async function publishOrg(
       screens.push({ screenId: screen.id, current, problems: ['the organization has no default playlist'] });
       continue;
     }
-    const { input, unavailable, unavailableKits } = screenInput(graph, screen);
+    const { input, unavailable, unavailableKits } = screenInput(compiled, screen);
     const result = await compileScreen(input, opts);
     // A published spot that could not be loaded shows up as unknown; say why.
     const reasons = [...unavailable]
@@ -571,5 +604,5 @@ export async function publishOrg(
     const problems = [...reasons, ...kitReasons, ...result.problems];
     screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
-  return { writes, drafts, screens, revision: read.publishRevision, read, graph };
+  return { writes, removals, drafts, screens, revision: read.publishRevision, read, graph };
 }

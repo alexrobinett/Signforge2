@@ -290,6 +290,11 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
         return staged(row as Row, db.insert(t).values({ ...row, rowVersion: firstVersion(id) } as never));
       },
       publish: publisher(db, orgId, table),
+      /** Delete the row, draft and published version, refused like `publish` if it was edited since it was read. */
+      remove: (row: Row): Staged => {
+        const deleted = rows.stage.delete(row.id);
+        return { row: undefined, writes: [versionGuard(db, orgId, t, row.id, row.rowVersion, row.incarnation), ...deleted.writes] };
+      },
     },
   };
 }

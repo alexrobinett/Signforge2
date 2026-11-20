@@ -63,6 +63,7 @@ export const screenOutput = z.object({
       asleep: z.boolean(),
       wakesAt: z.string().nullable(),
       playlist: z.object({ id: z.string(), name: z.string() }).nullable(),
+      takeover: z.boolean().describe('Whether a takeover plays that playlist'),
       spot: z
         .object({
           id: z.string(),

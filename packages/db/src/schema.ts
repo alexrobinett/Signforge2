@@ -500,6 +500,15 @@ export const scheduleEntries = sqliteTable(
     /** Local `HH:MM`. */
     fromTime: text('from_time'),
     toTime: text('to_time'),
+    /** A takeover's absolute bounds, epoch ms: `starts_at` inclusive, `ends_at` exclusive. An entry with `ends_at` is a takeover. */
+    startsAt: integer('starts_at'),
+    endsAt: integer('ends_at'),
+    /**
+     * Set when a published entry is deleted: screens keep its published version until a publish
+     * applies the deletion (one of everything, or one that pins it), which deletes the row. An entry
+     * never published is deleted at once.
+     */
+    deletedAt: integer('deleted_at'),
     /** Moves on with every edit of the draft; publishing does not move it. */
     rowVersion: rowVersion(),
     incarnation: incarnation(),

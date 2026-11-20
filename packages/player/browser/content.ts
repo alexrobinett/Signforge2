@@ -87,7 +87,8 @@ const templateManifest: TemplateManifest = {
     target: { type: 'text', label: 'Target' },
     items: { type: 'list', label: 'Items', maxItems: 3, default: [], item: { title: { type: 'text', label: 'Title' } } },
   },
-  duration: { defaultMs: 1000, minMs: 100, maxMs: 60_000 },
+  // Up to an hour: a takeover test jumps the clock past a takeover's end without reaching a spot's.
+  duration: { defaultMs: 1000, minMs: 100, maxMs: 3_600_000 },
   orientations: ['landscape', 'portrait'],
   uses: [],
   background: '#000',

@@ -627,9 +627,14 @@ export interface Playlist {
   items: { spot: string }[];
 }
 
-/** What a schedule entry is aimed at. More specific wins a priority tie. */
+/** What a schedule entry is aimed at. More specific wins a priority tie (`ScheduleEntry`). */
 export type TargetLevel = 'org' | 'group' | 'screen';
 
+/**
+ * Where entries that apply overlap, the highest `priority` plays; of equal priority the more
+ * specific target; then the later `startsAt` (an entry without one counts as earliest), so the
+ * newest of two takeovers wins; then the one later in the manifest's `schedule`.
+ */
 export interface ScheduleEntry {
   id: string;
   playlist: string;
@@ -645,9 +650,11 @@ export interface ScheduleEntry {
   to?: string;
   /**
    * Absolute bounds, ISO 8601 instants, on top of the local dates and window: `startsAt` inclusive,
-   * `endsAt` exclusive. A takeover sets `endsAt`, so it ends on time whatever the screen's time
-   * zone and with the network down. A screen that does not trust its clock skips any entry with
-   * either bound rather than risk running a takeover forever.
+   * `endsAt` exclusive. An entry with `endsAt` is a takeover: it ends on time whatever the screen's
+   * time zone and with the network down, and when the takeover that wins changes (one published,
+   * starting or ending) the player ends the spot on screen at once instead of at its end. A screen
+   * that does not trust its clock skips any entry with either bound rather than risk running a
+   * takeover forever.
    */
   startsAt?: string;
   endsAt?: string;
@@ -684,6 +691,7 @@ export interface ScreenManifest {
   spots: Record<string, Spot>;
   playlists: Record<string, Playlist>;
   dataSources: Record<string, DataSource>;
+  /** In the order the entries were published, oldest first: of two otherwise tied, the later wins. */
   schedule: ScheduleEntry[];
   /** Plays when no schedule entry applies, so a screen is never blank. */
   defaultPlaylist: string;

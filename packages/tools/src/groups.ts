@@ -3,6 +3,7 @@ import type { OrgScope, ScreenGroup } from '@signforge/db';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
+import { ended } from './schedule';
 import { defineTool, notFound, ToolError } from './tool';
 
 const groupOutput = z.object({
@@ -91,7 +92,7 @@ const renameGroup = defineTool({
 const deleteGroup = defineTool({
   name: 'delete_group',
   description:
-    'Delete a screen group. Its screens are not deleted. Refused with a conflict while a schedule entry targets the group; remove or retarget those entries first. Returns { deleted: groupId }.',
+    'Delete a screen group. Its screens are not deleted. Refused with a conflict while a schedule entry targets the group; remove or retarget those entries first. Takeovers of it that have ended do not count, and are deleted with it. Returns { deleted: groupId }.',
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
@@ -101,8 +102,10 @@ const deleteGroup = defineTool({
   target,
   handler: async ({ org, input, write }) => {
     await requireGroup(org, input.groupId);
-    // The schema would cascade the delete to these entries; a person should decide that.
-    const entries = (await org.scheduleEntries.list()).filter((e) => e.groupId === input.groupId).map((e) => e.id);
+    // The schema would cascade the delete to these entries; a person should decide that. An ended
+    // takeover plays nowhere again: the cascade takes it.
+    const now = Date.now();
+    const entries = (await org.scheduleEntries.list()).filter((e) => e.groupId === input.groupId && !ended(e, now)).map((e) => e.id);
     if (entries.length)
       throw new ToolError('conflict', `group ${input.groupId} is targeted by ${entries.length} schedule entries`, { scheduleEntryIds: entries });
     write(org.screenGroups.stage.delete(input.groupId));

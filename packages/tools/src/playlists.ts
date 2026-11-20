@@ -13,6 +13,7 @@ import { draftChanged, published, type OrgScope, type PlaylistRow } from '@signf
 import { z } from 'zod';
 import { draftOutput, id, idempotencyKey, ifVersion, name, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
+import { ended } from './schedule';
 import { defineTool, notFound, ToolError } from './tool';
 
 /** A new playlist's transition when none is given: fade, the player's default (docs/architecture.md, Transitions). */
@@ -140,11 +141,18 @@ const updatePlaylist = defineTool({
   refuseFailedCommit: async ({ org, input }) => ((await org.playlists.get(input.playlistId)) ? undefined : notFound('playlist', input.playlistId)),
 });
 
-/** Why a playlist cannot be deleted now (it is the default, or a schedule entry plays it), or undefined. */
+/** The playlist's takeovers that have ended for good: they play nowhere again, and go with it. */
+const endedWith = async (org: OrgScope, playlistId: string, now: number) =>
+  (await org.scheduleEntries.list()).filter((e) => ended(e, now) && (e.playlistId === playlistId || published(e)?.playlistId === playlistId));
+
+/** Why a playlist cannot be deleted now (it is the default, or a schedule entry plays it), or undefined. An ended takeover does not count. */
 async function inUse(org: OrgScope, playlistId: string): Promise<ToolError | undefined> {
   if ((await org.settings.get())?.defaultPlaylistId === playlistId)
     return new ToolError('conflict', `playlist ${playlistId} is the default playlist; choose another default first`);
-  const entries = (await org.scheduleEntries.list()).filter((e) => e.playlistId === playlistId || published(e)?.playlistId === playlistId).map((e) => e.id);
+  const now = Date.now();
+  const entries = (await org.scheduleEntries.list())
+    .filter((e) => !ended(e, now) && (e.playlistId === playlistId || published(e)?.playlistId === playlistId))
+    .map((e) => e.id);
   if (entries.length) return new ToolError('conflict', `playlist ${playlistId} is played by ${entries.length} schedule entries`, { scheduleEntryIds: entries });
   return undefined;
 }
@@ -152,7 +160,7 @@ async function inUse(org: OrgScope, playlistId: string): Promise<ToolError | und
 const deletePlaylist = defineTool({
   name: 'delete_playlist',
   description:
-    'Delete a playlist, its draft and its published version. Its spots are not deleted. Refused with a conflict while it is the default playlist or a schedule entry plays it, in its draft or its published version: change those first, since screens play them. Returns { deleted: playlistId }.',
+    'Delete a playlist, its draft and its published version. Its spots are not deleted. Refused with a conflict while it is the default playlist or a schedule entry plays it, in its draft or its published version: change those first, since screens play them. Takeovers of it that have ended are deleted with it. Returns { deleted: playlistId }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -164,6 +172,7 @@ const deletePlaylist = defineTool({
     await requirePlaylist(org, input.playlistId);
     const used = await inUse(org, input.playlistId);
     if (used) throw used;
+    for (const e of await endedWith(org, input.playlistId, Date.now())) write(org.scheduleEntries.stage.remove(e));
     write(org.playlists.stage.delete(input.playlistId));
     return { deleted: input.playlistId };
   },

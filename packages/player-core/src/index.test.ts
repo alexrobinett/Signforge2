@@ -3,10 +3,12 @@ import type { DataSnapshot, FieldDef, ScreenManifest, Spot, TemplateManifest } f
 import { SNAPSHOT_STALE_MS } from '@signforge/contract';
 import {
   Sequencer,
+  activeTakeover,
   displayOn,
   entryApplies,
   localTime,
   nextDisplayChange,
+  nextTakeoverEdge,
   planSync,
   resolvePlaylist,
   resolveSpotData,
@@ -109,6 +111,51 @@ describe('schedule', () => {
     const e = { id: 'e', playlist: 'all', priority: 1, target: 'screen' as const, startDate: '2026-11-17', endDate: '2026-11-18' };
     expect(entryApplies(e, localTime(at('12:00'), 'America/New_York'))).toBe(false);
     expect(entryApplies(e, localTime(new Date('2026-11-18T23:59:00-05:00'), 'America/New_York'))).toBe(true);
+  });
+});
+
+describe('takeovers (M3-19)', () => {
+  // Noon to 12:30 in New York; another from 12:15 to 13:00, below it.
+  const first = { id: 't1', playlist: 'takeover', priority: 100, target: 'org' as const, startsAt: '2026-11-16T17:00:00Z', endsAt: '2026-11-16T17:30:00Z' };
+  const second = { id: 't2', playlist: 'breakfast', priority: 100, target: 'org' as const, startsAt: '2026-11-16T17:15:00Z', endsAt: '2026-11-16T18:00:00Z' };
+
+  it('names the takeover that plays, and none when an entry without an end or the default does', () => {
+    const m = manifest({ schedule: [first, second, ...manifest().schedule] });
+    expect(activeTakeover(m, at('07:30'))).toBeUndefined();
+    expect(activeTakeover(m, at('12:00'))).toBe('t1');
+    // Both run from 12:15: of equal priority and target, the one that started later wins, as resolvePlaylist picks.
+    expect(activeTakeover(m, at('12:20'))).toBe('t2');
+    expect(resolvePlaylist(m, at('12:20')).id).toBe('breakfast');
+    expect(activeTakeover(m, at('12:30'))).toBe('t2');
+    expect(activeTakeover(m, at('13:00'))).toBeUndefined();
+    expect(activeTakeover(m, at('12:00'), { clockTrusted: false })).toBeUndefined();
+  });
+
+  it('of two takeovers on one target, the newer wins: the later start, then the later published, never the id', () => {
+    // A correction to a running takeover, started later and ending sooner: it wins until it ends, then the first is back.
+    const correction = { ...second, id: 't0', startsAt: '2026-11-16T17:10:00Z', endsAt: '2026-11-16T17:20:00Z' };
+    const m = manifest({ schedule: [first, correction, ...manifest().schedule] });
+    expect(activeTakeover(m, at('12:15'))).toBe('t0');
+    expect(activeTakeover(m, at('12:25'))).toBe('t1');
+    // The same start: the one published later, later in the list, whatever the ids.
+    const same = { ...correction, startsAt: first.startsAt };
+    expect(activeTakeover(manifest({ schedule: [first, same] }), at('12:15'))).toBe('t0');
+    expect(activeTakeover(manifest({ schedule: [same, first] }), at('12:15'))).toBe('t1');
+    // Entries without bounds tie the same way: the later published plays.
+    const a = { id: 'b', playlist: 'takeover', priority: 5, target: 'org' as const };
+    const b = { id: 'a', playlist: 'breakfast', priority: 5, target: 'org' as const };
+    expect(resolvePlaylist(manifest({ schedule: [a, b] }), at('12:15')).id).toBe('breakfast');
+    expect(resolvePlaylist(manifest({ schedule: [b, a] }), at('12:15')).id).toBe('takeover');
+  });
+
+  it('gives the next instant a takeover starts or ends, so a screen checks again then, offline too', () => {
+    const m = manifest({ schedule: [first, second, ...manifest().schedule] });
+    expect(nextTakeoverEdge(m, at('07:30'))).toEqual(new Date('2026-11-16T17:00:00Z'));
+    expect(nextTakeoverEdge(m, at('12:00'))).toEqual(new Date('2026-11-16T17:15:00Z'));
+    expect(nextTakeoverEdge(m, at('12:20'))).toEqual(new Date('2026-11-16T17:30:00Z'));
+    expect(nextTakeoverEdge(m, at('12:45'))).toEqual(new Date('2026-11-16T18:00:00Z'));
+    expect(nextTakeoverEdge(m, at('13:00'))).toBeUndefined();
+    expect(nextTakeoverEdge(manifest(), at('07:30'))).toBeUndefined();
   });
 });
 

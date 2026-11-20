@@ -116,6 +116,7 @@ describe('shouldBeShowing', () => {
       asleep: false,
       wakesAt: null,
       playlist: { id: 'main', name: 'Main loop' },
+      takeover: false,
       spot: { id: 'promo', name: 'Energy 3 for $7', kind: 'template', template: 'cstore-promo', image: 'a'.repeat(64) },
       spots: 2,
     });
@@ -131,7 +132,7 @@ describe('shouldBeShowing', () => {
 
   it('is asleep outside the display hours the screen was published with', () => {
     const m = manifest({ screen: { ...manifest().screen, displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '11:00', to: '19:00' }] } } });
-    expect(shouldBeShowing(m, NOW)).toEqual({ asleep: true, wakesAt: '2026-11-18T16:00:00.000Z', playlist: null, spot: null, spots: 0 });
+    expect(shouldBeShowing(m, NOW)).toEqual({ asleep: true, wakesAt: '2026-11-18T16:00:00.000Z', playlist: null, takeover: false, spot: null, spots: 0 });
     // Woken by an override.
     expect(shouldBeShowing(m, NOW, { state: 'on', until: '2026-11-18T16:00:00.000Z' })).toMatchObject({ asleep: false, spot: { id: 'promo' } });
   });
