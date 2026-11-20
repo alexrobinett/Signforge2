@@ -1,7 +1,9 @@
 // The brand kit page's store slice: its previews keep re-theming as the kit is edited. The player
 // is a stub frame that records what it is posted; the server functions are stubbed at the network
 // edge, and the Query client forgets an unobserved entry after a second, as the page's does after five
-// minutes.
+// minutes. The compile's hashing is the test's too: the real crypto.subtle finishes in wall-clock
+// time, so which of two compiles finished first was the runner's speed (#103's flaky queue test).
+import { createHash } from 'node:crypto';
 import { PREVIEW_PROTOCOL, templateKey, type TemplateManifest } from '@signforge/contract';
 import clock from '@signforge/template-clock/template.json';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
@@ -76,11 +78,37 @@ const preview = (brandKitId: string): SpotPreview => ({
 
 let hear: (e: unknown) => void = () => {};
 
+/** Hashes held back by the test, by a text their input contains; every other hash is done at once. */
+const held = new Map<string, Promise<void>>();
+
+/** Holds back the hash of any compile whose manifest contains `text` until the returned function is called. */
+function holdHashOf(text: string): () => void {
+  let release = () => {};
+  held.set(
+    text,
+    new Promise<void>((go) => {
+      release = go;
+    }),
+  );
+  return release;
+}
+
+/** Lets every pending compile finish, held ones excepted. */
+const settle = () => vi.advanceTimersByTimeAsync(0);
+
 beforeEach(() => {
   // Timers only: the compile hashes with crypto.subtle, which resolves outside fake time.
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
   vi.stubGlobal('location', { origin: 'http://cms.test' });
+  held.clear();
+  vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (_: AlgorithmIdentifier, data: BufferSource) => {
+    const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);
+    const text = new TextDecoder().decode(bytes);
+    for (const [k, wait] of held) if (text.includes(k)) await wait;
+    const d = createHash('sha256').update(bytes).digest();
+    return d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength);
+  });
   vi.mocked(getSpotPreview).mockImplementation(async ({ data }: { data: { brandKitId?: string } }) => preview(data.brandKitId ?? '')) as never;
 });
 afterEach(() => {
@@ -175,9 +203,29 @@ describe('drafts to one player (re-check of #103)', () => {
     await vi.advanceTimersByTimeAsync(100);
     store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#0f766e' } }));
     await vi.advanceTimersByTimeAsync(100);
-    await new Promise((r) => setImmediate(r));
+    await settle();
     expect(posted).toEqual(['#2563eb']);
     playing();
+    await vi.waitFor(() => expect(posted).toEqual(['#2563eb', '#0f766e']));
+  });
+
+  it('does not send a queued edit that a newer one still compiling has made old, when the player answers', async () => {
+    const a = kit('bk_a', '#2563eb');
+    const { store, posted, attach, listening, playing } = page([a]);
+    attach(a.id);
+    listening();
+    await vi.waitFor(() => expect(posted).toEqual(['#2563eb']));
+    // A slow runner: the first edit's compile is done and queued, the second's is still hashing.
+    const release = holdHashOf('#0f766e');
+    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
+    await vi.advanceTimersByTimeAsync(100);
+    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#0f766e' } }));
+    await vi.advanceTimersByTimeAsync(100);
+    await settle();
+    playing();
+    await settle();
+    expect(posted).toEqual(['#2563eb']);
+    release();
     await vi.waitFor(() => expect(posted).toEqual(['#2563eb', '#0f766e']));
   });
 });
