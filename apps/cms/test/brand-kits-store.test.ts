@@ -76,6 +76,7 @@ const preview = (brandKitId: string): SpotPreview => ({
   preview: { templates: { [version.key]: { manifest, html: HTML } }, files: { [HTML]: { size: 100, type: 'text/html' } }, dataSources: [] },
   brandKitId,
   problems: [],
+  timezone: null,
 });
 
 let hear: (e: unknown) => void = () => {};

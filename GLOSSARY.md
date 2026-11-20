@@ -7,3 +7,6 @@ _Avoid_: form state, optimistic update.
 
 **Tool services**: what a tool may use beyond its input and the org's data: sealing a URL, sending an alert now, telling screens, checking a template, providers' OAuth, rate limits. A caller (the CMS's, an agent's, a test's) carries them; each tool says which it needs, and a call without one is refused before the tool runs.
 _Avoid_: dependencies, context fields.
+
+**Draft to spot**: turning a spot's draft (as `get_spot` gives it) into the contract's `Spot` for one orientation, and compiling the probe screen a draft is checked on. One module (`@signforge/compiler/draft`) does it for the publish and the CMS's stage; each reads assets and template versions its own way (`DraftReads`). A spot can play and still not publish: an asset still being checked.
+_Avoid_: preview conversion, toSpot.

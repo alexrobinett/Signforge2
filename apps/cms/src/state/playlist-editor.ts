@@ -289,6 +289,8 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
         spots,
         versions: versionsById(templates),
         preview: merged(previews),
+        // Every preview is the same org's: one time zone.
+        timezone: previews[0]!.timezone,
         assets,
         orientation: t.orientation,
       });

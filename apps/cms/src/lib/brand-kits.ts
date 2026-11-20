@@ -5,9 +5,10 @@
  * one that fails. The contrast maths is the compiler's, so the page says what the tools say.
  */
 import { BRAND_PAIRS, brandFont, contrastRatio, HEX_COLOR, MIN_CONTRAST, onColor } from '@signforge/compiler';
+import { assetFile } from '@signforge/compiler/draft';
 import type { BrandColor, BrandColors, BrandKit, BrandShape, Orientation } from '@signforge/contract';
 import type { AssetView } from './assets';
-import { assetFile, type SpotPreview } from './spots';
+import type { SpotPreview } from './spots';
 
 type FontRef = { id: string; family: string } | null;
 
@@ -117,7 +118,7 @@ export function duplicateInput(kit: BrandKitView, idempotencyKey: string) {
 /**
  * A spot's preview input (`get_spot_preview`) wearing the draft instead of the saved kit, as the
  * publish would build it (packages/tools `toBrandKit`): catalogue fonts with their files, the
- * logo's rendition for the orientation. Undefined while a colour is not a hex colour yet.
+ * logo's file for the orientation (@signforge/compiler `assetFile`). Undefined while a colour is not a hex colour yet.
  */
 export function withDraftKit(opts: {
   preview: SpotPreview['preview'];
@@ -130,13 +131,9 @@ export function withDraftKit(opts: {
   const colors = draftColors(draft);
   if (!colors) return undefined;
   const files = { ...opts.preview.files };
-  const logo = (assetId: string | null) => {
-    const a = assetId ? opts.assets.find((x) => x.id === assetId) : undefined;
-    const f = a && assetFile(a, orientation);
-    if (!f) return undefined;
-    files[f.sha] = { size: f.size, type: f.type };
-    return f.sha;
-  };
+  const assets = { asset: (id: string) => opts.assets.find((x) => x.id === id) };
+  // An unverified logo shows while it is checked; the publish leaves such a kit out until it is.
+  const logo = (assetId: string | null) => (assetId ? assetFile(assets, assetId, orientation, files).sha : undefined);
   const display = brandFont(draft.displayFontId, files);
   const body = brandFont(draft.bodyFontId, files);
   const onDark = logo(draft.logoOnDarkAssetId);

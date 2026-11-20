@@ -6,6 +6,7 @@
  * `table` template's list fields may also be typed: they are live only once bound to a CSV or
  * JSON link (issue #84), with a mapping from the table's columns to their items' properties.
  */
+import type { DraftBinding } from '@signforge/compiler/draft';
 import {
   boundValue,
   readPath,
@@ -54,7 +55,7 @@ export interface PlaceView {
 }
 
 /** A spot's binding as the spot tools take it. */
-export type BindingInput = { dataSourceId: string; path: string; table?: TableMapping };
+export type BindingInput = DraftBinding;
 
 /** The formats a table template reads (`LiveData` source `table`): a forecast is plain `json`, news `rss`, a calendar `ical`. */
 const TABLE_FORMATS = ['csv', 'json-table'] as const;

@@ -2,40 +2,29 @@
  * The spot tools' outputs as the CMS reads them (`list_spots`, `get_spot`, `get_spot_preview`,
  * `list_templates` in packages/tools, the source of truth), and the editor's
  * draft turned into what the real player plays: a one-spot manifest (or a playlist's, for the
- * playlist editor) compiled in the browser with the server's compiler, so the stage never waits
- * on the network.
+ * playlist editor) compiled in the browser on the compiler's probe screen, the one a publish
+ * checks drafts on (@signforge/compiler `compileProbe`), so the stage never waits on the network
+ * and plays what a publish would send.
  */
-import { compileScreen, spotProblems, type CompileInput } from '@signforge/compiler';
+import { spotProblems, type CompileInput } from '@signforge/compiler';
+import { compileProbe, DEFAULT_FIT, spotFromDraft, type DraftReads, type Probe, type SpotDraft as SavedDraft } from '@signforge/compiler/draft';
 import {
   validateSpotData,
   type FieldDef,
   type Orientation,
-  type Playlist,
   type ScalarFieldDef,
   type ScreenManifest,
-  type Spot,
   type TemplateManifest,
   type Transition,
 } from '@signforge/contract';
 import type { AssetView } from './assets';
 import type { BindingInput } from './live-data';
 
-export type SpotKind = 'template' | 'image' | 'video' | 'url';
-type Fit = 'cover' | 'contain';
+export type SpotKind = SavedDraft['kind'];
+type Fit = NonNullable<SavedDraft['fit']>;
 
 /** One spot's draft, as `get_spot` returns it. */
-export interface SpotView {
-  id: string;
-  name: string;
-  kind: SpotKind;
-  durationMs: number;
-  templateVersionId: string | null;
-  data: Record<string, unknown> | null;
-  assets: Record<string, string> | null;
-  bindings: Record<string, BindingInput> | null;
-  assetId: string | null;
-  fit: Fit | null;
-  url: string | null;
+export interface SpotView extends SavedDraft {
   version: number;
   published: boolean;
   draftChanged: boolean;
@@ -60,11 +49,12 @@ export interface TemplateView {
   versions: TemplateVersionView[];
 }
 
-/** `get_spot_preview`'s output: a compile input without its screen and content. */
+/** `get_spot_preview`'s output: a compile input without its screen and content, and the org's time zone for new screens. */
 export interface SpotPreview {
   preview: Pick<CompileInput, 'templates' | 'files' | 'dataSources' | 'brand'>;
   brandKitId: string | null;
   problems: string[];
+  timezone: string | null;
 }
 
 /** What the editor edits: the parts of a spot's draft a person changes. */
@@ -87,7 +77,7 @@ export const draftOf = (s: SpotView): SpotDraft => ({
   assets: s.assets ?? {},
   bindings: s.bindings ?? {},
   assetId: s.assetId,
-  fit: s.fit ?? 'cover',
+  fit: s.fit ?? DEFAULT_FIT,
   url: s.url ?? '',
 });
 
@@ -141,123 +131,114 @@ export const startData = (fields: Record<string, FieldDef>) =>
     ),
   );
 
-/** The file an asset plays as on a screen of this orientation, as the publish picks it (packages/tools `assetFile`). */
-export function assetFile(asset: AssetView, orientation: Orientation): { sha: string; size: number; type: string } | undefined {
-  if (asset.kind === 'video') return { sha: asset.sha256, size: asset.size, type: asset.type };
-  const r = asset.renditions.find((x) => x.orientation === orientation);
-  return r && { sha: r.sha256, size: r.size, type: r.type };
-}
-
-/** The id the preview's one playlist has; each spot keeps its own id, so each edit updates it in place. */
-const PREVIEW_PLAYLIST = 'preview';
-
-/** The files a preview's spots play, by asset id, for one orientation; each one used is added to `files`. */
-function fileFor(assets: AssetView[], orientation: Orientation, files: CompileInput['files']) {
+/**
+ * The asset and template views as the draft-to-spot module reads them. A template is the one
+ * `get_spot_preview` gave for its version, with the version's status from `list_templates`.
+ */
+function viewReads(assets: AssetView[], versions: Map<string, TemplateVersionView>, preview: SpotPreview['preview']): DraftReads {
   const byId = new Map(assets.map((a) => [a.id, a]));
-  return (assetId: string | null) => {
-    const a = assetId ? byId.get(assetId) : undefined;
-    const f = a && assetFile(a, orientation);
-    if (!f) return '';
-    files[f.sha] = { size: f.size, type: f.type };
-    return f.sha;
+  return {
+    asset: (id) => byId.get(id),
+    templateVersion: (id) => {
+      const v = versions.get(id);
+      const t = v && preview.templates[v.key];
+      const bundle = t && preview.files[t.html];
+      return bundle && { key: v.key, manifest: t.manifest, html: t.html, size: bundle.size, status: v.status };
+    },
   };
 }
 
-/** A spot's draft as the contract's `Spot`, or undefined when its template is not available. */
-function spotContent(
-  spot: SpotView,
-  draft: SpotDraft,
-  version: TemplateVersionView | undefined,
-  file: (assetId: string | null) => string,
-  live: boolean,
-): Spot | undefined {
-  const base = { id: spot.id, name: draft.name || spot.name, durationMs: draft.durationMs };
-  if (spot.kind === 'template') {
-    if (!version) return undefined;
-    const assets = Object.fromEntries(Object.entries(draft.assets).map(([field, id]) => [field, file(id)]));
-    // The tools' bindings ({ dataSourceId, path, table? }) as the contract's ({ source, path, table? }).
-    const bindings = Object.fromEntries(
-      Object.entries(draft.bindings).map(([field, b]) => [field, { source: b.dataSourceId, path: b.path, ...(b.table ? { table: b.table } : {}) }]),
-    );
-    return { ...base, kind: 'template', template: version.key, data: draft.data, assets, ...(live && Object.keys(bindings).length ? { bindings } : {}) };
-  }
-  if (spot.kind === 'url') return { ...base, kind: 'url', url: draft.url };
-  return { ...base, kind: spot.kind, file: file(draft.assetId), fit: draft.fit };
-}
-
-/** A preview screen of this orientation playing `playlist`, compiled as a publish compiles. */
-const compileFor = (preview: SpotPreview['preview'], files: CompileInput['files'], orientation: Orientation, spots: Spot[], playlist: Playlist) =>
-  compileScreen(
-    {
-      ...preview,
-      files,
-      screen: { id: 'preview', name: 'Preview', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, orientation },
-      groups: [],
-      spots,
-      playlists: [playlist],
-      schedule: [],
-      defaultPlaylist: playlist.id,
-    },
-    { hash: sha256Hex, now: new Date() },
-  );
+/** The editor's draft over the saved spot; with `live` false, unbound, so the player shows the fallback. */
+const editedDraft = (spot: SpotView, draft: SpotDraft, live: boolean): SavedDraft => ({
+  ...spot,
+  name: draft.name || spot.name,
+  durationMs: draft.durationMs,
+  data: draft.data,
+  assets: draft.assets,
+  bindings: live ? draft.bindings : null,
+  assetId: draft.assetId,
+  fit: draft.fit,
+  url: draft.url,
+});
 
 /**
- * The draft compiled for the stage: a screen of this orientation playing just this spot, with
- * the brand kit and template `preview` holds. Problems are the compiler's, as a publish would see them.
- * With `live` false the spot is compiled without its bindings, so the player shows the fallback.
+ * The probe screen the stage compiles on: the preview's kit and files, in the org's time zone for
+ * new screens, else the editor's own, the zone a screen paired here starts with.
  */
-export async function compilePreview(opts: {
+const stageProbe = (preview: SpotPreview['preview'], timezone: string | null, orientation: Orientation, spots: SavedDraft[]): Probe => ({
+  orientation,
+  timezone: timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+  spots,
+  dataSources: preview.dataSources,
+  files: preview.files,
+  ...(preview.brand ? { brand: preview.brand } : {}),
+});
+
+/**
+ * The draft compiled for the stage: the probe screen of this orientation playing just this spot,
+ * with the brand kit and template `preview` holds. Problems are why a publish would refuse it; a
+ * manifest can come with them (an image still being checked plays here but does not publish).
+ */
+export function compilePreview(opts: {
   spot: SpotView;
   draft: SpotDraft;
-  version: TemplateVersionView | undefined;
+  versions: Map<string, TemplateVersionView>;
   preview: SpotPreview['preview'];
+  timezone: string | null;
   assets: AssetView[];
   orientation: Orientation;
   live: boolean;
 }): Promise<{ manifest?: ScreenManifest; problems: string[] }> {
-  const { spot, preview, orientation } = opts;
-  const files: CompileInput['files'] = { ...preview.files };
-  const content = spotContent(spot, opts.draft, opts.version, fileFor(opts.assets, orientation, files), opts.live);
-  if (!content) return { problems: ['the template is not available'] };
-  return compileFor(preview, files, orientation, [content], { id: PREVIEW_PLAYLIST, name: 'Preview', transition: { type: 'cut' }, items: [{ spot: spot.id }] });
+  const { preview, orientation } = opts;
+  return compileProbe(
+    stageProbe(preview, opts.timezone, orientation, [editedDraft(opts.spot, opts.draft, opts.live)]),
+    viewReads(opts.assets, opts.versions, preview),
+    { hash: sha256Hex, now: new Date() },
+  );
 }
 
 /**
- * A playlist's draft compiled for the stage, each spot as its saved draft. A spot a screen could
- * not play (no image yet, data its template refuses, a template not available) is left out of
- * the preview and listed with why, so the rest still plays; a publish would hold the playlist back.
+ * A playlist's draft compiled for the stage, each spot as its saved draft. A spot a publish would
+ * refuse (no image yet, data its template refuses, a template not available) is left out of the
+ * preview and listed with why, so the rest still plays; a publish would hold the playlist back.
  */
 export async function compilePlaylistPreview(opts: {
   playlist: { id: string; name: string; transition: Transition; spotIds: string[] };
   spots: SpotView[];
   versions: Map<string, TemplateVersionView>;
   preview: SpotPreview['preview'];
+  timezone: string | null;
   assets: AssetView[];
   orientation: Orientation;
 }): Promise<{ manifest?: ScreenManifest; problems: string[]; leftOut: Map<string, string[]> }> {
   const { playlist, preview, orientation } = opts;
-  const files: CompileInput['files'] = { ...preview.files };
-  const file = fileFor(opts.assets, orientation, files);
+  const reads = viewReads(opts.assets, opts.versions, preview);
   const byId = new Map(opts.spots.map((s) => [s.id, s]));
-  const playable = new Map<string, Spot>();
+  const playable = new Map<string, SavedDraft>();
   const leftOut = new Map<string, string[]>();
   for (const id of new Set(playlist.spotIds)) {
     const spot = byId.get(id);
+    if (!spot) {
+      leftOut.set(id, ['it is not in the library']);
+      continue;
+    }
     // Bound as saved; the playlist stage posts no snapshots, so a bound spot plays its fallback there.
-    const content = spot && spotContent(spot, draftOf(spot), opts.versions.get(spot.templateVersionId ?? ''), file, true);
-    const problems = !content
-      ? ['its template is not available']
-      : content.kind === 'template'
-        ? spotProblems(content, preview.templates)
-        : 'file' in content && !content.file
-          ? [`it has no ${content.kind} for ${orientation} screens`]
-          : [];
-    if (content && !problems.length) playable.set(id, content);
-    else leftOut.set(id, problems);
+    const into: Pick<CompileInput, 'files' | 'templates'> = { templates: {}, files: {} };
+    const r = spotFromDraft(spot, orientation, reads, into);
+    const problems = [...r.problems, ...(r.spot ? spotProblems(r.spot, into.templates) : [])];
+    if (problems.length) leftOut.set(id, problems);
+    else playable.set(id, spot);
   }
   const items = playlist.spotIds.filter((id) => playable.has(id)).map((spot) => ({ spot }));
   if (!items.length) return { problems: [], leftOut };
-  const result = await compileFor(preview, files, orientation, [...playable.values()], { ...playlist, items });
+  const result = await compileProbe(
+    {
+      ...stageProbe(preview, opts.timezone, orientation, [...playable.values()]),
+      playlist: { id: playlist.id, name: playlist.name, transition: playlist.transition, items },
+    },
+    reads,
+    { hash: sha256Hex, now: new Date() },
+  );
   return { ...result, leftOut };
 }
 

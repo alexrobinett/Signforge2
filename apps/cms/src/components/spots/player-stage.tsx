@@ -89,6 +89,7 @@ export function PlayerStage({
   const measure = useAppStore((s) => s.measureStage);
   const box = useAppStore((s) => s.spotEditor.stageBox);
   const holding = useAppStore((s) => s.spotEditor.holding);
+  const unpublishable = useAppStore((s) => s.spotEditor.unpublishable);
   const stageError = useAppStore((s) => s.spotEditor.stageError);
   const playing = useAppStore((s) => s.spotEditor.playing);
   // The player says once that it is listening; a frame in the server's HTML could say it before the store hears.
@@ -210,6 +211,12 @@ export function PlayerStage({
           <span className="inline-flex items-center gap-2">
             <TriangleAlertIcon className="size-3.5 text-[#fdb022]" aria-hidden />
             {playlistId !== undefined ? 'Holding the last frame the player could show.' : 'Holding the last valid frame until the marked field is fixed.'}
+          </span>
+        ) : unpublishable.length ? (
+          <span className="inline-flex items-center gap-2">
+            <TriangleAlertIcon className="size-3.5 text-[#fdb022]" aria-hidden />
+            Plays here, but will not publish yet:{' '}
+            {unpublishable.map((p) => (spotId && p.startsWith(`spot ${spotId}: `) ? p.slice(`spot ${spotId}: `.length) : p)).join('; ')}.
           </span>
         ) : stageError ? (
           <span className="inline-flex items-center gap-2">

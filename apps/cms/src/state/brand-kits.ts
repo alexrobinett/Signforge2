@@ -166,8 +166,16 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     const draft = get().brandKits.edits[kit.id]?.draft ?? kitDraftOf(kit);
     const themed = withDraftKit({ preview: preview.preview, kitId: kit.id, draft, assets, orientation: 'landscape' });
     if (!themed) return;
-    const version = versionsById(templates).get(t.templateVersionId);
-    const result = await compilePreview({ spot, draft: draftOf(spot), version, preview: themed, assets, orientation: 'landscape', live: true });
+    const result = await compilePreview({
+      spot,
+      draft: draftOf(spot),
+      versions: versionsById(templates),
+      preview: themed,
+      timezone: preview.timezone,
+      assets,
+      orientation: 'landscape',
+      live: true,
+    });
     if (seq !== link.seq || links.get(t.spotId) !== link || !result.manifest) return;
     post(link, result.manifest, seq);
   }

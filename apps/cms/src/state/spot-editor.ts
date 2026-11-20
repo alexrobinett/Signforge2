@@ -78,6 +78,8 @@ interface SpotEditorState {
   picking: string | null;
   /** True while the draft cannot be drawn: the stage keeps the last frame it drew. */
   holding: boolean;
+  /** Why a publish would refuse what the stage plays (an image still being checked), each prefixed with where it is. */
+  unpublishable: string[];
   /** Whether the player has said it plays the draft. */
   playing: boolean;
   /** The spot the player last said is on screen. */
@@ -131,6 +133,7 @@ const initial: SpotEditorState = {
   stale: false,
   picking: null,
   holding: false,
+  unpublishable: [],
   playing: false,
   playingSpot: null,
   stageError: null,
@@ -194,8 +197,16 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     if (!spot || !preview || !templates || !assets) return undefined;
     const e = get().spotEditor;
     const draft = e.spotId === spot.id && e.draft ? e.draft : draftOf(spot);
-    const version = spot.templateVersionId ? versionsById(templates).get(spot.templateVersionId) : undefined;
-    const result = await compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation, live: !t.fallback });
+    const result = await compilePreview({
+      spot,
+      draft,
+      versions: versionsById(templates),
+      preview: preview.preview,
+      timezone: preview.timezone,
+      assets,
+      orientation: t.orientation,
+      live: !t.fallback,
+    });
     const sources = !t.fallback ? [...new Set(Object.values(draft.bindings).map((b) => b.dataSourceId))] : [];
     // A table added just now has no snapshot until its first poll: the stage plays what the editor read from it.
     const latest = async (id: string): Promise<DataSnapshot[]> => {
@@ -226,7 +237,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       return;
     }
     t.frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest: result.manifest, data: result.data ?? [] }, location.origin);
-    editor((x) => ({ ...x, holding: false }));
+    editor((x) => ({ ...x, holding: false, unpublishable: result.problems }));
   }
 
   const stage: StageLink = { target: null, listening: null, seq: 0 };
@@ -326,7 +337,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
       }
       const changed = stage.target?.frame !== target?.frame;
       stage.target = target;
-      if (changed) editor((e) => ({ ...e, holding: false, playing: false, playingSpot: null, stageError: null }));
+      if (changed) editor((e) => ({ ...e, holding: false, unpublishable: [], playing: false, playingSpot: null, stageError: null }));
       void redraw();
     },
 
