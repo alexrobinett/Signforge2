@@ -5,12 +5,11 @@
  * one line. `seedTwoOrgs(db)` fills a migrated D1 with two orgs holding one of everything, plus
  * one base template, so an isolation test can call org B's scope with org A's ids and expect nothing.
  */
-import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { scoped, type NewRow, type RowPatch } from './scoped';
 import * as schema from './schema';
-import { strip, type Staged } from './writes';
+import { commit, type Staged, type Write } from './writes';
 
 type StagedRow<T extends SQLiteTable> = Staged<T['$inferSelect']> | Promise<Staged<T['$inferSelect']>>;
 /** A repository's read of one row and its staged writes, which `testScope` commits at once. */
@@ -18,7 +17,7 @@ interface Staging<T extends SQLiteTable> {
   get(id: string): Promise<T['$inferSelect'] | undefined>;
   stage: {
     insert(values: NewRow<T>): StagedRow<T>;
-    update(current: T['$inferSelect'], patch: RowPatch<T>): StagedRow<T>;
+    update(current: T['$inferSelect'], patch: RowPatch<T>, ifVersion?: number): StagedRow<T>;
     delete(id: string): Staged;
   };
 }
@@ -26,11 +25,11 @@ interface Staging<T extends SQLiteTable> {
 /**
  * `scoped(db, orgId)` with `insert`, `update` and `delete` on each repository, for tests and local
  * scripts. Each is the repository's `stage` write, committed at once, so it checks and stamps rows
- * exactly as a tool's write does. Production code stages and commits instead.
+ * exactly as a tool's write does, and each says what D1 did with it, even when another write lands
+ * between its read and its commit. Production code stages and commits instead.
  */
 export function testScope(db: D1Database, orgId: string) {
   const o = scoped(db, orgId);
-  const ca = schema.connectionAuthorizations;
   /** The row as written. */
   const insert =
     <T extends SQLiteTable>(stage: (values: NewRow<T>) => StagedRow<T>) =>
@@ -39,30 +38,30 @@ export function testScope(db: D1Database, orgId: string) {
       await o.commit(writes);
       return row;
     };
-  const direct = <T extends SQLiteTable>(repo: Staging<T>) => {
-    // A base template is readable by the org but not its own: it can neither change nor delete it.
-    const own = async (id: string) => {
-      const row = await repo.get(id);
-      return row && (row as { orgId: string | null }).orgId === orgId ? row : undefined;
-    };
-    return {
-      insert: insert<T>(repo.stage.insert),
-      /** The row as changed, or undefined if the org has no such row. An empty patch changes nothing. */
-      update: async (id: string, patch: RowPatch<T>): Promise<T['$inferSelect'] | undefined> => {
-        const current = await own(id);
-        if (!current) return undefined;
-        const { row, writes } = await repo.stage.update(current, patch);
-        await o.commit(writes);
-        return row;
-      },
-      /** Whether the org had the row. */
-      delete: async (id: string): Promise<boolean> => {
-        if (!(await own(id))) return false;
-        await o.commit(repo.stage.delete(id).writes);
-        return true;
-      },
-    };
-  };
+  /**
+   * Whether the last of `writes` changed its row, committed as the scope commits. D1 counts the
+   * rows its triggers and cascades change too, so it is whether any changed.
+   */
+  const changedRow = async (writes: readonly Write[]) => ((await commit(drizzle(db), writes)).at(-1) ?? 0) > 0;
+  const direct = <T extends SQLiteTable>(repo: Staging<T>) => ({
+    insert: insert<T>(repo.stage.insert),
+    /**
+     * The row as changed, or undefined if the org has no such row (a base template is readable but
+     * not its own). A versioned row's change is guarded by the version read, so the version
+     * returned is the one D1 stored: a change that landed in between refuses it (`StaleVersionError`).
+     * An empty patch changes nothing.
+     */
+    update: async (id: string, patch: RowPatch<T>): Promise<T['$inferSelect'] | undefined> => {
+      const current = await repo.get(id);
+      if (!current) return undefined;
+      const { orgId: owner, rowVersion } = current as { orgId: string | null; rowVersion?: number };
+      const { row, writes } = await repo.stage.update(current, patch, rowVersion);
+      if (!writes.length) return owner === orgId ? row : undefined;
+      return (await changedRow(writes)) ? row : undefined;
+    },
+    /** Whether D1 deleted the org's row: false for another org's, a base template, or one already gone. */
+    delete: async (id: string): Promise<boolean> => changedRow(repo.stage.delete(id).writes),
+  });
   return {
     ...o,
     screens: {
@@ -89,18 +88,7 @@ export function testScope(db: D1Database, orgId: string) {
     connections: {
       ...o.connections,
       ...direct<typeof schema.connections>(o.connections),
-      authorizations: {
-        ...o.connections.authorizations,
-        insert: insert<typeof ca>(o.connections.authorizations.stage.insert),
-        /** Production never changes an authorization (one is consumed whole); a test moves its expiry. */
-        update: (id: string, patch: RowPatch<typeof ca>) =>
-          drizzle(db)
-            .update(ca)
-            .set(strip(patch))
-            .where(and(eq(ca.orgId, orgId), eq(ca.id, id)))
-            .returning()
-            .get(),
-      },
+      authorizations: { ...o.connections.authorizations, insert: insert<typeof schema.connectionAuthorizations>(o.connections.authorizations.stage.insert) },
     },
     brandKits: { ...o.brandKits, ...direct<typeof schema.brandKits>(o.brandKits) },
   };

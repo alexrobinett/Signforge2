@@ -102,8 +102,13 @@ describe('connecting an account', () => {
   });
 
   it('refuses an authorization that ran out', async () => {
-    const { authorizeUrl } = await call('start_connection', { provider: 'fake' });
-    for (const row of await owner.org.connections.authorizations.list()) await o.scope.connections.authorizations.update(row.id, { expiresAt: Date.now() - 1 });
+    // Started on a test clock an hour back, so the real clock is past the expiry it was given.
+    // Back, not forward: rows written on a clock ahead would read as the newest to later tests.
+    vi.setSystemTime(Date.now() - 3_600_000);
+    onTestFinished(() => void vi.useRealTimers());
+    const { authorizeUrl, expiresAt } = await call('start_connection', { provider: 'fake' });
+    vi.useRealTimers();
+    expect(expiresAt).toBeLessThan(Date.now());
     expect(await result('finish_connection', { oauthState: stateOf(authorizeUrl), code: 'c' })).toMatchObject({ ok: false, error: 'not_found' });
     // The next start clears the ones that ran out.
     await call('start_connection', { provider: 'fake' });

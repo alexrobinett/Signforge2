@@ -567,7 +567,9 @@ export function scoped(d1: D1Database, orgId: string) {
   return {
     orgId,
     /** Run staged writes (from any `stage` of this scope) in one atomic batch: all of them take effect, or none. */
-    commit: (writes: readonly Write[]) => commit(db, writes),
+    commit: async (writes: readonly Write[]) => {
+      await commit(db, writes);
+    },
     screens: {
       ...screens,
       credentials: {
