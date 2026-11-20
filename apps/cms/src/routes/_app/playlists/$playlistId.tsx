@@ -81,13 +81,14 @@ function PlaylistEditor() {
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const { brandKits } = useSuspenseQuery(brandKitsQuery(orgId)).data;
 
-  const mine = (s: { playlistEditor: { playlistId: string | null } }) => s.playlistEditor.playlistId === playlistId;
-  const editing = useAppStore((s) => (mine(s) ? s.playlistEditor.draft : null));
-  const status = useAppStore((s) => (mine(s) ? s.playlistEditor.status : 'saved'));
-  const savedAt = useAppStore((s) => (mine(s) ? s.playlistEditor.savedAt : null));
-  const saveError = useAppStore((s) => (mine(s) ? s.playlistEditor.saveError : null));
-  const stale = useAppStore((s) => mine(s) && s.playlistEditor.stale);
-  const gone = useAppStore((s) => mine(s) && s.playlistEditor.gone);
+  const saved = useAppStore((s) => s.playlistEditor.drafts[playlistId]);
+  const mine = saved?.orgId === orgId ? saved : undefined;
+  const editing = mine?.edit ?? null;
+  const status = mine?.status ?? 'saved';
+  const savedAt = mine?.savedAt ?? null;
+  const saveError = mine?.error ?? null;
+  const stale = mine?.stale ?? false;
+  const gone = mine?.gone ?? false;
   const leftOutList = useAppStore((s) => s.playlistEditor.leftOut);
   const dragging = useAppStore((s) => s.playlistEditor.dragging);
   const deleting = useAppStore((s) => s.playlistEditor.deleting);
@@ -144,7 +145,7 @@ function PlaylistEditor() {
       >
         {canManage && (
           <>
-            <SaveDraftButton status={status} stale={stale} onSave={() => void save()} />
+            <SaveDraftButton status={status} stale={stale} onSave={() => void save(playlistId)} />
             <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => askDelete(true)}>
               <Trash2Icon aria-hidden />
               Delete
@@ -153,7 +154,7 @@ function PlaylistEditor() {
         )}
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
       </EditorHeader>
-      <SaveAlert error={saveError} stale={stale} onReload={() => void reload()} />
+      <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} />
       {gone && (
         <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
           <AlertDescription className="flex flex-wrap items-center gap-3">

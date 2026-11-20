@@ -132,10 +132,10 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     },
 
     async publishPlaylist(orgId, playlistId) {
-      await get().savePlaylistDraft();
-      const e = get().playlistEditor;
+      await get().savePlaylistDraft(playlistId);
+      const d = get().playlistEditor.drafts[playlistId];
       const playlist = queryClient.getQueryData(playlistQuery(orgId, playlistId).queryKey);
-      if (!playlist || (e.playlistId === playlistId && (e.status !== 'saved' || e.stale || e.gone))) {
+      if (!playlist || (d?.orgId === orgId && d.status !== 'saved')) {
         toast.error('Not published', { description: 'Save the draft first: fix what is marked, then publish.' });
         return;
       }
