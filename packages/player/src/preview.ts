@@ -11,7 +11,7 @@
  * A draft becomes the manifest playing once all its files are at hand: posted with it, or fetched
  * from the CMS (`sessionBlobPath`) with the user's session. If the spot on screen is in the new draft
  * it is updated in place at once (Slot.update); otherwise the draft shows at the next spot. A next
- * spot prepared from an older draft is prepared again from it (playbackLoop in main.ts).
+ * spot prepared from an older draft is prepared again from it (src/playback.ts).
  */
 import {
   PREVIEW_PROTOCOL,

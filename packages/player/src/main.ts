@@ -1,6 +1,6 @@
 /**
- * SignForge player shell. Boots from the cached manifest, keeps content in sync, and runs the
- * playback loop: play the current spot, prepare the next out of sight, swap when it is ready.
+ * SignForge player shell. Boots from the cached manifest, keeps content in sync, and wires the
+ * browser to the playback loop (src/playback.ts): the slots, the clock, the pins and what it reports.
  *
  * Query options:  ?content=<url>  where manifest.json and blobs/ live (default ./content). On another
  *                                 origin it is the API's device base (`https://<api>/v1/device`) and every
@@ -34,15 +34,13 @@ import {
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
   parseSyncResponse,
-  requiredFiles,
   type DeviceCommand,
   type ScreenKind,
   type ScreenManifest,
-  type Spot,
   type SyncRequest,
   type Transition,
 } from '@signforge/contract';
-import { Sequencer, activeTakeover, displayOn, localTime, nextTakeoverEdge, spotFiles, type Step } from '@signforge/player-core';
+import { displayOn, localTime } from '@signforge/player-core';
 import { clock, now, synced } from './clock';
 import { BrowserCredential } from './browser-credential';
 import { DeviceCredential, type ScreenCredential } from './credential';
@@ -51,6 +49,7 @@ import { pair } from './pairing';
 import { dataRejections, dataSettled, dataStatus, heldVersions, offerChecked, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
 import { activeOverride, savedOverride, setOverride, wakeable } from './override';
 import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
+import { Playback } from './playback';
 import { startPreview, type Preview } from './preview';
 import { Slot } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
@@ -65,9 +64,6 @@ const CONTENT = query.get('content') ?? './content';
 const POLL_MS = Number(query.get('poll') ?? 30) * 1000;
 const POLL_OVERRIDE = query.has('poll');
 const STALL_OVERRIDE_MS = query.get('stall') ? Number(query.get('stall')) * 1000 : undefined;
-/** How long before the end of a spot the next one starts loading. */
-const PREPARE_LEAD_MS = 3000;
-const MAX_CONSECUTIVE_FAILURES = 3;
 /** The longest a spot waits for its data feeds' first load. */
 const DATA_WAIT_MS = 3000;
 const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
@@ -133,9 +129,15 @@ interface PlayRecord {
 
 /** Live state, readable from DevTools and by the test rig. */
 const state = {
-  manifestId: '',
-  playlist: '',
-  spot: '',
+  get manifestId(): string {
+    return playback.manifest?.id ?? '';
+  },
+  get playlist(): string {
+    return playback.activity.playlist;
+  },
+  get spot(): string {
+    return playback.activity.spot;
+  },
   played: 0,
   skipped: 0,
   lastError: '',
@@ -150,7 +152,9 @@ const state = {
   /** The pairing code on screen, or ''. */
   pairing: '',
   /** False outside the screen's display hours, or while an override turns the panel off. */
-  displayOn: true,
+  get displayOn(): boolean {
+    return playback.displayOn;
+  },
   /** Whether the nudge socket to the API is open. While it is, the manifest is not polled. */
   socket: false,
   /** How the supervisor last switched the panel, or why it could not. */
@@ -164,13 +168,17 @@ const state = {
     return pendingPlays();
   },
   persistent: false,
-  /** The id of the last manifest that verifiably started a spot (`promote`): the one the player falls back to. */
-  lastGood: '',
+  /** The id of the last manifest that verifiably started a spot: the one the player falls back to. */
+  get lastGood(): string {
+    return playback.lastGood?.id ?? '';
+  },
   /**
    * The id of the newest manifest while the player falls back from it, because nothing in it
    * played for a full pass of its playlist; '' otherwise. Reported in the heartbeat (`manifest.fallbackFrom`).
    */
-  fallback: '',
+  get fallback(): string {
+    return playback.fallbackFrom;
+  },
   /** JS heap in MB, where the browser reports it. */
   get heapMb(): number {
     const m = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
@@ -199,9 +207,6 @@ Object.assign(window, { __sf: state });
 let lastFrame = 0;
 let interval = 0;
 const warmup: number[] = [];
-let phase = 'idle';
-let preparing = '';
-let spotStartedAt = 0;
 function monitor(t: number): void {
   // Asleep, the panel may have no signal and the browser stops producing frames: nothing to measure.
   if (!state.displayOn) {
@@ -219,6 +224,7 @@ function monitor(t: number): void {
     const missed = Math.max(0, Math.round(d / interval) - 1);
     state.frames.count++;
     state.frames.dropped += missed;
+    const { phase, preparing, spotStartedAt } = playback.activity;
     const p = (state.byPhase[phase] ??= { count: 0, dropped: 0 });
     p.count++;
     p.dropped += missed;
@@ -252,7 +258,6 @@ function renderHud(): void {
 
 // ------------------------------------------------------------------ playback
 const slots = [new Slot(), new Slot()] as const;
-let front = 0;
 let lastProgress = performance.now();
 
 /**
@@ -298,126 +303,89 @@ function show(next: Slot, prev: Slot | undefined, transition: Transition): { sta
   return { started, done };
 }
 
-async function prepareStep(slot: Slot, step: Step, manifest: ScreenManifest): Promise<boolean> {
-  try {
-    // Underneath the spot on screen, fully drawn. It must stay visible to the browser: Chromium
-    // stops rendering a frame it considers invisible, so a template loading at opacity 0 never
-    // reaches ready.
-    slot.el.style.transition = 'none';
-    slot.el.style.zIndex = '1';
-    slot.el.style.opacity = '1';
-    const t0 = performance.now();
-    await slot.prepare(step.spot, manifest);
-    state.prepares.push({ spot: step.spot.id, ms: Math.round(performance.now() - t0) });
-    if (state.prepares.length > 50) state.prepares.shift();
-    return true;
-  } catch (err) {
-    state.skipped++;
-    state.lastError = `${step.spot.id}: ${err instanceof Error ? err.message : String(err)}`;
-    console.warn('[sf] skipped', state.lastError);
-    preview?.failed(state.lastError);
-    slot.el.style.opacity = '0';
-    slot.clear();
-    return false;
-  }
-}
+/** Where the playback loop reports to the CMS, in preview mode. Set in boot. */
+let preview: Preview | undefined;
 
 /**
- * A spot of `manifestId` started playing, as far as the player can check: its manifest becomes
- * the last good one. A URL spot never counts: its frame loads even when the page failed, onto the
- * browser's error page. A draft in the preview is never a screen's last good manifest.
- */
-function promote(spot: Spot, manifestId: string): void {
-  if (SOURCE !== 'device' || spot.kind === 'url' || manifestId === state.lastGood || source?.id !== manifestId) return;
-  state.lastGood = manifestId;
-  lastGood = source;
-  pins.hold('last-good', requiredFiles(source));
-  rememberGood(source).catch((err: unknown) => console.warn('[sf] could not store the last good manifest', err));
-}
-
-/** A spot shown at `at` (corrected time) has played: logged, and counted. */
-function record(step: Step, manifestId: string, at: number): void {
-  preview?.played(manifestId, step.spot.id);
-  state.spot = step.spot.id;
-  state.playlist = step.playlist.id;
-  state.played++;
-  // On a clock it does not trust the screen cannot say which hour a play was in: not counted.
-  if (SOURCE === 'device' && clock.trusted) recordPlay(at, step.spot.id, step.spot.durationMs);
-  state.log.push({
-    spot: step.spot.id,
-    playlist: step.playlist.id,
-    manifest: manifestId,
-    startedAt: new Date(at).toISOString(),
-    durationMs: step.spot.durationMs,
-  });
-  if (state.log.length > 500) state.log.shift();
-  lastProgress = performance.now();
-}
-
-/** Resolves when the display goes to sleep, so a spot being held on screen gives way at once. */
-let fellAsleep = new Promise<void>(() => {});
-let markAsleep = () => {};
-const resetSleepSignal = () => (fellAsleep = new Promise<void>((r) => (markAsleep = r)));
-resetSleepSignal();
-
-/**
- * Takeovers (M3-19). The takeover the next spot was chosen under; when the one that should play
- * differs (one published, starting or ending), `cutIn` is set and `tookOver` resolves: the spot on
- * screen gives way as soon as the next is ready, instead of at its end. Checked when a manifest is
- * adopted, after a sync moves the clock, and by a timer at the next takeover start or end, so a
- * takeover ends on time with the network down.
- */
-let chosenTakeover: string | undefined;
-let cutIn = false;
-let tookOver = new Promise<void>(() => {});
-let markTakeover = () => {};
-const resetTakeoverSignal = () => (tookOver = new Promise<void>((r) => (markTakeover = r)));
-resetTakeoverSignal();
-let takeoverTimer: ReturnType<typeof setTimeout> | undefined;
-/** setTimeout's longest delay; a later edge is checked again when this one fires. */
-const MAX_TIMER_MS = 2 ** 31 - 1;
-
-function watchTakeover(): void {
-  clearTimeout(takeoverTimer);
-  if (!manifest) return;
-  const at = new Date(now());
-  if (activeTakeover(manifest, at, { clockTrusted: clock.trusted }) !== chosenTakeover) {
-    cutIn = true;
-    markTakeover();
-  }
-  const edge = nextTakeoverEdge(manifest, at);
-  if (edge) takeoverTimer = setTimeout(watchTakeover, Math.min(edge.getTime() - at.getTime(), MAX_TIMER_MS));
-}
-
-const hold = (ms: number) => Promise.race([sleep(ms), fellAsleep, tookOver]);
-/** Preview: a draft was adopted. Wakes the wait for the play boundary, so a play prepared from the older draft is prepared again at once. */
-let markDrafted = () => {};
-
-let manifest: ScreenManifest | undefined;
-/** `manifest` as it arrived, before testing overrides: what is stored as the last good one. */
-let source: ScreenManifest | undefined;
-/** The last manifest that played a spot. */
-let lastGood: ScreenManifest | undefined;
-let sequencer: Sequencer | undefined;
-/**
- * Files cache cleanup must keep beyond the active manifest's: the spot on screen (`playing`) and
- * the spot loading (`preparing`), either of which may come from a manifest just replaced.
+ * Files cache cleanup must keep beyond the active manifest's: the spot on screen (`playing`), the
+ * spot loading (`preparing`), either of which may come from a manifest just replaced, and the last
+ * good manifest's (`last-good`).
  */
 const pins = new PinSet();
 
-/**
- * Nothing in the current manifest has played for a full pass of its playlist: go back to the
- * last manifest that played, until the server sends a newer one.
- */
-function fallBack(): void {
-  if (!lastGood || !manifest || lastGood.id === manifest.id) return;
-  const from = manifest.id;
-  console.warn(`[sf] manifest ${from} played nothing in a full pass; falling back to ${lastGood.id}`);
-  adopt(lastGood);
-  state.fallback = from;
-  // Its files may have been evicted while another manifest played: the next sync checks them.
-  lastFileCheck = Number.NEGATIVE_INFINITY;
-}
+const playback = new Playback({
+  clock: {
+    mono: () => performance.now(),
+    now,
+    trusted: () => clock.trusted,
+    after: (ms, fn) => {
+      const t = setTimeout(fn, ms);
+      return () => clearTimeout(t);
+    },
+  },
+  slots: {
+    async prepare(i, spot, manifest) {
+      // Underneath the spot on screen, fully drawn. It must stay visible to the browser: Chromium
+      // stops rendering a frame it considers invisible, so a template loading at opacity 0 never
+      // reaches ready.
+      const { style } = slots[i].el;
+      style.transition = 'none';
+      style.zIndex = '1';
+      style.opacity = '1';
+      await slots[i].prepare(spot, manifest);
+    },
+    show: (i, prev, transition) => show(slots[i], prev === undefined ? undefined : slots[prev], transition),
+    clear(i) {
+      slots[i].el.style.opacity = '0';
+      slots[i].clear();
+    },
+    update: (i, spot, manifest) => slots[i].update(spot, manifest),
+  },
+  pins,
+  events: {
+    status,
+    played(step, manifestId, at) {
+      preview?.played(manifestId, step.spot.id);
+      state.played++;
+      // On a clock it does not trust the screen cannot say which hour a play was in: not counted.
+      if (SOURCE === 'device' && clock.trusted) recordPlay(at, step.spot.id, step.spot.durationMs);
+      state.log.push({
+        spot: step.spot.id,
+        playlist: step.playlist.id,
+        manifest: manifestId,
+        startedAt: new Date(at).toISOString(),
+        durationMs: step.spot.durationMs,
+      });
+      if (state.log.length > 500) state.log.shift();
+    },
+    skipped(message) {
+      state.skipped++;
+      state.lastError = message;
+      console.warn('[sf] skipped', message);
+      preview?.failed(message);
+    },
+    updateFailed(message) {
+      state.lastError = message;
+      preview?.failed(message);
+    },
+    prepared(spot, ms) {
+      state.prepares.push({ spot, ms });
+      if (state.prepares.length > 50) state.prepares.shift();
+    },
+    progress: () => (lastProgress = performance.now()),
+    adopted(next) {
+      wakeData();
+      if (API) void restoreSources(next);
+      socket?.reportApplied(next.id);
+    },
+    // Its files may have been evicted while another manifest played: the next sync checks them.
+    fellBack: () => (lastFileCheck = Number.NEGATIVE_INFINITY),
+    good: (m) => void rememberGood(m).catch((err: unknown) => console.warn('[sf] could not store the last good manifest', err)),
+  },
+  preview: SOURCE === 'preview',
+  playing: applyOverrides,
+  dataSettled: (sources) => dataSettled(sources, DATA_WAIT_MS),
+});
 
 /**
  * Run a loop body again and again, restarting it 5 s after it throws: a bug or a bad value must
@@ -433,166 +401,6 @@ async function loopRestartingOnError(name: string, body: () => Promise<void>): P
       await sleep(5000);
     }
   }
-}
-
-async function playbackLoop(): Promise<never> {
-  let current: Slot | undefined;
-  let currentSpot: Spot | undefined;
-  /** The manifest `currentSpot` came from: its files are named there. */
-  let currentManifest: ScreenManifest | undefined;
-  let startedAt = 0;
-  let failures = 0;
-  /** Spots of the current manifest that failed in a row, never reset by the pause below. */
-  let failedInManifest = 0;
-  let failingManifest = '';
-
-  /** A spot of `m` failed to prepare or to start: fall back after a full pass of them, pause after a few in a row. */
-  async function failed(step: Step, m: ScreenManifest): Promise<void> {
-    if (failingManifest !== m.id) {
-      failingManifest = m.id;
-      failedInManifest = 0;
-    }
-    if (++failedInManifest >= step.playlist.items.length && m.id !== state.lastGood && lastGood) {
-      failures = 0;
-      failedInManifest = 0;
-      fallBack();
-      return;
-    }
-    if (++failures >= MAX_CONSECUTIVE_FAILURES) {
-      current?.clear();
-      if (current) current.el.style.opacity = '0';
-      current = undefined;
-      currentSpot = undefined;
-      pins.release('playing');
-      status('SignForge\nContent is unavailable. Retrying…');
-      lastProgress = performance.now();
-      await sleep(5000);
-      failures = 0;
-    }
-  }
-
-  return loopRestartingOnError('playback', async () => {
-    if (!manifest || !sequencer) {
-      await sleep(500);
-      return;
-    }
-    if (!state.displayOn) {
-      // Outside display hours: draw nothing at all, then start fresh when the panel wakes.
-      for (const s of slots) {
-        s.clear();
-        s.el.style.opacity = '0';
-      }
-      current = undefined;
-      currentSpot = undefined;
-      pins.release('playing');
-      pins.release('preparing');
-      status('');
-      state.spot = '';
-      phase = 'sleep';
-      while (!state.displayOn) await sleep(1000);
-      lastProgress = performance.now();
-      phase = 'play';
-      return;
-    }
-    // Start loading the next spot shortly before the current one ends, or at once when a takeover cuts in.
-    if (currentSpot && !cutIn) await hold(startedAt + currentSpot.durationMs - PREPARE_LEAD_MS - performance.now());
-    if (!state.displayOn) return;
-
-    const m = manifest;
-    const chosenAt = new Date(now());
-    const drafted = new Promise<void>((r) => (markDrafted = r));
-    const step = sequencer.next(chosenAt, { clockTrusted: clock.trusted });
-    chosenTakeover = activeTakeover(m, chosenAt, { clockTrusted: clock.trusted });
-    resetTakeoverSignal();
-    watchTakeover();
-    if (!step) {
-      for (const s of slots) {
-        s.clear();
-        s.el.style.opacity = '0';
-      }
-      current = undefined;
-      currentSpot = undefined;
-      pins.release('playing');
-      status('SignForge\nNothing is scheduled for this screen.');
-      lastProgress = performance.now(); // waiting on purpose, not stuck
-      await sleep(5000);
-      return;
-    }
-    const slot = slots[front === 0 ? 1 : 0];
-    // A crossfade overlaps the end of the current spot; a fade's dark half does too.
-    const tr = step.playlist.transition;
-    const fadeMs = tr.type === 'crossfade' ? tr.ms : tr.type === 'fade' ? tr.ms / 2 : 0;
-    // Pinned before the first await: a sync that replaces `m` meanwhile must not delete these files.
-    pins.hold('preparing', spotFiles(step.spot, m));
-    phase = 'prepare';
-    preparing = step.spot.id;
-    // A spot's data is fixed for its play: let its feeds finish their first load before it starts.
-    if (step.spot.kind === 'template' && step.spot.bindings) {
-      await dataSettled([...new Set(Object.values(step.spot.bindings).map((b) => b.source))], DATA_WAIT_MS);
-    }
-    const ok = await prepareStep(slot, step, m);
-    preparing = '';
-    if (!ok) pins.release('preparing');
-    phase = 'play';
-    if (!state.displayOn) return;
-    if (!ok) return failed(step, m);
-
-    // Hold the current spot for its full length; a crossfade overlaps its last moments. A takeover cuts it short.
-    if (currentSpot && !cutIn) await Promise.race([hold(startedAt + currentSpot.durationMs - fadeMs - performance.now()), drafted]);
-    if (!state.displayOn) return;
-    // Preview: a draft posted while this spot loaded or waited has made it old. The spot on screen
-    // took the draft at once (adoptDraft); this place is loaded again from it, so the stage never
-    // shows an older draft (#123). A screen plays it: a new manifest shows from the next spot.
-    if (SOURCE === 'preview' && manifest !== m) {
-      slot.clear();
-      sequencer.again();
-      return;
-    }
-    // The takeover changed while this spot was chosen and loaded: choose again, so the old schedule never shows.
-    if (manifest && activeTakeover(manifest, new Date(now()), { clockTrusted: clock.trusted }) !== chosenTakeover) {
-      slot.clear();
-      slot.el.style.opacity = '0';
-      pins.release('preparing');
-      cutIn = true;
-      return;
-    }
-    cutIn = false;
-    status('');
-    startedAt = performance.now();
-    spotStartedAt = startedAt;
-    const shownAt = now();
-    phase = 'transition';
-    const { started, done } = show(slot, current, step.playlist.transition);
-    // A video keeps reading its file from the cache while it plays, and the outgoing spot is
-    // still on screen until the transition ends.
-    const playing = spotFiles(step.spot, m);
-    pins.hold('playing', currentSpot ? [...playing, ...spotFiles(currentSpot, currentManifest ?? m)] : playing);
-    pins.release('preparing');
-    front = front === 0 ? 1 : 0;
-    current = slot;
-    currentSpot = step.spot;
-    currentManifest = m;
-    // A spot counts, and plays, once it has started: a video whose play() the browser refuses is a failed spot.
-    const playedOk = await started.then(
-      () => true,
-      (err: unknown) => {
-        state.skipped++;
-        state.lastError = `${step.spot.id}: did not start: ${err instanceof Error ? err.message : String(err)}`;
-        console.warn('[sf] skipped', state.lastError);
-        preview?.failed(state.lastError);
-        return false;
-      },
-    );
-    await done;
-    pins.hold('playing', playing);
-    phase = 'play';
-    if (!playedOk) return failed(step, m);
-    // After the transition: storing the play and a new last good manifest costs frames on a Pi.
-    failures = 0;
-    failedInManifest = 0;
-    record(step, m.id, shownAt);
-    promote(step.spot, m.id);
-  });
 }
 
 // ------------------------------------------------------------------- display
@@ -636,7 +444,8 @@ async function displayLoop(): Promise<never> {
     // content to show. The first good sync wakes this loop to read them again.
     let on: boolean | undefined;
     if (!clock.trusted) on = true;
-    else if (manifest) {
+    else if (playback.manifest) {
+      const { manifest } = playback;
       const at = new Date(now());
       const override = activeOverride(at);
       on = override ? override.state === 'on' : displayOn(manifest.screen.displayHours, localTime(at, manifest.screen.timezone));
@@ -650,11 +459,9 @@ async function displayLoop(): Promise<never> {
         // A panel takes a few seconds to lock onto a returning signal or come out of standby;
         // start after that so the first spot's intro is seen and the mode change is not measured.
         await sleep(3000);
-        resetSleepSignal();
-        state.displayOn = true; // wakes the playback loop
+        playback.display(true);
       } else {
-        state.displayOn = false;
-        markAsleep();
+        playback.display(false);
         await sleep(1500); // let the playback loop clear the slots before the signal goes
         confirmed = (await setPanel(false)) ? false : undefined;
       }
@@ -681,7 +488,7 @@ function revoked(): Promise<void> {
     console.warn("[sf] the server refused this screen's credential: wiping what it holds and pairing again");
     state.online = true;
     state.auth = 'revoked';
-    const held = !!manifest || !!lastGood || pendingPlays() > 0;
+    const held = !!playback.manifest || !!playback.lastGood || pendingPlays() > 0;
     // No content fetch may store or adopt anything after the wipe: stop the one in flight, and any retry.
     contentDue = false;
     contentAbort.abort(new Error('revoked'));
@@ -716,7 +523,7 @@ async function pairScreen(): Promise<void> {
     await credential.adopt(got);
   }
   state.auth = '';
-  if (!manifest) status('SignForge\nWaiting for content…');
+  if (!playback.manifest) status('SignForge\nWaiting for content…');
 }
 
 function command(c: DeviceCommand): void {
@@ -783,18 +590,18 @@ async function fetchManifest(signal?: AbortSignal): Promise<void> {
   // While falling back, the manifest that failed counts as current: the server's answer is
   // 304 until it publishes something newer.
   const result = await sync(BASE, {
-    currentId: state.fallback || manifest?.id,
+    currentId: state.fallback || playback.manifest?.id,
     headers: await deviceHeaders(),
     ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
     pinned: pins,
     ...(signal ? { signal } : {}),
     // Falling back, the last good manifest plays: its files are put back too, since the synced one is not playing.
-    ...(state.fallback && manifest ? { fallback: manifest } : {}),
+    ...(state.fallback && playback.manifest ? { fallback: playback.manifest } : {}),
   });
   if (signal?.aborted) return;
   if (result.changed && result.manifest) {
     console.info(`[sf] manifest ${result.manifest.id} active (${result.downloaded} files downloaded)`);
-    adopt(result.manifest);
+    playback.adopt(result.manifest);
     // The sync that named it has kept its snapshots (apiSync offers them before it asks for content):
     // once the stored copies are read, its sources have had their first load, and spots waiting on
     // them start now rather than at the data wait's end.
@@ -866,7 +673,7 @@ async function contentLoop(): Promise<never> {
       const message = err instanceof Error ? err.message : String(err);
       state.lastError = `content: ${message}`;
       console.warn('[sf] could not fetch the content', err);
-      if (!manifest) status(`SignForge\nWaiting for content…\n${message}`);
+      if (!playback.manifest) status(`SignForge\nWaiting for content…\n${message}`);
       await content.wait(contentRetryMs(++failures, timing()));
     } finally {
       contentFetch = undefined;
@@ -879,12 +686,13 @@ async function contentLoop(): Promise<never> {
  * good, the playing one's first), and at most MAX_SYNC_SOURCES, so source turnover cannot grow it.
  */
 function ofHeldSources(values: Record<string, number>): Record<string, number> {
-  const ids = new Set([...Object.keys(manifest?.dataSources ?? {}), ...Object.keys(lastGood?.dataSources ?? {})]);
+  const ids = new Set([...Object.keys(playback.manifest?.dataSources ?? {}), ...Object.keys(playback.lastGood?.dataSources ?? {})]);
   return Object.fromEntries([...ids].flatMap((id) => (values[id] === undefined ? [] : [[id, values[id]] as const])).slice(0, MAX_SYNC_SOURCES));
 }
 
 /** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. */
 async function apiSync(): Promise<void> {
+  const { manifest } = playback;
   const batch = playBatch(now());
   const req: SyncRequest = {
     seq: batch.seq,
@@ -932,13 +740,12 @@ async function apiSync(): Promise<void> {
   for (const c of r.commands) command(c);
   // Display hours and any saved override were set aside while the clock was untrusted.
   if (!wasTrusted) display.wake();
-  // The corrected clock may have moved a takeover's start or end, or made it count at all.
-  watchTakeover();
+  playback.clockMoved();
 
-  await offerSnapshots(r.snapshots, manifest);
+  await offerSnapshots(r.snapshots, playback.manifest);
   await offerChecked(r.checked ?? {});
   // After the snapshots are kept, so a manifest the content worker adopts has its data.
-  const current = state.fallback || manifest?.id;
+  const current = state.fallback || playback.manifest?.id;
   if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
     contentDue = true;
     content.wake();
@@ -982,12 +789,12 @@ async function syncLoop(): Promise<never> {
       if (API && credential) {
         const has = await credential.check();
         // No supervisor to ask, with content playing: keep playing it rather than cover it with a code.
-        if (has === 'none' || (has === 'unknown' && !manifest)) await pairScreen();
+        if (has === 'none' || (has === 'unknown' && !playback.manifest)) await pairScreen();
         else if (has === 'unknown') state.auth = 'no credential';
         else if (has === 'elsewhere') {
           // Neither sent nor replaced. What is cached keeps playing.
           state.auth = 'paired with another API';
-          if (!manifest) status('SignForge\nThis screen is paired with another API than its address names.');
+          if (!playback.manifest) status('SignForge\nThis screen is paired with another API than its address names.');
         }
         if (credential.held) {
           await apiSync();
@@ -1002,14 +809,14 @@ async function syncLoop(): Promise<never> {
     } catch (err) {
       if (API) settleTickets({ error: err instanceof UnauthorisedError ? new UnauthorisedSync('sync: not authorised') : err });
       // The sync's own data has gone as far as it will: spots waiting for feeds start with what is stored.
-      if (API) settleSources(manifest);
+      if (API) settleSources(playback.manifest);
       if (err instanceof UnauthorisedError) {
         // Refused with a credential: revoked. Refused without one cannot happen (no request goes without).
         if (credential?.held) await revoked();
         return;
       }
       state.online = false;
-      if (!manifest) status(`SignForge\nWaiting for content…\n${err instanceof Error ? err.message : String(err)}`);
+      if (!playback.manifest) status(`SignForge\nWaiting for content…\n${err instanceof Error ? err.message : String(err)}`);
     }
     // The server says when to look; sooner while the socket is down, or after a failure.
     await poll.wait(syncWaitMs(timing()));
@@ -1041,42 +848,6 @@ function applyOverrides(m: ScreenManifest): ScreenManifest {
 /** Runs a data pass now; set once the data loop starts. */
 let wakeData = () => {};
 
-function adopt(next: ScreenManifest): void {
-  source = next;
-  state.fallback = '';
-  next = applyOverrides(next);
-  manifest = next;
-  wakeData();
-  if (API) void restoreSources(next);
-  state.manifestId = next.id;
-  socket?.reportApplied(next.id);
-  // The sequencer keeps its place; the change shows at the next spot boundary, or at once for a takeover.
-  if (sequencer) sequencer.setManifest(next);
-  else sequencer = new Sequencer(next);
-  watchTakeover();
-}
-
-// ------------------------------------------------------------------- preview
-/** Set in preview mode: where the playback loop reports to the CMS. */
-let preview: Preview | undefined;
-
-/** Preview: adopt a draft, and show the new version of the spot on screen at once if it has one. */
-async function adoptDraft(next: ScreenManifest): Promise<string | undefined> {
-  adopt(next);
-  markDrafted();
-  const slot = slots[front === 0 ? 0 : 1];
-  const spot = slot.spot && manifest?.spots[slot.spot.id];
-  if (!spot || !manifest) return undefined;
-  try {
-    await slot.update(spot, manifest);
-    return spot.id;
-  } catch (err) {
-    state.lastError = `${spot.id}: ${err instanceof Error ? err.message : String(err)}`;
-    preview?.failed(state.lastError);
-    return undefined;
-  }
-}
-
 // ---------------------------------------------------------------------- boot
 async function boot(): Promise<void> {
   if (query.get('debug')) {
@@ -1103,8 +874,8 @@ async function boot(): Promise<void> {
   if (SOURCE === 'preview') {
     // No service worker, storage, sync, data loop, display hours or watchdog reload: the CMS page
     // owns what plays, and a reload would lose the draft.
-    preview = startPreview({ adopt: adoptDraft, status });
-    void playbackLoop();
+    preview = startPreview({ adopt: (draft) => playback.adoptDraft(draft), status });
+    void loopRestartingOnError('playback', () => playback.pass());
     return;
   }
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[sf] no service worker', e));
@@ -1115,19 +886,17 @@ async function boot(): Promise<void> {
     console.warn('[sf] could not read stored manifests', err);
     return {} as Awaited<ReturnType<typeof loadManifests>>;
   });
-  lastGood = stored.lastGood;
   // Its files stay until a newer manifest has played, in case the active one plays nothing.
-  if (lastGood) pins.hold('last-good', requiredFiles(lastGood));
-  state.lastGood = lastGood?.id ?? '';
+  if (stored.lastGood) playback.restore(stored.lastGood);
   const cached = stored.active ?? stored.lastGood;
-  if (cached) adopt(cached);
+  if (cached) playback.adopt(cached);
   else status('SignForge\nWaiting for content…');
 
   // If playback stops advancing for far longer than any spot should take, start over.
   setInterval(() => {
-    const longest = Math.max(60_000, ...Object.values(manifest?.spots ?? {}).map((s) => s.durationMs));
+    const longest = Math.max(60_000, ...Object.values(playback.manifest?.spots ?? {}).map((s) => s.durationMs));
     if (!state.displayOn) lastProgress = performance.now();
-    else if (manifest && performance.now() - lastProgress > longest + 30_000) location.reload();
+    else if (playback.manifest && performance.now() - lastProgress > longest + 30_000) location.reload();
   }, 10_000);
   // That watchdog runs in the renderer it watches. The supervisor restarts the kiosk when these
   // beats stop (device/pi/supervisor.py). Without a supervisor (the demo in a browser) nobody hears them.
@@ -1138,8 +907,8 @@ async function boot(): Promise<void> {
   socket?.start();
   // From the API, snapshots come on the sync; static content has no sync, so each source is fetched.
   // Never with the credential: from the API, data comes on the sync.
-  if (!API) wakeData = startDataLoop(BASE, () => manifest);
-  void playbackLoop();
+  if (!API) wakeData = startDataLoop(BASE, () => playback.manifest);
+  void loopRestartingOnError('playback', () => playback.pass());
   void displayLoop();
 }
 

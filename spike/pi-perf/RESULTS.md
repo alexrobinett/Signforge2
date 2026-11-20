@@ -460,6 +460,19 @@ So #100 costs what it was measured to cost before it merged, and no more. It is 
 
 Afterwards the rig went back to master's player (`4196dd3`, which has #100). A kiosk restart came back on the old player's script from Chromium's HTTP cache. The player web server sends no cache headers, so the page needed a reload that ignored the cache (`Page.reload` with `ignoreCache`).
 
+### The playback module (second architecture review, item 2, 2026-11-20)
+
+The playback loop moved out of `src/main.ts` into `src/playback.ts`, with the same order of calls. Master (`acaf49e`) against the branch (`6563e82`), both built with Vite (main script 227 and 229 kB). #144's method: `examples/stress` built once from the branch (no brand kit) and served to both players, each at `http://localhost:8090/cpb/<build>/`, the full 16-spot playlist, cut, 120 s per run after 10 s to settle, HTTP cache cleared, the service worker bypassed and the origin's storage cleared before each run, the supervisor stopped (the soak logger was already stopped), `device/pi/isolate.py`'s measurement plus `__sf.prepares` (15 per run, from page load). Six runs per build, from 14:37 to 15:03: before, after three times, then after, before three times. Every run drew 7135 to 7170 frames, and nothing was skipped.
+
+| Build | Overall (`all%`) | Playing (`play%`) | Loading next | Worst frame | Prepare median per run (15 each) | Prepare max per run |
+| --- | --- | --- | --- | --- | --- | --- |
+| Before (`acaf49e`) | 0.92, 0.56, 0.53, 0.43, 0.53, 0.47% | 0.19, 0.13, 0.13, 0.13, 0.13, 0.13% | 22.6, 14.6, 14.4, 12.0, 13.7, 11.9% | 300, 133, 100, 117, 133, 117 ms | 297, 286, 254, 248, 296, 234 ms | 658, 462, 457, 369, 438, 691 ms |
+| After (`6563e82`) | 0.51, 0.50, 0.51, 0.57, 0.57, 0.58% | 0.13, 0.14, 0.13, 0.16, 0.11, 0.11% | 14.1, 12.8, 13.7, 14.1, 15.8, 16.4% | 100, 150, 100, 117, 117, 167 ms | 263, 261, 241, 273, 282, 231 ms | 381, 440, 601, 458, 444, 718 ms |
+
+Medians of the six runs, before against after: overall 0.53 and 0.54%, playing 0.13 and 0.13%, loading next 14.0 and 14.1%. All 90 prepares of each build: median 260 and 265 ms, 90th percentile 397 and 381 ms, over 500 ms 3 and 3 times. No change: every figure is within the run-to-run spread. Before's first run, the first after the cache was cleared, has the 300 ms frame (while loading) and the highest loss, as in the sections above; the worst frames otherwise are 100 to 167 ms in both builds.
+
+Afterwards the rig went back to the player it had (`index-Dwf3l023.js`, checked in the page after the kiosk restart), on `kiosk.env.cloud`, with the supervisor running.
+
 ## The sun and moon cross the sky (issue #70, 2026-11-18)
 
 weather 1.3.0 places the sun or moon on an arc from sunrise, sunset and `now()`, mixes the day and night skies, and adds a dawn or dusk glow, the moon's phase (a `clip-path`) and stars. Four spots with fixed data, with sunrise and sunset set around the time of the run: clear midday, partly cloudy 5 min after sunset (glow, clouds, faint stars), clear night (moon, stars), rain 5 min after sunset (glow muted, rain tiles). Before: master's weather 1.2.1 with `isDay` instead. This branch's player at a subdirectory of the rig, cut, 45 s per spot after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order before, after, after, before. Portrait by rotating the output (`wlr-randr --transform 90`; cage resizes Chromium to 1080×1920), restored afterwards.
