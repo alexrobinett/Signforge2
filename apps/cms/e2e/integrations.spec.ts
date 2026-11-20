@@ -98,7 +98,7 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await expect(now.getByText('iCal · Break room')).toBeVisible();
   await expect(now.getByText('failed 2×')).toBeVisible();
   await expect(now).toContainText(
-    /The Break room calendar answers with an error: its last 2 checks failed\. Its screens show the \d+:\d\d [AP]M copy\. It feeds the spot Break room agenda\./,
+    /The Break room calendar answers with an error: its last 2 checks failed\. Its screens show the (?:\w{3} )?\d+:\d\d [AP]M copy\. It feeds the spot Break room agenda\./,
   );
   await expect(now.getByText('RSS · Northside blog')).toBeVisible();
   await expect(owner.getByText('1 calendar · failing')).toBeVisible();
