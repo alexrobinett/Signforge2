@@ -28,6 +28,7 @@ beforeAll(async () => {
     blobs: env.BLOBS,
     screens: {
       manifest: async () => {},
+      manifests: async () => {},
       revoked: async () => {},
       command: async (screenId, command) => void sent.push({ screenId, command }),
     },

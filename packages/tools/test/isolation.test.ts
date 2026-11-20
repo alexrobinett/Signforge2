@@ -36,6 +36,7 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   dataSource: (o) => o.dataSource,
   alertDelivery: (o) => o.alertDelivery,
   connection: (o) => o.connection,
+  publish: (o) => o.publish,
 };
 const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
 

@@ -173,6 +173,12 @@ function summary(event: AlertEvent): string {
       return `${event.data.screen.name} in ${event.org.name} is offline`;
     case 'screen.back':
       return `${event.data.screen.name} in ${event.org.name} is back`;
+    case 'publish.finished': {
+      const { publish, screens, playing } = event.data;
+      return playing === screens
+        ? `v${publish.revision} reached every screen in ${event.org.name}`
+        : `v${publish.revision} finished in ${event.org.name}: playing on ${playing} of ${screens} screens`;
+    }
     case 'test':
       return event.data.message;
   }
@@ -203,6 +209,19 @@ function slackMessage(event: AlertEvent) {
           : mrkdwn(`*Offline from*\n${slackTime(event.data.offlineSince)} to ${slackTime(event.data.lastSeenAt)}`);
       const blocks: object[] = [{ type: 'section', text: mrkdwn(state), fields: [org, since] }];
       if (screen.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${screen.url}|Open the screen in SignForge>`)] });
+      return { text: esc(summary(event)), blocks };
+    }
+    case 'publish.finished': {
+      const { publish, screens, playing, replaced } = event.data;
+      const v = `v${publish.revision}`;
+      const name = publish.url ? `<${publish.url}|${v}>` : v;
+      const reach = mrkdwn(
+        `*Screens*\nPlaying on ${playing} of ${screens}${replaced ? `; a later publish reached ${replaced} first` : ''}${screens - playing - replaced ? `; ${screens - playing - replaced} revoked` : ''}`,
+      );
+      const at = mrkdwn(`*Published*\n${slackTime(publish.publishedAt)}`);
+      const state = playing === screens ? `:white_check_mark: ${name} reached *every screen*` : `:white_check_mark: ${name} *finished*`;
+      const blocks: object[] = [{ type: 'section', text: mrkdwn(state), fields: [org, reach, at] }];
+      if (publish.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${publish.url}|Open the rollout in SignForge>`)] });
       return { text: esc(summary(event)), blocks };
     }
   }

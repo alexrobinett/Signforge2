@@ -66,6 +66,9 @@ export function brandKitVersionOf(output: unknown): number {
 export const isStale = (err: unknown) =>
   err instanceof ToolCallError && err.code === 'conflict' && isRecord(err.details) && typeof err.details.version === 'number';
 
+/** Whether a refusal is a conflict of any kind, such as a publish made since an Undo's. */
+export const isConflict = (err: unknown) => err instanceof ToolCallError && err.code === 'conflict';
+
 /** A tool's refusal as a sentence for the page. */
 export const toolMessage = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');
 

@@ -183,6 +183,13 @@
       "when": 1795126771517,
       "tag": "0025_data_source_rows_path",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1795133418992,
+      "tag": "0026_publish_history",
+      "breakpoints": true
     }
   ]
 }

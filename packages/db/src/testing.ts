@@ -149,7 +149,8 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   await o.playlists.setItems(playlist.id, [templateSpot.id, imageSpot.id]);
   const scheduleEntry = await o.scheduleEntries.insert({ id: id('schedule'), playlistId: playlist.id, target: 'group', groupId: group.id, priority: 1 });
 
-  const publish = await o.publishes.insert({ id: id('publish'), status: 'published', actorKind: 'user', actorId: id('user') });
+  // At revision 0, the org's before any publish moves it: a publish the tests make is the org's first.
+  const publish = await o.publishes.insert({ id: id('publish'), status: 'published', actorKind: 'user', actorId: id('user'), revision: 0 });
   await o.publishes.addScreens(publish.id, [{ screenId: screen.id, manifestId: 'd'.repeat(64) }]);
 
   const dataSource = await o.dataSources.insert({ id: id('source'), name: 'Weather', format: 'json', urlEncrypted: 'enc:xyz', refreshS: 300 });

@@ -4,7 +4,7 @@
  * reads ids, names and times only. Every write that follows goes through `scoped(db, orgId)`
  * with the org a row here names (`org.incidents`).
  */
-import { and, eq, exists, gt, isNotNull, isNull, lt, not, sql } from 'drizzle-orm';
+import { and, eq, exists, gt, isNotNull, isNull, lt, not, sql, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as s from './schema';
 
@@ -64,4 +64,58 @@ export async function findAlertWork(d1: D1Database, now: number, defaultUnreacha
       .all(),
   ]);
   return { offline, back };
+}
+
+/**
+ * Publishes in any org whose rollout is over but not yet marked finished: each screen it switched
+ * reports playing its manifest, was moved on by a later publish, or can no longer take it (revoked:
+ * every credential it had is revoked, so it never reports again). Ids, names, times and counts
+ * (screens switched, playing it, moved on) only; each is marked, with its alert, through its org's
+ * scope (`publishes.finish`).
+ */
+export async function findFinishedRollouts(
+  d1: D1Database,
+): Promise<{ orgId: string; orgName: string; id: string; revision: number; createdAt: number; screens: number; playing: number; replaced: number }[]> {
+  const db = drizzle(d1);
+  const p = s.publishes;
+  const ps = s.publishScreens;
+  const sc = s.screens;
+  const c = s.screenCredentials;
+  const credentials = (more: SQL = sql`1`) => sql`SELECT 1 FROM ${c} WHERE ${c.orgId} = ${sc.orgId} AND ${c.screenId} = ${sc.id} AND ${more}`;
+  // As the screen's state reads it: revoked, or every credential it had is.
+  const revoked = sql`(${sc.status} = 'revoked' OR (EXISTS (${credentials()}) AND NOT EXISTS (${credentials(isNull(c.revokedAt))})))`;
+  const waiting = exists(
+    db
+      .select({ one: sql`1` })
+      .from(ps)
+      .innerJoin(sc, and(eq(sc.orgId, ps.orgId), eq(sc.id, ps.screenId)))
+      .where(
+        and(
+          eq(ps.orgId, p.orgId),
+          eq(ps.publishId, p.id),
+          eq(sc.desiredManifestId, ps.manifestId),
+          sql`${sc.reportedManifestId} IS NOT ${ps.manifestId}`,
+          sql`NOT ${revoked}`,
+        ),
+      ),
+  );
+  const count = (where: SQL) =>
+    sql<number>`(SELECT count(*) FROM ${ps} JOIN ${sc} ON ${sc.orgId} = ${ps.orgId} AND ${sc.id} = ${ps.screenId}
+      WHERE ${ps.orgId} = ${p.orgId} AND ${ps.publishId} = ${p.id} AND ${where})`.mapWith(Number);
+  return db
+    .select({
+      orgId: p.orgId,
+      orgName: s.organization.name,
+      id: p.id,
+      revision: p.revision,
+      createdAt: p.createdAt,
+      screens: sql<number>`(SELECT count(*) FROM ${ps} WHERE ${ps.orgId} = ${p.orgId} AND ${ps.publishId} = ${p.id})`.mapWith(Number),
+      playing: count(sql`${sc.reportedManifestId} = ${ps.manifestId}`),
+      // Moved on before it played this one: a screen still reporting it played it, whatever comes next.
+      replaced: count(sql`${sc.desiredManifestId} IS NOT ${ps.manifestId} AND ${sc.reportedManifestId} IS NOT ${ps.manifestId}`),
+    })
+    .from(p)
+    .innerJoin(s.organization, eq(s.organization.id, p.orgId))
+    .where(and(isNull(p.finishedAt), eq(p.status, 'published'), not(waiting)))
+    .all();
 }
