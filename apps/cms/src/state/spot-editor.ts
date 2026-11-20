@@ -2,12 +2,14 @@
  * The spot editor (canvas board Spot editor A): the draft being edited, its saves, and the stage,
  * the real player in an iframe fed through the preview channel (M3-36).
  *
- * A keystroke changes the draft here. The stage gets it 40 ms later: the draft is compiled in the
- * browser (`compilePreview`) and posted to the player, so nothing on that path waits on the
+ * A keystroke changes the spot's draft here. The stage gets it 40 ms later: the draft is compiled
+ * in the browser (`compilePreview`) and posted to the player, so nothing on that path waits on the
  * network. A draft the compiler refuses is not posted, so the stage keeps the last valid frame.
- * The save to the server (`update_spot`) waits a second after the last edit, sends the version the
- * editor opened with as `ifVersion`, chains the version each save returns, and writes the saved
- * spot into the Query cache.
+ * Each spot's draft is a versioned draft (./versioned-draft.ts): its save to the server
+ * (`update_spot`) waits a second after the last edit, sends the version the editor opened with as
+ * `ifVersion`, chains the version each save returns, and writes the saved spot into the Query
+ * cache. A save asked for while one runs (Save draft, Publish) waits for it and sends the latest
+ * edit, and editing another spot sends the edit left waiting on this one.
  *
  * Which spot, orientation and kit the stage shows lives in the URL and the Query cache; the stage
  * component hands them over with `attachStage` from its ref callback. The playlist editor shows
@@ -22,15 +24,15 @@ import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } fro
 import { playerMessage } from '~/lib/preview';
 import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
+import { orgOnScreen } from '~/lib/live';
 import { madeByEditor } from '~/lib/live-data';
-import { callTool, saveRefused, spotOf, toolMessage } from '~/lib/tools';
+import { callTool, spotOf, ToolCallError, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
+import { autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 /** How long typing pauses before the stage redraws, and before the draft is saved. */
 const STAGE_DELAY_MS = 40;
 const SAVE_DELAY_MS = 1000;
-
-type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'invalid';
 
 /** What the stage shows, a spot or a playlist, as the stage component reads it from the URL. */
 export type StageShows = {
@@ -64,16 +66,8 @@ interface NewSpotDraft {
 }
 
 interface SpotEditorState {
-  /** The spot the draft belongs to; another spot's page starts from its own saved draft. */
-  spotId: string | null;
-  draft: SpotDraft | null;
-  /** The spot's version the draft builds on: sent as `ifVersion`, moved on by each save. */
-  version: number | null;
-  status: SaveStatus;
-  savedAt: number | null;
-  saveError: string | null;
-  /** The last save was refused because someone else changed the spot: the editor offers a reload. */
-  stale: boolean;
+  /** Each spot's draft, by spot id. A saved one is shown while the spot is at the version it saved. */
+  drafts: Drafts<SpotDraft>;
   /** The image field whose picker is open (`assetId` for an image spot), or null. */
   picking: string | null;
   /** True while the draft cannot be drawn: the stage keeps the last frame it drew. */
@@ -93,12 +87,15 @@ interface SpotEditorState {
 
 export interface SpotEditorSlice {
   spotEditor: SpotEditorState;
-  /** Changes the draft of `spot`, starting from its saved draft if another spot was open. */
-  editSpot: (spot: SpotView, change: (d: SpotDraft) => SpotDraft) => void;
-  /** Saves the draft now (the Save draft button), or once the save in flight is done. */
-  saveSpotDraft: () => Promise<void>;
-  /** After a refused save: reads the spot again and drops the draft, to edit what is there now. */
-  reloadSpot: () => Promise<void>;
+  /**
+   * Changes the spot's draft in `orgId`. It starts from the spot as the Query cache holds it at this
+   * moment, never a copy a caller kept across an await (a place pick), so the edit builds on what the page shows.
+   */
+  editSpot: (orgId: string, spotId: string, change: (d: SpotDraft) => SpotDraft) => void;
+  /** Saves the spot's draft now (Save draft, Publish): resolves once the save in flight and this one are done. */
+  saveSpotDraft: (spotId: string) => Promise<void>;
+  /** After a refused save: reads the spot again and drops its draft, to edit what is there now. */
+  reloadSpot: (orgId: string, spotId: string) => Promise<void>;
   pickImageFor: (field: string | null) => void;
   /** The stage's iframe and what it should show; null when it unmounts. */
   attachStage: (target: StageTarget | null) => void;
@@ -124,13 +121,7 @@ const newSpotDraft = (): NewSpotDraft => ({
 });
 
 const initial: SpotEditorState = {
-  spotId: null,
-  draft: null,
-  version: null,
-  status: 'saved',
-  savedAt: null,
-  saveError: null,
-  stale: false,
+  drafts: {},
   picking: null,
   holding: false,
   unpublishable: [],
@@ -149,10 +140,15 @@ interface StageLink {
   seq: number;
 }
 
+/** The draft the spot's page shows and edits in `orgId`, or null for the spot as read (`shown`). */
+export const spotShown = (e: SpotEditorState, orgId: string, spot: SpotView): SpotDraft | null => {
+  const d = e.drafts[spot.id];
+  return d?.orgId === orgId ? shown(d, spot.version) : null;
+};
+
 export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, { router, queryClient }) => {
   const editor = (change: (e: SpotEditorState) => SpotEditorState) => set((s) => ({ spotEditor: change(s.spotEditor) }));
-  const timers: { stage?: ReturnType<typeof setTimeout>; save?: ReturnType<typeof setTimeout> } = {};
-  let saving = false;
+  const timers: { stage?: ReturnType<typeof setTimeout> } = {};
   let hearing = false;
 
   const savedSpot = (orgId: string, spotId: string) => queryClient.getQueryData(spotQuery(orgId, spotId).queryKey);
@@ -195,8 +191,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     const templates = queryClient.getQueryData(templatesQuery(t.orgId).queryKey)?.templates;
     const assets = queryClient.getQueryData(assetsQuery(t.orgId).queryKey)?.assets;
     if (!spot || !preview || !templates || !assets) return undefined;
-    const e = get().spotEditor;
-    const draft = e.spotId === spot.id && e.draft ? e.draft : draftOf(spot);
+    const draft = spotShown(get().spotEditor, t.orgId, spot) ?? draftOf(spot);
     const result = await compilePreview({
       spot,
       draft,
@@ -253,71 +248,59 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     else if (msg?.type === 'error') editor((x) => ({ ...x, stageError: msg.message }));
   };
 
-  const later = (which: 'stage' | 'save', ms: number, run: () => Promise<void>) => {
+  const later = (which: 'stage', ms: number, run: () => Promise<void>) => {
     clearTimeout(timers[which]);
     timers[which] = setTimeout(() => void run(), ms);
   };
 
+  const drafts = createVersionedDrafts<SpotDraft>({
+    state: { read: () => get().spotEditor.drafts, write: (change) => editor((e) => ({ ...e, drafts: change(e.drafts) })) },
+    async save({ key: spotId, draft: { orgId, edit: d, version } }) {
+      const spot = await queryClient.query({ ...spotQuery(orgId, spotId), staleTime: 'static' });
+      if (!spot) throw new ToolCallError('not_found', 'This spot was deleted.');
+      const kindFields =
+        spot.kind === 'template'
+          ? { data: d.data, assets: d.assets, bindings: d.bindings }
+          : spot.kind === 'url'
+            ? { url: d.url }
+            : { fit: d.fit, ...(d.assetId ? { assetId: d.assetId } : {}) };
+      const saved = spotOf(await callTool('update_spot', { spotId, name: d.name.trim(), durationMs: d.durationMs, ...kindFields, ifVersion: version }));
+      queryClient.setQueryData(spotKeys.one(orgId, spotId), saved);
+      void dropUnbound(orgId, spot, saved);
+      void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
+      return { version: saved.version };
+    },
+    invalid: ({ orgId, edit }, spotId) => {
+      const spot = savedSpot(orgId, spotId);
+      return spot ? unsaveable(spot, edit, orgId) : false;
+    },
+    makeId: () => crypto.randomUUID(),
+    currentOrg: () => orgOnScreen(router),
+    clock: realClock,
+  });
+  const saveSoon = autosave(realClock, SAVE_DELAY_MS, (spotId) => drafts.save(spotId));
+
   return {
     spotEditor: initial,
 
-    editSpot(spot, change) {
-      editor((e) => {
-        const fresh = e.spotId !== spot.id || !e.draft;
-        const base = fresh ? { ...initial, newSpot: e.newSpot, stageBox: e.stageBox, spotId: spot.id, version: spot.version } : e;
-        return { ...base, draft: change(fresh ? draftOf(spot) : (e.draft ?? draftOf(spot))), status: 'unsaved' };
-      });
-      later('stage', STAGE_DELAY_MS, redraw);
-      later('save', SAVE_DELAY_MS, get().saveSpotDraft);
-    },
-
-    async saveSpotDraft() {
-      clearTimeout(timers.save);
-      const t = stage.target;
-      const { spotId, draft, version, stale } = get().spotEditor;
-      if (!t || !('spotId' in t) || !spotId || !draft || version === null || stale || t.spotId !== spotId) return;
-      const spot = savedSpot(t.orgId, spotId);
+    editSpot(orgId, spotId, change) {
+      const spot = savedSpot(orgId, spotId);
+      // Not read, or deleted: there is nothing to change.
       if (!spot) return;
-      if (saving) {
-        later('save', SAVE_DELAY_MS, get().saveSpotDraft);
-        return;
-      }
-      if (unsaveable(spot, draft, t.orgId)) {
-        editor((e) => ({ ...e, status: 'invalid' }));
-        return;
-      }
-      saving = true;
-      editor((e) => ({ ...e, status: 'saving', saveError: null }));
-      // The answer belongs to this spot: another opened meanwhile has its own draft and version.
-      const open = () => get().spotEditor.spotId === spotId;
-      const kindFields =
-        spot.kind === 'template'
-          ? { data: draft.data, assets: draft.assets, bindings: draft.bindings }
-          : spot.kind === 'url'
-            ? { url: draft.url }
-            : { fit: draft.fit, ...(draft.assetId ? { assetId: draft.assetId } : {}) };
-      try {
-        const saved = spotOf(
-          await callTool('update_spot', { spotId, name: draft.name.trim(), durationMs: draft.durationMs, ...kindFields, ifVersion: version }),
-        );
-        queryClient.setQueryData(spotKeys.one(t.orgId, spotId), saved);
-        void dropUnbound(t.orgId, spot, saved);
-        void queryClient.invalidateQueries({ queryKey: spotKeys.all(t.orgId), exact: true });
-        if (open()) editor((e) => ({ ...e, version: saved.version, savedAt: Date.now(), status: e.draft === draft ? 'saved' : 'unsaved' }));
-      } catch (err) {
-        if (open()) editor((e) => ({ ...e, status: 'unsaved', ...saveRefused(err) }));
-      } finally {
-        saving = false;
-      }
-      const after = get().spotEditor;
-      if (open() && after.status === 'unsaved' && !after.saveError) later('save', SAVE_DELAY_MS, get().saveSpotDraft);
+      // Another spot's edit, still waiting out its second: it is saved now, not left behind.
+      for (const [id, d] of Object.entries(get().spotEditor.drafts)) if (id !== spotId && d.status === 'unsaved') void drafts.save(id);
+      drafts.edit(spotId, { orgId, record: spotId, version: spot.version, edit: draftOf(spot) }, change);
+      later('stage', STAGE_DELAY_MS, redraw);
+      saveSoon(spotId);
     },
 
-    async reloadSpot() {
-      const t = stage.target;
-      clearTimeout(timers.save);
-      editor((e) => ({ ...initial, newSpot: e.newSpot, stageBox: e.stageBox }));
-      if (t && 'spotId' in t) await queryClient.invalidateQueries({ queryKey: spotKeys.one(t.orgId, t.spotId) });
+    async saveSpotDraft(spotId) {
+      await drafts.save(spotId);
+    },
+
+    async reloadSpot(orgId, spotId) {
+      drafts.drop(spotId);
+      await queryClient.invalidateQueries({ queryKey: spotKeys.one(orgId, spotId) });
       await redraw();
     },
 

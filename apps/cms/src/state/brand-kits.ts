@@ -7,7 +7,8 @@
  * the draft kit laid over its preview input (`withDraftKit`) and posted to its player, so a colour
  * re-themes the spots without a round trip. Kits have no drafts on the server: Save sends the whole
  * draft to `update_brand_kit` with the version it was read at, and screens get it at their next
- * publish. Each kit keeps its own draft and errors here, so moving to another kit loses nothing.
+ * publish. Each kit's edit is a versioned draft here (./versioned-draft.ts), so moving to another
+ * kit loses nothing.
  * Kit and assignment changes invalidate the kit list, whose `reach` they change.
  */
 import { DEFAULT_BRAND_COLORS } from '@signforge/compiler';
@@ -16,9 +17,10 @@ import { duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraf
 import { orgOnScreen } from '~/lib/live';
 import { playerMessage } from '~/lib/preview';
 import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/spots';
-import { brandKitIdOf, brandKitVersionOf, callTool, isStale, toolMessage } from '~/lib/tools';
+import { brandKitIdOf, callTool, toolMessage, versionOf } from '~/lib/tools';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
+import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 const PREVIEW_DELAY_MS = 40;
 
@@ -40,24 +42,9 @@ export interface KitPreviewTarget {
   templateVersionId: string;
 }
 
-/** One kit's edit on this page: its draft until saved or discarded, and how its last save went. */
-export interface KitEdit {
-  draft: KitDraft | null;
-  saving: boolean;
-  savedAt: number | null;
-  error: string | null;
-  /** The last save was refused because someone else changed the kit: the editor offers a reload. */
-  stale: boolean;
-  /** The kit's version the draft builds on: sent as `ifVersion`, moved on by each save. Null with no draft. */
-  version: number | null;
-}
-
-/** A kit with nothing edited yet; one object, so a selector that falls back to it re-renders nothing. */
-export const NO_EDIT: KitEdit = { draft: null, saving: false, savedAt: null, error: null, stale: false, version: null };
-
 interface BrandKitsState {
-  /** Each kit's edit, by kit id. */
-  edits: Record<string, KitEdit>;
+  /** Each kit's edit, by kit id, until saved or discarded, and how its last save went. */
+  drafts: Drafts<KitDraft>;
   /** Which logo's picker is open. */
   logoFor: 'dark' | 'light' | null;
   /**
@@ -77,12 +64,13 @@ interface BrandKitsState {
 
 export interface BrandKitsSlice {
   brandKits: BrandKitsState;
-  /** Changes the draft of `kit`, starting from its saved values. */
-  editKit: (kit: BrandKitView, change: (d: KitDraft) => KitDraft) => void;
+  /** Changes the kit's draft in `orgId`, starting from the kit as the Query cache holds it at this moment. */
+  editKit: (orgId: string, kitId: string, change: (d: KitDraft) => KitDraft) => void;
   /** Gives the foreground of a failing pair its fix: a derived on-colour, or text moved until it reads. */
-  fixKitPair: (kit: BrandKitView, fg: BrandColor, bg: BrandColor) => void;
+  fixKitPair: (orgId: string, kitId: string, fg: BrandColor, bg: BrandColor) => void;
   discardKitDraft: (kitId: string) => void;
-  saveKit: (orgId: string, kit: BrandKitView) => Promise<void>;
+  /** Saves the kit's draft, unless a kit action, a save or a new kit is on its way. */
+  saveKit: (kitId: string) => Promise<void>;
   /** After a refused save: reads the kits again and drops the kit's draft. */
   reloadKit: (orgId: string, kitId: string) => Promise<void>;
   pickLogo: (which: 'dark' | 'light' | null) => void;
@@ -104,7 +92,7 @@ export interface BrandKitsSlice {
 const newKit = () => ({ open: false, name: '', pending: false, error: null, key: null });
 
 const initial: BrandKitsState = {
-  edits: {},
+  drafts: {},
   logoFor: null,
   pending: null,
   actionError: null,
@@ -126,12 +114,32 @@ interface PreviewLink {
  * Whether a kit action, a save or a new kit is on its way. They run one at a time: a Duplicate
  * during a save would copy the colours from before it, and two that navigate would race.
  */
-export const kitActionRunning = ({ brandKits: k }: BrandKitsSlice) => k.pending !== null || k.newKit.pending || Object.values(k.edits).some((e) => e.saving);
+export const kitActionRunning = ({ brandKits: k }: BrandKitsSlice) => k.pending !== null || k.newKit.pending || Object.values(k.drafts).some((d) => d.pending);
+
+/** The draft the kit's page shows and edits, or null for `kit` as read (`shown`). */
+const kitEditing = (k: BrandKitsState, kit: BrandKitView): KitDraft | null => shown(k.drafts[kit.id], kit.version);
 
 export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { router, queryClient }) => {
   const kits = (change: (k: BrandKitsState) => BrandKitsState) => set((s) => ({ brandKits: change(s.brandKits) }));
-  const edit = (kitId: string, change: (e: KitEdit) => KitEdit) => kits((k) => ({ ...k, edits: { ...k.edits, [kitId]: change(k.edits[kitId] ?? NO_EDIT) } }));
+  const drafts = createVersionedDrafts<KitDraft>({
+    state: { read: () => get().brandKits.drafts, write: (change) => kits((k) => ({ ...k, drafts: change(k.drafts) })) },
+    async save({ key: kitId, draft }) {
+      // A kit's draft always starts from the kit, with its version (editKit): only a create has none.
+      const version = versionOf(await callTool('update_brand_kit', updateInput(kitId, draft.edit, draft.version!)), 'brandKit');
+      // Still saving until the page has the kit as saved, which the next edit builds on.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: brandKitsQuery(draft.orgId).queryKey, exact: true }),
+        // The spot editor's stage wears saved kits.
+        queryClient.invalidateQueries({ queryKey: ['org', draft.orgId, 'spotPreview'] }),
+      ]);
+      return { version };
+    },
+    makeId: () => crypto.randomUUID(),
+    currentOrg: () => orgOnScreen(router),
+    clock: realClock,
+  });
   const links = new Map<string, PreviewLink>();
+  const cachedKit = (orgId: string, kitId: string) => queryClient.getQueryData(brandKitsQuery(orgId).queryKey)?.brandKits.find((k) => k.id === kitId);
   // A player says it is listening once per load. Its frame can be attached again for another kit
   // (the route stays mounted after Duplicate), so the frames that said it are kept, not the links.
   const heard = new WeakSet<Window>();
@@ -163,7 +171,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       kits((k) => ({ ...k, previews: { ...k.previews, [t.spotId]: { playing: false, error: `what it needs did not load (${toolMessage(err)})` } } }));
       return;
     }
-    const draft = get().brandKits.edits[kit.id]?.draft ?? kitDraftOf(kit);
+    const draft = kitEditing(get().brandKits, kit) ?? kitDraftOf(kit);
     const themed = withDraftKit({ preview: preview.preview, kitId: kit.id, draft, assets, orientation: 'landscape' });
     if (!themed) return;
     const result = await compilePreview({
@@ -262,51 +270,35 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
   return {
     brandKits: initial,
 
-    editKit(kit, change) {
+    editKit(orgId, kitId, change) {
+      const kit = cachedKit(orgId, kitId);
+      // Not read, or deleted: there is nothing to change.
+      if (!kit) return;
       // A new draft builds on the kit as the page holds it now; a later read of the kits does not move it.
-      edit(kit.id, (e) => (e.draft ? { ...e, draft: change(e.draft) } : { ...e, draft: change(kitDraftOf(kit)), version: kit.version }));
+      drafts.edit(kitId, { orgId, record: kitId, version: kit.version, edit: kitDraftOf(kit) }, change);
       redrawAll();
     },
 
-    fixKitPair(kit, fg, bg) {
-      const draft = get().brandKits.edits[kit.id]?.draft ?? kitDraftOf(kit);
+    fixKitPair(orgId, kitId, fg, bg) {
+      const kit = cachedKit(orgId, kitId);
+      if (!kit) return;
+      const draft = kitEditing(get().brandKits, kit) ?? kitDraftOf(kit);
       const value = fg === 'onPrimary' || fg === 'onAccent' ? null : pairFix(shownColors(draft, kit.colors), fg, bg).hex;
-      get().editKit(kit, (d) => ({ ...d, colors: { ...d.colors, [fg]: value } }));
+      get().editKit(orgId, kitId, (d) => ({ ...d, colors: { ...d.colors, [fg]: value } }));
     },
 
     discardKitDraft(kitId) {
-      edit(kitId, (e) => ({ ...e, draft: null, version: null, error: null, stale: false }));
+      drafts.drop(kitId);
       redrawAll();
     },
 
-    async saveKit(orgId, kit) {
-      const { draft, version } = get().brandKits.edits[kit.id] ?? NO_EDIT;
-      if (!draft || version === null || kitActionRunning(get())) return;
-      edit(kit.id, (e) => ({ ...e, saving: true, error: null }));
-      try {
-        const saved = brandKitVersionOf(await callTool('update_brand_kit', updateInput(kit.id, draft, version)));
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true }),
-          // The spot editor's stage wears saved kits.
-          queryClient.invalidateQueries({ queryKey: ['org', orgId, 'spotPreview'] }),
-        ]);
-        // A draft edited while it saved builds on the version just saved.
-        edit(kit.id, (e) =>
-          e.draft === draft
-            ? { ...e, saving: false, savedAt: Date.now(), draft: null, version: null }
-            : { ...e, saving: false, savedAt: Date.now(), version: saved },
-        );
-      } catch (err) {
-        edit(kit.id, (e) =>
-          isStale(err)
-            ? { ...e, saving: false, stale: true, error: 'This kit changed since you opened it.' }
-            : { ...e, saving: false, error: toolMessage(err) },
-        );
-      }
+    async saveKit(kitId) {
+      if (kitActionRunning(get())) return;
+      await drafts.save(kitId);
     },
 
     async reloadKit(orgId, kitId) {
-      edit(kitId, (e) => ({ ...e, draft: null, version: null, error: null, stale: false }));
+      drafts.drop(kitId);
       await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
       redrawAll();
     },

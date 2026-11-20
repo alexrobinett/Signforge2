@@ -26,12 +26,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
-import { useCanManage, useNow, useRole } from '~/lib/live';
+import { useCanManage, useNow, useOrgId, useRole } from '~/lib/live';
 import { eventText } from '~/lib/audit';
 import { ago, describeScreen, localClock } from '~/lib/screen-status';
 import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
+import { editorDraft, hoursDraftOf, settingsDraftOf } from '~/state/screens';
 
 export const Route = createFileRoute('/_app/screens/$screenId')({
   loader: async ({ params }) => {
@@ -59,6 +60,7 @@ const app = getRouteApi('/_app');
 function ScreenPage() {
   const { screen, groupIds, credentials, events, groups, at } = Route.useLoaderData();
   const me = app.useLoaderData().user.id;
+  const orgId = useOrgId();
   const canManage = useCanManage();
   const owner = useRole() === 'owner';
   const now = useNow(at);
@@ -160,8 +162,8 @@ function ScreenPage() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onSelect={() => openScreenSettings(screen, groupIds)}>Settings and groups…</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => openDisplayHours(screen)}>Display hours…</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openScreenSettings(orgId, screen, groupIds)}>Settings and groups…</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openDisplayHours(orgId, screen)}>Display hours…</DropdownMenuItem>
                     {owner && (
                       <>
                         <DropdownMenuSeparator />
@@ -258,7 +260,7 @@ function ScreenPage() {
             title="Display hours"
             action={
               canManage && !revoked ? (
-                <Button variant="link" size="sm" className="h-auto px-0 underline" onClick={() => openDisplayHours(screen)}>
+                <Button variant="link" size="sm" className="h-auto px-0 underline" onClick={() => openDisplayHours(orgId, screen)}>
                   Edit
                 </Button>
               ) : undefined
@@ -376,8 +378,8 @@ function CacheState({ screen }: { screen: ScreenView }) {
 
 function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupView[] }) {
   const id = useId();
-  const draft = useAppStore((s) => s.screens.page.settings);
-  const saving = useAppStore((s) => s.screens.page.saving);
+  const draft = useAppStore((s) => settingsDraftOf(s.screens, screen.id));
+  const saving = useAppStore((s) => editorDraft(s.screens)?.pending ?? false);
   const renameDraft = useAppStore((s) => s.renameDraft);
   const chooseDraftZone = useAppStore((s) => s.chooseDraftZone);
   const chooseDraftOrientation = useAppStore((s) => s.chooseDraftOrientation);
@@ -477,8 +479,8 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
 
 /** Why a save was refused; when the screen changed since the editor opened, a reload to start again from what is there now. */
 function SaveError() {
-  const error = useAppStore((s) => s.screens.page.saveError);
-  const stale = useAppStore((s) => s.screens.page.stale);
+  const error = useAppStore((s) => editorDraft(s.screens)?.error ?? null);
+  const stale = useAppStore((s) => editorDraft(s.screens)?.stale ?? false);
   const reload = useAppStore((s) => s.reloadScreenEditor);
   return (
     <div role="alert" className="flex flex-wrap items-center gap-2 text-sm font-medium text-destructive empty:hidden">
@@ -493,8 +495,8 @@ function SaveError() {
 }
 
 function HoursDialog({ screen }: { screen: ScreenView }) {
-  const hours = useAppStore((s) => s.screens.page.hours);
-  const saving = useAppStore((s) => s.screens.page.saving);
+  const hours = useAppStore((s) => hoursDraftOf(s.screens, screen.id));
+  const saving = useAppStore((s) => editorDraft(s.screens)?.pending ?? false);
   const editDraftHours = useAppStore((s) => s.editDraftHours);
   const saveDisplayHours = useAppStore((s) => s.saveDisplayHours);
   const close = useAppStore((s) => s.closeScreenEditor);
@@ -502,7 +504,7 @@ function HoursDialog({ screen }: { screen: ScreenView }) {
 
   function save(e: SubmitEvent) {
     e.preventDefault();
-    if (ok) void saveDisplayHours(screen.id);
+    if (ok) void saveDisplayHours(screen);
   }
 
   return (

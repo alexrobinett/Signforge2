@@ -333,7 +333,7 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
   const { settings, channels } = data;
   const id = useId();
   const orgId = useOrgId();
-  const edits = useAppStore((s) => editsIn(s.settings, 'notifications', orgId).alerts);
+  const edits = useAppStore((s) => editsIn(s.settings, 'notifications', orgId, settings.version).alerts);
   const editSettings = useAppStore((s) => s.editSettings);
   const saveSettings = useAppStore((s) => s.saveSettings);
   // A rule shows its edited fields, else what the page read: a reload refreshes the rest.

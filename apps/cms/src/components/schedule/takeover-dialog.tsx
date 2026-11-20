@@ -12,6 +12,7 @@ import { NativeSelect } from '~/components/ui/select';
 import type { PlaylistView } from '~/lib/playlists';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { useAppStore } from '~/state/provider';
+import { DIALOG } from '~/state/schedule';
 import { TargetFields } from './target-fields';
 
 const DAY_MS = 86_400_000;
@@ -41,14 +42,14 @@ export function TakeoverDialog({
   /** The page's clock: a render may not read the time itself. */
   now: number;
 }) {
-  const d = useAppStore((s) => s.schedule.takeover);
-  const saving = useAppStore((s) => s.schedule.saving);
-  const error = useAppStore((s) => s.schedule.error);
+  const draft = useAppStore((s) => s.schedule.takeovers[DIALOG]);
   const edit = useAppStore((s) => s.editTakeover);
   const start = useAppStore((s) => s.startTakeover);
   const close = useAppStore((s) => s.closeScheduleDialog);
   const id = useId();
-  if (!d) return null;
+  // A dialog opened in another org is not this page's.
+  if (draft?.orgId !== orgId) return null;
+  const { edit: d, pending: saving, error } = draft;
   const problem = takeoverProblem(d, now);
 
   function submit(e: SubmitEvent) {
@@ -91,7 +92,7 @@ export function TakeoverDialog({
           </div>
           {(error || problem) && (
             <div role="alert" className="text-sm text-destructive">
-              {error ?? problem}
+              {problem ?? error}
             </div>
           )}
           <DialogFooter>

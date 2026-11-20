@@ -112,6 +112,7 @@ beforeEach(() => {
   vi.stubGlobal('location', { origin: 'http://cms.test' });
   held.clear();
   router.state.location.href = '/settings/brand-kits';
+  router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }];
   router.navigate.mockClear();
   vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (_: AlgorithmIdentifier, data: BufferSource) => {
     const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);
@@ -160,7 +161,7 @@ describe("the kit page's previews (review of #103)", () => {
     playing();
 
     await vi.advanceTimersByTimeAsync(5_000);
-    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
     await vi.advanceTimersByTimeAsync(100);
     await vi.waitFor(() => expect(posted).toEqual(['#2563eb', '#c8102e']));
   });
@@ -178,7 +179,7 @@ describe("the kit page's previews (review of #103)", () => {
     attach(b.id);
     await vi.waitFor(() => expect(posted.at(-1)).toBe('#7a3e1d'));
     playing();
-    store.getState().editKit(b, (d) => ({ ...d, colors: { ...d.colors, primary: '#0f766e' } }));
+    store.getState().editKit(ORG, b.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#0f766e' } }));
     await vi.advanceTimersByTimeAsync(100);
     await vi.waitFor(() => expect(posted.at(-1)).toBe('#0f766e'));
   });
@@ -193,12 +194,31 @@ describe('a kit save (re-check of #103)', () => {
     });
     const v1 = kit('bk_a', '#2563eb');
     const { store } = page([v1]);
-    store.getState().editKit(v1, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
+    store.getState().editKit(ORG, v1.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
     // Someone else saves; the page reads the kits again (after an assignment, say) and holds v2.
     const v2 = { ...v1, shape: 'round' as const, version: 2 };
-    await store.getState().saveKit(ORG, v2);
+    await store.getState().saveKit(v2.id);
     expect(calls).toMatchObject([{ name: 'update_brand_kit', input: { brandKitId: 'bk_a', ifVersion: 1 } }]);
-    expect(store.getState().brandKits.edits.bk_a).toMatchObject({ stale: true, error: 'This kit changed since you opened it.' });
+    // The page says it in a kit's words (This kit changed since you opened it).
+    expect(store.getState().brandKits.drafts.bk_a).toMatchObject({
+      stale: true,
+      error: 'This changed since you opened it.',
+      edit: { colors: { primary: '#c8102e' } },
+    });
+  });
+
+  it('a save answered after the member switched org changes nothing: the kit is not marked saved, and its version stays (versioned draft)', async () => {
+    let answer: (r: Response) => void = () => {};
+    vi.stubGlobal('fetch', () => new Promise<Response>((resolve) => (answer = resolve)));
+    const a = kit('bk_a', '#2563eb');
+    const { store } = page([a]);
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
+    const saving = store.getState().saveKit(a.id);
+    await settle();
+    router.state.matches = [{ routeId: '/_app', loaderData: { organization: { id: 'org_2' } } }];
+    answer(new Response(JSON.stringify({ brandKit: { ...a, version: 2 } }), { status: 200 }));
+    await saving;
+    expect(store.getState().brandKits.drafts.bk_a).toMatchObject({ status: 'unsaved', version: 1, savedAt: null, pending: false });
   });
 });
 
@@ -210,9 +230,9 @@ describe('drafts to one player (re-check of #103)', () => {
     listening();
     await vi.waitFor(() => expect(posted).toEqual(['#2563eb']));
     // The player has not answered the first draft yet: two quick edits wait, and only the newer is sent.
-    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
     await vi.advanceTimersByTimeAsync(100);
-    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#0f766e' } }));
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#0f766e' } }));
     await vi.advanceTimersByTimeAsync(100);
     await settle();
     expect(posted).toEqual(['#2563eb']);
@@ -228,9 +248,9 @@ describe('drafts to one player (re-check of #103)', () => {
     await vi.waitFor(() => expect(posted).toEqual(['#2563eb']));
     // A slow runner: the first edit's compile is done and queued, the second's is still hashing.
     const release = holdHashOf('#0f766e');
-    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
     await vi.advanceTimersByTimeAsync(100);
-    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#0f766e' } }));
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#0f766e' } }));
     await vi.advanceTimersByTimeAsync(100);
     await settle();
     playing();
@@ -248,7 +268,7 @@ describe('drafts to one player across a kit switch and a reload (re-check of #10
     attach(a.id);
     listening();
     await vi.waitFor(() => expect(posted).toEqual(['#2563eb']));
-    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#c8102e' } }));
     await vi.advanceTimersByTimeAsync(100);
     // The route stays mounted on kit B (Duplicate) while A's draft is still being applied.
     store.getState().attachKitPreview(spot.id, null);
@@ -266,7 +286,7 @@ describe('drafts to one player across a kit switch and a reload (re-check of #10
     attach(a.id);
     listening();
     await vi.waitFor(() => expect(posted).toEqual(['#2563eb']));
-    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#111111' } }));
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#111111' } }));
     await vi.advanceTimersByTimeAsync(100);
     listening();
     await vi.waitFor(() => expect(posted).toEqual(['#2563eb', '#111111']));
@@ -307,8 +327,8 @@ describe('kit actions run one at a time (review of #143)', () => {
     const { calls, called } = heldTools();
     const a = kit('bk_a', '#2563eb');
     const { store } = page([a]);
-    store.getState().editKit(a, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
-    const saving = store.getState().saveKit(ORG, a);
+    store.getState().editKit(ORG, a.id, (d) => ({ ...d, colors: { ...d.colors, primary: '#335577' } }));
+    const saving = store.getState().saveKit(a.id);
     await called(1);
     await store.getState().duplicateKit(ORG, a);
     store.getState().nameNewKit('Spring');
@@ -319,7 +339,7 @@ describe('kit actions run one at a time (review of #143)', () => {
 
     const duplicating = store.getState().duplicateKit(ORG, a);
     await called(2);
-    await store.getState().saveKit(ORG, a);
+    await store.getState().saveKit(a.id);
     await store.getState().createKit(ORG);
     expect(calls.map((c) => c.name)).toEqual(['update_brand_kit', 'create_brand_kit']);
     calls[1]!.answer(409, refused);
