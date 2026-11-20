@@ -167,18 +167,20 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
 
 test('axe reads the stage only once a fade between spots is over (#95)', async () => {
   test.setTimeout(90_000);
-  // A loop of its own: two 8 s clocks and a 2 s fade leave the stage still for most of each loop,
-  // longer than an analysis on CI. In a loop of 4 s clocks the next prepare and the fade leave less.
+  // A loop of its own: a 4 s clock, then a 4 s fade into a 60 s one. After the fade the stage is
+  // still for most of a minute, however slow the machine: no play, fade or prepare comes sooner.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key.endsWith('/clock') || t.key === 'clock').versions.at(-1).id;
   const spotIds: string[] = [];
-  for (const greeting of ['Doors open', 'Doors close'])
-    spotIds.push(
-      (await tool(page, 'create_spot', { name: greeting, kind: 'template', templateVersionId: clock, durationMs: 8000, data: { greeting } })).spot.id,
-    );
+  const loop: [greeting: string, durationMs: number][] = [
+    ['Doors open', 4000],
+    ['Doors close', 60_000],
+  ];
+  for (const [greeting, durationMs] of loop)
+    spotIds.push((await tool(page, 'create_spot', { name: greeting, kind: 'template', templateVersionId: clock, durationMs, data: { greeting } })).spot.id);
   const { playlist } = await tool(page, 'create_playlist', {
     name: 'Fade check',
-    transition: { type: 'fade', ms: 2000 },
+    transition: { type: 'fade', ms: 4000 },
     spotIds,
     idempotencyKey: `fade-check-${Date.now()}`,
   });
@@ -222,7 +224,7 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
       },
     });
   });
-  // Catch a fade as it starts: 1 s out, then 1 s in, longer than both analyses together.
+  // The fade into the 60 s clock, caught as it starts: axe must wait until it is over.
   await expect
     .poll(
       () =>
@@ -233,7 +235,7 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
               (a) => a.playState === 'running' && a.effect instanceof KeyframeEffect && a.effect.target instanceof Element && a.effect.target.matches('.slot'),
             ),
         ),
-      { intervals: [20], timeout: 20_000 },
+      { intervals: [20], timeout: 30_000 },
     )
     .toBe(true);
   await axe(page);
