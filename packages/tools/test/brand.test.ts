@@ -237,7 +237,16 @@ describe('brand at publish', () => {
       ['pending', 'is still being checked'],
       ['rejected', 'was rejected'],
     ] as const) {
-      const logo = await org.assets.insert({ kind: 'image', name: 'logo.png', sha256: sha('f'), type: 'image/png', size: 500, width: 400, height: 200, status });
+      const logo = await org.assets.insert({
+        kind: 'image',
+        name: 'logo.png',
+        sha256: sha('f'),
+        type: 'image/png',
+        size: 500,
+        width: 400,
+        height: 200,
+        status,
+      });
       expect(await refusal('create_brand_kit', { name: 'House', colors: COLORS, logoOnDarkAssetId: logo.id })).toMatchObject({
         ok: false,
         error: 'invalid_input',
