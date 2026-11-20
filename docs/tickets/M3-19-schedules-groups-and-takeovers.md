@@ -1,6 +1,6 @@
 # M3-19 Schedules, groups and takeovers
 
-Status: in progress (branch m3-19-playlist-assignment)  ·  Size: M  ·  Depends on: M3-18, M3-32
+Status: done (branch m3-19-playlist-assignment)  ·  Size: M  ·  Depends on: M3-18, M3-32
 
 ## Goal
 
@@ -32,4 +32,4 @@ Target playlists by time and by screen, group or org.
 - [x] The week view agrees with `resolvePlaylist` for every hour of a test week. *(`apps/cms/test/schedule.test.ts`: the week view (`weekOf`) asks `resolvePlaylist` itself; the test checks every hour of a test week against `resolvePlaylist` on a manifest it builds independently, and against a week written out by hand, plus a day the clocks change.)*
 - [x] A takeover published now plays on the Pi immediately and ends on time with the network down. *(On screen 0.1–0.4 s after the push; with the API stopped, it ended 16 ms after its `endsAt`, mid-spot. Same section. In CI: `packages/player/browser/takeover.test.ts`, on a fake clock.)*
 - [x] A test deletes a schedule entry, makes it again with the same id, and sends an edit with the old `ifVersion`: refused `conflict`, nothing written (#64). *(`packages/tools/test/schedule.test.ts`, "an entry made again with a deleted one’s id…".)*
-- [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.
+- [x] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated. *(Typecheck, lint, knip and every package's tests pass on the merge with master; the CMS e2e, 46 tests, passed in full on its own ports in each of the last runs. Docs: architecture, backend plan, tools and CMS READMEs, `spike/pi-perf/RESULTS.md`.)*
