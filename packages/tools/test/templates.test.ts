@@ -8,6 +8,7 @@ import { baseBlobKey, dispatch, orgBlobKey, platformRegistry, registry, type Cal
 import type { PlatformScope } from '@signforge/db';
 import type { TemplateRuntimeReport } from '@signforge/contract';
 import { fakeServices } from './services';
+import { memberOf } from './member';
 
 const encoder = new TextEncoder();
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -65,13 +66,7 @@ const call = async <T = any>(name: string, input: unknown, as: Caller = owner): 
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'tpl-org');
-  owner = {
-    org: scoped(env.DB, o.orgId),
-    role: 'owner',
-    actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
-    blobs: env.BLOBS,
-    services: { ...fakeServices, templateCheck: passing },
-  };
+  owner = memberOf(scoped(env.DB, o.orgId), 'owner', { templateCheck: passing });
   system = {
     org: platform(env.DB),
     role: 'owner',

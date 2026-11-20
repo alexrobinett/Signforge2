@@ -6,12 +6,11 @@ import { scoped, type OrgScope } from '@signforge/db';
 import { seedOrganization } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { dispatch, publishOrg, registry, type Caller } from '../src';
-import { fakeServices } from './services';
+import { dispatch, publishOrg, registry } from '../src';
+import { memberOf } from './member';
+import { sha256Hex } from '../src/dispatch';
 
-const hash = async (text: string) =>
-  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-const opts = { hash, now: new Date('2026-11-17T12:00:00.000Z') };
+const opts = { hash: sha256Hex, now: new Date('2026-11-17T12:00:00.000Z') };
 const sha = (c: string) => c.repeat(64);
 
 const COLORS = { primary: '#1d4ed8', accent: '#ffcc00', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' };
@@ -58,7 +57,7 @@ async function setup(orgId: string) {
   const main = await org.playlists.insert({ id: `${orgId}-main`, name: 'Main', transitionJson: JSON.stringify({ type: 'cut' }) });
   await org.playlists.setItems(main.id, [`${orgId}-hello`]);
   await org.commit((await org.settings.stage.set({ defaultPlaylistId: main.id })).writes);
-  const owner: Caller = { org, role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS, services: fakeServices };
+  const owner = memberOf(org, 'owner');
   const call = async <T = any>(name: string, input: unknown): Promise<T> => {
     const r = await dispatch(registry, name, input, owner);
     if (!r.ok) throw new Error(`${name}: ${r.error}: ${r.message}`);

@@ -4,7 +4,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller, type FeedUrlSealer, type PlaceFinder, type TableReader, ToolError } from '../src';
-import { fakeServices } from './services';
+import { memberOf } from './member';
 
 let o: SeededOrg;
 let owner: Caller;
@@ -21,13 +21,7 @@ const refusal = (name: string, input: unknown, caller = owner) => dispatch(regis
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'feeds-org');
-  owner = {
-    org: scoped(env.DB, o.orgId),
-    role: 'owner',
-    actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
-    blobs: env.BLOBS,
-    services: { ...fakeServices, feedUrls: sealer },
-  };
+  owner = memberOf(scoped(env.DB, o.orgId), 'owner', { feedUrls: sealer });
 });
 
 describe('data sources', () => {

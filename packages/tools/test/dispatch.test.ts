@@ -597,20 +597,18 @@ describe('screen notices', () => {
     };
     return { told, screens };
   };
+  /** Revoke the credential as an owner whose screens are reached through `screens`. */
+  const revoke = (credentialId: string, screens: ScreenNotifier) =>
+    dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId }, { ...caller('owner'), services: { notify: screens } });
 
   it('tell the screen about a revoked credential once the change is committed', async () => {
     const { told, screens } = recorder();
     const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '9'.repeat(64) });
-    const r = await dispatch(
-      registry,
-      'revoke_screen_credential',
-      { screenId: o.screen, credentialId: cred.id },
-      { ...caller('owner'), services: { notify: screens } },
-    );
+    const r = await revoke(cred.id, screens);
     expect(r.ok).toBe(true);
     expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }]);
     // Already revoked: nothing changes, but the screen is told again, in case the first notice never arrived.
-    await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), services: { notify: screens } });
+    await revoke(cred.id, screens);
     expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }, { revoked: { screenId: o.screen, credentialId: cred.id } }]);
   });
 
@@ -619,9 +617,7 @@ describe('screen notices', () => {
     const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '8'.repeat(64) });
     await env.DB.exec("CREATE TRIGGER audit_down BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
     try {
-      await expect(
-        dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), services: { notify: screens } }),
-      ).rejects.toThrow();
+      await expect(revoke(cred.id, screens)).rejects.toThrow();
     } finally {
       await env.DB.exec('DROP TRIGGER audit_down');
     }
@@ -636,12 +632,7 @@ describe('screen notices', () => {
       revoked: async () => Promise.reject(new Error('object unreachable')),
     };
     const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '7'.repeat(64) });
-    const r = await dispatch(
-      registry,
-      'revoke_screen_credential',
-      { screenId: o.screen, credentialId: cred.id },
-      { ...caller('owner'), services: { notify: screens } },
-    );
+    const r = await revoke(cred.id, screens);
     expect(r.ok).toBe(true);
   });
 });
