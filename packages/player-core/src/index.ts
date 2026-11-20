@@ -154,16 +154,38 @@ export function withinBounds(e: ScheduleEntry, now: Date, clockTrusted = true): 
   return !(e.startsAt !== undefined && ms < Date.parse(e.startsAt)) && !(e.endsAt !== undefined && ms >= Date.parse(e.endsAt));
 }
 
+/** The entry that plays at `now`: highest priority, then the more specific target, then the first by id. Undefined: the default playlist. */
+function winningEntry(manifest: ScreenManifest, now: Date, clockTrusted: boolean): ScheduleEntry | undefined {
+  const t = localTime(now, manifest.screen.timezone);
+  return manifest.schedule
+    .filter((e) => withinBounds(e, now, clockTrusted) && entryApplies(e, t) && manifest.playlists[e.playlist])
+    .sort((a, b) => b.priority - a.priority || LEVEL[b.target] - LEVEL[a.target] || a.id.localeCompare(b.id))[0];
+}
+
 /** Highest priority wins; on a tie the more specific target wins; otherwise the default playlist. */
 export function resolvePlaylist(manifest: ScreenManifest, now: Date, { clockTrusted = true } = {}): Playlist {
-  const t = localTime(now, manifest.screen.timezone);
-  const live = manifest.schedule
-    .filter((e) => withinBounds(e, now, clockTrusted) && entryApplies(e, t) && manifest.playlists[e.playlist])
-    .sort((a, b) => b.priority - a.priority || LEVEL[b.target] - LEVEL[a.target] || a.id.localeCompare(b.id));
-  const id = live[0]?.playlist ?? manifest.defaultPlaylist;
+  const id = winningEntry(manifest, now, clockTrusted)?.playlist ?? manifest.defaultPlaylist;
   const playlist = manifest.playlists[id];
   if (!playlist) throw new Error(`manifest ${manifest.id} has no playlist "${id}"`);
   return playlist;
+}
+
+/**
+ * The takeover playing at `now` (the winning entry, when it has an `endsAt`), or undefined. When it
+ * changes, the player ends the spot on screen at once instead of at its end (M3-19).
+ */
+export function activeTakeover(manifest: ScreenManifest, now: Date, { clockTrusted = true } = {}): string | undefined {
+  const e = winningEntry(manifest, now, clockTrusted);
+  return e?.endsAt !== undefined ? e.id : undefined;
+}
+
+/** The next instant after `now` at which a takeover starts or ends: when the player checks `activeTakeover` again, offline too. */
+export function nextTakeoverEdge(manifest: ScreenManifest, now: Date): Date | undefined {
+  const edges = manifest.schedule
+    .filter((e) => e.endsAt !== undefined)
+    .flatMap((e) => [e.startsAt, e.endsAt].flatMap((at) => (at === undefined ? [] : [Date.parse(at)])))
+    .filter((ms) => ms > now.getTime());
+  return edges.length ? new Date(Math.min(...edges)) : undefined;
 }
 
 // ----------------------------------------------------------------- sequencer
