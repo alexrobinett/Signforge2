@@ -110,7 +110,7 @@ const hoursOf = (s: Pick<Screen, 'displayHoursJson'>) => (s.displayHoursJson ? (
 type StateColumns = Pick<Screen, 'timezone' | 'displayHoursJson' | 'desiredManifestId' | 'reportedManifestId' | 'lastSeenAt'>;
 
 /** What a screen's state is worked out from, given its row and whether it is revoked. */
-const stateInput = (s: StateColumns, revoked: boolean, heartbeat: StateInput['heartbeat'], unreachableAfterMs: number): StateInput => ({
+export const stateInput = (s: StateColumns, revoked: boolean, heartbeat: StateInput['heartbeat'], unreachableAfterMs: number): StateInput => ({
   status: revoked ? 'revoked' : 'active',
   timezone: s.timezone,
   displayHours: hoursOf(s),

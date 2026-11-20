@@ -230,6 +230,15 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   const refused = await invitee.request.post('/api/tools/publish_manifest_to_screen', { data: { screenId: 'scr_none', manifestId: 'f'.repeat(64) } });
   expect(refused.status()).toBe(403);
   expect(await refused.json()).toMatchObject({ error: 'forbidden', message: 'Only owners publish in this organization' });
+  // Choosing what every screen plays goes with publishing (M3-18): no Publish and no Play on every screen.
+  const made = await invitee.request.post('/api/tools/create_playlist', { data: { name: 'Editor loop' } });
+  const { playlist } = await made.json();
+  expect((await invitee.request.post('/api/tools/set_default_playlist', { data: { playlistId: playlist.id } })).status()).toBe(403);
+  await invitee.goto(`/playlists/${playlist.id}`);
+  await hydrated(invitee);
+  await expect(invitee.getByRole('heading', { name: 'Editor loop', level: 1 })).toBeVisible();
+  await expect(invitee.getByRole('button', { name: 'Publish', exact: true })).toHaveCount(0);
+  await expect(invitee.getByRole('button', { name: 'Play on every screen' })).toHaveCount(0);
   await page.reload();
   await hydrated(page);
   await page.getByLabel('Editors can publish').check();

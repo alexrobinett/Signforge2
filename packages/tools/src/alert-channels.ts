@@ -32,6 +32,15 @@ interface AlertScreen {
 export type AlertEvent = { id: string; occurredAt: string; org: { id: string; name: string } } & (
   | { type: 'screen.offline'; data: { screen: AlertScreen; lastSeenAt: string } }
   | { type: 'screen.back'; data: { screen: AlertScreen; lastSeenAt: string; offlineSince: string } }
+  | {
+      type: 'publish.finished';
+      /**
+       * `url` is the publish's rollout in the CMS; `publishedAt` when it was made. Of the `screens`
+       * it switched, `playing` say they play it and `replaced` a later publish switched before it
+       * got there; any other was revoked. Sent only when at least one played it.
+       */
+      data: { publish: { id: string; revision: number; url: string | null; publishedAt: string }; screens: number; playing: number; replaced: number };
+    }
   | { type: 'test'; data: { message: string } }
 );
 

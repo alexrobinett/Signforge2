@@ -38,3 +38,6 @@ export function useOrgId(): string {
 
 /** Editors and owners manage screens; viewers read. */
 export const useCanManage = () => useRole() !== 'viewer';
+
+/** Whether the member may publish here: the tools the shell lists for them include it (an editor loses it when only owners publish). */
+export const useCanPublish = () => app.useLoaderData().tools.some((t) => t.name === 'publish');

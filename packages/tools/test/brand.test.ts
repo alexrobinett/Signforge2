@@ -67,7 +67,7 @@ async function setup(orgId: string) {
   return { org, lobby, hall, front, back, call, refusal, spot: `${orgId}-hello` };
 }
 
-/** Publish as M3-18's publish tool will: commit the writes and make each manifest desired, in one batch. */
+/** Publish as the publish tool does: commit the writes and make each manifest desired, in one batch. */
 async function publish(org: OrgScope) {
   const result = await publishOrg(org, opts);
   await org.commit([

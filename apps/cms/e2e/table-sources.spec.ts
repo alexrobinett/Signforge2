@@ -179,7 +179,7 @@ test('a menu board fed by a CSV link: read it, map its columns, see its rows; th
   await expect(form.getByRole('combobox', { name: 'Table' })).toBeVisible();
 });
 
-test("the editor's fields are disabled in the server's HTML: a choice made before its code has hydrated would be lost", async () => {
+test("the editor's fields and Publish are disabled in the server's HTML: a choice made before its code has hydrated would be lost", async () => {
   // The spot editor is a route chunk that hydrates after the page (body[data-hydrated]); a select changed in
   // between was set back by React to its value, and the choice dropped (CI run 44652707436).
   const spotId = await newSpot(page, 'Menu Board', 'Server menu');
@@ -187,9 +187,16 @@ test("the editor's fields are disabled in the server's HTML: a choice made befor
   const fieldset = html.match(/<form[^>]*aria-label="Spot fields"[^>]*>\s*<fieldset([^>]*)>/)?.[1];
   expect(fieldset).toBeDefined();
   expect(fieldset).toMatch(/\bdisabled=""/);
-  // Loaded from the server, they are enabled once the editor has hydrated.
+  // The header's Save draft and Publish (#127) too: a click there before the editor hydrates would go nowhere.
+  for (const name of ['Save draft', 'Publish']) {
+    const button = html.match(new RegExp(`<button([^>]*)>${name}</button>`))?.[1];
+    expect(button, name).toBeDefined();
+    expect(button, name).toMatch(/\bdisabled=""/);
+  }
+  // Loaded from the server, they are enabled once the editor has hydrated (Save draft waits for a change).
   await page.reload();
   await expect(page.getByRole('form', { name: 'Spot fields' }).getByLabel('Name', { exact: true }).first()).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
 });
 
 test('the table source on a phone: no sideways scroll, light and dark', async () => {

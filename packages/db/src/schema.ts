@@ -752,10 +752,23 @@ export const publishes = sqliteTable(
     publishAt: integer('publish_at'),
     actorKind: text('actor_kind', { enum: ['user', 'agent', 'device', 'system'] }).notNull(),
     actorId: text('actor_id').notNull(),
+    /** The org's publish revision this publish moved it to (`org_settings.publish_revision`): the "v15" people see. */
+    revision: integer('revision').notNull(),
+    /** A roll back: the publish whose screens it put back. Null for a publish of content. */
+    restoresId: text('restores_id'),
     createdAt: created(),
+    /** When every screen it switched reported playing its manifest, moved on to a later one, or was revoked. */
     finishedAt: integer('finished_at'),
+    /** How many of its screens the check saw playing it then: 0 when replaced before any check saw one report it. Null until finished. */
+    reached: integer('reached'),
   },
-  (t) => [uniqueIndex('publishes_org_id_uq').on(t.orgId, t.id), index('publishes_org_created_idx').on(t.orgId, t.createdAt)],
+  (t) => [
+    uniqueIndex('publishes_org_id_uq').on(t.orgId, t.id),
+    index('publishes_org_created_idx').on(t.orgId, t.createdAt),
+    uniqueIndex('publishes_org_revision_uq').on(t.orgId, t.revision),
+    // The five-minute check reads the rollouts not yet finished, in every org (findFinishedRollouts).
+    index('publishes_unfinished_idx').on(t.orgId).where(sql`${t.finishedAt} IS NULL`),
+  ],
 );
 
 /** Which manifest each screen got from a publish. Rollout is a join against `screens.reported_manifest_id`. */

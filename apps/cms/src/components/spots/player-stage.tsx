@@ -183,7 +183,7 @@ export function PlayerStage({
         <svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true">
           <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2.2 1.6" />
         </svg>
-        Draft. Not on any screen.
+        The draft, as a screen would show it. Screens play what is published.
       </p>
       {/* The room is sized by the page, never by the frame in it, so Fit can measure it. */}
       <div ref={roomRef} className={cn('relative min-h-[420px] flex-1', scale === 'actual' ? 'overflow-auto' : 'overflow-hidden')}>

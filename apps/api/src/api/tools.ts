@@ -19,6 +19,7 @@ import { deliverAlert } from '../deliveries';
 import { emailSenderFor, type EmailSender } from '../email';
 import { openMeteoPlaces } from '../data/places';
 import { tableReader } from '../data/tables';
+import { publishLock } from '../publish';
 import { templateCheckAllowed, templateChecker } from '../template-check';
 import { uploadSigner } from '../uploads';
 import type { ApiEnv } from './index';
@@ -71,6 +72,7 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     connectors: connectorsFor(c.env, connectors ?? connectorDeps(c.env), new URL(CALLBACK_PATH, c.req.url).href),
     templateCheck: templateChecker(c.env),
     screens: screenNotifier(c.env),
+    publishLock: publishLock(c.env, c.var.org.orgId),
     // A template check counts against the org, whose one container it uses. The others count against the
     // member and against the address, so many accounts on one address share a limit.
     rateLimit: async (bucket) => {
