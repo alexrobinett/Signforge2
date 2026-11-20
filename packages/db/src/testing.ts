@@ -158,7 +158,11 @@ export const SEED_HOUR = Date.UTC(2026, 10, 17, 13);
 
 /** An `organization` row, as Better Auth would write it. Tenant rows reference it. */
 export async function seedOrganization(db: D1Database, orgId: string) {
-  await drizzle(db).insert(schema.organization).values({ id: orgId, name: orgId, slug: orgId, createdAt: new Date().toISOString() }).onConflictDoNothing().run();
+  await drizzle(db)
+    .insert(schema.organization)
+    .values({ id: orgId, name: orgId, slug: orgId, createdAt: new Date().toISOString() })
+    .onConflictDoNothing()
+    .run();
 }
 
 /**
