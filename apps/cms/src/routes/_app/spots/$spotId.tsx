@@ -10,14 +10,13 @@ import { safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, notFound } from '@tanstack/react-router';
 import { AssetPicker } from '~/components/assets/asset-picker';
-import { EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { FieldForm } from '~/components/spots/field-form';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
-import { useHydrated } from '~/lib/hydrated';
 import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
 import { boundSource, typedFields } from '~/lib/live-data';
 import { draftOf, publishWord, seconds, versionsById, type SpotDraft, type SpotView } from '~/lib/spots';
@@ -58,10 +57,6 @@ function SpotEditor() {
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
   const canPublish = useCanPublish();
-  // This subtree hydrates after the page: until it has, its fields and Publish are the server's
-  // HTML, and a choice made there is lost when React takes them over (a select set back to its
-  // value), a click on Publish with it.
-  const hydrated = useHydrated();
   const spot: SpotView | null = useSuspenseQuery(spotQuery(orgId, spotId)).data;
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
@@ -102,7 +97,7 @@ function SpotEditor() {
         about={`${what} · ${saveWord(status, savedAt)} · ${publishWord(spot)}`}
       >
         {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save()} />}
-        {canPublish && <PublishButton pending={publishing} disabled={stale || !hydrated} onPublish={() => void publish(orgId, spotId)} />}
+        {canPublish && <PublishButton pending={publishing} disabled={stale} onPublish={() => void publish(orgId, spotId)} />}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload()} />
       <div className="flex flex-1 flex-wrap items-stretch">
@@ -111,7 +106,7 @@ function SpotEditor() {
           onSubmit={(e) => e.preventDefault()}
           className="flex max-w-full flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
         >
-          <fieldset disabled={!canManage || !hydrated} className="contents">
+          <EditorFields disabled={!canManage}>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="spot-name" className="font-medium">
                 Name
@@ -220,7 +215,7 @@ function SpotEditor() {
                   : 'Seconds on screen each time the playlist reaches it.'}
               </p>
             </EditorSection>
-          </fieldset>
+          </EditorFields>
         </form>
         <div className="flex min-w-0 flex-[999_1_560px] flex-col">
           <PlayerStage

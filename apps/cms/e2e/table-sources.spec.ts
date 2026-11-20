@@ -4,7 +4,7 @@
 // stage after the next poll. How a screen's sync carries it is apps/api/test/table-sources.test.ts.
 import { writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, d1, hydrated, newSpot, orgOf, shots, signInAs, stageShows, tool } from './helpers';
+import { axe, createOrg, d1, disabledOnServer, hydrated, newSpot, orgOf, shots, signInAs, stageShows, tool } from './helpers';
 import { API_PORT, FEEDS_DIR } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit. */
@@ -183,16 +183,9 @@ test("the editor's fields and Publish are disabled in the server's HTML: a choic
   // The spot editor is a route chunk that hydrates after the page (body[data-hydrated]); a select changed in
   // between was set back by React to its value, and the choice dropped (CI run 44652707436).
   const spotId = await newSpot(page, 'Menu Board', 'Server menu');
-  const html = await (await page.request.get(`/spots/${spotId}`)).text();
-  const fieldset = html.match(/<form[^>]*aria-label="Spot fields"[^>]*>\s*<fieldset([^>]*)>/)?.[1];
-  expect(fieldset).toBeDefined();
-  expect(fieldset).toMatch(/\bdisabled=""/);
   // The header's Save draft and Publish (#127) too: a click there before the editor hydrates would go nowhere.
-  for (const name of ['Save draft', 'Publish']) {
-    const button = html.match(new RegExp(`<button([^>]*)>${name}</button>`))?.[1];
-    expect(button, name).toBeDefined();
-    expect(button, name).toMatch(/\bdisabled=""/);
-  }
+  const names = ['Duration', 'Save draft', 'Publish'];
+  expect(await disabledOnServer(page, `/spots/${spotId}`, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   // Loaded from the server, they are enabled once the editor has hydrated (Save draft waits for a change).
   await page.reload();
   await expect(page.getByRole('form', { name: 'Spot fields' }).getByLabel('Name', { exact: true }).first()).toBeEnabled();
