@@ -21,6 +21,7 @@ import {
   type PreviewPlayerMessage,
   type ScreenManifest,
 } from '@signforge/contract';
+import { Sha256 } from '@signforge/player-core/sha256';
 import { usePostedData } from './data';
 import { readFilesFrom } from './source';
 
@@ -72,7 +73,12 @@ export function startPreview(hooks: PreviewHooks): Preview {
     const out = new Map<string, Blob>();
     await Promise.all(
       [...requiredFiles(msg.manifest)].map(async (sha) => {
-        let blob = msg.files?.[sha] ?? files.get(sha) ?? previous.get(sha);
+        const posted = msg.files?.[sha];
+        // A file is used under its hash, and the player keeps work per hash (a bundle's frames): posted
+        // bytes must be those of the hash they come under. Our own SHA-256: WebCrypto needs a secure context.
+        if (posted && new Sha256().update(new Uint8Array(await posted.arrayBuffer())).hex() !== sha)
+          throw new Error(`file ${sha.slice(0, 12)} is not the file of its hash`);
+        let blob = posted ?? files.get(sha) ?? previous.get(sha);
         if (!blob) {
           const res = await fetch(`${CMS_ORIGIN}${sessionBlobPath(sha)}`, { credentials: 'include', signal: AbortSignal.timeout(20_000) });
           if (!res.ok) throw new Error(`file ${sha.slice(0, 12)}: ${res.status}`);
