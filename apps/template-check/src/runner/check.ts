@@ -263,7 +263,7 @@ export async function checkTemplate(browser: Browser, manifest: TemplateManifest
 
 /** A template that makes one request the policy blocks, with a quote in its URL. Protocol 1, no SDK. */
 const CANARY_URL = "https://canary.invalid/a'b";
-const CANARY_HTML = `<!doctype html><script>
+const CANARY_HTML = `<!doctype html><script>"use strict";
 addEventListener('message', (e) => {
   if (e.source !== parent || e.data?.type !== 'init') return;
   fetch(${JSON.stringify(CANARY_URL)}).catch(() => {});
