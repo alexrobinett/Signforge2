@@ -13,9 +13,10 @@ vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/server/playlists.functions', () => ({ getPlaylists: vi.fn(), getPlaylist: vi.fn() }));
 vi.mock('~/server/spots.functions', () => ({ getBrandKits: vi.fn(), getSpot: vi.fn(), getSpotPreview: vi.fn(), getSpots: vi.fn(), getTemplates: vi.fn() }));
 vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
-const toasts: { message: string; undo: () => void }[] = [];
+const toasts: { message: string; undo: () => void; duration?: number; closeButton?: boolean }[] = [];
 vi.mock('sonner', () => ({
-  toast: (message: string, opts: { action: { onClick: () => void } }) => toasts.push({ message, undo: opts.action.onClick }),
+  toast: (message: string, opts: { action: { onClick: () => void }; duration?: number; closeButton?: boolean }) =>
+    toasts.push({ message, undo: opts.action.onClick, duration: opts.duration, closeButton: opts.closeButton }),
 }));
 
 const ORG = 'org_1';
@@ -168,6 +169,8 @@ describe('Undo of a removed spot (review 2 and 3)', () => {
     const a = playlist('pls_a', 1, ['opening', 'lunch', 'closing']);
     open(a);
     store.getState().removeSpotFromPlaylist(ORG, a, 1, 'Lunch');
+    // Its Undo is kept until used or closed: no timer races a keyboard reaching it.
+    expect(toasts[0]).toMatchObject({ message: 'Removed Lunch', duration: Infinity, closeButton: true });
     store.getState().addSpotToPlaylist(ORG, a, 'extra');
     toasts[0]!.undo();
     expect(editor().draft?.spotIds).toEqual(['opening', 'lunch', 'closing', 'extra']);

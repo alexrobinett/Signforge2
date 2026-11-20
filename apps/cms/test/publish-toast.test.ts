@@ -1,7 +1,7 @@
 // The publish toast (M3-19 review): each publish's toast replaces the last one, under one id, and
 // sonner merges what it is given into the toast it replaces. So a takeover's toast, which offers no
 // Undo, must still clear the Undo of the publish before it, whenever it comes. Read from sonner's
-// own store, two publishes in a row, nothing on a timer.
+// own store, two publishes in a row, nothing on a timer. One with Undo stays until used or closed.
 import { QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -85,11 +85,15 @@ describe('the publish toast', () => {
     await s.publishSchedule(ORG);
     expect(publishToast()?.title).toBe('Published v2 to 1 screen');
     expect(undoOf()).toMatchObject({ label: 'Undo' });
+    // Its Undo is kept until used or closed: no timer races a keyboard reaching it.
+    expect(publishToast()).toMatchObject({ duration: Infinity, closeButton: true });
 
     await s.endTakeover(ORG, 'sch_flash');
     expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('end_takeover', { scheduleEntryId: 'sch_flash' });
     expect(publishToast()?.title).toBe('Published v3 to 1 screen');
     expect(undoOf()).toBeUndefined();
+    // Nothing to keep: it goes on its timer again, with no close button left from the one it replaced.
+    expect(publishToast()).toMatchObject({ duration: 10_000, closeButton: false });
   });
 
   it('offers no Undo for a publish that starts a takeover, right after one that did', async () => {
