@@ -47,13 +47,7 @@ export function DropdownMenuRadioItem({ className, children, ...props }: Compone
 }
 
 export function DropdownMenuLabel({ className, ...props }: ComponentProps<typeof DropdownMenuPrimitive.Label>) {
-  return (
-    <DropdownMenuPrimitive.Label
-      data-slot="dropdown-menu-label"
-      className={cn('px-2 py-1.5 text-xs font-medium text-muted-foreground', className)}
-      {...props}
-    />
-  );
+  return <DropdownMenuPrimitive.Label data-slot="dropdown-menu-label" className={cn('px-2 py-1.5 text-xs font-medium text-muted-foreground', className)} {...props} />;
 }
 
 export function DropdownMenuSeparator({ className, ...props }: ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
@@ -74,10 +68,7 @@ export function DropdownMenuSubContent({ className, ...props }: ComponentProps<t
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.SubContent
         data-slot="dropdown-menu-sub-content"
-        className={cn(
-          'z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0',
-          className,
-        )}
+        className={cn('z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0', className)}
         {...props}
       />
     </DropdownMenuPrimitive.Portal>
