@@ -28,6 +28,7 @@ const as = (actor: Caller['actor']): Caller => ({
   role: 'editor',
   actor,
   blobs: env.BLOBS,
+  services: {},
   agentLimiter: agentLimiter(env),
 });
 const agent = (grantId: string) => as({ kind: 'agent', id: grantId, clientId: 'agent-app' });

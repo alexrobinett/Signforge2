@@ -5,6 +5,7 @@ import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { dispatch, registry, type Caller, type ScreenHeartbeat } from '../src';
+import { fakeServices } from './services';
 
 let o: SeededOrg;
 
@@ -46,6 +47,7 @@ const callerOn = (db: D1Database): Caller => ({
   role: 'viewer',
   actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
   blobs: noBlobs,
+  services: fakeServices,
 });
 
 const call = async <T = any>(name: string, input: unknown, caller = callerOn(env.DB)): Promise<T> => {

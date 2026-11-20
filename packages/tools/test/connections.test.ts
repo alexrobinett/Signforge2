@@ -7,6 +7,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller, type Connectors, ToolError } from '../src';
+import { fakeServices } from './services';
 
 let o: SeededOrg;
 let other: SeededOrg;
@@ -40,8 +41,7 @@ const callerOf = (org: SeededOrg, role: Caller['role'], userId: string): Caller 
   role,
   actor: { kind: 'user', id: userId, clientId: 'cms' },
   blobs: env.BLOBS,
-  connectors,
-  feedUrls: { seal: async (source, value) => `sealed:${source.orgId}/${source.id}:${value}` },
+  services: { ...fakeServices, connectors, feedUrls: { seal: async (source, value) => `sealed:${source.orgId}/${source.id}:${value}` } },
 });
 
 const call = async <T = any>(name: string, input: unknown, caller = owner): Promise<T> => {

@@ -164,6 +164,7 @@ const createAssetUpload = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
+  needs: ['uploads'],
   input: z
     .object({
       name: name('asset'),
@@ -198,8 +199,7 @@ const createAssetUpload = defineTool({
     },
   },
   target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
-  handler: async ({ org, blobs, uploads, input, write }) => {
-    if (!uploads) throw new Error('direct uploads are not configured on this server (R2 S3 credentials)');
+  handler: async ({ org, blobs, input, write, services: { uploads } }) => {
     const { landscape, portrait } = input.renditions;
     // The asset and both renditions are written in one batch: never an asset without its renditions.
     const asset = write(
@@ -268,11 +268,11 @@ const renewAssetUpload = defineTool({
   minRole: 'editor',
   // It writes nothing, so nothing is audited, but it hands out the right to upload.
   mutates: true,
+  needs: ['uploads'],
   input: z.object({ assetId: id('asset') }),
   output: uploadOutput,
   example: { assetId: 'ast_example' },
-  handler: async ({ org, blobs, uploads, input }) => {
-    if (!uploads) throw new Error('direct uploads are not configured on this server (R2 S3 credentials)');
+  handler: async ({ org, blobs, input, services: { uploads } }) => {
     const asset = await requireAsset(org, input.assetId);
     if (asset.kind === 'video') throw new ToolError('conflict', `asset ${asset.id} is a video; it has no image renditions to renew`);
     if (asset.status !== 'pending') throw new ToolError('conflict', `asset ${asset.id} is ${asset.status}, not waiting for its upload`);

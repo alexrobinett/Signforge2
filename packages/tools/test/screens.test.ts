@@ -5,6 +5,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, manifestKey, registry, type Caller, type ScreenHeartbeat } from '../src';
+import { memberOf } from './member';
 
 let o: SeededOrg;
 let owner: Caller;
@@ -21,18 +22,14 @@ const IMAGE = 'd'.repeat(64);
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'screens-org');
-  owner = {
-    org: scoped(env.DB, o.orgId),
-    role: 'owner',
-    actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
-    blobs: env.BLOBS,
-    screens: {
+  owner = memberOf(scoped(env.DB, o.orgId), 'owner', {
+    notify: {
       manifest: async () => {},
       manifests: async () => {},
       revoked: async () => {},
       command: async (screenId, command) => void sent.push({ screenId, command }),
     },
-  };
+  });
   const org = scoped(env.DB, o.orgId);
   await env.BLOBS.put(
     manifestKey(o.orgId, o.screen, MANIFEST),

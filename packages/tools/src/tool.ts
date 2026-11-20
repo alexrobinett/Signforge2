@@ -105,14 +105,11 @@ export interface AlertSecretSealer {
 }
 
 /**
- * Sends a queued alert delivery now rather than at the next delivery run (a test send, a retry).
- * Implemented by the API, which sends it after the response; absent in tests and scripts, where it
- * waits for the run.
+ * Sends a queued alert delivery, in the caller's org, now rather than at the next delivery run (a
+ * test send, a retry). Implemented by the API, which sends it after the response; absent in tests
+ * and scripts, where it waits for the run.
  */
-export interface AlertDeliverer {
-  /** The delivery, in the caller's org. */
-  now(deliveryId: string): void;
-}
+export type AlertDeliverer = (deliveryId: string) => void;
 
 /**
  * Runs the runtime check on a built template: a headless render in a container with no network
@@ -150,8 +147,60 @@ export interface Connectors {
   revoke(provider: string, connection: { orgId: string; id: string }, credentialsSealed: string): Promise<void>;
 }
 
+/**
+ * Tool services (GLOSSARY.md): what a tool may use beyond its input and the org's data. A caller
+ * carries the ones it can provide; a tool names those it uses in `needs`, and dispatch refuses a
+ * call that lacks one before the handler runs. The API's constructor (apps/api/src/tool-services.ts)
+ * provides every one; a test passes fakes (test/services.ts).
+ *
+ * A new service is a field here, its words below, the API's constructor, its fake, and `needs` on
+ * the tools that use it; the compiler asks for each but the last.
+ */
+export interface ToolServices {
+  /** Signs direct uploads to `blobs` (./upload.ts). The API has none where uploads are not configured. */
+  uploads?: UploadSigner;
+  /** Seals feed URLs and provider resources (./data-sources.ts). */
+  feedUrls?: FeedUrlSealer;
+  /** Seals alert channels' URLs and secrets (./alert-channels.ts). */
+  alertSecrets?: AlertSecretSealer;
+  /** Looks places up (`find_places`). */
+  places?: PlaceFinder;
+  /** Reads a table at a URL now (`read_table`). */
+  tables?: TableReader;
+  /** The runtime check of an org's template (./templates.ts). */
+  templateCheck?: TemplateChecker;
+  /** Providers' OAuth (./connections.ts). */
+  connectors?: Connectors;
+  /** Counts attempts against the caller's rate limits: a tool that guards a guessable secret or a third party's allowance. */
+  rateLimit?: RateLimiter;
+  /**
+   * Reaches screens' sockets. Dispatch's own, like `deliverNow`: it sends what a handler queued with
+   * `ctx.notify` once the writes are committed. Without it, screens learn of a change at their next sync.
+   */
+  notify?: ScreenNotifier;
+  /** Sends what a handler queued with `ctx.deliverNow` once the writes are committed. Without it, they go at the next delivery run. */
+  deliverNow?: AlertDeliverer;
+}
+
+/** The services dispatch uses itself, after the commit. A tool queues for them on its context and never needs one. */
+type AfterCommit = 'notify' | 'deliverNow';
+/** A service a tool can need. */
+export type ServiceName = Exclude<keyof ToolServices, AfterCommit>;
+
+/** Each service in the refusal of a call that lacks it: `find_places needs a rate limit, and this caller has none`. */
+export const SERVICE_WORDS: Record<ServiceName, string> = {
+  uploads: 'direct uploads (R2 S3 credentials)',
+  feedUrls: 'a feed URL sealer',
+  alertSecrets: 'an alert secret sealer',
+  places: 'a place finder',
+  tables: 'a table reader',
+  templateCheck: 'the runtime check',
+  connectors: 'the connectors',
+  rateLimit: 'a rate limit',
+};
+
 /** What a handler gets. `org` is the only way it reaches data: an org's scope, or the platform's for a platform tool. */
-export interface ToolContext<I, D extends DataScope = OrgScope> {
+export interface ToolContext<I, D extends DataScope = OrgScope, N extends ServiceName = never> {
   org: D;
   actor: Actor;
   /** The caller's role in the org, for what a read may show it (an invitee's email, to owners only). */
@@ -161,20 +210,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   input: I;
   /** The R2 bucket holding blobs and manifests (keys in ./r2.ts). */
   blobs: R2Bucket;
-  /** Signs direct uploads to that bucket (./upload.ts). Undefined where uploads are not configured. */
-  uploads?: UploadSigner;
-  /** Seals feed URLs and provider resources (./data-sources.ts). Undefined where no data source tool runs. */
-  feedUrls?: FeedUrlSealer;
-  /** Seals alert channels' URLs and secrets (./alert-channels.ts). Undefined where no channel tool runs. */
-  alertSecrets?: AlertSecretSealer;
-  /** Looks places up (`find_places`). Undefined where no geocoder is configured. */
-  places?: PlaceFinder;
-  /** Reads a table at a URL now (`read_table`). Undefined where nothing fetches. */
-  tables?: TableReader;
-  /** The runtime check (./templates.ts). Registering an org template refuses to run without it. */
-  templateCheck?: TemplateChecker;
-  /** Providers' OAuth (./connections.ts). Undefined where no connection tool runs. */
-  connectors?: Connectors;
+  /** The caller's services, as it passed them: the tool sees those it `needs`, each there. */
+  services: Pick<Required<ToolServices>, N>;
   /**
    * Add a staged change (a repository's `stage.*`) to this call's writes, and get its row back.
    * A tool never writes to D1 itself: the dispatcher runs the writes and the audit row in one
@@ -182,19 +219,18 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
    */
   write: <T>(change: Staged<T>) => T;
   /**
-   * Tell screens about this call's change. Queued: the dispatcher sends the notices only once the
-   * writes are committed, so a screen never hears of a change that was rolled back.
+   * Tell screens about this call's change. Queued: the dispatcher sends the notices, through the
+   * caller's `notify`, only once the writes are committed, so a screen never hears of a change that
+   * was rolled back.
    */
   notify: (send: (screens: ScreenNotifier) => Promise<void>) => void;
-  /** Send a delivery this call queues as soon as its writes are committed (`AlertDeliverer`). */
+  /** Send a delivery this call queues as soon as its writes are committed, through the caller's `deliverNow`. */
   deliverNow: (deliveryId: string) => void;
   /**
    * Undo, if this call does not succeed, something the handler did outside the batch (a grant a
    * provider issued). Run after the refusal or failure, its own failure logged: best effort.
    */
   onDiscard: (undo: () => Promise<void>) => void;
-  /** The caller's rate limits. A tool that guards a guessable secret refuses without it. */
-  rateLimit?: RateLimiter;
 }
 
 export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable';
@@ -267,7 +303,7 @@ export class ToolError extends Error {
 
 export const notFound = (what: string, id: string) => new ToolError('not_found', `${what} ${id} not found`);
 
-export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.ZodType, D extends DataScope = OrgScope> {
+export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.ZodType, D extends DataScope = OrgScope, N extends ServiceName = never> {
   /** Stable: the CMS, agents and the audit log refer to it. snake_case, as MCP clients expect. */
   name: string;
   /** For an agent choosing a tool: what it does, when to use it, what it returns. */
@@ -292,6 +328,8 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * fresh read (./dispatch.ts, step 6). Its handler must be safe to run again.
    */
   publishes?: boolean;
+  /** The services the handler uses. Dispatch refuses a call whose caller lacks one, with `forbidden`, before the handler runs. */
+  needs?: readonly N[];
   input: S;
   /**
    * What the tool returns. Shown to agents as JSON Schema, and checked against every output in
@@ -306,7 +344,7 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
    * takes the output as possibly undefined and returns undefined for no target.
    */
   target?: (input: z.output<S>, output: NoInfer<z.output<R>>) => { kind: string; id: string } | undefined;
-  handler: (ctx: ToolContext<z.output<S>, D>) => Promise<NoInfer<z.output<R>>>;
+  handler: (ctx: ToolContext<z.output<S>, D, N>) => Promise<NoInfer<z.output<R>>>;
   /**
    * For a tool whose writes carry a guard (a statement that fails the batch when what the handler
    * checked changed before the commit): called when the commit fails, it says whether the guard
@@ -316,10 +354,13 @@ export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.Z
 }
 
 /** Declare a tool, keeping its input and output types. */
-export const defineTool = <S extends z.ZodType, R extends z.ZodType>(tool: Tool<S, R>): Tool<S, R> => tool;
+export const defineTool = <S extends z.ZodType, R extends z.ZodType, N extends ServiceName = never>(tool: Tool<S, R, OrgScope, N>): Tool<S, R, OrgScope, N> =>
+  tool;
 
 /** Declare a tool that works on an org's scope and on the platform's alike (templates). */
-export const defineSharedTool = <S extends z.ZodType, R extends z.ZodType>(tool: Tool<S, R, DataScope>): Tool<S, R, DataScope> => tool;
+export const defineSharedTool = <S extends z.ZodType, R extends z.ZodType, N extends ServiceName = never>(
+  tool: Tool<S, R, DataScope, N>,
+): Tool<S, R, DataScope, N> => tool;
 
 /** Any registered tool. */
-export type AnyTool<D extends DataScope = OrgScope> = Tool<z.ZodType, any, D>;
+export type AnyTool<D extends DataScope = OrgScope> = Tool<z.ZodType, any, D, ServiceName>;

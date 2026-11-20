@@ -41,7 +41,7 @@ export default {
         role: 'owner',
         actor: { kind: 'user', id: 'user-e2e', clientId: 'cms' },
         blobs: env.BLOBS,
-        uploads: r2Presigner({ endpoint: `${url.origin}/cdn-cgi/local/r2/s3`, ...s3 }),
+        services: { uploads: r2Presigner({ endpoint: `${url.origin}/cdn-cgi/local/r2/s3`, ...s3 }) },
       };
       const result = await dispatch(registry, tool[1]!, await request.json(), caller);
       return Response.json(result, { status: result.ok ? 200 : result.error === 'conflict' ? 409 : 400 });

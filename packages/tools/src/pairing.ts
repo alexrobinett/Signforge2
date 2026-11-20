@@ -29,6 +29,7 @@ const claimScreen = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
+  needs: ['rateLimit'],
   input: z.object({
     code,
     name: name('screen'),
@@ -41,8 +42,7 @@ const claimScreen = defineTool({
   output: z.object({ screen: screenOutput }),
   example: { code: 'ABC234', name: 'Lobby', timezone: 'Europe/London', orientation: 'landscape' },
   target: (_input, output) => ({ kind: 'screen', id: output.screen.id }),
-  handler: async ({ org, input, write, rateLimit, blobs }) => {
-    if (!rateLimit) throw new ToolError('forbidden', 'claim_screen needs a rate limit, and this caller has none');
+  handler: async ({ org, input, write, blobs, services: { rateLimit } }) => {
     // Counted before the code is looked at, so right and wrong guesses cost the same.
     if (!(await rateLimit('pairing_claim'))) throw new ToolError('rate_limited', 'too many pairing claims; wait a minute and try again');
     const now = Date.now();

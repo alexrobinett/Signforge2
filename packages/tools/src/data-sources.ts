@@ -13,7 +13,7 @@ import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
 import { id, idempotencyKey, ifVersion, name, version } from './fields';
 import { nextOutput, page, pageInput } from './paging';
-import { defineTool, type FeedUrlSealer, notFound, type PlaceFinder, type TableReader, ToolError } from './tool';
+import { defineTool, notFound, ToolError } from './tool';
 
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
 const MAX_DATA_SOURCES = 10;
@@ -109,21 +109,6 @@ async function requireSource(org: OrgScope, dataSourceId: string) {
   return row;
 }
 
-function sealerOf(feedUrls: FeedUrlSealer | undefined): FeedUrlSealer {
-  if (!feedUrls) throw new Error('the data source tools need a feed URL sealer');
-  return feedUrls;
-}
-
-function finderOf(places: PlaceFinder | undefined): PlaceFinder {
-  if (!places) throw new Error('find_places needs a place finder');
-  return places;
-}
-
-function readerOf(tables: TableReader | undefined): TableReader {
-  if (!tables) throw new Error('read_table needs a table reader');
-  return tables;
-}
-
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
 /** The source ids a spot's stored bindings name. */
@@ -214,6 +199,7 @@ const createDataSource = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
+  needs: ['feedUrls'],
   input: z
     .object({
       id: id('data source').optional().describe('The id spots bind with, such as weather; made for you if absent'),
@@ -237,13 +223,13 @@ const createDataSource = defineTool({
     feedUrl: 'https://api.open-meteo.com/v1/forecast?latitude=33.75&longitude=-84.39&current=temperature_2m',
   },
   target: (_input, output) => ({ kind: 'data_source', id: output.dataSource.id }),
-  handler: async ({ org, input, write, feedUrls }) => {
+  handler: async ({ org, input, write, services: { feedUrls } }) => {
     const existing = await org.dataSources.list();
     if (existing.length >= MAX_DATA_SOURCES) throw new ToolError('conflict', `an organization has at most ${MAX_DATA_SOURCES} data sources`);
     if (input.id && existing.some((d) => d.id === input.id)) throw new ToolError('conflict', `data source ${input.id} exists`);
     // The URL (or resource) is sealed to the row's id, so the id is chosen first.
     const sourceId = input.id ?? newId('src');
-    const urlEncrypted = await sealerOf(feedUrls).seal({ orgId: org.orgId, id: sourceId }, locatorOf(input));
+    const urlEncrypted = await feedUrls.seal({ orgId: org.orgId, id: sourceId }, locatorOf(input));
     const row = write(
       await org.dataSources.stage.insert({
         id: sourceId,
@@ -267,6 +253,7 @@ const updateDataSource = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  needs: ['feedUrls'],
   input: z.object({
     dataSourceId: id('data source'),
     name: name('data source').optional(),
@@ -280,7 +267,7 @@ const updateDataSource = defineTool({
   output: dataSourceResult,
   example: { dataSourceId: 'weather', refreshS: 600 },
   target,
-  handler: async ({ org, input, write, feedUrls }) => {
+  handler: async ({ org, input, write, services: { feedUrls } }) => {
     const row = await requireSource(org, input.dataSourceId);
     if (!calendarOnly(row.format, input.horizonDays)) throw new ToolError('invalid_input', HORIZON_ONLY_ICAL);
     if (!jsonTableOnly(row.format, input.rowsPath)) throw new ToolError('invalid_input', ROWS_PATH_ONLY_JSON_TABLE);
@@ -289,7 +276,7 @@ const updateDataSource = defineTool({
     const locator = input.feedUrl ?? input.resource;
     const clean = { etag: null, lastModified: null, failures: 0, lastError: null, nextPollAt: 0 };
     const fresh = {
-      ...(locator ? { urlEncrypted: await sealerOf(feedUrls).seal({ orgId: org.orgId, id: row.id }, locator), ...clean } : {}),
+      ...(locator ? { urlEncrypted: await feedUrls.seal({ orgId: org.orgId, id: row.id }, locator), ...clean } : {}),
       ...(input.rowsPath !== undefined ? clean : {}),
     };
     const updated = write(
@@ -356,14 +343,14 @@ const findPlaces = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
+  // Unlimited, one member could use up the geocoder's free allowance for every org.
+  needs: ['rateLimit', 'places'],
   input: z.object({ query: z.string().trim().min(2, 'type at least 2 letters of the place').max(100).describe('A place name, such as Atlanta') }),
   output: z.object({ places: z.array(placeOutput) }),
   example: { query: 'Atlanta' },
-  handler: async ({ input, places, rateLimit }) => {
-    // Unlimited, one member could use up the geocoder's free allowance for every org.
-    if (!rateLimit) throw new ToolError('forbidden', 'find_places needs a rate limit, and this caller has none');
+  handler: async ({ input, services: { places, rateLimit } }) => {
     if (!(await rateLimit('place_search'))) throw new ToolError('rate_limited', 'too many place searches; wait a minute and try again');
-    return { places: await finderOf(places).search(input.query) };
+    return { places: await places.search(input.query) };
   },
 });
 
@@ -374,6 +361,8 @@ const readTable = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
+  // Unlimited, one member could make the API fetch any URL as fast as it answers.
+  needs: ['rateLimit', 'tables'],
   input: z
     .object({
       feedUrl,
@@ -387,11 +376,9 @@ const readTable = defineTool({
       .describe('The TableFeed a snapshot would hold'),
   }),
   example: { feedUrl: 'https://example.com/menu.csv', format: 'csv' },
-  handler: async ({ input, tables, rateLimit }) => {
-    // Unlimited, one member could make the API fetch any URL as fast as it answers.
-    if (!rateLimit) throw new ToolError('forbidden', 'read_table needs a rate limit, and this caller has none');
+  handler: async ({ input, services: { tables, rateLimit } }) => {
     if (!(await rateLimit('table_read'))) throw new ToolError('rate_limited', 'too many table reads; wait a minute and try again');
-    return { table: await readerOf(tables).read({ url: input.feedUrl, format: input.format, rowsPath: input.rowsPath }) };
+    return { table: await tables.read({ url: input.feedUrl, format: input.format, rowsPath: input.rowsPath }) };
   },
 });
 

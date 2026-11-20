@@ -7,11 +7,9 @@ import { seedOrganization } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { editorCalls, ok } from './calls';
+import { sha256Hex } from '../src/dispatch';
 
 const sha = (c: string) => c.repeat(64);
-const hash = async (text: string) =>
-  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-
 const promo: TemplateManifest = {
   id: 'promo',
   version: '1.0.0',
@@ -260,7 +258,7 @@ describe('get_spot_preview', () => {
         schedule: [],
         defaultPlaylist: 'p',
       },
-      { hash, now: new Date() },
+      { hash: sha256Hex, now: new Date() },
     );
     expect(result.problems).toEqual([]);
     expect(result.manifest?.brand?.id).toBe(kitId);

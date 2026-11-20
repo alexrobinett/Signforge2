@@ -4,6 +4,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller, type FeedUrlSealer, type PlaceFinder, type TableReader, ToolError } from '../src';
+import { memberOf } from './member';
 
 let o: SeededOrg;
 let owner: Caller;
@@ -20,7 +21,7 @@ const refusal = (name: string, input: unknown, caller = owner) => dispatch(regis
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'feeds-org');
-  owner = { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS, feedUrls: sealer };
+  owner = memberOf(scoped(env.DB, o.orgId), 'owner', { feedUrls: sealer });
 });
 
 describe('data sources', () => {
@@ -164,13 +165,13 @@ describe('read_table', () => {
       registry,
       'read_table',
       { feedUrl: 'https://menu.example.com/m.json', format: 'json-table', rowsPath: 'items' },
-      { ...owner, role: 'viewer', tables, rateLimit },
+      { ...owner, role: 'viewer', services: { tables, rateLimit } },
     );
     expect(r).toEqual({ ok: true, output: { table } });
     expect(asked).toEqual([{ url: 'https://menu.example.com/m.json', format: 'json-table', rowsPath: 'items' }]);
     expect((await owner.org.dataSources.list()).length).toBe(before);
     expect(
-      await dispatch(registry, 'read_table', { feedUrl: 'https://menu.example.com/bad.csv', format: 'csv' }, { ...owner, tables, rateLimit }),
+      await dispatch(registry, 'read_table', { feedUrl: 'https://menu.example.com/bad.csv', format: 'csv' }, { ...owner, services: { tables, rateLimit } }),
     ).toMatchObject({
       ok: false,
       error: 'invalid_input',
@@ -180,17 +181,26 @@ describe('read_table', () => {
 
   it('refuses a URL the poller would refuse, a caller over its limit or with none, without fetching', async () => {
     asked.length = 0;
-    expect(await dispatch(registry, 'read_table', { feedUrl: 'https://10.0.0.1/m.csv', format: 'csv' }, { ...owner, tables, rateLimit })).toMatchObject({
+    expect(
+      await dispatch(registry, 'read_table', { feedUrl: 'https://10.0.0.1/m.csv', format: 'csv' }, { ...owner, services: { tables, rateLimit } }),
+    ).toMatchObject({
       error: 'invalid_input',
     });
     expect(
-      await dispatch(registry, 'read_table', { feedUrl: 'https://a.example.com/m.csv', format: 'csv' }, { ...owner, tables, rateLimit: async () => false }),
+      await dispatch(
+        registry,
+        'read_table',
+        { feedUrl: 'https://a.example.com/m.csv', format: 'csv' },
+        { ...owner, services: { tables, rateLimit: async () => false } },
+      ),
     ).toMatchObject({
       error: 'rate_limited',
     });
-    expect(await dispatch(registry, 'read_table', { feedUrl: 'https://a.example.com/m.csv', format: 'csv' }, { ...owner, tables })).toMatchObject({
-      error: 'forbidden',
-    });
+    expect(await dispatch(registry, 'read_table', { feedUrl: 'https://a.example.com/m.csv', format: 'csv' }, { ...owner, services: { tables } })).toMatchObject(
+      {
+        error: 'forbidden',
+      },
+    );
     expect(asked).toEqual([]);
   });
 });
@@ -214,27 +224,38 @@ describe('find_places', () => {
   };
 
   it('finds places by name, with what a weather source needs: coordinates and time zone', async () => {
-    const r = await dispatch(registry, 'find_places', { query: '  Atlanta ' }, { ...owner, role: 'viewer', places, rateLimit });
+    const r = await dispatch(registry, 'find_places', { query: '  Atlanta ' }, { ...owner, role: 'viewer', services: { places, rateLimit } });
     expect(r).toEqual({ ok: true, output: { places: [atlanta] } });
-    expect(await dispatch(registry, 'find_places', { query: 'Nowhere' }, { ...owner, places, rateLimit })).toEqual({ ok: true, output: { places: [] } });
+    expect(await dispatch(registry, 'find_places', { query: 'Nowhere' }, { ...owner, services: { places, rateLimit } })).toEqual({
+      ok: true,
+      output: { places: [] },
+    });
   });
 
   it('counts each search against the caller, and refuses one over its limit, and refuses a caller with none, without asking the geocoder', async () => {
     let asked = 0;
     const counting: PlaceFinder = { search: async () => (asked++, [atlanta]) };
     counted.length = 0;
-    await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting, rateLimit });
+    await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, services: { places: counting, rateLimit } });
     expect(counted).toEqual(['place_search']);
-    expect(await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting, rateLimit: async () => false })).toMatchObject({
+    expect(
+      await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, services: { places: counting, rateLimit: async () => false } }),
+    ).toMatchObject({
       ok: false,
       error: 'rate_limited',
     });
     // No limiter is no rate to wait out: refused as claim_screen refuses it.
-    expect(await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, places: counting })).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await dispatch(registry, 'find_places', { query: 'Atlanta' }, { ...owner, services: { places: counting } })).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+    });
     expect(asked).toBe(1);
   });
 
   it('refuses a query too short to mean a place', async () => {
-    expect(await dispatch(registry, 'find_places', { query: ' a ' }, { ...owner, places, rateLimit })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await dispatch(registry, 'find_places', { query: ' a ' }, { ...owner, services: { places, rateLimit } })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+    });
   });
 });

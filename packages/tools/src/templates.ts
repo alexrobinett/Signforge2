@@ -185,6 +185,8 @@ const registerTemplateVersion = defineSharedTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  // Only an org's new version uses them; /admin passes them for base templates too.
+  needs: ['templateCheck', 'rateLimit'],
   input: z.object({
     manifest: z.record(z.string(), z.unknown()).describe("The built template's template.json, with the protocol the build added"),
     bundleId: sha('bundle').describe("SHA-256 of the built HTML file, uploaded to the owner's prefix"),
@@ -207,7 +209,7 @@ const registerTemplateVersion = defineSharedTool({
     sourcesId: '1'.repeat(64),
   },
   target: (_input, output) => ({ kind: 'template_version', id: output.version.id }),
-  handler: async ({ org, blobs, input, write, templateCheck, rateLimit }) => {
+  handler: async ({ org, blobs, input, write, services: { templateCheck, rateLimit } }) => {
     const [bundle, sourcesObj] = await Promise.all([blobs.get(blobKey(org, input.bundleId)), blobs.get(blobKey(org, input.sourcesId))]);
     if (!bundle) throw new ToolError('not_found', `bundle ${input.bundleId} has not been uploaded`);
     if (!sourcesObj) throw new ToolError('not_found', `sources ${input.sourcesId} have not been uploaded`);
@@ -257,7 +259,6 @@ const registerTemplateVersion = defineSharedTool({
 
     let runtime: TemplateRuntimeReport | undefined;
     if (org.orgId !== null) {
-      if (!templateCheck || !rateLimit) throw new Error('registering an org template needs the runtime check and a rate limit, and the caller lacks one');
       // An org's checks share its one container: a push loop is slowed here, before it reaches it.
       if (!(await rateLimit('template_check'))) {
         throw new ToolError('rate_limited', 'too many template checks for this org; wait a minute and try again', { retryAfterSeconds: 60 });

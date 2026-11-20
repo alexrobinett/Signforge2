@@ -7,6 +7,7 @@ import { EXPORT_ADVICE } from '@signforge/media-check';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { dispatch, orgBlobKey, r2Presigner, registry, uploadKey, type Caller } from '../src';
+import { memberOf } from './member';
 
 // These tests upload, complete and re-hash multi-megabyte videos in workerd: several seconds each
 // on a CI runner, past vitest's 5 s default.
@@ -58,11 +59,7 @@ async function upload(name: string, bytes: Uint8Array, claim: { sha256?: string 
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'videos-org');
-  owner = {
-    org: scoped(env.DB, o.orgId),
-    role: 'owner',
-    actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
-    blobs: env.BLOBS,
+  owner = memberOf(scoped(env.DB, o.orgId), 'owner', {
     uploads: r2Presigner({
       endpoint: 'https://acct.r2.cloudflarestorage.com',
       bucket: 'signforge-test',
@@ -70,7 +67,7 @@ beforeAll(async () => {
       secretAccessKey: 'secret',
       now: () => Date.UTC(2026, 10, 18, 12),
     }),
-  };
+  });
 });
 
 describe('create_video_upload', () => {

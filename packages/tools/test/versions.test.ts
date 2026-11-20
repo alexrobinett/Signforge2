@@ -4,6 +4,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
+import { fakeServices } from './services';
 
 let o: SeededOrg;
 let n = 0;
@@ -12,6 +13,7 @@ const as = (org: OrgScope, kind: 'user' | 'agent'): Caller => ({
   role: 'owner',
   actor: { kind, id: `${kind}-1` },
   blobs: env.BLOBS,
+  services: fakeServices,
   agentLimiter: { take: async () => ({ ok: true }), audited: async () => {} },
 });
 let person: Caller;

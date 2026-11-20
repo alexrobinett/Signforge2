@@ -13,7 +13,7 @@ import { feedUrlProblem, type FeedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
 import { id, ifVersion, version } from './fields';
 import { keysetPage, nextOutput, pageInput } from './paging';
-import { type AlertSecretSealer, defineTool, notFound, ToolError } from './tool';
+import { defineTool, notFound, ToolError } from './tool';
 
 /** How long an alert is retried before it is given up on. */
 export const ALERT_RETRY_MS = 24 * 60 * 60_000;
@@ -129,11 +129,6 @@ const deliveryOf = (d: AlertDeliveryRow): z.infer<typeof deliveryView> => ({
   createdAt: d.createdAt,
 });
 
-function sealerOf(alertSecrets: AlertSecretSealer | undefined): AlertSecretSealer {
-  if (!alertSecrets) throw new Error('the alert channel tools need a sealer');
-  return alertSecrets;
-}
-
 const channelTarget = (kind: string) => ({ kind: 'alert_channel', id: kind });
 
 const getAlertChannels = defineTool({
@@ -159,12 +154,13 @@ const setSlackAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  needs: ['alertSecrets'],
   input: z.object({ webhookUrl: slackWebhookUrl, ifVersion }),
   output: z.object({ channel: channelView }),
   example: { webhookUrl: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX' },
   target: () => channelTarget('slack'),
-  handler: async ({ org, actor, input, write, alertSecrets }) => {
-    const urlEncrypted = await sealerOf(alertSecrets).seal({ orgId: org.orgId, kind: 'slack' }, 'url', input.webhookUrl);
+  handler: async ({ org, actor, input, write, services: { alertSecrets } }) => {
+    const urlEncrypted = await alertSecrets.seal({ orgId: org.orgId, kind: 'slack' }, 'url', input.webhookUrl);
     const row = write(
       await org.alertChannels.stage.put(
         'slack',
@@ -183,15 +179,16 @@ const setWebhookAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  needs: ['alertSecrets'],
   input: z
     .object({ webhookUrl: outgoingUrl.optional(), signingSecret: signingSecret.optional(), ifVersion })
     .refine((v) => v.webhookUrl !== undefined || v.signingSecret !== undefined, 'nothing to change'),
   output: z.object({ channel: channelView }),
   example: { webhookUrl: 'https://ops.example.com/hooks/signforge', signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD' },
   target: () => channelTarget('webhook'),
-  handler: async ({ org, actor, input, write, alertSecrets }) => {
+  handler: async ({ org, actor, input, write, services: { alertSecrets } }) => {
     const current = await org.alertChannels.get('webhook');
-    const seal = (field: 'url' | 'secret', value: string) => sealerOf(alertSecrets).seal({ orgId: org.orgId, kind: 'webhook' }, field, value);
+    const seal = (field: 'url' | 'secret', value: string) => alertSecrets.seal({ orgId: org.orgId, kind: 'webhook' }, field, value);
     const url = input.webhookUrl ? { host: new URL(input.webhookUrl).hostname, urlEncrypted: await seal('url', input.webhookUrl) } : current;
     const secret = input.signingSecret ? { secretEncrypted: await seal('secret', input.signingSecret), secretSetAt: Date.now() } : current;
     if (!url || !secret?.secretEncrypted) throw new ToolError('invalid_input', 'a new webhook needs both webhookUrl and signingSecret');

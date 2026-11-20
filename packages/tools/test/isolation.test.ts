@@ -8,8 +8,9 @@ import { seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing'
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { dispatch, manifestKey, orgBlobKey, r2Presigner, registry, TOOLS, type AnyTool, type Caller } from '../src';
-import { connectors, pendingFor } from './connectors-stub';
+import { dispatch, manifestKey, orgBlobKey, registry, TOOLS, type AnyTool, type Caller } from '../src';
+import { pendingFor } from './connectors-stub';
+import { fakeServices } from './services';
 
 /** Each org's manifest for its screen, and its uploaded template bundle and sources. */
 const FILES = {
@@ -212,13 +213,7 @@ beforeAll(async () => {
     role: 'owner',
     actor: { kind: 'user', id: 'user-b', clientId: 'test' },
     blobs: env.BLOBS,
-    uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
-    rateLimit: async () => true,
-    feedUrls: { seal: async (_source, url) => `sealed:${url}` },
-    alertSecrets: { seal: async (_channel, _field, value) => `sealed:${value}` },
-    places: { search: async () => [] },
-    tables: { read: async () => ({ columns: [], rows: [] }) },
-    connectors,
+    services: fakeServices,
   };
   // finish_connection's example state, pending for org B's owner.
   await pendingFor('org-b', 'user-b');
