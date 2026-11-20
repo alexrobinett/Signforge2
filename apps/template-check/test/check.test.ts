@@ -67,6 +67,8 @@ describe('a template that misbehaves', () => {
     ['on-play', ['tried to open https://example.com/ in a frame (blocked)', 'navigated its own frame (blocked)']],
     ['no-ready', ['did not report ready within 2000 ms']],
     ['spin', ['did not report ready within 2000 ms']],
+    ['spin-on-play', ['froze after play: did not draw a second of frames within 3000 ms']],
+    ['fetch-then-spin-on-play', ['requested https://example.com/leak (blocked)', 'froze after play: did not draw a second of frames within 3000 ms']],
     ['throw', ['failed to prepare: prepare blew up']],
     ['uncaught', ['threw an uncaught error: late failure']],
     ['webrtc', ['failed to prepare: RTCPeerConnection is not defined']],

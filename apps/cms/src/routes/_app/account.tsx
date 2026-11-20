@@ -5,6 +5,7 @@
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
+import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { ActionError, SettingsSection } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
@@ -14,10 +15,12 @@ import { ago } from '~/lib/screen-status';
 import { describeAgent } from '~/lib/settings';
 import type { Theme } from '~/lib/theme';
 import { cn } from '~/lib/utils';
+import { backToPage } from '~/server/form-post.server';
 import { getAccount } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/_app/account')({
+  server: { handlers: backToPage },
   loader: () => getAccount(),
   head: () => ({ meta: [{ title: 'Your account · SignForge' }] }),
   component: AccountPage,
@@ -62,24 +65,26 @@ function AccountPage() {
       </PageHeader>
 
       <SettingsSection id={`${id}-profile`} title="Profile">
-        <form key={user.name} onSubmit={submit} className="grid max-w-md gap-4" noValidate>
-          <div className="grid gap-1.5">
-            <Label htmlFor={`${id}-name`}>Name</Label>
-            <Input id={`${id}-name`} name="name" defaultValue={user.name} maxLength={100} autoComplete="name" />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor={`${id}-email`}>Email</Label>
-            <Input id={`${id}-email`} value={user.email} readOnly aria-describedby={`${id}-email-help`} />
-            <p id={`${id}-email-help`} className="text-[13px] text-muted-foreground">
-              Your sign-in address. Changing it is not offered yet.
-            </p>
-          </div>
-          <ActionError at="profile" />
-          <div>
-            <Button type="submit" disabled={pending === 'profile'}>
-              Save
-            </Button>
-          </div>
+        <form key={user.name} method="post" onSubmit={submit} className="grid max-w-md gap-4" noValidate>
+          <EditorFields>
+            <div className="grid gap-1.5">
+              <Label htmlFor={`${id}-name`}>Name</Label>
+              <Input id={`${id}-name`} name="name" defaultValue={user.name} maxLength={100} autoComplete="name" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor={`${id}-email`}>Email</Label>
+              <Input id={`${id}-email`} value={user.email} readOnly aria-describedby={`${id}-email-help`} />
+              <p id={`${id}-email-help`} className="text-[13px] text-muted-foreground">
+                Your sign-in address. Changing it is not offered yet.
+              </p>
+            </div>
+            <ActionError at="profile" />
+            <div>
+              <Button type="submit" disabled={pending === 'profile'}>
+                Save
+              </Button>
+            </div>
+          </EditorFields>
         </form>
       </SettingsSection>
 
@@ -143,18 +148,20 @@ function AccountPage() {
         <fieldset>
           <legend className="sr-only">Theme</legend>
           <div className="flex flex-wrap gap-2">
-            {THEMES.map(({ value, label, icon: Icon }) => (
-              <label
-                key={value}
-                className={cn(
-                  'flex h-10 cursor-pointer items-center gap-2 rounded-full border px-4 text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
-                  theme === value ? 'border-foreground bg-foreground text-background' : 'border-border-strong bg-card hover:bg-accent',
-                )}
-              >
-                <input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} className="sr-only" />
-                <Icon className="size-4" aria-hidden /> {label}
-              </label>
-            ))}
+            <EditorFields>
+              {THEMES.map(({ value, label, icon: Icon }) => (
+                <label
+                  key={value}
+                  className={cn(
+                    'flex h-10 cursor-pointer items-center gap-2 rounded-full border px-4 text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
+                    theme === value ? 'border-foreground bg-foreground text-background' : 'border-border-strong bg-card hover:bg-accent',
+                  )}
+                >
+                  <input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} className="sr-only" />
+                  <Icon className="size-4" aria-hidden /> {label}
+                </label>
+              ))}
+            </EditorFields>
           </div>
         </fieldset>
       </SettingsSection>

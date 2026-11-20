@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs } from './helpers';
 import { API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -286,4 +286,85 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await shots(page, '47b-settings-notifications-rules-phone');
   await toTop(page.getByRole('region', { name: 'Recent deliveries' }));
   await shots(page, '47c-settings-notifications-log-phone');
+});
+
+test("settings fields that save or show at once, or hold a URL or an email, are disabled in the server's HTML, until the page has hydrated (#136)", async ({
+  page,
+}) => {
+  // A page hydrates after the app (body[data-hydrated]): a controlled field changed in between was
+  // set back by React, the change lost (a member's role saved again as it was); a form submitted
+  // in between was the browser's own submit.
+  const email = `e2e-settings-server-${Date.now()}@example.com`;
+  await signInAs(page, email, '192.0.2.35');
+  await createOrg(page, 'Northside Market');
+  const pages: [path: string, names: string[]][] = [
+    ['/settings/general', ['Name', 'Always on', 'Set hours', 'Save changes']],
+    ['/settings/members', ['Emails, separated by commas', 'Send invites', `Role for ${email}`]],
+    ['/settings/notifications', ['Slack incoming-webhook URL', 'Connect Slack', 'Webhook URL', 'Add webhook']],
+    ['/account', ['Name', 'Save', 'Light', 'Dark', 'System']],
+  ];
+  for (const [path, names] of pages) {
+    expect(await disabledOnServer(page, path, names), path).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
+  }
+  // Rendered by the server, they are enabled once the page has hydrated.
+  await page.goto('/settings/general');
+  await hydrated(page);
+  await expect(page.getByRole('radio', { name: 'Set hours' })).toBeEnabled();
+  await page.goto('/settings/members');
+  await hydrated(page);
+  await expect(page.getByRole('combobox', { name: `Role for ${email}` })).toBeEnabled();
+  await expect(page.getByLabel('Emails, separated by commas')).toBeEnabled();
+  await page.goto('/settings/notifications');
+  await hydrated(page);
+  await expect(page.getByLabel('Webhook URL', { exact: true })).toBeEnabled();
+  await page.goto('/account');
+  await hydrated(page);
+  await expect(page.getByRole('radio', { name: 'Dark' })).toBeEnabled();
+});
+
+test('a form that holds a URL or an email, submitted before the page has hydrated, posts: the page comes back with none of it in its URL', async ({
+  page,
+  browser,
+}) => {
+  // As a GET, the browser's own submit put a Slack or webhook URL, or invitees' emails, in the
+  // page's URL: the address bar, history, a Referer and the Worker's request logs (#139's review).
+  await signInAs(page, `e2e-settings-post-${Date.now()}@example.com`, '192.0.2.36');
+  await createOrg(page, 'Northside Market');
+  // Without script the page stays as the server sent it, as before hydration. Its fieldsets' gate
+  // is taken off, so the form submits as one would that the gate did not hold.
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  await context.addCookies(await page.context().cookies());
+  const early = await context.newPage();
+  await early.route(/\/settings\/(notifications|members)$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    await route.fulfill({ response, body: (await response.text()).replaceAll('<fieldset disabled=""', '<fieldset') });
+  });
+  const forms = [
+    { path: '/settings/notifications', field: 'Webhook URL', button: 'Add webhook', value: 'https://example.com/hooks/tok_SECRET136' },
+    { path: '/settings/members', field: 'Emails, separated by commas', button: 'Send invites', value: 'sam-secret136@example.com' },
+  ];
+  for (const { path, field, button, value } of forms) {
+    await early.goto(path);
+    await early.getByLabel(field, { exact: true }).fill(value);
+    const sent = early.waitForRequest((r) => r.isNavigationRequest());
+    await early.getByRole('button', { name: button }).click();
+    const request = await sent;
+    // Sent in the body, and answered with the page again, by GET.
+    expect(request.method(), path).toBe('POST');
+    expect(request.postData(), path).toContain(encodeURIComponent(value));
+    const answer = await request.response();
+    expect(answer?.status(), path).toBe(303);
+    expect(answer?.headers().location, path).toBe(path);
+    await expect(early.getByLabel(field, { exact: true })).toHaveValue('');
+    expect(new URL(early.url()).pathname + new URL(early.url()).search, path).toBe(path);
+  }
+  await context.close();
+  // Account and sign-in post too; their answer echoes nothing.
+  for (const path of ['/account', '/sign-in?redirect=%2Fscreens']) {
+    const res = await page.request.post(path, { form: { name: 'Sam', email: 'sam@example.com', code: '123456' }, maxRedirects: 0 });
+    expect(res.status(), path).toBe(303);
+    expect(res.headers().location, path).toBe(path);
+    expect(await res.text(), path).toBe('');
+  }
 });

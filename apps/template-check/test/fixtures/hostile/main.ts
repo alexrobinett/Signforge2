@@ -68,5 +68,12 @@ defineTemplate({
   },
   play(ctx) {
     if (ctx.data.mode === 'on-play') Reflect.set(location, 'href', TARGET);
+    // Ready, then wedges its renderer: never yields another frame.
+    if (ctx.data.mode === 'spin-on-play') for (;;);
+    // Refused for both: the request, and the frames it never draws.
+    if (ctx.data.mode === 'fetch-then-spin-on-play') {
+      attempts.fetch?.();
+      for (;;);
+    }
   },
 });

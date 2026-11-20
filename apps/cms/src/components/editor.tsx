@@ -1,12 +1,14 @@
 /**
  * What the spot and playlist editors share (canvas board Spot editor A): the header with the
- * back link, the name and the save state; the alert for a refused save; the form's sections; Publish.
+ * back link, the name and the save state; the alert for a refused save; the form's sections; Publish;
+ * and EditorFields, which the brand kit, screen and settings pages use too.
  */
 import { Link } from '@tanstack/react-router';
 import { ChevronLeftIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
+import { useHydrated } from '~/lib/hydrated';
 
 /** How the save is going, in the header's words. */
 export function saveWord(status: 'saved' | 'unsaved' | 'saving' | 'invalid', savedAt: number | null) {
@@ -14,6 +16,21 @@ export function saveWord(status: 'saved' | 'unsaved' | 'saving' | 'invalid', sav
   if (status === 'invalid') return 'Not saved: fix the marked field';
   if (status === 'unsaved') return 'Unsaved changes';
   return savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'No changes yet';
+}
+
+/**
+ * Controls that stay disabled until they have hydrated, and while `disabled`. A page's own part
+ * hydrates after the app's (`body[data-hydrated]`); a control changed in between is still the
+ * server's HTML, and React sets it back when it takes it over, so the change is lost and the old
+ * value saved (#135, #136). A click there would go nowhere.
+ */
+export function EditorFields({ disabled = false, children }: { disabled?: boolean; children: ReactNode }) {
+  const hydrated = useHydrated();
+  return (
+    <fieldset disabled={disabled || !hydrated} className="contents">
+      {children}
+    </fieldset>
+  );
 }
 
 export function EditorSection({ title, children }: { title: string; children: ReactNode }) {
@@ -49,7 +66,11 @@ export function EditorHeader({
           {about}
         </p>
       </div>
-      {children && <div className="ml-auto flex gap-2">{children}</div>}
+      {children && (
+        <div className="ml-auto flex gap-2">
+          <EditorFields>{children}</EditorFields>
+        </div>
+      )}
     </header>
   );
 }

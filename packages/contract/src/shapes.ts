@@ -313,7 +313,8 @@ export interface TemplateRender {
   readyMs: number | null;
   /**
    * The first second of play, counted in the template's own frame, so the template could skew
-   * it: information, not a gate. The frame budgets are measured on the Pi. Null when it never played.
+   * it: information, not a gate. The frame budgets are measured on the Pi. Null when it never played,
+   * or played but drew no second of frames (wedged in `play`), which the check refuses.
    */
   frames: { count: number; longestMs: number } | null;
 }

@@ -56,6 +56,27 @@ export async function hydrated(page: Page) {
   await expect(page.locator('body[data-hydrated]')).toBeAttached({ timeout: 30_000 });
 }
 
+/**
+ * Whether each control named in `names` is disabled in the server's HTML of `path`, one entry per
+ * control of that name (its aria-label, else its label's text, else its own). A page's own part
+ * hydrates after `body[data-hydrated]`, and a field changed in between is set back by React, the
+ * old value saved (#135, #136): the editors keep their controls disabled until then.
+ */
+export async function disabledOnServer(page: Page, path: string, names: string[]): Promise<Record<string, boolean[]>> {
+  const html = await (await page.request.get(path)).text();
+  return page.evaluate(
+    ({ html, names }) => {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const controls = [...doc.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button, input, select')].map((el) => ({
+        name: (el.getAttribute('aria-label') ?? el.labels?.[0]?.textContent ?? el.textContent).trim(),
+        disabled: el.matches(':disabled'),
+      }));
+      return Object.fromEntries(names.map((n) => [n, controls.filter((c) => c.name === n).map((c) => c.disabled)]));
+    },
+    { html, names },
+  );
+}
+
 /** Each with E2E_SCREENSHOTS: a screenshot in the light theme, then in the dark. */
 export async function shots(page: Page, name: string) {
   await screenshot(page, `${name}-light`);

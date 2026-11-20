@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -176,4 +176,22 @@ test('a change someone else made while the kit was open is not overwritten, even
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(page.getByLabel('Primary', { exact: true })).toHaveValue('#7a3e1d');
   await expect(page.getByRole('radio', { name: 'Round' })).toBeChecked();
+});
+
+test("the kit's fields and actions are disabled in the server's HTML, until the editor has hydrated (#136)", async () => {
+  // The editor hydrates after the page (body[data-hydrated]): a field changed in between was set
+  // back by React, and the change lost.
+  const { brandKit } = await tool(page, 'create_brand_kit', {
+    name: 'Server kit',
+    colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
+    idempotencyKey: `server-kit-${Date.now()}`,
+  });
+  const path = `/settings/brand-kits/${brandKit.id}`;
+  const names = ['Name', 'Primary colour picker', 'Display font', 'Duplicate'];
+  expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
+  // Rendered by the server, they are enabled once the editor has hydrated.
+  await page.goto(path);
+  await hydrated(page);
+  await expect(page.getByLabel('Name', { exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Duplicate' })).toBeEnabled();
 });

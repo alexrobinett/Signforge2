@@ -14,6 +14,7 @@ import { ChevronLeftIcon, TriangleAlertIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { CatalogueFonts, ColourFields, FontField, LogoFields, ShapeField } from '~/components/brand/kit-fields';
 import { KitPreviews } from '~/components/brand/kit-previews';
+import { EditorFields } from '~/components/editor';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
@@ -254,7 +255,7 @@ function KitEditor() {
             )}
           </p>
           {canManage && (
-            <>
+            <EditorFields>
               <Button variant="outline" disabled={pending !== null} onClick={() => void duplicate(orgId, kit)}>
                 Duplicate
               </Button>
@@ -264,7 +265,7 @@ function KitEditor() {
               <Button disabled={!ready} onClick={() => void save(orgId, kit)}>
                 {saving ? 'Saving…' : 'Save kit'}
               </Button>
-            </>
+            </EditorFields>
           )}
         </div>
       </header>
@@ -282,49 +283,51 @@ function KitEditor() {
       )}
       <div className="flex flex-wrap items-start gap-5">
         <div className="flex min-w-0 flex-[1_1_360px] flex-col gap-5">
-          <form aria-label="Kit" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5">
-            <Panel id="kit-colours" title="Colours">
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="kit-name" className="font-medium">
-                  Name
-                </label>
-                <Input
-                  id="kit-name"
-                  value={draft.name}
-                  maxLength={100}
+          <EditorFields>
+            <form aria-label="Kit" onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5">
+              <Panel id="kit-colours" title="Colours">
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="kit-name" className="font-medium">
+                    Name
+                  </label>
+                  <Input
+                    id="kit-name"
+                    value={draft.name}
+                    maxLength={100}
+                    disabled={!canManage}
+                    onChange={(e) => set({ name: e.target.value })}
+                    aria-invalid={!draft.name.trim() || undefined}
+                  />
+                </div>
+                <ColourFields
+                  draft={draft}
+                  shown={colors}
                   disabled={!canManage}
-                  onChange={(e) => set({ name: e.target.value })}
-                  aria-invalid={!draft.name.trim() || undefined}
+                  onChange={(name, value) => change((d) => ({ ...d, colors: { ...d.colors, [name]: value } }))}
+                  onFix={(fg, bg) => fix(kit, fg, bg)}
                 />
-              </div>
-              <ColourFields
-                draft={draft}
-                shown={colors}
-                disabled={!canManage}
-                onChange={(name, value) => change((d) => ({ ...d, colors: { ...d.colors, [name]: value } }))}
-                onFix={(fg, bg) => fix(kit, fg, bg)}
-              />
-            </Panel>
-            <Panel id="kit-type" title="Type and shape">
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
-                <FontField use="display" value={draft.displayFontId} disabled={!canManage} onChange={(displayFontId) => set({ displayFontId })} />
-                <FontField use="body" value={draft.bodyFontId} disabled={!canManage} onChange={(bodyFontId) => set({ bodyFontId })} />
-              </div>
-              <ShapeField value={draft.shape} disabled={!canManage} onChange={(shape) => set({ shape })} />
-              <LogoFields
-                draft={draft}
-                colors={colors}
-                assets={assets}
-                picking={logoFor}
-                disabled={!canManage}
-                onPick={pickLogo}
-                onChange={(which, assetId) =>
-                  set(which === 'dark' ? { logoOnDarkAssetId: assetId, ...(assetId ? {} : { logoOnLightAssetId: null }) } : { logoOnLightAssetId: assetId })
-                }
-              />
-            </Panel>
-          </form>
-          <KitUse kit={kit} kits={brandKits} groups={groups} screens={screens} canManage={canManage} />
+              </Panel>
+              <Panel id="kit-type" title="Type and shape">
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
+                  <FontField use="display" value={draft.displayFontId} disabled={!canManage} onChange={(displayFontId) => set({ displayFontId })} />
+                  <FontField use="body" value={draft.bodyFontId} disabled={!canManage} onChange={(bodyFontId) => set({ bodyFontId })} />
+                </div>
+                <ShapeField value={draft.shape} disabled={!canManage} onChange={(shape) => set({ shape })} />
+                <LogoFields
+                  draft={draft}
+                  colors={colors}
+                  assets={assets}
+                  picking={logoFor}
+                  disabled={!canManage}
+                  onPick={pickLogo}
+                  onChange={(which, assetId) =>
+                    set(which === 'dark' ? { logoOnDarkAssetId: assetId, ...(assetId ? {} : { logoOnLightAssetId: null }) } : { logoOnLightAssetId: assetId })
+                  }
+                />
+              </Panel>
+            </form>
+            <KitUse kit={kit} kits={brandKits} groups={groups} screens={screens} canManage={canManage} />
+          </EditorFields>
         </div>
         {/* In view while the form scrolls: a player scrolled away is throttled and the edits would not show. */}
         <div className="flex min-w-0 flex-[999_1_480px] flex-col gap-5 lg:sticky lg:top-4">

@@ -7,6 +7,7 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { CopyIcon, LoaderCircleIcon, RotateCwIcon, SendIcon } from 'lucide-react';
 import { useId, type ReactNode, type SubmitEvent } from 'react';
 import { toast } from 'sonner';
+import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { ActionError, SaveRow, SettingsSection } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
@@ -26,10 +27,12 @@ import {
   type AlertKind,
   type AlertRule,
 } from '~/lib/settings';
+import { backToPage } from '~/server/form-post.server';
 import { getNotifications } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/_app/settings/notifications')({
+  server: { handlers: backToPage },
   loader: () => getNotifications(),
   head: () => ({ meta: [{ title: 'Notifications · SignForge' }] }),
   component: NotificationSettings,
@@ -251,15 +254,17 @@ function UrlForm({
     void onUrl(String(new FormData(form).get('url') ?? '')).then((saved) => saved && form.reset());
   };
   return (
-    <form onSubmit={submit} className="mt-2 w-full space-y-2" noValidate>
-      <Label htmlFor={id}>{name}</Label>
-      <Input id={id} name="url" type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
-      <p className="text-xs text-muted-foreground">Kept encrypted, and never shown again.</p>
-      <ActionError at={at} />
-      <Button type="submit" disabled={pending}>
-        {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} {button}
-      </Button>
-    </form>
+    <EditorFields>
+      <form method="post" onSubmit={submit} className="mt-2 w-full space-y-2" noValidate>
+        <Label htmlFor={id}>{name}</Label>
+        <Input id={id} name="url" type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
+        <p className="text-xs text-muted-foreground">Kept encrypted, and never shown again.</p>
+        <ActionError at={at} />
+        <Button type="submit" disabled={pending}>
+          {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} {button}
+        </Button>
+      </form>
+    </EditorFields>
   );
 }
 
