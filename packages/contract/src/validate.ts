@@ -526,6 +526,24 @@ function windowProblems(where: string, w: unknown, required: boolean): string[] 
   return out;
 }
 
+/**
+ * What is wrong with one schedule entry, as `validateManifest` checks it, apart from its playlist,
+ * which only a manifest lists. Empty if it is valid. The tools check an entry with it before it is
+ * stored, so a draft never holds one a screen would refuse.
+ */
+export function scheduleEntryProblems(e: unknown): string[] {
+  if (!isObj(e)) return ['a schedule entry is not an object'];
+  const where = `schedule entry "${show(e.id)}"`;
+  const out: string[] = [];
+  if (!isIdValue(e.id)) out.push(`schedule entry id "${show(e.id)}" is not a valid id`);
+  if (!isNum(e.priority)) out.push(`${where}: priority must be a number`);
+  if (e.target !== 'org' && e.target !== 'group' && e.target !== 'screen') out.push(`${where}: target must be org, group or screen`);
+  out.push(...windowProblems(where, e, false));
+  for (const k of ['startsAt', 'endsAt'] as const) if (e[k] !== undefined && !isInstant(e[k])) out.push(`${where}: ${k} must be an ISO 8601 time`);
+  if (isInstant(e.startsAt) && isInstant(e.endsAt) && !(Date.parse(e.endsAt) > Date.parse(e.startsAt))) out.push(`${where}: endsAt must be after startsAt`);
+  return out;
+}
+
 /** What is wrong with a screen's display hours, as `validateManifest` checks them. Empty if they are valid. */
 export function displayHoursProblems(hours: unknown): string[] {
   if (!isObj(hours)) return ['display hours must be an object'];
@@ -727,19 +745,8 @@ export function validateManifest(m: unknown): string[] {
   for (const sha of referenced) if (!own(files, sha)) errors.push(`file ${sha.slice(0, 12)} is referenced but not listed`);
 
   for (const e of schedule as unknown[]) {
-    if (!isObj(e)) {
-      errors.push('a schedule entry is not an object');
-      continue;
-    }
-    const where = `schedule entry "${show(e.id)}"`;
-    if (!isIdValue(e.id)) errors.push(`schedule entry id "${show(e.id)}" is not a valid id`);
-    if (!isNum(e.priority)) errors.push(`${where}: priority must be a number`);
-    if (e.target !== 'org' && e.target !== 'group' && e.target !== 'screen') errors.push(`${where}: target must be org, group or screen`);
-    if (!own(playlists, e.playlist)) errors.push(`${where} plays unknown playlist "${show(e.playlist)}"`);
-    errors.push(...windowProblems(where, e, false));
-    for (const k of ['startsAt', 'endsAt'] as const) if (e[k] !== undefined && !isInstant(e[k])) errors.push(`${where}: ${k} must be an ISO 8601 time`);
-    if (isInstant(e.startsAt) && isInstant(e.endsAt) && !(Date.parse(e.endsAt) > Date.parse(e.startsAt)))
-      errors.push(`${where}: endsAt must be after startsAt`);
+    errors.push(...scheduleEntryProblems(e));
+    if (isObj(e) && !own(playlists, e.playlist)) errors.push(`schedule entry "${show(e.id)}" plays unknown playlist "${show(e.playlist)}"`);
   }
 
   for (const [key, p] of Object.entries(playlists)) {

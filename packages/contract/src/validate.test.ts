@@ -24,6 +24,7 @@ import {
   requiredFiles,
   validateBrandKit,
   displayHoursProblems,
+  scheduleEntryProblems,
   readPath,
   boundValue,
   tableItems,
@@ -264,6 +265,7 @@ const validators: [string, (v: unknown) => string[], (() => unknown)?][] = [
     () => ({ ...tableBinding(), table: { columns: { name: 'Item' } } }),
   ],
   ['displayHoursProblems', displayHoursProblems, () => validManifest().screen.displayHours],
+  ['scheduleEntryProblems', scheduleEntryProblems, () => validManifest().schedule[1]],
   ['validatePairStartRequest', validatePairStartRequest, () => ({ kind: 'browser' })],
   ['validatePairStartResponse', validatePairStartResponse, () => ({ code: 'ABC123', pollToken: 'p', expiresAt: '2026-11-17T13:15:00Z' })],
   ['validatePairPollResponse', validatePairPollResponse, () => ({ status: 'paired', screenId: 's1', credential: 'sfd_s1.secret' })],
@@ -694,6 +696,22 @@ describe('brand', () => {
       'brand: body font file 1: weight must be 1 to 1000',
       'brand: body font file 1: style must be normal or italic',
       'file sha-logo is referenced but not listed',
+    ]);
+  });
+});
+
+describe('scheduleEntryProblems', () => {
+  it('checks one entry as validateManifest does, apart from its playlist, which a manifest lists', () => {
+    const entry = { id: 'breakfast', playlist: 'not-in-any-manifest', priority: 0, target: 'group', days: [1, 2, 3, 4, 5], from: '06:00', to: '10:30' };
+    expect(scheduleEntryProblems(entry)).toEqual([]);
+    expect(scheduleEntryProblems({ ...entry, days: [7], from: '6am', startDate: 'Monday', target: 'shop' })).toEqual([
+      'schedule entry "breakfast": target must be org, group or screen',
+      'schedule entry "breakfast": from must be HH:MM',
+      'schedule entry "breakfast": days must be 0-6',
+      'schedule entry "breakfast": startDate must be YYYY-MM-DD',
+    ]);
+    expect(scheduleEntryProblems({ ...entry, startsAt: '2026-11-17T16:00:00Z', endsAt: '2026-11-17T14:00:00Z' })).toEqual([
+      'schedule entry "breakfast": endsAt must be after startsAt',
     ]);
   });
 });

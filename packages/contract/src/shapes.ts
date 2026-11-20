@@ -631,9 +631,11 @@ export interface ScheduleEntry {
   to?: string;
   /**
    * Absolute bounds, ISO 8601 instants, on top of the local dates and window: `startsAt` inclusive,
-   * `endsAt` exclusive. A takeover sets `endsAt`, so it ends on time whatever the screen's time
-   * zone and with the network down. A screen that does not trust its clock skips any entry with
-   * either bound rather than risk running a takeover forever.
+   * `endsAt` exclusive. An entry with `endsAt` is a takeover: it ends on time whatever the screen's
+   * time zone and with the network down, and when the takeover that wins changes (one published,
+   * starting or ending) the player ends the spot on screen at once instead of at its end. A screen
+   * that does not trust its clock skips any entry with either bound rather than risk running a
+   * takeover forever.
    */
   startsAt?: string;
   endsAt?: string;
