@@ -12,7 +12,7 @@ import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { SpotPicker } from '~/components/playlists/spot-picker';
-import { EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import {
   AlertDialog,
@@ -170,7 +170,7 @@ function PlaylistEditor() {
           onSubmit={(e) => e.preventDefault()}
           className="flex max-w-full min-w-0 flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
         >
-          <fieldset disabled={!canManage} className="contents">
+          <EditorFields disabled={!canManage}>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="playlist-name" className="font-medium">
                 Name
@@ -359,7 +359,7 @@ function PlaylistEditor() {
                 </div>
               )}
             </EditorSection>
-          </fieldset>
+          </EditorFields>
         </form>
         {/* The form can be far longer than a spot's, so the stage stays in view beside it as it scrolls. */}
         <div className="flex min-w-0 flex-[999_1_560px] flex-col bg-[#18181a] lg:sticky lg:top-0 lg:h-[calc(100dvh-8rem)] lg:self-start">

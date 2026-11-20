@@ -8,6 +8,7 @@
 import { createFileRoute, getRouteApi } from '@tanstack/react-router';
 import { CheckIcon, MinusIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
+import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { ActionError, SaveRow, SettingsSection } from '~/components/settings/parts';
 import {
@@ -25,11 +26,13 @@ import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
 import { useRole } from '~/lib/live';
 import { isRole, roleTable, ROLES, type Invitation, type Member, type OrgSettings } from '~/lib/settings';
+import { backToPage } from '~/server/form-post.server';
 import { getMembers, getOrgSettings } from '~/server/settings.functions';
 import type { Role } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/_app/settings/members')({
+  server: { handlers: backToPage },
   loader: async () => {
     const [people, settings] = await Promise.all([getMembers(), getOrgSettings()]);
     return { ...people, settings };
@@ -102,27 +105,29 @@ function InviteForm() {
 
   return (
     <SettingsSection id={`${id}-invite`} title="Invite" description="Each address gets an email with a link to join.">
-      <form onSubmit={submit} className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_12rem_auto] sm:items-end" noValidate>
-        <div className="grid gap-1.5">
-          <Label htmlFor={`${id}-emails`}>Emails, separated by commas</Label>
-          <Input id={`${id}-emails`} name="emails" type="text" inputMode="email" autoComplete="off" placeholder="sam@example.com, alex@example.com" />
-        </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor={`${id}-role`}>Role</Label>
-          <NativeSelect id={`${id}-role`} name="role" defaultValue="editor">
-            {ROLES.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
-        <Button type="submit" disabled={pending}>
-          Send invites
-        </Button>
-        <div className="sm:col-span-3">
-          <ActionError at="invite" />
-        </div>
+      <form method="post" onSubmit={submit} className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_12rem_auto] sm:items-end" noValidate>
+        <EditorFields>
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-emails`}>Emails, separated by commas</Label>
+            <Input id={`${id}-emails`} name="emails" type="text" inputMode="email" autoComplete="off" placeholder="sam@example.com, alex@example.com" />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-role`}>Role</Label>
+            <NativeSelect id={`${id}-role`} name="role" defaultValue="editor">
+              {ROLES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <Button type="submit" disabled={pending}>
+            Send invites
+          </Button>
+          <div className="sm:col-span-3">
+            <ActionError at="invite" />
+          </div>
+        </EditorFields>
       </form>
     </SettingsSection>
   );
@@ -148,26 +153,28 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
         </div>
         {canEdit ? (
           <div className="flex items-center gap-2">
-            <NativeSelect
-              aria-label={`Role for ${display}`}
-              value={member.role}
-              disabled={pending}
-              onChange={(e) => {
-                if (isRole(e.target.value)) void changeMemberRole(member.id, e.target.value);
-              }}
-              className="w-36"
-            >
-              {ROLES.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
-            </NativeSelect>
-            {!self && (
-              <Button variant="ghost" className="text-destructive" disabled={pending} onClick={() => askToRemoveMember(member)}>
-                Remove
-              </Button>
-            )}
+            <EditorFields>
+              <NativeSelect
+                aria-label={`Role for ${display}`}
+                value={member.role}
+                disabled={pending}
+                onChange={(e) => {
+                  if (isRole(e.target.value)) void changeMemberRole(member.id, e.target.value);
+                }}
+                className="w-36"
+              >
+                {ROLES.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </NativeSelect>
+              {!self && (
+                <Button variant="ghost" className="text-destructive" disabled={pending} onClick={() => askToRemoveMember(member)}>
+                  Remove
+                </Button>
+              )}
+            </EditorFields>
           </div>
         ) : (
           <span className="text-sm">{roleLabel(member.role)}</span>
