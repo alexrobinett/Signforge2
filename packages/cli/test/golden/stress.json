@@ -27,10 +27,6 @@
       "size": 320263,
       "type": "image/jpeg"
     },
-    "19f93988c7682e3fd3bdcbd4248b4bfde6f6527a61d2c902671213f2bcb7e9b3": {
-      "size": 81026,
-      "type": "text/html"
-    },
     "1a4020bbad33d42b78a5bc6a531ef7115d4295c59317935eff06618f7fe384e7": {
       "size": 77514,
       "type": "text/html"
@@ -83,12 +79,16 @@
       "size": 182996,
       "type": "image/jpeg"
     },
+    "d7019943c39a4aded5c0a91144a20908b328084bc434e81aa630ecf619268f24": {
+      "size": 85303,
+      "type": "text/html"
+    },
     "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688": {
       "size": 421529,
       "type": "image/jpeg"
     }
   },
-  "id": "0b569d5efde0693dc00651521bc95a33a27e09c29ca7d5aad61ad2cd70e47779",
+  "id": "a75133b69011459c4a5e9f561d60618ddba542d9803edb8910e96c012ad5b13f",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -475,6 +475,14 @@
           "path": "daily.temperature_2m_min.0",
           "source": "weather"
         },
+        "sunrise": {
+          "path": "daily.sunrise.0",
+          "source": "weather"
+        },
+        "sunset": {
+          "path": "daily.sunset.0",
+          "source": "weather"
+        },
         "temp": {
           "path": "current.temperature_2m",
           "source": "weather"
@@ -491,6 +499,8 @@
         "humidity": 50,
         "isDay": 1,
         "low": 61,
+        "sunrise": 0,
+        "sunset": 0,
         "temp": 72,
         "unit": "°F",
         "wind": 5,
@@ -500,7 +510,7 @@
       "id": "weather-live",
       "kind": "template",
       "name": "Weather, live",
-      "template": "base/weather@1.4.0"
+      "template": "base/weather@1.5.0"
     },
     "weather-rain": {
       "assets": {},
@@ -511,6 +521,8 @@
         "humidity": 88,
         "isDay": 1,
         "low": 47,
+        "sunrise": 0,
+        "sunset": 0,
         "temp": 52,
         "unit": "°F",
         "wind": 12,
@@ -520,7 +532,7 @@
       "id": "weather-rain",
       "kind": "template",
       "name": "Weather, rain (fixed data)",
-      "template": "base/weather@1.4.0"
+      "template": "base/weather@1.5.0"
     },
     "weather-snow": {
       "assets": {},
@@ -531,6 +543,8 @@
         "humidity": 80,
         "isDay": 0,
         "low": 19,
+        "sunrise": 0,
+        "sunset": 0,
         "temp": 28,
         "unit": "°F",
         "wind": 8,
@@ -540,7 +554,7 @@
       "id": "weather-snow",
       "kind": "template",
       "name": "Weather, snow (fixed data)",
-      "template": "base/weather@1.4.0"
+      "template": "base/weather@1.5.0"
     }
   },
   "templates": {
@@ -993,11 +1007,11 @@
         "version": "1.2.3"
       }
     },
-    "base/weather@1.4.0": {
-      "html": "19f93988c7682e3fd3bdcbd4248b4bfde6f6527a61d2c902671213f2bcb7e9b3",
+    "base/weather@1.5.0": {
+      "html": "d7019943c39a4aded5c0a91144a20908b328084bc434e81aa630ecf619268f24",
       "manifest": {
         "background": "#0b1a33",
-        "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source.",
+        "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
         "duration": {
           "defaultMs": 8000,
           "maxMs": 60000,
@@ -1033,6 +1047,16 @@
           "low": {
             "default": 61,
             "label": "Today's low",
+            "type": "number"
+          },
+          "sunrise": {
+            "default": 0,
+            "label": "Sunrise, Unix seconds (0: none)",
+            "type": "number"
+          },
+          "sunset": {
+            "default": 0,
+            "label": "Sunset, Unix seconds (0: none)",
             "type": "number"
           },
           "temp": {
@@ -1072,6 +1096,8 @@
             "humidity": "current.relative_humidity_2m",
             "isDay": "current.is_day",
             "low": "daily.temperature_2m_min.0",
+            "sunrise": "daily.sunrise.0",
+            "sunset": "daily.sunset.0",
             "temp": "current.temperature_2m",
             "wind": "current.wind_speed_10m"
           },
@@ -1091,7 +1117,7 @@
         "uses": [
           "canvas"
         ],
-        "version": "1.4.0"
+        "version": "1.5.0"
       }
     }
   }

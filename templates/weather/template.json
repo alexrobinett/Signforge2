@@ -1,8 +1,8 @@
 {
   "id": "weather",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "name": "Weather Now",
-  "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source.",
+  "description": "Current conditions with today's high and low. Bind the numeric fields to a weather data source. Bind sunrise and sunset too, and the sun and moon cross the sky with the screen's clock.",
   "fields": {
     "city": { "type": "text", "label": "City", "default": "Atlanta", "maxLength": 24 },
     "temp": { "type": "number", "label": "Temperature", "default": 72 },
@@ -10,6 +10,8 @@
     "low": { "type": "number", "label": "Today's low", "default": 61 },
     "code": { "type": "number", "label": "WMO weather code", "default": 1 },
     "isDay": { "type": "number", "label": "Daytime (1) or night (0)", "default": 1 },
+    "sunrise": { "type": "number", "label": "Sunrise, Unix seconds (0: none)", "default": 0 },
+    "sunset": { "type": "number", "label": "Sunset, Unix seconds (0: none)", "default": 0 },
     "wind": { "type": "number", "label": "Wind speed", "default": 5 },
     "humidity": { "type": "number", "label": "Humidity %", "default": 50 },
     "unit": { "type": "select", "label": "Temperature unit", "options": ["°F", "°C"], "default": "°F" },
@@ -27,6 +29,8 @@
       "low": "daily.temperature_2m_min.0",
       "code": "current.weather_code",
       "isDay": "current.is_day",
+      "sunrise": "daily.sunrise.0",
+      "sunset": "daily.sunset.0",
       "wind": "current.wind_speed_10m",
       "humidity": "current.relative_humidity_2m"
     },

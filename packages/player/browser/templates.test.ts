@@ -63,7 +63,23 @@ const cases: Record<string, { a: Data; b: Data; assetsA?: Record<string, string>
     b: { source: 'Wire', items: [1, 2, 3].map((i) => ({ title: `Headline ${i}`, published: at(-i), source: 'Wire' })) },
   },
   'photo-promo': { a: { body: 'Picked this morning' }, b: { headline: 'Two for one' }, assetsA: { photo: '#963' }, assetsB: { photo: '#369' } },
-  weather: { a: { code: 61, isDay: 1 }, b: { code: 71, isDay: 0, temp: 30 } },
+  // a by day on the sun's arc, b an hour after sunset with the moon's phase drawn.
+  weather: {
+    a: { code: 61, isDay: 1, sunrise: NOW / 1000 - 3600, sunset: NOW / 1000 + 7200 },
+    b: { code: 71, isDay: 0, temp: 30, sunrise: NOW / 1000 - 11 * 3600, sunset: NOW / 1000 - 3600 },
+  },
+};
+
+/** examples/demo/brand.json, with the on-colours the brand tools derive for it. */
+const DEMO_KIT: BrandColors = {
+  primary: '#1d4ed8',
+  onPrimary: '#ffffff',
+  accent: '#f97316',
+  onAccent: '#000000',
+  background: '#0b1020',
+  surface: '#18213a',
+  text: '#f8fafc',
+  muted: '#a5b4cb',
 };
 
 const built = new Map<string, { html: string; manifest: TemplateManifest }>();
@@ -213,6 +229,228 @@ describe('template time', () => {
   });
 });
 
+describe('weather: the sun and moon follow sunrise, sunset and the screen clock (#70)', () => {
+  // Sunrise 12:00 UTC, sunset 22:00 UTC (Unix seconds, as Open-Meteo sends them with timeformat=unixtime).
+  const sunrise = Date.parse('2026-11-17T12:00:00Z') / 1000;
+  const sunset = Date.parse('2026-11-17T22:00:00Z') / 1000;
+  const clock = (iso: string) => Date.parse(iso);
+
+  /**
+   * One weather frame; `scene(data, at)` inits it with the clock at `at` and returns what it draws once
+   * its intro is over: the orb's centre as a fraction of the frame, and the stage's scene classes.
+   */
+  async function weather() {
+    const t = built.get('weather')!;
+    const hst = await host();
+    await hst.open('fresh', t.html);
+    let inits = 0;
+    return async (data: Data, at: number) => {
+      await hst.init('fresh', spotData(t.manifest, data), {}, at);
+      await hst.waitFor('fresh', 'ready', ++inits);
+      return hst.page
+        .mainFrame()
+        .childFrames()[0]!
+        .evaluate(() => {
+          // Every animation to just after the intro: the orb at rest, before the outro.
+          for (const a of document.getAnimations()) a.currentTime = 1500;
+          const r = document.querySelector('.orb')!.getBoundingClientRect();
+          const stage = document.getElementById('stage')!;
+          return {
+            x: (r.left + r.width / 2) / innerWidth,
+            y: (r.top + r.height / 2) / innerHeight,
+            classes: [...stage.classList].filter((c) => ['day', 'night', 'dawn', 'dusk'].includes(c)).sort(),
+            sun: getComputedStyle(document.querySelector('.orb .rays')!).display !== 'none',
+            glow: getComputedStyle(document.querySelector('.glow')!).backgroundImage !== 'none',
+          };
+        });
+    };
+  }
+
+  it('places the sun low at sunrise, high at midday and low at sunset, with dawn and dusk skies around them', async () => {
+    const scene = await weather();
+    const data = { code: 0, sunrise, sunset };
+    const rise = await scene(data, clock('2026-11-17T12:05:00Z'));
+    const noon = await scene(data, clock('2026-11-17T17:00:00Z'));
+    const set = await scene(data, clock('2026-11-17T21:55:00Z'));
+
+    for (const s of [rise, noon, set]) expect(s.sun).toBe(true);
+    expect(rise.y).toBeGreaterThan(0.8);
+    expect(set.y).toBeGreaterThan(0.8);
+    expect(noon.y).toBeLessThan(0.35);
+    // East to west: rises on the left, sets on the right.
+    expect(rise.x).toBeLessThan(noon.x);
+    expect(noon.x).toBeLessThan(set.x);
+    expect(rise.classes).toEqual(['dawn', 'day']);
+    expect(noon.classes).toEqual(['day']);
+    expect(set.classes).toEqual(['day', 'dusk']);
+    expect(rise.glow).toBe(true);
+    expect(set.glow).toBe(true);
+    expect(noon.glow).toBe(false);
+  });
+
+  it('carries the moon across the night, from sunset to the next sunrise', async () => {
+    const scene = await weather();
+    const data = { code: 0, sunrise, sunset };
+    const early = await scene(data, clock('2026-11-17T22:30:00Z'));
+    const middle = await scene(data, clock('2026-11-18T05:00:00Z'));
+    // Before the next sunrise, with the same (yesterday's) data: the times repeat a day later.
+    const late = await scene(data, clock('2026-11-18T11:40:00Z'));
+
+    for (const s of [early, middle, late]) {
+      expect(s.sun).toBe(false);
+      expect(s.classes).toContain('night');
+    }
+    expect(early.y).toBeGreaterThan(0.7);
+    expect(late.y).toBeGreaterThan(0.7);
+    expect(middle.y).toBeLessThan(0.35);
+    expect(early.x).toBeLessThan(middle.x);
+    expect(middle.x).toBeLessThan(late.x);
+    expect(middle.classes).toEqual(['night']);
+    expect(late.classes).toEqual(['dawn', 'night']);
+  });
+
+  it('a spot left playing across sunset goes from day to dusk to night with no new data', async () => {
+    const scene = await weather();
+    const data = { code: 2, sunrise, sunset };
+    const seen = [];
+    // The player prepares every play afresh with the screen's time, from the same snapshot.
+    for (const at of ['2026-11-17T20:30:00Z', '2026-11-17T21:50:00Z', '2026-11-17T22:15:00Z', '2026-11-17T23:30:00Z'])
+      seen.push((await scene(data, clock(at))).classes);
+    expect(seen).toEqual([['day'], ['day', 'dusk'], ['dusk', 'night'], ['night']]);
+  });
+
+  /**
+   * Each text in the forecast card that reads below AA (4.5:1, 3:1 for large text), measured from what
+   * is painted: the card screenshotted with its text and again with the text hidden, at rest. Each
+   * glyph pixel is compared with the pixel under it, so opacity on the text or a parent, and anything
+   * drawn over the card, count. A text's ratio is its 90th-percentile pixel: the cores of its strokes,
+   * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1.
+   */
+  async function paintedContrast(page: Page, f: Frame): Promise<string[]> {
+    const { card, texts } = await f.evaluate(() => {
+      for (const a of document.getAnimations()) a.currentTime = 2000;
+      const box = document.querySelector('.info')!.getBoundingClientRect();
+      const texts = [];
+      for (const el of document.querySelectorAll<HTMLElement>('.info, .info *')) {
+        const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
+        if (!own.length) continue;
+        const range = document.createRange();
+        range.selectNode(own[0]!);
+        range.setEndAfter(own.at(-1)!);
+        const r = range.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        const size = Number.parseFloat(s.fontSize);
+        texts.push({
+          name: el.id || el.className || el.tagName,
+          rect: { x: Math.round(r.x - box.x), y: Math.round(r.y - box.y), w: Math.round(r.width), h: Math.round(r.height) },
+          min: size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700) ? 3 : 4.5,
+        });
+      }
+      return { card: { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) }, texts };
+    });
+    const withText = (await page.screenshot({ clip: card })).toString('base64');
+    await f.evaluate(() => {
+      const hide = document.createElement('style');
+      hide.id = 'sf-test-hide';
+      hide.textContent = '.info, .info * { color: transparent !important; text-shadow: none !important; }';
+      document.head.append(hide);
+    });
+    const without = (await page.screenshot({ clip: card })).toString('base64');
+    await f.evaluate(() => document.getElementById('sf-test-hide')!.remove());
+    return page.evaluate(
+      async ({ withText, without, texts }) => {
+        const read = async (png: string) => {
+          const img = new Image();
+          img.src = `data:image/png;base64,${png}`;
+          await img.decode();
+          const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
+          g.drawImage(img, 0, 0);
+          return { w: img.width, d: g.getImageData(0, 0, img.width, img.height).data };
+        };
+        const [a, b] = [await read(withText), await read(without)];
+        const lum = (d: Uint8ClampedArray, i: number) => {
+          const [r, g, bl] = [d[i]!, d[i + 1]!, d[i + 2]!].map((v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+          return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
+        };
+        const out: string[] = [];
+        for (const t of texts) {
+          const ratios: number[] = [];
+          for (let y = t.rect.y; y < t.rect.y + t.rect.h; y++)
+            for (let x = t.rect.x; x < t.rect.x + t.rect.w; x++) {
+              const i = (y * a.w + x) * 4;
+              if (a.d[i] === b.d[i] && a.d[i + 1] === b.d[i + 1] && a.d[i + 2] === b.d[i + 2]) continue;
+              const [hi, lo] = [lum(a.d, i), lum(b.d, i)].sort((p, q) => q - p);
+              ratios.push((hi! + 0.05) / (lo! + 0.05));
+            }
+          ratios.sort((p, q) => p - q);
+          const ratio = ratios.length ? ratios[Math.floor(ratios.length * 0.9)]! : 1;
+          if (ratio < t.min) out.push(`${t.name}: ${ratio.toFixed(2)}:1, below ${t.min}:1`);
+        }
+        return out;
+      },
+      { withText, without, texts },
+    );
+  }
+
+  it('every text in the forecast card reads (AA) as painted, at every time of day, in every condition, with and without a kit', async () => {
+    const t = built.get('weather')!;
+    const hst = await host();
+    await hst.open('fresh', t.html);
+    const light: BrandColors = {
+      primary: '#0f766e',
+      onPrimary: '#ffffff',
+      accent: '#b45309',
+      onAccent: '#ffffff',
+      background: '#f8fafc',
+      surface: '#ffffff',
+      text: '#0f172a',
+      muted: '#475569',
+    };
+    const kits: [string, FrameTheme | undefined][] = [
+      ['no kit', undefined],
+      ['the demo kit', { colors: DEMO_KIT, shape: 'soft', fonts: {} }],
+      ['a light kit', { colors: light, shape: 'soft', fonts: {} }],
+    ];
+    const phases: [string, Data, string][] = [
+      ['day', { isDay: 1 }, '2026-11-17T17:00:00Z'],
+      ['night', { isDay: 0 }, '2026-11-17T17:00:00Z'],
+      ['dawn', { sunrise, sunset }, '2026-11-17T11:50:00Z'],
+      ['midday', { sunrise, sunset }, '2026-11-17T17:00:00Z'],
+      ['dusk', { sunrise, sunset }, '2026-11-17T22:10:00Z'],
+      ['midnight', { sunrise, sunset }, '2026-11-18T05:00:00Z'],
+    ];
+    const codes = [0, 2, 3, 45, 63, 71, 95];
+    const found: string[] = [];
+    let inits = 0;
+    for (const [kit, theme] of kits)
+      for (const [phase, data, at] of phases)
+        for (const code of codes) {
+          await hst.init('fresh', spotData(t.manifest, { ...data, code }), {}, clock(at), theme);
+          await hst.waitFor('fresh', 'ready', ++inits);
+          const low = await paintedContrast(hst.page, hst.page.mainFrame().childFrames()[0]!);
+          for (const l of low) found.push(`${kit}, ${phase}, code ${code}: ${l}`);
+        }
+    expect(found).toEqual([]);
+    // 252 screenshots: 17 s on a laptop, 55 s on CI's runner beside the CMS e2e (run 44578336166).
+  }, 120_000);
+
+  it('without sunrise and sunset, follows isDay as before, whatever the clock says', async () => {
+    const scene = await weather();
+    const day = await scene({ code: 0, isDay: 1 }, clock('2026-11-18T03:00:00Z'));
+    const day2 = await scene({ code: 0, isDay: 1 }, clock('2026-11-17T21:55:00Z'));
+    const night = await scene({ code: 0, isDay: 0 }, clock('2026-11-17T17:00:00Z'));
+    expect(day.classes).toEqual(['day']);
+    expect(day.sun).toBe(true);
+    expect(night.classes).toEqual(['night']);
+    expect(night.sun).toBe(false);
+    expect(day2).toEqual(day);
+    expect(day.glow).toBe(false);
+    // The sun's old fixed place: right of centre, halfway down.
+    expect(day.x).toBeCloseTo(0.765, 2);
+    expect(day.y).toBeCloseTo(0.5, 2);
+  });
+});
+
 describe('template update lifecycle', () => {
   it('covers every shipped template', () => {
     expect(Object.keys(cases).sort()).toEqual(names);
@@ -272,17 +510,7 @@ function contrast(a: string, b: string): number {
 }
 
 describe('text on a brand colour (#57, #69, #92)', () => {
-  /** examples/demo/brand.json, with the on-colours the brand tools derive for it. */
-  const demo: BrandColors = {
-    primary: '#1d4ed8',
-    onPrimary: '#ffffff',
-    accent: '#f97316',
-    onAccent: '#000000',
-    background: '#0b1020',
-    surface: '#18213a',
-    text: '#f8fafc',
-    muted: '#a5b4cb',
-  };
+  const demo = DEMO_KIT;
   // A kit may set its on-colours by hand; the brand tools only warn when a pair fails.
   const poor: BrandColors = { ...demo, onPrimary: '#2563eb', onAccent: '#ffffff' };
   // A light kit whose accent is the default palette's amber, which reads on dark only.

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Frame, type Page } from '@playwright/test';
 import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -163,4 +163,92 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await expect(page).toHaveURL(/\/playlists$/);
   await expect(page.getByRole('heading', { name: 'No playlists yet' })).toBeVisible();
+});
+
+test('axe reads the stage only once a fade between spots is over (#95)', async () => {
+  test.setTimeout(150_000);
+  // A loop of its own: a 4 s clock, then a 4 s fade into a 60 s one. After the fade the stage is
+  // still for most of a minute, however slow the machine: no play, fade or prepare comes sooner.
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key.endsWith('/clock') || t.key === 'clock').versions.at(-1).id;
+  const spotIds: string[] = [];
+  const loop: [greeting: string, durationMs: number][] = [
+    ['Doors open', 4000],
+    ['Doors close', 60_000],
+  ];
+  for (const [greeting, durationMs] of loop)
+    spotIds.push((await tool(page, 'create_spot', { name: greeting, kind: 'template', templateVersionId: clock, durationMs, data: { greeting } })).spot.id);
+  const { playlist } = await tool(page, 'create_playlist', {
+    name: 'Fade check',
+    transition: { type: 'fade', ms: 4000 },
+    spotIds,
+    idempotencyKey: `fade-check-${Date.now()}`,
+  });
+  await page.goto(`/playlists/${playlist.id}`);
+  await hydrated(page);
+  await expect(page.getByRole('region', { name: 'Live preview' }).getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  // The player's own document on the stage: the frame that holds the slots.
+  let stage: Frame | undefined;
+  await expect
+    .poll(async () => {
+      for (const f of page.frames()) if (await f.evaluate(() => document.querySelectorAll('.slot').length > 0).catch(() => false)) stage = f;
+      return stage !== undefined;
+    })
+    .toBe(true);
+  // Each time axe scans the player's document, note every slot's opacity then.
+  await stage!.evaluate(() => {
+    const root = document.documentElement;
+    root.dataset.scans = '';
+    // axe-core sets `runPartial` after `window.axe`: wrap whatever `runPartial` is when axe is read.
+    type Run = (...args: unknown[]) => unknown;
+    type Axe = { runPartial?: Run };
+    let real: Axe | undefined;
+    const wrappers = new WeakSet<Run>();
+    Object.defineProperty(window, 'axe', {
+      configurable: true,
+      get() {
+        const run = real?.runPartial;
+        if (real && run && !wrappers.has(run)) {
+          const probe: Run = function (this: unknown, ...args: unknown[]) {
+            const opacities = [...document.querySelectorAll('.slot')].map((el) => getComputedStyle(el).opacity).join('/');
+            root.dataset.scans = `${root.dataset.scans} ${opacities}`.trim();
+            return run.apply(this, args);
+          };
+          wrappers.add(probe);
+          real.runPartial = probe;
+        }
+        return real;
+      },
+      set(v: Axe) {
+        real = v;
+      },
+    });
+  });
+  // The fade into the 60 s clock, caught as it starts: axe must wait until it is over. If the steps
+  // above outlast the first fade, the next comes a whole loop (64 s and its fades) later.
+  await expect
+    .poll(
+      () =>
+        stage!.evaluate(() =>
+          document
+            .getAnimations()
+            .some(
+              (a) => a.playState === 'running' && a.effect instanceof KeyframeEffect && a.effect.target instanceof Element && a.effect.target.matches('.slot'),
+            ),
+        ),
+      { intervals: [20], timeout: 75_000 },
+    )
+    .toBe(true);
+  await axe(page);
+  const scans = (await stage!.evaluate(() => document.documentElement.dataset.scans ?? '')).split(' ');
+  expect(scans.length).toBeGreaterThanOrEqual(2);
+  // Every scan saw each slot fully shown or fully hidden, and one shown.
+  for (const scan of scans) {
+    const opacities = scan.split('/').map(Number);
+    expect(
+      opacities.every((o) => o === 0 || o === 1),
+      `slot opacities during a scan: ${scan}`,
+    ).toBe(true);
+    expect(opacities, `slot opacities during a scan: ${scan}`).toContain(1);
+  }
 });
