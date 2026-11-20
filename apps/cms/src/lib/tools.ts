@@ -56,12 +56,6 @@ export function entryIdOf(output: unknown): string {
   throw new ToolCallError('error', 'SignForge answered without the schedule entry. Reload the page to see it.');
 }
 
-/** The version of the screen in a `{ screen }` output, such as `rename_screen`'s: what the next edit sends as `ifVersion`. */
-export function screenVersionOf(output: unknown): number {
-  if (isRecord(output) && isRecord(output.screen) && typeof output.screen.version === 'number') return output.screen.version;
-  throw new ToolCallError('error', 'SignForge answered without the screen. Reload the page to see it.');
-}
-
 /** The id of the kit in a `{ brandKit }` output, such as `create_brand_kit`'s. */
 export function brandKitIdOf(output: unknown): string {
   if (isRecord(output) && isRecord(output.brandKit) && typeof output.brandKit.id === 'string') return output.brandKit.id;
