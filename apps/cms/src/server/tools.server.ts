@@ -8,6 +8,7 @@ import { getRequest } from '@tanstack/react-start/server';
 import type { AssetView } from '~/lib/assets';
 import type { BrandKitView } from '~/lib/brand-kits';
 import type { ListedSource } from '~/lib/integrations';
+import { signInBack } from '~/lib/paths';
 import type { SpotView, TemplateView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { callApi } from './api.server';
@@ -19,11 +20,9 @@ export async function tool<T>(name: string, input: unknown, opts?: { missing: 'n
   const res = await callApi(`/api/tools/${name}`, input);
   if (res.status === 404 && opts?.missing === 'null') return null;
   if (res.status === 401) {
-    // The way back, so it survives whichever redirect wins (the shell's too): the page itself on a
-    // page load; on a server function's call, the page that made it. Sign-in keeps it to this site.
+    // The way back, so it survives whichever redirect wins (the shell's too). Sign-in keeps it to this site.
     const req = getRequest();
-    const page = new URL(new URL(req.url).pathname.startsWith('/_serverFn/') ? (req.headers.get('referer') ?? '/') : req.url, req.url);
-    const back = page.pathname + page.search;
+    const back = signInBack(req.url, req.headers.get('referer'));
     throw redirect({ to: '/sign-in', search: back === '/' ? {} : { redirect: back } });
   }
   if (res.status === 403) {

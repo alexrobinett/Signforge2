@@ -1,6 +1,6 @@
 // Publishing from the CMS (M3-18): the publish tool through the API's caller, its org lock, and
 // the queue that tells the screens it switched.
-import type { ServerSocketMessage, SyncRequest, SyncResponse } from '@signforge/contract';
+import type { ServerSocketMessage } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { seedOrg } from '@signforge/db/testing';
 import { dispatch, registry, type Caller } from '@signforge/tools';
@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { mintCredential } from '../src/device/credential';
 import { queueNotices, screenNotifier, type PublishNotice } from '../src/device/screens';
 import { deliverNotices, publishLock, type OrgObject } from '../src/publish';
+import { syncAs, syncBody } from './sync-client';
 
 const BASE = 'https://api.test/v1/device';
 
@@ -21,33 +22,14 @@ async function until(check: () => boolean | Promise<boolean>, ms = 5000) {
   }
 }
 
-const syncBody: SyncRequest = {
-  seq: 0,
-  epoch: 'e1',
-  player: { version: 'test', manifestSchemas: [2, 3], protocols: [1, 2] },
-  manifest: { filesMissing: 0 },
-  display: { on: true },
-  deviceTime: new Date().toISOString(),
-  clock: { offsetMs: 0, trusted: false },
-  playCounts: [],
-  snapshots: {},
-};
-
 describe('publish through the API', () => {
   it("switches a screen and reaches its open socket through the queue, holding the org's lock", async () => {
     const seed = await seedOrg(env.DB, 'api-publish');
     const org = scoped(env.DB, seed.orgId);
     const { credential, secretHash } = await mintCredential(seed.screen);
     await org.screens.credentials.insert({ screenId: seed.screen, secretHash });
-    const sync = async () =>
-      (await (
-        await exports.default.fetch(`${BASE}/sync`, {
-          method: 'POST',
-          headers: { authorization: `Bearer ${credential}`, 'content-type': 'application/json' },
-          body: JSON.stringify(syncBody),
-        })
-      ).json()) as SyncResponse;
-    const res = await exports.default.fetch(`${BASE}/ws?ticket=${encodeURIComponent((await sync()).socketTicket)}`, { headers: { upgrade: 'websocket' } });
+    const { socketTicket } = await syncAs(credential, syncBody());
+    const res = await exports.default.fetch(`${BASE}/ws?ticket=${encodeURIComponent(socketTicket)}`, { headers: { upgrade: 'websocket' } });
     const ws = res.webSocket!;
     ws.accept();
     const messages: ServerSocketMessage[] = [];

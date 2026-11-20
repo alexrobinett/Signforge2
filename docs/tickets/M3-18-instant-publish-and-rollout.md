@@ -44,7 +44,7 @@ Publish compiles every affected screen, stores manifests, nudges screens, and sh
 
 ## Notes
 
-- Migration `0025_publish_history` (`publishes.revision`, unique per org, and `publishes.restores_id`). It may need renumbering at merge.
+- Migration `0026_publish_history` (`publishes.revision`, unique per org, and `publishes.restores_id`). It may need renumbering at merge.
 - Deploying needs the queue first: `wrangler queues create signforge-publish-notices-<env>`; the Durable Object migration `v3` adds `OrgObject`.
 - No contract change: nothing a screen sees changed.
 - `/admin/screens/*` and `sf push` stay until #34 removes them.

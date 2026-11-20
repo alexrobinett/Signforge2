@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4736e7ea-6bdf-4af7-b87b-6513dca3b0c8",
+  "id": "6988aaca-575e-4a85-8162-3880e439d6bc",
   "prevId": "cd965c26-3c31-499d-989b-060849286f10",
   "tables": {
     "account": {
@@ -1320,6 +1320,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "rows_path": {
+          "name": "rows_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "next_poll_at": {
           "name": "next_poll_at",
           "type": "integer",
@@ -2440,20 +2447,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "restores_id": {
-          "name": "restores_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -2463,13 +2456,6 @@
         },
         "finished_at": {
           "name": "finished_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reached": {
-          "name": "reached",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -2486,17 +2472,6 @@
           "name": "publishes_org_created_idx",
           "columns": ["org_id", "created_at"],
           "isUnique": false
-        },
-        "publishes_org_revision_uq": {
-          "name": "publishes_org_revision_uq",
-          "columns": ["org_id", "revision"],
-          "isUnique": true
-        },
-        "publishes_unfinished_idx": {
-          "name": "publishes_unfinished_idx",
-          "columns": ["org_id"],
-          "isUnique": false,
-          "where": "\"publishes\".\"finished_at\" IS NULL"
         }
       },
       "foreignKeys": {

@@ -50,6 +50,7 @@ import {
   type AlertDeliverer,
   type AlertSecretSealer,
   type PlaceFinder,
+  type TableReader,
   type ScreenNotifier,
   type TemplateChecker,
   type ToolErrorCode,
@@ -75,6 +76,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   deliveries?: AlertDeliverer;
   /** Looks places up by name. `find_places` needs it. */
   places?: PlaceFinder;
+  /** Reads a table at a URL. `read_table` needs it. */
+  tables?: TableReader;
   /** The runtime check of uploaded templates. Registering an org template needs it. */
   templateCheck?: TemplateChecker;
   /** Providers' OAuth. The connection tools need it. */
@@ -253,6 +256,7 @@ export async function dispatch<D extends DataScope>(
         feedUrls: caller.feedUrls,
         alertSecrets: caller.alertSecrets,
         places: caller.places,
+        tables: caller.tables,
         templateCheck: caller.templateCheck,
         connectors: caller.connectors,
         write,

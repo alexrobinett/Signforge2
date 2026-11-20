@@ -3,7 +3,8 @@
  * the sources that are due, in every org, and polls each: a guarded, conditional fetch
  * (./fetch.ts), converted by its format (`@signforge/feeds`), checked against the fields that
  * published spots bind to it (./fit.ts), and written only when the data changed. Screens get the snapshots on
- * their next sync.
+ * their next sync. A table (`csv`, `json-table`) that lacks a column a published spot maps fails
+ * as `missing-column`, whatever else it fills: the person renamed or dropped a column.
  *
  * A provider source (`format: 'provider'`) is read through its connection's adapter instead
  * (../connectors): the provider's fixed hosts only, with the connection's grant, refreshed
@@ -17,14 +18,14 @@
  * connection's grant when it was refreshed. A failure backs off, doubling the refresh interval
  * up to 6 hours, and keeps the last good snapshot.
  */
-import { canonicalJson, MAX_SNAPSHOT_BYTES, snapshotBytes } from '@signforge/contract';
+import { type Binding, canonicalJson, MAX_SNAPSHOT_BYTES, missingColumns, readPath, snapshotBytes } from '@signforge/contract';
 import { claimDueDataSources, type DataSourceRow, type OrgScope, published, scoped } from '@signforge/db';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
 import { type ConnectorDeps, connectorDeps, workerFetch } from '../connectors';
 import { type Grant, type ProviderAdapter, ProviderError, type ProviderFetch, providerFetch } from '../connectors/adapter';
 import { openGrant, sealGrant } from '../connectors/vault';
 import { openFeedUrl } from './cipher';
-import { dohResolver, FetchError, type FetchGuards, guardedFetch } from './fetch';
+import { FetchError, type FetchGuards, feedGuards, guardedFetch } from './fetch';
 import { type BoundField, fitsBoundFields } from './fit';
 
 /**
@@ -33,7 +34,7 @@ import { type BoundField, fitsBoundFields } from './fit';
  * claimed the next.
  */
 const POLLS_PER_RUN = 12;
-/** How long a claimed source is held for its run: past the fetch's 5 seconds, with redirects. */
+/** How long a claimed source is held for its run at least: past the fetch's 5 seconds, with redirects. The claim holds it for its next backoff when that is longer. */
 const LEASE_MS = 2 * 60_000;
 export const BACKOFF_MAX_MS = 6 * 3_600_000;
 /** Fetches in flight to one host at once (docs/backend-plan.md, Limits), or through one connection. */
@@ -50,6 +51,7 @@ type PollError =
   | FeedError['code']
   | ProviderError['code']
   | 'unfit'
+  | 'missing-column'
   | 'sealed-url'
   | 'sealed-credentials'
   | 'needs-reconnect'
@@ -65,8 +67,6 @@ class PollFailure extends Error {
     super(code, options);
   }
 }
-
-const workerGuards = (): FetchGuards => ({ fetch: workerFetch, resolve: dohResolver(workerFetch) });
 
 /** What one poll run reads with: the clock, the feed guards, the providers, and the grants this run refreshed. */
 interface Run {
@@ -87,9 +87,13 @@ interface Held {
 /** Run one poll pass at `now`. */
 export async function pollDataSources(
   env: Env,
-  { now = Date.now(), guards = workerGuards(), connectors = connectorDeps(env) }: { now?: number; guards?: FetchGuards; connectors?: ConnectorDeps } = {},
+  {
+    now = Date.now(),
+    guards = feedGuards(env, workerFetch),
+    connectors = connectorDeps(env),
+  }: { now?: number; guards?: FetchGuards; connectors?: ConnectorDeps } = {},
 ): Promise<void> {
-  const claimed = await claimDueDataSources(env.DB, now, { limit: POLLS_PER_RUN, leaseMs: LEASE_MS });
+  const claimed = await claimDueDataSources(env.DB, now, { limit: POLLS_PER_RUN, leaseMs: LEASE_MS, backoffMaxMs: BACKOFF_MAX_MS });
   const pass: Run = { env, now, guards, connectors, grants: new Map() };
   const hosts = new Map<string, Promise<void>[]>();
   const one = async ({ orgId, id }: { orgId: string; id: string }) => {
@@ -136,7 +140,9 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, locator: str
       await org.dataSources.savePoll(row.id, { source, checkedAt: now });
       return;
     }
-    if (!fitsBoundFields(await boundFields(org, row.id), data)) throw new PollFailure('unfit');
+    const bound = await boundFields(org, row.id);
+    if (lacksMappedColumn(bound, data)) throw new PollFailure('missing-column');
+    if (!fitsBoundFields(bound, data)) throw new PollFailure('unfit');
     await org.dataSources.savePoll(row.id, { source, snapshot: { version, fetchedAt: now, checkedAt: now, dataJson } });
   } catch (e) {
     if (!(e instanceof PollFailure || e instanceof FetchError || e instanceof FeedError || e instanceof ProviderError)) throw e;
@@ -159,7 +165,7 @@ async function read(run: Run, org: OrgScope, row: DataSourceRow, locator: string
   const validators = format === 'ical' ? {} : { etag: row.etag, lastModified: row.lastModified };
   const res = await guardedFetch(locator, validators, run.guards);
   if (res.status === 'not-modified') return res;
-  return { status: 'ok', data: convert(format, row.horizonDays, res.body, run.now), etag: res.etag, lastModified: res.lastModified };
+  return { status: 'ok', data: convert(format, row, res.body, run.now), etag: res.etag, lastModified: res.lastModified };
 }
 
 /** A provider resource's data, read with the connection's grant. */
@@ -227,7 +233,7 @@ async function refreshed(run: Run, org: OrgScope, conn: Connection, adapter: Pro
 }
 
 /** The feed body as a snapshot's data, by the source's format. */
-function convert(format: Exclude<DataSourceRow['format'], 'provider'>, horizonDays: number | null, body: string, now: number): unknown {
+function convert(format: Exclude<DataSourceRow['format'], 'provider'>, { horizonDays, rowsPath }: DataSourceRow, body: string, now: number): unknown {
   switch (format) {
     case 'json':
       try {
@@ -239,7 +245,16 @@ function convert(format: Exclude<DataSourceRow['format'], 'provider'>, horizonDa
       return normaliseFeed('ical', body, { now: new Date(now), ...(horizonDays ? { horizonDays } : {}) });
     case 'rss':
       return normaliseFeed('rss', body);
+    case 'csv':
+    case 'json-table':
+      return normaliseFeed(format, body, rowsPath ? { rowsPath } : {});
   }
+}
+
+/** Whether a table (a `TableFeed`) lacks a column some published spot's table binding names. */
+function lacksMappedColumn(bound: readonly BoundField[], data: unknown): boolean {
+  const columns = readPath(data, 'columns');
+  return Array.isArray(columns) && bound.some((b) => b.binding.table && missingColumns(columns, b.binding.table).length > 0);
 }
 
 async function sha256(text: string): Promise<string> {
@@ -249,6 +264,12 @@ async function sha256(text: string): Promise<string> {
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+/**
+ * Screens write numbers into text in their own locale; the poller checks for one in which the
+ * value fits, and each screen checks again in its own (`snapshotFit`).
+ */
+const FIT_LOCALE = 'en-US';
+
 /** The fields published spots bind to `sourceId`. Drafts do not count: screens play what was published. */
 async function boundFields(org: OrgScope, sourceId: string): Promise<BoundField[]> {
   const fieldsOf = new Map<string, unknown>();
@@ -256,16 +277,16 @@ async function boundFields(org: OrgScope, sourceId: string): Promise<BoundField[
   for (const draft of await org.spots.list()) {
     const spot = published(draft);
     if (spot?.kind !== 'template' || !spot.bindingsJson || !spot.templateVersionId) continue;
-    const bindings: unknown = JSON.parse(spot.bindingsJson);
-    if (!isObject(bindings)) continue;
-    for (const [field, b] of Object.entries(bindings)) {
-      if (!isObject(b) || b.source !== sourceId || typeof b.path !== 'string') continue;
+    // Written by the spot tools, which checked them.
+    const bindings: Record<string, Binding> = JSON.parse(spot.bindingsJson);
+    for (const [field, binding] of Object.entries(bindings)) {
+      if (binding.source !== sourceId) continue;
       if (!fieldsOf.has(spot.templateVersionId)) {
         const version = await org.templates.versions.get(spot.templateVersionId);
         const manifest: unknown = version ? JSON.parse(version.manifestJson) : undefined;
         fieldsOf.set(spot.templateVersionId, isObject(manifest) ? manifest.fields : undefined);
       }
-      out.push({ fields: fieldsOf.get(spot.templateVersionId), field, path: b.path });
+      out.push({ fields: fieldsOf.get(spot.templateVersionId), field, binding, locale: FIT_LOCALE });
     }
   }
   return out;

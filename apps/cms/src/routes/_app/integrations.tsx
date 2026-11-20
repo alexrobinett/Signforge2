@@ -34,6 +34,7 @@ import {
   weatherFixWords,
   isShow,
   KIND_WORD,
+  kindOf,
   type ListedSource,
   providerName,
   SHOW,
@@ -46,6 +47,7 @@ import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
 import { connectionsQuery } from '~/queries/integrations';
+import { retryUnlessRedirect } from '~/queries/retry';
 import { dataSourcesQuery } from '~/queries/spots';
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
@@ -103,7 +105,7 @@ function IntegrationsPage() {
   const navigate = Route.useNavigate();
   // Read again every 30 s while the page is open, so a poll's result (a fixed URL's first good
   // check) shows; a read fails when two tries in a row do, and the page says it is not current.
-  const { data, dataUpdatedAt, errorUpdatedAt } = useSuspenseQuery({ ...dataSourcesQuery(orgId), refetchInterval: 30_000, retry: 1 });
+  const { data, dataUpdatedAt, errorUpdatedAt } = useSuspenseQuery({ ...dataSourcesQuery(orgId), refetchInterval: 30_000, retry: retryUnlessRedirect(1) });
   // Not `isError`, which goes back to pending on each retry: the notice would blink (as on Screens).
   const notCurrent = errorUpdatedAt > dataUpdatedAt;
   const { connections, providers } = useSuspenseQuery(connectionsQuery(orgId)).data;
@@ -220,10 +222,10 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
   const openSources = useAppStore((s) => s.openSources);
   const mine = sourcesOf(c, sources);
   const failing = mine.some((s) => s.failures > 0);
-  // Feeds and calendars are added here by their address; weather from a place, in a weather spot.
-  const addable = c.format === 'rss' || c.format === 'ical';
-  const action = !c.format ? null : mine.length ? (canManage ? 'Manage' : 'View') : canManage && addable ? 'Connect' : null;
-  const format = c.format;
+  // Feeds and calendars are added here by their address; weather from a place, in a weather spot; a table in a menu board spot.
+  const addable = c.kind === 'rss' || c.kind === 'ical';
+  const action = !c.kind ? null : mine.length ? (canManage ? 'Manage' : 'View') : canManage && addable ? 'Connect' : null;
+  const kind = c.kind;
 
   return (
     <li className="grid grid-cols-[40px_minmax(0,1fr)] items-center gap-x-3.5 gap-y-2 border-b py-2.5 sm:grid-cols-[40px_minmax(0,1fr)_auto]">
@@ -241,15 +243,15 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
       </span>
       {(mine.length > 0 || action) && (
         <span className="col-start-2 flex items-center gap-3 sm:col-start-3 sm:justify-end sm:text-right">
-          {format && mine.length > 0 && (
-            <span className={cn('text-sm', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>{connectedWords(format, mine)}</span>
+          {kind && mine.length > 0 && (
+            <span className={cn('text-sm', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>{connectedWords(kind, mine)}</span>
           )}
-          {format && action && (
+          {kind && action && (
             <Button
               variant={action === 'Connect' ? 'default' : 'outline'}
               className="min-h-10 px-3.5 text-[15px] font-semibold"
               aria-label={`${action} ${c.name}`}
-              onClick={() => openSources(format, { adding: action === 'Connect' })}
+              onClick={() => openSources(kind, { adding: action === 'Connect' })}
             >
               {action}
             </Button>
@@ -323,7 +325,7 @@ function FeedingNow({
             <button
               type="button"
               className="inline-flex min-h-10 items-center self-start text-[15px] text-primary underline underline-offset-4"
-              onClick={() => openSources(s.format, { editing: s.id })}
+              onClick={() => openSources(kindOf(s.format), { editing: s.id })}
             >
               {FIX_WORD[s.format]}
               <span className="sr-only"> for {s.name}</span>

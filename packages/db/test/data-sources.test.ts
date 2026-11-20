@@ -18,22 +18,40 @@ describe('claimDueDataSources', () => {
     await b.scope.dataSources.update(b.dataSource, { nextPollAt: NOW - 20 });
     const late = await a.scope.dataSources.insert({ id: 'later', name: 'Later', format: 'rss', urlEncrypted: 'enc:l', refreshS: 300, nextPollAt: NOW + 1 });
 
-    const claimed = await claimDueDataSources(env.DB, NOW, { limit: 10, leaseMs: 60_000 });
+    const claimed = await claimDueDataSources(env.DB, NOW, { limit: 10, leaseMs: 60_000, backoffMaxMs: 6 * 3_600_000 });
     const mine = claimed.filter((c) => c.orgId.startsWith('org-poll-')).sort((x, y) => x.orgId.localeCompare(y.orgId));
     expect(mine).toEqual([
       { orgId: 'org-poll-a', id: a.dataSource },
       { orgId: 'org-poll-b', id: b.dataSource },
     ]);
-    expect(await a.scope.dataSources.get(a.dataSource)).toMatchObject({ nextPollAt: NOW + 60_000 });
+    // Held for the backoff a failure would get, 300 s doubled once, so a run that dies cannot retry it every lease.
+    expect(await a.scope.dataSources.get(a.dataSource)).toMatchObject({ nextPollAt: NOW + 600_000 });
     expect(await a.scope.dataSources.get(late.id)).toMatchObject({ nextPollAt: NOW + 1 });
     // Claimed: a second run in the same minute does not fetch them again.
-    expect((await claimDueDataSources(env.DB, NOW, { limit: 10, leaseMs: 60_000 })).filter((c) => c.orgId.startsWith('org-poll-'))).toEqual([]);
+    expect(
+      (await claimDueDataSources(env.DB, NOW, { limit: 10, leaseMs: 60_000, backoffMaxMs: 6 * 3_600_000 })).filter((c) => c.orgId.startsWith('org-poll-')),
+    ).toEqual([]);
+  });
+
+  it('holds a failing source for its next backoff, at most the cap, and at least the lease', async () => {
+    const claim = async (failures: number, refreshS: number, leaseMs = 60_000) => {
+      await a.scope.dataSources.update(a.dataSource, { nextPollAt: NOW - 1, failures, refreshS });
+      await b.scope.dataSources.update(b.dataSource, { nextPollAt: NOW + 1 });
+      await claimDueDataSources(env.DB, NOW, { limit: 10, leaseMs, backoffMaxMs: 6 * 3_600_000 });
+      return ((await a.scope.dataSources.get(a.dataSource))?.nextPollAt ?? 0) - NOW;
+    };
+    expect(await claim(2, 300)).toBe(300_000 * 8);
+    expect(await claim(9, 300)).toBe(6 * 3_600_000);
+    expect(await claim(60, 86_400)).toBe(6 * 3_600_000);
+    expect(await claim(0, 300, 20 * 60_000)).toBe(20 * 60_000);
   });
 
   it('claims at most the limit, the longest due first', async () => {
     await a.scope.dataSources.update(a.dataSource, { nextPollAt: 2 });
     await b.scope.dataSources.update(b.dataSource, { nextPollAt: 1 });
-    expect(await claimDueDataSources(env.DB, NOW, { limit: 1, leaseMs: 60_000 })).toEqual([{ orgId: 'org-poll-b', id: b.dataSource }]);
+    expect(await claimDueDataSources(env.DB, NOW, { limit: 1, leaseMs: 60_000, backoffMaxMs: 6 * 3_600_000 })).toEqual([
+      { orgId: 'org-poll-b', id: b.dataSource },
+    ]);
   });
 });
 

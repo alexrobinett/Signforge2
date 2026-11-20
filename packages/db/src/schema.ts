@@ -796,8 +796,12 @@ export const dataSources = sqliteTable(
     id: text('id').notNull(),
     orgId: orgId(),
     name: text('name').notNull(),
-    /** `provider`: the connection's adapter fetches it and gives the snapshot's data. */
-    format: text('format', { enum: ['json', 'ical', 'rss', 'provider'] }).notNull(),
+    /**
+     * How the poller reads the feed (`@signforge/feeds`): `json` as it is; `ical`, `rss`, `csv`
+     * and `json-table` converted to the contract's feeds. `provider`: the connection's adapter
+     * fetches it and gives the snapshot's data.
+     */
+    format: text('format', { enum: ['json', 'ical', 'rss', 'csv', 'json-table', 'provider'] }).notNull(),
     /**
      * The feed URL, encrypted: a private calendar URL is a secret. For a provider source, the
      * provider's resource (a calendar id, a sheet range), sealed the same way: a sheet's id can
@@ -814,6 +818,8 @@ export const dataSources = sqliteTable(
     refreshS: integer('refresh_s').notNull(),
     /** Calendars: how many days ahead their events reach. Null: `@signforge/feeds`' default. */
     horizonDays: integer('horizon_days'),
+    /** `json-table`: the dot path to the list of objects. Null: the document is the list. */
+    rowsPath: text('rows_path'),
     nextPollAt: integer('next_poll_at').notNull().default(0),
     etag: text('etag'),
     lastModified: text('last_modified'),

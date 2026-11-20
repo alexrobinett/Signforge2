@@ -5,11 +5,13 @@
  * values read-only, from the source's latest snapshot, and the static values a screen falls back
  * to sit in a collapsed "If the source is down" section. State and actions: src/state/spot-source.ts.
  */
-import { type LiveData, SNAPSHOT_STALE_MS, type TemplateManifest } from '@signforge/contract';
+import type { LiveData, TemplateManifest } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { ChevronRightIcon, Link2Icon, TriangleAlertIcon } from 'lucide-react';
+import { ChevronRightIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { FieldForm } from '~/components/spots/field-form';
+import { KeepSource, LiveCard, SourceChoice } from '~/components/spots/source-parts';
+import { TableSource } from '~/components/spots/table-source';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
@@ -17,21 +19,19 @@ import type { AssetView } from '~/lib/assets';
 import { useNow } from '~/lib/live';
 import {
   boundSource,
+  freshness,
+  isFresh,
   liveFields,
   liveValue,
   placeName,
-  pollErrorWords,
   rowTitles,
-  SOURCE_FORMAT,
   unitsOf,
   weatherWords,
   withUnit,
   type DataSourceView,
   type PlaceView,
-  type SnapshotView,
   type WeatherUnits,
 } from '~/lib/live-data';
-import { ago } from '~/lib/screen-status';
 import { fieldProblems, type SpotDraft, type SpotView } from '~/lib/spots';
 import { cn } from '~/lib/utils';
 import { dataSourceQuery, dataSourcesQuery } from '~/queries/spots';
@@ -44,6 +44,7 @@ const INTRO: Record<LiveData['source'], string> = {
   'open-meteo': 'Pick a place: the temperature, conditions, wind and humidity come from its forecast and update by themselves.',
   rss: 'Pick a news feed: the headlines come from it and update by themselves.',
   ical: 'Pick a calendar: the events come from it and update by themselves.',
+  table: 'Type the items below, or fill them from a CSV or JSON file on the web: each row is an item, and screens follow the file.',
 };
 
 /** Open-Meteo's values with their units; the condition and day or night are in the summary instead. */
@@ -72,23 +73,6 @@ function searchWords(places: PlaceView[] | null): string {
   if (!places) return '';
   if (!places.length) return 'No place by that name.';
   return `${places.length} ${places.length === 1 ? 'place' : 'places'} found.`;
-}
-
-/** Whether screens show the snapshot: one confirmed within `SNAPSHOT_STALE_MS`. */
-const isFresh = (snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
-  snapshot !== null && now - Date.parse(snapshot.checkedAt) <= SNAPSHOT_STALE_MS;
-
-/** How fresh the source's data is, and what screens do about it. */
-function freshness(source: DataSourceView, snapshot: SnapshotView | null, now: number): string {
-  const failing = source.lastError ? pollErrorWords(source.lastError) : undefined;
-  if (!snapshot)
-    return failing
-      ? `The first check failed: ${failing}. Screens show the fallback values until it works.`
-      : 'Waiting for the first check, within a minute. Until then screens show the fallback values.';
-  const since = now - Date.parse(snapshot.checkedAt);
-  if (!isFresh(snapshot, now)) return `Not confirmed for ${ago(since)}: screens show the fallback values.`;
-  const when = since < 60_000 ? 'Checked just now.' : `Checked ${ago(since)} ago.`;
-  return failing ? `${when} The last check failed: ${failing}. Screens keep this data for a day, then show the fallback values.` : when;
 }
 
 function LiveValues({
@@ -151,23 +135,7 @@ function LiveValues({
       : undefined;
   const rows = Object.entries(live.fields).filter(([, path]) => !(weather && IN_SUMMARY.has(path)));
   return (
-    <div
-      className={cn(
-        'flex flex-col gap-2.5 rounded-[10px] border p-3',
-        fresh ? 'border-primary/25 bg-accent' : 'border-status-updating/50 bg-status-updating-muted',
-      )}
-    >
-      {fresh ? (
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-foreground">
-          <Link2Icon className="size-3.5" aria-hidden />
-          Live data
-        </span>
-      ) : (
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-status-updating-foreground">
-          <TriangleAlertIcon className="size-3.5" aria-hidden />
-          Showing the fallback
-        </span>
-      )}
+    <LiveCard fresh={fresh} instead="fallback" className="gap-2.5">
       <span className="font-medium break-words">{dataSource.name}</span>
       {fresh && summary && <p className="text-[15px] font-semibold">{summary}</p>}
       {fresh && (
@@ -203,7 +171,7 @@ function LiveValues({
           Change source
         </Button>
       )}
-    </div>
+    </LiveCard>
   );
 }
 
@@ -286,46 +254,28 @@ function PlacePicker({ target, draft, bound }: { target: SourceTarget; draft: Sp
   );
 }
 
-function FeedPicker({ target, sources, boundId }: { target: SourceTarget; sources: DataSourceView[]; boundId: string | undefined }) {
-  const { spot, live } = target;
+function FeedPicker({
+  target,
+  sources,
+  boundId,
+  format,
+}: {
+  target: SourceTarget;
+  sources: DataSourceView[];
+  boundId: string | undefined;
+  format: 'rss' | 'ical';
+}) {
+  const { spot } = target;
   const st = useAppStore((s) => sourceStateOf(s.spotSource, spot.id));
-  const connect = useAppStore((s) => s.connectSource);
   const openForm = useAppStore((s) => s.openFeedForm);
   const editFeed = useAppStore((s) => s.editFeed);
   const addFeed = useAppStore((s) => s.addFeed);
-  const changeSource = useAppStore((s) => s.changeSource);
-  const chooseFeed = useAppStore((s) => s.chooseFeed);
-  const format = SOURCE_FORMAT[live.source];
   const mine = sources.filter((d) => d.format === format);
-  const choice = st.feedChoice ?? boundId;
   const word = format === 'ical' ? 'calendar' : 'feed';
   return (
     <div className="flex flex-col gap-3">
       {mine.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="source-feed" className="font-medium">
-            {format === 'ical' ? 'Calendar' : 'News feed'}
-          </label>
-          <NativeSelect id="source-feed" value={choice ?? ''} disabled={st.pending} onChange={(e) => chooseFeed(spot.id, e.target.value)}>
-            <option value="" disabled>
-              Choose a {word}
-            </option>
-            {mine.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </NativeSelect>
-          <Button
-            type="button"
-            variant="outline"
-            className="self-start"
-            disabled={st.pending || !choice || choice === boundId}
-            onClick={() => choice && void connect(target, choice)}
-          >
-            Use this {word}
-          </Button>
-        </div>
+        <SourceChoice target={target} sources={mine} boundId={boundId} id="source-feed" label={format === 'ical' ? 'Calendar' : 'News feed'} word={word} />
       )}
       {st.adding || mine.length === 0 ? (
         <fieldset className="rounded-[10px] border p-3">
@@ -374,7 +324,7 @@ function FeedPicker({ target, sources, boundId }: { target: SourceTarget; source
               </div>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button type="button" disabled={st.pending || !st.feedUrl.trim()} onClick={() => void addFeed(target)}>
+              <Button type="button" disabled={st.pending || !st.feedUrl.trim()} onClick={() => void addFeed(target, format)}>
                 {st.pending ? 'Adding…' : `Add ${word}`}
               </Button>
               {mine.length > 0 && (
@@ -390,11 +340,7 @@ function FeedPicker({ target, sources, boundId }: { target: SourceTarget; source
           Add a {word} by its address
         </Button>
       )}
-      {boundId && (
-        <Button type="button" variant="ghost" className="self-start" onClick={() => changeSource(spot.id, false)}>
-          Keep the current source
-        </Button>
-      )}
+      {boundId && <KeepSource spotId={spot.id} />}
     </div>
   );
 }
@@ -433,7 +379,7 @@ export function SourceSection({
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">{INTRO[live.source]}</p>
-      {boundId && (
+      {boundId && live.source !== 'table' && (
         <LiveValues
           orgId={orgId}
           spotId={spot.id}
@@ -445,20 +391,20 @@ export function SourceSection({
           onChange={() => changeSource(spot.id, true, typeof place === 'string' ? place : '')}
         />
       )}
-      {canManage &&
-        (!boundId || changing) &&
-        (live.source === 'open-meteo' ? (
-          <PlacePicker target={target} draft={draft} bound={boundId !== undefined} />
-        ) : (
-          <FeedPicker target={target} sources={dataSources} boundId={boundId} />
-        ))}
+      {canManage && (!boundId || changing) && live.source === 'open-meteo' && <PlacePicker target={target} draft={draft} bound={boundId !== undefined} />}
+      {canManage && (!boundId || changing) && (live.source === 'rss' || live.source === 'ical') && (
+        <FeedPicker target={target} sources={dataSources} boundId={boundId} format={live.source} />
+      )}
+      {live.source === 'table' && (
+        <TableSource target={target} draft={draft} sources={dataSources} boundId={boundId} canManage={canManage} onChange={onChange} />
+      )}
       {error && (
         <p role="alert" className="text-sm font-medium text-destructive">
           {error}
         </p>
       )}
-      {/* A disclosure the store controls: open while the person has it open, and while a fallback value is invalid. */}
-      <div className="rounded-[10px] border">
+      {/* A disclosure the store controls: open while the person has it open, and while a fallback value is invalid. An unbound table's items are typed in Content. */}
+      <div hidden={live.source === 'table' && !boundId} className="rounded-[10px] border">
         <button
           type="button"
           aria-expanded={fallbackShown}

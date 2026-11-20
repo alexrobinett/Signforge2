@@ -275,7 +275,8 @@ export class Slot {
       (e: MessageEvent<TemplateMessage>) => {
         if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
         if (e.data.type === 'loaded') {
-          const { data, rejected } = resolveSpotData(live.spot, t.manifest.fields, liveData, now());
+          const locale = live.manifest.screen.locale ?? 'en-US';
+          const { data, rejected } = resolveSpotData(live.spot, t.manifest.fields, liveData, now(), locale);
           reportRejected(rejected);
           this.post({
             sf: protocol,
@@ -286,7 +287,7 @@ export class Slot {
             orientation: live.orientation,
             viewport: live.viewport,
             timezone: live.manifest.screen.timezone,
-            locale: live.manifest.screen.locale ?? 'en-US',
+            locale,
             clock: frameClock(),
             ...(live.theme ? { theme: live.theme } : {}),
           });

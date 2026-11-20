@@ -8,7 +8,19 @@
  * holds it back until then.
  */
 import { spotProblems } from '@signforge/compiler';
-import { BINDING_PATH, readPath, safeUrl, templateKey, type Binding, type FieldDef, type TemplateManifest } from '@signforge/contract';
+import {
+  BINDING_PATH,
+  missingColumns,
+  readPath,
+  safeUrl,
+  TABLE_ROWS_PATH,
+  templateKey,
+  validateTableFeed,
+  type Binding,
+  type FieldDef,
+  type TableFeed,
+  type TemplateManifest,
+} from '@signforge/contract';
 import { draftChanged, type OrgScope, type SpotRow } from '@signforge/db';
 import { z } from 'zod';
 import { draftOutput, id, idempotencyKey, ifVersion, name, orientation, version } from './fields';
@@ -32,13 +44,27 @@ const data = z
   .describe("The template's field values by field name: the whole set, replacing the draft's. A field left out takes its default");
 const assets = z.record(z.string(), id('asset')).describe("Image fields to verified asset ids, by field name: the whole set, replacing the draft's");
 const url = z.string().refine(safeUrl, 'must be an https URL').describe('An https page on another origin');
+const column = z.string().min(1).max(200);
+const tableMapping = z
+  .object({
+    columns: z.record(z.string(), column).describe('Item property to the column that fills it, such as { "name": "Item", "price": "Price" }'),
+    filter: z
+      .object({ column, equals: z.string().max(200) })
+      .optional()
+      .describe('Only rows whose cell in column is equals, ignoring case'),
+    sort: z.object({ column, descending: z.boolean().optional() }).optional().describe("Rows in the order of a column; absent, the file's order"),
+  })
+  .describe(
+    `A list field filled from a csv or json-table source's rows (path ${TABLE_ROWS_PATH}): each row an item, at most the field's maxItems. Properties left out take their defaults`,
+  );
 const binding = z.object({
   dataSourceId: id('data source'),
   path: z
     .string()
     .max(200)
     .regex(BINDING_PATH, 'must be a dot path such as current.temperature_2m')
-    .describe("A dot path into the source's snapshot; numbers index arrays: daily.temperature_2m_max.0, items"),
+    .describe(`A dot path into the source's snapshot; numbers index arrays: daily.temperature_2m_max.0, items. With table, ${TABLE_ROWS_PATH}`),
+  table: tableMapping.optional(),
 });
 const bindings = z
   .record(z.string(), binding)
@@ -65,7 +91,7 @@ const spotOutput = z.object({
   data: z.record(z.string(), z.unknown()).nullable().describe('Template spots: field values by field name'),
   assets: z.record(z.string(), z.string()).nullable().describe('Template spots: image fields to asset ids'),
   bindings: z
-    .record(z.string(), z.object({ dataSourceId: z.string(), path: z.string() }))
+    .record(z.string(), z.object({ dataSourceId: z.string(), path: z.string(), table: tableMapping.optional() }))
     .nullable()
     .describe('Template spots: fields bound to a data source, as update_spot takes them'),
   assetId: z.string().nullable().describe('Image and video spots'),
@@ -87,7 +113,10 @@ function parsed<T>(text: string | null): T | null {
 /** Bindings as tools take them, from the contract's `Binding`s stored on the row. */
 function bindingsView(json: string | null): SpotView['bindings'] {
   const stored = parsed<Record<string, Binding>>(json);
-  return stored && Object.fromEntries(Object.entries(stored).map(([field, b]) => [field, { dataSourceId: b.source, path: b.path }]));
+  return (
+    stored &&
+    Object.fromEntries(Object.entries(stored).map(([field, b]) => [field, { dataSourceId: b.source, path: b.path, ...(b.table ? { table: b.table } : {}) }]))
+  );
 }
 
 const spotView = (row: SpotRow): SpotView => ({
@@ -165,21 +194,35 @@ function checkTemplateDraft(
 }
 
 /**
- * What a news (`rss`) or calendar (`ical`) source's snapshot holds, one row of each list: the
- * server converts those feeds to the contract's `NewsFeed` and `CalendarFeed`, so a path either
- * shape lacks never finds a value. A JSON source's shape is its feed's, unknown until it is polled.
+ * What a news (`rss`), calendar (`ical`) or table (`csv`, `json-table`) source's snapshot holds,
+ * one row of each list: the server converts those feeds to the contract's `NewsFeed`,
+ * `CalendarFeed` and `TableFeed`, so a path the shape lacks never finds a value. A JSON source's
+ * shape is its feed's, unknown until it is polled.
  */
+const TABLE_SHAPE = { what: 'a table', shape: { columns: [''], rows: [['']] } };
 const FEED_SHAPES = {
   rss: { what: 'a news feed', shape: { title: '', language: '', items: [{ title: '', published: '', source: '' }] } },
   ical: { what: 'a calendar feed', shape: { events: [{ title: '', start: '', end: '', allDay: false, location: '' }] } },
+  csv: TABLE_SHAPE,
+  'json-table': TABLE_SHAPE,
 } as const;
+const isFeedShaped = (format: string | undefined): format is keyof typeof FEED_SHAPES => format !== undefined && Object.hasOwn(FEED_SHAPES, format);
+
+/** The columns of a table source's latest snapshot; undefined before its first poll. */
+async function columnsOf(org: OrgScope, dataSourceId: string): Promise<string[] | undefined> {
+  const [snap] = await org.dataSources.snapshots([dataSourceId]);
+  if (!snap) return undefined;
+  const table: TableFeed = JSON.parse(snap.dataJson);
+  return validateTableFeed(table).length ? undefined : table.columns;
+}
 
 /** Whether `path` reaches a value in `shape`, whose lists hold one row: any index reads that row. */
 const reaches = (shape: unknown, path: string) => readPath(shape, path.replace(/(^|\.)\d+(?=\.|$)/g, '$10')) !== undefined;
 
 /**
  * The input's bindings as the contract's, each source one of the org's (`not_found` otherwise)
- * and each path one its feed's shape has. Undefined when the input has none.
+ * and each path one its feed's shape has. A table binding's source must be a table, and once it
+ * has been read, have every column the mapping names. Undefined when the input has none.
  */
 async function bindingsOf(org: OrgScope, input: z.infer<typeof bindings> | undefined): Promise<Record<string, Binding> | undefined> {
   if (!input) return undefined;
@@ -187,13 +230,26 @@ async function bindingsOf(org: OrgScope, input: z.infer<typeof bindings> | undef
   const sources = new Map((await Promise.all(ids.map((i) => org.dataSources.get(i)))).flatMap((d) => (d ? [[d.id, d] as const] : [])));
   const missing = ids.find((i) => !sources.has(i));
   if (missing) throw notFound('data source', missing);
-  const problems = Object.values(input).flatMap(({ dataSourceId, path }) => {
+  const problems: string[] = [];
+  for (const [field, { dataSourceId, path, table }] of Object.entries(input)) {
     const format = sources.get(dataSourceId)?.format;
-    const feed = format === 'rss' || format === 'ical' ? FEED_SHAPES[format] : undefined;
-    return feed && !reaches(feed.shape, path) ? [`${dataSourceId} is ${feed.what}, which has no ${path} (it has ${Object.keys(feed.shape).join(', ')})`] : [];
-  });
+    const feed = isFeedShaped(format) ? FEED_SHAPES[format] : undefined;
+    if (table) {
+      if (feed !== TABLE_SHAPE)
+        problems.push(`binding for "${field}": ${dataSourceId} is ${feed?.what ?? `a ${format} source`}, not a table (csv or json-table)`);
+      else {
+        const columns = await columnsOf(org, dataSourceId);
+        const missing = columns ? missingColumns(columns, table) : [];
+        if (missing.length)
+          problems.push(`binding for "${field}": ${dataSourceId} has no column ${missing.map((c) => `"${c}"`).join(', ')} (it has ${columns?.join(', ')})`);
+      }
+    } else if (feed && !reaches(feed.shape, path))
+      problems.push(`${dataSourceId} is ${feed.what}, which has no ${path} (it has ${Object.keys(feed.shape).join(', ')})`);
+  }
   if (problems.length) throw invalid('bindings', problems);
-  return Object.fromEntries(Object.entries(input).map(([field, b]) => [field, { source: b.dataSourceId, path: b.path }]));
+  return Object.fromEntries(
+    Object.entries(input).map(([field, b]) => [field, { source: b.dataSourceId, path: b.path, ...(b.table ? { table: b.table } : {}) }]),
+  );
 }
 
 /** Bindings for the row: none is stored as no bindings at all. */

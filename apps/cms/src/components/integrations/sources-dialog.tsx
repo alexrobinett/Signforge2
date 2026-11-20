@@ -17,29 +17,36 @@ import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { type Clock, failingWords, hasAddress, type ListedSource, type SourceFormat, sourceState, weatherFixWords } from '~/lib/integrations';
+import { type Clock, failingWords, hasAddress, kindOf, type ListedSource, type SourceKind, sourceState, weatherFixWords } from '~/lib/integrations';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 
-const TITLE: Record<SourceFormat, string> = { rss: 'RSS / Atom feeds', json: 'Weather', ical: 'iCal calendars', provider: 'Sources from accounts' };
+const TITLE: Record<SourceKind, string> = {
+  rss: 'RSS / Atom feeds',
+  json: 'Weather',
+  ical: 'iCal calendars',
+  table: 'CSV and JSON files',
+  provider: 'Sources from accounts',
+};
 
-const ABOUT: Record<SourceFormat, string> = {
+const ABOUT: Record<SourceKind, string> = {
   rss: 'Headlines for the News template. Screens get each new copy with their next sync.',
   json: 'Forecasts for the Weather template, one per place and units.',
   ical: 'Events for the Agenda template, from any calendar that publishes an .ics link.',
+  table: 'Rows for a Menu Board’s items. Add a file from a Menu Board spot’s Source section, where its columns are matched to the items.',
   provider: 'Data read through an account the organization connected.',
 };
 
-/** What the add form makes and calls it. Weather sources come from a place, which only the spot editor picks. */
+/** What the add form makes and calls it. Weather sources come from a place, and tables with their columns mapped, both in the spot editor. */
 const ADD = { rss: { noun: 'feed', button: 'Add a feed' }, ical: { noun: 'calendar', button: 'Add a calendar' } } as const;
 
-const isAddable = (f: SourceFormat): f is keyof typeof ADD => f in ADD;
+const isAddable = (k: SourceKind): k is keyof typeof ADD => k in ADD;
 
 export function SourcesDialog({ orgId, sources, clock, canManage }: { orgId: string; sources: ListedSource[]; clock: Clock; canManage: boolean }) {
   const s = useAppStore((st) => st.integrations);
   const openSources = useAppStore((st) => st.openSources);
   const format = s.dialog;
-  const mine = format ? sources.filter((x) => x.format === format) : [];
+  const mine = format ? sources.filter((x) => kindOf(x.format) === format) : [];
 
   return (
     <Dialog open={format !== null} onOpenChange={(open) => !open && openSources(null)}>

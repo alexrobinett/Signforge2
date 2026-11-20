@@ -4,7 +4,7 @@
  * themselves are Query data (src/queries/integrations.ts); each action invalidates what it changed.
  * The page's filter and search are in its URL.
  */
-import type { ConnectionView, ListedSource, SourceFormat } from '~/lib/integrations';
+import type { ConnectionView, ListedSource, SourceFormat, SourceKind } from '~/lib/integrations';
 import { callTool, isStale, toolMessage } from '~/lib/tools';
 import { connectionKeys } from '~/queries/integrations';
 import { dataSourceKeys } from '~/queries/spots';
@@ -25,7 +25,7 @@ interface NewSource {
 
 interface IntegrationsState {
   /** The kind whose sources the dialog shows; null while it is closed. */
-  dialog: SourceFormat | null;
+  dialog: SourceKind | null;
   /** The add form is open in the dialog. */
   adding: boolean;
   newSource: NewSource;
@@ -46,7 +46,7 @@ interface IntegrationsState {
 export interface IntegrationsSlice {
   integrations: IntegrationsState;
   /** Opens the dialog over one kind's sources, on the add form (`adding`) or a source's URL (`editing`); null closes it. */
-  openSources: (format: SourceFormat | null, open?: { adding?: boolean; editing?: string }) => void;
+  openSources: (kind: SourceKind | null, open?: { adding?: boolean; editing?: string }) => void;
   openAddSource: (open: boolean) => void;
   editNewSource: (change: Partial<NewSource>) => void;
   addSource: (orgId: string, format: AddableFormat) => Promise<void>;

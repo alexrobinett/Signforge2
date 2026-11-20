@@ -175,8 +175,10 @@ function spotContent(
   if (spot.kind === 'template') {
     if (!version) return undefined;
     const assets = Object.fromEntries(Object.entries(draft.assets).map(([field, id]) => [field, file(id)]));
-    // The tools' bindings ({ dataSourceId, path }) as the contract's ({ source, path }).
-    const bindings = Object.fromEntries(Object.entries(draft.bindings).map(([field, b]) => [field, { source: b.dataSourceId, path: b.path }]));
+    // The tools' bindings ({ dataSourceId, path, table? }) as the contract's ({ source, path, table? }).
+    const bindings = Object.fromEntries(
+      Object.entries(draft.bindings).map(([field, b]) => [field, { source: b.dataSourceId, path: b.path, ...(b.table ? { table: b.table } : {}) }]),
+    );
     return { ...base, kind: 'template', template: version.key, data: draft.data, assets, ...(live && Object.keys(bindings).length ? { bindings } : {}) };
   }
   if (spot.kind === 'url') return { ...base, kind: 'url', url: draft.url };
