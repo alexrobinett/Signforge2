@@ -17,6 +17,7 @@ import { SourceSection } from '~/components/spots/source-section';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
+import { useHydrated } from '~/lib/hydrated';
 import { useCanManage, useOrgId } from '~/lib/live';
 import { boundSource, typedFields } from '~/lib/live-data';
 import { draftOf, publishWord, seconds, versionsById, type SpotDraft, type SpotView } from '~/lib/spots';
@@ -56,6 +57,9 @@ function SpotEditor() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
+  // This route's code arrives after the page's: until it has hydrated, its fields are the server's
+  // HTML, and a choice made there is lost when React takes them over (a select set back to its value).
+  const hydrated = useHydrated();
   const spot: SpotView | null = useSuspenseQuery(spotQuery(orgId, spotId)).data;
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
@@ -102,7 +106,7 @@ function SpotEditor() {
           onSubmit={(e) => e.preventDefault()}
           className="flex max-w-full flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
         >
-          <fieldset disabled={!canManage} className="contents">
+          <fieldset disabled={!canManage || !hydrated} className="contents">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="spot-name" className="font-medium">
                 Name
