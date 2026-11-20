@@ -7,7 +7,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { resolveSpotData } from '@signforge/player-core';
 import { ToolError } from '@signforge/tools';
 import { env } from 'cloudflare:workers';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import menuBoard from '@signforge/template-menu-board/template.json';
 import { feedUrlSealer } from '../src/data/cipher';
 import { feedGuards, type FetchGuards } from '../src/data/fetch';
@@ -15,7 +15,7 @@ import { pollDataSources } from '../src/data/poller';
 import { tableReader } from '../src/data/tables';
 import { mintCredential } from '../src/device/credential';
 import { manifestKey } from '../src/r2';
-import { Client, email, inOneLimiterWindow, testApp } from './client';
+import { Client, clockLimits, email, nextIp, testApp } from './client';
 import { syncAs, syncBody } from './sync-client';
 
 const NOW = Date.UTC(2026, 11, 1, 12);
@@ -211,16 +211,20 @@ describe('read_table', () => {
 
 describe('read_table through /api/tools', () => {
   const t = testApp();
-  beforeEach(inOneLimiterWindow);
 
-  it('lets one member read 30 tables a minute, then refuses with rate_limited', async () => {
-    const member = new Client(t);
+  it('lets one member read 30 tables a minute, then refuses with rate_limited until the next minute', async () => {
+    onTestFinished(() => void vi.useRealTimers());
+    vi.setSystemTime('2026-11-20T12:00:00Z');
+    const member = new Client(t, nextIp(), clockLimits());
     await member.signIn(email('table-reader'));
     await member.setActive((await member.createOrg('Reader')).id);
     // Feeds go to a closed local port in the tests (vitest.config.ts): an allowed read fails upstream, as invalid_input.
     for (let i = 0; i < 30; i++) expect((await member.tool('read_table', { feedUrl: URL_, format: 'csv' })).status, `read ${i + 1}`).toBe(400);
+    vi.setSystemTime('2026-11-20T12:00:59.999Z');
     const refused = await member.tool('read_table', { feedUrl: URL_, format: 'csv' });
     expect(refused.status).toBe(429);
     expect(await refused.json()).toMatchObject({ error: 'rate_limited' });
+    vi.setSystemTime('2026-11-20T12:01:00Z');
+    expect((await member.tool('read_table', { feedUrl: URL_, format: 'csv' })).status).toBe(400);
   });
 });
