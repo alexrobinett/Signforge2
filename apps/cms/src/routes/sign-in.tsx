@@ -7,10 +7,12 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { safeRedirect } from '~/lib/paths';
+import { backToPage } from '~/server/form-post.server';
 import { getShell, getSignInOptions, type SignInOptions } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/sign-in')({
+  server: { handlers: backToPage },
   validateSearch: (search: Record<string, unknown>): { redirect?: string } => (typeof search.redirect === 'string' ? { redirect: search.redirect } : {}),
   beforeLoad: async ({ search }) => {
     if (await getShell()) throw redirect({ href: safeRedirect(search.redirect) });
@@ -86,7 +88,7 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
           </p>
         </div>
         {options.codesInTerminal && <DevCodeHint />}
-        <form onSubmit={onCodeSubmit} className="space-y-4" noValidate>
+        <form method="post" onSubmit={onCodeSubmit} className="space-y-4" noValidate>
           <div className="space-y-2">
             <Label htmlFor={codeId}>Sign-in code</Label>
             <Input
@@ -128,7 +130,7 @@ function SignInForm({ options, next }: { options: SignInOptions; next: string })
         <h1 className="text-[34px] leading-[1.15] font-semibold tracking-tight">Sign in to SignForge</h1>
         <p className="text-base leading-normal text-muted-foreground">We will email you a 6-digit code. No password to remember.</p>
       </div>
-      <form onSubmit={onEmailSubmit} className="space-y-7" noValidate>
+      <form method="post" onSubmit={onEmailSubmit} className="space-y-7" noValidate>
         <div className="space-y-2">
           <Label htmlFor={emailId}>Email</Label>
           <Input

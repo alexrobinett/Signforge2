@@ -15,10 +15,12 @@ import { ago } from '~/lib/screen-status';
 import { describeAgent } from '~/lib/settings';
 import type { Theme } from '~/lib/theme';
 import { cn } from '~/lib/utils';
+import { backToPage } from '~/server/form-post.server';
 import { getAccount } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
 
 export const Route = createFileRoute('/_app/account')({
+  server: { handlers: backToPage },
   loader: () => getAccount(),
   head: () => ({ meta: [{ title: 'Your account · SignForge' }] }),
   component: AccountPage,
@@ -63,24 +65,26 @@ function AccountPage() {
       </PageHeader>
 
       <SettingsSection id={`${id}-profile`} title="Profile">
-        <form key={user.name} onSubmit={submit} className="grid max-w-md gap-4" noValidate>
-          <div className="grid gap-1.5">
-            <Label htmlFor={`${id}-name`}>Name</Label>
-            <Input id={`${id}-name`} name="name" defaultValue={user.name} maxLength={100} autoComplete="name" />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor={`${id}-email`}>Email</Label>
-            <Input id={`${id}-email`} value={user.email} readOnly aria-describedby={`${id}-email-help`} />
-            <p id={`${id}-email-help`} className="text-[13px] text-muted-foreground">
-              Your sign-in address. Changing it is not offered yet.
-            </p>
-          </div>
-          <ActionError at="profile" />
-          <div>
-            <Button type="submit" disabled={pending === 'profile'}>
-              Save
-            </Button>
-          </div>
+        <form key={user.name} method="post" onSubmit={submit} className="grid max-w-md gap-4" noValidate>
+          <EditorFields>
+            <div className="grid gap-1.5">
+              <Label htmlFor={`${id}-name`}>Name</Label>
+              <Input id={`${id}-name`} name="name" defaultValue={user.name} maxLength={100} autoComplete="name" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor={`${id}-email`}>Email</Label>
+              <Input id={`${id}-email`} value={user.email} readOnly aria-describedby={`${id}-email-help`} />
+              <p id={`${id}-email-help`} className="text-[13px] text-muted-foreground">
+                Your sign-in address. Changing it is not offered yet.
+              </p>
+            </div>
+            <ActionError at="profile" />
+            <div>
+              <Button type="submit" disabled={pending === 'profile'}>
+                Save
+              </Button>
+            </div>
+          </EditorFields>
         </form>
       </SettingsSection>
 
