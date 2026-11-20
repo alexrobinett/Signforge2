@@ -166,7 +166,7 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
 });
 
 test('axe reads the stage only once a fade between spots is over (#95)', async () => {
-  test.setTimeout(90_000);
+  test.setTimeout(150_000);
   // A loop of its own: a 4 s clock, then a 4 s fade into a 60 s one. After the fade the stage is
   // still for most of a minute, however slow the machine: no play, fade or prepare comes sooner.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
@@ -224,7 +224,8 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
       },
     });
   });
-  // The fade into the 60 s clock, caught as it starts: axe must wait until it is over.
+  // The fade into the 60 s clock, caught as it starts: axe must wait until it is over. If the steps
+  // above outlast the first fade, the next comes a whole loop (64 s and its fades) later.
   await expect
     .poll(
       () =>
@@ -235,7 +236,7 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
               (a) => a.playState === 'running' && a.effect instanceof KeyframeEffect && a.effect.target instanceof Element && a.effect.target.matches('.slot'),
             ),
         ),
-      { intervals: [20], timeout: 30_000 },
+      { intervals: [20], timeout: 75_000 },
     )
     .toBe(true);
   await axe(page);
