@@ -19,7 +19,7 @@ import type { Role } from '~/server/shell.functions';
 import type { SliceCreator } from './store';
 
 /** A page whose actions run one at a time. Account and the invitation page belong to no org. */
-export type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'account' | 'invitation';
+type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'account' | 'invitation';
 /** Where an action runs: its page, in the org it was started in (null for Account and the invitation page). */
 export interface SettingsScope {
   page: SettingsPage;

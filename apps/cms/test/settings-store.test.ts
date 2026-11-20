@@ -15,6 +15,8 @@ const auth = vi.hoisted(() => ({
   linkSocial: vi.fn(),
 }));
 vi.mock('~/lib/auth-client', async (original) => ({ ...(await original<typeof import('../src/lib/auth-client')>()), authClient: auth }));
+// The tab's org comes from the page's router, which a store test has none of.
+vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn() }) }));
 
 /** A promise the test settles when it chooses. */
