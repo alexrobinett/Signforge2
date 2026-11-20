@@ -42,7 +42,7 @@ import {
   type SyncRequest,
   type Transition,
 } from '@signforge/contract';
-import { Sequencer, displayOn, localTime, spotFiles, type Step } from '@signforge/player-core';
+import { Sequencer, activeTakeover, displayOn, localTime, nextTakeoverEdge, spotFiles, type Step } from '@signforge/player-core';
 import { clock, now, synced } from './clock';
 import { BrowserCredential } from './browser-credential';
 import { DeviceCredential, type ScreenCredential } from './credential';
@@ -359,7 +359,37 @@ let fellAsleep = new Promise<void>(() => {});
 let markAsleep = () => {};
 const resetSleepSignal = () => (fellAsleep = new Promise<void>((r) => (markAsleep = r)));
 resetSleepSignal();
-const hold = (ms: number) => Promise.race([sleep(ms), fellAsleep]);
+
+/**
+ * Takeovers (M3-19). The takeover the next spot was chosen under; when the one that should play
+ * differs (one published, starting or ending), `cutIn` is set and `tookOver` resolves: the spot on
+ * screen gives way as soon as the next is ready, instead of at its end. Checked when a manifest is
+ * adopted, after a sync moves the clock, and by a timer at the next takeover start or end, so a
+ * takeover ends on time with the network down.
+ */
+let chosenTakeover: string | undefined;
+let cutIn = false;
+let tookOver = new Promise<void>(() => {});
+let markTakeover = () => {};
+const resetTakeoverSignal = () => (tookOver = new Promise<void>((r) => (markTakeover = r)));
+resetTakeoverSignal();
+let takeoverTimer: ReturnType<typeof setTimeout> | undefined;
+/** setTimeout's longest delay; a later edge is checked again when this one fires. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+function watchTakeover(): void {
+  clearTimeout(takeoverTimer);
+  if (!manifest) return;
+  const at = new Date(now());
+  if (activeTakeover(manifest, at, { clockTrusted: clock.trusted }) !== chosenTakeover) {
+    cutIn = true;
+    markTakeover();
+  }
+  const edge = nextTakeoverEdge(manifest, at);
+  if (edge) takeoverTimer = setTimeout(watchTakeover, Math.min(edge.getTime() - at.getTime(), MAX_TIMER_MS));
+}
+
+const hold = (ms: number) => Promise.race([sleep(ms), fellAsleep, tookOver]);
 
 let manifest: ScreenManifest | undefined;
 /** `manifest` as it arrived, before testing overrides: what is stored as the last good one. */
@@ -462,12 +492,16 @@ async function playbackLoop(): Promise<never> {
       phase = 'play';
       return;
     }
-    // Start loading the next spot shortly before the current one ends.
-    if (currentSpot) await hold(startedAt + currentSpot.durationMs - PREPARE_LEAD_MS - performance.now());
+    // Start loading the next spot shortly before the current one ends, or at once when a takeover cuts in.
+    if (currentSpot && !cutIn) await hold(startedAt + currentSpot.durationMs - PREPARE_LEAD_MS - performance.now());
     if (!state.displayOn) return;
 
     const m = manifest;
-    const step = sequencer.next(new Date(now()), { clockTrusted: clock.trusted });
+    const chosenAt = new Date(now());
+    const step = sequencer.next(chosenAt, { clockTrusted: clock.trusted });
+    chosenTakeover = activeTakeover(m, chosenAt, { clockTrusted: clock.trusted });
+    resetTakeoverSignal();
+    watchTakeover();
     if (!step) {
       for (const s of slots) {
         s.clear();
@@ -500,9 +534,18 @@ async function playbackLoop(): Promise<never> {
     if (!state.displayOn) return;
     if (!ok) return failed(step, m);
 
-    // Hold the current spot for its full length; a crossfade overlaps its last moments.
-    if (currentSpot) await hold(startedAt + currentSpot.durationMs - fadeMs - performance.now());
+    // Hold the current spot for its full length; a crossfade overlaps its last moments. A takeover cuts it short.
+    if (currentSpot && !cutIn) await hold(startedAt + currentSpot.durationMs - fadeMs - performance.now());
     if (!state.displayOn) return;
+    // The takeover changed while this spot was chosen and loaded: choose again, so the old schedule never shows.
+    if (manifest && activeTakeover(manifest, new Date(now()), { clockTrusted: clock.trusted }) !== chosenTakeover) {
+      slot.clear();
+      slot.el.style.opacity = '0';
+      pins.release('preparing');
+      cutIn = true;
+      return;
+    }
+    cutIn = false;
     status('');
     startedAt = performance.now();
     spotStartedAt = startedAt;
@@ -878,6 +921,8 @@ async function apiSync(): Promise<void> {
   for (const c of r.commands) command(c);
   // Display hours and any saved override were set aside while the clock was untrusted.
   if (!wasTrusted) display.wake();
+  // The corrected clock may have moved a takeover's start or end, or made it count at all.
+  watchTakeover();
 
   await offerSnapshots(r.snapshots, manifest);
   await offerChecked(r.checked ?? {});
@@ -994,9 +1039,10 @@ function adopt(next: ScreenManifest): void {
   if (API) void restoreSources(next);
   state.manifestId = next.id;
   socket?.reportApplied(next.id);
-  // The sequencer keeps its place; the change shows at the next spot boundary.
+  // The sequencer keeps its place; the change shows at the next spot boundary, or at once for a takeover.
   if (sequencer) sequencer.setManifest(next);
   else sequencer = new Sequencer(next);
+  watchTakeover();
 }
 
 // ------------------------------------------------------------------- preview
