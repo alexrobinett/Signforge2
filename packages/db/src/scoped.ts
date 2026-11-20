@@ -1557,11 +1557,13 @@ export function scoped(d1: D1Database, orgId: string) {
     },
 
     auditLog: {
-      append: async (entry: NewRow<typeof s.auditLog>) => {
-        const { row, writes } = audit.stage.insert(entry);
-        await commit(db, writes);
-        return row;
-      },
+      /** One statement, not a batch: for a change made outside ours (Better Auth's), which no batch of ours records. */
+      append: async (entry: NewRow<typeof s.auditLog>) =>
+        db
+          .insert(s.auditLog)
+          .values({ ...strip(entry), id: newId('aud'), orgId })
+          .returning()
+          .get(),
       /** The audit row for a change, staged to commit with it. */
       stage: (entry: NewRow<typeof s.auditLog>) => audit.stage.insert(entry),
       /**

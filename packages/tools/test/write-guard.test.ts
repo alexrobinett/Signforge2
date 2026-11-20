@@ -1,9 +1,10 @@
 // Generated from the registry: every tool that changes data writes only through the dispatcher's
 // one batch (staged with `ctx.write`), never straight to D1, so a change cannot land without its
 // audit row. Each tool runs its example, with ids pointing at its own org's rows, on a D1 that
-// records every statement run outside `batch()`.
-import { startPairing } from '@signforge/db';
-import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
+// records every write run outside the dispatcher's commit: a statement on its own, or a batch of
+// its own.
+import { scoped, startPairing } from '@signforge/db';
+import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -12,10 +13,16 @@ import { pendingFor } from './connectors-stub';
 import { fakeServices } from './services';
 
 const WRITE_SQL = /^\s*(insert|update|delete|replace)\b/i;
+/** The dispatcher's commit ends with the call's audit row (`dispatch`, src/dispatch.ts). */
+const AUDIT_SQL = /^\s*insert\s+into\s+"audit_log"/i;
 
-/** A D1 that passes everything through, and notes each write run on its own instead of in a batch. */
+/**
+ * A D1 that passes everything through, and notes each write run outside the dispatcher's commit:
+ * one run on its own (`outside`), or a batch that writes and is not that commit (`batches`).
+ */
 function recordingD1(real: D1Database) {
   const outside: string[] = [];
+  const batches: string[][] = [];
   const wrap = (stmt: D1PreparedStatement, sql: string): D1PreparedStatement => {
     const note = () => {
       if (WRITE_SQL.test(sql)) outside.push(sql);
@@ -28,6 +35,7 @@ function recordingD1(real: D1Database) {
       };
     const w = {
       real: stmt,
+      sql,
       bind: (...values: unknown[]) => wrap(stmt.bind(...values), sql),
       run: call('run'),
       all: call('all'),
@@ -38,13 +46,18 @@ function recordingD1(real: D1Database) {
   };
   const db = {
     prepare: (sql: string) => wrap(real.prepare(sql), sql),
-    batch: (stmts: D1PreparedStatement[]) => real.batch(stmts.map((s) => (s as unknown as { real: D1PreparedStatement }).real)),
+    batch: (stmts: D1PreparedStatement[]) => {
+      const recorded = stmts as unknown as { real: D1PreparedStatement; sql: string }[];
+      const sqls = recorded.map((s) => s.sql);
+      if (sqls.some((s) => WRITE_SQL.test(s)) && !AUDIT_SQL.test(sqls.at(-1)!)) batches.push(sqls);
+      return real.batch(recorded.map((s) => s.real));
+    },
     exec: (sql: string) => {
       outside.push(sql);
       return real.exec(sql);
     },
   };
-  return { db: db as unknown as D1Database, outside };
+  return { db: db as unknown as D1Database, outside, batches };
 }
 
 /** The org's own row for each kind of id a tool input can name, so the tool gets as far as writing. */
@@ -142,9 +155,9 @@ async function runRecorded(tool: AnyTool, input: unknown) {
   const o = await seedOrg(env.DB, `guard-${++n}`);
   await env.BLOBS.put(manifestKey(o.orgId, o.screen, 'a'.repeat(64)), '{}');
   await PREPARE[tool.name]?.(o);
-  const { db, outside } = recordingD1(env.DB);
+  const { db, outside, batches } = recordingD1(env.DB);
   const caller: Caller = {
-    org: testScope(db, o.orgId),
+    org: scoped(db, o.orgId),
     role: 'owner',
     actor: { kind: 'user', id: 'user-g', clientId: 'test' },
     blobs: env.BLOBS,
@@ -153,8 +166,8 @@ async function runRecorded(tool: AnyTool, input: unknown) {
   const reg = new Map([[tool.name, tool]]);
   const result = await dispatch(reg, tool.name, input ?? INPUT[tool.name]?.(o, tool.example) ?? withOwnIds(tool.example, o), caller);
   if (REJECTS.has(tool.name)) expect((await o.scope.assets.get(o.asset))?.status).toBe('rejected');
-  const audit = await testScope(env.DB, o.orgId).auditLog.list({ limit: 10 });
-  return { result, outside, audited: audit.some((e) => e.action === tool.name) };
+  const audit = await scoped(env.DB, o.orgId).auditLog.list({ limit: 10 });
+  return { result, outside, batches, audited: audit.some((e) => e.action === tool.name) };
 }
 
 beforeAll(() => {
@@ -164,8 +177,9 @@ beforeAll(() => {
 describe('every tool that changes data', () => {
   for (const tool of TOOLS.filter((t) => t.mutates)) {
     it(`${tool.name}: writes nothing outside the batch`, async () => {
-      const { result, outside } = await runRecorded(tool, undefined);
+      const { result, outside, batches } = await runRecorded(tool, undefined);
       expect(outside, `${tool.name} wrote straight to D1 (${JSON.stringify(result)})`).toEqual([]);
+      expect(batches, `${tool.name} committed a batch of its own (${JSON.stringify(result)})`).toEqual([]);
       // The finalize tools refuse the seeded files, marking the asset rejected: a write too.
       if (!STOPS_SHORT.has(tool.name) && !REJECTS.has(tool.name)) expect(result, tool.name).toMatchObject({ ok: true });
     });
@@ -183,10 +197,52 @@ describe('every tool that changes data', () => {
       example: { screenId: 'scr_example' },
       handler: async ({ org, input }) => ({ switched: await org.screens.setDesiredManifest(input.screenId, 'f'.repeat(64)) }),
     });
-    const { outside, audited } = await runRecorded(rogue, undefined);
+    const { outside, batches, audited } = await runRecorded(rogue, undefined);
     expect(outside).toHaveLength(1);
+    expect(batches).toEqual([]);
     // The change went in and nothing recorded it: what this guard exists to stop.
     expect(audited).toBe(false);
+  });
+
+  it('is caught when it commits a batch of its own', async () => {
+    const rogue = defineTool({
+      name: 'rogue_commit',
+      description: 'A test tool that stages its write but commits it itself, outside the audited batch.',
+      scope: 'screens:manage',
+      minRole: 'editor',
+      mutates: true,
+      input: z.object({ screenId: z.string() }),
+      output: z.object({ screen: z.unknown() }),
+      example: { screenId: 'scr_example' },
+      handler: async ({ org, input }) => {
+        const change = org.screens.stage.update((await org.screens.get(input.screenId))!, { name: 'rogue' });
+        await org.commit(change.writes);
+        return { screen: change.row };
+      },
+    });
+    const { outside, batches, audited } = await runRecorded(rogue, undefined);
+    expect(outside).toEqual([]);
+    expect(batches).toHaveLength(1);
+    expect(audited).toBe(false);
+  });
+
+  it('is caught when it appends an audit row of its own', async () => {
+    const rogue = defineTool({
+      name: 'rogue_append',
+      description: 'A test tool that writes an audit row itself, which no change of its commits with.',
+      scope: 'screens:manage',
+      minRole: 'editor',
+      mutates: true,
+      input: z.object({ screenId: z.string() }),
+      output: z.object({ ok: z.boolean() }),
+      example: { screenId: 'scr_example' },
+      handler: async ({ org, input }) => {
+        await org.auditLog.append({ actorKind: 'system', actorId: 'rogue', action: 'rogue_note', targetKind: 'screen', targetId: input.screenId });
+        return { ok: true };
+      },
+    });
+    const { outside, batches } = await runRecorded(rogue, undefined);
+    expect([...outside, ...batches.flat()]).toHaveLength(1);
   });
 
   it('is not caught when it stages its change', async () => {
