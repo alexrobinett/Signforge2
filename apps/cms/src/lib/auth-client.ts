@@ -6,11 +6,18 @@
 import { ac, roles } from '@signforge/api/roles';
 import { emailOTPClient, organizationClient } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
+import { tabOrgHeaders } from './tab-org';
 
 export const authClient = createAuthClient({
   basePath: '/api/auth',
   // The API's roles (owner, editor, viewer), so member and invitation calls take them by name.
   plugins: [emailOTPClient(), organizationClient({ ac, roles })],
+  // The tab's org, so a call on the active org from a tab left on another is refused (#129).
+  fetchOptions: {
+    async onRequest(ctx) {
+      for (const [name, value] of Object.entries(await tabOrgHeaders())) ctx.headers.set(name, value);
+    },
+  },
 });
 
 /** Better Auth's error, as a sentence for the page. */

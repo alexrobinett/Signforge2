@@ -116,7 +116,7 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   await page.goto('/audit?who=constructor');
   await expect(page.getByText('Nothing matches these filters.')).toBeVisible();
 
-  // The member switches org in another tab: Load older on this one is refused, not filled from the other org.
+  // The member switches org in another tab: Load older on this one is refused, not filled from the other org (#129).
   await page.goto('/audit');
   await hydrated(page);
   await expect(rows).toHaveCount(50);
@@ -126,6 +126,8 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   });
   expect(other.status(), await other.text()).toBe(200);
   await page.getByRole('button', { name: 'Load older' }).click();
-  await expect(page.getByRole('alert')).toContainText('Could not load older entries: cursor cannot be used: it was made in another organization');
+  await expect(page.getByRole('alert')).toContainText(
+    'Could not load older entries: This tab is on Northside Market; you switched to Other Co in another tab. Reload.',
+  );
   await expect(rows).toHaveCount(50);
 });

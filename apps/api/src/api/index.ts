@@ -7,18 +7,22 @@
  * - `/api/session` says who is signed in and their active org, if any.
  * - Every other route runs behind `requireOrg`, which re-checks membership of the active org
  *   on every request and hands handlers `c.var.org`, a `scoped(db, orgId)`.
+ * - A CMS tab names the org it shows in `TAB_ORG_HEADER` (#129). `/api/session`, `requireOrg`
+ *   and Better Auth's org calls refuse a call from a tab whose org is no longer the session's:
+ *   the member switched org in another tab. Callers with no tab (agents, scripts) send none.
  * - `/api/tools` serves the tool registry (./tools.ts). It is the only route here that changes
  *   data, but for the OAuth callback (./connections.ts), a GET because a provider redirects the
  *   browser to it, which changes data only by running `finish_connection` through the
  *   dispatcher; test/routes.test.ts fails if another one does.
  */
-import { Hono, type MiddlewareHandler } from 'hono';
-import { findMembership, scoped, type OrgScope } from '@signforge/db';
+import { type Context, Hono, type MiddlewareHandler } from 'hono';
+import { findMembership, memberOrgNames, scoped, type OrgScope } from '@signforge/db';
 import { createAuth, ROLES, type Auth, type AuthSession, type Role } from '../auth';
 import { emailSenderFor, type EmailSender } from '../email';
 import type { ConnectorDeps } from '../connectors';
 import { mountBlobs } from './blobs';
 import { mountConnectionCallback, mountSignedOutCallback } from './connections';
+import { ORG_CHANGED, TAB_ORG_HEADER } from './tab-org';
 import { mountTools } from './tools';
 
 interface ApiVars {
@@ -55,12 +59,34 @@ const requireSession: MiddlewareHandler<ApiEnv> = async (c, next) => {
 };
 
 /**
+ * A 409 when the request comes from a CMS tab showing another org than the session's active one,
+ * which the member switched in another tab: acting in the session's org would act on one the tab
+ * does not show. The header only ever refuses; the org still comes from the session alone. With no
+ * header (an agent, a script, the CLI) there is no tab to be out of date. The message names only
+ * orgs the member belongs to, so a made-up header learns nothing.
+ */
+async function refuseOtherTabOrg(c: Context<ApiEnv>, session: AuthSession): Promise<Response | undefined> {
+  const shown = c.req.header(TAB_ORG_HEADER);
+  const active = session.session.activeOrganizationId ?? null;
+  if (shown === undefined || shown === active) return undefined;
+  const names = await memberOrgNames(c.env.DB, session.user.id, active ? [shown, active] : [shown]);
+  const tab = names.get(shown) ?? 'another organization';
+  const now = active && names.get(active);
+  const message = now
+    ? `This tab is on ${tab}; you switched to ${now} in another tab. Reload.`
+    : `This tab is on ${tab}, which is no longer your active organization. Reload.`;
+  return c.json({ error: ORG_CHANGED, message }, 409);
+}
+
+/**
  * The session's active org, with membership re-checked against the database. The session (and
  * its cache cookie, for up to five minutes) only says which org is active; whether the user is
  * still a member, and in what role, is read fresh every time. The org comes from the session
  * alone, never from the request, so ids from another org find nothing.
  */
 const requireOrg: MiddlewareHandler<ApiEnv> = async (c, next) => {
+  const refused = await refuseOtherTabOrg(c, c.var.session);
+  if (refused) return refused;
   const orgId = c.var.session.session.activeOrganizationId;
   if (!orgId) return c.json(error('no_active_organization'), 403);
   const membership = await findMembership(c.env.DB, orgId, c.var.session.user.id);
@@ -81,7 +107,16 @@ export function createApi(deps: ApiDeps = {}) {
     await next();
   });
 
-  api.on(['GET', 'POST'], '/auth/*', (c) => c.var.auth.handler(c.req.raw));
+  // Better Auth's org calls act on the active org unless told another, so a tab on another org is
+  // refused them, but for switching and creating (which switches). Signed out, Better Auth answers.
+  api.on(['GET', 'POST'], '/auth/*', async (c) => {
+    if (c.req.header(TAB_ORG_HEADER) !== undefined && /\/organization\/(?!(set-active|create)$)/.test(c.req.path)) {
+      const session = await c.var.auth.api.getSession({ headers: c.req.raw.headers });
+      const refused = session && (await refuseOtherTabOrg(c, session));
+      if (refused) return refused;
+    }
+    return c.var.auth.handler(c.req.raw);
+  });
 
   // GitHub is offered only when its OAuth app is configured. In dev, codes are not emailed but
   // printed in the `wrangler dev` terminal (src/email), and the CMS says so.
@@ -94,6 +129,8 @@ export function createApi(deps: ApiDeps = {}) {
   );
 
   api.get('/session', requireSession, async (c) => {
+    const refused = await refuseOtherTabOrg(c, c.var.session);
+    if (refused) return refused;
     const { user, session } = c.var.session;
     const orgId = session.activeOrganizationId ?? null;
     const membership = orgId ? await findMembership(c.env.DB, orgId, user.id) : undefined;
