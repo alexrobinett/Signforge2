@@ -1,8 +1,8 @@
 // find_places's geocoder: Open-Meteo's search, read at the edge. No network: fetch is stubbed.
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ToolError } from '@signforge/tools';
 import { openMeteoPlaces } from '../src/data/places';
-import { Client, email, inOneLimiterWindow, testApp } from './client';
+import { Client, clockLimits, email, nextIp, testApp } from './client';
 
 /** A fetch that answers `body` and records the URL it was asked for. */
 function stub(body: unknown, status = 200) {
@@ -73,16 +73,20 @@ describe('a busy geocoder', () => {
 
 describe('find_places through /api/tools', () => {
   const t = testApp();
-  beforeEach(inOneLimiterWindow);
 
-  it('lets one member search 30 times a minute, then refuses with rate_limited', async () => {
-    const member = new Client(t);
+  it('lets one member search 30 times a minute, then refuses with rate_limited until the next minute', async () => {
+    onTestFinished(() => void vi.useRealTimers());
+    vi.setSystemTime('2026-11-20T12:00:00Z');
+    const member = new Client(t, nextIp(), clockLimits());
     await member.signIn(email('place-searcher'));
     await member.setActive((await member.createOrg('Searcher')).id);
     // The geocoder is a closed local port (vitest.config.ts), so an allowed search fails upstream: anything but a 429.
     for (let i = 0; i < 30; i++) expect((await member.tool('find_places', { query: 'Atlanta' })).status, `search ${i + 1}`).not.toBe(429);
+    vi.setSystemTime('2026-11-20T12:00:59.999Z');
     const refused = await member.tool('find_places', { query: 'Atlanta' });
     expect(refused.status).toBe(429);
     expect(await refused.json()).toMatchObject({ error: 'rate_limited' });
+    vi.setSystemTime('2026-11-20T12:01:00Z');
+    expect((await member.tool('find_places', { query: 'Atlanta' })).status).not.toBe(429);
   });
 });
