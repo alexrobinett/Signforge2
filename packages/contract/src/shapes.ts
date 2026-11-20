@@ -627,9 +627,14 @@ export interface Playlist {
   items: { spot: string }[];
 }
 
-/** What a schedule entry is aimed at. More specific wins a priority tie. */
+/** What a schedule entry is aimed at. More specific wins a priority tie (`ScheduleEntry`). */
 export type TargetLevel = 'org' | 'group' | 'screen';
 
+/**
+ * Where entries that apply overlap, the highest `priority` plays; of equal priority the more
+ * specific target; then the later `startsAt` (an entry without one counts as earliest), so the
+ * newest of two takeovers wins; then the one later in the manifest's `schedule`.
+ */
 export interface ScheduleEntry {
   id: string;
   playlist: string;
@@ -686,6 +691,7 @@ export interface ScreenManifest {
   spots: Record<string, Spot>;
   playlists: Record<string, Playlist>;
   dataSources: Record<string, DataSource>;
+  /** In the order the entries were published, oldest first: of two otherwise tied, the later wins. */
   schedule: ScheduleEntry[];
   /** Plays when no schedule entry applies, so a screen is never blank. */
   defaultPlaylist: string;
