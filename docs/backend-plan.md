@@ -268,7 +268,7 @@ Each slice ends with something working on the real Pi.
 - Better Auth's OAuth provider is the least-proven piece; Better Auth on D1 is proven for sign-in and organizations, but runs multi-step flows without a transaction.
 - An API deploy resets any screen Durable Object that is awake at the time, and a Cloudflare incident can drop every socket at once; reconnects need jitter.
 - R2 is not enabled on the account yet. It is enabled in the dashboard, and nothing that stores files can deploy until it is.
-- A takeover ends at an absolute instant (`ScheduleEntry.endsAt`, manifest schema 3). A schema-2 player ignores it, so a takeover published to a screen still on schema 2 must also be compiled into a dated window.
+- A takeover ends at an absolute instant (`ScheduleEntry.endsAt`, manifest schema 3). Every player release since plays it (schema 2 is no longer supported), and the server sends `reload` to one that cannot play what it compiles. A screen that does not trust its clock skips a takeover rather than risk running it forever (M3-19).
 
 ## Open questions
 
