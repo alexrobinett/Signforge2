@@ -43,8 +43,14 @@ async function backdrop(ctx: TemplateContext, eyebrow: HTMLElement, bg: string):
   g.fillRect(0, 0, w, 2 * h);
 
   const img = document.querySelector<HTMLImageElement>('.photo img')!;
-  // A photo that does not decode is not shown, and the copy then sits on the background.
-  if (img.src) await img.decode().catch(() => undefined);
+  // drawImage decodes the photo for the canvas itself: awaiting img.decode() first decoded it twice
+  // (on the Pi, 100 ms more per prepare). A photo that does not load is not shown, and the copy then
+  // sits on the background.
+  if (img.src && !img.complete)
+    await new Promise((loaded) => {
+      img.addEventListener('load', loaded, { once: true });
+      img.addEventListener('error', loaded, { once: true });
+    });
   if (img.naturalWidth && width) {
     const { width: vw, height: vh } = ctx.viewport;
     const push = Number(getComputedStyle(img.parentElement!).getPropertyValue('--push'));

@@ -558,6 +558,32 @@ The change adds work at every spot boundary (`activeTakeover` twice more, a time
 
 No cost: playing is 0.10 to 0.17% in both, within the spread the sections above found for master alone; master's 300 ms frame was again in its first run after the cache was cleared.
 
+## The eyebrow measured over the photo (issue #124, 2026-11-20)
+
+photo-promo 1.3.0 measures its eyebrow over the photo under it: in `prepare` it draws the part of the photo under the text (wherever the push-in takes it) into a small canvas, one pixel per 4 px, paints the shade over it at the text's top and bottom, and reads it once (`readableOver`). Master's player at `http://localhost:8090/cpb124/` (its own origin, so the kiosk's caches are untouched), `examples/stress` built from master's templates (before, photo-promo 1.2.3) and this branch's (after), with no kit and with the demo kit's colours (a scratch copy with a `brand.json`). Playlist photo-berries (1080p photo), photo-river and photo-kitchen (4K photos); cut, HTTP cache and the origin's storage cleared before each run, 10 s to settle, the supervisor stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order alternated (before, after, after, before).
+
+The first version awaited `img.decode()` before drawing (round 1, 90 s runs, 22 prepares per build and kit):
+
+| Content | Build | Overall | Playing | Loading next | Worst frame | Prepare median | Range | Over 500 ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no kit | before | 0.20, 0.26% | 0.00, 0.04% | 7.1, 7.6% | 50 ms | 225 ms | 194-343 | 0 |
+| | after | 0.28, 0.31% | 0.04, 0.04% | 5.0, 5.9% | 50 ms | 372 ms | 324-461 | 0 |
+| demo kit | before | 0.15, 0.19% | 0.00, 0.06% | 4.6, 4.9% | 33 ms | 213 ms | 195-345 | 0 |
+| | after | 0.35, 0.44% | 0.02, 0.06% | 5.7, 8.2% | 67 ms | 409 ms | 346-576 | 1 |
+
+Variants, no kit, 45 s runs, 12 prepares each (master 224 ms in the same set): awaiting the decode and reading the layout with no draw, 284 ms; `createImageBitmap(img, crop, { resizeWidth, resizeHeight })` in place of `drawImage`, 384 ms; a 256x256 canvas (large enough for Chromium to accelerate) with only the corner read back, 392 ms; drawing without awaiting `img.decode()` first, 302 ms. `drawImage` decodes the photo for the canvas itself, so a decode awaited first was a second one.
+
+What ships draws without awaiting the decode (round 2, 60 s runs, 14 prepares per build and kit):
+
+| Content | Build | Overall | Playing | Loading next | Worst frame | Prepare median | Range | Over 500 ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no kit | before | 0.22, 0.25% | 0.03, 0.03% | 6.9, 8.0% | 50 ms | 230 ms | 211-276 | 0 |
+| | after | 0.19, 0.67% | 0.03, 0.44% | 4.2, 5.7% | 267 ms | 304 ms | 279-622 | 2 |
+| demo kit | before | 0.19, 0.28% | 0.03, 0.06% | 5.7, 7.2% | 50 ms | 241 ms | 194-332 | 0 |
+| | after | 0.25, 0.31% | 0.00, 0.03% | 5.2, 7.1% | 50 ms | 343 ms | 296-477 | 0 |
+
+A cost: the canvas decode adds about 75 to 100 ms to each photo-promo prepare (river, a 4K photo, most: 235 to 434 ms median with no kit), and two of 28 prepares went over 500 ms (449 and 622 ms, berries and river). One run had a 267 ms frame while playing; the other three after-runs were as before. Nothing was skipped. The decode is of the whole photo however small the part read; the template frame cannot fetch its own blob (`connect-src` is `'none'`) to decode a smaller copy off the main thread.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.

@@ -27,6 +27,10 @@
       "size": 77514,
       "type": "text/html"
     },
+    "26f95d14ba7e347a67ff040ea31f29a011ddcbec50c276586a41c7013b94b9d6": {
+      "size": 74997,
+      "type": "text/html"
+    },
     "2ab42d80861eae3aa89e8fb4c422c0b26df924e41f6e6eb5125d8b399a28274a": {
       "size": 76424,
       "type": "text/html"
@@ -59,10 +63,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "97f6e0913458ded5a438104f3413a6072246e2979ee7ff2cf0f4151e19c0628b": {
-      "size": 74912,
-      "type": "text/html"
-    },
     "9d3d3e63607683cf54f951e37373695b235fbe471fd87fd603e79f083ef57a91": {
       "size": 74661,
       "type": "text/html"
@@ -88,7 +88,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "0a0f15062308aae5a27030473aa9fa5c61dbc286539209db5dff2d671847334d",
+  "id": "6160447099d94d5c0c55dd27df247f473ed41b3717ca40285668e58bf5e13b04",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -957,7 +957,7 @@
       }
     },
     "base/photo-promo@1.3.0": {
-      "html": "97f6e0913458ded5a438104f3413a6072246e2979ee7ff2cf0f4151e19c0628b",
+      "html": "26f95d14ba7e347a67ff040ea31f29a011ddcbec50c276586a41c7013b94b9d6",
       "manifest": {
         "background": "#000000",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
