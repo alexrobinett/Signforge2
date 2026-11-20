@@ -97,12 +97,15 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
   await expect(page.getByText('3 spots · 12 s loop', { exact: false })).toBeVisible();
 
   // Undo pressed after the removal has autosaved (re-check of #153): the spot comes back once, on the
-  // version that save made. Under the pointer the toast's timer is paused, so it waits for the save.
+  // version that save made. With the pointer held down on the toast its timer stays paused, even if
+  // sonner's toast list changes meanwhile, so it waits for the save.
   const removalSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/update_playlist') && r.ok());
   await page.getByRole('button', { name: 'Remove Lunch' }).click();
   const removed = page.locator('[data-sonner-toast]').filter({ hasText: 'Removed Lunch' });
   await removed.hover();
+  await page.mouse.down();
   await removalSaved;
+  await page.mouse.up();
   const undoSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/update_playlist'));
   await removed.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
