@@ -103,7 +103,7 @@ describe('sf template seed', () => {
       expect(x.owner).toBe('base');
       expect(x.versions).toHaveLength(1);
       expect(x.versions[0]).toMatchObject({ status: 'approved', checkReport: { ok: true } });
-      expect(x.versions[0]!.checkReport.checks).toHaveLength(5);
+      expect(x.versions[0]!.checkReport.checks).toHaveLength(6);
     }
     const weather = templates.find((x) => x.key === 'weather')!;
     const got = (await (await member.tool('get_template', { templateId: weather.id })).json()) as { template: { versions: { manifest: TemplateManifest }[] } };

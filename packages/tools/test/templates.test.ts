@@ -24,7 +24,7 @@ const manifest = (over: Record<string, unknown> = {}) => ({
   protocol: 1,
   ...over,
 });
-const html = (css = 'h1{color:red}', script = 'parent.postMessage({type:"loaded"},"*")') =>
+const html = (css = 'h1{color:red}', script = '"use strict";parent.postMessage({type:"loaded"},"*")') =>
   `<!doctype html><html><head><style>${css}</style></head><body><h1 data-sf="title"></h1><script>${script}</script></body></html>`;
 const sources = (main = "import { defineTemplate } from '@signforge/template-sdk';\ndefineTemplate({});\n") =>
   JSON.stringify({ 'index.html': '<h1 data-sf="title"></h1>', 'style.css': 'h1 { color: red; }', 'main.ts': main });
@@ -113,6 +113,22 @@ describe('register_template_version', () => {
     const r = await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'glass' }), ...ids }, owner);
     expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'forbidden-css', message: expect.stringMatching(/backdrop-filter/) }] });
     expect(await scoped(env.DB, o.orgId).templates.ownByKey('glass')).toBeUndefined();
+  });
+
+  it('rejects scripts a template frame would not run, as the browser reads them', async () => {
+    const markup =
+      '<script type="&#109;odule">"use strict";m()</script><svg><script href="x.js"/></svg><script type="text/ecmascript">"use strict";e()</script>';
+    const ids = await orgUpload(html().replace('<body>', `<body>${markup}`));
+    const r = await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'scripts' }), ...ids }, owner);
+    expect(r).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [
+        { path: 'scripts', message: expect.stringMatching(/type "module" does not run/) },
+        { path: 'scripts', message: expect.stringMatching(/external script does not run/) },
+        { path: 'scripts', message: expect.stringMatching(/type "text\/ecmascript" does not run/) },
+      ],
+    });
   });
 
   it("rejects sources that call fetch, though the bundle's SDK reaches its parent", async () => {

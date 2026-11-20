@@ -170,9 +170,9 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 - A crawl or ticker is one strip of text holding its content twice, sliding left by exactly one copy. It loops seamlessly and costs nothing measurable.
 
 **Isolation**
-- No network. The template runs in a sandboxed frame under a policy that blocks every request, including navigating its own frame: a template that tries is stopped and its spot is skipped. Scripts and styles must be inline after the build, and images arrive from the player.
+- No network. The template runs in a sandboxed frame under a policy that blocks every request, including navigating its own frame: a template that tries is stopped and its spot is skipped. There is no WebRTC either: `RTCPeerConnection` is undefined in the template's frame and in any frame it adds, on screens and in the runtime check. Scripts and styles must be inline after the build, and images arrive from the player.
+- Only the bundle's own inline classic scripts run (no `type`, or `text/javascript`), and each must start with exactly `"use strict";` (`sf build` makes one such script: esbuild emits it for a strict TypeScript build). Scripts are read with an HTML parser: a script example shown in a textarea or kept in a comment is text, and is left as written. No script may sit in a `<select>`: browsers parse `<select>` differently, so one there is refused and does not run. Inline modules, external scripts (none is ever requested), inline event handlers (`onclick="…"`, `setAttribute('onload', …)`) and `javascript:` URLs do not: use `addEventListener` or a property (`img.onload = …`). Nor do `eval` and `new Function`.
 - No storage, cookies or access to anything outside its own frame.
-- No WebRTC. The policy does not cover it, so the runtime check refuses any use of `RTCPeerConnection`.
 - Fonts ship inside the bundle. Reference a font file from `style.css` and the build inlines it. Use a font you are licensed to redistribute. Brand fonts are the exception: they come with the theme (see Brand), from the curated catalogue in `fonts/`.
 - Data is fixed for one play. New values arrive with the next `init`, from a clean document (see Lifecycle).
 - Decoration must not fail the spot. If an optional effect cannot be drawn, catch the error and show the content without it; a template that rejects in `prepare` is skipped.
@@ -187,7 +187,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 | Dropped frames over a play | 1% |
 | Longest single frame | 50 ms |
 
-`sf build` and `sf template push` enforce manifest validity, the forbidden-CSS list, bundle size, the no-network rule and the forbidden-code list (`checkTemplateBundle` in `packages/contract`), and warn on colour literals (see Brand). The server repeats the same checks when a version is registered and stores the report on it: the first four on the uploaded bundle, the code list on the author's own `index.html`, `style.css` and `main.ts`, which are uploaded alongside it (the bundle holds the SDK, which itself calls `parent.postMessage`).
+`sf build` and `sf template push` enforce manifest validity, the forbidden-CSS list, bundle size, the no-network rule and the forbidden-code list (`checkTemplateBundle` in `packages/contract`; it refuses network calls, navigation, inline event handlers and `javascript:` URLs) and the script rule (read with an HTML parser: each classic script in HTML or SVG starts with exactly `"use strict";`; no external script, module or other script type, and no script markup in a `<select>`), and warn on colour literals (see Brand). The server repeats the same checks when a version is registered and stores the report on it: the first four on the uploaded bundle, the code list on the author's own `index.html`, `style.css` and `main.ts`, which are uploaded alongside it (the bundle holds the SDK, which itself calls `parent.postMessage`).
 
 These checks are a lint, not a security boundary: string matching can be evaded. What keeps a screen safe is the sandbox the template runs in and its policy that blocks every request.
 
@@ -195,8 +195,7 @@ These checks are a lint, not a security boundary: string matching can be evaded.
 
 - a request of any kind (`requested https://example.com/x (blocked)`), including images, fonts, media, workers and beacons, and anything else the policy blocks (`eval`);
 - navigating its own frame, the page around it, a new window or a form;
-- WebRTC (`RTCPeerConnection`): the screen's policy cannot block it, so a template may not use it;
-- an uncaught error, or a `prepare` that rejects;
+- an uncaught error, or a `prepare` that rejects. Its frames have no `RTCPeerConnection`, as on a screen, so a template whose use of it throws is refused this way; one that catches the error, or only tests for the constructor, passes (and has no WebRTC on screens either);
 - no `ready` within 2 seconds, the player's limit;
 - `ready`, then no second of frames within 3 seconds of `play` (`froze after play`): a template wedged in `play`, as a busy loop is, would freeze the screen. Blocking work in `play` is refused once it runs for about 2 seconds, since the second of frames must still fit in the 3.
 

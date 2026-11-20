@@ -54,7 +54,8 @@ const attempts: Record<string, () => unknown> = {
       throw new Error('late failure');
     });
   },
-  webrtc: () => new (Reflect.get(globalThis, 'RTCPeerConnection') as new () => object)(),
+  // A screen gives a template no RTCPeerConnection, and the check renders it as a screen does.
+  webrtc: () => new RTCPeerConnection(),
   image: () => {
     const img = new Image();
     img.src = TARGET;

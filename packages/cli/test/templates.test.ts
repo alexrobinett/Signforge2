@@ -9,7 +9,7 @@
  * template's key and the sha256 of its bundle.
  */
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { templateKey } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
@@ -53,4 +53,29 @@ it('changes no template bundle without a new version', async () => {
       "bytes. Bump the template's version (template.json and package.json) and record the new key and hash in place of the old. " +
       "If the template's own files did not change, something else reached its bundle (docs/template-spec.md, Rules).",
   ).toEqual(recorded);
+});
+
+it('refuses scripts a template frame would not run, as the browser reads them', async () => {
+  // Under this directory, so main.ts resolves the SDK as a template's own does.
+  const at = mkdtempSync(join(import.meta.dirname, '.scripts-'));
+  try {
+    const manifest = JSON.parse(readFileSync(join(dir, 'clock', 'template.json'), 'utf8')) as Record<string, unknown>;
+    writeFileSync(join(at, 'template.json'), JSON.stringify({ ...manifest, id: 'scripts' }));
+    writeFileSync(join(at, 'style.css'), 'body { margin: 0; }');
+    writeFileSync(join(at, 'main.ts'), "import { defineTemplate } from '@signforge/template-sdk';\ndefineTemplate({});\n");
+    writeFileSync(
+      join(at, 'index.html'),
+      '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body>' +
+        '<script type="&#109;odule">"use strict";m()</script><svg><script href="x.js"/></svg><script type="text/ecmascript">"use strict";e()</script>' +
+        '<script type="module" src="main.ts"></script></body></html>',
+    );
+    const { problems } = await buildTemplate(at);
+    expect(problems.filter((p) => /script/.test(p))).toEqual([
+      expect.stringMatching(/type "module" does not run/),
+      expect.stringMatching(/external script does not run/),
+      expect.stringMatching(/type "text\/ecmascript" does not run/),
+    ]);
+  } finally {
+    rmSync(at, { recursive: true, force: true });
+  }
 });
