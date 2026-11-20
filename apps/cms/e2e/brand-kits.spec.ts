@@ -218,7 +218,8 @@ test('kit actions run one at a time: Duplicate during a save is ignored, then co
   await duplicate.focus();
   await page.keyboard.press('Enter');
   await saveAnswer.continue();
-  await expect(page.getByText(/Brand kit · Saved \d/)).toBeVisible();
+  // Default kit or not (this test may run alone, its kit the org's first), it reads Saved and a time.
+  await expect(page.getByText(/ · Saved \d/)).toBeVisible();
   await expect(duplicate).not.toHaveAttribute('aria-disabled');
   expect(copies.calls()).toBe(0);
 

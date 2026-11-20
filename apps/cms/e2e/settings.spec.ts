@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, holdFirst, hydrated, shots, signInAs } from './helpers';
+import { axe, createOrg, disabledOnServer, holdFirst, hydrated, shots, signInAs, tool } from './helpers';
 import { API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -347,14 +347,32 @@ test('a role select or an invitation button keeps keyboard focus while its chang
   // Enabled once its part of the page has hydrated (#136), after body[data-hydrated].
   await expect(role).toBeEnabled();
   await expect(role).toHaveValue('editor');
+  // Every choice the select fires, so the test knows each second one was really made: Chromium's
+  // type-ahead joins letters pressed close together, and "vo" chooses nothing (re-check of #143, 5).
+  await role.evaluate((select: HTMLSelectElement) => {
+    select.dataset.chosen = '';
+    select.addEventListener('change', () => {
+      select.dataset.chosen += ` ${select.value}`;
+    });
+  });
+  const chosen = async () => (await role.getAttribute('data-chosen'))?.trim().split(' ');
+  /** Owner, by keyboard, after Tab away and back, which starts the type-ahead again. */
+  const chooseOwner = async () => {
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await expect(role).toBeFocused();
+    await page.keyboard.press('o');
+  };
   const roleChange = await holdFirst(page, '/api/auth/organization/update-member-role');
   await role.focus();
+  await expect(role).toBeFocused();
   await page.keyboard.press('v');
   const roleAnswer = await roleChange.arrived;
   await expect(role).toBeFocused();
   await expect(role).toHaveAttribute('aria-disabled', 'true');
   await expect(role).toHaveValue('viewer');
-  await page.keyboard.press('o');
+  await chooseOwner();
+  expect(await chosen()).toEqual(['viewer', 'owner']);
   await expect(role).toHaveValue('viewer');
   const reads = await holdReads(page);
   await roleAnswer.continue();
@@ -362,7 +380,8 @@ test('a role select or an invitation button keeps keyboard focus while its chang
   await expect(page.getByText('Role changed')).toBeVisible();
   await expect(role).toHaveAttribute('aria-disabled', 'true');
   await expect(role).toHaveValue('viewer');
-  await page.keyboard.press('o');
+  await chooseOwner();
+  expect(await chosen()).toEqual(['viewer', 'owner', 'owner']);
   await expect(role).toHaveValue('viewer');
   await reads.release();
   await expect(role).not.toHaveAttribute('aria-disabled');
@@ -391,6 +410,25 @@ test('a role select or an invitation button keeps keyboard focus while its chang
   await hydrated(page);
   await expect(role).toHaveValue('viewer');
   await expect(waiting).toBeVisible();
+
+  // Removing them, its answer held: the dialog says it is waiting, and Escape closes it, focus back
+  // on the page, the removal going on and the row saying so (re-check of #143, 3).
+  const row = page.getByRole('region', { name: 'People' }).getByRole('listitem').filter({ hasText: editorEmail });
+  await row.getByRole('button', { name: 'Remove' }).click();
+  const dialog = page.getByRole('alertdialog');
+  const removal = await holdFirst(page, '/api/auth/organization/remove-member');
+  await dialog.getByRole('button', { name: 'Remove' }).click();
+  const removeAnswer = await removal.arrived;
+  await expect(dialog.getByRole('status')).toHaveText('Removing… Waiting for SignForge to answer. You can close this; it goes on.');
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(row.getByRole('button', { name: 'Removing…' })).toBeVisible();
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => document.activeElement?.closest('[role="alertdialog"]') ?? null)).toBeNull();
+  await removeAnswer.continue();
+  await expect(page.getByText('Removed', { exact: true })).toBeVisible();
+  await expect(row).toHaveCount(0);
 });
 
 test("an edit typed while its save runs is kept: the next addresses to invite, and General's retention (review of #143, 4)", async ({ page }) => {
@@ -423,23 +461,37 @@ test("an edit typed while its save runs is kept: the next addresses to invite, a
   await page.goto('/settings/general');
   await hydrated(page);
   const retention = page.getByLabel('Keep entries for');
+  const timezone = page.getByLabel('Time zone');
   await expect(retention).toBeEnabled();
   await retention.fill('100');
   const saving = await holdFirst(page, '/api/tools/update_org_settings');
   await page.getByRole('button', { name: 'Save changes' }).click();
   const saveAnswer = await saving.arrived;
   await retention.fill('120');
-  // Compared once the page has drawn its reload (the shell's read and the settings'), which
-  // remounted the form on the version the save made.
+  // Someone else sets the time zone once this save is written, before the page reads again.
   const reads = await holdReads(page);
   await saveAnswer.continue();
-  await reads.holding(2);
+  await reads.holding(1);
+  await tool(page, 'update_org_settings', { timezone: 'Europe/London' });
   await reads.release();
-  await expect(page.getByText('Saved')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Save changes' })).not.toHaveAttribute('aria-disabled');
+  // The page has drawn its reload when the time zone, untouched here, shows the other change
+  // (re-check of #143, 6); the retention typed meanwhile is kept.
+  await expect(timezone).toHaveValue('Europe/London');
   await expect(retention).toHaveValue('120');
+  await expect(page.getByRole('button', { name: 'Save changes' })).not.toHaveAttribute('aria-disabled');
+
+  // Saved again, it sends only the retention, on the version this page saved: the time zone set
+  // since makes it a conflict, shown, never an overwrite of it (re-check of #143, 1).
+  const sent = page.waitForRequest('**/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  expect(Object.keys((await sent).postDataJSON()).sort()).toEqual(['auditRetentionDays', 'ifVersion']);
+  await expect(page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(retention).toHaveValue('100');
+  await expect(timezone).toHaveValue('Europe/London');
   await page.reload();
   await hydrated(page);
+  await expect(timezone).toHaveValue('Europe/London');
   await expect(retention).toHaveValue('100');
 });
 
@@ -470,9 +522,19 @@ test('Keep it waits for a webhook removal that has been sent, and says so (revie
   await page.keyboard.press('Enter');
   await expect(asking).toBeVisible();
   await expect(page.getByRole('button', { name: 'Removing…' })).toBeVisible();
+
+  // It holds up only its own page: General still saves (re-check of #143, 3).
+  await settingsNav(page).getByRole('link', { name: 'General' }).click();
+  const retention = page.getByLabel('Keep entries for');
+  await expect(retention).toBeEnabled();
+  await retention.fill('95');
+  const sent = page.waitForRequest('**/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await sent;
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await removeAnswer.continue();
   await expect(page.getByText('Webhook removed')).toBeVisible();
-  await expect(asking).toBeHidden();
+  await settingsNav(page).getByRole('link', { name: 'Notifications' }).click();
   await expect(page.getByRole('button', { name: 'Add webhook' })).toBeVisible();
 });
 
@@ -513,8 +575,12 @@ test("settings fields that save or show at once, or hold a URL or an email, are 
   await createOrg(page, 'Northside Market');
   const pages: [path: string, names: string[]][] = [
     ['/settings/general', ['Name', 'Always on', 'Set hours', 'Save changes']],
-    ['/settings/members', ['Emails, separated by commas', 'Send invites', `Role for ${email}`]],
-    ['/settings/notifications', ['Slack incoming-webhook URL', 'Connect Slack', 'Webhook URL', 'Add webhook']],
+    ['/settings/screens', ['From', 'Alert after', 'Save changes']],
+    ['/settings/members', ['Emails, separated by commas', 'Send invites', `Role for ${email}`, 'Save']],
+    [
+      '/settings/notifications',
+      ['Slack incoming-webhook URL', 'Connect Slack', 'Webhook URL', 'Add webhook', 'Email for: A screen goes offline, and when it is back'],
+    ],
     ['/account', ['Name', 'Save', 'Light', 'Dark', 'System']],
   ];
   for (const [path, names] of pages) {
