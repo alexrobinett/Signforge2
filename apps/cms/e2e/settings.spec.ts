@@ -21,20 +21,25 @@ async function invitePathFor(email: string): Promise<string> {
 /** Holds every request to the app's server functions (the loaders' reads) from now until `release`. */
 async function holdReads(page: Page) {
   const held: Route[] = [];
-  let first: (route: Route) => void = () => {};
-  const arrived = new Promise<Route>((resolve) => {
-    first = resolve;
-  });
+  let waiting = { n: Number.POSITIVE_INFINITY, done: () => {} };
   const hold = (route: Route) => {
     held.push(route);
-    first(route);
+    if (held.length >= waiting.n) waiting.done();
   };
   await page.route('**/_serverFn/**', hold);
+  /** Resolves once `n` reads are held. */
+  const holding = (n: number) =>
+    new Promise<void>((done) => {
+      waiting = { n, done };
+      if (held.length >= n) done();
+    });
+  /** Lets them go; resolves once each has its whole answer and the page has drawn two frames since. */
   const release = async () => {
     await page.unroute('**/_serverFn/**', hold);
-    for (const route of held) await route.continue();
+    for (const route of held) await route.fulfill({ response: await route.fetch() });
+    await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
   };
-  return { arrived, release };
+  return { holding, release };
 }
 
 const settingsNav = (page: Page) => page.getByRole('navigation', { name: 'Settings' });
@@ -353,7 +358,7 @@ test('a role select or an invitation button keeps keyboard focus while its chang
   await expect(role).toHaveValue('viewer');
   const reads = await holdReads(page);
   await roleAnswer.continue();
-  await reads.arrived;
+  await reads.holding(1);
   await expect(page.getByText('Role changed')).toBeVisible();
   await expect(role).toHaveAttribute('aria-disabled', 'true');
   await expect(role).toHaveValue('viewer');
@@ -424,7 +429,12 @@ test("an edit typed while its save runs is kept: the next addresses to invite, a
   await page.getByRole('button', { name: 'Save changes' }).click();
   const saveAnswer = await saving.arrived;
   await retention.fill('120');
+  // Compared once the page has drawn its reload (the shell's read and the settings'), which
+  // remounted the form on the version the save made.
+  const reads = await holdReads(page);
   await saveAnswer.continue();
+  await reads.holding(2);
+  await reads.release();
   await expect(page.getByText('Saved')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save changes' })).not.toHaveAttribute('aria-disabled');
   await expect(retention).toHaveValue('120');
