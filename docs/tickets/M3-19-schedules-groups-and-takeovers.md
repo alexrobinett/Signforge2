@@ -18,7 +18,8 @@ Target playlists by time and by screen, group or org.
 - Schedule entries: playlist, priority, target, dates, days, window. Validated with `player-core`.
 - Takeover: an entry with an end time under 24 hours (`startsAt` and `endsAt`, manifest schema 3). *(Was "compiled into a dated window", for schema-2 players, which ignore `endsAt`; no supported player plays schema 2 any more, so none is compiled, 2026-11-19.)*
 - A takeover cuts in at once: when a screen receives a manifest whose active takeover differs from what it is playing, it ends the current spot (with the normal transition) instead of waiting for the spot boundary. Every other publish waits for the boundary (decided 2026-11-17, see M3-06).
-- A week view showing what each screen plays when.
+- A week view showing what each screen plays when. *(To the minute: an entry or takeover that starts or ends inside an hour is drawn there.)*
+- Owner decision (review of #146, in line with M3-18): deleting a published schedule entry needs `content:publish`, and a pinned publish applies only the changes it pins, so a deletion never rides along on someone else's pinned publish; a publish of everything applies it. Of two takeovers on the same screens the newer wins (later `startsAt`, then later published).
 - Deleting and creating schedule entries go through `packages/db`'s repository (`org.scheduleEntries.delete`, `stage.delete`, `insert`, `stage.insert`), never SQL of their own: a schedule entry made again with a deleted one's id continues its versions (`draft_tombstones`, #64), so an edit sent with an `ifVersion` read before the delete is refused `conflict`.
 
 ## Out of scope
