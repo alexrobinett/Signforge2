@@ -13,8 +13,14 @@ import type { Role } from '~/server/shell.functions';
 import type { SliceCreator } from './store';
 
 interface SettingsState {
-  /** The action running (`general`, `invite`, `role:<memberId>`, ...), or null. */
+  /**
+   * The action running (`general`, `invite`, `role:<memberId>`, ...), or null. While one runs,
+   * another is ignored, and its controls say so with `aria-disabled` rather than `disabled`: a
+   * control disabled while it has focus loses it to the page (#126).
+   */
   pending: string | null;
+  /** The role a member's running change gives them, so their select shows where it is going. */
+  roleChange: { memberId: string; role: Role } | null;
   /**
    * Why the last action failed, and which one it was, so the form it came from shows it. `stale`:
    * the settings changed since the page read them, and the form offers a reload.
@@ -101,14 +107,19 @@ function newSigningSecret(): string {
 export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { router }) => {
   const patch = (change: (s: SettingsState) => SettingsState) => set((s) => ({ settings: change(s.settings) }));
 
-  /** Runs one action: marks it pending, says how it went, and reloads the page's data. */
+  /**
+   * Runs one action, unless one is running: marks it pending, says how it went, and reloads the
+   * page's data. It stays pending until the page has its new data, so a control does not show
+   * the old value in between.
+   */
   async function run(at: string, work: () => Promise<unknown>, done: string) {
+    if (get().settings.pending !== null) return false;
     patch((s) => ({ ...s, pending: at, error: null }));
     try {
       await work();
-      patch((s) => ({ ...s, pending: null }));
       toast.success(done);
       await router.invalidate();
+      patch((s) => ({ ...s, pending: null }));
       return true;
     } catch (err) {
       const error = isStale(err) ? { at, text: 'This changed since you opened it.', stale: true } : { at, text: toolMessage(err), stale: false };
@@ -118,7 +129,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
   }
 
   return {
-    settings: { pending: null, error: null, hours: null, removing: null, removingChannel: null, signingSecret: null },
+    settings: { pending: null, roleChange: null, error: null, hours: null, removing: null, removingChannel: null, signingSecret: null },
     editDefaultHours: (value) => patch((s) => ({ ...s, hours: { value } })),
 
     async saveGeneral(org, values, ifVersion) {
@@ -207,12 +218,12 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         () => auth(authClient.organization.cancelInvitation({ invitationId }), 'Could not revoke it.'),
         'Invite revoked',
       )),
-    changeMemberRole: async (memberId, role) =>
-      void (await run(
-        `role:${memberId}`,
-        () => auth(authClient.organization.updateMemberRole({ memberId, role }), 'Could not change the role.'),
-        'Role changed',
-      )),
+    async changeMemberRole(memberId, role) {
+      if (get().settings.pending !== null) return;
+      patch((s) => ({ ...s, roleChange: { memberId, role } }));
+      await run(`role:${memberId}`, () => auth(authClient.organization.updateMemberRole({ memberId, role }), 'Could not change the role.'), 'Role changed');
+      patch((s) => ({ ...s, roleChange: null }));
+    },
     askToRemoveMember: (member) => patch((s) => ({ ...s, removing: member, error: null })),
     async removeMember(memberId) {
       const removed = await run(
@@ -237,6 +248,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     signOutOtherSessions: async () =>
       void (await run('sessions', () => auth(authClient.revokeOtherSessions(), 'Could not sign them out.'), 'Signed out everywhere else')),
     async connectGithub() {
+      if (get().settings.pending !== null) return;
       patch((s) => ({ ...s, pending: 'github', error: null }));
       // On success the browser leaves for GitHub and comes back to the account page.
       const res = await authClient.linkSocial({ provider: 'github', callbackURL: '/account' });

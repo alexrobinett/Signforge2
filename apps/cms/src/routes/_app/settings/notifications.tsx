@@ -184,7 +184,7 @@ function SlackCard(props: CardProps) {
 function WebhookCard(props: CardProps) {
   const setWebhook = useAppStore((s) => s.setWebhook);
   const rotate = useAppStore((s) => s.rotateSigningSecret);
-  const pending = useAppStore((s) => s.settings.pending === 'webhook');
+  const busy = useAppStore((s) => s.settings.pending !== null);
   const { channel } = props;
   return (
     <ChannelOf
@@ -193,7 +193,7 @@ function WebhookCard(props: CardProps) {
       onUrl={(url) => setWebhook(url, channel?.version)}
       extra={
         channel && (
-          <Button type="button" variant="outline" disabled={pending} onClick={() => void rotate(channel.version)}>
+          <Button type="button" variant="outline" aria-disabled={busy || undefined} onClick={() => void rotate(channel.version)}>
             <RotateCwIcon aria-hidden /> New signing secret
           </Button>
         )
@@ -207,7 +207,7 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
   const asking = useAppStore((s) => s.settings.removingChannel === kind);
   const ask = useAppStore((s) => s.askToRemoveAlertChannel);
   const remove = useAppStore((s) => s.removeAlertChannel);
-  const pending = useAppStore((s) => s.settings.pending === `remove:${kind}`);
+  const busy = useAppStore((s) => s.settings.pending !== null);
   const name = CHANNEL_COPY[kind].title;
   if (!asking)
     return (
@@ -220,7 +220,7 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
       <p>Stop sending alerts to {name}? Its URL is forgotten, and alerts still waiting for it are not sent.</p>
       <ActionError at={`remove:${kind}`} />
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="destructive" disabled={pending} onClick={() => void remove(kind)}>
+        <Button type="button" variant="destructive" aria-disabled={busy || undefined} onClick={() => void remove(kind)}>
           Remove
         </Button>
         <Button type="button" variant="outline" onClick={() => ask(null)}>
@@ -247,6 +247,7 @@ function UrlForm({
 }) {
   const id = useId();
   const pending = useAppStore((s) => s.settings.pending === at);
+  const busy = useAppStore((s) => s.settings.pending !== null);
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -260,7 +261,7 @@ function UrlForm({
         <Input id={id} name="url" type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
         <p className="text-xs text-muted-foreground">Kept encrypted, and never shown again.</p>
         <ActionError at={at} />
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" aria-disabled={busy || undefined}>
           {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} {button}
         </Button>
       </form>
@@ -271,9 +272,10 @@ function UrlForm({
 function TestButton({ channel, label }: { channel: AlertDelivery['channel']; label: string }) {
   const test = useAppStore((s) => s.testAlertChannel);
   const pending = useAppStore((s) => s.settings.pending === `test:${channel}`);
+  const busy = useAppStore((s) => s.settings.pending !== null);
   return (
     <>
-      <Button type="button" variant="outline" disabled={pending} onClick={() => void test(channel)}>
+      <Button type="button" variant="outline" aria-disabled={busy || undefined} onClick={() => void test(channel)}>
         {pending ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <SendIcon aria-hidden />} {label}
       </Button>
       <ActionError at={`test:${channel}`} />
@@ -419,7 +421,7 @@ const LOG_COLUMNS = 'sm:grid-cols-[6rem_6rem_minmax(0,1fr)_minmax(0,1fr)_4.5rem_
 function DeliveryLog({ deliveries, canEdit, at }: { deliveries: AlertDelivery[]; canEdit: boolean; at: number }) {
   const now = useNow(at);
   const retry = useAppStore((s) => s.retryAlertDelivery);
-  const pending = useAppStore((s) => s.settings.pending);
+  const busy = useAppStore((s) => s.settings.pending !== null);
   if (!deliveries.length) return <p className="text-sm text-muted-foreground">Nothing has been sent to Slack or a webhook yet.</p>;
   return (
     <>
@@ -445,7 +447,7 @@ function DeliveryLog({ deliveries, canEdit, at }: { deliveries: AlertDelivery[];
               </span>
               <span>
                 {canEdit && d.status !== 'delivered' && (
-                  <Button type="button" variant="outline" size="sm" disabled={pending === `retry:${d.id}`} onClick={() => void retry(d.id)}>
+                  <Button type="button" variant="outline" size="sm" aria-disabled={busy || undefined} onClick={() => void retry(d.id)}>
                     <RotateCwIcon aria-hidden /> Retry now
                   </Button>
                 )}

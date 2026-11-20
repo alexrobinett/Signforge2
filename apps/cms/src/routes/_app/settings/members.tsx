@@ -86,7 +86,7 @@ function MembersSettings() {
 
 function InviteForm() {
   const id = useId();
-  const pending = useAppStore((s) => s.settings.pending === 'invite');
+  const busy = useAppStore((s) => s.settings.pending !== null);
   const inviteMembers = useAppStore((s) => s.inviteMembers);
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
@@ -121,7 +121,7 @@ function InviteForm() {
               ))}
             </NativeSelect>
           </div>
-          <Button type="submit" disabled={pending}>
+          <Button type="submit" aria-disabled={busy || undefined}>
             Send invites
           </Button>
           <div className="sm:col-span-3">
@@ -135,7 +135,8 @@ function InviteForm() {
 
 function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
   const me = app.useLoaderData().user.id;
-  const pending = useAppStore((s) => s.settings.pending === `role:${member.id}` || s.settings.pending === `remove:${member.id}`);
+  const busy = useAppStore((s) => s.settings.pending !== null);
+  const role = useAppStore((s) => (s.settings.roleChange?.memberId === member.id ? s.settings.roleChange.role : member.role));
   const changeMemberRole = useAppStore((s) => s.changeMemberRole);
   const askToRemoveMember = useAppStore((s) => s.askToRemoveMember);
   const display = member.user.name || member.user.email;
@@ -156,8 +157,9 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
             <EditorFields>
               <NativeSelect
                 aria-label={`Role for ${display}`}
-                value={member.role}
-                disabled={pending}
+                value={role}
+                // Not disabled while an action runs: a disabled select loses keyboard focus. A change then is ignored.
+                aria-disabled={busy || undefined}
                 onChange={(e) => {
                   if (isRole(e.target.value)) void changeMemberRole(member.id, e.target.value);
                 }}
@@ -170,7 +172,14 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
                 ))}
               </NativeSelect>
               {!self && (
-                <Button variant="ghost" className="text-destructive" disabled={pending} onClick={() => askToRemoveMember(member)}>
+                <Button
+                  variant="ghost"
+                  className="text-destructive"
+                  aria-disabled={busy || undefined}
+                  onClick={() => {
+                    if (!busy) askToRemoveMember(member);
+                  }}
+                >
                   Remove
                 </Button>
               )}
@@ -186,7 +195,7 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
 }
 
 function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdit: boolean }) {
-  const pending = useAppStore((s) => s.settings.pending === `resend:${invitation.email}` || s.settings.pending === `cancel:${invitation.id}`);
+  const busy = useAppStore((s) => s.settings.pending !== null);
   const resendInvitation = useAppStore((s) => s.resendInvitation);
   const cancelInvitation = useAppStore((s) => s.cancelInvitation);
   const expires = new Date(invitation.expiresAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
@@ -202,10 +211,16 @@ function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdi
         </div>
         {canEdit && (
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={pending} onClick={() => void resendInvitation(invitation.email, invitation.role)}>
+            <Button variant="outline" size="sm" aria-disabled={busy || undefined} onClick={() => void resendInvitation(invitation.email, invitation.role)}>
               Resend
             </Button>
-            <Button variant="ghost" size="sm" className="text-destructive" disabled={pending} onClick={() => void cancelInvitation(invitation.id)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive"
+              aria-disabled={busy || undefined}
+              onClick={() => void cancelInvitation(invitation.id)}
+            >
               Revoke
             </Button>
           </div>
@@ -300,7 +315,7 @@ function RoleTable({ editorsPublish }: { editorsPublish: boolean }) {
 
 function RemoveDialog() {
   const member = useAppStore((s) => s.settings.removing);
-  const pending = useAppStore((s) => (member ? s.settings.pending === `remove:${member.id}` : false));
+  const busy = useAppStore((s) => s.settings.pending !== null);
   const askToRemoveMember = useAppStore((s) => s.askToRemoveMember);
   const removeMember = useAppStore((s) => s.removeMember);
   const display = member ? member.user.name || member.user.email : '';
@@ -315,7 +330,7 @@ function RemoveDialog() {
         {member && <ActionError at={`remove:${member.id}`} />}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button variant="destructive" disabled={pending} onClick={() => member && void removeMember(member.id)}>
+          <Button variant="destructive" aria-disabled={busy || undefined} onClick={() => member && void removeMember(member.id)}>
             Remove
           </Button>
         </AlertDialogFooter>

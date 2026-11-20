@@ -59,7 +59,11 @@ interface BrandKitsState {
   edits: Record<string, KitEdit>;
   /** Which logo's picker is open. */
   logoFor: 'dark' | 'light' | null;
-  /** The kit action running (`default:<kit>`, `duplicate:<kit>`, `assign:<group or screen>`), or null. */
+  /**
+   * The kit action running (`default:<kit>`, `duplicate:<kit>`, `assign:<group or screen>`), or
+   * null. While one runs, another is ignored; its controls say so with `aria-disabled`, since a
+   * disabled control loses keyboard focus.
+   */
   pending: string | null;
   /** Why the last kit action failed, for the kit whose page or row it was started from. */
   actionError: { kitId: string; text: string } | null;
@@ -215,8 +219,9 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     }));
   };
 
-  /** Runs one kit action for `kitId`'s page or row, marking it pending and showing its refusal there, then reads the kits again. */
+  /** Runs one kit action for `kitId`'s page or row, unless one is running, marking it pending and showing its refusal there, then reads the kits again. */
   async function act(orgId: string, kitId: string, at: string, work: () => Promise<unknown>): Promise<boolean> {
+    if (get().brandKits.pending !== null) return false;
     kits((k) => ({ ...k, pending: at, actionError: null }));
     try {
       await work();

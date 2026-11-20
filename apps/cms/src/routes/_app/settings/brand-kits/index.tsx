@@ -136,12 +136,22 @@ function BrandKitsPage() {
                   </Link>
                 </Button>
                 {canManage && (
-                  <Button variant="outline" disabled={pending !== null} onClick={() => void duplicate(orgId, k)} aria-label={`Duplicate ${k.name}`}>
+                  <Button
+                    variant="outline"
+                    aria-disabled={pending !== null || undefined}
+                    onClick={() => void duplicate(orgId, k)}
+                    aria-label={`Duplicate ${k.name}`}
+                  >
                     Duplicate
                   </Button>
                 )}
                 {canManage && !k.isDefault && (
-                  <Button variant="outline" disabled={pending !== null} onClick={() => void makeDefault(orgId, k.id)} aria-label={`Make default: ${k.name}`}>
+                  <Button
+                    variant="outline"
+                    aria-disabled={pending !== null || undefined}
+                    onClick={() => void makeDefault(orgId, k.id)}
+                    aria-label={`Make default: ${k.name}`}
+                  >
                     Make default
                   </Button>
                 )}

@@ -80,11 +80,12 @@ export function ActionError({ at }: { at: string }) {
 /** A form's save button and its error; only owners get the button. */
 export function SaveRow({ at, canEdit, label = 'Save changes' }: { at: string; canEdit: boolean; label?: string }) {
   const pending = useAppStore((s) => s.settings.pending === at);
+  const busy = useAppStore((s) => s.settings.pending !== null);
   if (!canEdit) return <p className="text-sm text-muted-foreground">Only owners can change these.</p>;
   return (
     <div className="space-y-2">
       <ActionError at={at} />
-      <Button type="submit" disabled={pending}>
+      <Button type="submit" aria-disabled={busy || undefined}>
         {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} {label}
       </Button>
     </div>

@@ -104,9 +104,7 @@ function KitUse({
             // Not disabled while an action runs: a disabled box loses keyboard focus. A change then is ignored.
             disabled={!canManage}
             aria-disabled={pending !== null || undefined}
-            onChange={(e) => {
-              if (pending === null) void assign(orgId, kit, e.target.checked, target);
-            }}
+            onChange={(e) => void assign(orgId, kit, e.target.checked, target)}
             className="size-4 accent-primary"
           />
           <span className="min-w-0">
@@ -131,7 +129,7 @@ function KitUse({
           )}
         </p>
         {canManage && !kit.isDefault && (
-          <Button variant="outline" disabled={pending !== null} onClick={() => void makeDefault(orgId, kit.id)}>
+          <Button variant="outline" aria-disabled={pending !== null || undefined} onClick={() => void makeDefault(orgId, kit.id)}>
             Make default
           </Button>
         )}
@@ -256,7 +254,7 @@ function KitEditor() {
           </p>
           {canManage && (
             <EditorFields>
-              <Button variant="outline" disabled={pending !== null} onClick={() => void duplicate(orgId, kit)}>
+              <Button variant="outline" aria-disabled={pending !== null || undefined} onClick={() => void duplicate(orgId, kit)}>
                 Duplicate
               </Button>
               <Button variant="outline" disabled={!editing || saving} onClick={() => discard(kit.id)}>
