@@ -534,6 +534,17 @@ Every change of takeover cut the spot on screen within half a second of the push
 
 Ending offline: a takeover ending 100 s after it was pushed; once it played, the local API was stopped (04:21:56 UTC; the Pi then got no answer from it, and no sync succeeded after 04:21:45). `endsAt` was 04:23:24.000; `main` started at 04:23:24.016, 39 s into the flash spot. The player's `online` flag turned false only at its next sync, 04:26:17: it reports the last sync, not the socket, as before this change.
 
+### Steady playback with no takeover (M3-19 review, 2026-11-20)
+
+The change adds work at every spot boundary (`activeTakeover` twice more, a timer reset) and none per frame. #91's method, as in "After the merge" above: `examples/stress` built once from master and served to both players, each at `http://localhost:8090/m319/<build>/`, the full 16-spot playlist, cut, 120 s per run after 10 s to settle, HTTP cache cleared, the service worker bypassed and the origin's storage cleared before each run, the soak logger and the supervisor stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Master `fcee189` against the branch `eec8e29`, master/branch/branch/master, starting 01:00 at night. Every run drew about 7160 frames, and nothing was skipped.
+
+| Build | Overall (`all%`) | Playing (`play%`) | Loading next | Worst frame | Prepares, median and max (13 each) |
+| --- | --- | --- | --- | --- | --- |
+| Master (`fcee189`) | 0.74, 0.44% | 0.17, 0.10% | 18.6, 12.4% | 300, 100 ms | 271 / 726, 230 / 528 ms |
+| This branch (`eec8e29`) | 0.54, 0.50% | 0.14, 0.11% | 14.6, 13.3% | 100, 100 ms | 259 / 396, 256 / 465 ms |
+
+No cost: playing is 0.10 to 0.17% in both, within the spread the sections above found for master alone; master's 300 ms frame was again in its first run after the cache was cleared.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
