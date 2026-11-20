@@ -206,9 +206,12 @@ async function render(
       if (problem) problems.add(problem);
     });
     page.on('pageerror', (e) => problems.add(`threw an uncaught error: ${e.message}`));
+    let navigated = false;
     page.on('framenavigated', (f) => {
       // A new fragment keeps the document (no second load), so the player does not count it either.
-      if (f === templateFrame(page) && f.url().split('#')[0] !== 'about:srcdoc') problems.add('navigated its own frame (blocked)');
+      if (f !== templateFrame(page) || f.url().split('#')[0] === 'about:srcdoc') return;
+      navigated = true;
+      problems.add('navigated its own frame (blocked)');
     });
     await page.goto(HOST);
 
@@ -240,10 +243,9 @@ async function render(
     await page.waitForTimeout(SETTLE_MS);
     // Never ready, and nothing above says why: a template that only stalls, or that reports an error it never threw.
     if (readyMs === null && !problems.size) problems.add(`did not report ready within ${READY_TIMEOUT_MS} ms`);
-    // Ready, then no second of frames, and nothing above says why (a navigation leaves no frames to count): wedged in
-    // `play`, or it broke the count. On a screen a wedged template holds the player's frame.
-    if (readyMs !== null && frames === null && !problems.size)
-      problems.add(`froze after play: did not draw a second of frames within ${PLAY_MS + GRACE_MS} ms`);
+    // Ready, then no second of frames: wedged in `play`, or it broke the count. On a screen a wedged template holds
+    // the player's frame. A frame that navigated away has no frames to count, and is refused for the navigation.
+    if (readyMs !== null && frames === null && !navigated) problems.add(`froze after play: did not draw a second of frames within ${PLAY_MS + GRACE_MS} ms`);
     return { render: { orientation, viewport, readyMs, frames }, problems };
   } finally {
     await context.close();

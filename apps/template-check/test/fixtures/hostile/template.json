@@ -24,7 +24,8 @@
         "webrtc",
         "image",
         "on-play",
-        "spin-on-play"
+        "spin-on-play",
+        "fetch-then-spin-on-play"
       ],
       "default": "ok"
     },
