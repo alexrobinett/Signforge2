@@ -110,7 +110,11 @@ class FakePins {
 const spot = (id: string, durationMs: number): Spot => ({ id, name: id, kind: 'image', file: `sha-${id}`, fit: 'cover', durationMs });
 
 /** A manifest that loops `items`; with `takeover`, an entry from mono `from` to `to` plays playlist `takeover`'s spot t. */
-function manifest(id: string, spots: Spot[], opts: { items?: string[]; transition?: Transition; takeover?: { from: number; to: number } } = {}): ScreenManifest {
+function manifest(
+  id: string,
+  spots: Spot[],
+  opts: { items?: string[]; transition?: Transition; takeover?: { from: number; to: number } } = {},
+): ScreenManifest {
   const takeover: ScheduleEntry[] = opts.takeover
     ? [{ id: 'tk', playlist: 'takeover', priority: 100, target: 'org', startsAt: iso(opts.takeover.from), endsAt: iso(opts.takeover.to) }]
     : [];
@@ -123,7 +127,12 @@ function manifest(id: string, spots: Spot[], opts: { items?: string[]; transitio
     templates: {},
     spots: Object.fromEntries(spots.map((s) => [s.id, s])),
     playlists: {
-      main: { id: 'main', name: 'Main', transition: opts.transition ?? { type: 'cut' }, items: (opts.items ?? spots.filter((s) => s.id !== 't').map((s) => s.id)).map((s) => ({ spot: s })) },
+      main: {
+        id: 'main',
+        name: 'Main',
+        transition: opts.transition ?? { type: 'cut' },
+        items: (opts.items ?? spots.filter((s) => s.id !== 't').map((s) => s.id)).map((s) => ({ spot: s })),
+      },
       takeover: { id: 'takeover', name: 'Takeover', transition: { type: 'cut' }, items: [{ spot: 't' }] },
     },
     dataSources: {},
@@ -136,7 +145,14 @@ function setup({ preview = false } = {}) {
   const clock = new FakeClock();
   const slots = new FakeSlots(clock);
   const pins = new FakePins();
-  const seen = { played: [] as string[], skipped: [] as string[], status: [] as string[], fellBack: [] as string[], good: [] as string[], errors: [] as unknown[] };
+  const seen = {
+    played: [] as string[],
+    skipped: [] as string[],
+    status: [] as string[],
+    fellBack: [] as string[],
+    good: [] as string[],
+    errors: [] as unknown[],
+  };
   const playback = new Playback({
     clock,
     slots,
