@@ -1,0 +1,105 @@
+import { createHash } from 'node:crypto';
+import { createContext, runInContext } from 'node:vm';
+import { describe, expect, it } from 'vitest';
+import { containedFrames } from './frame';
+
+const hash = (text: string) => `'sha256-${createHash('sha256').update(text).digest('base64')}'`;
+const policiesOf = (wrapper: string) => [...wrapper.matchAll(/content="([^"]*)"/g)].map((m) => m[1]!);
+const scriptsOf = (html: string) => [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+const DISARM = "if(!(delete this.RTCPeerConnection&&delete this.webkitRTCPeerConnection))throw new Error('[sf] WebRTC could not be removed');";
+
+describe('containedFrames', () => {
+  it('lets the wrapper and template run only their classic scripts, each disarmed first', () => {
+    const { wrapper, template } = containedFrames(
+      '<!doctype html><p>x</p><script>"use strict";go()</script><script type="text/javascript">"use strict";more()\r\n</script><script type="module">"use strict";mod()</script>',
+    );
+    const [classic, typed, module] = scriptsOf(template);
+    // The guard goes right after "use strict";, which stays first; CR LF reads as LF.
+    expect(classic).toBe(`"use strict";${DISARM}go()`);
+    expect(typed).toBe(`"use strict";${DISARM}more()\n`);
+    // A module is left as it is, and not let run.
+    expect(module).toBe('"use strict";mod()');
+    const [relay] = scriptsOf(wrapper);
+    const [policy, inlineOnly] = policiesOf(wrapper);
+    expect(policy).toContain(`script-src ${[relay!, classic!, typed!].map(hash).join(' ')};`);
+    expect(/script-src [^;]*/.exec(policy!)![0]).not.toContain('unsafe');
+    // The second policy allows no script URL, whatever `integrity` a script names.
+    expect(inlineOnly).toBe("script-src 'unsafe-inline'");
+  });
+
+  it('leaves a data block as it is, and does not let it run', () => {
+    const { wrapper, template } = containedFrames('<script type="application/json">{"a":1}</script>');
+    expect(template).toBe('<script type="application/json">{"a":1}</script>');
+    expect(policiesOf(wrapper)[0]).not.toContain(hash('{"a":1}'));
+  });
+
+  // A global with both constructors, as a template's frame has before the guard runs; then the script.
+  const run = (script: string) => {
+    const global = createContext({ RTCPeerConnection() {}, webkitRTCPeerConnection() {} });
+    runInContext(script, global);
+    return global as { seen?: boolean; r?: string };
+  };
+  const allowed = (bundle: string) => {
+    const { wrapper, template } = containedFrames(bundle);
+    const [armed] = scriptsOf(template);
+    return policiesOf(wrapper)[0]!.includes(hash(armed!)) ? armed! : undefined;
+  };
+
+  it('runs the guard before anything else in the script, however a comment in it ends', () => {
+    // U+2028 and U+2029 end a line comment in JavaScript; the parser reads CR LF as LF.
+    for (const end of ['\n', '\r\n', '\u2028', '\u2029']) {
+      const armed = allowed(`<script>"use strict";// a note${end}this.seen = 'RTCPeerConnection' in this;</script>`);
+      expect(armed, JSON.stringify(end)).toBeDefined();
+      expect(run(armed!).seen, JSON.stringify(end)).toBe(false);
+    }
+  });
+
+  it('keeps an expression that starts with a string on the next line whole', () => {
+    const armed = allowed('<script>"use strict";"abc"\n.concat(this.r = "ok");</script>');
+    expect(run(armed!).r).toBe('ok');
+  });
+
+  it('lets no script run that does not start with exactly "use strict";', () => {
+    for (const text of ['\uFEFF"use strict";x()', '/* licence */"use strict";x()', "'use strict';x()", '"use strict"\r\nx()', ' "use strict";x()', 'x()']) {
+      const { wrapper, template } = containedFrames(`<script>${text}</script>`);
+      expect(template, JSON.stringify(text)).toBe(`<script>${text.replace('\r\n', '\n')}</script>`);
+      expect(policiesOf(wrapper)[0]!.match(/'sha256-/g), JSON.stringify(text)).toHaveLength(1);
+    }
+  });
+
+  it('changes only real scripts: text that looks like one in a textarea or a comment stays as written', () => {
+    const inert = '<textarea><script>"use strict";x()</script></textarea><!-- <script>"use strict";y()</script> -->';
+    const { wrapper, template } = containedFrames(`${inert}<script>"use strict";z()</script>`);
+    expect(template).toBe(`${inert}<script>"use strict";${DISARM}z()</script>`);
+    expect(policiesOf(wrapper)[0]!.match(/'sha256-/g)).toHaveLength(2);
+  });
+
+  it('arms a script in SVG and in a template element, as the browser finds them', () => {
+    const { wrapper, template } = containedFrames('<svg><script>"use strict";a()</script></svg><template><script>"use strict";b()</script></template>');
+    expect(template).toBe(`<svg><script>"use strict";${DISARM}a()</script></svg><template><script>"use strict";${DISARM}b()</script></template>`);
+    for (const armed of scriptsOf(template)) expect(policiesOf(wrapper)[0]).toContain(hash(armed));
+  });
+
+  it('gives no hash to a module, an external script or another executable type, however its attributes are written', () => {
+    for (const html of [
+      '<script type="&#109;odule">"use strict";m()</script>',
+      '<script type=" MODULE ">"use strict";m()</script>',
+      '<script type="text/ecmascript">"use strict";e()</script>',
+      '<script language="javascript1.5">"use strict";l()</script>',
+      '<script src="x.js">"use strict";s()</script>',
+      '<svg><script href="x.js">"use strict";h()</script></svg>',
+    ]) {
+      const { wrapper, template } = containedFrames(html);
+      expect(template, html).toBe(html);
+      expect(policiesOf(wrapper)[0]!.match(/'sha256-/g), html).toHaveLength(1);
+    }
+  });
+
+  it('leaves a script in MathML, which never runs, and one in a select, where parsers differ, unarmed', () => {
+    for (const html of ['<math><script>"use strict";m()</script></math>', '<select><script>"use strict";s()</script></select>']) {
+      const { wrapper, template } = containedFrames(html);
+      expect(template, html).toBe(html);
+      expect(policiesOf(wrapper)[0]!.match(/'sha256-/g), html).toHaveLength(1);
+    }
+  });
+});

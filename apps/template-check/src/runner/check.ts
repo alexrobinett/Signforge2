@@ -1,21 +1,21 @@
 /**
- * The runtime check: render a template bundle in headless Chromium, in the frame the player gives
- * it (the wrapper document and sandbox from `@signforge/player-core`), with example data, at
+ * The runtime check: render a template bundle in headless Chromium, in the frames the player gives
+ * it (`containedFrames` and the sandbox from `@signforge/player-core`), with example data, at
  * 1920x1080 in each orientation it supports, and turn everything it tries into problems.
  *
  * What Chromium shows of a blocked attempt: a request the policy blocks never reaches the network
  * stack (no Playwright request event), but Chromium logs it to the console of the frame that made
  * it, out-of-process frames included. The console lines below are Chromium's own, not the
  * template's; a template can add lines that look like them, which only refuses itself. A template
- * frame navigated away lands on an error page. WebRTC is the one channel the policy does not cover
- * (CSP has no directive for it), so the check reports any use of `RTCPeerConnection`.
+ * frame navigated away lands on an error page. As on a screen, the template's frames have no
+ * `RTCPeerConnection`: a template that reaches for it fails as it would there.
  *
  * A template can still behave differently here than on a screen (wait out the check, sniff the
  * browser): this check refuses what it sees. The sandbox and its policy remain the boundary on screens.
  */
 import { DEFAULT_BRAND_COLORS, isBrandColor, tokenName } from '@signforge/compiler';
 import type { FieldDef, InitPayload, Orientation, ScalarFieldDef, TemplateManifest, TemplateRender } from '@signforge/contract';
-import { READY_TIMEOUT_MS, TEMPLATE_SANDBOX, WRAPPER_HTML } from '@signforge/player-core';
+import { containedFrames, READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from '@signforge/player-core';
 import type { Browser, Frame, Page } from 'playwright-core';
 
 /** The page around the template, on an origin of its own that nothing else answers. */
@@ -55,33 +55,13 @@ const BLOCKED: [RegExp, (url: string) => string][] = [
 ];
 /** Any other line with these words is something the policy stopped (eval, say): also a problem. */
 const CSP_VIOLATION = 'violates the following Content Security Policy directive';
-/** Logged by the init script below; a template cannot remove that script's hold on the constructor. */
-const WEBRTC = '[sf-check] RTCPeerConnection';
-
 function consoleProblem(text: string): string | undefined {
-  if (text.startsWith(WEBRTC)) return "used WebRTC (RTCPeerConnection), which a template may not: the screen's policy does not block it";
   for (const [pattern, problem] of BLOCKED) {
     const m = pattern.exec(text);
     if (m) return problem(m[1] ?? '');
   }
   if (text.includes(CSP_VIOLATION)) return `did something the screen's policy blocks: ${text}`;
   return undefined;
-}
-
-/** Runs in every frame before its own scripts: any reach for a peer connection is logged. */
-function watchWebRtc(marker: string) {
-  const log = console.error.bind(console);
-  for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection']) {
-    const real: unknown = Reflect.get(window, name);
-    if (real === undefined) continue;
-    Object.defineProperty(window, name, {
-      configurable: false,
-      get() {
-        log(marker);
-        return real;
-      },
-    });
-  }
 }
 
 /** A value of the field's type for a field with no default, so the template gets data it accepts. */
@@ -212,7 +192,6 @@ async function render(
   const problems = new Set<string>();
   const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
   try {
-    await context.addInitScript(watchWebRtc, WEBRTC);
     // Nothing but the host page is answered. A request that gets this far got past the policy.
     await context.route('**/*', (route) => {
       const url = route.request().url();
@@ -234,10 +213,11 @@ async function render(
     await page.goto(HOST);
 
     const { data, images } = exampleData(manifest.fields);
+    const contained = containedFrames(html);
     const args: RenderArgs = {
-      wrapperHtml: WRAPPER_HTML,
+      wrapperHtml: contained.wrapper,
       sandbox: TEMPLATE_SANDBOX,
-      html,
+      html: contained.template,
       protocol: manifest.protocol ?? 1,
       init: { data, durationMs: manifest.duration.defaultMs, orientation, viewport, timezone: 'UTC', locale: 'en-US' },
       images,
@@ -283,7 +263,7 @@ export async function checkTemplate(browser: Browser, manifest: TemplateManifest
 
 /** A template that makes one request the policy blocks, with a quote in its URL. Protocol 1, no SDK. */
 const CANARY_URL = "https://canary.invalid/a'b";
-const CANARY_HTML = `<!doctype html><script>
+const CANARY_HTML = `<!doctype html><script>"use strict";
 addEventListener('message', (e) => {
   if (e.source !== parent || e.data?.type !== 'init') return;
   fetch(${JSON.stringify(CANARY_URL)}).catch(() => {});

@@ -36,7 +36,16 @@ export type FixtureMode =
   | 'iframe'
   | 'fetch'
   | 'image'
-  | 'font';
+  | 'font'
+  | 'external-script'
+  | 'webrtc'
+  | 'webrtc-frame'
+  | 'webrtc-srcdoc'
+  | 'webrtc-srcdoc-sandboxed'
+  | 'webrtc-srcdoc-same-origin'
+  | 'webrtc-javascript-url'
+  | 'webrtc-grandchild'
+  | 'webrtc-markup';
 
 export interface FixtureSpot {
   id: string;

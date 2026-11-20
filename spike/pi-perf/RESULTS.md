@@ -397,6 +397,50 @@ Prepares over both sets and kits (ms, before / after): meeting-room (agenda) med
 
 No cost in frames: the ranges overlap run for run, and the one 83 ms frame was in set 1's second after run with no kit. Agenda's meeting room, the spot with the most rows, prepares about 20 ms slower, the canvas read per row; well within 500 ms. The other templates are within run-to-run noise. Nothing was skipped.
 
+## No WebRTC in template frames (issue #91, 2026-11-19)
+
+The template's policy runs only the bundle's classic scripts, by hash, each rewritten to start (after its directive prologue) with a guard that deletes `RTCPeerConnection` and `webkitRTCPeerConnection` from `this`; a second policy allows no script URL. The player builds both policies and the rewritten bundle at every template load (`containedFrames` in `packages/player-core`; see Template containment in `docs/architecture.md`). Master's player (`96cd45b`), this branch's (`504ad0c`) and, for the two cases found in the re-check, the PR's previous head (`cd3b308`), at subdirectories of the rig, served on `http://localhost:8090` so the kiosk's own origin and caches were not touched.
+
+WebRTC, in a new tab of the kiosk's Chromium 156: the browser tests' fixture modes (a peer connection to a STUN server on UDP 34780 and a TURN server on TCP 34781, both on the Pi's loopback; `external-script` asks for `http://127.0.0.1:34781/x.js` with the template's own hash as `integrity`), 14 s, so the spot came up three times. Datagrams, then TCP connections:
+
+| Mode | Master | Previous head | This branch |
+| --- | --- | --- | --- |
+| `webrtc` (the template's own window) | 9, 3 | | 0, 0 |
+| `webrtc-srcdoc` (a frame it adds runs its own script) | 9, 3 | | 0, 0 |
+| `webrtc-javascript-url` | 9, 3 | | 0, 0 |
+| `webrtc-markup` (the frame is in the bundle's markup, so every spot of it has one) | 24, 8 | | 0, 0 |
+| module copy (one of its classic scripts, declaring `function window`, run as a module in a frame it adds) | 24, 8 | 23, 8 | 0, 0 |
+| `external-script` | 0, 0 (no hashes in its policy) | 0, 3 (requested) | 0, 0 |
+
+Frames: the full 16-spot `examples/stress` playlist, cut, 120 s per run after 10 s to settle, HTTP cache cleared, the service worker bypassed and the origin's storage cleared before each run, the soak logger and the supervisor stopped (the kiosk page left the player's origin, so it did not beat), `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order: master, branch, branch, master.
+
+| Build | Overall | Playing | Loading next | Worst frame | Prepares, median and max (13 each) |
+| --- | --- | --- | --- | --- | --- |
+| Master | 0.35, 0.33% | 0.11, 0.13% | 9.1, 7.8% | 117, 117 ms | 243 / 371, 233 / 512 ms |
+| This branch | 0.43, 0.43% | 0.14, 0.13% | 10.3, 10.3% | 100, 117 ms | 243 / 529, 267 / 446 ms |
+
+`containedFrames` itself, timed in a tab of the same Chromium on a 79 kB stress bundle, 30 times: 0.9 ms median, 0.4 ms at best, 11.6 ms on the first (cold) call. That is well inside the spread between runs: the previous session of this issue had master higher (0.60, 0.37% against 0.39, 0.39%), and both builds here have one prepare over 500 ms. Nothing was skipped.
+
+After the second re-check the guard goes right after the exact `"use strict";` every bundle script starts with, with no prologue matching (`cea6a31`). One more round, same method, master `50c0dfe` against the branch, master/branch/branch/master; `webrtc` sent 9 datagrams and 3 TURN connections on master and nothing on the branch:
+
+| Build | Overall | Playing | Loading next | Worst frame | Prepares, median and max (13 each) |
+| --- | --- | --- | --- | --- | --- |
+| Master | 0.62, 0.36% | 0.14, 0.10% | 17.6, 10.2% | 300, 100 ms | 235 / 660, 249 / 345 ms |
+| This branch | 0.39, 0.37% | 0.14, 0.13% | 9.1, 9.2% | 100, 117 ms | 236 / 534, 242 / 380 ms |
+
+No cost; the 300 ms frame was again in master's first run after the cache was cleared. Nothing was skipped.
+
+After the third re-check the player finds a bundle's scripts with an HTML parser (parse5, `bundleScripts` in the contract) and arms them at their offsets. That parse costs, in a tab of the kiosk's Chromium on a 79 kB stress bundle, 12.4 ms median and 91 ms on the first, cold call (the text matcher it replaced took 0.9 ms), and the player's main script grows from 68 to 221 kB (24 to 66 kB gzipped). Master `7f03512` against the branch; `webrtc` sent 9 datagrams and 3 TURN connections on master and nothing on the branch.
+
+| Build | Overall | Playing | Loading next | Worst frame | Prepares, median and max (13 each) |
+| --- | --- | --- | --- | --- | --- |
+| Master | 0.69, 0.42% | 0.19, 0.13% | 17.3, 10.8% | 300, 100 ms | 247 / 626, 228 / 460 ms |
+| Branch, parsing at every prepare | 0.61, 0.61% | 0.16, 0.17% | 14.6, 14.0% | 117, 150 ms | 299 / 464, 266 / 694 ms |
+| Master | 0.40, 0.40% | 0.10, 0.16% | 11.6, 8.5% | 100, 150 ms | 256 / 358, 228 / 545 ms |
+| Branch, parsed once per bundle (`47b4492`) | 0.49, 0.56% | 0.10, 0.19% | 13.3, 12.3% | 100, 150 ms | 272 / 469, 259 / 456 ms |
+
+Parsing at every prepare made prepares 30 to 50 ms slower, so the player now keeps the result per bundle hash for the manifest playing. Each run above reloads the page, so about half its prepares still parse a bundle for the first time. A longer pair (240 s each, 27 prepares) split them: a spot's first prepare took 246 ms median on master and 261 ms on the branch; repeats took 213 and 231 ms. Overall dropped frames were 0.37 and 0.49%. Master alone has measured 0.29 to 0.69% across this issue's sessions, so the difference is within the spread, but the branch now tends to the higher side, by about 0.1 point overall and 15 to 20 ms per prepare. All runs are within the 1% budget. Prepares over 500 ms happened in both builds (master 545, 626 ms; branch 694, 713 ms). Nothing was skipped.
+
 ## The sun and moon cross the sky (issue #70, 2026-11-18)
 
 weather 1.3.0 places the sun or moon on an arc from sunrise, sunset and `now()`, mixes the day and night skies, and adds a dawn or dusk glow, the moon's phase (a `clip-path`) and stars. Four spots with fixed data, with sunrise and sunset set around the time of the run: clear midday, partly cloudy 5 min after sunset (glow, clouds, faint stars), clear night (moon, stars), rain 5 min after sunset (glow muted, rain tiles). Before: master's weather 1.2.1 with `isDay` instead. This branch's player at a subdirectory of the rig, cut, 45 s per spot after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order before, after, after, before. Portrait by rotating the output (`wlr-randr --transform 90`; cage resizes Chromium to 1080×1920), restored afterwards.

@@ -246,15 +246,28 @@ export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
   },
   { pattern: /@import\b/, reason: 'stylesheets must be bundled, not imported at run time' },
   { pattern: /["'(=]\s*(?:https?:)?\/\/[a-z0-9]/i, reason: 'a template may not refer to anything on the network' },
+  // The player's policy runs only the bundle's own scripts (Template containment in docs/architecture.md).
+  {
+    // An `on…=` attribute in markup, in a file or in a string, or set with setAttribute; not a property such as `img.onload = f`.
+    pattern: /<[a-z][^>]*\son[a-z]+\s*=|\bsetAttribute\(\s*["'`]on[a-z]/i,
+    reason: 'inline event handlers do not run in a template; use addEventListener',
+  },
+  { pattern: /\bjavascript:/i, reason: '`javascript:` URLs do not run in a template' },
 ];
 
+/**
+ * What every classic inline script of a built template starts with, exactly (`sf build` emits it).
+ * The player puts its WebRTC guard right after these bytes and lets no other script run, so it never
+ * parses a template's code (Template containment in docs/architecture.md).
+ */
+export const TEMPLATE_SCRIPT_START = '"use strict";';
 /** CSS a template may not ship. Each entry was measured as too slow on the baseline device. */
 export const FORBIDDEN_CSS: { pattern: RegExp; reason: string }[] = [
   { pattern: /backdrop-filter\s*:/i, reason: '`backdrop-filter` drops about a fifth of frames over moving content' },
 ];
 
 /** The checks a built template is put through, by `sf build` and again by the server. */
-export const TEMPLATE_CHECKS = ['manifest', 'forbidden-css', 'size', 'network', 'source-code'] as const;
+export const TEMPLATE_CHECKS = ['manifest', 'forbidden-css', 'size', 'network', 'source-code', 'scripts'] as const;
 export type TemplateCheckName = (typeof TEMPLATE_CHECKS)[number];
 
 /** The result of `checkTemplateBundle`. The server stores it on the template version. */
