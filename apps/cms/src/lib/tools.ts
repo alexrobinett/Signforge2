@@ -4,6 +4,8 @@
  * tool's own message, written to be shown as it is.
  */
 import type { AuditPage } from './audit';
+import { ORG_CHANGED } from '@signforge/api/tab-org';
+import { OrgChanged } from './org-changed';
 import { tabOrgHeaders } from './tab-org';
 import type { PlaylistView } from './playlists';
 import type { SpotView } from './spots';
@@ -33,6 +35,7 @@ export async function callTool(name: string, input: unknown): Promise<unknown> {
   const body: unknown = await res.json().catch(() => null);
   if (!res.ok) {
     const text = (key: string) => (isRecord(body) && typeof body[key] === 'string' ? body[key] : undefined);
+    if (text('error') === ORG_CHANGED) throw new OrgChanged(text('message'));
     throw new ToolCallError(text('error') ?? 'error', text('message') ?? `Something went wrong (${res.status}).`, isRecord(body) ? body.details : undefined);
   }
   return body;

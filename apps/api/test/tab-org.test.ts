@@ -87,6 +87,18 @@ describe('the refusal', () => {
     });
   });
 
+  it('is the same for an empty header, on the tools, the session and Better Auth alike', async () => {
+    const empty = { error: 'org_changed', message: 'This tab is on another organization; you switched to Southside in another tab. Reload.' };
+    for (const res of [
+      await alice.tool('list_screens', {}, from('')),
+      await alice.get('/api/session', from('')),
+      await alice.get('/api/auth/organization/list-members', from('')),
+    ]) {
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual(empty);
+    }
+  });
+
   it('says so when the session has no active org any more', async () => {
     const carol = new Client(t);
     await carol.signIn(email('carol'));

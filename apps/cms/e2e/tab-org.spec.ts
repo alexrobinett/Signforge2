@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { createOrg, hydrated, orgSwitcher, signInAs } from './helpers';
+import { axe, createOrg, hydrated, orgSwitcher, signInAs } from './helpers';
 import { CMS_URL } from './servers';
 
 /**
@@ -63,4 +63,17 @@ test("an audit export from a tab left on the old org is refused, with no file of
   await page.getByRole('button', { name: 'Export CSV' }).click();
   await expect(page.getByRole('status').filter({ hasText: refusal })).toBeVisible();
   expect(downloads).toBe(0);
+});
+
+test('a tab left on the old org that navigates says to reload, and Reload shows the new org', async ({ page }) => {
+  await twoOrgs(page, '192.0.2.63', '/settings/general');
+  await switchInAnotherTab(page);
+
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
+  await expect(page.getByRole('alert')).toHaveText(refusal);
+  await axe(page);
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await hydrated(page);
+  await expect(orgSwitcher(page)).toContainText('Southside Deli');
+  await expect(page.getByRole('heading', { name: 'Screens', level: 1 })).toBeVisible();
 });

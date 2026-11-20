@@ -110,7 +110,7 @@ export function createApi(deps: ApiDeps = {}) {
   // Better Auth's org calls act on the active org unless told another, so a tab on another org is
   // refused them, but for switching and creating (which switches). Signed out, Better Auth answers.
   api.on(['GET', 'POST'], '/auth/*', async (c) => {
-    if (c.req.header(TAB_ORG_HEADER) && /\/organization\/(?!(set-active|create)$)/.test(c.req.path)) {
+    if (c.req.header(TAB_ORG_HEADER) !== undefined && /\/organization\/(?!(set-active|create)$)/.test(c.req.path)) {
       const session = await c.var.auth.api.getSession({ headers: c.req.raw.headers });
       const refused = session && (await refuseOtherTabOrg(c, session));
       if (refused) return refused;

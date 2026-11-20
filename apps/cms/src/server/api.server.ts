@@ -5,6 +5,7 @@
 import { env } from 'cloudflare:workers';
 import { appendResponseHeader, getRequest } from '@tanstack/react-start/server';
 import { ORG_CHANGED, TAB_ORG_HEADER } from '@signforge/api/tab-org';
+import { OrgChanged } from '~/lib/org-changed';
 
 /** Headers from the browser that the API reads: the session cookies, the client address for rate limits and the tab's org (src/lib/tab-org.ts). */
 const FORWARDED = ['cookie', 'cf-connecting-ip', 'user-agent', 'accept-language', TAB_ORG_HEADER];
@@ -34,7 +35,7 @@ export async function callApi(path: `/api/${string}`, body?: unknown): Promise<R
       .clone()
       .json()
       .catch(() => null);
-    if (refusal?.error === ORG_CHANGED) throw new Error(refusal.message);
+    if (refusal?.error === ORG_CHANGED) throw new OrgChanged(refusal.message);
   }
   return res;
 }
