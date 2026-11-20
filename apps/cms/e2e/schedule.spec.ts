@@ -43,7 +43,7 @@ test.beforeAll(async ({ browser }) => {
   }
   await tool(page, 'set_default_playlist', { playlistId: playlist['All day'] });
 
-  // A test screen, paired by its code as the Screens page pairs one, in group Front.
+  // A test screen, paired by its code as the Screens page pairs one, put in a new group, Front, from its settings.
   screen = await (await browser.newContext()).newPage();
   await screen.goto('/test-screen/?kind=browser&content=/v1/device');
   await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
@@ -53,7 +53,15 @@ test.beforeAll(async ({ browser }) => {
     timezone: 'UTC',
     orientation: 'landscape',
   });
-  await tool(page, 'create_group', { name: 'Front', screenIds: [paired.id] });
+  await page.goto(`/screens/${paired.id}`);
+  await hydrated(page);
+  await page.getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('menuitem', { name: 'Settings and groups…' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByLabel('New group').fill('Front');
+  await settings.getByRole('button', { name: 'Save' }).click();
+  await expect(settings).toBeHidden();
+  await expect(page.getByText('group Front')).toBeVisible();
   // A screen gets content at the publish after it is paired.
   await tool(page, 'publish', {});
   await expect.poll(playlistOn, { timeout: 30_000 }).toBe(playlist['All day']);
