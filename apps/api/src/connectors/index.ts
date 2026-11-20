@@ -15,6 +15,9 @@ import { openGrant, openVerifier, sealGrant, sealVerifier } from './vault';
  */
 const ADAPTERS: readonly ((env: Env) => ProviderAdapter | undefined)[] = [];
 
+/** The path the providers send the browser back to (api/connections.ts), registered with each provider's OAuth client. */
+export const CALLBACK_PATH = '/api/connections/callback';
+
 /** What the connector code reaches providers with. The Worker's by default; tests pass a fake provider's. */
 export interface ConnectorDeps {
   adapters: readonly ProviderAdapter[];

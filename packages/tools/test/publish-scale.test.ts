@@ -90,7 +90,9 @@ describe('a 1,000-screen org', () => {
       role: 'owner',
       actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
       blobs: r2.bucket,
-      screens: { manifest: async () => {}, manifests: async (rows) => void told.push(rows.length), revoked: async () => {}, command: async () => {} },
+      services: {
+        notify: { manifest: async () => {}, manifests: async (rows) => void told.push(rows.length), revoked: async () => {}, command: async () => {} },
+      },
     };
     const started = performance.now();
     const out = await ok(dispatch(registry, 'publish', {}, caller));

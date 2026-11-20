@@ -106,12 +106,11 @@ describe('list_audit_log', () => {
   });
 
   it('returns inputs as they were recorded, secrets redacted', async () => {
-    const editor: Caller = { ...as('editor'), feedUrls: { seal: async (_source, url) => `sealed:${url}` } };
     const made = await dispatch(
       registry,
       'create_data_source',
       { name: 'Menu feed', format: 'json', feedUrl: 'https://feeds.example.com/menu?key=hunter2' },
-      editor,
+      as('editor'),
     );
     expect(made.ok, JSON.stringify(made)).toBe(true);
     const [entry] = await all({ action: 'create_data_source' });

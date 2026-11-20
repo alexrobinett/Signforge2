@@ -34,6 +34,7 @@ const createVideoUpload = defineTool({
   minRole: 'editor',
   mutates: true,
   idempotent: true,
+  needs: ['uploads'],
   input: z.object({
     name: name('asset'),
     sha256: z.string().regex(SHA256, 'not a SHA-256 (64 lowercase hex characters)'),
@@ -54,8 +55,7 @@ const createVideoUpload = defineTool({
   }),
   example: { name: 'Summer promo', sha256: '1'.repeat(64), type: 'video/mp4', size: 48_000_000 },
   target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
-  handler: async ({ org, blobs, uploads, input, write }) => {
-    if (!uploads) throw new Error('direct uploads are not configured on this server (R2 S3 credentials)');
+  handler: async ({ org, blobs, input, write, services: { uploads } }) => {
     const asset = write(
       org.assets.stage.insert({
         kind: 'video',

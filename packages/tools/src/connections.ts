@@ -51,11 +51,6 @@ const viewOf = (c: ConnectionRow): z.infer<typeof connectionOutput> => ({
   updatedAt: c.updatedAt,
 });
 
-function connectorsOf(connectors: Connectors | undefined): Connectors {
-  if (!connectors) throw new Error('the connection tools need the connectors');
-  return connectors;
-}
-
 async function requireConnection(org: OrgScope, connectionId: string) {
   const row = await org.connections.get(connectionId);
   if (!row) throw notFound('connection', connectionId);
@@ -80,6 +75,7 @@ const listConnections = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
+  needs: ['connectors'],
   input: z.object({ ...pageInput }),
   output: z.object({
     connections: z.array(connectionOutput),
@@ -87,9 +83,9 @@ const listConnections = defineTool({
     next: nextOutput,
   }),
   example: {},
-  handler: async ({ org, input, connectors }) => {
+  handler: async ({ org, input, services: { connectors } }) => {
     const { rows, next } = page(await org.connections.list(), (c) => [c.id], input);
-    return { connections: rows.map(viewOf), providers: [...connectorsOf(connectors).providers], next };
+    return { connections: rows.map(viewOf), providers: [...connectors.providers], next };
   },
 });
 
@@ -100,6 +96,7 @@ const startConnection = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  needs: ['connectors'],
   input: z.object({
     provider: z
       .string()
@@ -115,16 +112,18 @@ const startConnection = defineTool({
   example: { provider: 'google' },
   target: (input, output) =>
     input.connectionId ? { kind: 'connection', id: input.connectionId } : { kind: 'connection_authorization', id: output.authorizationId },
-  handler: async ({ org, actor, input, write, connectors }) => {
+  handler: async ({ org, actor, input, write, services: { connectors } }) => {
     // The provider sends a browser back, and the callback finishes as its session's user: an agent's authorization could never be finished.
     if (actor.kind !== 'user')
       throw new ToolError(
         'forbidden',
         'Only a person signed in to the CMS can connect an account: the provider sends their browser back to SignForge, which finishes it as them. Ask them to connect it on the Integrations page',
       );
-    const providers = connectorsOf(connectors);
-    if (!providers.providers.includes(input.provider))
-      throw new ToolError('invalid_input', `${input.provider} cannot be connected here; this deployment connects: ${providers.providers.join(', ') || 'none'}`);
+    if (!connectors.providers.includes(input.provider))
+      throw new ToolError(
+        'invalid_input',
+        `${input.provider} cannot be connected here; this deployment connects: ${connectors.providers.join(', ') || 'none'}`,
+      );
     if (input.connectionId) {
       const existing = await requireConnection(org, input.connectionId);
       if (existing.provider !== input.provider) throw new ToolError('invalid_input', `connection ${existing.id} is a ${existing.provider} connection`);
@@ -133,7 +132,7 @@ const startConnection = defineTool({
     write(org.connections.authorizations.stage.deleteExpired(now));
     const state = newState();
     const stateHash = await sha256Hex(state);
-    const { authorizeUrl, verifierSealed } = await providers.begin(input.provider, { orgId: org.orgId, stateHash }, state);
+    const { authorizeUrl, verifierSealed } = await connectors.begin(input.provider, { orgId: org.orgId, stateHash }, state);
     const row = write(
       await org.connections.authorizations.stage.insert({
         provider: input.provider,
@@ -156,6 +155,7 @@ const finishConnection = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  needs: ['connectors'],
   input: z.object({
     oauthState: z.string().min(16).max(256).describe('The state the provider sent back'),
     code: z.string().min(1).max(2048).describe("The provider's authorization code"),
@@ -164,8 +164,7 @@ const finishConnection = defineTool({
   example: { oauthState: 'example-state-from-the-callback', code: 'example-code' },
   // No output when the provider refused the code: the authorization was used up, with nothing to name.
   target: (_input, output: { connection: { id: string } } | undefined) => (output ? { kind: 'connection', id: output.connection.id } : undefined),
-  handler: async ({ org, actor, input, write, onDiscard, connectors }) => {
-    const providers = connectorsOf(connectors);
+  handler: async ({ org, actor, input, write, onDiscard, services: { connectors } }) => {
     const pending = await org.connections.authorizations.byState(await sha256Hex(input.oauthState), Date.now());
     if (!pending || pending.actorKind !== actor.kind || pending.actorId !== actor.id) throw new ToolError('not_found', NOT_PENDING);
     write(org.connections.authorizations.stage.consume(pending.id));
@@ -179,7 +178,7 @@ const finishConnection = defineTool({
     }
     let grant: Awaited<ReturnType<Connectors['finish']>>;
     try {
-      grant = await providers.finish(pending.provider, pending, input.code, { orgId: org.orgId, id: target.id });
+      grant = await connectors.finish(pending.provider, pending, input.code, { orgId: org.orgId, id: target.id });
     } catch (e) {
       if (!(e instanceof ToolError)) throw e;
       // The state works once, refused or not: commit using it up, audited with the refusal.
@@ -187,7 +186,7 @@ const finishConnection = defineTool({
       throw new ToolError(e.code, e.message, e.details, true, { cause: e });
     }
     // Not stored if this call loses (a twin callback for the same state committed first): revoke it then.
-    onDiscard(() => providers.revoke(pending.provider, { orgId: org.orgId, id: target.id }, grant.credentialsSealed));
+    onDiscard(() => connectors.revoke(pending.provider, { orgId: org.orgId, id: target.id }, grant.credentialsSealed));
     if (fresh) write(fresh);
     // Its sources failed while it needed reconnecting, backing off for hours: poll them now.
     else write(org.dataSources.stage.pollAgain(target.id));
@@ -215,6 +214,7 @@ const disconnect = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  needs: ['connectors'],
   input: z.object({ connectionId: id('connection') }),
   output: z.object({
     deleted: z.boolean().describe('Whether the connection is gone; false while data sources read through it'),
@@ -222,10 +222,10 @@ const disconnect = defineTool({
   }),
   example: { connectionId: 'con_example' },
   target: (input) => ({ kind: 'connection', id: input.connectionId }),
-  handler: async ({ org, input, write, connectors }) => {
+  handler: async ({ org, input, write, services: { connectors } }) => {
     const row = await requireConnection(org, input.connectionId);
     // Before the batch: a failed batch leaves the grant revoked, and the next poll marks it needs_reconnect.
-    if (row.credentialsSealed) await connectorsOf(connectors).revoke(row.provider, { orgId: org.orgId, id: row.id }, row.credentialsSealed);
+    if (row.credentialsSealed) await connectors.revoke(row.provider, { orgId: org.orgId, id: row.id }, row.credentialsSealed);
     const dataSourceIds = (await org.dataSources.usingConnection(row.id)).map((d) => d.id);
     if (dataSourceIds.length) write(org.connections.stage.update(row, { status: 'disconnected', credentialsSealed: null, expiresAt: null, lastError: null }));
     else write(org.connections.stage.delete(row.id));

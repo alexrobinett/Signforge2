@@ -5,6 +5,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, type AlertSecretSealer, type Caller } from '../src';
+import { fakeServices } from './services';
 
 const SLACK = 'https://hooks.slack.com/services/T0A1B2C3D/B0A1B2C3D/abcDEF123ghiJKL456mno789';
 const SECRET = 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD';
@@ -19,8 +20,7 @@ const as = (role: Caller['role'], kind: 'user' | 'agent' = 'user'): Caller => ({
   role,
   actor: { kind, id: `${kind}-${role}`, clientId: 'cms' },
   blobs: env.BLOBS,
-  alertSecrets: sealer,
-  deliveries: { now: (id) => void sentNow.push(id) },
+  services: { ...fakeServices, alertSecrets: sealer, deliverNow: (id) => void sentNow.push(id) },
   agentLimiter: { take: async () => ({ ok: true }), audited: async () => {} },
 });
 const call = (name: string, input: unknown, role: Caller['role'] = 'owner') => dispatch(registry, name, input, as(role));

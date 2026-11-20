@@ -31,9 +31,11 @@ export {
   type RateLimitBucket,
   type RateLimiter,
   type ScreenNotifier,
+  type ServiceName,
   type Tool,
   type ToolContext,
   type ToolErrorCode,
+  type ToolServices,
 } from './tool';
 export { dispatch, describeTools, effectiveScopes, grantOf, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
 export { setOutputChecks } from './output';

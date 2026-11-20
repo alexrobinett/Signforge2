@@ -43,9 +43,8 @@ import {
   type TemplateVersionView,
 } from '@signforge/tools';
 import { Hono, type Context } from 'hono';
-import { screenNotifier } from '../device/screens';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../r2';
-import { templateCheckAllowed, templateChecker } from '../template-check';
+import { toolServices } from '../tool-services';
 import { adminAuth, type AdminEnv } from './auth';
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -150,7 +149,7 @@ admin.put('/screens/:screen/manifest', async (c) => {
     scopes: ['content:publish'],
     actor: { kind: 'system', id: SF_PUSH, clientId: SF_PUSH },
     blobs: c.env.BLOBS,
-    screens: screenNotifier(c.env),
+    services: { notify: toolServices(c, { orgId: screen.orgId }).notify },
   };
   const result = await dispatch(registry, 'publish_manifest_to_screen', { screenId: screen.screenId, manifestId: manifest.id }, caller);
   if (!result.ok) return fail(c, result.error === 'not_found' ? 404 : 409, result.message);
@@ -167,16 +166,17 @@ admin.put('/orgs/:org/blobs/:sha256', async (c) => {
 });
 
 /** The system actor `sf-push`, with the owner's role and a grant for drafting and approving templates. Org templates get the runtime check. */
-const templateCaller = <D extends DataScope>(c: Context<AdminEnv>, org: D): Caller<D> => ({
-  org,
-  role: 'owner',
-  scopes: ['content:draft', 'content:publish'],
-  actor: { kind: 'system', id: SF_PUSH, clientId: SF_PUSH },
-  blobs: c.env.BLOBS,
-  templateCheck: templateChecker(c.env),
-  // Only an org's registration asks, for its template checks.
-  rateLimit: async (bucket) => bucket === 'template_check' && org.orgId !== null && templateCheckAllowed(c.env, org.orgId),
-});
+const templateCaller = <D extends DataScope>(c: Context<AdminEnv>, org: D): Caller<D> => {
+  const { templateCheck, rateLimit } = toolServices(c, { orgId: org.orgId });
+  return {
+    org,
+    role: 'owner',
+    scopes: ['content:draft', 'content:publish'],
+    actor: { kind: 'system', id: SF_PUSH, clientId: SF_PUSH },
+    blobs: c.env.BLOBS,
+    services: { templateCheck, rateLimit },
+  };
+};
 
 const STATUS = { invalid_input: 400, not_found: 404, conflict: 409, rate_limited: 429, unavailable: 503, forbidden: 500, unknown_tool: 500 } as const;
 const refused = (c: Context, r: Extract<DispatchResult, { ok: false }>) => {

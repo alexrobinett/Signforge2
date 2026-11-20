@@ -4,8 +4,9 @@ import { scoped } from '@signforge/db';
 import { seedOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { dispatch, registry, type Caller } from '../src';
+import { dispatch, registry } from '../src';
 import { editorCalls, ok } from './calls';
+import { memberOf } from './member';
 
 async function setup(orgId: string) {
   const o = await seedOrg(env.DB, orgId);
@@ -111,7 +112,7 @@ describe('playlist drafts', () => {
 
   it('lets a viewer read but not change playlists', async () => {
     const { o, org } = await setup('pl-viewer');
-    const viewer: Caller = { org, role: 'viewer', actor: { kind: 'user', id: 'user-2', clientId: 'cms' }, blobs: env.BLOBS };
+    const viewer = memberOf(org, 'viewer', {}, 'user-2');
     expect(await dispatch(registry, 'get_playlist', { playlistId: o.playlist }, viewer)).toMatchObject({ ok: true });
     for (const [name, input] of [
       ['create_playlist', { name: 'x' }],

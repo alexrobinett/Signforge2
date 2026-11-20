@@ -7,6 +7,8 @@
  *      editor's scopes are read per call from the org's settings: with `editorsPublish` off, they
  *      lack `content:publish` (owner decision Q7).
  *   3. Validate the input with the tool's zod schema.
+ *      A call whose caller lacks a service the tool `needs` (`ToolServices`) is refused with
+ *      `forbidden` before its handler runs, the same for every tool.
  *   4. Run the handler with `scoped(db, orgId)`, the actor and the parsed input. A handler reads
  *      freely but never writes: it stages each change with `ctx.write`.
  *   5. Commit the staged writes and their `audit_log` row (actor kind and id, client id, action,
@@ -31,11 +33,11 @@ import { canonicalJson } from '@signforge/contract';
 import { z } from 'zod';
 import { checkOutput } from './output';
 import { orgSettings } from './settings';
-import type { UploadSigner } from './upload';
 import {
   AGENT_LIMITS,
   ROLE_SCOPES,
   ROLES,
+  SERVICE_WORDS,
   ToolError,
   type Actor,
   type AgentLimit,
@@ -44,16 +46,10 @@ import {
   type DataScope,
   type Role,
   type Scope,
-  type RateLimiter,
-  type Connectors,
-  type FeedUrlSealer,
-  type AlertDeliverer,
-  type AlertSecretSealer,
-  type PlaceFinder,
-  type TableReader,
   type ScreenNotifier,
-  type TemplateChecker,
+  type ServiceName,
   type ToolErrorCode,
+  type ToolServices,
 } from './tool';
 
 /** Who is calling, resolved by the adapter (the `/api` route, `/admin`, later MCP and WebMCP). */
@@ -66,31 +62,17 @@ export interface Caller<D extends DataScope = OrgScope> {
   scopes?: readonly Scope[];
   actor: Actor;
   blobs: R2Bucket;
-  /** Signs direct uploads to `blobs`. Asset uploads need it; nothing else does. */
-  uploads?: UploadSigner;
-  /** Seals feed URLs. The data source tools that take a URL need it. */
-  feedUrls?: FeedUrlSealer;
-  /** Seals alert channels' URLs and secrets. The tools that set a channel need it. */
-  alertSecrets?: AlertSecretSealer;
-  /** Sends a test or a retry at once. Without it, they go at the next delivery run. */
-  deliveries?: AlertDeliverer;
-  /** Looks places up by name. `find_places` needs it. */
-  places?: PlaceFinder;
-  /** Reads a table at a URL. `read_table` needs it. */
-  tables?: TableReader;
-  /** The runtime check of uploaded templates. Registering an org template needs it. */
-  templateCheck?: TemplateChecker;
-  /** Providers' OAuth. The connection tools need it. */
-  connectors?: Connectors;
-  /** Reaches screens' sockets. Without it, screens learn of a change at their next sync. */
-  screens?: ScreenNotifier;
+  /**
+   * What its tools may use (`ToolServices`). Each adapter builds them with its environment's one
+   * constructor: the API's (apps/api/src/tool-services.ts) for `/api` and `/admin`, and Milestone 4's
+   * `/mcp` through the same; a test's fakes (test/services.ts).
+   */
+  services: ToolServices;
   /**
    * Runs `run` while no other publish of the org runs (the API: the org's Durable Object). Without
    * it, publishes may overlap, and the publish revision's guard still commits them in order.
    */
   publishLock?: <T>(run: () => Promise<T>) => Promise<T>;
-  /** Counts attempts against the caller's rate limits. `claim_screen` refuses without one. */
-  rateLimit?: RateLimiter;
   /** Counts an agent's calls against its grant's limits. Required when the actor is an agent: dispatch throws without it. */
   agentLimiter?: AgentLimiter;
 }
@@ -189,6 +171,12 @@ export async function dispatch<D extends DataScope>(
     if (prior) return prior;
   }
 
+  const { services } = caller;
+  if (!provides(services, tool.needs ?? [])) {
+    const lacking = (tool.needs ?? []).filter((n) => services[n] === undefined).map((n) => SERVICE_WORDS[n]);
+    return fail('forbidden', `${tool.name} needs ${lacking.join(' and ')}, and this caller has none`);
+  }
+
   const writes: Write[] = [];
   const notices: ((screens: ScreenNotifier) => Promise<void>)[] = [];
   const notify = (send: (screens: ScreenNotifier) => Promise<void>) => {
@@ -200,7 +188,7 @@ export async function dispatch<D extends DataScope>(
    * here is logged, never returned as the call's failure (the change is made).
    */
   const tell = async () => {
-    const { screens } = caller;
+    const { notify: screens } = services;
     if (!screens || !(writes.length || tool.alwaysAudited)) return;
     await Promise.all(notices.map((send) => send(screens).catch((err: unknown) => console.warn(`[tools] ${tool.name}: could not tell the screen`, err))));
   };
@@ -253,18 +241,11 @@ export async function dispatch<D extends DataScope>(
         scopes: effectiveScopes(grant),
         input: parsed.data,
         blobs: caller.blobs,
-        uploads: caller.uploads,
-        feedUrls: caller.feedUrls,
-        alertSecrets: caller.alertSecrets,
-        places: caller.places,
-        tables: caller.tables,
-        templateCheck: caller.templateCheck,
-        connectors: caller.connectors,
+        services,
         write,
         notify,
         deliverNow,
         onDiscard,
-        rateLimit: caller.rateLimit,
       });
     } catch (err) {
       if (err instanceof ToolError) {
@@ -302,7 +283,7 @@ export async function dispatch<D extends DataScope>(
       throw err;
     }
     await tell();
-    if (writes.length) for (const id of soon) caller.deliveries?.now(id);
+    if (writes.length) for (const id of soon) services.deliverNow?.(id);
     return { ok: true, output };
   };
 
@@ -330,6 +311,10 @@ export async function dispatch<D extends DataScope>(
     if (!succeeded) await Promise.all(discards.map((undo) => undo().catch((err: unknown) => console.warn(`[tools] ${tool.name}: could not undo`, err))));
   }
 }
+
+/** Whether the caller's services include every one the tool needs. */
+const provides = <N extends ServiceName>(services: ToolServices, needs: readonly N[]): services is ToolServices & Pick<Required<ToolServices>, N> =>
+  needs.every((n) => services[n] !== undefined);
 
 const OVER: Record<AgentLimit, string> = {
   calls_per_minute: `made ${AGENT_LIMITS.calls_per_minute} calls this minute`,

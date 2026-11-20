@@ -1,10 +1,8 @@
 // The conventions every tool keeps: it declares what it returns, and a list pages.
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { connectors } from './connectors-stub';
 import {
   defineTool,
   describeTools,
@@ -18,13 +16,13 @@ import {
   type AnyTool,
   type Caller,
 } from '../src';
+import { seededMembers } from './member';
 
-let o: SeededOrg;
+const { o, as } = seededMembers('conv-org');
 let owner: Caller;
 
-beforeAll(async () => {
-  o = await seedOrg(env.DB, 'conv-org');
-  owner = { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS, connectors };
+beforeAll(() => {
+  owner = as('owner');
 });
 
 const shapeOf = (schema: z.ZodType) => (schema instanceof z.ZodObject ? schema.shape : undefined);
