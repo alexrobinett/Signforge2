@@ -113,7 +113,7 @@ interface PreviewLink {
   /** Counts redraws, so a slow compile never posts over a newer one. */
   seq: number;
   /** The newest draft compiled while the player had one unanswered: sent when it answers. */
-  next: ScreenManifest | null;
+  next: { manifest: ScreenManifest; seq: number } | null;
 }
 
 export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { router, queryClient }) => {
@@ -157,13 +157,13 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     const version = versionsById(templates).get(t.templateVersionId);
     const result = await compilePreview({ spot, draft: draftOf(spot), version, preview: themed, assets, orientation: 'landscape', live: true });
     if (seq !== link.seq || links.get(t.spotId) !== link || !result.manifest) return;
-    post(link, result.manifest);
+    post(link, result.manifest, seq);
   }
 
-  function post(link: PreviewLink, manifest: ScreenManifest) {
+  function post(link: PreviewLink, manifest: ScreenManifest, seq: number) {
     const frame = link.target.frame;
     if (busy.has(frame)) {
-      link.next = manifest;
+      link.next = { manifest, seq };
       return;
     }
     frame.postMessage({ sfPreview: PREVIEW_PROTOCOL, type: 'draft', manifest }, location.origin);
@@ -181,7 +181,8 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     const next = link?.next;
     if (!link || !next) return;
     link.next = null;
-    post(link, next);
+    // A newer redraw still compiling makes the queued draft old: it posts the newest when it is done.
+    if (next.seq === link.seq) post(link, next.manifest, next.seq);
   }
 
   const redrawAll = () => {
