@@ -68,12 +68,6 @@ export function brandKitIdOf(output: unknown): string {
   throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
 }
 
-/** The version of the kit in a `{ brandKit }` output, such as `update_brand_kit`'s: what the next save sends as `ifVersion`. */
-export function brandKitVersionOf(output: unknown): number {
-  if (isRecord(output) && isRecord(output.brandKit) && typeof output.brandKit.version === 'number') return output.brandKit.version;
-  throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
-}
-
 /** The version of the row in a `{ [of]: { version } }` output, such as `update_org_settings`' (`settings`): what the next save sends as `ifVersion`. */
 export function versionOf(output: unknown, of: string): number {
   const row = isRecord(output) ? output[of] : undefined;
