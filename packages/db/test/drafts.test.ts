@@ -173,6 +173,19 @@ describe('promotion from an old read (R09)', () => {
     await expect(org.commit(org.scheduleEntries.stage.publish(read).writes)).rejects.toBeInstanceOf(StaleVersionError);
     expect((await org.scheduleEntries.get(r.scheduleEntry))!.publishedJson).toBeNull();
   });
+
+  it('removes a schedule entry, draft and published version, only as it was read (M3-19)', async () => {
+    const org = scoped(env.DB, r.orgId);
+    const made = await org.scheduleEntries.insert({ id: 'drafts-race-remove', playlistId: r.playlist, target: 'org', priority: 0 });
+    await org.commit(org.scheduleEntries.stage.publish(made).writes);
+    const read = (await org.scheduleEntries.get(made.id))!;
+    await org.scheduleEntries.update(made.id, { deletedAt: 1 });
+    await expect(org.commit(org.scheduleEntries.stage.remove(read).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    expect(await org.scheduleEntries.get(made.id)).toMatchObject({ deletedAt: 1 });
+
+    await org.commit(org.scheduleEntries.stage.remove((await org.scheduleEntries.get(made.id))!).writes);
+    expect(await org.scheduleEntries.get(made.id)).toBeUndefined();
+  });
 });
 
 describe('publish order (R09)', () => {
