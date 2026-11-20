@@ -14,7 +14,7 @@ await org.playlists.setItems(id, spotIds); // throws NotInOrgError if any id is 
 
 Every repository query is filtered by the scope's org, and every row it writes is stamped with that org whatever the caller passes. A call made for org B with org A's ids reads nothing and changes nothing. Templates and template versions with a null org are base templates: every org can read them, none can change them.
 
-The table objects (`src/schema.ts`) are not exported. `test/node/boundary.test.ts` fails if anything outside this package imports them; code elsewhere imports `@signforge/db`, and tests may also import `@signforge/db/testing`.
+The table objects (`src/schema.ts`) are not exported. `test/node/boundary.test.ts` fails if anything outside this package imports them; code elsewhere imports `@signforge/db`. Only tests, their harnesses and e2e specs (a `test` or `e2e` directory) and `apps/api/scripts/dev-screen.ts` may also import `@signforge/db/testing`: the same test fails if production code does.
 
 `@signforge/db/testing` has `seedTwoOrgs(db)`: two orgs, `org-a` and `org-b`, each with one of everything, for isolation tests. `seedOrganization(db, orgId)` writes just the `organization` row, which every tenant row needs. `testScope(db, orgId)` is `scoped(db, orgId)` with `insert(values)`, `update(id, patch)` and `delete(id)` on each repository, so a test (or `apps/api/scripts/dev-screen.ts`) can set up a row in one line. Each is the repository's `stage` write committed at once, so it checks and stamps rows as a tool's write does: `update` returns undefined and `delete` false for a row the org does not own (a base template included). Production code never writes that way: it stages, below.
 
