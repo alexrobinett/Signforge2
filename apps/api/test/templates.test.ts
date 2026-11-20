@@ -7,7 +7,7 @@ import { pushFonts, pushTemplate, TemplatePushError, type TemplatePushOptions } 
 import { FONTS } from '@signforge/compiler';
 import { platform, scoped } from '@signforge/db';
 import { env, exports } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { baseBlobKey, orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
 
@@ -138,6 +138,8 @@ describe("the server's checks", () => {
 });
 
 describe('org templates', () => {
+  // The `unavailable` cases silence and read console.error; restored even when one fails.
+  afterEach(() => vi.restoreAllMocks());
   it("go under the org's prefix, as drafts in its catalogue, audited in its log", async () => {
     const r = await push(card({ id: 'own-card', css: '.own{color:teal}' }), { owner: { org: orgId } });
     expect(r).toMatchObject({ key: `${orgId}/own-card@1.0.0`, status: 'draft', changed: true });
@@ -180,7 +182,6 @@ describe('org templates', () => {
     // Its answer says why to the operator's logs, not to the member or agent.
     expect(message).toMatch(/503\nthe template check is not available \(it answered 503\); try again in a minute$/);
     expect(logged).toHaveBeenCalledWith(`template check for ${orgId}: it answered 503`, expect.stringContaining('the check container did not start'));
-    logged.mockRestore();
     expect(await scoped(env.DB, orgId).templates.ownByKey('down-card')).toBeUndefined();
 
     const res = await registerFromCms(card({ id: 'down-cms-card', css: '/* sf-runtime-down */' }));
@@ -199,7 +200,6 @@ describe('org templates', () => {
       expect(await scoped(env.DB, orgId).templates.ownByKey(`${marker}-card`)).toBeUndefined();
       // The cause goes to the operator's logs; the member or agent sees only the sentence above.
       expect(logged).toHaveBeenCalledWith(`template check for ${orgId}: ${why}`, expect.any(cause));
-      logged.mockRestore();
     });
   }
 
