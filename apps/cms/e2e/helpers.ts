@@ -109,6 +109,12 @@ export async function signInAs(page: Page, email: string, address: string) {
     }),
   );
   await request.dispose();
+  // The page's calls come from `address` too (the CMS passes it to the API). Better Auth counts a
+  // path's calls per address until 10 s pass with none, so on one shared address every spec's
+  // shell read added up and a long run got 429.
+  await page
+    .context()
+    .route(`${CMS_URL}/**`, async (route) => route.fallback({ headers: { ...(await route.request().allHeaders()), 'cf-connecting-ip': address } }));
 }
 
 const sha256 = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
