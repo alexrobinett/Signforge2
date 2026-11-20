@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
+import type { DataSnapshot, FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
 import { SNAPSHOT_STALE_MS } from '@signforge/contract';
 import {
   Sequencer,
@@ -19,7 +19,7 @@ const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${
 
 function manifest(over: Partial<ScreenManifest> = {}): ScreenManifest {
   return {
-    schema: 2,
+    schema: 3,
     id: 'm1',
     generatedAt: '2026-11-16T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'America/New_York', orientation: 'landscape' },
@@ -209,15 +209,18 @@ describe('live data', () => {
   };
 
   it('overlays snapshot values on the static data', () => {
-    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]), NOW)).toEqual({ data: { city: 'Atlanta', temp: 41.2, high: 60.6 }, rejected: [] });
+    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]), NOW, 'en-US')).toEqual({
+      data: { city: 'Atlanta', temp: 41.2, high: 60.6 },
+      rejected: [],
+    });
   });
 
   it('falls back to the static value when there is no snapshot yet', () => {
-    expect(resolveSpotData(bound, fields, new Map(), NOW)).toEqual({ data: bound.data, rejected: [] });
+    expect(resolveSpotData(bound, fields, new Map(), NOW, 'en-US')).toEqual({ data: bound.data, rejected: [] });
   });
 
   it('falls back to the static value once the server has not confirmed the snapshot for a day', () => {
-    const at = (checkedAt: string) => resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), NOW).data;
+    const at = (checkedAt: string) => resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), NOW, 'en-US').data;
     expect(SNAPSHOT_STALE_MS).toBe(24 * 3_600_000);
     expect(at('2026-11-16T12:00:00Z')).toEqual({ city: 'Atlanta', temp: 41.2, high: 60.6 });
     expect(at('2026-11-16T11:59:59Z')).toEqual(bound.data);
@@ -225,12 +228,52 @@ describe('live data', () => {
 
   it('keeps the static value for a live value that does not fit its field, and says why', () => {
     const hot = { ...weather, data: { current: { temp: 400 }, daily: {} } };
-    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]), NOW)).toEqual({
+    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]), NOW, 'en-US')).toEqual({
       data: bound.data,
       rejected: [
         { source: 'weather', problem: 'field "temp" must be at most 100' },
         { source: 'weather', problem: 'field "high" has no value at the bound path' },
       ],
+    });
+  });
+
+  it("fills a list field from a table's rows, in the screen's locale, at most maxItems, naming a row left out", () => {
+    const listFields: Record<string, FieldDef> = {
+      items: {
+        type: 'list',
+        label: 'Items',
+        maxItems: 2,
+        item: { name: { type: 'text', label: 'Name' }, price: { type: 'text', label: 'Price', maxLength: 6 } },
+      },
+    };
+    const menu: DataSnapshot = {
+      ...weather,
+      id: 'menu',
+      data: {
+        columns: ['Item', 'Price'],
+        rows: [
+          ['Soup', 4.5],
+          ['Feast', 1234.5],
+          ['Tea', 2],
+          ['Cake', 3],
+        ],
+      },
+    };
+    const spot = { ...bound, data: { items: [] }, bindings: { items: { source: 'menu', path: 'rows', table: { columns: { name: 'Item', price: 'Price' } } } } };
+    expect(resolveSpotData(spot, listFields, new Map([['menu', menu]]), NOW, 'de-DE')).toEqual({
+      data: {
+        items: [
+          { name: 'Soup', price: '4,50' },
+          { name: 'Tea', price: '2' },
+        ],
+      },
+      rejected: [{ source: 'menu', problem: 'field "items": row 2: price is longer than 6' }],
+    });
+    // A mapped column the file lost: the fallback, and why.
+    const lost = { ...menu, data: { columns: ['Dish', 'Price'], rows: [] } };
+    expect(resolveSpotData(spot, listFields, new Map([['menu', lost]]), NOW, 'en-US')).toEqual({
+      data: { items: [] },
+      rejected: [{ source: 'menu', problem: 'field "items": the table has no column "Item"' }],
     });
   });
 
@@ -326,9 +369,10 @@ describe('files', () => {
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
     // A release plays schema N and N-1, so a screen updated while offline keeps its cached manifest.
-    expect(validateManifest(manifest({ schema: 2 }))).toEqual([]);
-    expect(validateManifest(manifest({ schema: 1 }))).toEqual(['manifest schema 1 is not one this player can play (2, 3)']);
-    expect(validateManifest(manifest({ schema: 4 }))).toEqual(['manifest schema 4 is not one this player can play (2, 3)']);
+    expect(validateManifest(manifest({ schema: 3 }))).toEqual([]);
+    expect(validateManifest(manifest({ schema: 4 }))).toEqual([]);
+    expect(validateManifest(manifest({ schema: 2 }))).toEqual(['manifest schema 2 is not one this player can play (3, 4)']);
+    expect(validateManifest(manifest({ schema: 5 }))).toEqual(['manifest schema 5 is not one this player can play (3, 4)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);

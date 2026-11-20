@@ -4,13 +4,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import { canonicalJson } from '@signforge/contract';
 import { parseNews } from '@signforge/feeds';
-import { axe, d1, fillUntilEnabled, hydrated, shots, signInAs, stageShows, tool } from './helpers';
+import { axe, d1, fillUntilEnabled, hydrated, newSpot, orgOf, shots, signInAs, spotIdOf, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit. */
 const ADDRESS = '192.0.2.33';
-
-/** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */
-const orgOf = (spotId: string) => `(SELECT org_id FROM spots WHERE id = '${spotId}')`;
 
 /** As if the poller had just fetched `data` for the source. */
 function pollFound(spotId: string, sourceId: string, data: unknown) {
@@ -26,20 +23,6 @@ function pollFound(spotId: string, sourceId: string, data: unknown) {
 /** As if every poll of the source had timed out. */
 const pollFailed = (spotId: string, sourceId: string) =>
   d1(`UPDATE data_sources SET failures = 3, last_error = 'timeout' WHERE org_id = ${orgOf(spotId)} AND id = '${sourceId}'`);
-
-const spotIdOf = (page: Page) => new URL(page.url()).pathname.split('/').at(-1) ?? '';
-
-async function newSpot(page: Page, template: string, name: string) {
-  await page.goto('/spots');
-  await hydrated(page);
-  await page.getByRole('button', { name: 'New spot' }).click();
-  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: template });
-  await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Create spot' }).click();
-  await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
-  await hydrated(page);
-  return spotIdOf(page);
-}
 
 const ATLANTA = {
   current: { temperature_2m: 88.4, weather_code: 3, is_day: 1, wind_speed_10m: 7, relative_humidity_2m: 40 },

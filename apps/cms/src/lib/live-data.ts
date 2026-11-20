@@ -2,15 +2,30 @@
  * Where a spot's live fields come from (issue #79): the data sources the spot editor picks or
  * makes, as `list_data_sources`, `get_data_source` and `find_places` return them, and the
  * Open-Meteo forecast a place and its units make. A template says which of its fields are live in
- * its manifest's `live` (packages/contract `LiveData`); the editor binds those to one source.
+ * its manifest's `live` (packages/contract `LiveData`); the editor binds those to one source. A
+ * `table` template's list fields may also be typed: they are live only once bound to a CSV or
+ * JSON link (issue #84), with a mapping from the table's columns to their items' properties.
  */
-import { readPath, type LiveData, type TemplateManifest, type WEATHER_UNITS } from '@signforge/contract';
+import {
+  boundValue,
+  readPath,
+  SNAPSHOT_STALE_MS,
+  TABLE_ROWS_PATH,
+  type FieldDef,
+  type LiveData,
+  type TableMapping,
+  type TemplateManifest,
+  type WEATHER_UNITS,
+} from '@signforge/contract';
+import { ago } from './screen-status';
 
 /** One data source, as the data source tools show it. Its feed URL is sealed and never shown. */
 export interface DataSourceView {
   id: string;
   name: string;
-  format: 'json' | 'ical' | 'rss' | 'provider';
+  format: 'json' | 'ical' | 'rss' | TableFormat | 'provider';
+  /** A json-table source: the path to its list of objects. */
+  rowsPath: string | null;
   refreshS: number;
   horizonDays: number | null;
   failures: number;
@@ -39,19 +54,26 @@ export interface PlaceView {
 }
 
 /** A spot's binding as the spot tools take it. */
-export type BindingInput = { dataSourceId: string; path: string };
+export type BindingInput = { dataSourceId: string; path: string; table?: TableMapping };
 
-/** The data source format each kind of live template reads: an Open-Meteo forecast is plain JSON. */
-export const SOURCE_FORMAT: Record<LiveData['source'], DataSourceView['format']> = { 'open-meteo': 'json', rss: 'rss', ical: 'ical' };
+/** The formats a table template reads (`LiveData` source `table`): a forecast is plain `json`, news `rss`, a calendar `ical`. */
+const TABLE_FORMATS = ['csv', 'json-table'] as const;
+export type TableFormat = (typeof TABLE_FORMATS)[number];
+export const isTableFormat = (format: string): format is TableFormat => TABLE_FORMATS.some((f) => f === format);
+type ListDef = Extract<FieldDef, { type: 'list' }>;
 
 /** "Atlanta, Georgia, United States". */
 export const placeName = (p: Pick<PlaceView, 'name' | 'region' | 'country'>) => [p.name, p.region, p.country].filter(Boolean).join(', ');
 
-/** The fields a person types: neither live nor one of the source's settings (an Open-Meteo template's units). */
-export function typedFields(m: TemplateManifest): TemplateManifest['fields'] {
+/**
+ * The fields a person types: neither live nor one of the source's settings (an Open-Meteo
+ * template's units). A table template's live fields are typed until they are bound.
+ */
+export function typedFields(m: TemplateManifest, bindings: Record<string, BindingInput>): TemplateManifest['fields'] {
   const live = m.live;
   if (!live) return m.fields;
-  const skip = new Set([...Object.keys(live.fields), live.units?.temperature, live.units?.wind]);
+  const fields = live.source === 'table' ? Object.keys(live.fields).filter((f) => bindings[f]) : Object.keys(live.fields);
+  const skip = new Set([...fields, live.units?.temperature, live.units?.wind]);
   return Object.fromEntries(Object.entries(m.fields).filter(([name]) => !skip.has(name)));
 }
 
@@ -66,11 +88,60 @@ export function boundSource(live: LiveData, bindings: Record<string, BindingInpu
     .find(Boolean);
 }
 
-/** Every live field bound to `dataSourceId` at the template's own path; the spot's other bindings stay. */
-export const bindAll = (live: LiveData, bindings: Record<string, BindingInput>, dataSourceId: string): Record<string, BindingInput> => ({
+/**
+ * Every live field bound to `dataSourceId` at the template's own path; the spot's other bindings
+ * stay. A table template's list fields each get a mapping guessed from the table's `columns`.
+ */
+export const bindAll = (
+  m: TemplateManifest,
+  live: LiveData,
+  bindings: Record<string, BindingInput>,
+  dataSourceId: string,
+  columns: readonly string[] = [],
+): Record<string, BindingInput> => ({
   ...bindings,
-  ...Object.fromEntries(Object.entries(live.fields).map(([field, path]) => [field, { dataSourceId, path }])),
+  ...Object.fromEntries(
+    Object.entries(live.fields).map(([field, path]) => {
+      const def = m.fields[field];
+      return [field, live.source === 'table' && def?.type === 'list' ? { dataSourceId, path, table: guessMapping(def, columns) } : { dataSourceId, path }];
+    }),
+  ),
 });
+
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+/** Other words a column may go by, per item property name. */
+const ALSO: Record<string, string[]> = { name: ['item', 'title', 'dish', 'product'], price: ['cost', 'amount'], description: ['details', 'desc'] };
+
+/**
+ * A first mapping for a list field from a table's columns: each item property to the column named
+ * like it (its name, its label, or a usual other word), and a property without a default to the
+ * first column not yet taken. The person changes it in the Source section.
+ */
+export function guessMapping(def: ListDef, columns: readonly string[]): TableMapping {
+  const taken = new Set<string>();
+  const mapped: Record<string, string> = {};
+  for (const [prop, d] of Object.entries(def.item)) {
+    // Own keys only: an org template's item may have a property named `constructor`.
+    const words = new Set([prop, d.label, ...(Object.hasOwn(ALSO, prop) ? (ALSO[prop] ?? []) : [])].map(squash));
+    const named = columns.find((c) => !taken.has(c) && words.has(squash(c)));
+    if (named) mapped[prop] = named;
+  }
+  for (const c of Object.values(mapped)) taken.add(c);
+  for (const [prop, d] of Object.entries(def.item)) {
+    if (mapped[prop] || d.default !== undefined) continue;
+    const free = columns.find((c) => !taken.has(c));
+    if (free === undefined) continue;
+    mapped[prop] = free;
+    taken.add(free);
+  }
+  return { columns: mapped };
+}
+
+/** The items a table binding fills from a snapshot, as a screen in `locale` would, and what is wrong (the contract's `boundValue`). */
+export function tableRows(m: TemplateManifest, field: string, binding: BindingInput, data: unknown, locale: string) {
+  const { value, problems } = boundValue(m.fields, field, { source: binding.dataSourceId, path: TABLE_ROWS_PATH, table: binding.table }, data, locale);
+  return { items: Array.isArray(value) ? value : undefined, problems };
+}
 
 /** The units a forecast is fetched in, as the template's unit fields write them. */
 export interface WeatherUnits {
@@ -154,6 +225,23 @@ export async function weatherSource(live: LiveData, place: PlaceView, units: Wea
   };
 }
 
+/** Whether screens show the snapshot: one confirmed within `SNAPSHOT_STALE_MS`. */
+export const isFresh = (snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
+  snapshot !== null && now - Date.parse(snapshot.checkedAt) <= SNAPSHOT_STALE_MS;
+
+/** How fresh the source's data is, and what screens do about it. */
+export function freshness(source: DataSourceView, snapshot: SnapshotView | null, now: number): string {
+  const failing = source.lastError ? pollErrorWords(source.lastError) : undefined;
+  if (!snapshot)
+    return failing
+      ? `The first check failed: ${failing}. Screens show the fallback values until it works.`
+      : 'Waiting for the first check, within a minute. Until then screens show the fallback values.';
+  const since = now - Date.parse(snapshot.checkedAt);
+  if (!isFresh(snapshot, now)) return `Not confirmed for ${ago(since)}: screens show the fallback values.`;
+  const when = since < 60_000 ? 'Checked just now.' : `Checked ${ago(since)} ago.`;
+  return failing ? `${when} The last check failed: ${failing}. Screens keep this data for a day, then show the fallback values.` : when;
+}
+
 /** WMO weather codes, as Open-Meteo sends them, in words. */
 const WMO: [number[], string][] = [
   [[0], 'clear'],
@@ -174,7 +262,7 @@ export const weatherWords = (code: unknown) => WMO.find(([codes]) => typeof code
 export const liveValue = (snapshot: SnapshotView | null, path: string): unknown => (snapshot ? readPath(snapshot.data, path) : undefined);
 
 /** Why a poll failed, from the poller's category (apps/api `PollError`), in words. */
-export function pollErrorWords(code: string): string {
+function pollErrorWords(code: string): string {
   switch (code) {
     case 'timeout':
       return 'the feed took too long to answer';
@@ -195,6 +283,10 @@ export function pollErrorWords(code: string): string {
       return 'the feed is not one SignForge can read';
     case 'unfit':
       return 'its data does not fit the spots that use it';
+    case 'missing-column':
+      return 'the file no longer has a column a spot uses';
+    case 'not-a-table':
+      return 'the JSON is not a list of objects at that path';
     default:
       return `the check failed (${code})`;
   }

@@ -208,6 +208,7 @@ beforeAll(async () => {
     feedUrls: { seal: async (_source, url) => `sealed:${url}` },
     alertSecrets: { seal: async (_channel, _field, value) => `sealed:${value}` },
     places: { search: async () => [] },
+    tables: { read: async () => ({ columns: [], rows: [] }) },
     connectors,
   };
   // finish_connection's example state, pending for org B's owner.

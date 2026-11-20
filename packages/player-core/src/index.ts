@@ -3,11 +3,10 @@
  * and which files a manifest still needs. Checking a manifest is the contract's job. The browser shell supplies time, storage and frames.
  */
 import {
+  boundValue,
   brandFiles,
-  readPath,
   SNAPSHOT_STALE_MS,
   requiredFiles,
-  validateBoundValue,
   type DataSnapshot,
   type DisplayHours,
   type Playlist,
@@ -231,26 +230,27 @@ export interface Rejected {
 
 /**
  * The data a template spot plays with at `now`: its static values, with each bound field replaced
- * by the latest snapshot value when that value fits the field (`validateBoundValue`). A missing
- * source, or a snapshot the server last confirmed more than `SNAPSHOT_STALE_MS` before `now`,
- * leaves the static fallback in place quietly; a value that is missing at its path or does not fit
- * also leaves the fallback, and is listed in `rejected` so a broken feed can be seen.
+ * by the latest snapshot value when that value fits the field (the contract's `boundValue`; a
+ * table's rows mapped onto a list field, numbers written in `locale`). A missing source, or a
+ * snapshot the server last confirmed more than `SNAPSHOT_STALE_MS` before `now`, leaves the static
+ * fallback in place quietly; a value that is missing at its path or does not fit also leaves the
+ * fallback, and is listed in `rejected` so a broken feed can be seen, as is a table row left out.
  */
 export function resolveSpotData(
   spot: Extract<Spot, { kind: 'template' }>,
   fields: unknown,
   snapshots: ReadonlyMap<string, DataSnapshot>,
   now: number,
+  locale: string,
 ): { data: Record<string, unknown>; rejected: Rejected[] } {
   const data = { ...spot.data };
   const rejected: Rejected[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
     if (!snapshot || now - Date.parse(snapshot.checkedAt) > SNAPSHOT_STALE_MS) continue;
-    const v = readPath(snapshot.data, b.path);
-    const problems = validateBoundValue(fields, field, v);
-    if (problems.length) rejected.push(...problems.map((problem) => ({ source: b.source, problem })));
-    else data[field] = v;
+    const { value, problems } = boundValue(fields, field, b, snapshot.data, locale);
+    rejected.push(...problems.map((problem) => ({ source: b.source, problem })));
+    if (value !== undefined) data[field] = value;
   }
   return { data, rejected };
 }
@@ -268,9 +268,9 @@ export function snapshotFit(manifest: ScreenManifest, snapshot: DataSnapshot): {
     const fields = manifest.templates[spot.template]?.manifest.fields;
     for (const [field, b] of Object.entries(spot.bindings ?? {})) {
       if (b.source !== snapshot.id) continue;
-      const p = validateBoundValue(fields, field, readPath(snapshot.data, b.path));
-      if (p.length) problems.push(...p.map((e) => `spot "${spot.id}": ${e}`));
-      else fits++;
+      const { value, problems: p } = boundValue(fields, field, b, snapshot.data, manifest.screen.locale ?? 'en-US');
+      problems.push(...p.map((e) => `spot "${spot.id}": ${e}`));
+      if (value !== undefined) fits++;
     }
   }
   return { fits, problems };

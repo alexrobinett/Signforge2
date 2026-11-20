@@ -24,6 +24,7 @@ export {
   type FeedUrlSealer,
   type Place,
   type PlaceFinder,
+  type TableReader,
   type TemplateChecker,
   type Role,
   type Scope,

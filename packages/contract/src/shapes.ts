@@ -7,8 +7,11 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  *   1  pre-release; never deployed beyond the test rig
  *   2  template keys carry their owner: `<owner>/<id>@<version>`
  *   3  the screen's `brand`; schedule entries bounded by instants (`startsAt`, `endsAt`)
+ *   4  a template may declare a `table` live source, and a binding a `table` mapping (#84). A player
+ *      that knows only 3 refuses such a template, so it must not get one: it reports [2, 3], and
+ *      the server tells it to reload into a player that plays 4.
  */
-export const MANIFEST_SCHEMA = 3;
+export const MANIFEST_SCHEMA = 4;
 /** Manifest schemas this player can play: the current one and the one before it. */
 export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
@@ -82,9 +85,11 @@ export interface TemplateManifest {
 
 /**
  * The kinds of feed a template's live fields come from: an Open-Meteo forecast (a JSON source),
- * or a news (`rss`) or calendar (`ical`) feed, which the server converts to `NewsFeed` and `CalendarFeed`.
+ * a news (`rss`) or calendar (`ical`) feed, which the server converts to `NewsFeed` and
+ * `CalendarFeed`, or a `table` (a CSV file or a JSON list, converted to `TableFeed`) whose rows
+ * fill a list field through a `TableMapping`.
  */
-export const LIVE_SOURCES = ['open-meteo', 'rss', 'ical'] as const;
+export const LIVE_SOURCES = ['open-meteo', 'rss', 'ical', 'table'] as const;
 export type LiveSource = (typeof LIVE_SOURCES)[number];
 
 /** The units an Open-Meteo forecast is fetched in, as a weather template's unit fields write them. */
@@ -100,7 +105,10 @@ export const BINDING_PATH = /^[^.\s]+(?:\.[^.\s]+)*$/;
  */
 export interface LiveData {
   source: LiveSource;
-  /** Field name to its path in the source's snapshot, as a `Binding` names it. */
+  /**
+   * Field name to its path in the source's snapshot, as a `Binding` names it. A `table` source
+   * fills list fields only, each at `rows` (`TABLE_ROWS_PATH`), mapped by the spot's binding.
+   */
   fields: Record<string, string>;
   /** Open-Meteo: the text field naming the place, which starts as the place picked. */
   place?: string;
@@ -527,10 +535,44 @@ export interface NewsFeed {
   items: { title: string; published: string; source: string }[];
 }
 
+/**
+ * A CSV file or a JSON list of objects, as the server converts a `csv` or `json-table` source.
+ * `columns` in the file's order (a CSV's header row; for JSON every key, in the order first
+ * seen); each row has one cell per column, `''` where it had none. CSV cells are text as written,
+ * so "$4.50" and "02134" keep their form; JSON numbers stay numbers.
+ */
+export interface TableFeed {
+  columns: string[];
+  rows: (string | number)[][];
+}
+
+/** A table binding's path: the rows of a `TableFeed`. */
+export const TABLE_ROWS_PATH = 'rows';
+
+/**
+ * How a table's rows fill a list field (`Binding.table`). Each row becomes an item: the column
+ * named for each item property fills it, converted to the property's type (a number written as
+ * text in the screen's locale, as a price: 4.5 is "4.50"; a select matched to its options in any
+ * case). A property with no column takes its default. A row that does not fit the item, or leaves
+ * a property with no default empty, is left out; when every row the filter keeps is left out, the
+ * binding has no value, so the last good snapshot or the fallback stays. The rows kept are
+ * filtered, then sorted, then cut to the field's `maxItems`.
+ */
+export interface TableMapping {
+  /** Item property to the column that fills it. Every property without a default needs one. */
+  columns: Record<string, string>;
+  /** Only rows whose cell in `column` is `equals`, ignoring case and surrounding spaces: `section` = `Mains`. */
+  filter?: { column: string; equals: string };
+  /** Rows in the order of `column`: numbers by value, text in the screen's locale with its digits as numbers. Absent: the file's order. */
+  sort?: { column: string; descending?: boolean };
+}
+
 export interface Binding {
   source: string;
-  /** Dot path into the snapshot's data. Numbers index arrays: `daily.temperature_2m_max.0`. */
+  /** Dot path into the snapshot's data. Numbers index arrays: `daily.temperature_2m_max.0`. With `table`, `rows`. */
   path: string;
+  /** A list field filled from a `TableFeed`'s rows. From manifest schema 4. */
+  table?: TableMapping;
 }
 
 // ------------------------------------------------------------ screen manifest

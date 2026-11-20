@@ -18,6 +18,8 @@ export const ADMIN_TOKEN = 'e2e-admin-token';
 /** Scratch space for one run: the API's log, local D1 state and the dev registry. */
 export const RUN_DIR = fileURLToPath(new URL('../.e2e/', import.meta.url));
 export const API_LOG = `${RUN_DIR}api.log`;
+/** What the run's file server serves, by file name, for every feed the API fetches (`FEED_STUB_URL`, global-setup.ts). */
+export const FEEDS_DIR = `${RUN_DIR}feeds/`;
 
 /** The newest sign-in code the dev API printed for `email`, as a developer would read it. */
 export async function codeFor(email: string, timeoutMs = 10_000): Promise<string> {
