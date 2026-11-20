@@ -7,8 +7,9 @@ import news from '@signforge/template-news/template.json';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
+import type { AssetView } from '../src/lib/assets';
 import type { SpotView } from '../src/lib/spots';
-import { spotKeys } from '../src/queries/spots';
+import { assetsQuery, spotKeys, spotPreviewQuery, templatesQuery } from '../src/queries/spots';
 import { getDataSource } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
 import { createSpotSourceSlice, type SpotSourceSlice } from '../src/state/spot-source';
@@ -157,6 +158,47 @@ describe('the stage (review of #97)', () => {
     hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, type: 'listening' } });
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().spotEditor.stageError).toBe('what it needs did not load (get_spot_preview failed: 500)');
+  });
+
+  it('holds an image still being checked and says why, as a publish refuses it; it posts nothing the player cannot fetch', async () => {
+    const queryClient = new QueryClient();
+    let hear: (e: unknown) => void = () => {};
+    vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
+    const store = createStore<SpotEditorSlice>()((set, get) => createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never));
+    const sha = 'b'.repeat(64);
+    const image: SpotView = { ...spot('spt_img', 1), kind: 'image', url: null, assetId: 'ast_new' };
+    const asset: AssetView = {
+      id: 'ast_new',
+      name: 'new.jpg',
+      kind: 'image',
+      status: 'pending',
+      sha256: sha,
+      type: 'image/jpeg',
+      size: 2000,
+      width: 1920,
+      height: 1080,
+      renditions: [{ orientation: 'landscape', sha256: sha, type: 'image/jpeg', size: 2000, width: 1920, height: 1080 }],
+      createdAt: 0,
+      updatedAt: 0,
+      usageCount: 1,
+    };
+    queryClient.setQueryData(spotKeys.one(ORG, image.id), image);
+    queryClient.setQueryData(templatesQuery(ORG).queryKey, { templates: [] });
+    queryClient.setQueryData(assetsQuery(ORG).queryKey, { assets: [asset] });
+    queryClient.setQueryData(spotPreviewQuery(ORG, { orientation: 'landscape' }).queryKey, {
+      preview: { templates: {}, files: {}, dataSources: [] },
+      brandKitId: null,
+      problems: [],
+      timezone: 'Europe/London',
+    });
+    const posted: unknown[] = [];
+    const frame: Window = { postMessage: (m: never) => posted.push(m) } as never;
+    const held = new Promise<void>((resolve) => store.subscribe((s) => s.spotEditor.holding && resolve()));
+    store.getState().attachStage({ frame, orgId: ORG, spotId: image.id, orientation: 'landscape' });
+    hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, type: 'listening' } });
+    await held;
+    expect(store.getState().spotEditor.refusals).toEqual(['asset ast_new is still being checked']);
+    expect(posted).toEqual([]);
   });
 });
 
