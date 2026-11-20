@@ -33,6 +33,7 @@ import { cn } from '~/lib/utils';
 import { playlistQuery } from '~/queries/playlists';
 import { assetsQuery, brandKitsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
+import { shown } from '~/state/versioned-draft';
 
 export const Route = createFileRoute('/_app/playlists/$playlistId')({
   validateSearch: stageSearch,
@@ -81,13 +82,15 @@ function PlaylistEditor() {
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const { brandKits } = useSuspenseQuery(brandKitsQuery(orgId)).data;
 
-  const mine = (s: { playlistEditor: { playlistId: string | null } }) => s.playlistEditor.playlistId === playlistId;
-  const editing = useAppStore((s) => (mine(s) ? s.playlistEditor.draft : null));
-  const status = useAppStore((s) => (mine(s) ? s.playlistEditor.status : 'saved'));
-  const savedAt = useAppStore((s) => (mine(s) ? s.playlistEditor.savedAt : null));
-  const saveError = useAppStore((s) => (mine(s) ? s.playlistEditor.saveError : null));
-  const stale = useAppStore((s) => mine(s) && s.playlistEditor.stale);
-  const gone = useAppStore((s) => mine(s) && s.playlistEditor.gone);
+  const saved = useAppStore((s) => s.playlistEditor.drafts[playlistId]);
+  const mine = saved?.orgId === orgId ? saved : undefined;
+  // A saved draft is shown while the playlist is still at the version it saved.
+  const editing = shown(mine, playlist?.version ?? null);
+  const status = mine?.status ?? 'saved';
+  const savedAt = mine?.savedAt ?? null;
+  const saveError = mine?.error ?? null;
+  const stale = mine?.stale ?? false;
+  const gone = mine?.gone ?? false;
   const leftOutList = useAppStore((s) => s.playlistEditor.leftOut);
   const dragging = useAppStore((s) => s.playlistEditor.dragging);
   const deleting = useAppStore((s) => s.playlistEditor.deleting);
@@ -129,7 +132,7 @@ function PlaylistEditor() {
   for (const id of draft.spotIds) counts.set(id, (counts.get(id) ?? 0) + 1);
   const t = draft.transition;
   const msBad = t.type !== 'cut' && !(t.ms >= 1 && t.ms <= 10_000);
-  const change = (patch: Partial<typeof draft>) => edit(orgId, playlist, (d) => ({ ...d, ...patch }));
+  const change = (patch: Partial<typeof draft>) => edit(orgId, playlist.id, (d) => ({ ...d, ...patch }));
   const setSearch = (next: Partial<StageSearch>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
   const count = draft.spotIds.length === 1 ? '1 spot' : `${draft.spotIds.length} spots`;
   const loop = clockLength(loopMs(draft.spotIds, byId));
@@ -144,7 +147,7 @@ function PlaylistEditor() {
       >
         {canManage && (
           <>
-            <SaveDraftButton status={status} stale={stale} onSave={() => void save()} />
+            <SaveDraftButton status={status} stale={stale} onSave={() => void save(playlistId)} />
             <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => askDelete(true)}>
               <Trash2Icon aria-hidden />
               Delete
@@ -153,7 +156,7 @@ function PlaylistEditor() {
         )}
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
       </EditorHeader>
-      <SaveAlert error={saveError} stale={stale} onReload={() => void reload()} />
+      <SaveAlert error={gone ? null : saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} />
       {gone && (
         <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
           <AlertDescription className="flex flex-wrap items-center gap-3">
@@ -210,7 +213,7 @@ function PlaylistEditor() {
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          drop(orgId, playlist, i);
+                          drop(orgId, playlist.id, i);
                         }}
                         onDragEnd={() => startDrag(null)}
                         // The player names the spot, not its place: a spot listed twice is marked once, at its first place.
@@ -245,7 +248,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === 0}
                               ref={focusOn('up')}
-                              onClick={() => move(orgId, playlist, i, i - 1, name)}
+                              onClick={() => move(orgId, playlist.id, i, i - 1, name)}
                               aria-label={`Move ${name} up`}
                             >
                               <ArrowUpIcon aria-hidden />
@@ -257,7 +260,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === draft.spotIds.length - 1}
                               ref={focusOn('down')}
-                              onClick={() => move(orgId, playlist, i, i + 1, name)}
+                              onClick={() => move(orgId, playlist.id, i, i + 1, name)}
                               aria-label={`Move ${name} down`}
                             >
                               <ArrowDownIcon aria-hidden />
@@ -267,7 +270,7 @@ function PlaylistEditor() {
                               variant="ghost"
                               size="icon"
                               className="size-9"
-                              onClick={() => remove(orgId, playlist, i, name)}
+                              onClick={() => remove(orgId, playlist.id, i, name)}
                               aria-label={`Remove ${name}`}
                             >
                               <XIcon aria-hidden />
@@ -285,7 +288,7 @@ function PlaylistEditor() {
                   Add spots
                 </Button>
               )}
-              <SpotPicker spots={spots} versions={versions} counts={counts} onAdd={(s) => add(orgId, playlist, s.id)} />
+              <SpotPicker spots={spots} versions={versions} counts={counts} onAdd={(s) => add(orgId, playlist.id, s.id)} />
             </EditorSection>
             <EditorSection title="Where it plays">
               {playlist.isDefault ? (

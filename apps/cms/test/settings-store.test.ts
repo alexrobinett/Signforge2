@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { Member, OrgSettings } from '../src/lib/settings';
-import { createSettingsSlice, editsIn, errorOf, runningIn, type SettingsSlice } from '../src/state/settings';
+import { createSettingsSlice, editsIn, errorOf, hasEdits, runningIn, type SettingsSlice } from '../src/state/settings';
 
 const auth = vi.hoisted(() => ({
   organization: { updateMemberRole: vi.fn(), inviteMember: vi.fn(), removeMember: vi.fn(), acceptInvitation: vi.fn(), update: vi.fn() },
@@ -192,11 +192,11 @@ describe('a settings save (re-check of #143, 1)', () => {
     write.resolve(saved(2));
     await saving;
     expect(calls).toEqual([{ name: 'update_org_settings', input: { auditRetentionDays: 100, ifVersion: 1 } }]);
-    expect(store.getState().settings.drafts.general).toEqual({ orgId: A, version: 2, edits: { auditRetentionDays: '120' } });
+    expect(store.getState().settings.drafts.general).toMatchObject({ orgId: A, version: 2, edit: { auditRetentionDays: '120' } });
 
     await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'Northside' });
     expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 120, ifVersion: 2 } });
-    expect(store.getState().settings.drafts.general).toBeUndefined();
+    expect(hasEdits(store.getState().settings, 'general', A)).toBe(false);
   });
 
   it("a change someone else made since is refused and shown, never overwritten; Reload drops the org's edits", async () => {
@@ -207,10 +207,10 @@ describe('a settings save (re-check of #143, 1)', () => {
     await store.getState().saveSettings(A, 'general', { ...settings, timezone: 'Europe/London', version: 3 }, { id: A, name: 'Northside' });
     expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 120, ifVersion: 2 } });
     expect(errorOf(store.getState().settings, 'general', A)).toMatchObject({ stale: true, text: 'This changed since you opened it.' });
-    expect(editsIn(store.getState().settings, 'general', A)).toEqual({ auditRetentionDays: '120' });
+    expect(editsIn(store.getState().settings, 'general', A, 3)).toEqual({ auditRetentionDays: '120' });
 
     await store.getState().reloadSettings(A, 'general');
-    expect(editsIn(store.getState().settings, 'general', A)).toEqual({});
+    expect(editsIn(store.getState().settings, 'general', A, 3)).toEqual({});
     expect(errorOf(store.getState().settings, 'general', A)).toBeUndefined();
   });
 
@@ -230,10 +230,30 @@ describe('the settings pages share one version (third re-check of #143)', () => 
     store.getState().editSettings(A, 'screens', 1, { unreachableAfterMinutes: '17' });
     await store.getState().saveSettings(A, 'screens', settings);
     expect(lastCall()).toEqual({ name: 'update_org_settings', input: { unreachableAfterMinutes: 17, ifVersion: 1 } });
-    expect(store.getState().settings.drafts.general).toEqual({ orgId: A, version: 2, edits: { auditRetentionDays: '111' } });
+    expect(store.getState().settings.drafts.general).toMatchObject({ orgId: A, version: 2, edit: { auditRetentionDays: '111' } });
     await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'A' });
     expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 111, ifVersion: 2 } });
     expect(errorOf(store.getState().settings, 'general', A)).toBeUndefined();
+  });
+
+  it('two forms saved at once take turns: the second sends the version the first made, not a conflict (versioned draft)', async () => {
+    const first = held<Reply>();
+    replies.push(first.promise, saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '111' });
+    store.getState().editSettings(A, 'screens', 1, { unreachableAfterMinutes: '17' });
+    const general = store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
+    const screens = store.getState().saveSettings(A, 'screens', settings);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(calls).toHaveLength(1);
+    expect(runningIn(store.getState().settings, { page: 'screens', orgId: A })).toBe('screens');
+    first.resolve(saved(2));
+    await Promise.all([general, screens]);
+    expect(calls.map((c) => c.input)).toEqual([
+      { auditRetentionDays: 111, ifVersion: 1 },
+      { unreachableAfterMinutes: 17, ifVersion: 2 },
+    ]);
+    expect(errorOf(store.getState().settings, 'screens', A)).toBeUndefined();
   });
 
   it("leaves a draft on an older version, or another org's, where it is: those really were changed since", async () => {
@@ -254,8 +274,8 @@ describe('the settings pages share one version (third re-check of #143)', () => 
     store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '222' });
     await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
     await store.getState().reloadSettings(A, 'general');
-    expect(editsIn(store.getState().settings, 'general', A)).toEqual({});
-    expect(editsIn(store.getState().settings, 'screens', A)).toEqual({ updateFrom: '03:15' });
+    expect(editsIn(store.getState().settings, 'general', A, 3)).toEqual({});
+    expect(editsIn(store.getState().settings, 'screens', A, 1)).toEqual({ updateFrom: '03:15' });
   });
 
   it('a rename that fails after the settings were written leaves the edits on the version written', async () => {
@@ -283,7 +303,7 @@ describe('edits and actions belong to their org (re-check of #143, 2)', () => {
     // The switch.
     store.getState().forgetOrgSettings();
     showOrg(B);
-    expect(editsIn(store.getState().settings, 'general', B)).toEqual({});
+    expect(editsIn(store.getState().settings, 'general', B, 7)).toEqual({});
 
     write.resolve(saved(2));
     await saving;
@@ -349,5 +369,23 @@ describe('an action waiting on the server (re-check of #143, 3)', () => {
     channel.resolve({ status: 200, body: {} });
     await removingChannel;
     expect(store.getState().settings.removingChannel).toBeNull();
+  });
+});
+
+describe("the org's name, which the settings' version does not cover (re-check of #153, 1)", () => {
+  it("after a rename is saved, the page shows another owner's later rename, and the next General save does not rename it back", async () => {
+    auth.organization.update.mockResolvedValue(ok);
+    replies.push(saved(2), saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { name: 'Mine', auditRetentionDays: '100' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
+    expect(auth.organization.update).toHaveBeenCalledTimes(1);
+
+    // Another owner renames it "Theirs"; the page reads that, with the settings still at 2.
+    expect(editsIn(store.getState().settings, 'general', A, 2).name).toBeUndefined();
+    store.getState().editSettings(A, 'general', 2, { timezone: 'Europe/London' });
+    await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'Theirs' });
+    expect(auth.organization.update).toHaveBeenCalledTimes(1);
+    expect(lastCall()).toMatchObject({ name: 'update_org_settings', input: { timezone: 'Europe/London', ifVersion: 2 } });
   });
 });

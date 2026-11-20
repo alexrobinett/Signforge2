@@ -76,7 +76,7 @@ function BrandKitsPage() {
   const { groups } = useSuspenseQuery(screensQuery(orgId)).data;
   const busy = useAppStore(kitActionRunning);
   const actionError = useAppStore((s) => s.brandKits.actionError);
-  const edits = useAppStore((s) => s.brandKits.edits);
+  const drafts = useAppStore((s) => s.brandKits.drafts);
   const duplicate = useAppStore((s) => s.duplicateKit);
   const makeDefault = useAppStore((s) => s.makeDefaultKit);
   const kits = brandKits.toSorted((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name));
@@ -110,7 +110,7 @@ function BrandKitsPage() {
                   >
                     {k.isDefault ? 'Default' : plural(k.reach.length, 'screen')}
                   </span>
-                  {edits[k.id]?.draft && (
+                  {drafts[k.id] !== undefined && drafts[k.id]?.status !== 'saved' && (
                     <span className="rounded-xs bg-status-updating-muted px-2 py-0.5 text-sm font-semibold text-status-updating-foreground">
                       Unsaved changes
                     </span>

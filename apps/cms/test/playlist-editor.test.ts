@@ -41,9 +41,19 @@ interface Call {
 }
 let calls: Call[] = [];
 
+/** The org the tab's shell shows; a test switches it. */
+const org = { id: ORG };
+
 function setup() {
   const queryClient = new QueryClient();
-  const router = { navigate: vi.fn(async () => {}) };
+  const router = {
+    navigate: vi.fn(async () => {}),
+    state: {
+      get matches() {
+        return [{ routeId: '/_app', loaderData: { organization: { id: org.id } } }];
+      },
+    },
+  };
   const store = createStore<PlaylistEditorSlice & { redrawStage: () => void }>()((set, get) => ({
     ...createPlaylistEditorSlice(set as never, get as never, { router, queryClient } as never),
     redrawStage: () => {},
@@ -58,6 +68,7 @@ const settle = () => vi.advanceTimersByTimeAsync(0);
 beforeEach(() => {
   vi.useFakeTimers();
   calls = [];
+  org.id = ORG;
   toasts.length = 0;
   vi.stubGlobal('fetch', (url: string, init: { body: string }) => {
     return new Promise<Response>((resolve) =>
@@ -81,15 +92,16 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     const b = playlist('pls_b', 1, ['s1']);
     open(a);
     open(b);
-    store.getState().editPlaylist(ORG, a, (d) => ({ ...d, spotIds: [] }));
-    void store.getState().savePlaylistDraft();
+    store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, spotIds: [] }));
+    void store.getState().savePlaylistDraft('pls_a');
     await settle();
     expect(calls).toMatchObject([{ name: 'update_playlist', input: { playlistId: 'pls_a', ifVersion: 4 } }]);
 
-    store.getState().editPlaylist(ORG, b, (d) => ({ ...d, name: 'B, renamed' }));
+    store.getState().editPlaylist(ORG, b.id, (d) => ({ ...d, name: 'B, renamed' }));
     calls[0]!.answer({ playlist: playlist('pls_a', 5, []) });
     await settle();
-    expect(editor()).toMatchObject({ playlistId: 'pls_b', version: 1, status: 'unsaved', saveError: null, stale: false });
+    expect(editor().playlistId).toBe('pls_b');
+    expect(editor().drafts.pls_b).toMatchObject({ version: 1, status: 'unsaved', error: null, stale: false });
 
     await vi.advanceTimersByTimeAsync(1000);
     expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { playlistId: 'pls_b', name: 'B, renamed', ifVersion: 1 } });
@@ -101,12 +113,12 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     const b = playlist('pls_b', 1, ['s1']);
     open(a);
     open(b);
-    store.getState().editPlaylist(ORG, a, (d) => ({ ...d, spotIds: ['s2', 's1'] }));
-    void store.getState().savePlaylistDraft();
+    store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, spotIds: ['s2', 's1'] }));
+    void store.getState().savePlaylistDraft('pls_a');
     await settle();
     // A second edit of A, still waiting out its second when B gets its first edit.
-    store.getState().editPlaylist(ORG, a, (d) => ({ ...d, spotIds: ['s2'] }));
-    store.getState().editPlaylist(ORG, b, (d) => ({ ...d, name: 'B, renamed' }));
+    store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, spotIds: ['s2'] }));
+    store.getState().editPlaylist(ORG, b.id, (d) => ({ ...d, name: 'B, renamed' }));
     calls[0]!.answer({ playlist: playlist('pls_a', 5, ['s2', 's1']) });
     await settle();
 
@@ -120,8 +132,8 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     const { store, open, queryClient } = setup();
     const a = playlist('pls_a', 4, ['s1']);
     open(a);
-    store.getState().editPlaylist(ORG, a, (d) => ({ ...d, spotIds: [] }));
-    void store.getState().savePlaylistDraft();
+    store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, spotIds: [] }));
+    void store.getState().savePlaylistDraft('pls_a');
     await settle();
     void store.getState().deletePlaylist(ORG, 'pls_a');
     await settle();
@@ -136,7 +148,7 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     const { store, open, editor } = setup();
     const a = playlist('pls_a', 4, ['s1']);
     open(a);
-    store.getState().editPlaylist(ORG, a, (d) => ({ ...d, name: 'Renamed' }));
+    store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, name: 'Renamed' }));
     void store.getState().deletePlaylist(ORG, 'pls_a');
     await settle();
     calls[0]!.answer({ error: 'conflict', message: 'playlist pls_a is the default playlist' }, 409);
@@ -150,15 +162,30 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     const { store, open, editor } = setup();
     const a = playlist('pls_a', 4, ['s1']);
     open(a);
-    store.getState().editPlaylist(ORG, a, (d) => ({ ...d, name: 'Renamed' }));
-    void store.getState().savePlaylistDraft();
+    store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, name: 'Renamed' }));
+    void store.getState().savePlaylistDraft('pls_a');
     await settle();
     calls[0]!.answer({ error: 'not_found', message: 'playlist pls_a not found' }, 404);
     await settle();
-    expect(editor()).toMatchObject({ gone: true });
-    store.getState().editPlaylist(ORG, a, (d) => ({ ...d, name: 'Again' }));
+    expect(editor().drafts.pls_a).toMatchObject({ gone: true });
+    store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, name: 'Again' }));
     await vi.advanceTimersByTimeAsync(5000);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('a save answered after an org switch (versioned draft)', () => {
+  it('changes nothing: the draft is not marked saved, and its version stays', async () => {
+    const { store, open, editor } = setup();
+    const a = playlist('pls_a', 4, ['s1']);
+    open(a);
+    store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, name: 'Renamed' }));
+    void store.getState().savePlaylistDraft('pls_a');
+    await settle();
+    org.id = 'org_2';
+    calls[0]!.answer({ playlist: { ...a, name: 'Renamed', version: 5 } });
+    await settle();
+    expect(editor().drafts.pls_a).toMatchObject({ status: 'unsaved', version: 4, savedAt: null });
   });
 });
 
@@ -167,16 +194,16 @@ describe('Undo of a removed spot (review 2 and 3)', () => {
     const { store, open, editor } = setup();
     const a = playlist('pls_a', 1, ['opening', 'lunch', 'closing']);
     open(a);
-    store.getState().removeSpotFromPlaylist(ORG, a, 1, 'Lunch');
-    store.getState().addSpotToPlaylist(ORG, a, 'extra');
+    store.getState().removeSpotFromPlaylist(ORG, a.id, 1, 'Lunch');
+    store.getState().addSpotToPlaylist(ORG, a.id, 'extra');
     toasts[0]!.undo();
-    expect(editor().draft?.spotIds).toEqual(['opening', 'lunch', 'closing', 'extra']);
+    expect(editor().drafts.pls_a?.edit.spotIds).toEqual(['opening', 'lunch', 'closing', 'extra']);
 
     // Removed from the end, then the list shrank: it goes back at the end.
-    store.getState().removeSpotFromPlaylist(ORG, a, 3, 'Extra');
-    store.getState().removeSpotFromPlaylist(ORG, a, 2, 'Closing');
+    store.getState().removeSpotFromPlaylist(ORG, a.id, 3, 'Extra');
+    store.getState().removeSpotFromPlaylist(ORG, a.id, 2, 'Closing');
     toasts[1]!.undo();
-    expect(editor().draft?.spotIds).toEqual(['opening', 'lunch', 'extra']);
+    expect(editor().drafts.pls_a?.edit.spotIds).toEqual(['opening', 'lunch', 'extra']);
   });
 
   it('does nothing once another playlist is being edited', () => {
@@ -185,9 +212,30 @@ describe('Undo of a removed spot (review 2 and 3)', () => {
     const b = playlist('pls_b', 1, ['s3']);
     open(a);
     open(b);
-    store.getState().removeSpotFromPlaylist(ORG, a, 0, 'S1');
-    store.getState().editPlaylist(ORG, b, (d) => ({ ...d, spotIds: [] }));
+    store.getState().removeSpotFromPlaylist(ORG, a.id, 0, 'S1');
+    store.getState().editPlaylist(ORG, b.id, (d) => ({ ...d, spotIds: [] }));
     toasts[0]!.undo();
-    expect(editor()).toMatchObject({ playlistId: 'pls_b', draft: { spotIds: [] } });
+    expect(editor().playlistId).toBe('pls_b');
+    expect(editor().drafts.pls_b?.edit.spotIds).toEqual([]);
+    expect(editor().drafts.pls_a?.edit.spotIds).toEqual(['s2']);
+  });
+});
+
+describe('Undo pressed after the removal autosaved (re-check of #153, 2)', () => {
+  it('puts the spot back once, on the version the removal saved', async () => {
+    const { store, open, editor, queryClient } = setup();
+    const a = playlist('pls_a', 1, ['opening', 'lunch', 'closing']);
+    open(a);
+    store.getState().removeSpotFromPlaylist(ORG, a.id, 1, 'Lunch');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { spotIds: ['opening', 'closing'], ifVersion: 1 } });
+    calls.at(-1)!.answer({ playlist: playlist('pls_a', 2, ['opening', 'closing']) });
+    await settle();
+    expect(queryClient.getQueryData(playlistKeys.one(ORG, 'pls_a'))).toMatchObject({ version: 2 });
+
+    toasts[0]!.undo();
+    expect(editor().drafts.pls_a?.edit.spotIds).toEqual(['opening', 'lunch', 'closing']);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { spotIds: ['opening', 'lunch', 'closing'], ifVersion: 2 } });
   });
 });

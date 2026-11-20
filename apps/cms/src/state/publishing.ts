@@ -3,9 +3,9 @@
  * undo it, roll back to an earlier publish, and choose the default playlist. The Schedule page
  * publishes its entries with the playlists and spots they need (M3-19).
  *
- * A publish from an editor saves the draft first, then publishes it pinned at the version saved
- * (`publish` with `drafts`), so it publishes exactly what the person sees and nobody else's
- * unfinished drafts. A playlist publishes with its spots that have unpublished changes, since its
+ * A publish from an editor saves the draft first, waiting for a save already on its way, then
+ * publishes it pinned at the version saved (`publish` with `drafts`), so it publishes exactly what
+ * the person sees and nobody else's unfinished drafts. A playlist publishes with its spots that have unpublished changes, since its
  * stage plays their saved drafts. The toast says what reached screens, with Undo (a roll back to
  * the publish before) and a link to the rollout. Confirmation dialogs are kept for revoking and
  * deleting: a publish is undone instead (docs/research/cms-ux.md). A publish that starts or ends a
@@ -121,10 +121,10 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     publishing: { pending: false },
 
     async publishSpot(orgId, spotId) {
-      await get().saveSpotDraft();
-      const e = get().spotEditor;
+      await get().saveSpotDraft(spotId);
+      const d = get().spotEditor.drafts[spotId];
       const spot = queryClient.getQueryData(spotQuery(orgId, spotId).queryKey);
-      if (!spot || e.status !== 'saved' || e.stale) {
+      if (!spot || (d?.orgId === orgId && d.status !== 'saved')) {
         toast.error('Not published', { description: 'Save the draft first: fix what is marked, then publish.' });
         return;
       }
@@ -132,10 +132,10 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     },
 
     async publishPlaylist(orgId, playlistId) {
-      await get().savePlaylistDraft();
-      const e = get().playlistEditor;
+      await get().savePlaylistDraft(playlistId);
+      const d = get().playlistEditor.drafts[playlistId];
       const playlist = queryClient.getQueryData(playlistQuery(orgId, playlistId).queryKey);
-      if (!playlist || (e.playlistId === playlistId && (e.status !== 'saved' || e.stale || e.gone))) {
+      if (!playlist || (d?.orgId === orgId && d.status !== 'saved')) {
         toast.error('Not published', { description: 'Save the draft first: fix what is marked, then publish.' });
         return;
       }

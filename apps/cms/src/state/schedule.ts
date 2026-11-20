@@ -6,21 +6,24 @@
  * removal of one screens play. A takeover is sent at once: started, then published with the
  * playlist and spots it needs; End now is `endTakeover` (./publishing.ts). A dialog checks its
  * entry with the contract's `scheduleEntryProblems`, so the CMS refuses what a screen would.
+ *
+ * Each dialog's draft is a versioned draft (./versioned-draft.ts): a change sends the entry's
+ * version as `ifVersion` and offers Reload on a conflict, and a create (a new entry, a takeover)
+ * keeps one idempotency key until it is answered, so a retry after a lost answer makes no second.
  */
 import { scheduleEntryProblems } from '@signforge/contract';
 import { toast } from 'sonner';
+import { orgOnScreen } from '~/lib/live';
 import type { ScheduleEntryView } from '~/lib/schedule';
-import { callTool, entryIdOf, isStale, toolMessage } from '~/lib/tools';
-import { scheduleKey } from '~/queries/schedule';
+import { callTool, entryIdOf, toolMessage } from '~/lib/tools';
+import { scheduleKey, scheduleQuery } from '~/queries/schedule';
 import type { SliceCreator } from './store';
+import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
 
 type Target = ScheduleEntryView['target'];
 
 /** A schedule entry in its dialog. Empty strings are fields left out. */
 export interface EntryDraft {
-  /** The entry being changed, or null for a new one. */
-  id: string | null;
-  version: number | null;
   playlistId: string;
   target: Target;
   groupId: string;
@@ -44,27 +47,30 @@ interface TakeoverDraft {
 }
 
 interface ScheduleState {
-  entry: EntryDraft | null;
-  takeover: TakeoverDraft | null;
-  saving: boolean;
-  error: string | null;
-  /** The entry the dialog changes was changed elsewhere since it was opened. */
-  stale: boolean;
+  /** The entry dialog's draft (at `DIALOG`): its record is the entry it changes, null for a new one. */
+  entries: Drafts<EntryDraft>;
+  /** The takeover dialog's draft (at `DIALOG`). */
+  takeovers: Drafts<TakeoverDraft>;
   /** The screen the week view shows; null shows the first. */
   weekScreenId: string | null;
 }
 
+/** The key of the one dialog's draft. */
+export const DIALOG = 'dialog';
+
 export interface ScheduleSlice {
   schedule: ScheduleState;
-  /** Opens a new entry, with what the page chose (a screen's own, say). */
-  openNewEntry: (preset?: Partial<EntryDraft>) => void;
-  openEditEntry: (entry: ScheduleEntryView) => void;
+  /** Opens a new entry in `orgId`, with what the page chose (a screen's own, say). */
+  openNewEntry: (orgId: string, preset?: Partial<EntryDraft>) => void;
+  openEditEntry: (orgId: string, entry: ScheduleEntryView) => void;
   editEntry: (patch: Partial<EntryDraft>) => void;
   /** Saves the entry as a draft. */
   saveEntry: (orgId: string) => Promise<void>;
+  /** After a conflict: reads the schedule again and opens the entry as it is now, to make the change again. */
+  reloadEntry: (orgId: string) => Promise<void>;
   /** Removes an entry: at once if it was never published, else at the next publish. */
   removeEntry: (orgId: string, entry: ScheduleEntryView) => Promise<void>;
-  openTakeover: (preset?: Partial<TakeoverDraft>) => void;
+  openTakeover: (orgId: string, preset?: Partial<TakeoverDraft>) => void;
   editTakeover: (patch: Partial<TakeoverDraft>) => void;
   /** Starts the takeover and publishes it, so screens cut in at once. */
   startTakeover: (orgId: string) => Promise<void>;
@@ -123,21 +129,51 @@ export function entryProblems(d: EntryDraft): string[] {
   return out;
 }
 
-export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { queryClient }) => {
+export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { router, queryClient }) => {
   const patch = (fn: (s: ScheduleState) => ScheduleState) => set((s) => ({ schedule: fn(s.schedule) }));
   const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: scheduleKey(orgId) });
-  const closed = { entry: null, takeover: null, saving: false, error: null, stale: false };
+  const common = { makeId: () => crypto.randomUUID(), currentOrg: () => orgOnScreen(router), clock: realClock };
+
+  const entries = createVersionedDrafts<EntryDraft>({
+    ...common,
+    state: { read: () => get().schedule.entries, write: (change) => patch((s) => ({ ...s, entries: change(s.entries) })) },
+    async save({ draft: { orgId, record, version, edit, idempotencyKey } }) {
+      const fields = { playlistId: edit.playlistId, ...aim(edit), ...entryWhen(edit) };
+      const out =
+        record === null
+          ? await callTool('create_schedule_entry', { ...fields, idempotencyKey })
+          : await callTool('update_schedule_entry', { scheduleEntryId: record, ...fields, ifVersion: version });
+      await refresh(orgId);
+      return { record: entryIdOf(out) };
+    },
+  });
+
+  const takeovers = createVersionedDrafts<TakeoverDraft>({
+    ...common,
+    state: { read: () => get().schedule.takeovers, write: (change) => patch((s) => ({ ...s, takeovers: change(s.takeovers) })) },
+    async save({ draft: { orgId, edit: d, idempotencyKey } }) {
+      const made = await callTool('start_takeover', { playlistId: d.playlistId, ...aim(d), endsAt: new Date(d.until).toISOString(), idempotencyKey });
+      await refresh(orgId);
+      return { record: entryIdOf(made) };
+    },
+  });
+
+  /** Opens one dialog: the other's draft goes. */
+  const close = () => {
+    entries.drop(DIALOG);
+    takeovers.drop(DIALOG);
+  };
 
   return {
-    schedule: { ...closed, weekScreenId: null },
+    schedule: { entries: {}, takeovers: {}, weekScreenId: null },
 
-    openNewEntry: (preset = {}) =>
-      patch((s) => ({
-        ...s,
-        ...closed,
-        entry: {
-          id: null,
-          version: null,
+    openNewEntry(orgId, preset = {}) {
+      close();
+      entries.open(DIALOG, {
+        orgId,
+        record: null,
+        version: null,
+        edit: {
           playlistId: '',
           target: 'org',
           groupId: '',
@@ -150,15 +186,16 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { que
           endDate: '',
           ...preset,
         },
-      })),
+      });
+    },
 
-    openEditEntry: (e) =>
-      patch((s) => ({
-        ...s,
-        ...closed,
-        entry: {
-          id: e.id,
-          version: e.version,
+    openEditEntry(orgId, e) {
+      close();
+      entries.open(DIALOG, {
+        orgId,
+        record: e.id,
+        version: e.version,
+        edit: {
           playlistId: e.playlistId,
           target: e.target,
           groupId: e.groupId ?? '',
@@ -170,29 +207,27 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { que
           startDate: e.startDate ?? '',
           endDate: e.endDate ?? '',
         },
-      })),
+      });
+    },
 
-    editEntry: (change) => patch((s) => (s.entry ? { ...s, entry: { ...s.entry, ...change }, error: null } : s)),
+    editEntry: (change) => entries.update(DIALOG, (d) => ({ ...d, ...change })),
 
     async saveEntry(orgId) {
-      const d = get().schedule.entry;
-      if (!d) return;
-      patch((s) => ({ ...s, saving: true, error: null, stale: false }));
-      try {
-        const fields = { playlistId: d.playlistId, ...aim(d), ...entryWhen(d) };
-        if (d.id === null) await callTool('create_schedule_entry', { ...fields, idempotencyKey: crypto.randomUUID() });
-        else await callTool('update_schedule_entry', { scheduleEntryId: d.id, ...fields, ifVersion: d.version });
-        await refresh(orgId);
-        patch((s) => ({ ...s, ...closed }));
-        toast.success(d.id === null ? 'Scheduled, as a draft' : 'Saved, as a draft', { description: 'Publish to send it to screens.' });
-      } catch (err) {
-        patch((s) => ({
-          ...s,
-          saving: false,
-          stale: isStale(err),
-          error: isStale(err) ? 'It changed since you opened it. Reload it and make your change again.' : toolMessage(err),
-        }));
-      }
+      const d = get().schedule.entries[DIALOG];
+      if (d?.orgId !== orgId) return;
+      // This draft's outcome, though its dialog may have been closed, or opened on another, meanwhile.
+      const saved = await entries.save(DIALOG);
+      if (saved?.status !== 'saved') return;
+      if (get().schedule.entries[DIALOG]?.id === saved.id) entries.drop(DIALOG);
+      toast.success(d.record === null ? 'Scheduled, as a draft' : 'Saved, as a draft', { description: 'Publish to send it to screens.' });
+    },
+
+    async reloadEntry(orgId) {
+      const id = get().schedule.entries[DIALOG]?.record;
+      entries.drop(DIALOG);
+      await refresh(orgId);
+      const now = queryClient.getQueryData(scheduleQuery(orgId).queryKey)?.entries.find((e) => e.id === id);
+      if (now) get().openEditEntry(orgId, now);
     },
 
     async removeEntry(orgId, e) {
@@ -205,31 +240,28 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { que
       }
     },
 
-    openTakeover: (preset = {}) =>
-      patch((s) => ({ ...s, ...closed, takeover: { playlistId: '', target: 'org', groupId: '', screenId: '', until: inAnHour(), ...preset } })),
-
-    editTakeover: (change) => patch((s) => (s.takeover ? { ...s, takeover: { ...s.takeover, ...change }, error: null } : s)),
-
-    async startTakeover(orgId) {
-      const d = get().schedule.takeover;
-      if (!d) return;
-      patch((s) => ({ ...s, saving: true, error: null }));
-      try {
-        const made = await callTool('start_takeover', {
-          playlistId: d.playlistId,
-          ...aim(d),
-          endsAt: new Date(d.until).toISOString(),
-          idempotencyKey: crypto.randomUUID(),
-        });
-        await refresh(orgId);
-        patch((s) => ({ ...s, ...closed }));
-        await get().publishSchedule(orgId, [entryIdOf(made)]);
-      } catch (err) {
-        patch((s) => ({ ...s, saving: false, error: toolMessage(err) }));
-      }
+    openTakeover(orgId, preset = {}) {
+      close();
+      takeovers.open(DIALOG, {
+        orgId,
+        record: null,
+        version: null,
+        edit: { playlistId: '', target: 'org', groupId: '', screenId: '', until: inAnHour(), ...preset },
+      });
     },
 
-    closeScheduleDialog: () => patch((s) => ({ ...s, ...closed })),
+    editTakeover: (change) => takeovers.update(DIALOG, (d) => ({ ...d, ...change })),
+
+    async startTakeover(orgId) {
+      if (get().schedule.takeovers[DIALOG]?.orgId !== orgId) return;
+      // This takeover's outcome: one started is published, though its dialog was closed meanwhile.
+      const made = await takeovers.save(DIALOG);
+      if (made?.status !== 'saved' || made.record === null) return;
+      if (get().schedule.takeovers[DIALOG]?.id === made.id) takeovers.drop(DIALOG);
+      await get().publishSchedule(orgId, [made.record]);
+    },
+
+    closeScheduleDialog: close,
 
     chooseWeekScreen: (screenId) => patch((s) => ({ ...s, weekScreenId: screenId })),
   };

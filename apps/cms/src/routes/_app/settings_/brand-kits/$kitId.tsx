@@ -25,7 +25,8 @@ import { versionsById, type SpotView } from '~/lib/spots';
 import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
-import { kitActionRunning, NO_EDIT, previewKey } from '~/state/brand-kits';
+import { kitActionRunning, previewKey } from '~/state/brand-kits';
+import { shown } from '~/state/versioned-draft';
 
 /** How many of the org's template spots the page plays: each is a player on the page. */
 const PREVIEWS = 3;
@@ -202,7 +203,12 @@ function KitEditor() {
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
 
-  const { draft: editing, saving, savedAt, error: saveError, stale } = useAppStore((s) => s.brandKits.edits[kitId] ?? NO_EDIT);
+  const saved = useAppStore((s) => s.brandKits.drafts[kitId]);
+  const unsaved = saved !== undefined && saved.status !== 'saved';
+  const saving = saved?.pending ?? false;
+  const savedAt = saved?.savedAt ?? null;
+  const stale = saved?.stale ?? false;
+  const saveError = stale ? 'This kit changed since you opened it.' : (saved?.error ?? null);
   const actionError = useAppStore((s) => (s.brandKits.actionError?.kitId === kitId ? s.brandKits.actionError.text : null));
   const busy = useAppStore(kitActionRunning);
   const logoFor = useAppStore((s) => s.brandKits.logoFor);
@@ -216,15 +222,16 @@ function KitEditor() {
 
   const kit = brandKits.find((k) => k.id === kitId);
   if (!kit) return null;
-  const draft = editing ?? kitDraftOf(kit);
+  // A saved draft is shown while the kit is still at the version it saved.
+  const draft = shown(saved, kit.version) ?? kitDraftOf(kit);
   const colors = shownColors(draft, kit.colors);
-  const change = (c: (d: KitDraft) => KitDraft) => edit(kit, c);
+  const change = (c: (d: KitDraft) => KitDraft) => edit(orgId, kit.id, c);
   const set = (patch: Partial<KitDraft>) => change((d) => ({ ...d, ...patch }));
-  const ready = editing !== null && draftColors(draft) !== null && draft.name.trim() !== '' && !stale;
+  const ready = unsaved && draftColors(draft) !== null && draft.name.trim() !== '' && !stale;
   const versions = versionsById(templates);
   const withTemplates = previewSpots(spots);
   const reach = kit.reach.map((id) => screens.find((s) => s.id === id)?.name ?? id);
-  const statusWord = editing
+  const statusWord = unsaved
     ? 'Unsaved changes'
     : savedAt
       ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
@@ -259,10 +266,10 @@ function KitEditor() {
               <Button variant="outline" aria-disabled={busy || undefined} onClick={() => void duplicate(orgId, kit)}>
                 Duplicate
               </Button>
-              <Button variant="outline" disabled={!editing || saving} onClick={() => discard(kit.id)}>
+              <Button variant="outline" disabled={!unsaved || saving} onClick={() => discard(kit.id)}>
                 Discard changes
               </Button>
-              <Button disabled={!ready} aria-disabled={busy || undefined} onClick={() => void save(orgId, kit)}>
+              <Button disabled={!ready} aria-disabled={busy || undefined} onClick={() => void save(kit.id)}>
                 {saving ? 'Saving…' : 'Save kit'}
               </Button>
             </EditorFields>
@@ -304,7 +311,7 @@ function KitEditor() {
                   shown={colors}
                   disabled={!canManage}
                   onChange={(name, value) => change((d) => ({ ...d, colors: { ...d.colors, [name]: value } }))}
-                  onFix={(fg, bg) => fix(kit, fg, bg)}
+                  onFix={(fg, bg) => fix(orgId, kit.id, fg, bg)}
                 />
               </Panel>
               <Panel id="kit-type" title="Type and shape">
