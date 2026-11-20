@@ -99,27 +99,34 @@ describe('spotFromDraft', () => {
     });
   });
 
-  it('draws an asset still being checked but says it will not publish; a rejected or missing one draws nothing', () => {
+  it('gives only a verified asset a file: one still being checked, rejected or missing is refused, and adds no file', () => {
     const into = { templates: {}, files: {} };
-    const pending = spotFromDraft(draft({ kind: 'image', assetId: 'photo' }), 'landscape', reads({ photo: { ...photo, status: 'pending' } }), into);
-    expect(pending).toEqual({ spot: expect.objectContaining({ file: sha('b') }), problems: ['asset photo is not verified'] });
-    expect(spotFromDraft(draft({ kind: 'image', assetId: 'photo' }), 'landscape', reads({ photo: { ...photo, status: 'rejected' } }), into)).toEqual({
-      problems: ['asset photo is not verified'],
+    expect(spotFromDraft(draft({ kind: 'image', assetId: 'photo' }), 'landscape', reads({ photo: { ...photo, status: 'pending' } }), into)).toEqual({
+      problems: ['asset photo is still being checked'],
     });
+    expect(
+      spotFromDraft(
+        draft({ kind: 'template', templateVersionId: 'tpv_promo', assets: { photo: 'clip' } }),
+        'landscape',
+        reads({ clip: { ...clip, status: 'rejected' } }),
+        { templates: {}, files: {} },
+      ),
+    ).toEqual({ problems: ['asset clip was rejected'] });
     expect(spotFromDraft(draft({ kind: 'image', assetId: 'gone' }), 'landscape', reads(), into)).toEqual({ problems: ['asset gone does not exist'] });
     expect(
       spotFromDraft(draft({ kind: 'image', assetId: 'photo' }), 'portrait', reads({ photo: { ...photo, renditions: photo.renditions.slice(0, 1) } }), into),
     ).toEqual({ problems: ['asset photo has no portrait rendition'] });
+    expect(into).toEqual({ templates: {}, files: {} });
   });
 
-  it('refuses a template version the org does not have, and leaves a draft version out of the templates a screen gets', () => {
+  it('refuses a template version the org does not have, or a draft version, in the words the publish uses', () => {
     expect(spotFromDraft(draft({ kind: 'template', templateVersionId: 'tpv_gone' }), 'landscape', reads(), { templates: {}, files: {} })).toEqual({
       problems: ['template version tpv_gone does not exist'],
     });
     const drafted: DraftReads = { ...reads(), templateVersion: (id) => ({ ...reads().templateVersion(id)!, status: 'draft' }) };
     const into = { templates: {}, files: {} };
-    expect(spotFromDraft(draft({ kind: 'template', templateVersionId: 'tpv_promo' }), 'landscape', drafted, into).spot).toMatchObject({
-      template: 'base/promo@1.0.0',
+    expect(spotFromDraft(draft({ kind: 'template', templateVersionId: 'tpv_promo' }), 'landscape', drafted, into)).toEqual({
+      problems: ['template base/promo@1.0.0 is draft; only an approved version can be published'],
     });
     expect(into).toEqual({ templates: {}, files: {} });
   });
@@ -139,27 +146,23 @@ describe('compileProbe', () => {
     expect(manifest!.playlists[manifest!.defaultPlaylist]!.items).toEqual([{ spot: 'deal' }, { spot: 'page' }]);
   });
 
-  it("gives a draft that draws but will not publish its manifest with the publish's problems", async () => {
-    const result = await compileProbe(
-      { ...probe, spots: [draft({ kind: 'image', assetId: 'photo' })] },
-      reads({ photo: { ...photo, status: 'pending' } }),
-      opts(),
-    );
-    expect(result.problems).toEqual(['spot deal: asset photo is not verified']);
-    expect(result.manifest!.spots.deal).toMatchObject({ file: sha('b') });
-  });
-
-  it('compiles nothing when a draft cannot be drawn, and says why once', async () => {
-    expect(await compileProbe({ ...probe, spots: [draft({ kind: 'image' })] }, reads(), opts())).toEqual({ problems: ['spot deal: no asset'] });
+  it('compiles nothing when a draft cannot be a spot, and says why once', async () => {
+    expect(await compileProbe({ ...probe, spots: [draft({ kind: 'image' })] }, reads(), opts())).toEqual({ problems: ['spot deal: no asset'], refused: true });
+    const pending = { ...draft({ kind: 'template', templateVersionId: 'tpv_promo', assets: { photo: 'photo' } }), durationMs: 1 };
+    expect(await compileProbe({ ...probe, spots: [pending] }, reads({ photo: { ...photo, status: 'pending' } }), opts())).toEqual({
+      problems: ['spot deal: asset photo is still being checked'],
+      refused: true,
+    });
   });
 
   it("adds the compiler's own problems, such as data the template refuses", async () => {
-    const { manifest, problems } = await compileProbe(
+    const { manifest, problems, refused } = await compileProbe(
       { ...probe, spots: [draft({ kind: 'template', templateVersionId: 'tpv_promo', data: { title: 'x'.repeat(41) }, assets: { photo: 'photo' } })] },
       reads(),
       opts(),
     );
     expect(manifest).toBeUndefined();
     expect(problems).toEqual(['spot deal: field "title" is longer than 40']);
+    expect(refused).toBe(false);
   });
 });

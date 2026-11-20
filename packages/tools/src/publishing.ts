@@ -252,7 +252,7 @@ function screenInput(graph: OrgGraph, screen: Screen): { input: CompileInput; un
     const pub = published(row);
     if (!pub) continue;
     const { spot, problems } = spotFromDraft(spotDraft(pub), screen.orientation, reads, { templates, files });
-    if (spot && !problems.length) spots.push(spot);
+    if (spot) spots.push(spot);
     else unavailable.set(row.id, problems);
   }
   const playlists = graph.playlists.flatMap((row) => {

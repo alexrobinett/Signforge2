@@ -68,8 +68,9 @@ export interface DraftReads {
 export const bindingOf = (b: DraftBinding): Binding => ({ source: b.dataSourceId, path: b.path, ...(b.table ? { table: b.table } : {}) });
 
 /**
- * The file an asset plays as on a screen of this orientation, added to `files`. An asset still
- * being checked has its file and the problem that stops it publishing; a rejected one has no file.
+ * The file an asset plays as on a screen of this orientation, added to `files`, or why there is
+ * none. Only a verified asset has one: until `finalize_asset` checks an upload, its files are not
+ * where screens, or the stage, read them.
  */
 export function assetFile(
   reads: Pick<DraftReads, 'asset'>,
@@ -79,18 +80,18 @@ export function assetFile(
 ): { sha?: Sha256; problem?: string } {
   const a = reads.asset(assetId);
   if (!a) return { problem: `asset ${assetId} does not exist` };
-  const problem = a.status === 'verified' ? undefined : `asset ${assetId} is not verified`;
-  if (a.status === 'rejected') return { problem };
+  if (a.status === 'pending') return { problem: `asset ${assetId} is still being checked` };
+  if (a.status === 'rejected') return { problem: `asset ${assetId} was rejected` };
   const f = a.kind === 'video' ? a : a.renditions.find((r) => r.orientation === orientation);
   if (!f) return { problem: `asset ${assetId} has no ${orientation} rendition` };
   files[f.sha256] = { size: f.size, type: f.type };
-  return problem ? { sha: f.sha256, problem } : { sha: f.sha256 };
+  return { sha: f.sha256 };
 }
 
 /**
- * A draft as the contract's `Spot` for one orientation; the template and files it uses are added
- * to `into`. `spot` is what a screen would draw, absent when nothing can be drawn. `problems` is
- * why a publish refuses it: a spot can come with problems (an asset still being checked).
+ * A draft as the contract's `Spot` for one orientation, with no problems; or, when it cannot be
+ * one, why. The template and files it uses are added to `into`. A spot's data is checked when it
+ * is compiled (`compileProbe`).
  */
 export function spotFromDraft(
   draft: SpotDraft,
@@ -100,21 +101,19 @@ export function spotFromDraft(
 ): { spot?: Spot; problems: string[] } {
   const base = { id: draft.id, name: draft.name, durationMs: draft.durationMs };
   const problems: string[] = [];
-  let drawable = true;
   const file = (assetId: string) => {
     const f = assetFile(reads, assetId, orientation, into.files);
     if (f.problem) problems.push(f.problem);
-    if (!f.sha) drawable = false;
     return f.sha ?? '';
   };
   let spot: Spot;
   if (draft.kind === 'template') {
     const v = draft.templateVersionId ? reads.templateVersion(draft.templateVersionId) : undefined;
     if (!v) return { problems: [`template version ${draft.templateVersionId} does not exist`] };
-    if (v.status !== 'draft') {
-      into.templates[v.key] = { manifest: v.manifest, html: v.html };
-      into.files[v.html] = { size: v.size, type: 'text/html' };
-    }
+    // A screen never gets a draft version; the publish refuses a spot on one with these words too.
+    if (v.status === 'draft') return { problems: [`template ${v.key} is draft; only an approved version can be published`] };
+    into.templates[v.key] = { manifest: v.manifest, html: v.html };
+    into.files[v.html] = { size: v.size, type: 'text/html' };
     const assets = Object.fromEntries(Object.entries(draft.assets ?? {}).map(([field, id]) => [field, file(id)]));
     const bindings = Object.entries(draft.bindings ?? {}).map(([field, b]) => [field, bindingOf(b)] as const);
     spot = {
@@ -131,7 +130,7 @@ export function spotFromDraft(
   } else {
     spot = { ...base, kind: 'url', url: draft.url ?? '' };
   }
-  return drawable ? { spot, problems } : { problems };
+  return problems.length ? { problems } : { spot, problems };
 }
 
 /** The probe screen's id, and the id of the playlist it plays when it is given none. */
@@ -154,23 +153,25 @@ export interface Probe {
 }
 
 /**
- * Compile a probe screen playing drafts, as a screen reaching them would get them. `problems` is
- * why a publish refuses them, each prefixed with where it is; `manifest` is what the screen
- * would play, and can come with problems (an asset still being checked draws but does not publish).
- * A draft that cannot be drawn compiles nothing: its problems are all there is to say.
+ * Compile a probe screen playing drafts, as a screen reaching them would get them: the manifest,
+ * or why a publish refuses them, each problem prefixed with where it is. A draft that cannot be
+ * a spot compiles nothing (`refused`): its problems are all there is to say, and none is about
+ * its data.
  */
-export async function compileProbe(probe: Probe, reads: DraftReads, opts: CompileOptions): Promise<{ manifest?: ScreenManifest; problems: string[] }> {
+export async function compileProbe(
+  probe: Probe,
+  reads: DraftReads,
+  opts: CompileOptions,
+): Promise<{ manifest?: ScreenManifest; problems: string[]; refused: boolean }> {
   const into: Pick<CompileInput, 'files' | 'templates'> = { templates: {}, files: { ...probe.files } };
   const spots: Spot[] = [];
   const problems: string[] = [];
-  let drawable = true;
   for (const d of probe.spots) {
     const r = spotFromDraft(d, probe.orientation, reads, into);
     problems.push(...r.problems.map((p) => `spot ${d.id}: ${p}`));
     if (r.spot) spots.push(r.spot);
-    else drawable = false;
   }
-  if (!drawable) return { problems };
+  if (problems.length) return { problems, refused: true };
   const playlist = probe.playlist ?? { id: PROBE, name: PROBE, transition: { type: 'cut' }, items: probe.spots.map((s) => ({ spot: s.id })) };
   const result = await compileScreen(
     {
@@ -186,5 +187,5 @@ export async function compileProbe(probe: Probe, reads: DraftReads, opts: Compil
     },
     opts,
   );
-  return { ...(result.manifest ? { manifest: result.manifest } : {}), problems: [...problems, ...result.problems] };
+  return { ...result, refused: false };
 }

@@ -252,7 +252,7 @@ describe('publishOrg', () => {
       {
         screenId: hall.id,
         current: null,
-        problems: [`spot ${x('extra')}: asset ${other.id} is not verified`, `manifest: playlist "${x('lonely')}" lists unknown spot "${x('extra')}"`],
+        problems: [`spot ${x('extra')}: asset ${other.id} was rejected`, `manifest: playlist "${x('lonely')}" lists unknown spot "${x('extra')}"`],
       },
       { screenId: lobby.id, current: null, problems: [], manifest: expect.objectContaining({ defaultPlaylist: x('main') }) },
     ]);
