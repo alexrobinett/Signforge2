@@ -1,9 +1,9 @@
 // The live values the spot editor shows read from snapshots as the poller stores them: the
 // normalised feed through canonicalJson, which sorts every object's keys.
-import { canonicalJson, readPath } from '@signforge/contract';
+import { canonicalJson, readPath, type FieldDef, type TemplateManifest } from '@signforge/contract';
 import { parseCalendar, parseNews } from '@signforge/feeds';
 import { describe, expect, it } from 'vitest';
-import { madeByEditor, rowTitles, weatherSource } from '../src/lib/live-data';
+import { bindAll, guessMapping, madeByEditor, rowTitles, tableRows, typedFields, weatherSource } from '../src/lib/live-data';
 
 /** What the poller writes as a snapshot's data (apps/api/src/data/poller.ts). */
 const stored = (feed: unknown): unknown => JSON.parse(canonicalJson(feed));
@@ -56,5 +56,69 @@ describe('madeByEditor', () => {
       expect(madeByEditor((await weatherSource(live, place, units)).id)).toBe(true);
     // A feed or calendar added by its address gets the server's id, or one a person or agent chose.
     for (const id of ['src_8f2k3j4h5g6f7d8s', 'weather', 'news-bbc', 'weather-atlanta', 'weather-4180439-f-mph']) expect(madeByEditor(id), id).toBe(false);
+  });
+});
+
+describe('a table template (issue #84)', () => {
+  const items: Extract<FieldDef, { type: 'list' }> = {
+    type: 'list',
+    label: 'Items',
+    maxItems: 2,
+    item: {
+      name: { type: 'text', label: 'Name' },
+      description: { type: 'text', label: 'Description', default: '' },
+      price: { type: 'text', label: 'Price' },
+      tag: { type: 'select', label: 'Tag', options: ['', 'New'], default: '' },
+    },
+  };
+  const manifest = { fields: { title: { type: 'text', label: 'Title' }, items }, live: { source: 'table', fields: { items: 'rows' } } } as const;
+  const m: TemplateManifest = {
+    ...structuredClone(manifest),
+    id: 'menu',
+    version: '1.0.0',
+    name: 'Menu',
+    duration: { defaultMs: 1, minMs: 1, maxMs: 1 },
+    orientations: ['landscape'],
+    uses: [],
+    background: '#000',
+  };
+
+  it('guesses each column by its name or a usual other word, and gives each property without a default a column', () => {
+    expect(guessMapping(items, ['Section', 'Item', 'Cost', 'Notes'])).toEqual({ columns: { name: 'Item', price: 'Cost' } });
+    expect(guessMapping(items, ['A', 'B', 'Description'])).toEqual({ columns: { name: 'A', price: 'B', description: 'Description' } });
+    // Property names an org template chose, which are also every object's keys.
+    const odd: Extract<FieldDef, { type: 'list' }> = JSON.parse(
+      '{"type":"list","label":"Rows","item":{"constructor":{"type":"text","label":"Maker"},"toString":{"type":"text","label":"Label","default":""}}}',
+    );
+    expect(guessMapping(odd, ['Maker', 'Label'])).toEqual({ columns: { constructor: 'Maker', toString: 'Label' } });
+  });
+
+  it('types its list fields until they are bound, then they are live', () => {
+    expect(Object.keys(typedFields(m, {}))).toEqual(['title', 'items']);
+    const bound = bindAll(m, m.live!, {}, 'src_menu', ['Item', 'Price']);
+    expect(bound).toEqual({ items: { dataSourceId: 'src_menu', path: 'rows', table: { columns: { name: 'Item', price: 'Price' } } } });
+    expect(Object.keys(typedFields(m, bound))).toEqual(['title']);
+  });
+
+  it('shows the items a screen would, at most maxItems, from the table as the poller stores it', () => {
+    const data = stored({
+      columns: ['Item', 'Price'],
+      rows: [
+        ['Tea', 2],
+        ['Cake', '$3'],
+        ['Pie', '4'],
+      ],
+    });
+    expect(tableRows(m, 'items', { dataSourceId: 'src_menu', path: 'rows', table: { columns: { name: 'Item', price: 'Price' } } }, data, 'en-US')).toEqual({
+      items: [
+        { name: 'Tea', description: '', price: '2', tag: '' },
+        { name: 'Cake', description: '', price: '$3', tag: '' },
+      ],
+      problems: [],
+    });
+  });
+
+  it('is a source a person added, which the editor never deletes', () => {
+    expect(madeByEditor('src_8f2k3j4h5g6f7d8s')).toBe(false);
   });
 });

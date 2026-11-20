@@ -176,6 +176,13 @@
       "when": 1795090547310,
       "tag": "0024_alert_channels",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1795126771517,
+      "tag": "0025_data_source_rows_path",
+      "breakpoints": true
     }
   ]
 }

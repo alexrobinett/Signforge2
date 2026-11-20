@@ -38,7 +38,7 @@ const blobPath = { [`/blobs/${A}`]: FILES.a, [`/blobs/${B}`]: FILES.b };
 
 function manifest(id: string, text = 'hello'): ScreenManifest {
   return {
-    schema: 2,
+    schema: 3,
     id,
     generatedAt: '2026-11-17T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'UTC', orientation: 'landscape' },

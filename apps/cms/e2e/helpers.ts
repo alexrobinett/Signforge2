@@ -271,3 +271,21 @@ export async function createOrg(page: Page, name: string) {
   await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
 }
+
+/** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */
+export const orgOf = (spotId: string) => `(SELECT org_id FROM spots WHERE id = '${spotId}')`;
+
+export const spotIdOf = (page: Page) => new URL(page.url()).pathname.split('/').at(-1) ?? '';
+
+/** A new template spot from the Spots page, open in its editor; its id. */
+export async function newSpot(page: Page, template: string, name: string) {
+  await page.goto('/spots');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'New spot' }).click();
+  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: template });
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('button', { name: 'Create spot' }).click();
+  await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+  await hydrated(page);
+  return spotIdOf(page);
+}

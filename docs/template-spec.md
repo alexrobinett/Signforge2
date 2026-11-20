@@ -2,7 +2,7 @@
 
 Version 1. This is what a template author, human or agent, builds against and what a reviewer checks. The types and limits here are defined in code in `packages/contract/src/shapes.ts`; if the two disagree, the code is right.
 
-Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl) and `menu-board` (static list).
+Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl) and `menu-board` (a list typed by people or filled from a CSV or JSON link).
 
 ## What a template is
 
@@ -100,7 +100,7 @@ A colour field may default to a brand token, `"$brand.<colour>"` with one of the
 
 ## Live data
 
-Any non-image field can be bound to a data source instead of a fixed value. The spot names the source and a dot path into it (`current.temperature_2m`, `daily.temperature_2m_max.0`, `events`). The static value is the fallback: it shows until the first data arrives, and whenever the live value does not fit the field. Before a bound value replaces it, the player checks it against the field's definition (type, `maxLength`, `min`/`max`/`step`, `options`, a list's `maxItems` and row fields); a value that is missing at its path or fails is ignored for that spot and counted against its source. So a template can trust its data to have the shape its fields declare, live or not. The check is `validateBoundValue` in `packages/contract`, which the server also runs before it stores or sends a snapshot. Data the server has not confirmed for a day is stale, and the static value shows again (`SNAPSHOT_STALE_MS`). A news feed's `language` is always present (`''` when the feed declares none), so the news template binds it to write headline ages in the feed's language.
+Any non-image field can be bound to a data source instead of a fixed value. The spot names the source and a dot path into it (`current.temperature_2m`, `daily.temperature_2m_max.0`, `events`). The static value is the fallback: it shows until the first data arrives, and whenever the live value does not fit the field. Before a bound value replaces it, the player checks it against the field's definition (type, `maxLength`, `min`/`max`/`step`, `options`, a list's `maxItems` and row fields); a value that is missing at its path or fails is ignored for that spot and counted against its source. So a template can trust its data to have the shape its fields declare, live or not. The check is `boundValue` in `packages/contract` (`validateBoundValue` on the value read), which the server also runs before it stores or sends a snapshot. Data the server has not confirmed for a day is stale, and the static value shows again (`SNAPSHOT_STALE_MS`). A news feed's `language` is always present (`''` when the feed declares none), so the news template binds it to write headline ages in the feed's language.
 
 **Declaring live fields.** A template whose fields come from a feed says so in `live`, so the CMS shows a Source section for them instead of inputs: people choose where the data comes from (a place, a news feed, a calendar), never the values. Each field keeps its definition and default, which are the fallback.
 
@@ -113,14 +113,37 @@ Any non-image field can be bound to a data source instead of a fixed value. The 
 }
 ```
 
-- `source`: the kind of feed. `open-meteo` is an Open-Meteo forecast (a JSON source; the CMS asks for the `current=` and `daily=` variables the paths read, in the place's time zone, with `timeformat=unixtime`). `rss` is a news feed and `ical` a calendar, which the server converts to `NewsFeed` and `CalendarFeed`, so their paths are those shapes' (`items`, `language`, `events`).
+- `source`: the kind of feed. `open-meteo` is an Open-Meteo forecast (a JSON source; the CMS asks for the `current=` and `daily=` variables the paths read, in the place's time zone, with `timeformat=unixtime`). `rss` is a news feed and `ical` a calendar, which the server converts to `NewsFeed` and `CalendarFeed`, so their paths are those shapes' (`items`, `language`, `events`). `table` is a CSV file or a JSON list at a link (below): its fields must be lists, at `rows`, and they stay typed until a spot binds them.
 - `fields`: each live field's path in the snapshot, as a binding names it (`BINDING_PATH`). Not an image field.
 - `place` (Open-Meteo only): a text field that starts as the name of the place picked. People may still change it.
 - `units` (Open-Meteo only): the select fields that choose the units the forecast is fetched in, `temperature` with options from `°F`, `°C` and `wind` from `mph`, `km/h` (`WEATHER_UNITS`). The CMS sets them with the place, so the numbers and the unit shown always agree.
 
-`validateTemplateManifest` checks all of it. A template with no `live` is typed by people; a list a connector could fill later (a menu's items) can be declared once a source of that kind exists. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda (`ical`: `events`). A spot may still bind any field to any source with the tools (`bindings` on `create_spot` and `update_spot`); `live` is what the editor offers.
+`validateTemplateManifest` checks all of it. A template with no `live` is typed by people. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda (`ical`: `events`), menu-board (`table`: `items`).
 
-The server fetches feeds, never the screen. JSON feeds pass through; calendar (iCal) and news (RSS or Atom) feeds are converted to fixed shapes, `CalendarFeed` and `NewsFeed` in `packages/contract`, so a template binds to the same paths whichever service the data came from. A spot reads the latest data when it starts; data does not change during a play.
+**Table bindings.** A `csv` or `json-table` source's snapshot is a `TableFeed`: `columns` and `rows` of text and numbers (`@signforge/feeds`, Tables). A binding with a `table` mapping (`TableMapping`), at path `rows`, fills a list field from its rows:
+
+```json
+"items": {
+  "source": "lunch-menu",
+  "path": "rows",
+  "table": {
+    "columns": { "name": "Item", "price": "Price", "description": "Notes" },
+    "filter": { "column": "Section", "equals": "Mains" },
+    "sort": { "column": "Price", "descending": true }
+  }
+}
+```
+
+- Each row becomes an item: the column named for each item property fills it, converted to the property's type. A number written into a text property takes the screen's locale, as a price (4.5 is "4.50" in en-US, "4,50" in de-DE, 12 is "12"); text stays as the file has it ("$4.50"). A select takes its option in any case; a boolean `true`/`yes`/`1` or `false`/`no`/`0`. An empty cell takes the property's default.
+- Every property without a default needs a column. A row that leaves one empty, or does not fit the item (too long, not an option), is left out and named in the screen's rejected data; the rest still show. When every row the filter keeps is left out, the binding has no value: the poller fails the source as `unfit` and keeps the last good snapshot, and a screen keeps what it shows, rather than draw an empty list. A filter that keeps no rows is an empty list.
+- `filter` keeps the rows whose cell equals the value, ignoring case and surrounding spaces; `sort` orders by a column (numbers, and text that is one number, by value; other text in the screen's locale), else the file's order. Then the list is cut to the field's `maxItems`, so a template draws at most that many rows however long the file is. Measured on the Pi: menu-board fed by 24 rows plays as its 12 typed items do (`spike/pi-perf/RESULTS.md`, Table bindings).
+- A table without a mapped column gives no items: the fallback shows. The poller fails such a source as `missing-column` when a published spot maps the column, keeping the last good snapshot.
+- A template that declares a `table` source, or a binding with `table`, needs manifest schema 4 (`MANIFEST_SCHEMA`). A player before #84 plays schemas 2 and 3 and refuses such a template in any manifest, typed items or not; it reports that in its sync, cannot play schema 4, and the server tells it to reload (`canPlay` in apps/api `device/sync.ts`), into a player that plays 3 and 4.
+- A table with more cells than any snapshot can hold (columns × rows past half `MAX_SNAPSHOT_BYTES`) is refused as `too-large` before its rows are built.
+
+A spot may still bind any field to any source with the tools (`bindings` on `create_spot` and `update_spot`); `live` is what the editor offers.
+
+The server fetches feeds, never the screen. JSON feeds pass through; calendar (iCal), news (RSS or Atom) and table (CSV, or a JSON list) feeds are converted to fixed shapes, `CalendarFeed`, `NewsFeed` and `TableFeed` in `packages/contract`, so a template binds to the same paths whichever service the data came from. A spot reads the latest data when it starts; data does not change during a play.
 
 ## Rules
 

@@ -442,6 +442,19 @@ Review fixes (PR #104): clock 1.2.3 now measures its greeting over its accent gl
 
 Clock prepares 182 / 180.5 ms (median before / after, 20 each, 144-268 / 146-266): the canvas read costs nothing measurable. photo-berries 215.5 / 216.5, photo-river 233 / 231.5. menu (menu-board) 200 / 217, the same gap as above. The rig was slower than in the night's runs for every spot (energy 298 ms against 225), so compare within this table only. Frames while playing are unchanged; the 83 ms frames are within what earlier sections record from run to run.
 
+## Table bindings: menu-board fed by a CSV (issue #84, 2026-11-19)
+
+menu-board's items from a table binding (1.3.0 here; measured on 1.2.2's bundle, before #104's contrast change, which the mapping does not touch: it runs in the player) (the contract's `tableItems`: column mapping, a filter, cut to `maxItems`, run by the player as the spot prepares) against the same template with its items typed. A scratch copy of `examples/stress` with two spots: `menu-typed`, 12 typed items, and `menu-table`, bound to a `TableFeed` snapshot of 24 rows (2x `maxItems`; every third price a JSON number, written in the screen's locale), filtered to one section that every row is in, so 12 are drawn. This branch's player at a subdirectory of the rig, the content beside it with the snapshot at `data/menu-table.json`; HTTP cache cleared and the service worker bypassed before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`, 60 s per run after 10 s to settle. A screenshot confirmed 12 rows from the table on screen, and `__sf.dataRejected` stayed empty.
+
+| Spots | Transition | Runs | Overall | Playing | Loading next | Worst frame | Prepares (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| menu-typed | cut | 3 | 0.03-0.06% | 0.00-0.03% | 1.5-1.6% | 33 ms | 153-345, median 165 |
+| menu-table | cut | 3 | 0.03% | 0.00-0.03% | 0.0-1.6% | 33 ms | 151-235, median 164 |
+| menu-typed, photo-river | fade 600 | 2 | 0.14, 0.19% | 0.09, 0.06% | 2.9, 6.7% | 50, 67 ms | menu 165-375 |
+| menu-table, photo-river | fade 600 | 2 | 0.28, 0.11% | 0.12, 0.06% | 7.6, 2.8% | 50, 50 ms | menu 168-254 |
+
+Order alternated (cut: typed, table, table, typed, typed, table; fade: table first, then typed first). No cost: the ranges overlap run for run, and mapping 24 rows adds nothing visible to a prepare (medians 164 and 165 ms). Only `maxItems` rows reach the template, so a longer file costs the player one pass over its rows (the snapshot limit, 64 kB, bounds it). The one 67 ms frame was in a typed run. Nothing was skipped.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.

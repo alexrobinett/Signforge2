@@ -6,7 +6,10 @@ import {
   connectionNotice,
   failingWords,
   type ListedSource,
+  hasAddress,
+  KIND_WORD,
   shows,
+  sourcesOf,
   sourceState,
   weatherFixWords,
 } from '../src/lib/integrations';
@@ -21,6 +24,7 @@ const source = (over: Partial<ListedSource> = {}): ListedSource => ({
   connectionId: null,
   refreshS: 300,
   horizonDays: null,
+  rowsPath: null,
   nextPollAt: NOW + 60_000,
   failures: 0,
   lastError: null,
@@ -110,8 +114,8 @@ describe('the catalogue', () => {
   const all = CATALOGUE.flatMap((g) => g.items);
   const count = (show: Parameters<typeof shows>[1], sources: ListedSource[] = []) => all.filter((c) => shows(c, show, '', sources)).length;
 
-  it("has the board's connectors: 4 built, 18 planned and 4 for later", () => {
-    expect([count('all'), count('built'), count('planned'), count('later')]).toEqual([26, 4, 18, 4]);
+  it("has the board's connectors: 5 built, 17 planned and 4 for later", () => {
+    expect([count('all'), count('built'), count('planned'), count('later')]).toEqual([26, 5, 17, 4]);
   });
 
   it('counts a built connector as connected once the org has a source of its kind', () => {
@@ -127,5 +131,28 @@ describe('the catalogue', () => {
   it("counts a connector's sources, and says when one fails", () => {
     expect(connectedWords('rss', [source({ format: 'rss' }), source({ format: 'rss' })])).toBe('2 feeds');
     expect(connectedWords('ical', [source({ failures: 2 })])).toBe('1 calendar · failing');
+  });
+});
+
+describe('CSV and JSON tables (issue #84)', () => {
+  const row = CATALOGUE.flatMap((g) => g.items).find((c) => c.name === 'CSV or JSON URL');
+
+  it('are built, one catalogue row for both formats, each named by its format', () => {
+    expect(row).toMatchObject({ state: 'built', kind: 'table' });
+    const csv = source({ id: 'lunch', format: 'csv' });
+    const json = source({ id: 'stock', format: 'json-table', rowsPath: 'data.items' });
+    expect(row && sourcesOf(row, [csv, json, source()]).map((s) => s.id)).toEqual(['lunch', 'stock']);
+    expect(connectedWords('table', [csv, json])).toBe('2 files');
+    expect([KIND_WORD.csv, KIND_WORD['json-table']]).toEqual(['CSV', 'JSON']);
+    expect(hasAddress(csv) && hasAddress(json)).toBe(true);
+  });
+
+  it('say a file that lost a mapped column, or is not a list, in words', () => {
+    expect(failingWords(source({ name: 'Lunch menu', format: 'csv', failures: 1, lastError: 'missing-column' }), clock)).toBe(
+      'The Lunch menu file no longer has a column a spot uses: its last check failed. Its screens show the 7:05 AM copy.',
+    );
+    expect(failingWords(source({ name: 'Stock', format: 'json-table', failures: 2, lastError: 'not-a-table' }), clock)).toMatch(
+      /^The Stock file is not a list of objects at its path: its last 2 checks failed\./,
+    );
   });
 });

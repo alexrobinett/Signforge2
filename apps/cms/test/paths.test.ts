@@ -1,5 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { initials, safeRedirect, slugify } from '../src/lib/paths';
+import { initials, safeRedirect, signInBack, slugify } from '../src/lib/paths';
+
+describe('signInBack', () => {
+  const fn = 'https://cms.test/_serverFn/abc';
+  it('is the page on a page load, and the calling page on a server function call', () => {
+    expect(signInBack('https://cms.test/spots?tab=draft', null)).toBe('/spots?tab=draft');
+    expect(signInBack(fn, 'https://cms.test/spots/spt_1')).toBe('/spots/spt_1');
+    expect(signInBack(fn, null)).toBe('/');
+  });
+
+  it("keeps sign-in's own way back for a call made once the address is sign-in's, never nesting it", () => {
+    // A read of Spots ending after the address was sign-in's (CI runs 44575937095 and 44575649020).
+    expect(signInBack(fn, 'https://cms.test/sign-in?redirect=%2Fspots')).toBe('/spots');
+    expect(signInBack(fn, 'https://cms.test/sign-in')).toBe('/');
+    expect(signInBack(fn, 'https://cms.test/sign-in?redirect=https%3A%2F%2Fevil.example')).toBe('/');
+  });
+
+  it('knows sign-in by every path the router renders it at, or sends to it', () => {
+    for (const path of ['/SIGN-IN', '/Sign-In', '/sign%2Din', '/%53IGN-IN', '/sign-in/', '//sign-in', '/x/../sign-in']) {
+      expect(signInBack(fn, `https://cms.test${path}?redirect=%2Fspots`)).toBe('/spots');
+    }
+    expect(signInBack(fn, 'https://cms.test/sign-in?redirect=%2FSIGN-IN%3Fredirect%3D%252Fspots')).toBe('/');
+    // A tab, CR or LF the browser would drop, making a host of what follows: refused, not an error.
+    expect(signInBack(fn, 'https://cms.test/sign-in?redirect=%2F%09%2F%5B')).toBe('/');
+  });
+
+  it('keeps the case of a page to come back to', () => {
+    expect(signInBack(fn, 'https://cms.test/spots/spt_AbC?tab=Draft')).toBe('/spots/spt_AbC?tab=Draft');
+    expect(signInBack(fn, 'https://cms.test/sign-in/x')).toBe('/sign-in/x');
+  });
+});
 
 describe('safeRedirect', () => {
   it('keeps a path on this site', () => {
@@ -8,7 +38,28 @@ describe('safeRedirect', () => {
   });
 
   it('refuses anything that could leave the site, and loops back to sign-in', () => {
-    for (const bad of ['https://evil.example/', '//evil.example/', '/\\evil.example', 'javascript:alert(1)', '', undefined, 42, '/sign-in', '/sign-in?redirect=/', '/api/auth/sign-out']) {
+    for (const bad of [
+      'https://evil.example/',
+      '//evil.example/',
+      '/\\evil.example',
+      'javascript:alert(1)',
+      '',
+      undefined,
+      42,
+      '/sign-in',
+      '/sign-in?redirect=/',
+      '/SIGN-IN?redirect=%2Fspots',
+      '/Sign-In',
+      '/sign%2din',
+      '/sign-in/',
+      '/x/../sign-in',
+      '/sign-in#top',
+      '/\t/[',
+      '/\t/evil.example',
+      '/\n/evil.example',
+      '/\r/evil.example',
+      '/api/auth/sign-out',
+    ]) {
       expect(safeRedirect(bad)).toBe('/');
     }
   });

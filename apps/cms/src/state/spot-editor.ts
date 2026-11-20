@@ -197,8 +197,15 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     const version = spot.templateVersionId ? versionsById(templates).get(spot.templateVersionId) : undefined;
     const result = await compilePreview({ spot, draft, version, preview: preview.preview, assets, orientation: t.orientation, live: !t.fallback });
     const sources = !t.fallback ? [...new Set(Object.values(draft.bindings).map((b) => b.dataSourceId))] : [];
-    const read = await Promise.all(sources.map((id) => queryClient.query({ ...dataSourceQuery(t.orgId, id), staleTime: 'static' }).catch(() => null)));
-    return { ...result, data: read.flatMap((r) => (r?.snapshot ? [r.snapshot] : [])) };
+    // A table added just now has no snapshot until its first poll: the stage plays what the editor read from it.
+    const latest = async (id: string): Promise<DataSnapshot[]> => {
+      const r = await queryClient.query({ ...dataSourceQuery(t.orgId, id), staleTime: 'static' }).catch(() => null);
+      if (r?.snapshot) return [r.snapshot];
+      const table = get().readTables[id];
+      const now = new Date().toISOString();
+      return table ? [{ id, version: 0, fetchedAt: now, checkedAt: now, data: table }] : [];
+    };
+    return { ...result, data: (await Promise.all(sources.map(latest))).flat() };
   }
 
   async function redraw() {

@@ -63,7 +63,7 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await hydrated(owner);
   const now = owner.getByRole('region', { name: 'Feeding screens now' });
   await expect(now).toContainText('No data sources yet');
-  await expect(owner.getByRole('group', { name: 'Show' }).getByRole('button')).toHaveText(['All 26', 'Connected 0', 'Built 4', 'Planned 18', 'Later 4']);
+  await expect(owner.getByRole('group', { name: 'Show' }).getByRole('button')).toHaveText(['All 26', 'Connected 0', 'Built 5', 'Planned 17', 'Later 4']);
 
   // Connect iCal URL: the dialog opens on the add form.
   await owner.getByRole('button', { name: 'Connect iCal URL' }).click();
