@@ -154,12 +154,29 @@ export function withinBounds(e: ScheduleEntry, now: Date, clockTrusted = true): 
   return !(e.startsAt !== undefined && ms < Date.parse(e.startsAt)) && !(e.endsAt !== undefined && ms >= Date.parse(e.endsAt));
 }
 
-/** The entry that plays at `now`: highest priority, then the more specific target, then the first by id. Undefined: the default playlist. */
+/** An entry's `startsAt` for the tie-break: one without counts as earliest. */
+const startOf = (e: ScheduleEntry) => (e.startsAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(e.startsAt));
+
+/**
+ * The entry that plays at `now` (`ScheduleEntry`'s rule): highest priority, then the more specific
+ * target, then the later `startsAt`, then the later in `schedule` (publish order), so of two
+ * takeovers the newest wins. Undefined: the default playlist.
+ */
 function winningEntry(manifest: ScreenManifest, now: Date, clockTrusted: boolean): ScheduleEntry | undefined {
   const t = localTime(now, manifest.screen.timezone);
-  return manifest.schedule
-    .filter((e) => withinBounds(e, now, clockTrusted) && entryApplies(e, t) && manifest.playlists[e.playlist])
-    .sort((a, b) => b.priority - a.priority || LEVEL[b.target] - LEVEL[a.target] || a.id.localeCompare(b.id))[0];
+  let best: { e: ScheduleEntry; at: number } | undefined;
+  for (const e of manifest.schedule) {
+    if (!withinBounds(e, now, clockTrusted) || !entryApplies(e, t) || !manifest.playlists[e.playlist]) continue;
+    const at = startOf(e);
+    // At least as good: an entry later in the list wins a full tie.
+    if (
+      !best ||
+      e.priority > best.e.priority ||
+      (e.priority === best.e.priority && (LEVEL[e.target] > LEVEL[best.e.target] || (LEVEL[e.target] === LEVEL[best.e.target] && at >= best.at)))
+    )
+      best = { e, at };
+  }
+  return best?.e;
 }
 
 /** Highest priority wins; on a tie the more specific target wins; otherwise the default playlist. */

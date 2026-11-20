@@ -44,7 +44,7 @@ SignForge 2 is a ground-up rebuild of a digital signage platform: a CMS, a playe
 ### Schedule rules
 
 - Times are local to each screen.
-- When schedules overlap, higher priority wins. On a tie the more specific target wins: screen, then group, then org.
+- When schedules overlap, higher priority wins. On a tie the more specific target wins: screen, then group, then org; then the later `startsAt`, so the newest of two takeovers wins; then the entry published later (a manifest lists its entries in publish order).
 - Every org has a default playlist, so a screen is never blank.
 - An instant send is a takeover: a top-priority schedule with an expiry that falls back automatically.
 

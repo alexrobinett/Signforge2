@@ -123,12 +123,29 @@ describe('takeovers (M3-19)', () => {
     const m = manifest({ schedule: [first, second, ...manifest().schedule] });
     expect(activeTakeover(m, at('07:30'))).toBeUndefined();
     expect(activeTakeover(m, at('12:00'))).toBe('t1');
-    // Both run from 12:15: of equal priority and target, the first by id wins, as resolvePlaylist picks.
-    expect(activeTakeover(m, at('12:20'))).toBe('t1');
-    expect(resolvePlaylist(m, at('12:20')).id).toBe('takeover');
+    // Both run from 12:15: of equal priority and target, the one that started later wins, as resolvePlaylist picks.
+    expect(activeTakeover(m, at('12:20'))).toBe('t2');
+    expect(resolvePlaylist(m, at('12:20')).id).toBe('breakfast');
     expect(activeTakeover(m, at('12:30'))).toBe('t2');
     expect(activeTakeover(m, at('13:00'))).toBeUndefined();
     expect(activeTakeover(m, at('12:00'), { clockTrusted: false })).toBeUndefined();
+  });
+
+  it('of two takeovers on one target, the newer wins: the later start, then the later published, never the id', () => {
+    // A correction to a running takeover, started later and ending sooner: it wins until it ends, then the first is back.
+    const correction = { ...second, id: 't0', startsAt: '2026-11-16T17:10:00Z', endsAt: '2026-11-16T17:20:00Z' };
+    const m = manifest({ schedule: [first, correction, ...manifest().schedule] });
+    expect(activeTakeover(m, at('12:15'))).toBe('t0');
+    expect(activeTakeover(m, at('12:25'))).toBe('t1');
+    // The same start: the one published later, later in the list, whatever the ids.
+    const same = { ...correction, startsAt: first.startsAt };
+    expect(activeTakeover(manifest({ schedule: [first, same] }), at('12:15'))).toBe('t0');
+    expect(activeTakeover(manifest({ schedule: [same, first] }), at('12:15'))).toBe('t1');
+    // Entries without bounds tie the same way: the later published plays.
+    const a = { id: 'b', playlist: 'takeover', priority: 5, target: 'org' as const };
+    const b = { id: 'a', playlist: 'breakfast', priority: 5, target: 'org' as const };
+    expect(resolvePlaylist(manifest({ schedule: [a, b] }), at('12:15')).id).toBe('breakfast');
+    expect(resolvePlaylist(manifest({ schedule: [b, a] }), at('12:15')).id).toBe('takeover');
   });
 
   it('gives the next instant a takeover starts or ends, so a screen checks again then, offline too', () => {
