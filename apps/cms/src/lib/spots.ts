@@ -176,8 +176,8 @@ const stageProbe = (preview: SpotPreview['preview'], timezone: string | null, or
 
 /**
  * The draft compiled for the stage: the probe screen of this orientation playing just this spot,
- * with the brand kit and template `preview` holds. Problems are why a publish would refuse it; a
- * manifest can come with them (an image still being checked plays here but does not publish).
+ * with the brand kit and template `preview` holds; or why a publish would refuse it. `refused`:
+ * it cannot be a spot at all (an image still being checked), so no field of it is at fault.
  */
 export function compilePreview(opts: {
   spot: SpotView;
@@ -188,7 +188,7 @@ export function compilePreview(opts: {
   assets: AssetView[];
   orientation: Orientation;
   live: boolean;
-}): Promise<{ manifest?: ScreenManifest; problems: string[] }> {
+}): Promise<{ manifest?: ScreenManifest; problems: string[]; refused: boolean }> {
   const { preview, orientation } = opts;
   return compileProbe(
     stageProbe(preview, opts.timezone, orientation, [editedDraft(opts.spot, opts.draft, opts.live)]),

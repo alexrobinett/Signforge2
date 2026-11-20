@@ -174,11 +174,15 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     const draft = kitEditing(get().brandKits, kit) ?? kitDraftOf(kit);
     const themed = withDraftKit({ preview: preview.preview, kitId: kit.id, draft, assets, orientation: 'landscape' });
     if (!themed) return;
+    if ('problems' in themed) {
+      kits((k) => ({ ...k, previews: { ...k.previews, [t.spotId]: { playing: false, error: themed.problems.join('; ') } } }));
+      return;
+    }
     const result = await compilePreview({
       spot,
       draft: draftOf(spot),
       versions: versionsById(templates),
-      preview: themed,
+      preview: themed.preview,
       timezone: preview.timezone,
       assets,
       orientation: 'landscape',

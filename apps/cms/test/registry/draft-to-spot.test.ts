@@ -10,6 +10,7 @@ import stressGolden from '@signforge/cli/golden/stress.json';
 import { previewInput, probeDrafts, type OrgGraph } from '@signforge/tools';
 import { describe, expect, it } from 'vitest';
 import type { AssetView } from '~/lib/assets';
+import { withDraftKit } from '~/lib/brand-kits';
 import { compilePlaylistPreview, compilePreview, draftOf, type SpotView, type TemplateVersionView } from '~/lib/spots';
 
 const golden: ScreenManifest = JSON.parse(JSON.stringify(stressGolden));
@@ -123,7 +124,7 @@ function views(graph: OrgGraph, draft: SpotDraft, orientation: Orientation) {
 /** What the stage plays for a draft, and why it would not publish. */
 async function stage(graph: OrgGraph, draft: SpotDraft, orientation: Orientation = 'landscape') {
   const v = views(graph, draft, orientation);
-  const { manifest, problems } = await compilePreview({
+  const { manifest, problems, refused } = await compilePreview({
     spot: v.spot,
     draft: draftOf(v.spot),
     versions: v.versions,
@@ -133,7 +134,7 @@ async function stage(graph: OrgGraph, draft: SpotDraft, orientation: Orientation
     orientation,
     live: true,
   });
-  return { manifest: manifest && { ...manifest, generatedAt: opts.now.toISOString() }, problems };
+  return { manifest: manifest && { ...manifest, generatedAt: opts.now.toISOString() }, problems, refused };
 }
 
 /** What a publish's check of the draft compiles, and why it would hold the draft back. */
@@ -158,14 +159,60 @@ describe('the stage and the publish', () => {
     for (const d of drafts) expect((await stage(stressOrg(), d)).manifest!.spots[d.id], d.id).toEqual(golden.spots[d.id]);
   });
 
-  it('refuse an asset still being checked for the same reason; the stage still plays it, and says so', async () => {
+  it("refuse an asset still being checked for the same reason, an image spot's or a template's image field, and neither plays it", async () => {
     const graph = stressOrg({ status: 'pending' });
-    const d = draftOfKind('image');
-    const published = await publish(graph, d);
-    const staged = await stage(graph, d);
-    expect(published.problems).toEqual([`spot ${d.id}: asset ${d.assetId} is not verified`]);
-    expect(staged.problems).toEqual(published.problems);
-    expect(staged.manifest!.spots[d.id]).toEqual(golden.spots[d.id]);
+    const image = draftOfKind('image');
+    expect(await stage(graph, image)).toEqual({ problems: [`spot ${image.id}: asset ${image.assetId} is still being checked`], refused: true });
+    expect(await publish(graph, image)).toEqual(await stage(graph, image));
+    const field = drafts.find((d) => Object.keys(d.assets ?? {}).length)!;
+    expect((await stage(graph, field)).problems).toEqual(Object.values(field.assets!).map((id) => `spot ${field.id}: asset ${id} is still being checked`));
+    expect(await publish(graph, field)).toEqual(await stage(graph, field));
+  });
+
+  it('refuse a spot on a template version not approved yet, in the words a publish holds it back with', async () => {
+    const graph = stressOrg();
+    const d = draftOfKind('template');
+    const v = graph.templateVersions.get(d.templateVersionId!)!;
+    graph.templateVersions.set(d.templateVersionId!, { ...v, status: 'draft' });
+    const want = { problems: [`spot ${d.id}: template ${v.key} is draft; only an approved version can be published`], refused: true };
+    expect(await stage(graph, d)).toEqual(want);
+    expect(await publish(graph, d)).toEqual(want);
+  });
+
+  it("refuse a brand kit whose logo is still being checked: the stage's draft kit and the publish's kit, for the same reason", async () => {
+    const graph = stressOrg();
+    const logo = [...graph.assets.values()].find((a) => a.asset.kind === 'image')!;
+    graph.assets.set(logo.asset.id, { ...logo, asset: { ...logo.asset, status: 'pending' } });
+    const row = {
+      id: 'bk_north',
+      orgId: 'org',
+      name: 'North',
+      colorsJson: JSON.stringify({ primary: '#123456', accent: '#ff8800', background: '#ffffff', surface: '#f4f4f4', text: '#111111', muted: '#666666' }),
+      shape: 'soft' as const,
+      displayFontId: null,
+      bodyFontId: null,
+      logoOnDarkAssetId: logo.asset.id,
+      logoOnLightAssetId: null,
+      rowVersion: 1,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    graph.brandKits.set(row.id, row);
+    graph.brandAssignments.push({ orgId: 'org', brandKitId: row.id, target: 'org', groupId: null, screenId: null, updatedAt: 0 });
+    expect(previewInput(graph, 'landscape', {}).problems).toEqual([`brand kit ${row.id}: logo asset ${logo.asset.id} is still being checked`]);
+    const v = views(graph, draftOfKind('template'), 'landscape');
+    const draft = {
+      name: row.name,
+      colors: { ...JSON.parse(row.colorsJson), onPrimary: null, onAccent: null },
+      shape: row.shape,
+      displayFontId: null,
+      bodyFontId: null,
+      logoOnDarkAssetId: logo.asset.id,
+      logoOnLightAssetId: null,
+    };
+    expect(withDraftKit({ preview: v.preview.preview, kitId: row.id, draft, assets: v.assets, orientation: 'landscape' })).toEqual({
+      problems: [`logo asset ${logo.asset.id} is still being checked`],
+    });
   });
 
   it('refuse a rejected asset alike, and neither plays it', async () => {
@@ -178,8 +225,8 @@ describe('the stage and the publish', () => {
   it('refuse an image or video spot with no asset alike, with nothing to play', async () => {
     for (const kind of ['image', 'video'] as const) {
       const d = { ...draftOfKind(kind), assetId: null };
-      expect(await stage(stressOrg(), d)).toEqual({ problems: [`spot ${d.id}: no asset`] });
-      expect(await publish(stressOrg(), d)).toEqual({ problems: [`spot ${d.id}: no asset`] });
+      expect(await stage(stressOrg(), d)).toEqual({ problems: [`spot ${d.id}: no asset`], refused: true });
+      expect(await publish(stressOrg(), d)).toEqual({ problems: [`spot ${d.id}: no asset`], refused: true });
     }
   });
 

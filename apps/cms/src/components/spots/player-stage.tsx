@@ -89,7 +89,7 @@ export function PlayerStage({
   const measure = useAppStore((s) => s.measureStage);
   const box = useAppStore((s) => s.spotEditor.stageBox);
   const holding = useAppStore((s) => s.spotEditor.holding);
-  const unpublishable = useAppStore((s) => s.spotEditor.unpublishable);
+  const refusals = useAppStore((s) => s.spotEditor.refusals);
   const stageError = useAppStore((s) => s.spotEditor.stageError);
   const playing = useAppStore((s) => s.spotEditor.playing);
   // The player says once that it is listening; a frame in the server's HTML could say it before the store hears.
@@ -207,21 +207,20 @@ export function PlayerStage({
         </div>
       </div>
       <p className="flex flex-wrap justify-between gap-3 text-[13px] text-[#c8c8c8]">
-        {holding ? (
-          <span className="inline-flex items-center gap-2">
-            <TriangleAlertIcon className="size-3.5 text-[#fdb022]" aria-hidden />
-            {playlistId !== undefined ? 'Holding the last frame the player could show.' : 'Holding the last valid frame until the marked field is fixed.'}
-          </span>
-        ) : unpublishable.length ? (
-          <span className="inline-flex items-center gap-2">
-            <TriangleAlertIcon className="size-3.5 text-[#fdb022]" aria-hidden />
-            Plays here, but will not publish yet:{' '}
-            {unpublishable.map((p) => (spotId && p.startsWith(`spot ${spotId}: `) ? p.slice(`spot ${spotId}: `.length) : p)).join('; ')}.
-          </span>
-        ) : stageError ? (
+        {/* The player's own error first: it is what the screen shows, whatever the draft. */}
+        {stageError ? (
           <span className="inline-flex items-center gap-2">
             <TriangleAlertIcon className="size-3.5 text-[#fdb022]" aria-hidden />
             The player could not show it: {stageError}
+          </span>
+        ) : holding ? (
+          <span className="inline-flex items-center gap-2">
+            <TriangleAlertIcon className="size-3.5 text-[#fdb022]" aria-hidden />
+            {playlistId !== undefined
+              ? 'Holding the last frame the player could show.'
+              : refusals.length
+                ? `Holding the last valid frame: ${refusals.join('; ')}.`
+                : 'Holding the last valid frame until the marked field is fixed.'}
           </span>
         ) : (
           <span>{playing ? 'Drawn by the player your screens run.' : 'Starting the player…'}</span>

@@ -160,7 +160,7 @@ describe('the stage (review of #97)', () => {
     expect(store.getState().spotEditor.stageError).toBe('what it needs did not load (get_spot_preview failed: 500)');
   });
 
-  it('plays an image still being checked, and says why it will not publish yet, as a publish would refuse it', async () => {
+  it('holds an image still being checked and says why, as a publish refuses it; it posts nothing the player cannot fetch', async () => {
     const queryClient = new QueryClient();
     let hear: (e: unknown) => void = () => {};
     vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
@@ -191,13 +191,14 @@ describe('the stage (review of #97)', () => {
       problems: [],
       timezone: 'Europe/London',
     });
-    let played: (m: { manifest: { spots: Record<string, unknown> } }) => void = () => {};
-    const posted = new Promise<{ manifest: { spots: Record<string, unknown> } }>((resolve) => (played = resolve));
-    const frame: Window = { postMessage: (m: never) => played(m) } as never;
+    const posted: unknown[] = [];
+    const frame: Window = { postMessage: (m: never) => posted.push(m) } as never;
+    const held = new Promise<void>((resolve) => store.subscribe((s) => s.spotEditor.holding && resolve()));
     store.getState().attachStage({ frame, orgId: ORG, spotId: image.id, orientation: 'landscape' });
     hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, type: 'listening' } });
-    expect((await posted).manifest.spots[image.id]).toMatchObject({ kind: 'image', file: sha });
-    expect(store.getState().spotEditor).toMatchObject({ holding: false, unpublishable: ['spot spt_img: asset ast_new is not verified'] });
+    await held;
+    expect(store.getState().spotEditor.refusals).toEqual(['asset ast_new is still being checked']);
+    expect(posted).toEqual([]);
   });
 });
 
