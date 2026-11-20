@@ -1,5 +1,5 @@
 import { expect, test, type Frame, type Page } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.44';
@@ -251,4 +251,17 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
     ).toBe(true);
     expect(opacities, `slot opacities during a scan: ${scan}`).toContain(1);
   }
+});
+
+test("the editor's fields and actions are disabled in the server's HTML, until the editor has hydrated (#136)", async () => {
+  // The editor hydrates after the page (body[data-hydrated]): a field changed in between was set
+  // back by React, and the old value autosaved.
+  const { playlist } = await tool(page, 'create_playlist', { name: 'Server loop', spotIds: [spots.Opening], idempotencyKey: `server-loop-${Date.now()}` });
+  const path = `/playlists/${playlist.id}`;
+  const names = ['Name', 'Remove Opening', 'Add spots', 'Play on every screen', 'Save draft', 'Delete', 'Publish'];
+  expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
+  // Rendered by the server, they are enabled once the editor has hydrated (Save draft waits for a change).
+  await page.goto(path);
+  await expect(page.getByLabel('Name', { exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
 });
