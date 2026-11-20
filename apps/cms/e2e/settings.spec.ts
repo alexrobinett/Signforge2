@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs } from './helpers';
 import { API_LOG } from './servers';
 
@@ -16,6 +16,21 @@ async function invitePathFor(email: string): Promise<string> {
     expect(path).toBeTruthy();
   }).toPass({ timeout: 10_000 });
   return path!;
+}
+
+/** Holds the first request to `path` until the test continues it; later ones go through, counted. */
+async function holdFirst(page: Page, path: string) {
+  let calls = 0;
+  let hold: (route: Route) => void = () => {};
+  const arrived = new Promise<Route>((resolve) => {
+    hold = resolve;
+  });
+  await page.route(`**${path}`, (route) => {
+    calls += 1;
+    if (calls === 1) hold(route);
+    else void route.continue();
+  });
+  return { arrived, calls: () => calls };
 }
 
 const settingsNav = (page: Page) => page.getByRole('navigation', { name: 'Settings' });
@@ -286,6 +301,83 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await shots(page, '47b-settings-notifications-rules-phone');
   await toTop(page.getByRole('region', { name: 'Recent deliveries' }));
   await shots(page, '47c-settings-notifications-log-phone');
+});
+
+test('a role select or an invitation button keeps keyboard focus while its change runs, and a second change meanwhile is ignored (#126)', async ({
+  page,
+  browser,
+}) => {
+  // A control disabled while its own action ran lost focus to the page (Chromium moves it to body),
+  // so the next Tab started from the top. Each answer is held until the test lets it go.
+  test.setTimeout(120_000);
+  const stamp = Date.now();
+  const editorEmail = `e2e-settings-focus-editor-${stamp}@example.com`;
+  const waitingEmail = `e2e-settings-focus-waiting-${stamp}@example.com`;
+  await signInAs(page, `e2e-settings-focus-owner-${stamp}@example.com`, '192.0.2.37');
+  await createOrg(page, 'Northside Market');
+  await page.goto('/settings/members');
+  await hydrated(page);
+  await page.getByLabel('Emails, separated by commas').fill(`${editorEmail}, ${waitingEmail}`);
+  await page.getByRole('button', { name: 'Send invites' }).click();
+  await expect(page.getByText('2 invites sent')).toBeVisible();
+  const invitee = await browser.newContext();
+  const joining = await invitee.newPage();
+  await signInAs(joining, editorEmail, '192.0.2.38');
+  await joining.goto(await invitePathFor(editorEmail));
+  await hydrated(joining);
+  await joining.getByRole('button', { name: 'Accept' }).click();
+  await expect(joining).toHaveURL(/\/$/);
+  await invitee.close();
+
+  // The role: Editor to Viewer. The select shows where it is going while it saves;
+  // a change meanwhile (to Owner) is ignored.
+  await page.reload();
+  await hydrated(page);
+  const role = page.getByRole('region', { name: 'People' }).getByLabel(new RegExp(`Role for ${editorEmail.split('@')[0]}`));
+  await expect(role).toHaveValue('editor');
+  const roleChange = await holdFirst(page, '/api/auth/organization/update-member-role');
+  // A native select's picker takes no keys in headless Chromium on macOS, so the choice is made on
+  // the focused select as the picker makes it.
+  await role.focus();
+  await role.selectOption('viewer');
+  const roleAnswer = await roleChange.arrived;
+  await expect(role).toBeFocused();
+  await expect(role).toHaveAttribute('aria-disabled', 'true');
+  await expect(role).toHaveValue('viewer');
+  // Playwright waits for a control that says it is disabled, so the second choice is made in the page.
+  await role.evaluate((select: HTMLSelectElement) => {
+    select.value = 'owner';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(role).toHaveValue('viewer');
+  await roleAnswer.continue();
+  await expect(page.getByText('Role changed')).toBeVisible();
+  await expect(role).not.toHaveAttribute('aria-disabled');
+  await expect(role).toBeFocused();
+  await expect(role).toHaveValue('viewer');
+  expect(roleChange.calls()).toBe(1);
+
+  // Resend, by keyboard: a second Enter while it runs sends nothing more.
+  const waiting = page.getByRole('region', { name: 'Waiting for a reply' }).getByRole('listitem').filter({ hasText: waitingEmail });
+  const resend = waiting.getByRole('button', { name: 'Resend' });
+  const resending = await holdFirst(page, '/api/auth/organization/invite-member');
+  await resend.focus();
+  await page.keyboard.press('Enter');
+  const resendAnswer = await resending.arrived;
+  await expect(resend).toBeFocused();
+  await expect(resend).toHaveAttribute('aria-disabled', 'true');
+  await expect(waiting.getByRole('button', { name: 'Revoke' })).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Enter');
+  await resendAnswer.continue();
+  await expect(page.getByText('Invite sent again')).toBeVisible();
+  await expect(resend).not.toHaveAttribute('aria-disabled');
+  await expect(resend).toBeFocused();
+  expect(resending.calls()).toBe(1);
+
+  await page.reload();
+  await hydrated(page);
+  await expect(role).toHaveValue('viewer');
+  await expect(waiting).toBeVisible();
 });
 
 test("settings fields that save or show at once, or hold a URL or an email, are disabled in the server's HTML, until the page has hydrated (#136)", async ({
