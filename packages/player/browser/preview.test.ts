@@ -197,6 +197,20 @@ describe('preview content source', () => {
     expect(blobRequests).toEqual([]);
   });
 
+  it('refuses a posted file whose bytes are not those of its hash', async () => {
+    const p = await openPreview(CMS);
+    await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'listening' });
+    await p.post(draft({ label: 'Real' }));
+    await p.until((s) => s.played >= 1);
+    await expect.poll(p.onScreen).toMatchObject({ label: 'Real' });
+    // The next draft names the same bundle, but posts other bytes under its hash.
+    const next = draft({ label: 'Forged' });
+    const [sha] = [...next.blobs.keys()];
+    await p.post({ ...next, blobs: new Map([[sha!, Buffer.from(h.templateHtml.replace('<body>', '<body>forged'))]]) });
+    await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'error', message: `file ${sha!.slice(0, 12)} is not the file of its hash` });
+    expect(await p.onScreen()).toMatchObject({ label: 'Real' });
+  });
+
   it('fetches the files it was not sent from the CMS blob route', async () => {
     const c = draft({ label: 'Saved draft', asset: Buffer.from('a saved image') });
     const p = await openPreview(CMS, c);

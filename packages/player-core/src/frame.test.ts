@@ -94,4 +94,12 @@ describe('containedFrames', () => {
       expect(policiesOf(wrapper)[0]!.match(/'sha256-/g), html).toHaveLength(1);
     }
   });
+
+  it('leaves a script in MathML, which never runs, and one in a select, where parsers differ, unarmed', () => {
+    for (const html of ['<math><script>"use strict";m()</script></math>', '<select><script>"use strict";s()</script></select>']) {
+      const { wrapper, template } = containedFrames(html);
+      expect(template, html).toBe(html);
+      expect(policiesOf(wrapper)[0]!.match(/'sha256-/g), html).toHaveLength(1);
+    }
+  });
 });
