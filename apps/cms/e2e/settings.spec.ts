@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, holdFirst, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool } from './helpers';
 import { API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -493,6 +493,60 @@ test("an edit typed while its save runs is kept: the next addresses to invite, a
   await hydrated(page);
   await expect(timezone).toHaveValue('Europe/London');
   await expect(retention).toHaveValue('100');
+});
+
+test('edits belong to the org they were made in: after a switch, a late answer for the old org changes nothing in the new one (re-check of #143, 2)', async ({
+  page,
+}) => {
+  // Display hours edited while a General save ran in one org followed a switch, and the next org
+  // saved them as its own.
+  test.setTimeout(90_000);
+  await signInAs(page, `e2e-settings-orgs-${Date.now()}@example.com`, '192.0.2.47');
+  await createOrg(page, 'Alpha Market');
+  const switcher = orgSwitcher(page);
+  await switcher.click();
+  await page.getByRole('menuitem', { name: 'Create organization' }).click();
+  const create = page.getByRole('dialog', { name: 'Create organization' });
+  await create.getByLabel('Organization name').fill('Beta Market');
+  await create.getByRole('button', { name: 'Create organization' }).click();
+  await expect(switcher).toContainText('Beta Market');
+  const switchTo = async (name: string) => {
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name }).click();
+    await expect(switcher).toContainText(name);
+  };
+  await switchTo('Alpha Market');
+
+  await page.goto('/settings/general');
+  await hydrated(page);
+  const retention = page.getByLabel('Keep entries for');
+  await expect(retention).toBeEnabled();
+  await retention.fill('100');
+  // Alpha's save is written; its answer is held on its way back.
+  const saving = await holdFirst(page, '/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const saveAnswer = await saving.arrived;
+  const written = await saveAnswer.fetch();
+  await page.getByText('Set hours', { exact: true }).click();
+  await expect(page.getByRole('radio', { name: 'Set hours' })).toBeChecked();
+
+  await switchTo('Beta Market');
+  await saveAnswer.fulfill({ response: written });
+  await expect(page.getByRole('radio', { name: 'Always on' })).toBeChecked();
+  await expect(retention).toHaveValue('365');
+  await retention.fill('200');
+  const sent = page.waitForRequest('**/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  expect(Object.keys((await sent).postDataJSON()).sort()).toEqual(['auditRetentionDays', 'ifVersion']);
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+  await page.reload();
+  await hydrated(page);
+  await expect(retention).toHaveValue('200');
+  await expect(page.getByRole('radio', { name: 'Always on' })).toBeChecked();
+  await switchTo('Alpha Market');
+  await expect(retention).toHaveValue('100');
+  await expect(page.getByRole('radio', { name: 'Always on' })).toBeChecked();
 });
 
 test('Keep it waits for a webhook removal that has been sent, and says so (review of #143, 5)', async ({ page }) => {
