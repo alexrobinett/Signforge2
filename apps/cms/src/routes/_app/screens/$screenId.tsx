@@ -32,7 +32,7 @@ import { ago, describeScreen, localClock } from '~/lib/screen-status';
 import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
-import { editorDraft } from '~/state/screens';
+import { editorDraft, hoursDraftOf, settingsDraftOf } from '~/state/screens';
 
 export const Route = createFileRoute('/_app/screens/$screenId')({
   loader: async ({ params }) => {
@@ -378,7 +378,7 @@ function CacheState({ screen }: { screen: ScreenView }) {
 
 function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupView[] }) {
   const id = useId();
-  const draft = useAppStore((s) => (s.screens.page.screenId === screen.id ? (s.screens.settingsDrafts[screen.id]?.edit ?? null) : null));
+  const draft = useAppStore((s) => settingsDraftOf(s.screens, screen.id));
   const saving = useAppStore((s) => editorDraft(s.screens)?.pending ?? false);
   const renameDraft = useAppStore((s) => s.renameDraft);
   const chooseDraftZone = useAppStore((s) => s.chooseDraftZone);
@@ -495,7 +495,7 @@ function SaveError() {
 }
 
 function HoursDialog({ screen }: { screen: ScreenView }) {
-  const hours = useAppStore((s) => s.screens.hoursDrafts[screen.id]?.edit ?? null);
+  const hours = useAppStore((s) => hoursDraftOf(s.screens, screen.id));
   const saving = useAppStore((s) => editorDraft(s.screens)?.pending ?? false);
   const editDraftHours = useAppStore((s) => s.editDraftHours);
   const saveDisplayHours = useAppStore((s) => s.saveDisplayHours);
@@ -504,7 +504,7 @@ function HoursDialog({ screen }: { screen: ScreenView }) {
 
   function save(e: SubmitEvent) {
     e.preventDefault();
-    if (ok) void saveDisplayHours(screen.id);
+    if (ok) void saveDisplayHours(screen);
   }
 
   return (

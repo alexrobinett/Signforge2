@@ -21,7 +21,8 @@ const groups: GroupView[] = [];
 
 /** Each tool call, and the answers to give them in turn: a body, or `null` for a request that gets no answer. */
 let calls: { name: string; input: Record<string, unknown> }[] = [];
-let replies: ({ status: number; body: unknown } | null)[] = [];
+let replies: (Reply | null | Promise<Reply | null>)[] = [];
+type Reply = { status: number; body: unknown };
 const router = { invalidate: vi.fn(async () => {}), state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }] } };
 
 function screensStore() {
@@ -34,7 +35,7 @@ beforeEach(() => {
   router.invalidate.mockClear();
   vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
     calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
-    const reply = replies.length ? replies.shift() : { status: 200, body: {} };
+    const reply = await (replies.length ? replies.shift() : { status: 200, body: {} });
     if (!reply) throw new TypeError('Failed to fetch');
     return new Response(JSON.stringify(reply.body), { status: reply.status });
   });
@@ -68,13 +69,32 @@ describe('the settings editor (versioned draft)', () => {
     const hours = { weekly: [{ days: [1], from: '08:00', to: '18:00' }] };
     store.getState().editDraftHours(hours);
     replies.push({ status: 409, body: { error: 'conflict', message: 'stale', details: { version: 4 } } });
-    await store.getState().saveDisplayHours(screen.id);
-    expect(store.getState().screens.hoursDrafts.scr_1).toMatchObject({ stale: true, edit: hours, error: 'This changed since you opened it.' });
-    await store.getState().saveDisplayHours(screen.id);
+    await store.getState().saveDisplayHours(screen);
+    expect(editorDraft(store.getState().screens)).toMatchObject({ stale: true, edit: { hours }, error: 'This changed since you opened it.' });
+    await store.getState().saveDisplayHours(screen);
     expect(calls).toHaveLength(1);
 
     await store.getState().reloadScreenEditor();
-    expect(store.getState().screens.hoursDrafts).toEqual({});
+    expect(store.getState().screens.drafts).toEqual({});
     expect(store.getState().screens.page.notice?.text).toMatch(/^Reloaded/);
+  });
+
+  it('the settings and hours drafts are of one screen: a save of one waits for the other, and builds on the version it made (review of #153)', async () => {
+    let answer: (r: Reply) => void = () => {};
+    const store = screensStore();
+    store.getState().openScreenSettings(ORG, screen, []);
+    store.getState().renameDraft('Front lobby');
+    replies.push(new Promise<Reply>((resolve) => (answer = resolve)));
+    const renaming = store.getState().saveScreenSettings(screen, groups);
+    // Closed while it saves, and the hours opened and saved.
+    store.getState().closeScreenEditor();
+    store.getState().openDisplayHours(ORG, screen);
+    store.getState().editDraftHours(null);
+    const hours = store.getState().saveDisplayHours(screen);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(calls.map((c) => c.name)).toEqual(['rename_screen']);
+    answer({ status: 200, body: { screen: { ...screen, name: 'Front lobby', version: 4 } } });
+    await Promise.all([renaming, hours]);
+    expect(calls[1]).toMatchObject({ name: 'update_screen_settings', input: { displayHours: null, ifVersion: 4 } });
   });
 });

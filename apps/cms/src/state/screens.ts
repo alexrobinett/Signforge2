@@ -53,12 +53,14 @@ interface ScreenPageState {
   revoking: boolean;
 }
 
+/** What an editor on a screen's page edits: its settings, or its display hours. Both are drafts of the screen. */
+type ScreenEdit = { kind: 'settings'; settings: SettingsDraft } | { kind: 'hours'; hours: DisplayHours | null };
+
 interface ScreensState {
   pairing: PairingDraft;
   page: ScreenPageState;
-  /** The settings editor's draft, and the display hours editor's, by screen id. */
-  settingsDrafts: Drafts<SettingsDraft>;
-  hoursDrafts: Drafts<DisplayHours | null>;
+  /** The editors' drafts, by `editorKey`: one record, the screen, so their saves take turns and move each other's version. */
+  drafts: Drafts<ScreenEdit>;
 }
 
 /** A command or change sent from a screen's page, with what to say when it worked. */
@@ -92,7 +94,7 @@ export interface ScreensSlice {
   editDraftHours: (hours: DisplayHours | null) => void;
   /** Saves the settings draft: name, time zone, orientation, groups and a new group, each with its own tool. */
   saveScreenSettings: (screen: ScreenView, groups: GroupView[]) => Promise<void>;
-  saveDisplayHours: (screenId: string) => Promise<void>;
+  saveDisplayHours: (screen: ScreenView) => Promise<void>;
   /** After a refused save: reads the screen again and closes the editor, to be opened on what is there now. */
   reloadScreenEditor: () => Promise<void>;
   askToRevoke: (open: boolean) => void;
@@ -120,12 +122,26 @@ const newPage = (): ScreenPageState => ({
   revoking: false,
 });
 
-const initialScreens: ScreensState = { pairing: newPairing(), page: newPage(), settingsDrafts: {}, hoursDrafts: {} };
+const initialScreens: ScreensState = { pairing: newPairing(), page: newPage(), drafts: {} };
+
+/** Where an editor's draft for a screen is kept. */
+const editorKey = (editor: 'settings' | 'hours', screenId: string) => `${editor}:${screenId}`;
 
 /** The draft of the editor open on the page, if one is: what its Save and its error show. */
-export function editorDraft({ page, settingsDrafts, hoursDrafts }: ScreensState) {
-  if (page.screenId === null) return undefined;
-  return page.editing === 'settings' ? settingsDrafts[page.screenId] : page.editing === 'hours' ? hoursDrafts[page.screenId] : undefined;
+export function editorDraft({ page, drafts }: ScreensState) {
+  return page.screenId === null || page.editing === null ? undefined : drafts[editorKey(page.editing, page.screenId)];
+}
+
+/** The settings editor's fields for `screenId`, if it is open there. */
+export function settingsDraftOf(s: ScreensState, screenId: string): SettingsDraft | null {
+  const edit = s.page.screenId === screenId ? s.drafts[editorKey('settings', screenId)]?.edit : undefined;
+  return edit?.kind === 'settings' ? edit.settings : null;
+}
+
+/** The display hours editor's hours for `screenId`. */
+export function hoursDraftOf(s: ScreensState, screenId: string): DisplayHours | null {
+  const edit = s.drafts[editorKey('hours', screenId)]?.edit;
+  return edit?.kind === 'hours' ? edit.hours : null;
 }
 
 const toggled = (ids: string[], id: string, member: boolean) => (member ? [...new Set([...ids, id])] : ids.filter((x) => x !== id));
@@ -134,12 +150,20 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
   const pairing = (change: (p: PairingDraft) => PairingDraft) => set((s) => ({ screens: { ...s.screens, pairing: change(s.screens.pairing) } }));
   const page = (change: (p: ScreenPageState) => ScreenPageState) => set((s) => ({ screens: { ...s.screens, page: change(s.screens.page) } }));
   const screens = (change: (s: ScreensState) => ScreensState) => set((s) => ({ screens: change(s.screens) }));
-  const common = { makeId: () => crypto.randomUUID(), currentOrg: () => orgOnScreen(router), clock: realClock };
 
-  const settingsDrafts = createVersionedDrafts<SettingsDraft, { screen: ScreenView; groups: GroupView[] }>({
-    ...common,
-    state: { read: () => get().screens.settingsDrafts, write: (change) => screens((s) => ({ ...s, settingsDrafts: change(s.settingsDrafts) })) },
-    async save({ key: screenId, draft: { edit: d, version, idempotencyKey }, context: { screen, groups }, moved }) {
+  const drafts = createVersionedDrafts<ScreenEdit, { screen: ScreenView; groups: GroupView[] }>({
+    makeId: () => crypto.randomUUID(),
+    currentOrg: () => orgOnScreen(router),
+    clock: realClock,
+    state: { read: () => get().screens.drafts, write: (change) => screens((s) => ({ ...s, drafts: change(s.drafts) })) },
+    async save({ draft: { edit, version, idempotencyKey }, context: { screen, groups }, moved }) {
+      const screenId = screen.id;
+      if (edit.kind === 'hours') {
+        const saved = versionOf(await callTool('update_screen_settings', { screenId, displayHours: edit.hours, ifVersion: version }), 'screen');
+        await router.invalidate();
+        return { version: saved };
+      }
+      const d = edit.settings;
       // Each change carries the version the last one left, so only someone else's change is refused;
       // a retry after a later step failed starts from there.
       let ifVersion = version;
@@ -161,19 +185,17 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
     },
   });
 
-  const hoursDrafts = createVersionedDrafts<DisplayHours | null>({
-    ...common,
-    state: { read: () => get().screens.hoursDrafts, write: (change) => screens((s) => ({ ...s, hoursDrafts: change(s.hoursDrafts) })) },
-    async save({ key: screenId, draft: { edit: displayHours, version } }) {
-      const saved = versionOf(await callTool('update_screen_settings', { screenId, displayHours, ifVersion: version }), 'screen');
-      await router.invalidate();
-      return { version: saved };
-    },
-  });
-
   /** The screen whose page the editors are on. */
   const editing = () => get().screens.page.screenId ?? '';
-  const draft = (change: (d: SettingsDraft) => SettingsDraft) => settingsDrafts.update(editing(), change);
+  const draft = (change: (d: SettingsDraft) => SettingsDraft) =>
+    drafts.update(editorKey('settings', editing()), (e) => (e.kind === 'settings' ? { ...e, settings: change(e.settings) } : e));
+
+  /** Saves an editor's draft; once saved, its editor closes, unless another has opened since. */
+  async function saveEditor(editor: 'settings' | 'hours', screen: ScreenView, groups: GroupView[]) {
+    const key = editorKey(editor, screen.id);
+    const saved = await drafts.save(key, { screen, groups });
+    if (saved?.status === 'saved' && get().screens.drafts[key]?.id === saved.id) get().closeScreenEditor();
+  }
 
   return {
     screens: initialScreens,
@@ -223,20 +245,20 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
 
     openScreenSettings(orgId, screen, groupIds) {
       page((p) => ({ ...p, screenId: screen.id, editing: 'settings' }));
-      settingsDrafts.open(screen.id, {
+      drafts.open(editorKey('settings', screen.id), {
         orgId,
         record: screen.id,
         version: screen.version,
-        edit: { name: screen.name, timezone: screen.timezone, orientation: screen.orientation, groupIds, newGroup: '' },
+        edit: { kind: 'settings', settings: { name: screen.name, timezone: screen.timezone, orientation: screen.orientation, groupIds, newGroup: '' } },
       });
     },
     openDisplayHours(orgId, screen) {
       page((p) => ({ ...p, screenId: screen.id, editing: 'hours' }));
-      hoursDrafts.open(screen.id, { orgId, record: screen.id, version: screen.version, edit: screen.displayHours });
+      drafts.open(editorKey('hours', screen.id), { orgId, record: screen.id, version: screen.version, edit: { kind: 'hours', hours: screen.displayHours } });
     },
     closeScreenEditor() {
-      settingsDrafts.drop(editing());
-      hoursDrafts.drop(editing());
+      drafts.drop(editorKey('settings', editing()));
+      drafts.drop(editorKey('hours', editing()));
       page((p) => ({ ...p, editing: null }));
     },
     renameDraft: (name) => draft((d) => ({ ...d, name })),
@@ -244,17 +266,10 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
     chooseDraftZone: (timezone) => draft((d) => ({ ...d, timezone })),
     chooseDraftOrientation: (orientation) => draft((d) => ({ ...d, orientation })),
     toggleDraftGroup: (groupId, member) => draft((d) => ({ ...d, groupIds: toggled(d.groupIds, groupId, member) })),
-    editDraftHours: (hours) => hoursDrafts.update(editing(), () => hours),
+    editDraftHours: (hours) => drafts.update(editorKey('hours', editing()), (e) => (e.kind === 'hours' ? { ...e, hours } : e)),
 
-    async saveScreenSettings(screen, groups) {
-      await settingsDrafts.save(screen.id, { screen, groups });
-      if (get().screens.settingsDrafts[screen.id]?.status === 'saved') get().closeScreenEditor();
-    },
-
-    async saveDisplayHours(screenId) {
-      await hoursDrafts.save(screenId);
-      if (get().screens.hoursDrafts[screenId]?.status === 'saved') get().closeScreenEditor();
-    },
+    saveScreenSettings: (screen, groups) => saveEditor('settings', screen, groups),
+    saveDisplayHours: (screen) => saveEditor('hours', screen, []),
 
     async reloadScreenEditor() {
       await router.invalidate();

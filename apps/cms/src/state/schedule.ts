@@ -215,9 +215,10 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
     async saveEntry(orgId) {
       const d = get().schedule.entries[DIALOG];
       if (d?.orgId !== orgId) return;
-      await entries.save(DIALOG);
-      if (get().schedule.entries[DIALOG]?.status !== 'saved') return;
-      entries.drop(DIALOG);
+      // This draft's outcome, though its dialog may have been closed, or opened on another, meanwhile.
+      const saved = await entries.save(DIALOG);
+      if (saved?.status !== 'saved') return;
+      if (get().schedule.entries[DIALOG]?.id === saved.id) entries.drop(DIALOG);
       toast.success(d.record === null ? 'Scheduled, as a draft' : 'Saved, as a draft', { description: 'Publish to send it to screens.' });
     },
 
@@ -253,10 +254,10 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
 
     async startTakeover(orgId) {
       if (get().schedule.takeovers[DIALOG]?.orgId !== orgId) return;
-      await takeovers.save(DIALOG);
-      const made = get().schedule.takeovers[DIALOG];
+      // This takeover's outcome: one started is published, though its dialog was closed meanwhile.
+      const made = await takeovers.save(DIALOG);
       if (made?.status !== 'saved' || made.record === null) return;
-      takeovers.drop(DIALOG);
+      if (get().schedule.takeovers[DIALOG]?.id === made.id) takeovers.drop(DIALOG);
       await get().publishSchedule(orgId, [made.record]);
     },
 
