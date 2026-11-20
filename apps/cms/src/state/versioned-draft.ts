@@ -64,9 +64,15 @@ interface DraftStart<E> {
 }
 
 /** What a save's answer says: the record's version now, and the record a create made. */
-export interface Saved {
+export interface Saved<E> {
   version?: number;
   record?: string;
+  /**
+   * What of the edit still stands for the record at `version` once it is saved, when not all of it
+   * does: a field saved outside the record's version (the org's name, renamed through Better Auth)
+   * must not be shown, or sent again, as if the version vouched for it.
+   */
+  edit?: E;
 }
 
 /** One save to send: the draft as it stands, what the page gave with the save, and `moved` for a save made of several writes. */
@@ -98,7 +104,7 @@ export interface DraftsOptions<E, C> {
   /** The drafts in the store's state. */
   state: { read: () => Drafts<E>; write: (change: (drafts: Drafts<E>) => Drafts<E>) => void };
   /** Sends one save. A refusal is thrown, as `callTool` throws it. */
-  save: (call: SaveCall<E, C>) => Promise<Saved>;
+  save: (call: SaveCall<E, C>) => Promise<Saved<E>>;
   /** Makes an id: a draft's own, and its idempotency key. */
   makeId: () => string;
   /** The org the tab shows now, or undefined outside the app shell. */
@@ -119,7 +125,9 @@ export interface VersionedDrafts<E, C> {
   open: (key: string, start: DraftStart<E>) => void;
   /**
    * Changes the draft at `key`. With none in that org, or a saved one whose record has moved on
-   * from the version it saved (`start.version` is the version the page holds), it starts from `start`.
+   * from the version it saved, it starts from `start`. `start` is the record as the page holds it
+   * at this moment, read where the edit is made (the stores read their Query cache by id), never a
+   * copy kept from earlier: an older one would make a saved draft look moved on.
    */
   edit: (key: string, start: DraftStart<E>, change: (edit: E) => E) => void;
   /** Changes the draft at `key`, if there is one. */
@@ -181,13 +189,18 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
     gone: false,
   });
 
-  /** Every draft of `record` in `orgId` still on `from`, and the saved draft itself, goes to `to`. */
-  const advance = (key: string, orgId: string, record: string | null, from: number | null, to: number) =>
+  /**
+   * The saved draft `id` at `key`, and every draft of `record` in `orgId` at another key still on
+   * `from`, goes to `to`. A draft opened again at the same key (the editor closed and opened while
+   * it saved) edits the same fields from an older read: it stays, and its save conflicts rather
+   * than undoing this one.
+   */
+  const advance = (key: string, id: string, orgId: string, record: string | null, from: number | null, to: number) =>
     state.write((drafts) =>
       Object.fromEntries(
         Object.entries(drafts).map(([k, d]) => [
           k,
-          d.orgId === orgId && d.version === from && (k === key || (record !== null && d.record === record)) ? { ...d, version: to } : d,
+          d.orgId === orgId && d.version === from && (k === key ? d.id === id : record !== null && d.record === record) ? { ...d, version: to } : d,
         ]),
       ),
     );
@@ -212,7 +225,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
     let at = d.version;
     const moved = (version: number) => {
       if (!here()) return;
-      advance(key, orgId, d.record, at, version);
+      advance(key, id, orgId, d.record, at, version);
       at = version;
       flight.result = { ...flight.result, version };
     };
@@ -226,6 +239,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
       settle((x) => ({
         ...x,
         record: answer.record ?? x.record,
+        edit: x.edit === sent ? (answer.edit ?? x.edit) : x.edit,
         status: x.edit === sent ? 'saved' : flight.next ? 'saving' : 'unsaved',
         savedAt: clock.now(),
         idempotencyKey: options.makeId(),

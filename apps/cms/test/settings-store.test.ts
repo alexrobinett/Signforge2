@@ -371,3 +371,21 @@ describe('an action waiting on the server (re-check of #143, 3)', () => {
     expect(store.getState().settings.removingChannel).toBeNull();
   });
 });
+
+describe("the org's name, which the settings' version does not cover (re-check of #153, 1)", () => {
+  it("after a rename is saved, the page shows another owner's later rename, and the next General save does not rename it back", async () => {
+    auth.organization.update.mockResolvedValue(ok);
+    replies.push(saved(2), saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { name: 'Mine', auditRetentionDays: '100' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
+    expect(auth.organization.update).toHaveBeenCalledTimes(1);
+
+    // Another owner renames it "Theirs"; the page reads that, with the settings still at 2.
+    expect(editsIn(store.getState().settings, 'general', A, 2).name).toBeUndefined();
+    store.getState().editSettings(A, 'general', 2, { timezone: 'Europe/London' });
+    await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'Theirs' });
+    expect(auth.organization.update).toHaveBeenCalledTimes(1);
+    expect(lastCall()).toMatchObject({ name: 'update_org_settings', input: { timezone: 'Europe/London', ifVersion: 2 } });
+  });
+});

@@ -97,4 +97,22 @@ describe('the settings editor (versioned draft)', () => {
     await Promise.all([renaming, hours]);
     expect(calls[1]).toMatchObject({ name: 'update_screen_settings', input: { displayHours: null, ifVersion: 4 } });
   });
+
+  it('a settings dialog closed while it saves and opened again before the answer conflicts, rather than undoing that save (re-check of #153)', async () => {
+    let answer: (r: Reply) => void = () => {};
+    const store = screensStore();
+    store.getState().openScreenSettings(ORG, screen, []);
+    store.getState().renameDraft('Front lobby');
+    replies.push(new Promise<Reply>((resolve) => (answer = resolve)));
+    const renaming = store.getState().saveScreenSettings(screen, groups);
+    store.getState().closeScreenEditor();
+    // Opened again on the screen as the page read it before the rename.
+    store.getState().openScreenSettings(ORG, screen, []);
+    answer({ status: 200, body: { screen: { ...screen, name: 'Front lobby', version: 4 } } });
+    await renaming;
+    expect(editorDraft(store.getState().screens)?.version).toBe(3);
+    // The page has read the rename; the reopened form, saved as it is, would put the old name back.
+    await store.getState().saveScreenSettings({ ...screen, name: 'Front lobby', version: 4 } as never, groups);
+    expect(calls[1]).toMatchObject({ name: 'rename_screen', input: { name: 'Lobby', ifVersion: 3 } });
+  });
 });

@@ -40,7 +40,7 @@ interface Sent {
   draft: Draft<Edit>;
   context: string;
   moved: (version: number) => void;
-  answer: (saved: Saved) => void;
+  answer: (saved: Saved<Edit>) => void;
   refuse: (err: unknown) => void;
 }
 
@@ -55,7 +55,7 @@ function setup({ invalid, gone }: { invalid?: (d: Draft<Edit>) => boolean; gone?
   const module = createVersionedDrafts<Edit, string>({
     state: { read: () => drafts, write: (change) => (drafts = change(drafts)) },
     save: ({ key, draft, context, moved }) =>
-      new Promise<Saved>((resolve, reject) => sent.push({ key, draft, context, moved, answer: resolve, refuse: reject })),
+      new Promise<Saved<Edit>>((resolve, reject) => sent.push({ key, draft, context, moved, answer: resolve, refuse: reject })),
     makeId: () => `key_${++ids}`,
     currentOrg: () => org,
     clock,
@@ -232,6 +232,33 @@ describe('after a save', () => {
     void module.save('spt_1', '');
     await settle();
     expect(sent[2]!.draft).toMatchObject({ edit: { name: 'Theirs!' }, version: 7 });
+  });
+
+  it("keeps, once saved, only what the answer says still stands: a field outside the record's version is not shown or sent again (re-check of #153, 1)", async () => {
+    const { module, sent, draft } = setup();
+    module.edit('general', start('settings', 1), named('Renamed'));
+    void module.save('general', '');
+    await settle();
+    sent[0]!.answer({ version: 2, edit: { name: '' } });
+    await settle();
+    expect(shown(draft('general'), 2)).toEqual({ name: '' });
+    module.edit('general', start('settings', 2), (e) => ({ name: `${e.name}x` }));
+    expect(draft('general')?.edit).toEqual({ name: 'x' });
+  });
+
+  it('a draft opened again at the same key while the save is out keeps its older version, so its own save conflicts (re-check of #153)', async () => {
+    const { module, sent, draft } = setup();
+    module.open('settings:scr_1', start('scr_1', 3, 'Lobby'));
+    module.update('settings:scr_1', named('Front lobby'));
+    module.edit('hours:scr_1', start('scr_1', 3), named('hours'));
+    void module.save('settings:scr_1', '');
+    await settle();
+    module.open('settings:scr_1', start('scr_1', 3, 'Lobby'));
+    sent[0]!.answer({ version: 4 });
+    await settle();
+    expect(draft('settings:scr_1')?.version).toBe(3);
+    // Another editor's draft of the record, at another key, moves on.
+    expect(draft('hours:scr_1')?.version).toBe(4);
   });
 
   it('the next edit of a saved draft starts from the record as the page holds it now', async () => {

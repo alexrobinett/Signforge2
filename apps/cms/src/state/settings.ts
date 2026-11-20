@@ -209,7 +209,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         toast.success('Saved');
         await router.invalidate({ sync: true });
       }
-      return {};
+      // The name is not under the settings' version: once renamed, the page shows the org's name as read.
+      return { edit: fields };
     },
     makeId: () => crypto.randomUUID(),
     currentOrg: () => orgOnScreen(router),
