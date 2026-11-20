@@ -16,6 +16,7 @@ import { Route as AppAccountRouteImport } from './routes/_app/account'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppIntegrationsRouteImport } from './routes/_app/integrations'
+import { Route as AppPublishesRouteImport } from './routes/_app/publishes'
 import { Route as AppScheduleRouteImport } from './routes/_app/schedule'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation.$invitationId'
@@ -67,6 +68,11 @@ const AppAuditRoute = AppAuditRouteImport.update({
 const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPublishesRoute = AppPublishesRouteImport.update({
+  id: '/publishes',
+  path: '/publishes',
   getParentRoute: () => AppRoute,
 } as any)
 const AppScheduleRoute = AppScheduleRouteImport.update({
@@ -171,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/assets': typeof AppAssetsRoute
   '/audit': typeof AppAuditRoute
   '/integrations': typeof AppIntegrationsRoute
+  '/publishes': typeof AppPublishesRoute
   '/schedule': typeof AppScheduleRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
@@ -196,6 +203,7 @@ export interface FileRoutesByTo {
   '/assets': typeof AppAssetsRoute
   '/audit': typeof AppAuditRoute
   '/integrations': typeof AppIntegrationsRoute
+  '/publishes': typeof AppPublishesRoute
   '/schedule': typeof AppScheduleRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/api/$': typeof ApiSplatRoute
@@ -223,6 +231,7 @@ export interface FileRoutesById {
   '/_app/assets': typeof AppAssetsRoute
   '/_app/audit': typeof AppAuditRoute
   '/_app/integrations': typeof AppIntegrationsRoute
+  '/_app/publishes': typeof AppPublishesRoute
   '/_app/schedule': typeof AppScheduleRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
@@ -252,6 +261,7 @@ export interface FileRouteTypes {
     | '/assets'
     | '/audit'
     | '/integrations'
+    | '/publishes'
     | '/schedule'
     | '/settings'
     | '/accept-invitation/$invitationId'
@@ -277,6 +287,7 @@ export interface FileRouteTypes {
     | '/assets'
     | '/audit'
     | '/integrations'
+    | '/publishes'
     | '/schedule'
     | '/accept-invitation/$invitationId'
     | '/api/$'
@@ -303,6 +314,7 @@ export interface FileRouteTypes {
     | '/_app/assets'
     | '/_app/audit'
     | '/_app/integrations'
+    | '/_app/publishes'
     | '/_app/schedule'
     | '/_app/settings'
     | '/accept-invitation/$invitationId'
@@ -381,6 +393,13 @@ declare module '@tanstack/react-router' {
       path: '/integrations'
       fullPath: '/integrations'
       preLoaderRoute: typeof AppIntegrationsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/publishes': {
+      id: '/_app/publishes'
+      path: '/publishes'
+      fullPath: '/publishes'
+      preLoaderRoute: typeof AppPublishesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/schedule': {
@@ -539,6 +558,7 @@ interface AppRouteChildren {
   AppAssetsRoute: typeof AppAssetsRoute
   AppAuditRoute: typeof AppAuditRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
+  AppPublishesRoute: typeof AppPublishesRoute
   AppScheduleRoute: typeof AppScheduleRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
@@ -556,6 +576,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAssetsRoute: AppAssetsRoute,
   AppAuditRoute: AppAuditRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
+  AppPublishesRoute: AppPublishesRoute,
   AppScheduleRoute: AppScheduleRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,

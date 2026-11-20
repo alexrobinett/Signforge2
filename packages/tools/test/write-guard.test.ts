@@ -65,6 +65,7 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   dataSource: (o) => o.dataSource,
   alertDelivery: (o) => o.alertDelivery,
   connection: (o) => o.connection,
+  publish: (o) => o.publish,
   // An R2 multipart upload's id, not a row.
   upload: () => 'upload-id',
   // Catalogue ids, the same for every org.

@@ -29,7 +29,7 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await expect(page.getByRole('heading', { name: 'Lobby clock', level: 1 })).toBeVisible();
 
   const stage = page.getByRole('region', { name: 'Live preview' });
-  await expect(stage.getByRole('status')).toHaveText('Draft. Not on any screen.');
+  await expect(stage.getByRole('status')).toHaveText('The draft, as a screen would show it. Screens play what is published.');
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   await expect(stage.getByText('1920 × 1080 ·', { exact: false })).toBeVisible();
 

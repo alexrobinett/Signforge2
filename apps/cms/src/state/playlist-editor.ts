@@ -254,7 +254,8 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
         return;
       }
       const p = waiting();
-      if (!p) return;
+      // Nothing waiting: done once the save in flight, if any, is.
+      if (!p) return queue;
       editor((e) => ({ ...e, status: 'saving', saveError: null }));
       await enqueue(p);
     },

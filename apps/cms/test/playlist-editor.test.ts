@@ -23,6 +23,7 @@ const playlist = (id: string, version: number, spotIds: string[]): PlaylistView 
   transition: { type: 'cut' },
   spotIds,
   version,
+  isDefault: false,
   published: false,
   draftChanged: true,
   publishedAt: null,

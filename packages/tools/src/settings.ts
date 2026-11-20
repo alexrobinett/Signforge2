@@ -10,7 +10,7 @@ import { displayHours, ifVersion, locale, timezone, version } from './fields';
 import { UNREACHABLE_AFTER_MS } from './screen-state';
 import { defineTool } from './tool';
 
-/** The alerts there are. Only `screen_offline` is sent today (by email, to Slack and to the webhook); publishing (M3-18) and agents (Milestone 4) send the others. */
+/** The alerts there are. `screen_offline` and `publish_finished` are sent (by email, to Slack and to the webhook); agents (Milestone 4) send `agent_refused`. */
 const ALERT_KINDS = ['screen_offline', 'publish_finished', 'agent_refused'] as const;
 type AlertKind = (typeof ALERT_KINDS)[number];
 

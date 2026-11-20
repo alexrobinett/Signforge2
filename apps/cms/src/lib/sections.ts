@@ -7,12 +7,13 @@ import {
   MonitorIcon,
   PlugIcon,
   ScrollTextIcon,
+  SendIcon,
   SettingsIcon,
   type LucideIcon,
 } from 'lucide-react';
 
 export interface Section {
-  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/assets' | '/integrations' | '/audit' | '/settings';
+  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/publishes' | '/assets' | '/integrations' | '/audit' | '/settings';
   label: string;
   icon: LucideIcon;
   description: string;
@@ -55,6 +56,13 @@ export const SECTIONS: Section[] = [
     icon: CalendarClockIcon,
     description: 'Which playlist plays on which screens, and when.',
     empty: { title: 'Nothing scheduled', body: 'Schedule entries choose a playlist by screen, day and time of day.' },
+  },
+  {
+    to: '/publishes',
+    label: 'Publishes',
+    icon: SendIcon,
+    description: 'What went to screens, when and by whom, how each rollout stands, and rolling screens back.',
+    empty: { title: 'Nothing published yet', body: 'Publish a spot or a playlist from its editor, and its rollout to each screen shows here.' },
   },
   {
     to: '/assets',

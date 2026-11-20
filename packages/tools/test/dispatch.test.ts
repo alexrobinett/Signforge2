@@ -80,6 +80,7 @@ describe('the registry', () => {
       'get_data_source',
       'get_org_settings',
       'get_playlist',
+      'get_publish',
       'get_screen',
       'get_spot',
       'get_spot_preview',
@@ -94,10 +95,12 @@ describe('the registry', () => {
       'list_fonts',
       'list_groups',
       'list_playlists',
+      'list_publishes',
       'list_screen_status',
       'list_screens',
       'list_spots',
       'list_templates',
+      'publish',
       'publish_manifest_to_screen',
       'read_table',
       'register_template_version',
@@ -109,7 +112,9 @@ describe('the registry', () => {
       'restart_screen',
       'retry_alert_delivery',
       'revoke_screen_credential',
+      'roll_back_publish',
       'set_default_brand_kit',
+      'set_default_playlist',
       'set_display_override',
       'set_group_members',
       'set_slack_alert_channel',
@@ -207,6 +212,7 @@ describe('roles and scopes', () => {
       'get_data_source',
       'get_org_settings',
       'get_playlist',
+      'get_publish',
       'get_screen',
       'get_spot',
       'get_spot_preview',
@@ -220,6 +226,7 @@ describe('roles and scopes', () => {
       'list_fonts',
       'list_groups',
       'list_playlists',
+      'list_publishes',
       'list_screen_status',
       'list_screens',
       'list_spots',
@@ -571,6 +578,7 @@ describe('screen notices', () => {
     const told: unknown[] = [];
     const screens: ScreenNotifier = {
       manifest: async (screenId, manifestId) => void told.push({ manifest: { screenId, manifestId } }),
+      manifests: async (changes) => void told.push({ manifests: changes }),
       revoked: async (screenId, credentialId) => void told.push({ revoked: { screenId, credentialId } }),
       command: async (screenId, command) => void told.push({ command: { screenId, command } }),
     };
@@ -603,7 +611,12 @@ describe('screen notices', () => {
   });
 
   it('do not fail a committed change when the screen cannot be told', async () => {
-    const screens: ScreenNotifier = { manifest: async () => {}, command: async () => {}, revoked: async () => Promise.reject(new Error('object unreachable')) };
+    const screens: ScreenNotifier = {
+      manifest: async () => {},
+      manifests: async () => {},
+      command: async () => {},
+      revoked: async () => Promise.reject(new Error('object unreachable')),
+    };
     const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '7'.repeat(64) });
     const r = await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
     expect(r.ok).toBe(true);

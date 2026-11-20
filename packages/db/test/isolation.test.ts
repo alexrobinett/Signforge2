@@ -56,6 +56,7 @@ describe("a call made for org B with org A's ids", () => {
       ['scheduleEntries.get', () => b.scheduleEntries.get(a.scheduleEntry)],
       ['publishes.get', () => b.publishes.get(a.publish)],
       ['publishes.screens', () => b.publishes.screens(a.publish)],
+      ['publishes.rollout', () => b.publishes.rollout(a.publish)],
       ['dataSources.get', () => b.dataSources.get(a.dataSource)],
       ['dataSources.snapshot', () => b.dataSources.snapshot(a.dataSource)],
       ['dataSources.usingConnection', () => b.dataSources.usingConnection(a.connection)],
@@ -69,6 +70,10 @@ describe("a call made for org B with org A's ids", () => {
       const got = await read();
       expect(got === undefined || (Array.isArray(got) && got.length === 0), `${name} returned ${JSON.stringify(got)}`).toBe(true);
     }
+  });
+
+  it("reads only org B's publishes for a screen's manifest as of a revision", async () => {
+    expect((await s.b.scope.publishes.asOf(Number.MAX_SAFE_INTEGER)).map((r) => r.screenId)).toEqual([s.b.screen]);
   });
 
   it("pages only org B's screens for the fleet poll", async () => {
@@ -91,6 +96,7 @@ describe("a call made for org B with org A's ids", () => {
       playlists: await b.playlists.list(),
       scheduleEntries: await b.scheduleEntries.list(),
       publishes: await b.publishes.list(),
+      publishHistory: await b.publishes.history({ limit: 200 }),
       dataSources: await b.dataSources.list(),
       connections: await b.connections.list(),
       auditLog: await b.auditLog.list(),
@@ -288,7 +294,7 @@ describe('ids', () => {
       await b.screenGroups.insert({ id: s.a.group, name: 'x' } as never),
       await b.screens.credentials.insert({ id: s.a.credential, screenId: s.b.screen, secretHash: '1'.repeat(64) } as never),
       await b.assets.insert({ id: s.a.asset, kind: 'image', name: 'x', sha256: '2'.repeat(64), type: 'image/png', size: 1 } as never),
-      await b.publishes.insert({ id: s.a.publish, status: 'published', actorKind: 'user', actorId: 'u' } as never),
+      await b.publishes.insert({ id: s.a.publish, status: 'published', actorKind: 'user', actorId: 'u', revision: 9 } as never),
       await b.templates.insert({ id: s.a.template, key: 'chosen', name: 'x' } as never),
       b.screens.stage.insert({ id: taken, name: 'y', timezone: 'UTC', orientation: 'landscape' } as never).row,
     ];

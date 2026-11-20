@@ -13,6 +13,8 @@ export interface PlaylistView {
   transition: Transition;
   spotIds: string[];
   version: number;
+  /** The default playlist: every screen plays it when no schedule entry says otherwise. */
+  isDefault: boolean;
   published: boolean;
   draftChanged: boolean;
   publishedAt: number | null;

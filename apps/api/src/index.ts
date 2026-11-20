@@ -3,6 +3,7 @@
  * on another's tree: `/api` for CMS users (session cookie), `/v1/device` for screens (bearer
  * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. `/admin` takes
  * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
+ * A queue consumer tells the screens a publish switched (src/publish.ts).
  * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
  * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
  * keys, audit rows and alert deliveries (packages/db retention.ts).
@@ -16,11 +17,13 @@ import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
 import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
-import { checkScreenAlerts } from './alerts';
+import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
 import { emailSenderFor } from './email';
+import type { PublishNotice } from './device/screens';
+import { deliverNotices } from './publish';
 
 // `Env` is generated from wrangler.jsonc by `wrangler types` (worker-configuration.d.ts).
 export const app = new Hono<{ Bindings: Env }>();
@@ -44,8 +47,8 @@ const DAY_MS = 24 * 60 * 60_000;
 const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // The data-source poller, every minute.
   '* * * * *': (env, now) => pollDataSources(env, { now }),
-  // The offline alert check, every 5 minutes: screens sync that often, so a shorter period finds nothing new.
-  // Then the alert deliveries to Slack and webhooks (src/deliveries.ts), the new ones and the retries due,
+  // The offline alert check and the finished rollouts (src/alerts.ts), every 5 minutes: screens sync that
+  // often, so a shorter period finds nothing new. Then the alert deliveries to Slack and webhooks (src/deliveries.ts), the new ones and the retries due,
   // started once the check has queued its alerts and whether or not it failed, so neither holds up the other.
   // The 00:00 UTC run also expires idempotency keys, audit rows and the delivery log: a daily job with no
   // trigger of its own, since the Free plan allows five Cron Triggers per account and demo and prod use four.
@@ -53,15 +56,15 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   '*/5 * * * *': async (env, now) => {
     const daily = now % DAY_MS < FIVE_MIN_MS;
     const email = emailSenderFor(env);
-    const check = checkScreenAlerts(env, email, now);
+    const checks = [checkScreenAlerts(env, email, now), finishRollouts(env, email, now)];
     const results = await Promise.allSettled([
-      check,
-      // Claimed at the time it claims: the check may have taken minutes, and a lease counted from the
+      ...checks,
+      // Claimed at the time it claims: the checks may have taken minutes, and a lease counted from the
       // schedule could run out before the sends do, letting the next run send them again.
-      check.catch(() => undefined).then(() => deliverAlerts(env, email, { now: Date.now() })),
+      Promise.allSettled(checks).then(() => deliverAlerts(env, email, { now: Date.now() })),
       ...(daily ? [expireAuditRows(env.DB, now), expireIdempotencyKeys(env.DB, now), expireAlertDeliveries(env.DB, now)] : []),
     ]);
-    const audit = results[2];
+    const audit = results[checks.length + 1];
     if (audit?.status === 'fulfilled' && audit.value === AUDIT_ROWS_PER_RUN)
       console.warn(`audit retention hit its cap of ${AUDIT_ROWS_PER_RUN} rows: a backlog is left for the next runs`);
     const failed = results.filter((r) => r.status === 'rejected').map((r) => r.reason);
@@ -71,13 +74,15 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
 
 export default {
   fetch: app.fetch,
+  queue: (batch, env) => deliverNotices(batch, env),
   scheduled(controller, env, ctx) {
     const job = CRON_JOBS[controller.cron];
     if (!job) throw new Error(`No job for cron "${controller.cron}"`);
     ctx.waitUntil(job(env, controller.scheduledTime));
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env, PublishNotice>;
 
 // Durable Object classes are exported from the Worker's entry point.
 export { ScreenObject } from './device/screen-object';
 export { AgentGrantObject } from './agents/grant-object';
+export { OrgObject } from './publish';

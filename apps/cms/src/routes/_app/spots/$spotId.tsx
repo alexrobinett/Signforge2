@@ -10,14 +10,14 @@ import { safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, notFound } from '@tanstack/react-router';
 import { AssetPicker } from '~/components/assets/asset-picker';
-import { EditorHeader, EditorSection, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { FieldForm } from '~/components/spots/field-form';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
-import { useCanManage, useOrgId } from '~/lib/live';
+import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
 import { boundSource, typedFields } from '~/lib/live-data';
 import { draftOf, publishWord, seconds, versionsById, type SpotDraft, type SpotView } from '~/lib/spots';
 import { assetsQuery, brandKitsQuery, dataSourceQuery, dataSourcesQuery, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
@@ -56,6 +56,7 @@ function SpotEditor() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
+  const canPublish = useCanPublish();
   const spot: SpotView | null = useSuspenseQuery(spotQuery(orgId, spotId)).data;
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
@@ -74,6 +75,8 @@ function SpotEditor() {
   const save = useAppStore((s) => s.saveSpotDraft);
   const reload = useAppStore((s) => s.reloadSpot);
   const pick = useAppStore((s) => s.pickImageFor);
+  const publishing = useAppStore((s) => s.publishing.pending);
+  const publish = useAppStore((s) => s.publishSpot);
 
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
@@ -94,6 +97,7 @@ function SpotEditor() {
         about={`${what} · ${saveWord(status, savedAt)} · ${publishWord(spot)}`}
       >
         {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save()} />}
+        {canPublish && <PublishButton pending={publishing} disabled={stale} onPublish={() => void publish(orgId, spotId)} />}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload()} />
       <div className="flex flex-1 flex-wrap items-stretch">
