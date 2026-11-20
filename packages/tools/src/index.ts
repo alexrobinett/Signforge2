@@ -76,3 +76,4 @@ export {
   type StateKind,
 } from './screen-state';
 export { orgSettings, type Audience } from './settings';
+export { madeBySpotEditor } from './data-sources';

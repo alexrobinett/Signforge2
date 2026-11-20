@@ -303,6 +303,15 @@ const updateDataSource = defineTool({
   },
 });
 
+/**
+ * Whether the CMS's spot editor made this source from a place and units (`weatherSource` in
+ * apps/cms/src/lib/live-data.ts, whose `madeByEditor` this must match: apps/cms/test/registry/
+ * editor-sources.test.ts). The editor deletes one when a save stops binding it, but not while a
+ * published version still does; a publish deletes it once nothing binds it (./publish.ts). A feed
+ * or calendar added by its address is a person's to delete.
+ */
+export const madeBySpotEditor = (dataSourceId: string) => /^weather-\d+-[cf]-(?:mph|kmh)-[0-9a-f]{6}$/.test(dataSourceId);
+
 /** Spots whose draft or published version binds a field to `dataSourceId`. */
 async function spotsBinding(org: OrgScope, dataSourceId: string): Promise<string[]> {
   return (await org.spots.list())

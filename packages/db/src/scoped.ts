@@ -11,7 +11,7 @@
 import type { ScreenKind } from '@signforge/contract';
 import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
-import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { alias, type SQLiteColumn, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
@@ -345,6 +345,27 @@ export interface SyncWrite {
 
 type Snapshot = Omit<typeof s.dataSnapshots.$inferInsert, 'orgId' | 'dataSourceId'>;
 
+const statusCredentials = (more: SQL = sql`1`) =>
+  sql`SELECT 1 FROM ${s.screenCredentials} WHERE ${s.screenCredentials.orgId} = ${s.screens.orgId} AND ${s.screenCredentials.screenId} = ${s.screens.id} AND ${more}`;
+
+/**
+ * What a screen's state is worked out from, and nothing else: for the fleet poll and a publish's
+ * rollout. `credentialsRevoked` is whether the screen had credentials and every one is revoked.
+ */
+const statusColumns = {
+  id: s.screens.id,
+  status: s.screens.status,
+  timezone: s.screens.timezone,
+  displayHoursJson: s.screens.displayHoursJson,
+  desiredManifestId: s.screens.desiredManifestId,
+  reportedManifestId: s.screens.reportedManifestId,
+  lastSeenAt: s.screens.lastSeenAt,
+  heartbeatJson: s.screens.heartbeatJson,
+  credentialsRevoked: sql<boolean>`EXISTS (${statusCredentials()}) AND NOT EXISTS (${statusCredentials(isNull(s.screenCredentials.revokedAt))})`.mapWith(
+    Boolean,
+  ),
+};
+
 export function scoped(d1: D1Database, orgId: string) {
   assertId(orgId, 'orgId');
   const db: Db = drizzle(d1);
@@ -539,28 +560,14 @@ export function scoped(d1: D1Database, orgId: string) {
        * `(org_id, id)` index; `credentialsRevoked` is whether the screen had credentials and every
        * one is revoked, read through `(org_id, screen_id)`.
        */
-      statusPage: ({ afterId, limit }: { afterId?: string; limit: number }) => {
-        const sc = s.screens;
-        const c = s.screenCredentials;
-        const credentials = (more: SQL = sql`1`) => sql`SELECT 1 FROM ${c} WHERE ${c.orgId} = ${sc.orgId} AND ${c.screenId} = ${sc.id} AND ${more}`;
-        return db
-          .select({
-            id: sc.id,
-            status: sc.status,
-            timezone: sc.timezone,
-            displayHoursJson: sc.displayHoursJson,
-            desiredManifestId: sc.desiredManifestId,
-            reportedManifestId: sc.reportedManifestId,
-            lastSeenAt: sc.lastSeenAt,
-            heartbeatJson: sc.heartbeatJson,
-            credentialsRevoked: sql<boolean>`EXISTS (${credentials()}) AND NOT EXISTS (${credentials(isNull(c.revokedAt))})`.mapWith(Boolean),
-          })
-          .from(sc)
-          .where(and(eq(sc.orgId, orgId), afterId === undefined ? undefined : gt(sc.id, afterId)))
-          .orderBy(asc(sc.id))
+      statusPage: ({ afterId, limit }: { afterId?: string; limit: number }) =>
+        db
+          .select(statusColumns)
+          .from(s.screens)
+          .where(and(eq(s.screens.orgId, orgId), afterId === undefined ? undefined : gt(s.screens.id, afterId)))
+          .orderBy(asc(s.screens.id))
           .limit(limit)
-          .all();
-      },
+          .all(),
       /**
        * Make `manifestId` the screen's desired manifest. The one it replaces becomes the previous
        * manifest, whose files a screen still mid-download may fetch. Setting the current one again
@@ -1270,13 +1277,26 @@ export function scoped(d1: D1Database, orgId: string) {
         /**
          * As `addScreens`, staged, so a publish's rollout rows commit in one batch with its row
          * (`stage.insert`, staged before them), its order (`advance`) and its screens' switches.
-         * Throws `NotInOrgError` for a screen the org does not have. The publish may not be stored
-         * yet, so it is not read: the `(org_id, publish_id)` foreign key refuses another org's.
+         * The batch fails as a stale read (`StaleVersionError`, id `screens`, version 0) unless
+         * every screen is the org's when it commits: one deleted since the publish read it, or
+         * another org's, which would otherwise fail on the rows' foreign key. A publish retries
+         * that from a fresh read. Nothing is read here: 1,000 screens are one statement's check.
+         * The publish may not be stored yet: the `(org_id, publish_id)` foreign key refuses another org's.
          */
-        addScreens: async (publishId: string, rows: readonly { screenId: string; manifestId: string }[]): Promise<Staged> => {
-          await orgScreens(rows.map((r) => r.screenId));
+        addScreens: (publishId: string, rows: readonly { screenId: string; manifestId: string }[]): Staged => {
+          const ids = [...new Set(rows.map((r) => r.screenId))];
           const values = rows.map((r) => ({ orgId, publishId, screenId: r.screenId, manifestId: r.manifestId }));
-          return staged(undefined, ...chunk(values, 4).map((part) => db.insert(ps).values(part)));
+          const inserts = staged(undefined, ...chunk(values, 4).map((part) => db.insert(ps).values(part)));
+          if (!ids.length) return inserts;
+          // The ids go as one JSON value, past the 100-parameter limit.
+          const sc = s.screens;
+          const found = sql`(SELECT count(*) FROM ${sc} WHERE ${sc.orgId} = ${orgId} AND ${sc.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)})))`;
+          const check = db
+            .select({ ok: sql`json(CASE WHEN ${found} = ${ids.length} THEN '1' ELSE 'stale version' END)` })
+            .from(s.organization)
+            .where(eq(s.organization.id, orgId));
+          const stale = async () => ((await screens.getMany(ids)).length === ids.length ? undefined : 0);
+          return { row: undefined, writes: [guard(check, { id: 'screens', version: ids.length, stale }), ...inserts.writes] };
         },
         /**
          * Put a publish in order: stage moving the org's publish revision on from `revision`, the
@@ -1306,6 +1326,83 @@ export function scoped(d1: D1Database, orgId: string) {
             .onConflictDoUpdate({ target: os.orgId, set: { publishRevision: sql`${os.publishRevision} + 1`, updatedAt: sql`${os.updatedAt}` } });
           return { row: undefined, writes: [guard(check, { id: 'publish revision', version: revision, stale }), ...staged(undefined, move).writes] };
         },
+      },
+      /**
+       * Mark a publish's rollout finished at `now`, with how many of its screens were playing it
+       * (`reached`), and queue its alert, in one batch; false if it was marked already (by a check
+       * that queued the same event, which is queued once). Without `alert`, the mark alone.
+       */
+      finish: async (publishId: string, now: number, reached: number, alert?: QueuedAlert): Promise<boolean> => {
+        const p = s.publishes;
+        const [marked] = await db.batch([
+          db
+            .update(p)
+            .set({ finishedAt: now, reached })
+            .where(and(eq(p.orgId, orgId), eq(p.id, publishId), isNull(p.finishedAt)))
+            .returning({ id: p.id }),
+          ...(alert ? queueAlert(alert, now, sql`1`) : []),
+        ]);
+        return marked.length === 1;
+      },
+      /**
+       * Publishes newest first, `limit` of them from below `beforeRevision`, each with who made it
+       * (a member's name), for a roll back the revision it went back to, and how its rollout stands: the screens it switched, how many report
+       * playing its manifest, and how many a later publish moved on.
+       */
+      history: ({ beforeRevision, limit }: { beforeRevision?: number; limit: number }) => {
+        const p = s.publishes;
+        const restored = alias(s.publishes, 'restored');
+        const sc = s.screens;
+        const rows = (where: SQL) =>
+          sql<number>`(SELECT count(*) FROM ${ps} JOIN ${sc} ON ${sc.orgId} = ${ps.orgId} AND ${sc.id} = ${ps.screenId}
+            WHERE ${ps.orgId} = ${p.orgId} AND ${ps.publishId} = ${p.id} AND ${where})`.mapWith(Number);
+        return db
+          .select({
+            ...getTableColumns(p),
+            actorName: s.user.name,
+            restoresRevision: restored.revision,
+            screens: rows(sql`1`),
+            applied: rows(sql`${sc.reportedManifestId} = ${ps.manifestId}`),
+            // Moved on and not reporting it: a screen still reporting it is playing it.
+            replaced: rows(sql`${sc.desiredManifestId} IS NOT ${ps.manifestId} AND ${sc.reportedManifestId} IS NOT ${ps.manifestId}`),
+          })
+          .from(p)
+          .leftJoin(s.user, and(eq(p.actorKind, 'user'), eq(s.user.id, p.actorId)))
+          .leftJoin(restored, and(eq(restored.orgId, p.orgId), eq(restored.id, p.restoresId)))
+          .where(and(eq(p.orgId, orgId), beforeRevision === undefined ? undefined : lt(p.revision, beforeRevision)))
+          .orderBy(desc(p.revision))
+          .limit(limit)
+          .all();
+      },
+      /** A publish's screens, by name, with the manifest each got and what its state is worked out from now. */
+      rollout: (publishId: string) =>
+        db
+          .select({ ...statusColumns, name: s.screens.name, manifestId: ps.manifestId })
+          .from(ps)
+          .innerJoin(s.screens, and(eq(s.screens.orgId, ps.orgId), eq(s.screens.id, ps.screenId)))
+          .where(and(eq(ps.orgId, orgId), eq(ps.publishId, publishId)))
+          .orderBy(asc(s.screens.name), asc(s.screens.id))
+          .all(),
+      /**
+       * The manifest each screen had right after the publish at `revision`: the one from the last
+       * publish up to it that switched the screen. A screen no such publish switched is absent.
+       */
+      asOf: (revision: number) => {
+        const p = s.publishes;
+        const p2 = alias(s.publishes, 'p2');
+        const ps2 = alias(ps, 'ps2');
+        const last = db
+          .select({ r: sql`max(${p2.revision})` })
+          .from(ps2)
+          .innerJoin(p2, and(eq(p2.orgId, ps2.orgId), eq(p2.id, ps2.publishId)))
+          .where(and(eq(ps2.orgId, ps.orgId), eq(ps2.screenId, ps.screenId), lte(p2.revision, revision)));
+        return db
+          .select({ screenId: ps.screenId, manifestId: ps.manifestId })
+          .from(ps)
+          .innerJoin(p, and(eq(p.orgId, ps.orgId), eq(p.id, ps.publishId)))
+          .where(and(eq(ps.orgId, orgId), eq(p.revision, sql`(${last})`)))
+          .orderBy(asc(ps.screenId))
+          .all();
       },
       screens: (publishId: string) =>
         db
@@ -1342,6 +1439,33 @@ export function scoped(d1: D1Database, orgId: string) {
         update: async (current: typeof s.dataSources.$inferSelect, patch: RowPatch<typeof s.dataSources>, ifVersion?: number) => {
           await checkConnection(patch.connectionId);
           return dataSources.stage.update(current, patch, ifVersion);
+        },
+        /**
+         * Delete each of these sources, with its snapshot, made before `madeBefore`, that no spot
+         * binds when the batch runs: in its draft or its published version. The check is in the
+         * statement, so a spot bound to one since the caller looked keeps it, and staged after a
+         * publish's promotions it sees them.
+         */
+        deleteUnbound: (ids: readonly string[], madeBefore: number): Staged => {
+          if (!ids.length) return { row: undefined, writes: [] };
+          const ds = s.dataSources;
+          const sp = s.spots;
+          const binds = (bindings: SQL) =>
+            sql`EXISTS (SELECT 1 FROM ${sp}, json_each(COALESCE(${bindings}, '{}')) AS b WHERE ${sp.orgId} = ${ds.orgId} AND json_extract(b.value, '$.source') = ${ds.id})`;
+          return staged(
+            undefined,
+            db
+              .delete(ds)
+              .where(
+                and(
+                  eq(ds.orgId, orgId),
+                  lt(ds.createdAt, madeBefore),
+                  sql`${ds.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`,
+                  sql`NOT ${binds(sql`${sp.bindingsJson}`)}`,
+                  sql`NOT ${binds(sql`json_extract(${sp.publishedJson}, '$.bindingsJson')`)}`,
+                ),
+              ),
+          );
         },
         /**
          * The sources reading through `connectionId` polled again at once, their failures and backoff
