@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./roles": "./src/auth/roles.ts"
+    "./roles": "./src/auth/roles.ts",
+    "./tab-org": "./src/api/tab-org.ts"
   },
   "scripts": {
     "dev": "wrangler dev --env dev --port 8787 --var LOCAL_S3_ORIGIN:http://localhost:8787",

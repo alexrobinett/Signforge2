@@ -1,6 +1,7 @@
 import { environmentManager, QueryClient } from '@tanstack/react-query';
 import { createRouter } from '@tanstack/react-router';
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query';
+import { RouteError } from './components/route-error';
 import { retryUnlessRedirect } from './queries/retry';
 import { routeTree } from './routeTree.gen';
 import { StoreProvider } from './state/provider';
@@ -21,6 +22,7 @@ export function getRouter() {
     context: { queryClient },
     scrollRestoration: true,
     defaultPreload: 'intent',
+    defaultErrorComponent: RouteError,
     // biome-ignore lint/correctness/noComponentHookFactories: made once per router, so its identity never changes and nothing remounts.
     Wrap: ({ children }) => <StoreProvider store={store}>{children}</StoreProvider>,
   });

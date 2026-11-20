@@ -8,6 +8,8 @@ import type { SpotView } from '../src/lib/spots';
 import { spotKeys } from '../src/queries/spots';
 import { createSpotEditorSlice, type SpotEditorSlice } from '../src/state/spot-editor';
 
+// The tab's org comes from the page's router, which a store test has none of.
+vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
 vi.mock('~/server/spots.functions', () => ({ getBrandKits: vi.fn(), getSpot: vi.fn(), getSpotPreview: vi.fn(), getSpots: vi.fn(), getTemplates: vi.fn() }));
 vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
 

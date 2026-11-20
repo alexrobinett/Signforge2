@@ -4,7 +4,7 @@ One registry of operations on an org's data. The CMS calls it over `/api/tools`.
 
 ## For the CMS: the route
 
-Both routes run behind `requireOrg`. They need a signed-in session with an active org, and refuse an `Authorization` header. The caller acts in the session's active org only. No field in the request can choose another org.
+Both routes run behind `requireOrg`. They need a signed-in session with an active org, and refuse an `Authorization` header. The caller acts in the session's active org only. No field in the request can choose another org. A CMS tab names the org it shows in `x-signforge-org` (`TAB_ORG_HEADER` in apps/api), and a call from a tab whose org is no longer the session's is refused with 409 `org_changed` before any tool runs (#129); the header never picks the org. Agents, scripts and the CLI send none.
 
 ### `GET /api/tools`
 

@@ -6,6 +6,7 @@
 import type { AnyRouter } from '@tanstack/react-router';
 import { authClient, authErrorMessage } from './auth-client';
 import { slugify } from './paths';
+import { reloadAs } from './tab-org';
 
 class OrgActionError extends Error {}
 
@@ -16,7 +17,7 @@ const slugTaken = (e: { code?: string; message?: string }) => /ALREADY_EXISTS|SL
 export async function switchOrganization(router: AnyRouter, organizationId: string) {
   const { error } = await authClient.organization.setActive({ organizationId });
   if (error) throw new OrgActionError(authErrorMessage(error, 'Could not switch organization.'));
-  await router.invalidate();
+  await reloadAs(router, organizationId);
 }
 
 /** Create an org; it becomes the active one. Slugs are not shown yet, so a taken one gets a suffix. */
@@ -25,6 +26,6 @@ export async function createOrganization(router: AnyRouter, name: string) {
   let res = await authClient.organization.create({ name, slug: base });
   if (res.error && slugTaken(res.error)) res = await authClient.organization.create({ name, slug: `${base}-${suffix()}` });
   if (res.error) throw new OrgActionError(authErrorMessage(res.error, 'Could not create the organization.'));
-  await router.invalidate();
+  await reloadAs(router, res.data.id);
   return res.data;
 }

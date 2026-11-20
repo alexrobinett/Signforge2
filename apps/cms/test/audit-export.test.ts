@@ -1,10 +1,14 @@
 // The Audit log's CSV export (store slice): every page into one file, members by name, a byte order
 // mark for Excel; and a page refused part-way (another org's cursor, after a switch in another tab)
-// leaves no file at all, only the refusal.
+// leaves no file at all, only the refusal. Every page names the tab's org (#129), so a tab left on
+// the old org is refused rather than given the new org's log.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { csvRow, type AuditEntry } from '../src/lib/audit';
 import { createAuditSlice, type AuditSlice } from '../src/state/audit';
+
+// The tab's org comes from the page's router, which a store test has none of.
+vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({ 'x-signforge-org': 'org_north' }) }));
 
 const entry = (at: number): AuditEntry => ({
   at,
@@ -17,16 +21,20 @@ const entry = (at: number): AuditEntry => ({
 /** `list_audit_log`'s answers, in order: an output, or a refusal with its status. */
 let answers: { body: unknown; status: number }[] = [];
 const cursors: (string | undefined)[] = [];
+/** The org each call named. */
+const orgs: (string | undefined)[] = [];
 let files: Blob[] = [];
 
 beforeEach(() => {
   answers = [];
   cursors.length = 0;
+  orgs.length = 0;
   files = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (_url: string, init: { body: string }) => {
+    vi.fn(async (_url: string, init: { body: string; headers: Record<string, string> }) => {
       cursors.push((JSON.parse(init.body) as { cursor?: string }).cursor);
+      orgs.push(init.headers['x-signforge-org']);
       const { body, status } = answers.shift()!;
       return new Response(JSON.stringify(body), { status });
     }),
@@ -55,6 +63,7 @@ describe('exporting the audit log', () => {
     const { store, run } = exporter();
     await run();
     expect(cursors).toEqual([undefined, 'c1']);
+    expect(orgs).toEqual(['org_north', 'org_north']);
     expect(files).toHaveLength(1);
     // text() drops a byte order mark, so read its bytes.
     expect([...new Uint8Array(await files[0]!.arrayBuffer()).slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
@@ -74,6 +83,16 @@ describe('exporting the audit log', () => {
     ];
     const { store, run } = exporter();
     await run();
+    expect(files).toEqual([]);
+    expect(store.getState().audit).toEqual({ exporting: false, exportNote: { text: message, failed: true } });
+  });
+
+  it('leaves no file when the member switched org in another tab, and says to reload', async () => {
+    const message = 'This tab is on Northside; you switched to Southside in another tab. Reload.';
+    answers = [{ body: { error: 'org_changed', message }, status: 409 }];
+    const { store, run } = exporter();
+    await run();
+    expect(orgs).toEqual(['org_north']);
     expect(files).toEqual([]);
     expect(store.getState().audit).toEqual({ exporting: false, exportNote: { text: message, failed: true } });
   });
