@@ -113,8 +113,29 @@ describe("a call made for org B with org A's ids", () => {
   it('changes nothing', async () => {
     const { a } = s;
     const b = s.b.scope;
-    expect(await b.screens.update(a.screen, { name: 'hijacked' })).toBeUndefined();
-    expect(await b.screens.credentials.update(a.credential, { revokedAt: 1 })).toBeUndefined();
+    const ra = s.a.scope;
+    // Org B handed rows as org A read them: its staged changes and deletes still write only org B's rows.
+    await b.commit([
+      ...b.screens.stage.update((await ra.screens.get(a.screen))!, { name: 'hijacked' }).writes,
+      ...b.screens.credentials.stage.update((await ra.screens.credentials.get(a.credential))!, { revokedAt: 1 }).writes,
+      ...(await b.spots.stage.update((await ra.spots.get(a.imageSpot))!, { name: 'hijacked' })).writes,
+      ...b.connections.stage.update((await ra.connections.get(a.connection))!, { status: 'disconnected', credentialsSealed: null }).writes,
+      ...b.templates.stage.update((await ra.templates.get(a.template))!, { name: 'hijacked' }).writes,
+      ...b.screens.stage.delete(a.screen).writes,
+      ...b.screens.credentials.stage.delete(a.credential).writes,
+      ...b.screenGroups.stage.delete(a.group).writes,
+      ...b.assets.stage.delete(a.asset).writes,
+      ...b.assets.renditions.stage.delete(a.rendition).writes,
+      ...b.templates.stage.delete(a.template).writes,
+      ...b.templates.versions.stage.delete(a.templateVersion).writes,
+      ...b.spots.stage.delete(a.imageSpot).writes,
+      ...b.playlists.stage.delete(a.playlist).writes,
+      ...b.scheduleEntries.stage.delete(a.scheduleEntry).writes,
+      ...b.publishes.stage.delete(a.publish).writes,
+      ...b.dataSources.stage.delete(a.dataSource).writes,
+      ...b.connections.stage.delete(a.connection).writes,
+      ...b.brandKits.stage.delete(a.brandKit).writes,
+    ]);
     expect(await b.screens.setDesiredManifest(a.screen, 'f'.repeat(64))).toBe(false);
     await b.screens.reportManifest(a.screen, 'f'.repeat(64), { arrivedAt: 1 });
     expect(
@@ -127,29 +148,23 @@ describe("a call made for org B with org A's ids", () => {
         counts: [{ hour: a.hour, spotId: a.templateSpot, plays: 100, ms: 1 }],
       }),
     ).toBeUndefined();
-    expect(await b.spots.update(a.imageSpot, { name: 'hijacked' })).toBeUndefined();
-    expect(await b.connections.update(a.connection, { status: 'disconnected', credentialsSealed: null })).toBeUndefined();
-    expect(await b.templates.update(a.template, { name: 'hijacked' })).toBeUndefined();
     expect(await b.screenGroups.removeMember(a.group, a.screen)).toBe(false);
-    for (const del of [
-      () => b.screens.delete(a.screen),
-      () => b.screens.credentials.delete(a.credential),
-      () => b.screenGroups.delete(a.group),
-      () => b.assets.delete(a.asset),
-      () => b.assets.renditions.delete(a.rendition),
-      () => b.templates.delete(a.template),
-      () => b.templates.versions.delete(a.templateVersion),
-      () => b.spots.delete(a.imageSpot),
-      () => b.playlists.delete(a.playlist),
-      () => b.scheduleEntries.delete(a.scheduleEntry),
-      () => b.publishes.delete(a.publish),
-      () => b.dataSources.delete(a.dataSource),
-      () => b.connections.delete(a.connection),
-      () => b.brandKits.delete(a.brandKit),
-    ])
-      expect(await del()).toBe(false);
 
-    const ra = s.a.scope;
+    for (const [name, read] of [
+      ['screenGroups', () => ra.screenGroups.get(a.group)],
+      ['assets', () => ra.assets.get(a.asset)],
+      ['renditions', () => ra.assets.renditions.get(a.rendition)],
+      ['templates', () => ra.templates.get(a.template)],
+      ['templateVersions', () => ra.templates.versions.get(a.templateVersion)],
+      ['playlists', () => ra.playlists.get(a.playlist)],
+      ['scheduleEntries', () => ra.scheduleEntries.get(a.scheduleEntry)],
+      ['publishes', () => ra.publishes.get(a.publish)],
+      ['dataSources', () => ra.dataSources.get(a.dataSource)],
+      ['brandKits', () => ra.brandKits.get(a.brandKit)],
+    ] as const)
+      expect(await read(), name).toBeDefined();
+    expect(await ra.templates.get(a.template)).toMatchObject({ name: 'Menu' });
+    expect(await ra.connections.get(a.connection)).toMatchObject({ status: 'active', credentialsSealed: 'sealed:grant' });
     expect(await ra.screens.get(a.screen)).toMatchObject({
       name: 'org-a lobby',
       desiredManifestId: null,
@@ -178,13 +193,15 @@ describe("a call made for org B with org A's ids", () => {
       ['putSnapshot', () => b.dataSources.putSnapshot(a.dataSource, { version: 'x', fetchedAt: 0, checkedAt: 0, dataJson: '{}' })],
       ['savePoll', () => b.dataSources.savePoll(a.dataSource, { source: { nextPollAt: 0, failures: 1 }, checkedAt: 0 })],
       ['playCounts.add', () => b.playCounts.add(a.screen, [{ hour: a.hour, spotId: a.templateSpot, plays: 1, ms: 1 }])],
-      ['spot on A template version', () => b.spots.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })],
-      ['spot moved to A template version', () => b.spots.update(s.b.templateSpot, { templateVersionId: a.templateVersion })],
-      ['spot image field on A asset', () => b.spots.update(s.b.templateSpot, { assetMapJson: JSON.stringify({ photo: a.asset }) })],
-      ['spot staged with A asset', async () => b.spots.stage.update((await b.spots.get(s.b.imageSpot))!, { assetId: a.asset })],
-      ['spot bound to A data source', () => b.spots.update(s.b.templateSpot, { bindingsJson: JSON.stringify({ title: { source: a.dataSource, path: 't' } }) })],
+      ['spot on A template version', () => b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })],
+      ['spot moved to A template version', async () => b.spots.stage.update((await b.spots.get(s.b.templateSpot))!, { templateVersionId: a.templateVersion })],
       [
-        'spot staged bound to A data source',
+        'spot image field on A asset',
+        async () => b.spots.stage.update((await b.spots.get(s.b.templateSpot))!, { assetMapJson: JSON.stringify({ photo: a.asset }) }),
+      ],
+      ['spot staged with A asset', async () => b.spots.stage.update((await b.spots.get(s.b.imageSpot))!, { assetId: a.asset })],
+      [
+        'spot bound to A data source',
         async () =>
           b.spots.stage.update((await b.spots.get(s.b.templateSpot))!, { bindingsJson: JSON.stringify({ title: { source: a.dataSource, path: 't' } }) }),
       ],
@@ -320,8 +337,10 @@ describe('base templates', () => {
     for (const o of [s.a.scope, s.b.scope]) {
       expect(await o.templates.get(s.base.template)).toMatchObject({ orgId: null });
       expect(await o.templates.versions.forTemplate(s.base.template)).toHaveLength(1);
-      expect(await o.templates.update(s.base.template, { name: 'hijacked' })).toBeUndefined();
-      expect(await o.templates.versions.delete(s.base.templateVersion)).toBe(false);
+      const base = (await o.templates.get(s.base.template))!;
+      await o.commit([...o.templates.stage.update(base, { name: 'hijacked' }).writes, ...o.templates.versions.stage.delete(s.base.templateVersion).writes]);
+      expect(await o.templates.get(s.base.template)).toEqual(base);
+      expect(await o.templates.versions.get(s.base.templateVersion)).toBeDefined();
     }
     expect(await s.b.scope.spots.get(s.b.templateSpot)).toMatchObject({ templateVersionId: s.base.templateVersion });
   });

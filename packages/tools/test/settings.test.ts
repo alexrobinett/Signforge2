@@ -1,6 +1,5 @@
 // Org settings (M3-42): defaults until set, only owners change them, and the screen state follows the threshold.
-import { scoped } from '@signforge/db';
-import { seedOrg } from '@signforge/db/testing';
+import { seedOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { dispatch, registry } from '../src';
@@ -64,7 +63,7 @@ describe('org settings', () => {
         },
       },
     });
-    const audit = await scoped(env.DB, o.orgId).auditLog.list();
+    const audit = await testScope(env.DB, o.orgId).auditLog.list();
     expect(audit.filter((a) => a.action === 'update_org_settings')).toHaveLength(2);
   });
 
@@ -85,7 +84,7 @@ describe('org settings', () => {
   });
 
   it('reads a rule stored before Slack and the webhook with both off', async () => {
-    const org = scoped(env.DB, 'legacy-rules-org');
+    const org = testScope(env.DB, 'legacy-rules-org');
     await seedOrg(env.DB, 'legacy-rules-org');
     await org.commit((await org.settings.stage.set({ alertsJson: JSON.stringify({ screen_offline: { who: 'owners', email: false } }) })).writes);
     const r = await dispatch(registry, 'get_org_settings', {}, { ...as('viewer'), org });
@@ -141,7 +140,7 @@ describe('org settings', () => {
   });
 
   it("marks a screen unreachable after the org's threshold, not before", async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const twentyMinutesAgo = Date.now() - 20 * 60_000;
     await org.screens.update(o.screen, { lastSeenAt: twentyMinutesAgo });
     await dispatch(registry, 'update_org_settings', { unreachableAfterMinutes: 30 }, as('owner'));

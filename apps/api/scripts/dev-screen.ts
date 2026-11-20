@@ -22,8 +22,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { ScreenManifest } from '@signforge/contract';
-import { scoped } from '@signforge/db';
-import { seedOrganization } from '@signforge/db/testing';
+import { seedOrganization, testScope } from '@signforge/db/testing';
 import { getPlatformProxy } from 'wrangler';
 import { feedUrlSealer } from '../src/data/cipher';
 import { mintCredential } from '../src/device/credential';
@@ -62,7 +61,8 @@ try {
   const { DB, BLOBS } = proxy.env;
   // Since M3-09 a screen's org must exist in Better Auth's `organization` table. Make it if it is new.
   await seedOrganization(DB, args.org!);
-  const org = scoped(DB, args.org!);
+  // Writes directly, as a test does: there is no tool call to stage them for.
+  const org = testScope(DB, args.org!);
 
   const screen = await org.screens.insert({
     name: args.name ?? manifest?.screen.name ?? 'Test screen',

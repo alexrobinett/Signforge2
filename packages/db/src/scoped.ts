@@ -122,7 +122,10 @@ function versionGuard(db: Db, orgId: string, t: typeof s.screens | typeof s.spot
   return staleGuard(db, orgId, id, version, holds, stale);
 }
 
-/** get / list / insert / update / delete over a table with an org and an id. */
+/**
+ * get / list over a table with an org and an id, and its writes, staged. Tests write directly
+ * through `testScope` (./testing.ts), which commits these.
+ */
 function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: string, ids: Ids = 'server') {
   const idFor = (values: { id?: string }) => {
     const id = ids === 'content' ? (values.id ?? newId(prefix)) : newId(prefix);
@@ -175,27 +178,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
         )
       ).flat() as Row[],
     list: async (): Promise<Row[]> => (await db.select().from(t).where(eq(t.orgId, orgId)).orderBy(asc(t.id)).all()) as Row[],
-    insert: async (values: NewRow<T>): Promise<Row> => {
-      const id = idFor(values);
-      return (await db
-        .insert(t)
-        .values({ ...strip(values as object), id, orgId } as never)
-        .returning()
-        .get()) as Row;
-    },
-    /** Returns the updated row, or undefined if the org has no such row. An empty patch changes nothing. */
-    update: async (id: string, patch: RowPatch<T>): Promise<Row | undefined> => {
-      const set = strip(patch as Record<string, unknown>);
-      if (!Object.values(set).some((v) => v !== undefined)) return (await db.select().from(t).where(mine(id)).get()) as Row | undefined;
-      return (await db
-        .update(t)
-        .set(bump(set) as never)
-        .where(mine(id))
-        .returning()
-        .get()) as Row | undefined;
-    },
-    delete: async (id: string): Promise<boolean> => (await db.delete(t).where(mine(id)).returning({ id: t.id }).all()).length > 0,
-    /** The same changes, staged for the scope's `commit` (./writes.ts). */
+    /** Changes, staged for the scope's `commit` (./writes.ts). */
     stage: {
       insert: (values: NewRow<T>): Staged<Row> => {
         const id = idFor(values);
@@ -279,14 +262,6 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
   };
   return {
     ...rows,
-    insert: async (values: NewRow<T>): Promise<Row> => {
-      const id = idFor(values);
-      return (await db
-        .insert(t)
-        .values({ ...strip(values as object), id, orgId, rowVersion: firstVersion(id) } as never)
-        .returning()
-        .get()) as Row;
-    },
     stage: {
       ...rows.stage,
       insert: async (values: NewRow<T>): Promise<Staged<Row>> => {
@@ -969,14 +944,6 @@ export function scoped(d1: D1Database, orgId: string) {
 
     spots: {
       ...spotRows,
-      insert: async (values: NewRow<typeof s.spots>) => {
-        await checkSpot(values);
-        return spotRows.insert(values);
-      },
-      update: async (id: string, patch: RowPatch<typeof s.spots>) => {
-        await checkSpot(patch);
-        return spotRows.update(id, patch);
-      },
       stage: {
         ...spotRows.stage,
         insert: async (values: NewRow<typeof s.spots>) => {
@@ -1244,14 +1211,6 @@ export function scoped(d1: D1Database, orgId: string) {
      */
     brandKits: {
       ...brandKitRows,
-      insert: async (values: NewRow<typeof s.brandKits>) => {
-        await checkLogos(values);
-        return brandKitRows.insert(values);
-      },
-      update: async (id: string, patch: RowPatch<typeof s.brandKits>) => {
-        await checkLogos(patch);
-        return brandKitRows.update(id, patch);
-      },
       stage: {
         ...brandKitRows.stage,
         insert: async (values: NewRow<typeof s.brandKits>) => {
@@ -1437,14 +1396,6 @@ export function scoped(d1: D1Database, orgId: string) {
 
     dataSources: {
       ...dataSources,
-      insert: async (values: NewRow<typeof s.dataSources>) => {
-        await checkConnection(values.connectionId);
-        return dataSources.insert(values);
-      },
-      update: async (id: string, patch: RowPatch<typeof s.dataSources>) => {
-        await checkConnection(patch.connectionId);
-        return dataSources.update(id, patch);
-      },
       stage: {
         ...dataSources.stage,
         insert: async (values: NewRow<typeof s.dataSources>) => {
@@ -1585,10 +1536,6 @@ export function scoped(d1: D1Database, orgId: string) {
       markNeedsReconnect: (id: string, from: string, lastError: string) => changeGrant(id, from, { status: 'needs_reconnect', lastError }),
       authorizations: {
         ...authorizations,
-        insert: async (values: NewRow<typeof s.connectionAuthorizations>) => {
-          await checkConnection(values.connectionId);
-          return authorizations.insert(values);
-        },
         /** The live authorization whose state hashes to `stateHash`, in this org. */
         byState: (stateHash: string, now: number) =>
           db
@@ -1622,7 +1569,11 @@ export function scoped(d1: D1Database, orgId: string) {
     },
 
     auditLog: {
-      append: (entry: NewRow<typeof s.auditLog>) => audit.insert(entry),
+      append: async (entry: NewRow<typeof s.auditLog>) => {
+        const { row, writes } = audit.stage.insert(entry);
+        await commit(db, writes);
+        return row;
+      },
       /** The audit row for a change, staged to commit with it. */
       stage: (entry: NewRow<typeof s.auditLog>) => audit.stage.insert(entry),
       /**

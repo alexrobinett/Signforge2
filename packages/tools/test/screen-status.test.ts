@@ -1,6 +1,5 @@
 // `list_screen_status`, the fleet poll: each screen's state without its settings or manifest, a page read in SQL.
-import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -43,7 +42,7 @@ const noBlobs = new Proxy(env.BLOBS, {
 });
 
 const callerOn = (db: D1Database): Caller => ({
-  org: scoped(db, o.orgId),
+  org: testScope(db, o.orgId),
   role: 'viewer',
   actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
   blobs: noBlobs,
@@ -73,7 +72,7 @@ let revoked: string;
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'status-org');
-  const org = scoped(env.DB, o.orgId);
+  const org = testScope(env.DB, o.orgId);
   const now = Date.now();
   const synced = async (name: string, lastSeenAt: number) => {
     const s = await org.screens.insert({ name, timezone: 'UTC', orientation: 'landscape' });
@@ -111,7 +110,7 @@ describe('list_screen_status', () => {
   it("reads one page's rows from D1, however many screens the org has", async () => {
     // An org of paired screens, each with its one credential, that has changed its settings.
     const p = await seedOrg(env.DB, 'status-poll-org');
-    const org = scoped(env.DB, p.orgId);
+    const org = testScope(env.DB, p.orgId);
     await org.commit((await org.settings.stage.set({ unreachableAfterMs: 10 * 60_000 })).writes);
     const paired = async (n: number) => {
       for (let i = 0; i < n; i++) {
@@ -123,7 +122,7 @@ describe('list_screen_status', () => {
     let next = '';
     const rowsRead = async (name: string, limit: number, cursor?: string) => {
       read.rows = 0;
-      const out = await dispatch(registry, name, { limit, cursor }, { ...callerOn(d1), org: scoped(d1, p.orgId) });
+      const out = await dispatch(registry, name, { limit, cursor }, { ...callerOn(d1), org: testScope(d1, p.orgId) });
       if (!out.ok) throw new Error(out.message);
       ({ next } = z.object({ next: z.string() }).parse(out.output));
       return read.rows;

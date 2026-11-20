@@ -2,8 +2,8 @@
 // published version. See docs/backend-plan.md#publishing.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { draftChanged, findFinishedRollouts, NotInOrgError, published, scoped, StaleVersionError } from '../src/index';
-import { seedOrg, type SeededOrg } from '../src/testing';
+import { draftChanged, findFinishedRollouts, NotInOrgError, published, type scoped, StaleVersionError } from '../src/index';
+import { seedOrg, type SeededOrg, testScope } from '../src/testing';
 
 let o: SeededOrg;
 beforeAll(async () => {
@@ -12,7 +12,7 @@ beforeAll(async () => {
 
 describe('drafts', () => {
   it('starts unpublished, and publishing snapshots the draft as it was read', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const spot = (await org.spots.get(o.imageSpot))!;
     expect(published(spot)).toBeUndefined();
     expect(draftChanged(spot)).toBe(true);
@@ -33,7 +33,7 @@ describe('drafts', () => {
   });
 
   it('never lets an edit set the published version', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const forged = { name: 'Forged', publishedJson: '{"name":"forged"}', publishedAt: 1 } as never;
     await org.spots.update(o.templateSpot, forged);
     const current = (await org.spots.get(o.templateSpot))!;
@@ -45,7 +45,7 @@ describe('drafts', () => {
   });
 
   it('publishes a playlist with its items, so a later draft edit to the items is not live', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const row = (await org.playlists.get(o.playlist))!;
     const items = await org.playlists.items(o.playlist);
     await org.commit(org.playlists.stage.publish(row, items).writes);
@@ -59,7 +59,7 @@ describe('drafts', () => {
   });
 
   it('publishes schedule entries', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const row = (await org.scheduleEntries.get(o.scheduleEntry))!;
     await org.commit(org.scheduleEntries.stage.publish(row).writes);
     await org.scheduleEntries.update(o.scheduleEntry, { priority: 7 });
@@ -67,7 +67,7 @@ describe('drafts', () => {
   });
 
   it('counts an asset a published spot still uses as in use, so it cannot be deleted from under a screen', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const other = await org.assets.insert({ kind: 'image', name: 'other.png', sha256: 'f'.repeat(64), type: 'image/png', size: 10, status: 'verified' });
     const spot = (await org.spots.get(o.imageSpot))!;
     await org.commit(org.spots.stage.publish(spot).writes);
@@ -80,7 +80,7 @@ describe('drafts', () => {
 
 describe('org settings', () => {
   it('holds the default playlist, which must be one of the org own', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     expect(await org.settings.get()).toBeUndefined();
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: o.playlist })).writes);
     expect(await org.settings.get()).toMatchObject({ defaultPlaylistId: o.playlist });
@@ -92,7 +92,7 @@ describe('org settings', () => {
   });
 
   it('lists every group membership at once', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     expect(await org.screenGroups.allMembers()).toEqual([{ groupId: o.group, screenId: o.screen }]);
   });
 });
@@ -104,7 +104,7 @@ describe('promotion from an old read (R09)', () => {
   });
 
   it('refuses to publish a spot edited since it was read, and writes nothing', async () => {
-    const org = scoped(env.DB, r.orgId);
+    const org = testScope(env.DB, r.orgId);
     const read = (await org.spots.get(r.imageSpot))!;
     const edited = (await org.spots.update(r.imageSpot, { name: 'Edited meanwhile' }))!;
 
@@ -115,7 +115,7 @@ describe('promotion from an old read (R09)', () => {
   });
 
   it("refuses to publish a playlist whose items changed since it was read, and moves the playlist's version with them", async () => {
-    const org = scoped(env.DB, r.orgId);
+    const org = testScope(env.DB, r.orgId);
     const read = (await org.playlists.get(r.playlist))!;
     const items = await org.playlists.items(r.playlist);
     await org.playlists.setItems(r.playlist, [r.imageSpot]);
@@ -127,7 +127,7 @@ describe('promotion from an old read (R09)', () => {
   });
 
   it('refuses to publish a deleted spot into one made again with its id (review 4)', async () => {
-    const org = scoped(env.DB, r.orgId);
+    const org = testScope(env.DB, r.orgId);
     const values = { id: 'drafts-race-again', kind: 'image', durationMs: 5000, assetId: r.asset, fit: 'cover' } as const;
     const read = await org.spots.insert({ ...values, name: 'Deleted' });
     const promotion = org.spots.stage.publish(read);
@@ -140,7 +140,7 @@ describe('promotion from an old read (R09)', () => {
   });
 
   it('reports a spot deleted since it was read as a conflict, not as missing, and writes nothing (re-check)', async () => {
-    const org = scoped(env.DB, r.orgId);
+    const org = testScope(env.DB, r.orgId);
     const read = await org.spots.insert({ id: 'drafts-race-gone', name: 'Gone', kind: 'image', durationMs: 5000, assetId: r.asset, fit: 'cover' });
     const revision = (await org.settings.get())?.publishRevision ?? 0;
     const writes = [...org.publishes.stage.advance(revision).writes, ...org.spots.stage.publish(read).writes];
@@ -154,7 +154,7 @@ describe('promotion from an old read (R09)', () => {
   });
 
   it("keeps the draft's edit time as stored, not as it was read", async () => {
-    const org = scoped(env.DB, r.orgId);
+    const org = testScope(env.DB, r.orgId);
     const read = (await org.spots.get(r.templateSpot))!;
     // Stands in for a write that leaves the version alone: the stored time is the one to keep.
     await env.DB.prepare('UPDATE spots SET updated_at = ? WHERE org_id = ? AND id = ?')
@@ -167,7 +167,7 @@ describe('promotion from an old read (R09)', () => {
   });
 
   it('refuses to publish a schedule entry edited since it was read', async () => {
-    const org = scoped(env.DB, r.orgId);
+    const org = testScope(env.DB, r.orgId);
     const read = (await org.scheduleEntries.get(r.scheduleEntry))!;
     await org.scheduleEntries.update(r.scheduleEntry, { priority: 3 });
     await expect(org.commit(org.scheduleEntries.stage.publish(read).writes)).rejects.toBeInstanceOf(StaleVersionError);
@@ -175,7 +175,7 @@ describe('promotion from an old read (R09)', () => {
   });
 
   it('removes a schedule entry, draft and published version, only as it was read (M3-19)', async () => {
-    const org = scoped(env.DB, r.orgId);
+    const org = testScope(env.DB, r.orgId);
     const made = await org.scheduleEntries.insert({ id: 'drafts-race-remove', playlistId: r.playlist, target: 'org', priority: 0 });
     await org.commit(org.scheduleEntries.stage.publish(made).writes);
     const read = (await org.scheduleEntries.get(made.id))!;
@@ -191,7 +191,7 @@ describe('promotion from an old read (R09)', () => {
 describe('publish order (R09)', () => {
   it('orders the publishes of an org with no settings row: the first makes it, at revision 1 (review 3)', async () => {
     const p = await seedOrg(env.DB, 'drafts-order-new');
-    const org = scoped(env.DB, p.orgId);
+    const org = testScope(env.DB, p.orgId);
     expect(await org.settings.get()).toBeUndefined();
 
     await org.commit(org.publishes.stage.advance(0).writes);
@@ -202,7 +202,7 @@ describe('publish order (R09)', () => {
 
   it('moves the publish revision on from the one read, and refuses a publish read before another committed', async () => {
     const p = await seedOrg(env.DB, 'drafts-order');
-    const org = scoped(env.DB, p.orgId);
+    const org = testScope(env.DB, p.orgId);
     await org.commit((await org.settings.stage.set({ locale: 'en-GB' })).writes);
     const before = (await org.settings.get())!;
     expect(before.publishRevision).toBe(0);
@@ -219,7 +219,7 @@ describe('publish order (R09)', () => {
 describe('rollout history in the publish batch (review 5)', () => {
   it("stages a publish's row and its screens' rollout rows, which a failed guard rolls back with the switches", async () => {
     const p = await seedOrg(env.DB, 'drafts-rollout');
-    const org = scoped(env.DB, p.orgId);
+    const org = testScope(env.DB, p.orgId);
     const manifestId = 'a'.repeat(64);
     const stage = async (revision: number) => {
       const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision: revision + 1 });
@@ -250,16 +250,16 @@ describe('rollout history in the publish batch (review 5)', () => {
 
   it('refuses a rollout row for a screen the org does not have', async () => {
     const p = await seedOrg(env.DB, 'drafts-rollout-foreign');
-    const org = scoped(env.DB, p.orgId);
+    const org = testScope(env.DB, p.orgId);
     const other = await seedOrg(env.DB, 'drafts-rollout-other');
     const rollout = org.publishes.stage.addScreens(p.publish, [{ screenId: other.screen, manifestId: 'a'.repeat(64) }]);
     await expect(org.commit(rollout.writes)).rejects.toMatchObject({ name: 'StaleVersionError', id: 'screens', version: 0 });
-    expect(await scoped(env.DB, other.orgId).publishes.screens(p.publish)).toEqual([]);
+    expect(await testScope(env.DB, other.orgId).publishes.screens(p.publish)).toEqual([]);
   });
 
   it('fails the batch as a stale read when a screen is deleted between the read and the commit (#52)', async () => {
     const p = await seedOrg(env.DB, 'drafts-rollout-deleted');
-    const org = scoped(env.DB, p.orgId);
+    const org = testScope(env.DB, p.orgId);
     const other = await org.screens.insert({ name: 'Other', timezone: 'UTC', orientation: 'landscape' });
     const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision: 2 });
     const rollout = org.publishes.stage.addScreens(publish.row.id, [
@@ -284,7 +284,7 @@ describe('publish history', () => {
 
   it('lists publishes newest first with how each rollout stands, and pages by revision', async () => {
     const p = await seedOrg(env.DB, 'history-list');
-    const org = scoped(env.DB, p.orgId);
+    const org = testScope(env.DB, p.orgId);
     const two = await org.screens.insert({ name: 'Two', timezone: 'UTC', orientation: 'landscape' });
     const v2 = await publishAt(org, 2, [
       { screenId: p.screen, manifestId: m('1') },
@@ -302,12 +302,12 @@ describe('publish history', () => {
       [p.publish, 1, 0, 1],
     ]);
     expect((await org.publishes.history({ beforeRevision: 3, limit: 10 })).map((h) => h.id)).toEqual([v2.id, p.publish]);
-    expect(await scoped(env.DB, 'drafts-org').publishes.history({ limit: 10 })).not.toContainEqual(expect.objectContaining({ id: v2.id }));
+    expect(await testScope(env.DB, 'drafts-org').publishes.history({ limit: 10 })).not.toContainEqual(expect.objectContaining({ id: v2.id }));
   });
 
   it("reads a publish's rollout with each screen's state, and what each screen had as of a revision", async () => {
     const p = await seedOrg(env.DB, 'history-rollout');
-    const org = scoped(env.DB, p.orgId);
+    const org = testScope(env.DB, p.orgId);
     const late = await org.screens.insert({ name: 'Annex', timezone: 'UTC', orientation: 'landscape' });
     const v2 = await publishAt(org, 2, [{ screenId: p.screen, manifestId: m('1') }]);
     await publishAt(org, 3, [{ screenId: late.id, manifestId: m('2') }]);
@@ -329,7 +329,7 @@ describe('publish history', () => {
 
   it('finds a rollout once every screen it switched plays its manifest or moved on, and marks it finished with its alert once', async () => {
     const p = await seedOrg(env.DB, 'history-finish');
-    const org = scoped(env.DB, p.orgId);
+    const org = testScope(env.DB, p.orgId);
     const two = await org.screens.insert({ name: 'Two', timezone: 'UTC', orientation: 'landscape' });
     // The seeded publish's screen never reported its manifest.
     await org.screens.reportManifest(p.screen, m('d'), { arrivedAt: 1 });
@@ -353,7 +353,7 @@ describe('publish history', () => {
     expect((await org.alertDeliveries.list({ take: 50 })).filter((d) => d.eventId === alert.event.id)).toHaveLength(1);
     expect(await due()).toEqual([]);
     // Another org's publish is not theirs to mark.
-    expect(await scoped(env.DB, 'drafts-org').publishes.finish(v2.id, 50, 0)).toBe(false);
+    expect(await testScope(env.DB, 'drafts-org').publishes.finish(v2.id, 50, 0)).toBe(false);
 
     // A screen whose credentials are all revoked never reports again: it does not hold a rollout open.
     const cred = await org.screens.credentials.insert({ screenId: two.id, secretHash: '9'.repeat(64) });
@@ -392,7 +392,7 @@ describe('publish history', () => {
 describe('playlist edits (M3-17)', () => {
   it('changes the fields and the items in one change, moving the version on once', async () => {
     const e = await seedOrg(env.DB, 'drafts-pl-edit');
-    const org = scoped(env.DB, e.orgId);
+    const org = testScope(env.DB, e.orgId);
     const read = (await org.playlists.get(e.playlist))!;
     const fade = JSON.stringify({ type: 'fade', ms: 600 });
     const s = await org.playlists.stage.update(read, { name: 'Lunch', transitionJson: fade }, read.rowVersion, [e.imageSpot, e.templateSpot, e.imageSpot]);
@@ -410,7 +410,7 @@ describe('playlist edits (M3-17)', () => {
 
   it('refuses an order made from an old read, in the batch, and leaves the items as they are', async () => {
     const e = await seedOrg(env.DB, 'drafts-pl-stale');
-    const org = scoped(env.DB, e.orgId);
+    const org = testScope(env.DB, e.orgId);
     const read = (await org.playlists.get(e.playlist))!;
     const mine = await org.playlists.stage.update(read, {}, read.rowVersion, [e.imageSpot]);
     await org.commit((await org.playlists.stage.update(read, { name: 'Theirs' }, read.rowVersion)).writes);
@@ -421,7 +421,7 @@ describe('playlist edits (M3-17)', () => {
   it("refuses a spot the org does not have, and another org's spot", async () => {
     const e = await seedOrg(env.DB, 'drafts-pl-spots');
     const other = await seedOrg(env.DB, 'drafts-pl-spots-other');
-    const org = scoped(env.DB, e.orgId);
+    const org = testScope(env.DB, e.orgId);
     const read = (await org.playlists.get(e.playlist))!;
     for (const spot of ['spt_missing', other.imageSpot])
       await expect(org.playlists.stage.update(read, {}, read.rowVersion, [spot])).rejects.toBeInstanceOf(NotInOrgError);
@@ -438,7 +438,7 @@ describe('versions across delete and make-again (#64)', () => {
   // the edit made from the old read, as an edit tool would: the row now, guarded by the version read.
   const cases = {
     spot: async () => {
-      const org = scoped(env.DB, t.orgId);
+      const org = testScope(env.DB, t.orgId);
       const values = { id: 'tomb-spot', name: 'Spot', kind: 'image', durationMs: 5000, assetId: t.asset, fit: 'cover' } as const;
       await org.spots.insert(values);
       const read = (await org.spots.update(values.id, { name: 'Spot, edited' }))!;
@@ -448,7 +448,7 @@ describe('versions across delete and make-again (#64)', () => {
       return { read, again, edit, now: () => org.spots.get(values.id) };
     },
     playlist: async () => {
-      const org = scoped(env.DB, t.orgId);
+      const org = testScope(env.DB, t.orgId);
       const values = { id: 'tomb-playlist', name: 'Playlist', transitionJson: JSON.stringify({ type: 'cut' }) };
       await org.playlists.insert(values);
       const read = (await org.playlists.update(values.id, { name: 'Playlist, edited' }))!;
@@ -460,7 +460,7 @@ describe('versions across delete and make-again (#64)', () => {
       return { read, again, edit, now: () => org.playlists.get(values.id) };
     },
     'schedule entry': async () => {
-      const org = scoped(env.DB, t.orgId);
+      const org = testScope(env.DB, t.orgId);
       const values = { id: 'tomb-entry', playlistId: t.playlist, target: 'group', groupId: t.group, priority: 1 } as const;
       await org.scheduleEntries.insert(values);
       const read = (await org.scheduleEntries.update(values.id, { priority: 2 }))!;
@@ -485,7 +485,7 @@ describe('versions across delete and make-again (#64)', () => {
   }
 
   it('refuses in the batch an edit staged from the old row, made again after it was read', async () => {
-    const org = scoped(env.DB, t.orgId);
+    const org = testScope(env.DB, t.orgId);
     const values = { id: 'tomb-batch', name: 'Spot', kind: 'image', durationMs: 5000, assetId: t.asset, fit: 'cover' } as const;
     const read = await org.spots.insert(values);
     const edit = await org.spots.stage.update(read, { name: 'From the old read' }, read.rowVersion);
@@ -499,7 +499,7 @@ describe('versions across delete and make-again (#64)', () => {
 
   it('continues the versions of a schedule entry deleted with its group', async () => {
     const c = await seedOrg(env.DB, 'drafts-tomb-cascade');
-    const org = scoped(env.DB, c.orgId);
+    const org = testScope(env.DB, c.orgId);
     const read = (await org.scheduleEntries.update(c.scheduleEntry, { priority: 5 }))!;
     expect(read.rowVersion).toBe(2);
     await org.screenGroups.delete(c.group);
@@ -511,8 +511,8 @@ describe('versions across delete and make-again (#64)', () => {
 
   it("starts another org's row with the same id at 1", async () => {
     const other = await seedOrg(env.DB, 'drafts-tomb-other');
-    const org = scoped(env.DB, other.orgId);
-    await scoped(env.DB, t.orgId).spots.delete('tomb-spot');
+    const org = testScope(env.DB, other.orgId);
+    await testScope(env.DB, t.orgId).spots.delete('tomb-spot');
     const spot = await org.spots.insert({ id: 'tomb-spot', name: 'Theirs', kind: 'image', durationMs: 5000, assetId: other.asset, fit: 'cover' });
     expect(spot.rowVersion).toBe(1);
     expect((await org.playlists.stage.insert({ id: 'tomb-playlist', name: 'Theirs', transitionJson: '{"type":"cut"}' })).row.rowVersion).toBe(1);

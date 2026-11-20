@@ -2,8 +2,8 @@
 // database to `compileScreen`. See docs/backend-plan.md#publishing.
 import { compileScreen } from '@signforge/compiler';
 import { templateKey, type ScreenManifest, type Spot, type TemplateManifest } from '@signforge/contract';
-import { draftChanged, platform, published, scoped, StaleVersionError, type OrgScope } from '@signforge/db';
-import { seedOrganization, seedScreen } from '@signforge/db/testing';
+import { draftChanged, platform, published, StaleVersionError } from '@signforge/db';
+import { seedOrganization, seedScreen, testScope, type TestScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import stressGolden from '@signforge/cli/golden/stress.json';
@@ -33,7 +33,7 @@ const promo: TemplateManifest = {
 };
 
 /** An org template version, registered as the template tools would leave it. */
-async function addTemplate(org: OrgScope, manifest: TemplateManifest, bundle: string, status: 'draft' | 'approved' | 'retired' = 'approved') {
+async function addTemplate(org: TestScope, manifest: TemplateManifest, bundle: string, status: 'draft' | 'approved' | 'retired' = 'approved') {
   const t = (await org.templates.ownByKey(manifest.id)) ?? (await org.templates.insert({ key: manifest.id, name: manifest.name }));
   return org.templates.versions.insert({
     templateId: t.id,
@@ -46,7 +46,7 @@ async function addTemplate(org: OrgScope, manifest: TemplateManifest, bundle: st
 }
 
 /** An image asset with both renditions, verified. */
-async function addImage(org: OrgScope, landscape: string, portrait: string) {
+async function addImage(org: TestScope, landscape: string, portrait: string) {
   const asset = await org.assets.insert({
     kind: 'image',
     name: 'photo.jpg',
@@ -85,7 +85,7 @@ async function addImage(org: OrgScope, landscape: string, portrait: string) {
 async function seedSmallOrg(orgId: string) {
   prefix = orgId;
   await seedOrganization(env.DB, orgId);
-  const org = scoped(env.DB, orgId);
+  const org = testScope(env.DB, orgId);
   const lobby = await org.screens.insert({ name: 'Lobby', timezone: 'Europe/London', orientation: 'landscape' });
   const hall = await org.screens.insert({ name: 'Hall', timezone: 'Europe/London', orientation: 'portrait', locale: 'en-GB' });
   const front = await org.screenGroups.insert({ name: 'Front' });
@@ -260,7 +260,7 @@ describe('publishOrg', () => {
 
   it('says so when the org has no default playlist', async () => {
     await seedOrganization(env.DB, 'pub-no-default');
-    const org = scoped(env.DB, 'pub-no-default');
+    const org = testScope(env.DB, 'pub-no-default');
     const only = await org.screens.insert({ name: 'Only', timezone: 'UTC', orientation: 'landscape' });
     expect((await publishOrg(org, opts)).screens).toEqual([{ screenId: only.id, current: null, problems: ['the organization has no default playlist'] }]);
   });
@@ -269,15 +269,15 @@ describe('publishOrg', () => {
 describe('concurrent publishes (R09)', () => {
   type Publish = Awaited<ReturnType<typeof publishOrg>>;
   /** Commit a publish as the publish tool does: its writes and every screen's switch, in one batch. */
-  const commitPublish = (org: OrgScope, result: Publish) =>
+  const commitPublish = (org: TestScope, result: Publish) =>
     org.commit([
       ...result.writes,
       ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id).writes : [])),
     ]);
   const titleOn = (result: Publish, screenId: string) =>
     (result.screens.find((s) => s.screenId === screenId)!.manifest!.spots[x('deal')] as Extract<Spot, { kind: 'template' }>).data.title;
-  const editDeal = (org: OrgScope, title: string) => org.spots.update(x('deal'), { dataJson: JSON.stringify({ title }) });
-  const desiredOn = async (org: OrgScope, screenId: string) => (await org.screens.get(screenId))!.desiredManifestId;
+  const editDeal = (org: TestScope, title: string) => org.spots.update(x('deal'), { dataJson: JSON.stringify({ title }) });
+  const desiredOn = async (org: TestScope, screenId: string) => (await org.screens.get(screenId))!.desiredManifestId;
   const manifestOn = (result: Publish, screenId: string) => result.screens.find((s) => s.screenId === screenId)!.manifest!.id;
 
   /**
@@ -411,7 +411,7 @@ describe('loadCompileInput', () => {
    */
   async function seedStress(orgId: string, { playlists = true, screenId = golden.screen.id } = {}) {
     await seedOrganization(env.DB, orgId);
-    const org = scoped(env.DB, orgId);
+    const org = testScope(env.DB, orgId);
     base ??= baseTemplates();
     const versionIds = await base;
     const assetIds = new Map<string, string>();
@@ -510,7 +510,7 @@ describe('loadCompileInput', () => {
   it('reads only the published graph, and nothing for a screen the org does not have', async () => {
     const { org, lobby, hall } = await seedSmallOrg('load-published');
     await seedOrganization(env.DB, 'load-other');
-    const elsewhere = await scoped(env.DB, 'load-other').screens.insert({ name: 'Elsewhere', timezone: 'UTC', orientation: 'landscape' });
+    const elsewhere = await testScope(env.DB, 'load-other').screens.insert({ name: 'Elsewhere', timezone: 'UTC', orientation: 'landscape' });
     const before = await loadCompileInput(org, lobby.id);
     expect(before).toMatchObject({ spots: [], playlists: [], schedule: [], defaultPlaylist: x('main') });
     await org.commit((await publishOrg(org, opts)).writes);
@@ -525,7 +525,7 @@ describe('loadCompileInput', () => {
 
 describe('the publish tools (M3-18)', () => {
   /** Calls as an editor, with a notifier that records which screens it was told of and a bucket `put` can be wrapped around. */
-  function publisher(org: OrgScope, opts: { onPut?: (attempt: number) => Promise<void>; lock?: boolean } = {}) {
+  function publisher(org: TestScope, opts: { onPut?: (attempt: number) => Promise<void>; lock?: boolean } = {}) {
     const told: { screenId: string; manifestId: string }[][] = [];
     let puts = 0;
     let locked = 0;
@@ -555,7 +555,7 @@ describe('the publish tools (M3-18)', () => {
     };
     return { call: (name: string, input: unknown) => dispatch(registry, name, input, caller), told, locked: () => locked };
   }
-  const editDeal = (org: OrgScope, title: string) => org.spots.update(x('deal'), { dataJson: JSON.stringify({ title }) });
+  const editDeal = (org: TestScope, title: string) => org.spots.update(x('deal'), { dataJson: JSON.stringify({ title }) });
   type Out = {
     publish: { id: string; revision: number; screens: number; previousId: string | null } | null;
     promoted: unknown[];
@@ -623,7 +623,7 @@ describe('the publish tools (M3-18)', () => {
       details: { id: theirs, version: 0 },
     });
     expect((await org.settings.get())!.publishRevision).toBe(2);
-    expect(draftChanged((await scoped(env.DB, 'tool-pub-pins-theirs').spots.get(theirs))!)).toBe(true);
+    expect(draftChanged((await testScope(env.DB, 'tool-pub-pins-theirs').spots.get(theirs))!)).toBe(true);
   });
 
   it('is refused to an editor when only owners publish', async () => {

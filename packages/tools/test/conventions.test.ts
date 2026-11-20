@@ -1,5 +1,5 @@
 // The conventions every tool keeps: it declares what it returns, and a list pages.
-import { scoped } from '@signforge/db';
+import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -96,7 +96,7 @@ describe('the output check', () => {
 
 describe('paging', () => {
   it('defaults the limit, caps it, and walks every row once', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     for (let i = 0; i < 4; i++) await org.screens.insert({ name: `Page ${i}`, timezone: 'UTC', orientation: 'landscape' });
     const all = (await org.screens.list()).map((s) => s.id);
     expect(all.length).toBe(5);
@@ -121,7 +121,7 @@ describe('paging', () => {
   });
 
   it('gives every list tool the same rows, in the same order, one at a time as all at once', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     // Assets made back to back often share a millisecond; the id breaks the tie.
     for (const n of ['Tie a', 'Tie b', 'Tie c'])
       await org.assets.insert({ kind: 'image', name: n, sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1, status: 'verified' });

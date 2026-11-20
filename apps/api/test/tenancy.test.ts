@@ -1,7 +1,7 @@
 // A session for org A cannot read or change org B's data, even with org B's ids, through the
 // real tool route. packages/tools/test/isolation.test.ts covers every tool the same way.
 import { env, exports } from 'cloudflare:workers';
-import { scoped } from '@signforge/db';
+import { testScope } from '@signforge/db/testing';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Client, email, testApp } from './client';
 
@@ -18,8 +18,8 @@ beforeAll(async () => {
   await bob.signIn(email('bob'));
   orgA = (await alice.createOrg('Org A')).id;
   orgB = (await bob.createOrg('Org B')).id;
-  screenA = (await scoped(env.DB, orgA).screens.insert({ name: 'A lobby', timezone: 'UTC', orientation: 'landscape' })).id;
-  screenB = (await scoped(env.DB, orgB).screens.insert({ name: 'B lobby', timezone: 'UTC', orientation: 'landscape' })).id;
+  screenA = (await testScope(env.DB, orgA).screens.insert({ name: 'A lobby', timezone: 'UTC', orientation: 'landscape' })).id;
+  screenB = (await testScope(env.DB, orgB).screens.insert({ name: 'B lobby', timezone: 'UTC', orientation: 'landscape' })).id;
 });
 
 describe('a session for org A', () => {
@@ -34,7 +34,7 @@ describe('a session for org A', () => {
   it("cannot read or change org B's screen by id", async () => {
     expect((await alice.tool('get_screen', { screenId: screenB })).status).toBe(404);
     expect((await alice.tool('rename_screen', { screenId: screenB, name: 'hijacked' })).status).toBe(404);
-    expect(await scoped(env.DB, orgB).screens.get(screenB)).toMatchObject({ name: 'B lobby' });
+    expect(await testScope(env.DB, orgB).screens.get(screenB)).toMatchObject({ name: 'B lobby' });
   });
 
   it('cannot pick org B from the request', async () => {

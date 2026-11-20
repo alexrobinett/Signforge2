@@ -2,8 +2,7 @@
 // org's connections, disconnect; and provider data sources reading through a connection. The
 // API's OAuth is stubbed here (`Connectors`); apps/api/test/connections.test.ts runs the real one
 // against a fake provider.
-import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { dispatch, registry, type Caller, type Connectors, ToolError } from '../src';
@@ -37,7 +36,7 @@ const connectors: Connectors = {
 };
 
 const callerOf = (org: SeededOrg, role: Caller['role'], userId: string): Caller => ({
-  org: scoped(env.DB, org.orgId),
+  org: testScope(env.DB, org.orgId),
   role,
   actor: { kind: 'user', id: userId, clientId: 'cms' },
   blobs: env.BLOBS,
@@ -104,8 +103,7 @@ describe('connecting an account', () => {
 
   it('refuses an authorization that ran out', async () => {
     const { authorizeUrl } = await call('start_connection', { provider: 'fake' });
-    for (const row of await owner.org.connections.authorizations.list())
-      await owner.org.connections.authorizations.update(row.id, { expiresAt: Date.now() - 1 });
+    for (const row of await owner.org.connections.authorizations.list()) await o.scope.connections.authorizations.update(row.id, { expiresAt: Date.now() - 1 });
     expect(await result('finish_connection', { oauthState: stateOf(authorizeUrl), code: 'c' })).toMatchObject({ ok: false, error: 'not_found' });
     // The next start clears the ones that ran out.
     await call('start_connection', { provider: 'fake' });
@@ -135,7 +133,7 @@ describe('connecting an account', () => {
 
   it('reconnects a connection in place, keeping its id', async () => {
     const first = await connect();
-    await owner.org.connections.update(first.id, { status: 'needs_reconnect', lastError: 'invalid_grant' });
+    await o.scope.connections.update(first.id, { status: 'needs_reconnect', lastError: 'invalid_grant' });
     const again = await connect(owner, { connectionId: first.id });
     expect(again).toMatchObject({ id: first.id, status: 'active', lastError: null });
     expect(await result('start_connection', { provider: 'fake', connectionId: other.connection })).toMatchObject({ ok: false, error: 'not_found' });

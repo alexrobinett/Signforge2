@@ -1,12 +1,112 @@
 /**
  * Test helpers: `@signforge/db/testing`. Not for production code.
  *
- * `seedTwoOrgs(db)` fills a migrated D1 with two orgs holding one of everything, plus one base
- * template, so an isolation test can call org B's scope with org A's ids and expect nothing.
+ * `testScope(db, orgId)` is `scoped(db, orgId)` with direct writes, so a test can set up a row in
+ * one line. `seedTwoOrgs(db)` fills a migrated D1 with two orgs holding one of everything, plus
+ * one base template, so an isolation test can call org B's scope with org A's ids and expect nothing.
  */
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { scoped, type OrgScope } from './scoped';
-import { organization, screens, templates, templateVersions } from './schema';
+import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { scoped, type NewRow, type RowPatch } from './scoped';
+import * as schema from './schema';
+import { strip, type Staged } from './writes';
+
+type StagedRow<T extends SQLiteTable> = Staged<T['$inferSelect']> | Promise<Staged<T['$inferSelect']>>;
+/** A repository's read of one row and its staged writes, which `testScope` commits at once. */
+interface Staging<T extends SQLiteTable> {
+  get(id: string): Promise<T['$inferSelect'] | undefined>;
+  stage: {
+    insert(values: NewRow<T>): StagedRow<T>;
+    update(current: T['$inferSelect'], patch: RowPatch<T>): StagedRow<T>;
+    delete(id: string): Staged;
+  };
+}
+
+/**
+ * `scoped(db, orgId)` with `insert`, `update` and `delete` on each repository, for tests and local
+ * scripts. Each is the repository's `stage` write, committed at once, so it checks and stamps rows
+ * exactly as a tool's write does. Production code stages and commits instead.
+ */
+export function testScope(db: D1Database, orgId: string) {
+  const o = scoped(db, orgId);
+  const ca = schema.connectionAuthorizations;
+  /** The row as written. */
+  const insert =
+    <T extends SQLiteTable>(stage: (values: NewRow<T>) => StagedRow<T>) =>
+    async (values: NewRow<T>): Promise<T['$inferSelect']> => {
+      const { row, writes } = await stage(values);
+      await o.commit(writes);
+      return row;
+    };
+  const direct = <T extends SQLiteTable>(repo: Staging<T>) => {
+    // A base template is readable by the org but not its own: it can neither change nor delete it.
+    const own = async (id: string) => {
+      const row = await repo.get(id);
+      return row && (row as { orgId: string | null }).orgId === orgId ? row : undefined;
+    };
+    return {
+      insert: insert<T>(repo.stage.insert),
+      /** The row as changed, or undefined if the org has no such row. An empty patch changes nothing. */
+      update: async (id: string, patch: RowPatch<T>): Promise<T['$inferSelect'] | undefined> => {
+        const current = await own(id);
+        if (!current) return undefined;
+        const { row, writes } = await repo.stage.update(current, patch);
+        await o.commit(writes);
+        return row;
+      },
+      /** Whether the org had the row. */
+      delete: async (id: string): Promise<boolean> => {
+        if (!(await own(id))) return false;
+        await o.commit(repo.stage.delete(id).writes);
+        return true;
+      },
+    };
+  };
+  return {
+    ...o,
+    screens: {
+      ...o.screens,
+      ...direct<typeof schema.screens>(o.screens),
+      credentials: { ...o.screens.credentials, ...direct<typeof schema.screenCredentials>(o.screens.credentials) },
+    },
+    screenGroups: { ...o.screenGroups, ...direct<typeof schema.screenGroups>(o.screenGroups) },
+    assets: {
+      ...o.assets,
+      ...direct<typeof schema.assets>(o.assets),
+      renditions: { ...o.assets.renditions, ...direct<typeof schema.assetRenditions>(o.assets.renditions) },
+    },
+    templates: {
+      ...o.templates,
+      ...direct<typeof schema.templates>(o.templates),
+      versions: { ...o.templates.versions, ...direct<typeof schema.templateVersions>(o.templates.versions) },
+    },
+    spots: { ...o.spots, ...direct<typeof schema.spots>(o.spots) },
+    playlists: { ...o.playlists, ...direct<typeof schema.playlists>(o.playlists) },
+    scheduleEntries: { ...o.scheduleEntries, ...direct<typeof schema.scheduleEntries>(o.scheduleEntries) },
+    publishes: { ...o.publishes, ...direct<typeof schema.publishes>(o.publishes) },
+    dataSources: { ...o.dataSources, ...direct<typeof schema.dataSources>(o.dataSources) },
+    connections: {
+      ...o.connections,
+      ...direct<typeof schema.connections>(o.connections),
+      authorizations: {
+        ...o.connections.authorizations,
+        insert: insert<typeof ca>(o.connections.authorizations.stage.insert),
+        /** Production never changes an authorization (one is consumed whole); a test moves its expiry. */
+        update: (id: string, patch: RowPatch<typeof ca>) =>
+          drizzle(db)
+            .update(ca)
+            .set(strip(patch))
+            .where(and(eq(ca.orgId, orgId), eq(ca.id, id)))
+            .returning()
+            .get(),
+      },
+    },
+    brandKits: { ...o.brandKits, ...direct<typeof schema.brandKits>(o.brandKits) },
+  };
+}
+
+export type TestScope = ReturnType<typeof testScope>;
 
 const MANIFEST = (key: string) =>
   JSON.stringify({
@@ -23,7 +123,7 @@ const MANIFEST = (key: string) =>
 /** Ids of everything seeded for one org. */
 export interface SeededOrg {
   orgId: string;
-  scope: OrgScope;
+  scope: TestScope;
   screen: string;
   group: string;
   credential: string;
@@ -58,7 +158,7 @@ export const SEED_HOUR = Date.UTC(2026, 10, 17, 13);
 
 /** An `organization` row, as Better Auth would write it. Tenant rows reference it. */
 export async function seedOrganization(db: D1Database, orgId: string) {
-  await drizzle(db).insert(organization).values({ id: orgId, name: orgId, slug: orgId, createdAt: new Date().toISOString() }).onConflictDoNothing().run();
+  await drizzle(db).insert(schema.organization).values({ id: orgId, name: orgId, slug: orgId, createdAt: new Date().toISOString() }).onConflictDoNothing().run();
 }
 
 /**
@@ -72,7 +172,7 @@ export async function seedScreen(
 ) {
   const now = Date.now();
   await drizzle(db)
-    .insert(screens)
+    .insert(schema.screens)
     .values({
       id: screen.id,
       orgId,
@@ -94,7 +194,7 @@ export async function seedScreen(
  */
 export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion?: string): Promise<SeededOrg> {
   await seedOrganization(db, orgId);
-  const o = scoped(db, orgId);
+  const o = testScope(db, orgId);
   const id = (thing: string) => `${orgId}-${thing}`;
 
   const screen = await o.screens.insert({ id: id('screen'), name: `${orgId} lobby`, timezone: 'Europe/London', orientation: 'landscape' });
@@ -216,9 +316,9 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
 /** A base template (null org) every org can use, with fixed ids. Production code writes base templates through `platform(db)`. */
 export async function seedBaseTemplate(db: D1Database) {
   const d = drizzle(db);
-  await d.insert(templates).values({ id: 'base-clock', orgId: null, key: 'clock', name: 'Clock' }).onConflictDoNothing().run();
+  await d.insert(schema.templates).values({ id: 'base-clock', orgId: null, key: 'clock', name: 'Clock' }).onConflictDoNothing().run();
   await d
-    .insert(templateVersions)
+    .insert(schema.templateVersions)
     .values({
       id: 'base-clock-1',
       orgId: null,

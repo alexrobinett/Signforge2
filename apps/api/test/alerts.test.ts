@@ -1,5 +1,5 @@
 // Offline alerts (M3-42): a screen silent past its org's threshold emails once, and once more when it is back.
-import { scoped } from '@signforge/db';
+import { testScope } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
@@ -27,7 +27,7 @@ async function orgWithTeam() {
 }
 
 async function pairedScreen(orgId: string, name: string, lastSeenAt: number, kind: 'device' | 'browser' = 'device') {
-  const org = scoped(env.DB, orgId);
+  const org = testScope(env.DB, orgId);
   const screen = await org.screens.insert({ name, timezone: 'UTC', orientation: 'landscape', lastSeenAt, kind });
   await org.screens.credentials.insert({ screenId: screen.id, secretHash: '0'.repeat(64) });
   return screen.id;
@@ -59,7 +59,7 @@ describe('offline alerts', () => {
     expect(to(outbox, 'Lobby east')).toHaveLength(2);
 
     // Heard from again: one more email each, then quiet.
-    await scoped(env.DB, org.id).screens.update(screenId, { lastSeenAt: start + 61 * MIN });
+    await testScope(env.DB, org.id).screens.update(screenId, { lastSeenAt: start + 61 * MIN });
     await checkScreenAlerts(env, outbox, start + 62 * MIN);
     const back = to(outbox, 'Lobby east').slice(2);
     expect(back.map((m) => m.to).sort()).toEqual([addr.owner, addr.editor].sort());
@@ -106,7 +106,7 @@ describe('offline alerts', () => {
     const start = Date.now();
     await pairedScreen(org.id, 'Muted', start);
     const revoked = await pairedScreen(org.id, 'Revoked', start);
-    const o = scoped(env.DB, org.id);
+    const o = testScope(env.DB, org.id);
     for (const c of await o.screens.credentials.forScreen(revoked)) await o.screens.credentials.update(c.id, { revokedAt: start });
     await o.screens.insert({ name: 'Never seen', timezone: 'UTC', orientation: 'landscape' });
     await owner.tool('update_org_settings', { alerts: { screen_offline: { who: 'everyone', email: false } } });
@@ -140,7 +140,7 @@ describe('the Cron Triggers', () => {
 
   it('expire idempotency keys after 7 days, on the first five-minute run of each UTC day', async () => {
     const { org } = await orgWithTeam();
-    const scope = scoped(env.DB, org.id);
+    const scope = testScope(env.DB, org.id);
     await scope.commit(scope.idempotency.stage({ key: 'k-retention', action: 'create_group', inputSha256: '0', outputJson: '{}' }).writes);
     const midnight = (days: number) => Math.ceil(Date.now() / DAY) * DAY + days * DAY;
 
@@ -155,7 +155,7 @@ describe('the Cron Triggers', () => {
 
   it("delete audit rows past the org's retention (365 days by default) on the first five-minute run of each UTC day", async () => {
     const { org } = await orgWithTeam();
-    const scope = scoped(env.DB, org.id);
+    const scope = testScope(env.DB, org.id);
     const day = Math.ceil(Date.now() / DAY) * DAY + 400 * DAY;
     for (const age of [364, 366]) await scope.auditLog.append({ actorKind: 'system', actorId: 'test', action: `aged-${age}`, at: day - age * DAY });
     const aged = async () => (await scope.auditLog.list()).map((r) => r.action).filter((a) => a.startsWith('aged-'));

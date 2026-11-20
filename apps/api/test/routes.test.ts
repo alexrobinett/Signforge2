@@ -1,8 +1,7 @@
 // The guard: on `/api`, only Better Auth and the tool route change data, and the tool route
 // changes it only through the dispatcher, which writes the audit log. The test enumerates the
 // Worker's routes, so a new route fails here until it is either read-only or listed below.
-import { scoped } from '@signforge/db';
-import { seedBaseTemplate } from '@signforge/db/testing';
+import { seedBaseTemplate, testScope } from '@signforge/db/testing';
 import { registry } from '@signforge/tools';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -97,22 +96,22 @@ describe('requests', () => {
     const setup = new Client(t);
     await setup.signIn(email('guard'));
     const org = await setup.createOrg('Guard');
-    screenId = (await scoped(env.DB, org.id).screens.insert({ name: 'Guarded', timezone: 'UTC', orientation: 'landscape' })).id;
+    screenId = (await testScope(env.DB, org.id).screens.insert({ name: 'Guarded', timezone: 'UTC', orientation: 'landscape' })).id;
     assetId = (
-      await scoped(env.DB, org.id).assets.insert({ kind: 'image', name: 'a.png', sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 })
+      await testScope(env.DB, org.id).assets.insert({ kind: 'image', name: 'a.png', sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1 })
     ).id;
     await env.BLOBS.put(orgBlobKey(org.id, 'a'.repeat(64)), 'a');
     brandKitId = (
-      await scoped(env.DB, org.id).brandKits.insert({
+      await testScope(env.DB, org.id).brandKits.insert({
         name: 'House',
         colorsJson: JSON.stringify({ primary: '#000000', accent: '#ffffff', background: '#000000', surface: '#111111', text: '#ffffff', muted: '#aaaaaa' }),
         shape: 'soft',
       })
     ).id;
-    spotId = (await scoped(env.DB, org.id).spots.insert({ name: 'Site', kind: 'url', durationMs: 10_000, url: 'https://example.com' })).id;
-    playlistId = (await scoped(env.DB, org.id).playlists.insert({ name: 'Main', transitionJson: JSON.stringify({ type: 'cut' }) })).id;
+    spotId = (await testScope(env.DB, org.id).spots.insert({ name: 'Site', kind: 'url', durationMs: 10_000, url: 'https://example.com' })).id;
+    playlistId = (await testScope(env.DB, org.id).playlists.insert({ name: 'Main', transitionJson: JSON.stringify({ type: 'cut' }) })).id;
     // get_data_source's example names `weather`.
-    await scoped(env.DB, org.id).dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
+    await testScope(env.DB, org.id).dataSources.insert({ id: 'weather', name: 'Weather', format: 'json', urlEncrypted: 'sealed', refreshS: 300 });
     // The same session, on a D1 binding that records writes.
     owner = new Client(t, setup.ip, { ...env, DB: recordingD1(env.DB, writes) });
     for (const [k, v] of setup.jar) owner.jar.set(k, v);
@@ -178,7 +177,7 @@ describe('POST /api/tools/:name', () => {
     await owner.signIn(email('owner'));
     await viewer.signIn(email('viewer'));
     const org = await owner.createOrg('Tools');
-    screenId = (await scoped(env.DB, org.id).screens.insert({ name: 'Lobby', timezone: 'UTC', orientation: 'landscape' })).id;
+    screenId = (await testScope(env.DB, org.id).screens.insert({ name: 'Lobby', timezone: 'UTC', orientation: 'landscape' })).id;
     const invite = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', {
       email: (await viewer.session()).body.user.email,
       role: 'viewer',
@@ -206,7 +205,7 @@ describe('POST /api/tools/:name', () => {
     const res = await owner.tool('rename_screen', { screenId, name: 'Front desk' });
     expect(await res.json()).toMatchObject({ screen: { id: screenId, name: 'Front desk' } });
     const { user, organization } = (await owner.session()).body;
-    const [entry] = await scoped(env.DB, organization.id).auditLog.list({ limit: 1 });
+    const [entry] = await testScope(env.DB, organization.id).auditLog.list({ limit: 1 });
     expect(entry).toMatchObject({ actorKind: 'user', actorId: user.id, clientId: 'cms', action: 'rename_screen', targetKind: 'screen', targetId: screenId });
   });
 

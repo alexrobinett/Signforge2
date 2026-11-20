@@ -2,8 +2,8 @@
 // one batch (staged with `ctx.write`), never straight to D1, so a change cannot land without its
 // audit row. Each tool runs its example, with ids pointing at its own org's rows, on a D1 that
 // records every statement run outside `batch()`.
-import { scoped, startPairing } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { startPairing } from '@signforge/db';
+import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -144,7 +144,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
   await PREPARE[tool.name]?.(o);
   const { db, outside } = recordingD1(env.DB);
   const caller: Caller = {
-    org: scoped(db, o.orgId),
+    org: testScope(db, o.orgId),
     role: 'owner',
     actor: { kind: 'user', id: 'user-g', clientId: 'test' },
     blobs: env.BLOBS,
@@ -153,7 +153,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
   const reg = new Map([[tool.name, tool]]);
   const result = await dispatch(reg, tool.name, input ?? INPUT[tool.name]?.(o, tool.example) ?? withOwnIds(tool.example, o), caller);
   if (REJECTS.has(tool.name)) expect((await o.scope.assets.get(o.asset))?.status).toBe('rejected');
-  const audit = await scoped(env.DB, o.orgId).auditLog.list({ limit: 10 });
+  const audit = await testScope(env.DB, o.orgId).auditLog.list({ limit: 10 });
   return { result, outside, audited: audit.some((e) => e.action === tool.name) };
 }
 
@@ -173,15 +173,15 @@ describe('every tool that changes data', () => {
 
   it('is caught when it writes straight to D1', async () => {
     const rogue = defineTool({
-      name: 'rogue_rename',
+      name: 'rogue_switch',
       description: 'A test tool that writes around the dispatcher, to show the guard catches it.',
       scope: 'screens:manage',
       minRole: 'editor',
       mutates: true,
       input: z.object({ screenId: z.string() }),
-      output: z.object({ screen: z.unknown() }),
+      output: z.object({ switched: z.boolean() }),
       example: { screenId: 'scr_example' },
-      handler: async ({ org, input }) => ({ screen: await org.screens.update(input.screenId, { name: 'rogue' }) }),
+      handler: async ({ org, input }) => ({ switched: await org.screens.setDesiredManifest(input.screenId, 'f'.repeat(64)) }),
     });
     const { outside, audited } = await runRecorded(rogue, undefined);
     expect(outside).toHaveLength(1);
