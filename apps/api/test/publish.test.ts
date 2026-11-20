@@ -42,7 +42,7 @@ describe('publish through the API', () => {
       role: 'editor',
       actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
       blobs: env.BLOBS,
-      screens: screenNotifier(env),
+      services: { notify: screenNotifier(env) },
       publishLock: (run) => ((locked += 1), lock(run)),
     };
     expect(await dispatch(registry, 'set_default_playlist', { playlistId: seed.playlist }, caller)).toMatchObject({ ok: true });

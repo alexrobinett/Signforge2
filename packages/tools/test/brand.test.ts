@@ -7,6 +7,7 @@ import { seedOrganization } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { dispatch, publishOrg, registry, type Caller } from '../src';
+import { fakeServices } from './services';
 
 const hash = async (text: string) =>
   [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -57,7 +58,7 @@ async function setup(orgId: string) {
   const main = await org.playlists.insert({ id: `${orgId}-main`, name: 'Main', transitionJson: JSON.stringify({ type: 'cut' }) });
   await org.playlists.setItems(main.id, [`${orgId}-hello`]);
   await org.commit((await org.settings.stage.set({ defaultPlaylistId: main.id })).writes);
-  const owner: Caller = { org, role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS };
+  const owner: Caller = { org, role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS, services: fakeServices };
   const call = async <T = any>(name: string, input: unknown): Promise<T> => {
     const r = await dispatch(registry, name, input, owner);
     if (!r.ok) throw new Error(`${name}: ${r.error}: ${r.message}`);

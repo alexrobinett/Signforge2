@@ -7,6 +7,7 @@ import { EXPORT_ADVICE } from '@signforge/media-check';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { dispatch, orgBlobKey, r2Presigner, registry, uploadKey, type Caller } from '../src';
+import { fakeServices } from './services';
 
 // These tests upload, complete and re-hash multi-megabyte videos in workerd: several seconds each
 // on a CI runner, past vitest's 5 s default.
@@ -63,13 +64,16 @@ beforeAll(async () => {
     role: 'owner',
     actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
     blobs: env.BLOBS,
-    uploads: r2Presigner({
-      endpoint: 'https://acct.r2.cloudflarestorage.com',
-      bucket: 'signforge-test',
-      accessKeyId: 'AKID',
-      secretAccessKey: 'secret',
-      now: () => Date.UTC(2026, 10, 18, 12),
-    }),
+    services: {
+      ...fakeServices,
+      uploads: r2Presigner({
+        endpoint: 'https://acct.r2.cloudflarestorage.com',
+        bucket: 'signforge-test',
+        accessKeyId: 'AKID',
+        secretAccessKey: 'secret',
+        now: () => Date.UTC(2026, 10, 18, 12),
+      }),
+    },
   };
 });
 

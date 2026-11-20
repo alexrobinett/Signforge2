@@ -5,6 +5,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, manifestKey, registry, type Caller, type ScreenHeartbeat } from '../src';
+import { fakeServices } from './services';
 
 let o: SeededOrg;
 let owner: Caller;
@@ -26,11 +27,14 @@ beforeAll(async () => {
     role: 'owner',
     actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
     blobs: env.BLOBS,
-    screens: {
-      manifest: async () => {},
-      manifests: async () => {},
-      revoked: async () => {},
-      command: async (screenId, command) => void sent.push({ screenId, command }),
+    services: {
+      ...fakeServices,
+      notify: {
+        manifest: async () => {},
+        manifests: async () => {},
+        revoked: async () => {},
+        command: async (screenId, command) => void sent.push({ screenId, command }),
+      },
     },
   };
   const org = scoped(env.DB, o.orgId);

@@ -4,12 +4,14 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll } from 'vitest';
 import type { Caller } from '../src';
+import { fakeServices } from './services';
 
 export const member = (orgId: string, role: Caller['role']): Caller => ({
   org: scoped(env.DB, orgId),
   role,
   actor: { kind: 'user', id: `user-${role}`, clientId: 'cms' },
   blobs: env.BLOBS,
+  services: fakeServices,
 });
 
 /** Seeds the org `name` before the file's tests: `o` is filled in then, and `as(role)` is one of its members. */

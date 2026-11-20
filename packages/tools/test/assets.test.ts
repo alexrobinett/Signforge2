@@ -6,6 +6,7 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, orgBlobKey, r2Presigner, registry, uploadKey, type Caller } from '../src';
+import { fakeServices } from './services';
 
 let o: SeededOrg;
 let owner: Caller;
@@ -62,13 +63,16 @@ beforeAll(async () => {
     role: 'owner',
     actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
     blobs: env.BLOBS,
-    uploads: r2Presigner({
-      endpoint: 'https://acct.r2.cloudflarestorage.com',
-      bucket: 'signforge-test',
-      accessKeyId: 'AKID',
-      secretAccessKey: 'secret',
-      now: () => Date.UTC(2026, 10, 17, 12),
-    }),
+    services: {
+      ...fakeServices,
+      uploads: r2Presigner({
+        endpoint: 'https://acct.r2.cloudflarestorage.com',
+        bucket: 'signforge-test',
+        accessKeyId: 'AKID',
+        secretAccessKey: 'secret',
+        now: () => Date.UTC(2026, 10, 17, 12),
+      }),
+    },
   };
 });
 

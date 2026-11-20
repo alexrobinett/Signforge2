@@ -16,9 +16,9 @@
  */
 import { dispatch, registry } from '@signforge/tools';
 import type { Context, Hono } from 'hono';
-import type { ConnectorDeps } from '../connectors';
+import { CALLBACK_PATH, type ConnectorDeps } from '../connectors';
 import type { ApiEnv } from './index';
-import { CALLBACK_PATH, cmsCaller } from './tools';
+import { cmsCaller } from './tools';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 

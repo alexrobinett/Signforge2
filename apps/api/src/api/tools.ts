@@ -8,20 +8,12 @@
  * Every route that changes data on `/api`, other than Better Auth's, is this one;
  * test/routes.test.ts fails if another appears. See packages/tools/README.md for the contract.
  */
-import { describeTools, dispatch, grantOf, registry, type Caller, type RateLimitBucket, type ToolErrorCode } from '@signforge/tools';
+import { describeTools, dispatch, grantOf, registry, type Caller, type ToolErrorCode } from '@signforge/tools';
 import type { Context, Hono } from 'hono';
-import { type ConnectorDeps, connectorDeps, connectorsFor, workerFetch } from '../connectors';
-import { clientIp } from '../device/pairing';
-import { screenNotifier } from '../device/screens';
-import { alertSecretSealer, feedUrlSealer } from '../data/cipher';
-import { feedGuards } from '../data/fetch';
-import { deliverAlert } from '../deliveries';
-import { emailSenderFor, type EmailSender } from '../email';
-import { openMeteoPlaces } from '../data/places';
-import { tableReader } from '../data/tables';
+import type { ConnectorDeps } from '../connectors';
+import type { EmailSender } from '../email';
 import { publishLock } from '../publish';
-import { templateCheckAllowed, templateChecker } from '../template-check';
-import { uploadSigner } from '../uploads';
+import { toolServices } from '../tool-services';
 import type { ApiEnv } from './index';
 
 const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = {
@@ -34,22 +26,12 @@ const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = {
   unavailable: 503,
 };
 
-/** The Workers rate limit each bucket counts against (wrangler.jsonc). */
-const LIMITS: Record<Exclude<RateLimitBucket, 'template_check'>, (env: Env) => RateLimit> = {
-  pairing_claim: (env) => env.PAIR_CLAIM_LIMIT,
-  place_search: (env) => env.PLACE_SEARCH_LIMIT,
-  table_read: (env) => env.TABLE_READ_LIMIT,
-};
-
 /** The CMS's client id in the audit log. */
 const CMS_CLIENT_ID = 'cms';
 
-/** The path the providers send the browser back to (./connections.ts), registered with each provider's OAuth client. */
-export const CALLBACK_PATH = '/api/connections/callback';
-
 /**
- * The session's member as a tool caller, through the cms client. `email` sends test alerts by
- * email; it defaults to `emailSenderFor(env)`, and tests pass a recorder.
+ * The session's member as a tool caller, through the cms client, with every tool service. `email`
+ * and `connectors` are the tests' seams (`ServiceScope`).
  */
 export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefined, email?: EmailSender): Caller {
   return {
@@ -57,30 +39,8 @@ export function cmsCaller(c: Context<ApiEnv>, connectors: ConnectorDeps | undefi
     role: c.var.role,
     actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_CLIENT_ID },
     blobs: c.env.BLOBS,
-    uploads: uploadSigner(c.env, c.req.url),
-    feedUrls: feedUrlSealer(c.env),
-    alertSecrets: alertSecretSealer(c.env),
-    // After the response: a receiver's 5 seconds are not the caller's to wait for.
-    deliveries: {
-      now: (id) =>
-        c.executionCtx.waitUntil(
-          deliverAlert(c.env, email ?? emailSenderFor(c.env), c.var.orgId, id).catch((err: unknown) => console.error('alert delivery failed', err)),
-        ),
-    },
-    places: openMeteoPlaces(c.env),
-    tables: tableReader(feedGuards(c.env, workerFetch)),
-    connectors: connectorsFor(c.env, connectors ?? connectorDeps(c.env), new URL(CALLBACK_PATH, c.req.url).href),
-    templateCheck: templateChecker(c.env),
-    screens: screenNotifier(c.env),
+    services: toolServices(c, { orgId: c.var.org.orgId, member: c.var.session.user.id, email, connectors }),
     publishLock: publishLock(c.env, c.var.org.orgId),
-    // A template check counts against the org, whose one container it uses. The others count against the
-    // member and against the address, so many accounts on one address share a limit.
-    rateLimit: async (bucket) => {
-      if (bucket === 'template_check') return templateCheckAllowed(c.env, c.var.org.orgId);
-      const limit = LIMITS[bucket](c.env);
-      const [user, ip] = await Promise.all([limit.limit({ key: `user:${c.var.session.user.id}` }), limit.limit({ key: `ip:${clientIp(c)}` })]);
-      return user.success && ip.success;
-    },
   };
 }
 

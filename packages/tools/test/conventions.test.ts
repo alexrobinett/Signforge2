@@ -4,7 +4,6 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { connectors } from './connectors-stub';
 import {
   defineTool,
   describeTools,
@@ -18,13 +17,14 @@ import {
   type AnyTool,
   type Caller,
 } from '../src';
+import { fakeServices } from './services';
 
 let o: SeededOrg;
 let owner: Caller;
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'conv-org');
-  owner = { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS, connectors };
+  owner = { org: scoped(env.DB, o.orgId), role: 'owner', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS, services: fakeServices };
 });
 
 const shapeOf = (schema: z.ZodType) => (schema instanceof z.ZodObject ? schema.shape : undefined);

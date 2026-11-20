@@ -23,7 +23,9 @@ import {
   type Scope,
   type ScreenNotifier,
   ToolError,
+  type ToolServices,
 } from '../src';
+import { fakeServices } from './services';
 
 let o: SeededOrg;
 /** An agent's limiter that always allows: these tests are about something else. */
@@ -34,6 +36,7 @@ const caller = (role: Role, scopes?: Scope[], actor: Caller['actor'] = { kind: '
   scopes,
   actor,
   blobs: env.BLOBS,
+  services: fakeServices,
   agentLimiter: unlimited,
 });
 
@@ -261,6 +264,7 @@ describe('whether editors publish (Q7, an org setting)', () => {
     scopes,
     actor,
     blobs: env.BLOBS,
+    services: fakeServices,
     agentLimiter: unlimited,
   });
   const editorsAgent = () => as('editor', ['content:read', 'content:draft', 'content:publish'], { kind: 'agent', id: 'grant-q7', clientId: 'agent-app' });
@@ -597,11 +601,16 @@ describe('screen notices', () => {
   it('tell the screen about a revoked credential once the change is committed', async () => {
     const { told, screens } = recorder();
     const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '9'.repeat(64) });
-    const r = await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
+    const r = await dispatch(
+      registry,
+      'revoke_screen_credential',
+      { screenId: o.screen, credentialId: cred.id },
+      { ...caller('owner'), services: { notify: screens } },
+    );
     expect(r.ok).toBe(true);
     expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }]);
     // Already revoked: nothing changes, but the screen is told again, in case the first notice never arrived.
-    await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
+    await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), services: { notify: screens } });
     expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }, { revoked: { screenId: o.screen, credentialId: cred.id } }]);
   });
 
@@ -611,7 +620,7 @@ describe('screen notices', () => {
     await env.DB.exec("CREATE TRIGGER audit_down BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
     try {
       await expect(
-        dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens }),
+        dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), services: { notify: screens } }),
       ).rejects.toThrow();
     } finally {
       await env.DB.exec('DROP TRIGGER audit_down');
@@ -627,8 +636,60 @@ describe('screen notices', () => {
       revoked: async () => Promise.reject(new Error('object unreachable')),
     };
     const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '7'.repeat(64) });
-    const r = await dispatch(registry, 'revoke_screen_credential', { screenId: o.screen, credentialId: cred.id }, { ...caller('owner'), screens });
+    const r = await dispatch(
+      registry,
+      'revoke_screen_credential',
+      { screenId: o.screen, credentialId: cred.id },
+      { ...caller('owner'), services: { notify: screens } },
+    );
     expect(r.ok).toBe(true);
+  });
+});
+
+describe('tool services', () => {
+  /** A tool that needs two services, and records each run and the services it was given. */
+  const ran: unknown[] = [];
+  const nearby = defineTool({
+    name: 'find_nearby',
+    description: 'A test tool that needs a place finder and a rate limit, to show dispatch checks its needs.',
+    scope: 'content:read',
+    minRole: 'viewer',
+    mutates: false,
+    needs: ['places', 'rateLimit'],
+    input: z.object({ query: z.string() }),
+    output: z.object({ found: z.number() }),
+    example: { query: 'Atlanta' },
+    handler: async ({ input, services }) => {
+      ran.push(services);
+      await services.rateLimit('place_search');
+      return { found: (await services.places.search(input.query)).length };
+    },
+  });
+  const reg = new Map([[nearby.name, nearby]]);
+  const places: ToolServices['places'] = { search: async () => [] };
+  const rateLimit: ToolServices['rateLimit'] = async () => true;
+
+  it('refuse a call that lacks a needed service, before the handler runs', async () => {
+    ran.length = 0;
+    expect(await dispatch(reg, 'find_nearby', { query: 'Atlanta' }, { ...caller('viewer'), services: {} })).toEqual({
+      ok: false,
+      error: 'forbidden',
+      message: 'find_nearby needs a place finder and a rate limit, and this caller has none',
+    });
+    expect(await dispatch(reg, 'find_nearby', { query: 'Atlanta' }, { ...caller('viewer'), services: { places } })).toEqual({
+      ok: false,
+      error: 'forbidden',
+      message: 'find_nearby needs a rate limit, and this caller has none',
+    });
+    expect(ran).toEqual([]);
+  });
+
+  it("reach the handler as the caller's own object", async () => {
+    ran.length = 0;
+    const services: ToolServices = { places, rateLimit };
+    expect(await dispatch(reg, 'find_nearby', { query: 'Atlanta' }, { ...caller('viewer'), services })).toEqual({ ok: true, output: { found: 0 } });
+    expect(ran).toHaveLength(1);
+    expect(ran[0]).toBe(services);
   });
 });
 
@@ -636,12 +697,7 @@ describe('claim_screen', () => {
   it('makes a screen of the kind the screen said it is at pair start', async () => {
     const { startPairing } = await import('@signforge/db');
     await startPairing(env.DB, { code: 'TAB234', pollTokenHash: '8'.repeat(64), kind: 'browser', now: Date.now() });
-    const r = await dispatch(
-      registry,
-      'claim_screen',
-      { code: 'TAB234', name: 'Test screen', timezone: 'UTC', orientation: 'landscape' },
-      { ...caller('editor'), rateLimit: async () => true },
-    );
+    const r = await dispatch(registry, 'claim_screen', { code: 'TAB234', name: 'Test screen', timezone: 'UTC', orientation: 'landscape' }, caller('editor'));
     expect(r).toMatchObject({ ok: true, output: { screen: { name: 'Test screen', kind: 'browser' } } });
   });
 });
@@ -653,14 +709,14 @@ describe('claim_screen racing', () => {
     await startPairing(env.DB, { code, pollTokenHash: '9'.repeat(64), now: Date.now() });
     const other = await seedOrg(env.DB, 'disp-race');
     const input = { code, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' };
-    const winner = await dispatch(registry, 'claim_screen', input, { ...caller('editor'), org: scoped(env.DB, other.orgId), rateLimit: async () => true });
+    const winner = await dispatch(registry, 'claim_screen', input, { ...caller('editor'), org: scoped(env.DB, other.orgId) });
     expect(winner).toMatchObject({ ok: true });
     // The loser saw the code open just before the winner committed.
     const org = scoped(env.DB, o.orgId);
     const before = await org.screens.list();
     let checks = 0;
     const stale = { ...org, pairing: { ...org.pairing, open: async (c: string, now: number) => (checks++ === 0 ? 'device' : org.pairing.open(c, now)) } };
-    const loser = await dispatch(registry, 'claim_screen', input, { ...caller('editor'), org: stale, rateLimit: async () => true });
+    const loser = await dispatch(registry, 'claim_screen', input, { ...caller('editor'), org: stale });
     expect(loser).toMatchObject({ ok: false, error: 'not_found' });
     expect(await org.screens.list()).toEqual(before);
   });

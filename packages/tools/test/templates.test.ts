@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { baseBlobKey, dispatch, orgBlobKey, platformRegistry, registry, type Caller, type TemplateChecker } from '../src';
 import type { PlatformScope } from '@signforge/db';
 import type { TemplateRuntimeReport } from '@signforge/contract';
+import { fakeServices } from './services';
 
 const encoder = new TextEncoder();
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -69,8 +70,7 @@ beforeAll(async () => {
     role: 'owner',
     actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
     blobs: env.BLOBS,
-    templateCheck: passing,
-    rateLimit: async () => true,
+    services: { ...fakeServices, templateCheck: passing },
   };
   system = {
     org: platform(env.DB),
@@ -78,6 +78,7 @@ beforeAll(async () => {
     scopes: ['content:draft', 'content:publish'],
     actor: { kind: 'system', id: 'sf-push', clientId: 'sf-push' },
     blobs: env.BLOBS,
+    services: fakeServices,
   };
 });
 
@@ -182,7 +183,12 @@ describe('the runtime check', () => {
   it('refuses a version that fails it, with each problem, and stores nothing', async () => {
     const ids = await orgUpload(html('h1{color:olive}'));
     const failing: TemplateChecker = async () => runtimeReport(['requested https://example.com/x (blocked)', 'did not report ready within 2000 ms']);
-    const r = await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'leaky' }), ...ids }, { ...owner, templateCheck: failing });
+    const r = await dispatch(
+      registry,
+      'register_template_version',
+      { manifest: manifest({ id: 'leaky' }), ...ids },
+      { ...owner, services: { ...owner.services, templateCheck: failing } },
+    );
     expect(r).toMatchObject({
       ok: false,
       error: 'invalid_input',
@@ -200,9 +206,12 @@ describe('the runtime check', () => {
     const buckets: string[] = [];
     const over: Caller = {
       ...owner,
-      rateLimit: async (bucket) => {
-        buckets.push(bucket);
-        return false;
+      services: {
+        ...owner.services,
+        rateLimit: async (bucket) => {
+          buckets.push(bucket);
+          return false;
+        },
       },
     };
     const before = checked.length;
@@ -224,12 +233,12 @@ describe('the runtime check', () => {
     expect(checked.length).toBe(before);
   });
 
-  it('is required for an org template: without one, registering fails rather than skip it', async () => {
+  it('is required for an org template: without one, registering is refused rather than skip it', async () => {
     const ids = await orgUpload(html('h1{color:maroon}'));
-    const { templateCheck: _, ...unchecked } = owner;
-    await expect(dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'unchecked' }), ...ids }, unchecked)).rejects.toThrow(
-      /runtime check/,
-    );
+    const { templateCheck: _, ...unchecked } = owner.services;
+    expect(
+      await dispatch(registry, 'register_template_version', { manifest: manifest({ id: 'unchecked' }), ...ids }, { ...owner, services: unchecked }),
+    ).toEqual({ ok: false, error: 'forbidden', message: 'register_template_version needs the runtime check, and this caller has none' });
   });
 
   it('does not run on base templates, which CI checks', async () => {
@@ -239,7 +248,7 @@ describe('the runtime check', () => {
       platformRegistry,
       'register_template_version',
       { manifest: manifest({ id: 'base-unchecked' }), ...ids },
-      { ...system, templateCheck: never },
+      { ...system, services: { ...system.services, templateCheck: never } },
     );
     expect(reg).toMatchObject({ ok: true });
     expect((reg as { output: { version: { checkReport: object } } }).output.version.checkReport).not.toHaveProperty('runtime');

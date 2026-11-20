@@ -7,8 +7,9 @@ import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { defineTool, dispatch, manifestKey, r2Presigner, TOOLS, uploadKey, type AnyTool, type Caller } from '../src';
-import { connectors, pendingFor } from './connectors-stub';
+import { defineTool, dispatch, manifestKey, TOOLS, uploadKey, type AnyTool, type Caller } from '../src';
+import { pendingFor } from './connectors-stub';
+import { fakeServices } from './services';
 
 const WRITE_SQL = /^\s*(insert|update|delete|replace)\b/i;
 
@@ -147,11 +148,7 @@ async function runRecorded(tool: AnyTool, input: unknown) {
     role: 'owner',
     actor: { kind: 'user', id: 'user-g', clientId: 'test' },
     blobs: env.BLOBS,
-    uploads: r2Presigner({ endpoint: 'https://r2.test', bucket: 'blobs', accessKeyId: 'k', secretAccessKey: 's' }),
-    rateLimit: async () => true,
-    feedUrls: { seal: async (_source, url) => `sealed:${url}` },
-    alertSecrets: { seal: async (_channel, _field, value) => `sealed:${value}` },
-    connectors,
+    services: fakeServices,
   };
   const reg = new Map([[tool.name, tool]]);
   const result = await dispatch(reg, tool.name, input ?? INPUT[tool.name]?.(o, tool.example) ?? withOwnIds(tool.example, o), caller);

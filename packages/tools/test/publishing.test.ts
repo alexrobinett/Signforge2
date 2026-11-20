@@ -10,6 +10,7 @@ import stressGolden from '@signforge/cli/golden/stress.json';
 import { editorCalls, ok } from './calls';
 import { loadCompileInput, loadOrg, publishOrg } from '../src/publishing';
 import { dispatch, manifestKey, registry, type Caller, type ScreenNotifier } from '../src';
+import { fakeServices } from './services';
 
 const hash = async (text: string) =>
   [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -550,7 +551,7 @@ describe('the publish tools (M3-18)', () => {
       role: 'editor',
       actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
       blobs,
-      screens,
+      services: { ...fakeServices, notify: screens },
       ...(opts.lock ? { publishLock: async <T>(run: () => Promise<T>) => ((locked += 1), run()) } : {}),
     };
     return { call: (name: string, input: unknown) => dispatch(registry, name, input, caller), told, locked: () => locked };

@@ -96,7 +96,7 @@ const caller = (s: Screen, role: Caller['role'] = 'owner'): Caller => ({
   role,
   actor: { kind: 'user', id: 'socket-test' },
   blobs: env.BLOBS,
-  screens: screenNotifier(env),
+  services: { notify: screenNotifier(env) },
 });
 
 let a: Screen;
@@ -261,7 +261,7 @@ describe('revoking a credential whose socket is open', () => {
   /** The real notifier, except that the revocation's own notice never reaches the object. */
   const unreachable = (s: Screen): Caller => ({
     ...caller(s),
-    screens: { ...screenNotifier(env), revoked: () => Promise.reject(new Error('object unreachable')) },
+    services: { notify: { ...screenNotifier(env), revoked: () => Promise.reject(new Error('object unreachable')) } },
   });
   const settle = () => new Promise((r) => setTimeout(r, 100));
 

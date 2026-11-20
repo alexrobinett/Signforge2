@@ -2,10 +2,11 @@
 import type { OrgScope } from '@signforge/db';
 import { env } from 'cloudflare:workers';
 import { dispatch, registry, type Caller } from '../src';
+import { fakeServices } from './services';
 
 /** A function that calls a tool as an editor of `org`. */
 export function editorCalls(org: OrgScope) {
-  const caller: Caller = { org, role: 'editor', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS };
+  const caller: Caller = { org, role: 'editor', actor: { kind: 'user', id: 'user-1', clientId: 'cms' }, blobs: env.BLOBS, services: fakeServices };
   return (name: string, input: unknown) => dispatch(registry, name, input, caller);
 }
 
