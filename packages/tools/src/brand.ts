@@ -5,6 +5,7 @@
  * (`reach`), and which screens cannot get a kit because their groups disagree (`conflicts`).
  */
 import { brandWarnings, chooseBrandKit, FONTS, fontById, HEX_COLOR, onColor } from '@signforge/compiler';
+import { unverified } from '@signforge/compiler/draft';
 import { BRAND_SHAPES, type BrandColors } from '@signforge/contract';
 import type { BrandAssignment, BrandKitRow, OrgScope } from '@signforge/db';
 import { z } from 'zod';
@@ -189,9 +190,7 @@ async function checkLogo(org: OrgScope, assetId: string | null | undefined, fiel
   const problem =
     a.kind !== 'image' || !['image/png', 'image/svg+xml'].includes(a.type)
       ? 'a logo must be an SVG or PNG image'
-      : a.status !== 'verified'
-        ? `asset ${assetId} is not verified; finalize its upload first`
-        : undefined;
+      : unverified(assetId, a.status);
   if (problem) throw new ToolError('invalid_input', problem, [{ path: field, message: problem }]);
 }
 

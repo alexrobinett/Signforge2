@@ -67,6 +67,10 @@ export interface DraftReads {
 /** A binding as a screen reads it. */
 export const bindingOf = (b: DraftBinding): Binding => ({ source: b.dataSourceId, path: b.path, ...(b.table ? { table: b.table } : {}) });
 
+/** Why an asset cannot be used yet, in the words every refusal uses; undefined once it is verified. */
+export const unverified = (assetId: string, status: DraftAsset['status']): string | undefined =>
+  status === 'pending' ? `asset ${assetId} is still being checked` : status === 'rejected' ? `asset ${assetId} was rejected` : undefined;
+
 /**
  * The file an asset plays as on a screen of this orientation, added to `files`, or why there is
  * none. Only a verified asset has one: until `finalize_asset` checks an upload, its files are not
@@ -80,8 +84,8 @@ export function assetFile(
 ): { sha?: Sha256; problem?: string } {
   const a = reads.asset(assetId);
   if (!a) return { problem: `asset ${assetId} does not exist` };
-  if (a.status === 'pending') return { problem: `asset ${assetId} is still being checked` };
-  if (a.status === 'rejected') return { problem: `asset ${assetId} was rejected` };
+  const problem = unverified(assetId, a.status);
+  if (problem) return { problem };
   const f = a.kind === 'video' ? a : a.renditions.find((r) => r.orientation === orientation);
   if (!f) return { problem: `asset ${assetId} has no ${orientation} rendition` };
   files[f.sha256] = { size: f.size, type: f.type };

@@ -8,7 +8,7 @@
  * holds it back until then.
  */
 import { spotProblems } from '@signforge/compiler';
-import { bindingOf, DEFAULT_FIT } from '@signforge/compiler/draft';
+import { bindingOf, DEFAULT_FIT, unverified } from '@signforge/compiler/draft';
 import {
   BINDING_PATH,
   missingColumns,
@@ -255,7 +255,8 @@ function refuseOtherKinds(kind: SpotRow['kind'], input: Record<string, unknown>)
 async function checkMedia(org: OrgScope, kind: 'image' | 'video', assetId: string) {
   const a = await org.assets.get(assetId);
   if (!a) throw notFound('asset', assetId);
-  if (a.kind !== kind || a.status !== 'verified') throw invalid('assetId', [`asset ${assetId} is not a verified ${kind}`]);
+  const problem = a.kind !== kind ? `asset ${assetId} is not a ${kind}` : unverified(assetId, a.status);
+  if (problem) throw invalid('assetId', [problem]);
 }
 
 const listSpots = defineTool({

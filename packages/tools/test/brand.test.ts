@@ -231,6 +231,21 @@ describe('brand at publish', () => {
     for (const f of inter.files) expect(manifest.files[f.file]).toEqual({ size: f.size, type: 'font/woff2' });
   });
 
+  it('refuses a logo that is still being checked or was rejected, in the words the publish uses', async () => {
+    const { refusal, org } = await setup('brand-logo-unverified');
+    for (const [status, message] of [
+      ['pending', 'is still being checked'],
+      ['rejected', 'was rejected'],
+    ] as const) {
+      const logo = await org.assets.insert({ kind: 'image', name: 'logo.png', sha256: sha('f'), type: 'image/png', size: 500, width: 400, height: 200, status });
+      expect(await refusal('create_brand_kit', { name: 'House', colors: COLORS, logoOnDarkAssetId: logo.id })).toMatchObject({
+        ok: false,
+        error: 'invalid_input',
+        details: [{ path: 'logoOnDarkAssetId', message: `asset ${logo.id} ${message}` }],
+      });
+    }
+  });
+
   it('refuses to delete an asset a kit uses as its logo', async () => {
     const { call, refusal, org } = await setup('brand-logo-delete');
     const logo = await org.assets.insert({

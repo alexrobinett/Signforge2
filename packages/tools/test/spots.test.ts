@@ -118,6 +118,25 @@ describe('spot drafts', () => {
       spot: { url: 'https://example.com/other', durationMs: 20_000, version: 2 },
     });
   });
+
+  it('refuses an image spot an asset that is still being checked or was rejected, in the words the publish uses, or one of another kind', async () => {
+    const { call, org, asset } = await setup('spots-unverified');
+    const upload = (status: 'pending' | 'rejected') =>
+      org.assets.insert({ kind: 'image', name: `${status}.png`, sha256: sha('e'), type: 'image/png', size: 10, width: 1920, height: 1080, status });
+    for (const [a, message] of [
+      [(await upload('pending')).id, 'is still being checked'],
+      [(await upload('rejected')).id, 'was rejected'],
+    ] as const) {
+      expect(await call('create_spot', { name: 'x', kind: 'image', assetId: a })).toMatchObject({
+        ok: false,
+        error: 'invalid_input',
+        details: [{ path: 'assetId', message: `asset ${a} ${message}` }],
+      });
+    }
+    expect(await call('create_spot', { name: 'x', kind: 'video', assetId: asset })).toMatchObject({
+      details: [{ path: 'assetId', message: `asset ${asset} is not a video` }],
+    });
+  });
 });
 
 /** Each binding set is refused by update_spot with its one message, at `bindings`. */
