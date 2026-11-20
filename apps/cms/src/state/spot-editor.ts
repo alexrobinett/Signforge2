@@ -85,8 +85,11 @@ interface SpotEditorState {
 
 export interface SpotEditorSlice {
   spotEditor: SpotEditorState;
-  /** Changes the draft of `spot` in `orgId`, starting from its saved draft. */
-  editSpot: (orgId: string, spot: SpotView, change: (d: SpotDraft) => SpotDraft) => void;
+  /**
+   * Changes the spot's draft in `orgId`. It starts from the spot as the Query cache holds it at this
+   * moment, never a copy a caller kept across an await (a place pick), so the edit builds on what the page shows.
+   */
+  editSpot: (orgId: string, spotId: string, change: (d: SpotDraft) => SpotDraft) => void;
   /** Saves the spot's draft now (Save draft, Publish): resolves once the save in flight and this one are done. */
   saveSpotDraft: (spotId: string) => Promise<void>;
   /** After a refused save: reads the spot again and drops its draft, to edit what is there now. */
@@ -269,12 +272,15 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
   return {
     spotEditor: initial,
 
-    editSpot(orgId, spot, change) {
+    editSpot(orgId, spotId, change) {
+      const spot = savedSpot(orgId, spotId);
+      // Not read, or deleted: there is nothing to change.
+      if (!spot) return;
       // Another spot's edit, still waiting out its second: it is saved now, not left behind.
-      for (const [spotId, d] of Object.entries(get().spotEditor.drafts)) if (spotId !== spot.id && d.status === 'unsaved') void drafts.save(spotId);
-      drafts.edit(spot.id, { orgId, record: spot.id, version: spot.version, edit: draftOf(spot) }, change);
+      for (const [id, d] of Object.entries(get().spotEditor.drafts)) if (id !== spotId && d.status === 'unsaved') void drafts.save(id);
+      drafts.edit(spotId, { orgId, record: spotId, version: spot.version, edit: draftOf(spot) }, change);
       later('stage', STAGE_DELAY_MS, redraw);
-      saveSoon(spot.id);
+      saveSoon(spotId);
     },
 
     async saveSpotDraft(spotId) {

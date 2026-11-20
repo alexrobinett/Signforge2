@@ -132,7 +132,7 @@ function PlaylistEditor() {
   for (const id of draft.spotIds) counts.set(id, (counts.get(id) ?? 0) + 1);
   const t = draft.transition;
   const msBad = t.type !== 'cut' && !(t.ms >= 1 && t.ms <= 10_000);
-  const change = (patch: Partial<typeof draft>) => edit(orgId, playlist, (d) => ({ ...d, ...patch }));
+  const change = (patch: Partial<typeof draft>) => edit(orgId, playlist.id, (d) => ({ ...d, ...patch }));
   const setSearch = (next: Partial<StageSearch>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
   const count = draft.spotIds.length === 1 ? '1 spot' : `${draft.spotIds.length} spots`;
   const loop = clockLength(loopMs(draft.spotIds, byId));
@@ -213,7 +213,7 @@ function PlaylistEditor() {
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          drop(orgId, playlist, i);
+                          drop(orgId, playlist.id, i);
                         }}
                         onDragEnd={() => startDrag(null)}
                         // The player names the spot, not its place: a spot listed twice is marked once, at its first place.
@@ -248,7 +248,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === 0}
                               ref={focusOn('up')}
-                              onClick={() => move(orgId, playlist, i, i - 1, name)}
+                              onClick={() => move(orgId, playlist.id, i, i - 1, name)}
                               aria-label={`Move ${name} up`}
                             >
                               <ArrowUpIcon aria-hidden />
@@ -260,7 +260,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === draft.spotIds.length - 1}
                               ref={focusOn('down')}
-                              onClick={() => move(orgId, playlist, i, i + 1, name)}
+                              onClick={() => move(orgId, playlist.id, i, i + 1, name)}
                               aria-label={`Move ${name} down`}
                             >
                               <ArrowDownIcon aria-hidden />
@@ -270,7 +270,7 @@ function PlaylistEditor() {
                               variant="ghost"
                               size="icon"
                               className="size-9"
-                              onClick={() => remove(orgId, playlist, i, name)}
+                              onClick={() => remove(orgId, playlist.id, i, name)}
                               aria-label={`Remove ${name}`}
                             >
                               <XIcon aria-hidden />
@@ -288,7 +288,7 @@ function PlaylistEditor() {
                   Add spots
                 </Button>
               )}
-              <SpotPicker spots={spots} versions={versions} counts={counts} onAdd={(s) => add(orgId, playlist, s.id)} />
+              <SpotPicker spots={spots} versions={versions} counts={counts} onAdd={(s) => add(orgId, playlist.id, s.id)} />
             </EditorSection>
             <EditorSection title="Where it plays">
               {playlist.isDefault ? (

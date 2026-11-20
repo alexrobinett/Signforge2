@@ -225,7 +225,7 @@ function KitEditor() {
   // A saved draft is shown while the kit is still at the version it saved.
   const draft = shown(saved, kit.version) ?? kitDraftOf(kit);
   const colors = shownColors(draft, kit.colors);
-  const change = (c: (d: KitDraft) => KitDraft) => edit(orgId, kit, c);
+  const change = (c: (d: KitDraft) => KitDraft) => edit(orgId, kit.id, c);
   const set = (patch: Partial<KitDraft>) => change((d) => ({ ...d, ...patch }));
   const ready = unsaved && draftColors(draft) !== null && draft.name.trim() !== '' && !stale;
   const versions = versionsById(templates);
@@ -311,7 +311,7 @@ function KitEditor() {
                   shown={colors}
                   disabled={!canManage}
                   onChange={(name, value) => change((d) => ({ ...d, colors: { ...d.colors, [name]: value } }))}
-                  onFix={(fg, bg) => fix(orgId, kit, fg, bg)}
+                  onFix={(fg, bg) => fix(orgId, kit.id, fg, bg)}
                 />
               </Panel>
               <Panel id="kit-type" title="Type and shape">

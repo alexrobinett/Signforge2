@@ -193,7 +193,11 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
     // A table's mapping is guessed from its columns: the latest snapshot's, or what was just read.
     const known = readPath(read?.snapshot?.data, 'columns');
     const columns = Array.isArray(known) ? known : (get().readTables[dataSourceId]?.columns ?? []);
-    get().editSpot(t.orgId, t.spot, (d) => ({ ...d, data: { ...d.data, ...data }, bindings: bindAll(t.manifest, t.live, d.bindings, dataSourceId, columns) }));
+    get().editSpot(t.orgId, t.spot.id, (d) => ({
+      ...d,
+      data: { ...d.data, ...data },
+      bindings: bindAll(t.manifest, t.live, d.bindings, dataSourceId, columns),
+    }));
     source(t.spot.id, (s) => ({ ...initial, units: s.units, fallbackOpen: s.fallbackOpen, focusChange: true }));
   }
 

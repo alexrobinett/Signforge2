@@ -2,19 +2,30 @@
 // for a save on its way and publishes the latest edit, and a spot left with an edit waiting is
 // saved (#150). Tool calls go through a stubbed `fetch`, held open until the test answers; the
 // autosave's second is fake time.
-import { PREVIEW_PROTOCOL } from '@signforge/contract';
+import { PREVIEW_PROTOCOL, type TemplateManifest } from '@signforge/contract';
+import news from '@signforge/template-news/template.json';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { SpotView } from '../src/lib/spots';
 import { spotKeys } from '../src/queries/spots';
+import { getDataSource } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
+import { createSpotSourceSlice, type SpotSourceSlice } from '../src/state/spot-source';
 import { draftOf } from '../src/lib/spots';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
 
 // The tab's org comes from the page's router, which a store test has none of.
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
-vi.mock('~/server/spots.functions', () => ({ getBrandKits: vi.fn(), getSpot: vi.fn(), getSpotPreview: vi.fn(), getSpots: vi.fn(), getTemplates: vi.fn() }));
+vi.mock('~/server/spots.functions', () => ({
+  getBrandKits: vi.fn(),
+  getDataSource: vi.fn(),
+  getDataSources: vi.fn(),
+  getSpot: vi.fn(),
+  getSpotPreview: vi.fn(),
+  getSpots: vi.fn(),
+  getTemplates: vi.fn(),
+}));
 vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
 vi.mock('~/server/playlists.functions', () => ({ getPlaylists: vi.fn(), getPlaylist: vi.fn() }));
 vi.mock('~/server/schedule.functions', () => ({ getSchedule: vi.fn() }));
@@ -74,13 +85,13 @@ describe('spot saves belong to the spot they were made for (review of #97, 2)', 
     const frame = (): Window => ({ postMessage: () => {} }) as never;
 
     store.getState().attachStage({ frame: frame(), orgId: ORG, spotId: a.id, orientation: 'landscape' });
-    store.getState().editSpot(ORG, a, (d) => ({ ...d, name: 'A, renamed' }));
+    store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'A, renamed' }));
     void store.getState().saveSpotDraft(a.id);
     await vi.advanceTimersByTimeAsync(0);
     expect(answers).toHaveLength(1);
 
     store.getState().attachStage({ frame: frame(), orgId: ORG, spotId: b.id, orientation: 'landscape' });
-    store.getState().editSpot(ORG, b, (d) => ({ ...d, name: 'B, renamed' }));
+    store.getState().editSpot(ORG, b.id, (d) => ({ ...d, name: 'B, renamed' }));
     answers[0]!({ spot: { ...a, name: 'A, renamed', version: 5 } });
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getState().spotEditor.drafts.spt_b).toMatchObject({ version: 1, status: 'unsaved', error: null, stale: false });
@@ -102,11 +113,11 @@ describe('a save on its way (#150)', () => {
     const { store, queryClient } = editorAndPublishing();
     const a = spot('spt_a', 4);
     queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
-    store.getState().editSpot(ORG, a, (d) => ({ ...d, name: 'One' }));
+    store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'One' }));
     await vi.advanceTimersByTimeAsync(1000);
     expect(calls).toMatchObject([{ name: 'update_spot', input: { name: 'One', ifVersion: 4 } }]);
 
-    store.getState().editSpot(ORG, a, (d) => ({ ...d, name: 'Two' }));
+    store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'Two' }));
     void store.getState().publishSpot(ORG, a.id);
     await vi.advanceTimersByTimeAsync(0);
     answers[0]!({ spot: { ...a, name: 'One', version: 5 } });
@@ -124,8 +135,8 @@ describe('a save on its way (#150)', () => {
     const { store, queryClient } = editorAndPublishing();
     const [a, b] = [spot('spt_a', 4), spot('spt_b', 1)];
     for (const s of [a, b]) queryClient.setQueryData(spotKeys.one(ORG, s.id), s);
-    store.getState().editSpot(ORG, a, (d) => ({ ...d, name: 'A, renamed' }));
-    store.getState().editSpot(ORG, b, (d) => ({ ...d, name: 'B, renamed' }));
+    store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'A, renamed' }));
+    store.getState().editSpot(ORG, b.id, (d) => ({ ...d, name: 'B, renamed' }));
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toMatchObject([{ name: 'update_spot', input: { spotId: 'spt_a', name: 'A, renamed', ifVersion: 4 } }]);
     expect(store.getState().spotEditor.drafts.spt_a?.edit.name).toBe('A, renamed');
@@ -161,10 +172,10 @@ describe('an edit after a save, once someone else has saved since (review of #15
     /** A keystroke in the name field: what it shows, and one more character. */
     const type = (key: string) => {
       const name = `${onPage().name}${key}`;
-      store.getState().editSpot(ORG, cached(), (d) => ({ ...d, name }));
+      store.getState().editSpot(ORG, cached().id, (d) => ({ ...d, name }));
     };
 
-    store.getState().editSpot(ORG, cached(), (d) => ({ ...d, name: 'Mine' }));
+    store.getState().editSpot(ORG, cached().id, (d) => ({ ...d, name: 'Mine' }));
     void store.getState().saveSpotDraft(v4.id);
     await vi.advanceTimersByTimeAsync(0);
     answers[0]!({ spot: { ...v4, name: 'Mine', version: 5 } });
@@ -185,7 +196,7 @@ describe('an edit after a save, once someone else has saved since (review of #15
     const store = createStore<SpotEditorSlice>()((set, get) => createSpotEditorSlice(set as never, get as never, { router, queryClient } as never));
     const v4 = spot('spt_a', 4);
     queryClient.setQueryData(spotKeys.one(ORG, v4.id), v4);
-    store.getState().editSpot(ORG, v4, (d) => ({ ...d, name: 'Mine ' }));
+    store.getState().editSpot(ORG, v4.id, (d) => ({ ...d, name: 'Mine ' }));
     void store.getState().saveSpotDraft(v4.id);
     await vi.advanceTimersByTimeAsync(0);
     // The server trims the name; the page keeps the space just typed.
@@ -193,9 +204,40 @@ describe('an edit after a save, once someone else has saved since (review of #15
     await vi.advanceTimersByTimeAsync(0);
     const v5 = queryClient.getQueryData<SpotView>(spotKeys.one(ORG, v4.id))!;
     expect(spotShown(store.getState().spotEditor, ORG, v5)?.name).toBe('Mine ');
-    store.getState().editSpot(ORG, v5, (d) => ({ ...d, name: `${d.name}two` }));
+    store.getState().editSpot(ORG, v5.id, (d) => ({ ...d, name: `${d.name}two` }));
     void store.getState().saveSpotDraft(v4.id);
     await vi.advanceTimersByTimeAsync(0);
     expect(calls.at(-1)).toMatchObject({ name: 'update_spot', input: { name: 'Mine two', ifVersion: 5 } });
+  });
+});
+
+describe('a place picked while a typed edit saves (re-check of #153, 2)', () => {
+  it('binds on top of the edit as saved, at the version it saved, not on the spot as it was when the pick began', async () => {
+    const queryClient = new QueryClient();
+    const store = createStore<SpotEditorSlice & SpotSourceSlice>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router, queryClient } as never),
+      ...createSpotSourceSlice(set as never, get as never, { router, queryClient } as never),
+    }));
+    const manifest = news as unknown as TemplateManifest;
+    const v4: SpotView = { ...spot('spt_news', 4), kind: 'template', templateVersionId: 'tpv_news', url: null, data: {}, assets: {}, bindings: {} };
+    queryClient.setQueryData(spotKeys.one(ORG, v4.id), v4);
+    let read: (v: unknown) => void = () => {};
+    vi.mocked(getDataSource).mockImplementation(() => new Promise((resolve) => (read = resolve)) as never);
+
+    store.getState().editSpot(ORG, v4.id, (d) => ({ ...d, name: 'Typed' }));
+    void store.getState().saveSpotDraft(v4.id);
+    await vi.advanceTimersByTimeAsync(0);
+    // The pick starts from the page's spot at 4, then waits on the source's read.
+    const binding = store.getState().connectSource({ orgId: ORG, spot: v4, manifest, live: manifest.live! }, 'dsrc_news');
+    await vi.advanceTimersByTimeAsync(0);
+    // Meanwhile the typed edit's save is answered: the spot is at 5.
+    answers[0]!({ spot: { ...v4, name: 'Typed', version: 5 } });
+    await vi.advanceTimersByTimeAsync(0);
+    read({ dataSource: { id: 'dsrc_news' }, snapshot: null });
+    await binding;
+    expect(store.getState().spotEditor.drafts.spt_news).toMatchObject({
+      version: 5,
+      edit: { name: 'Typed', bindings: { items: { dataSourceId: 'dsrc_news' } } },
+    });
   });
 });

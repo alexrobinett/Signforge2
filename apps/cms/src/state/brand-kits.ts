@@ -64,10 +64,10 @@ interface BrandKitsState {
 
 export interface BrandKitsSlice {
   brandKits: BrandKitsState;
-  /** Changes the draft of `kit` in `orgId`, starting from its saved values. */
-  editKit: (orgId: string, kit: BrandKitView, change: (d: KitDraft) => KitDraft) => void;
+  /** Changes the kit's draft in `orgId`, starting from the kit as the Query cache holds it at this moment. */
+  editKit: (orgId: string, kitId: string, change: (d: KitDraft) => KitDraft) => void;
   /** Gives the foreground of a failing pair its fix: a derived on-colour, or text moved until it reads. */
-  fixKitPair: (orgId: string, kit: BrandKitView, fg: BrandColor, bg: BrandColor) => void;
+  fixKitPair: (orgId: string, kitId: string, fg: BrandColor, bg: BrandColor) => void;
   discardKitDraft: (kitId: string) => void;
   /** Saves the kit's draft, unless a kit action, a save or a new kit is on its way. */
   saveKit: (kitId: string) => Promise<void>;
@@ -139,6 +139,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     clock: realClock,
   });
   const links = new Map<string, PreviewLink>();
+  const cachedKit = (orgId: string, kitId: string) => queryClient.getQueryData(brandKitsQuery(orgId).queryKey)?.brandKits.find((k) => k.id === kitId);
   // A player says it is listening once per load. Its frame can be attached again for another kit
   // (the route stays mounted after Duplicate), so the frames that said it are kept, not the links.
   const heard = new WeakSet<Window>();
@@ -261,16 +262,21 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
   return {
     brandKits: initial,
 
-    editKit(orgId, kit, change) {
+    editKit(orgId, kitId, change) {
+      const kit = cachedKit(orgId, kitId);
+      // Not read, or deleted: there is nothing to change.
+      if (!kit) return;
       // A new draft builds on the kit as the page holds it now; a later read of the kits does not move it.
-      drafts.edit(kit.id, { orgId, record: kit.id, version: kit.version, edit: kitDraftOf(kit) }, change);
+      drafts.edit(kitId, { orgId, record: kitId, version: kit.version, edit: kitDraftOf(kit) }, change);
       redrawAll();
     },
 
-    fixKitPair(orgId, kit, fg, bg) {
+    fixKitPair(orgId, kitId, fg, bg) {
+      const kit = cachedKit(orgId, kitId);
+      if (!kit) return;
       const draft = kitEditing(get().brandKits, kit) ?? kitDraftOf(kit);
       const value = fg === 'onPrimary' || fg === 'onAccent' ? null : pairFix(shownColors(draft, kit.colors), fg, bg).hex;
-      get().editKit(orgId, kit, (d) => ({ ...d, colors: { ...d.colors, [fg]: value } }));
+      get().editKit(orgId, kitId, (d) => ({ ...d, colors: { ...d.colors, [fg]: value } }));
     },
 
     discardKitDraft(kitId) {

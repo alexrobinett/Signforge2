@@ -48,19 +48,22 @@ interface PlaylistEditorState {
 
 export interface PlaylistEditorSlice {
   playlistEditor: PlaylistEditorState;
-  /** Changes the draft of `playlist`, starting from its saved draft if another playlist was open. */
-  editPlaylist: (orgId: string, playlist: PlaylistView, change: (d: PlaylistDraft) => PlaylistDraft) => void;
-  addSpotToPlaylist: (orgId: string, playlist: PlaylistView, spotId: string) => void;
+  /**
+   * Changes the playlist's draft. It starts from the playlist as the Query cache holds it at this
+   * moment, never a copy a caller kept (a toast's Undo), so the edit builds on what the page shows.
+   */
+  editPlaylist: (orgId: string, playlistId: string, change: (d: PlaylistDraft) => PlaylistDraft) => void;
+  addSpotToPlaylist: (orgId: string, playlistId: string, spotId: string) => void;
   /** Removes the spot at `index`, with a toast that puts it back. */
-  removeSpotFromPlaylist: (orgId: string, playlist: PlaylistView, index: number, name: string) => void;
-  moveSpotInPlaylist: (orgId: string, playlist: PlaylistView, from: number, to: number) => void;
+  removeSpotFromPlaylist: (orgId: string, playlistId: string, index: number, name: string) => void;
+  moveSpotInPlaylist: (orgId: string, playlistId: string, from: number, to: number) => void;
   /** A move by a row's up or down button: focus stays on the moved row, and its new place is said. */
-  moveSpotByButton: (orgId: string, playlist: PlaylistView, from: number, to: number, name: string) => void;
+  moveSpotByButton: (orgId: string, playlistId: string, from: number, to: number, name: string) => void;
   /** The moved row's button has taken focus. */
   focusMoved: () => void;
   startDragSpot: (index: number | null) => void;
   /** Drops the dragged spot at `index`. */
-  dropSpot: (orgId: string, playlist: PlaylistView, index: number) => void;
+  dropSpot: (orgId: string, playlistId: string, index: number) => void;
   openAddSpots: (open: boolean) => void;
   searchAddSpots: (query: string) => void;
   /** Saves the playlist's draft now (Save draft, Publish): resolves once the save in flight and this one are done. */
@@ -139,42 +142,50 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
 
   /** The draft of `playlist` as it stands: the one edited here, else the saved one. */
   const current = (playlist: PlaylistView) => shown(get().playlistEditor.drafts[playlist.id], playlist.version) ?? playlistDraftOf(playlist);
+  /** The same for the playlist as the cache holds it now, if it does. */
+  const shownIn = (orgId: string, playlistId: string) => {
+    const playlist = savedPlaylist(orgId, playlistId);
+    return playlist && current(playlist);
+  };
 
   return {
     playlistEditor: initial,
 
-    editPlaylist(orgId, playlist, change) {
+    editPlaylist(orgId, playlistId, change) {
+      const playlist = savedPlaylist(orgId, playlistId);
+      // Deleted meanwhile (an Undo pressed after the playlist went): there is nothing to change.
+      if (!playlist) return;
       // Another playlist's edit, still waiting out its second: it is saved now, not left behind.
-      for (const [id, d] of Object.entries(get().playlistEditor.drafts)) if (id !== playlist.id && d.status === 'unsaved') void drafts.save(id);
+      for (const [id, d] of Object.entries(get().playlistEditor.drafts)) if (id !== playlistId && d.status === 'unsaved') void drafts.save(id);
       // The picker stays as it is: the first spot added from it is the edit that starts the draft.
       editor((e) => ({
-        ...(e.playlistId === playlist.id ? e : { ...initial, drafts: e.drafts, adding: e.adding, addQuery: e.addQuery, playlistId: playlist.id }),
+        ...(e.playlistId === playlistId ? e : { ...initial, drafts: e.drafts, adding: e.adding, addQuery: e.addQuery, playlistId }),
         dragging: null,
       }));
-      drafts.edit(playlist.id, { orgId, record: playlist.id, version: playlist.version, edit: playlistDraftOf(playlist) }, change);
+      drafts.edit(playlistId, { orgId, record: playlistId, version: playlist.version, edit: playlistDraftOf(playlist) }, change);
       get().redrawStage();
-      saveSoon(playlist.id);
+      saveSoon(playlistId);
     },
 
-    addSpotToPlaylist: (orgId, playlist, spotId) => get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: [...d.spotIds, spotId] })),
+    addSpotToPlaylist: (orgId, playlistId, spotId) => get().editPlaylist(orgId, playlistId, (d) => ({ ...d, spotIds: [...d.spotIds, spotId] })),
 
-    removeSpotFromPlaylist(orgId, playlist, index, name) {
-      const spotId = current(playlist).spotIds[index];
+    removeSpotFromPlaylist(orgId, playlistId, index, name) {
+      const spotId = shownIn(orgId, playlistId)?.spotIds[index];
       if (spotId === undefined) return;
-      get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(index, 1) }));
+      get().editPlaylist(orgId, playlistId, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(index, 1) }));
       // Back at its place in the order as it is by then, so what was done since stays; only while this playlist is open.
       const undo = () => {
-        if (get().playlistEditor.playlistId !== playlist.id) return;
-        get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(Math.min(index, d.spotIds.length), 0, spotId) }));
+        if (get().playlistEditor.playlistId !== playlistId) return;
+        get().editPlaylist(orgId, playlistId, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(Math.min(index, d.spotIds.length), 0, spotId) }));
       };
       toast(`Removed ${name}`, { action: { label: 'Undo', onClick: undo } });
     },
 
-    moveSpotInPlaylist: (orgId, playlist, from, to) => get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: moved(d.spotIds, from, to) })),
+    moveSpotInPlaylist: (orgId, playlistId, from, to) => get().editPlaylist(orgId, playlistId, (d) => ({ ...d, spotIds: moved(d.spotIds, from, to) })),
 
-    moveSpotByButton(orgId, playlist, from, to, name) {
-      get().moveSpotInPlaylist(orgId, playlist, from, to);
-      const order = current(playlist).spotIds;
+    moveSpotByButton(orgId, playlistId, from, to, name) {
+      get().moveSpotInPlaylist(orgId, playlistId, from, to);
+      const order = shownIn(orgId, playlistId)?.spotIds ?? [];
       const row = rowKeys(order)[to];
       if (row === undefined) return;
       // The pressed button, unless the row reached that end and it is disabled: then the other one.
@@ -186,10 +197,10 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
 
     startDragSpot: (dragging) => editor((e) => ({ ...e, dragging })),
 
-    dropSpot(orgId, playlist, index) {
+    dropSpot(orgId, playlistId, index) {
       const from = get().playlistEditor.dragging;
       if (from === null || from === index) return get().startDragSpot(null);
-      get().moveSpotInPlaylist(orgId, playlist, from, index);
+      get().moveSpotInPlaylist(orgId, playlistId, from, index);
     },
 
     openAddSpots: (adding) => editor((e) => ({ ...e, adding, addQuery: '' })),

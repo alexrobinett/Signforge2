@@ -85,7 +85,7 @@ function SpotEditor() {
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
   const version = versionsById(templates).get(templateVersionId ?? '');
-  const change = (c: (d: SpotDraft) => SpotDraft) => edit(orgId, spot, c);
+  const change = (c: (d: SpotDraft) => SpotDraft) => edit(orgId, spot.id, c);
   const set = (patch: Partial<SpotDraft>) => change((d) => ({ ...d, ...patch }));
   const range = version?.manifest.duration;
   const durationBad = range ? draft.durationMs < range.minMs || draft.durationMs > range.maxMs : draft.durationMs < 1000;
