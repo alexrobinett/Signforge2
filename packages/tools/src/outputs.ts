@@ -4,7 +4,8 @@
  * its calls from these types reads exactly what the tools return: the CMS does, from the browser
  * and from its server functions (`@signforge/tools/outputs`, types only).
  *
- * This file is plain zod and the contract, with no Workers types and nothing a handler needs: the
+ * It imports zod, the contract, the compiler's types (`get_spot_preview`'s preview) and, through
+ * ./screen-state's state names, player-core: no Workers types and nothing a handler needs, so the
  * CMS's DOM typecheck loads it, which it cannot do with the tool files. A schema a tool also takes
  * as input (a transition, a table mapping) lives here too, and the tool imports it.
  */

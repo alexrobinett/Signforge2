@@ -17,8 +17,22 @@ export const getScreenStatus = createServerFn({ method: 'GET' }).handler(async (
   return { screens, at: Date.now() };
 });
 
-/** Its events' inputs are typed `unknown` (any JSON value, as the tool recorded it), which Start's type check cannot prove serializes, so it is not asked to. */
-export const getScreen = createServerFn({ method: 'GET', strict: { output: false } })
+/** A JSON value: what Start's type check can prove a server function's answer serializes. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/**
+ * A value read from the API's JSON, typed as JSON: an event's input is typed `unknown` by its
+ * tool (whatever the tool was given), which Start's check cannot prove serializes.
+ */
+function json(v: unknown): Json {
+  if (v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  if (Array.isArray(v)) return v.map(json);
+  if (typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, json(x)]));
+  // Nothing else comes out of JSON.parse; the return is for the type.
+  return null;
+}
+
+export const getScreen = createServerFn({ method: 'GET' })
   .validator((screenId: string) => screenId)
   .handler(async ({ data: screenId }) => {
     const [detail, groups] = await inOrg(
@@ -26,5 +40,6 @@ export const getScreen = createServerFn({ method: 'GET', strict: { output: false
       [null, []],
     );
     if (!detail) return null;
-    return { ...detail, groups, at: Date.now() };
+    const events = detail.events.map((e) => ({ ...e, input: Object.fromEntries(Object.entries(e.input).map(([k, x]) => [k, json(x)])) }));
+    return { ...detail, events, groups, at: Date.now() };
   });

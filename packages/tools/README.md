@@ -264,7 +264,7 @@ The API's five-minute check marks a rollout finished once every screen it switch
    - Give it the narrowest scope and role.
    - Set `mutates: true` if it changes anything.
    - Give a `target` for the audit log.
-   - Give an `output` schema: what it returns, as zod, written in `src/outputs.ts` under the tool's name and given as `output: outputs.<name>`. The handler's return type is checked against it at compile time, and every output against it in tests. `src/outputs.ts` holds only zod and the contract, as the CMS types its calls from it in the browser (`@signforge/tools/outputs`, types only); a schema the input shares goes there too.
+   - Give an `output` schema: what it returns, as zod, written in `src/outputs.ts` under the tool's name and given as `output: outputs.<name>`. The handler's return type is checked against it at compile time, and every output against it in tests. `src/outputs.ts` imports only zod, the contract, the compiler's types and (through `src/screen-state.ts`) player-core, all of which the CMS's DOM typecheck can load, as the CMS types its calls from it (`@signforge/tools/outputs`, types only); never import a tool file or a Workers type there. A schema the input shares goes there too.
    - A `list_*` tool pages: spread `pageInput` (`src/paging.ts`) into its input, add `next: nextOutput` (`src/outputs.ts`) to its output, and cut the rows with `page()`.
    - Give an `example`.
    - Name in `needs` the tool services its handler uses (see Tool services), and read them from `ctx.services`. Do not check for them yourself: the dispatcher refuses a call without one.
