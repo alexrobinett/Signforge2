@@ -67,5 +67,7 @@ defineTemplate({
   },
   play(ctx) {
     if (ctx.data.mode === 'on-play') Reflect.set(location, 'href', TARGET);
+    // Ready, then wedges its renderer: never yields another frame.
+    if (ctx.data.mode === 'spin-on-play') for (;;);
   },
 });

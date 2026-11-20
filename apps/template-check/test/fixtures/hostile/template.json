@@ -23,7 +23,8 @@
         "uncaught",
         "webrtc",
         "image",
-        "on-play"
+        "on-play",
+        "spin-on-play"
       ],
       "default": "ok"
     },

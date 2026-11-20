@@ -260,6 +260,10 @@ async function render(
     await page.waitForTimeout(SETTLE_MS);
     // Never ready, and nothing above says why: a template that only stalls, or that reports an error it never threw.
     if (readyMs === null && !problems.size) problems.add(`did not report ready within ${READY_TIMEOUT_MS} ms`);
+    // Ready, then no second of frames, and nothing above says why (a navigation leaves no frames to count): wedged in
+    // `play`, or it broke the count. On a screen a wedged template holds the player's frame.
+    if (readyMs !== null && frames === null && !problems.size)
+      problems.add(`froze after play: did not draw a second of frames within ${PLAY_MS + GRACE_MS} ms`);
     return { render: { orientation, viewport, readyMs, frames }, problems };
   } finally {
     await context.close();
