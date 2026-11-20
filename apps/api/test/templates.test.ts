@@ -7,7 +7,7 @@ import { pushFonts, pushTemplate, TemplatePushError, type TemplatePushOptions } 
 import { FONTS } from '@signforge/compiler';
 import { platform, scoped } from '@signforge/db';
 import { env, exports } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { baseBlobKey, orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
 
@@ -138,6 +138,8 @@ describe("the server's checks", () => {
 });
 
 describe('org templates', () => {
+  // The `unavailable` cases silence and read console.error; restored even when one fails.
+  afterEach(() => vi.restoreAllMocks());
   it("go under the org's prefix, as drafts in its catalogue, audited in its log", async () => {
     const r = await push(card({ id: 'own-card', css: '.own{color:teal}' }), { owner: { org: orgId } });
     expect(r).toMatchObject({ key: `${orgId}/own-card@1.0.0`, status: 'draft', changed: true });
@@ -175,9 +177,11 @@ describe('org templates', () => {
   });
 
   it('are refused to retry, not registered, when the check is not available', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     const message = await rejection(push(card({ id: 'down-card', css: '/* sf-runtime-down */' }), { owner: { org: orgId } }));
     // Its answer says why to the operator's logs, not to the member or agent.
     expect(message).toMatch(/503\nthe template check is not available \(it answered 503\); try again in a minute$/);
+    expect(logged).toHaveBeenCalledWith(`template check for ${orgId}: it answered 503`, expect.stringContaining('the check container did not start'));
     expect(await scoped(env.DB, orgId).templates.ownByKey('down-card')).toBeUndefined();
 
     const res = await registerFromCms(card({ id: 'down-cms-card', css: '/* sf-runtime-down */' }));
@@ -185,14 +189,17 @@ describe('org templates', () => {
     expect(await res.json()).toMatchObject({ error: 'unavailable', details: { retryAfterSeconds: 60 } });
   });
 
-  for (const [marker, why] of [
-    ['sf-runtime-not-json', 'its answer could not be read'],
-    ['sf-runtime-cut', 'its answer could not be read'],
-  ]) {
+  for (const [marker, why, cause] of [
+    ['sf-runtime-not-json', 'its answer could not be read', SyntaxError],
+    ['sf-runtime-cut', 'its answer could not be read', Error],
+  ] as const) {
     it(`are refused to retry when the check answers 200 but its body fails: ${marker}`, async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
       const message = await rejection(push(card({ id: `${marker}-card`, css: `/* ${marker} */` }), { owner: { org: orgId } }));
       expect(message).toMatch(new RegExp(`503\\nthe template check is not available \\(${why}\\); try again in a minute$`));
       expect(await scoped(env.DB, orgId).templates.ownByKey(`${marker}-card`)).toBeUndefined();
+      // The cause goes to the operator's logs; the member or agent sees only the sentence above.
+      expect(logged).toHaveBeenCalledWith(`template check for ${orgId}: ${why}`, expect.any(cause));
     });
   }
 

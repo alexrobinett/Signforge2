@@ -58,6 +58,7 @@ describe("an org's checks", () => {
     ['navigate-top', 'tried to navigate the page around it (blocked)'],
     ['no-ready', 'did not report ready within 2000 ms'],
     ['throw', 'failed to prepare: prepare blew up'],
+    ['spin-on-play', 'froze after play: did not draw a second of frames within 3000 ms'],
   ];
   for (const [mode, problem] of refused) {
     it(`refuse the fixture that does this: ${mode}`, async () => {
