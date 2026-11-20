@@ -105,8 +105,8 @@ export interface SettingsSlice {
   /** Send a test alert now; email goes to the member asking. */
   testAlertChannel: (orgId: string, channel: AlertDelivery['channel']) => Promise<void>;
   retryAlertDelivery: (orgId: string, deliveryId: string) => Promise<void>;
-  /** After a stale save: reads the settings again, dropping the org's edits. */
-  reloadSettings: (orgId: string | null) => Promise<void>;
+  /** After a stale save of `at`: reads the settings again, dropping that form's edits and error. */
+  reloadSettings: (orgId: string | null, at: string) => Promise<void>;
   /** After a switch: the old org's edits and confirmations go. Its running actions finish, and change nothing here. */
   forgetOrgSettings: () => void;
   /** True once every invite is sent, so the form can clear. */
@@ -129,6 +129,10 @@ export interface SettingsSlice {
 export const runningIn = (settings: SettingsState, scope: SettingsScope): string | undefined => settings.pending[scopeKey(scope)];
 
 const NO_EDITS: SettingsEdits = {};
+/** Whether the form saved as `at` has edits not yet saved in `orgId`. */
+export const hasEdits = (settings: SettingsState, at: string, orgId: string | null) =>
+  Object.entries(settings.drafts).some(([form, d]) => form === at && d.orgId === orgId && Object.keys(d.edits).length > 0);
+
 /** A form's edits in `orgId`; another org's are never shown. */
 export function editsIn(settings: SettingsState, form: SettingsForm, orgId: string): SettingsEdits {
   const draft = settings.drafts[form];
@@ -228,30 +232,37 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
 
     async saveSettings(orgId, form, settings, renamed) {
       const draft = get().settings.drafts[form];
-      if (draft?.orgId !== orgId) return;
+      if (draft?.orgId !== orgId) {
+        toast('Nothing to save');
+        return;
+      }
       const { name, ...fields } = draft.edits;
       const change = changeOf(fields, settings);
-      const result: { version: number | null } = { version: null };
       const saved = await run(
         org(FORM_PAGE[form], orgId),
         form,
         async () => {
           if (name !== undefined && !name.trim()) throw new Error('The organization needs a name.');
           // The versioned write first: a stale save changes nothing, the name included.
-          if (Object.keys(change).length) result.version = settingsVersionOf(await callTool('update_org_settings', { ...change, ifVersion: draft.version }));
+          if (Object.keys(change).length) {
+            const version = settingsVersionOf(await callTool('update_org_settings', { ...change, ifVersion: draft.version }));
+            // This save alone took the settings from the drafts' version to this one, and its fields
+            // are no other form's: every draft of the org still on the old version moves with it, so
+            // an edit left on another page does not conflict with this page's save.
+            patch((s) => ({
+              ...s,
+              drafts: Object.fromEntries(
+                Object.entries(s.drafts).map(([f, d]) => [f, d.orgId === orgId && d.version === draft.version ? { ...d, version } : d]),
+              ),
+            }));
+          }
           if (name !== undefined && renamed && name.trim() !== renamed.name)
             await auth(authClient.organization.update({ organizationId: renamed.id, data: { name: name.trim() } }), 'Could not rename the organization.');
         },
         'Saved',
       );
-      if (!saved) return;
-      // Its edits are saved. Edits made while it ran stay, on the version it made.
-      patch((s) => {
-        const now = s.drafts[form];
-        if (now === draft) return { ...s, drafts: withoutKey(s.drafts, form) };
-        if (now?.orgId !== orgId) return s;
-        return { ...s, drafts: { ...s.drafts, [form]: { ...now, version: result.version ?? now.version } } };
-      });
+      // Its edits are saved; edits made while it ran stay, on the version it made.
+      if (saved) patch((s) => (s.drafts[form]?.edits === draft.edits ? { ...s, drafts: withoutKey(s.drafts, form) } : s));
     },
 
     connectSlack: (orgId, webhookUrl, ifVersion) =>
@@ -308,12 +319,13 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         'Sending it again',
       )),
 
-    async reloadSettings(orgId) {
+    async reloadSettings(orgId, at) {
       await router.invalidate({ sync: true });
+      // Only the refused form's edits go: another page's are kept, and its own save says if they conflict.
       patch((s) => ({
         ...s,
-        drafts: Object.fromEntries(Object.entries(s.drafts).filter(([, d]) => d.orgId !== orgId)),
-        errors: Object.fromEntries(Object.entries(s.errors).filter(([, e]) => e.orgId !== orgId)),
+        drafts: Object.fromEntries(Object.entries(s.drafts).filter(([form, d]) => !(form === at && d.orgId === orgId))),
+        errors: withoutKey(s.errors, at),
       }));
       toast('Reloaded. Make your change again on what is there now.');
     },

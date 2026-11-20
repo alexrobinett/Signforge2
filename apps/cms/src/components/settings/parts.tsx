@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 import { Button } from '~/components/ui/button';
 import { useOrgOnScreen } from '~/lib/live';
 import { useAppStore } from '~/state/provider';
-import { errorOf, runningIn, type SettingsScope } from '~/state/settings';
+import { errorOf, hasEdits, runningIn, type SettingsScope } from '~/state/settings';
 
 const LINK =
   'flex min-h-10 shrink-0 items-center rounded-md px-3 whitespace-nowrap text-sm font-medium text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[status=active]:bg-accent data-[status=active]:text-accent-foreground';
@@ -77,7 +77,7 @@ export function ActionError({ at }: { at: string }) {
     <div role="alert" className="flex flex-wrap items-center gap-2 text-sm font-medium text-destructive empty:hidden">
       {error?.text}
       {error?.stale && (
-        <Button type="button" variant="outline" size="sm" onClick={() => void reload(error.orgId)}>
+        <Button type="button" variant="outline" size="sm" onClick={() => void reload(error.orgId, at)}>
           <RotateCwIcon aria-hidden /> Reload
         </Button>
       )}
@@ -88,13 +88,18 @@ export function ActionError({ at }: { at: string }) {
 /** A form's save button and its error; only owners get the button. */
 export function SaveRow({ at, scope, canEdit, label = 'Save changes' }: { at: string; scope: SettingsScope; canEdit: boolean; label?: string }) {
   const running = useRunning(scope);
+  const edited = useAppStore((s) => hasEdits(s.settings, at, scope.orgId));
   if (!canEdit) return <p className="text-sm text-muted-foreground">Only owners can change these.</p>;
   return (
     <div className="space-y-2">
       <ActionError at={at} />
-      <Button type="submit" aria-disabled={running !== undefined || undefined}>
-        {running === at && <LoaderCircleIcon className="animate-spin" aria-hidden />} {label}
-      </Button>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" aria-disabled={running !== undefined || undefined}>
+          {running === at && <LoaderCircleIcon className="animate-spin" aria-hidden />} {label}
+        </Button>
+        {/* Edits are kept on leaving the page, until saved or reloaded; this says they are there. */}
+        {edited && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
+      </div>
     </div>
   );
 }
