@@ -291,6 +291,20 @@ describe('schedule entries', () => {
     expect(await org.scheduleEntries.get(takeover.id)).toBeUndefined();
   });
 
+  it('a group whose takeover has ended can be deleted before any publish, the takeover with it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, publish, front, flash } = await setup('sch-ended-group');
+    const takeover = entryOf(
+      await ok(call('start_takeover', { playlistId: flash, target: 'group', groupId: front, endsAt: '2026-11-17T13:00:00Z', idempotencyKey: 'takeover-1' })),
+    );
+    await publish(takeover);
+    expect(await call('delete_group', { groupId: front })).toMatchObject({ ok: false, error: 'conflict' });
+    vi.setSystemTime(at('2026-11-17T13:00'));
+    expect(await ok(call('delete_group', { groupId: front }))).toEqual({ deleted: front });
+    expect(await org.scheduleEntries.get(takeover.id)).toBeUndefined();
+  });
+
   it('end_takeover deletes a takeover and publishes that alone, in one call', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(at('2026-11-17T12:00'));

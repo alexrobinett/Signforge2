@@ -54,7 +54,7 @@ The CMS should keep every cookie a response sets (see M3-09). Times in outputs a
 | `list_groups` | content:read | viewer | `{ limit?, cursor? }` | `{ groups: Group[], next }`, by id |
 | `create_group` | screens:manage | editor | `{ name, screenIds?, idempotencyKey? }` | `{ group }` |
 | `rename_group` | screens:manage | editor | `{ groupId, name, ifVersion? }` | `{ group }` |
-| `delete_group` | screens:manage | editor | `{ groupId }` | `{ deleted }`, or 409 while a schedule entry targets the group |
+| `delete_group` | screens:manage | editor | `{ groupId }` | `{ deleted }`, or 409 while a schedule entry targets the group (an ended takeover does not, and goes with it) |
 | `set_group_members` | screens:manage | editor | `{ groupId, screenIds, ifVersion? }` | `{ group }` |
 | `add_group_members` | screens:manage | editor | `{ groupId, screenIds }` | `{ group }` |
 | `remove_group_members` | screens:manage | editor | `{ groupId, screenIds }` | `{ group }` |
