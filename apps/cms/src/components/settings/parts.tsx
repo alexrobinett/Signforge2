@@ -6,6 +6,7 @@ import { Link } from '@tanstack/react-router';
 import { LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '~/components/ui/button';
+import { useOrgId } from '~/lib/live';
 import { useAppStore } from '~/state/provider';
 
 const LINK =
@@ -59,6 +60,16 @@ export function SettingsSection({ id, title, description, children }: { id: stri
       {children}
     </section>
   );
+}
+
+/**
+ * A settings form's key. Another org, or Reload after a stale save, remounts the form with what is
+ * there now; the form's own save does not, so a change typed while it ran is kept.
+ */
+export function useFormKey(): string {
+  const orgId = useOrgId();
+  const reloads = useAppStore((s) => s.settings.reloads);
+  return `${orgId}-${reloads}`;
 }
 
 /** The error of the action `at`, if the last one to fail was it; a reload when the settings changed since the page read them. */

@@ -9,7 +9,7 @@ import { useId, type ReactNode, type SubmitEvent } from 'react';
 import { toast } from 'sonner';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { ActionError, SaveRow, SettingsSection } from '~/components/settings/parts';
+import { ActionError, SaveRow, SettingsSection, useFormKey } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -208,10 +208,11 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
   const ask = useAppStore((s) => s.askToRemoveAlertChannel);
   const remove = useAppStore((s) => s.removeAlertChannel);
   const busy = useAppStore((s) => s.settings.pending !== null);
+  const removing = useAppStore((s) => s.settings.pending === `remove:${kind}`);
   const name = CHANNEL_COPY[kind].title;
   if (!asking)
     return (
-      <Button type="button" variant="ghost" className="text-destructive" onClick={() => ask(kind)}>
+      <Button type="button" variant="ghost" className="text-destructive" aria-disabled={busy || undefined} onClick={() => ask(kind)}>
         Remove {name}
       </Button>
     );
@@ -221,9 +222,10 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
       <ActionError at={`remove:${kind}`} />
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="destructive" aria-disabled={busy || undefined} onClick={() => void remove(kind)}>
-          Remove
+          {removing && <LoaderCircleIcon className="animate-spin" aria-hidden />} {removing ? 'Removing…' : 'Remove'}
         </Button>
-        <Button type="button" variant="outline" onClick={() => ask(null)}>
+        {/* Once the removal is sent it cannot be called back, so Keep it waits for the answer. */}
+        <Button type="button" variant="outline" aria-disabled={busy || undefined} onClick={() => ask(null)}>
           Keep it
         </Button>
       </div>
@@ -250,9 +252,13 @@ function UrlForm({
   const busy = useAppStore((s) => s.settings.pending !== null);
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const form = e.currentTarget;
-    // Cleared once saved: the URL is kept sealed, and never shown again here either.
-    void onUrl(String(new FormData(form).get('url') ?? '')).then((saved) => saved && form.reset());
+    const url = String(new FormData(e.currentTarget).get('url') ?? '');
+    const field = e.currentTarget.elements.namedItem('url');
+    // Cleared once saved: the URL is kept sealed, and never shown again here either. A URL typed
+    // while it saved is kept.
+    void onUrl(url).then((saved) => {
+      if (saved && field instanceof HTMLInputElement && field.value === url) field.value = '';
+    });
   };
   return (
     <EditorFields>
@@ -318,6 +324,7 @@ const COLUMNS = 'sm:grid-cols-[minmax(0,1fr)_12rem_4rem_4rem_4rem]';
 function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
   const { settings, channels } = data;
   const id = useId();
+  const formKey = useFormKey();
   const saveAlerts = useAppStore((s) => s.saveAlerts);
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
@@ -352,7 +359,7 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
   );
 
   return (
-    <form key={settings.version} onSubmit={submit} noValidate>
+    <form key={formKey} onSubmit={submit} noValidate>
       <SettingsSection
         id={`${id}-who`}
         title="Who hears about what"

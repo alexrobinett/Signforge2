@@ -9,7 +9,7 @@ import { describeHours, DisplayHoursEditor, hoursProblems } from '~/components/s
 import { zones } from '~/components/screens/pair-screen-form';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { SaveRow, SettingsSection } from '~/components/settings/parts';
+import { SaveRow, SettingsSection, useFormKey } from '~/components/settings/parts';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
@@ -41,6 +41,7 @@ function GeneralSettings() {
   const org = app.useLoaderData().organization;
   const canEdit = useRole() === 'owner';
   const id = useId();
+  const formKey = useFormKey();
   const draftHours = useAppStore((s) => s.settings.hours);
   const editDefaultHours = useAppStore((s) => s.editDefaultHours);
   const saveGeneral = useAppStore((s) => s.saveGeneral);
@@ -64,7 +65,7 @@ function GeneralSettings() {
   }
 
   return (
-    <form key={`${settings.version}-${org.name}`} onSubmit={submit} className="flex flex-col gap-6" noValidate>
+    <form key={formKey} onSubmit={submit} className="flex flex-col gap-6" noValidate>
       <EditorFields>
         <PageHeader title="General" description="The organization's name, and what new screens start with." />
         <SettingsSection id={`${id}-org`} title="Organization" description="Shown to members and in invite emails.">

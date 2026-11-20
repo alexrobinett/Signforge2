@@ -10,7 +10,7 @@ import { CheckIcon, MinusIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { ActionError, SaveRow, SettingsSection } from '~/components/settings/parts';
+import { ActionError, SaveRow, SettingsSection, useFormKey } from '~/components/settings/parts';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -99,8 +99,11 @@ function InviteForm() {
       .map((x) => x.trim())
       .filter(Boolean);
     if (!isRole(role)) return;
-    const target = e.currentTarget;
-    void inviteMembers(emails, role).then((sent) => sent && target.reset());
+    const field = e.currentTarget.elements.namedItem('emails');
+    // Cleared once sent, unless other addresses were typed while it ran.
+    void inviteMembers(emails, role).then((sent) => {
+      if (sent && field instanceof HTMLInputElement && field.value === raw) field.value = '';
+    });
   }
 
   return (
@@ -172,14 +175,7 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
                 ))}
               </NativeSelect>
               {!self && (
-                <Button
-                  variant="ghost"
-                  className="text-destructive"
-                  aria-disabled={busy || undefined}
-                  onClick={() => {
-                    if (!busy) askToRemoveMember(member);
-                  }}
-                >
+                <Button variant="ghost" className="text-destructive" aria-disabled={busy || undefined} onClick={() => askToRemoveMember(member)}>
                   Remove
                 </Button>
               )}
@@ -234,6 +230,7 @@ function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdi
 
 function PublishingForm({ settings, canEdit }: { settings: OrgSettings; canEdit: boolean }) {
   const id = useId();
+  const formKey = useFormKey();
   const saveEditorsPublish = useAppStore((s) => s.saveEditorsPublish);
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
@@ -242,7 +239,7 @@ function PublishingForm({ settings, canEdit }: { settings: OrgSettings; canEdit:
   }
 
   return (
-    <form key={settings.version} onSubmit={submit} noValidate>
+    <form key={formKey} onSubmit={submit} noValidate>
       <SettingsSection
         id={`${id}-publishing`}
         title="Who publishes"
@@ -329,7 +326,7 @@ function RemoveDialog() {
         </AlertDialogHeader>
         {member && <ActionError at={`remove:${member.id}`} />}
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel aria-disabled={busy || undefined}>Cancel</AlertDialogCancel>
           <Button variant="destructive" aria-disabled={busy || undefined} onClick={() => member && void removeMember(member.id)}>
             Remove
           </Button>

@@ -127,9 +127,15 @@ function AccountPage() {
                 </span>
               </span>
               {s.token !== null && (
-                <Button variant="ghost" size="sm" aria-disabled={busy || undefined} onClick={() => s.token && void signOutSession(s.token)}>
-                  Sign out
-                </Button>
+                <>
+                  <Button variant="ghost" size="sm" aria-disabled={busy || undefined} onClick={() => s.token && void signOutSession(s.token)}>
+                    Sign out
+                  </Button>
+                  {/* Its refusal shows on its row; a row with none takes no space. */}
+                  <div className="basis-full has-[>:empty]:hidden">
+                    <ActionError at={`session:${s.token}`} />
+                  </div>
+                </>
               )}
             </li>
           ))}

@@ -22,6 +22,11 @@ interface SettingsState {
   /** The role a member's running change gives them, so their select shows where it is going. */
   roleChange: { memberId: string; role: Role } | null;
   /**
+   * How many times the settings were read again after a stale save. The forms are keyed by it,
+   * not by the settings' version: their own save keeps what was typed while it ran.
+   */
+  reloads: number;
+  /**
    * Why the last action failed, and which one it was, so the form it came from shows it. `stale`:
    * the settings changed since the page read them, and the form offers a reload.
    */
@@ -66,6 +71,7 @@ export interface SettingsSlice {
   /** A new signing secret for the webhook, shown once. */
   rotateSigningSecret: (ifVersion: number) => Promise<void>;
   dismissSigningSecret: () => void;
+  /** Opens or closes a channel's removal confirmation; ignored while an action runs, as is the next one. */
   askToRemoveAlertChannel: (kind: AlertChannel['kind'] | null) => void;
   removeAlertChannel: (kind: AlertChannel['kind']) => Promise<void>;
   /** Send a test alert now; email goes to the member asking. */
@@ -78,6 +84,7 @@ export interface SettingsSlice {
   resendInvitation: (email: string, role: Role) => Promise<void>;
   cancelInvitation: (invitationId: string) => Promise<void>;
   changeMemberRole: (memberId: string, role: Role) => Promise<void>;
+  /** Opens or closes the remove dialog; ignored while an action runs. */
   askToRemoveMember: (member: Member | null) => void;
   removeMember: (memberId: string) => Promise<void>;
   saveProfile: (name: string) => Promise<void>;
@@ -88,9 +95,11 @@ export interface SettingsSlice {
   declineInvitation: (invitationId: string) => Promise<void>;
 }
 
-/** Better Auth's client answers `{ error }` rather than throwing. */
+/** Better Auth's client answers `{ error }`, and rejects only when the request did not get an answer. */
 async function auth<T extends { error: { message?: string; code?: string; status?: number } | null }>(call: Promise<T>, fallback: string): Promise<T> {
-  const res = await call;
+  const res = await call.catch((cause: unknown) => {
+    throw new Error(fallback, { cause });
+  });
   if (res.error) throw new Error(authErrorMessage(res.error, fallback));
   return res;
 }
@@ -109,8 +118,9 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
 
   /**
    * Runs one action, unless one is running: marks it pending, says how it went, and reloads the
-   * page's data. It stays pending until the page has its new data, so a control does not show
-   * the old value in between.
+   * page's data. It stays pending until the page's loaders have finished (`sync`; without it the
+   * router reloads in the background), so a control never shows the old value, or takes another
+   * change, in between. Every way out releases it.
    */
   async function run(at: string, work: () => Promise<unknown>, done: string) {
     if (get().settings.pending !== null) return false;
@@ -118,18 +128,19 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     try {
       await work();
       toast.success(done);
-      await router.invalidate();
-      patch((s) => ({ ...s, pending: null }));
+      await router.invalidate({ sync: true });
       return true;
     } catch (err) {
       const error = isStale(err) ? { at, text: 'This changed since you opened it.', stale: true } : { at, text: toolMessage(err), stale: false };
-      patch((s) => ({ ...s, pending: null, error }));
+      patch((s) => ({ ...s, error }));
       return false;
+    } finally {
+      patch((s) => ({ ...s, pending: null }));
     }
   }
 
   return {
-    settings: { pending: null, roleChange: null, error: null, hours: null, removing: null, removingChannel: null, signingSecret: null },
+    settings: { pending: null, roleChange: null, reloads: 0, error: null, hours: null, removing: null, removingChannel: null, signingSecret: null },
     editDefaultHours: (value) => patch((s) => ({ ...s, hours: { value } })),
 
     async saveGeneral(org, values, ifVersion) {
@@ -151,7 +162,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         },
         'Saved',
       );
-      if (saved) patch((s) => ({ ...s, hours: null }));
+      // An edit made while it saved is kept.
+      if (saved) patch((s) => (s.hours === hours ? { ...s, hours: null } : s));
     },
 
     saveScreenDefaults: async (values, ifVersion) => void (await run('screens', () => callTool('update_org_settings', { ...values, ifVersion }), 'Saved')),
@@ -176,7 +188,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       if (saved) patch((s) => ({ ...s, signingSecret }));
     },
     dismissSigningSecret: () => patch((s) => ({ ...s, signingSecret: null })),
-    askToRemoveAlertChannel: (kind) => patch((s) => ({ ...s, removingChannel: kind, error: null })),
+    // Neither opens nor closes while an action runs: a removal once sent cannot be called back.
+    askToRemoveAlertChannel: (kind) => patch((s) => (s.pending !== null ? s : { ...s, removingChannel: kind, error: null })),
     async removeAlertChannel(kind) {
       const removed = await run(
         `remove:${kind}`,
@@ -191,8 +204,8 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       void (await run(`retry:${deliveryId}`, () => callTool('retry_alert_delivery', { alertDeliveryId: deliveryId }), 'Sending it again')),
 
     async reloadSettings() {
-      await router.invalidate();
-      patch((s) => ({ ...s, error: null, hours: null }));
+      await router.invalidate({ sync: true });
+      patch((s) => ({ ...s, error: null, hours: null, reloads: s.reloads + 1 }));
       toast('Reloaded. Make your change again on what is there now.');
     },
 
@@ -220,11 +233,13 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       )),
     async changeMemberRole(memberId, role) {
       if (get().settings.pending !== null) return;
-      patch((s) => ({ ...s, roleChange: { memberId, role } }));
+      const change = { memberId, role };
+      patch((s) => ({ ...s, roleChange: change }));
       await run(`role:${memberId}`, () => auth(authClient.organization.updateMemberRole({ memberId, role }), 'Could not change the role.'), 'Role changed');
-      patch((s) => ({ ...s, roleChange: null }));
+      // Another change may have started once this one let go.
+      patch((s) => (s.roleChange === change ? { ...s, roleChange: null } : s));
     },
-    askToRemoveMember: (member) => patch((s) => ({ ...s, removing: member, error: null })),
+    askToRemoveMember: (member) => patch((s) => (s.pending !== null ? s : { ...s, removing: member, error: null })),
     async removeMember(memberId) {
       const removed = await run(
         `remove:${memberId}`,
@@ -250,10 +265,15 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     async connectGithub() {
       if (get().settings.pending !== null) return;
       patch((s) => ({ ...s, pending: 'github', error: null }));
-      // On success the browser leaves for GitHub and comes back to the account page.
-      const res = await authClient.linkSocial({ provider: 'github', callbackURL: '/account' });
-      if (res.error)
-        patch((s) => ({ ...s, pending: null, error: { at: 'github', text: authErrorMessage(res.error, 'Could not connect GitHub.'), stale: false } }));
+      try {
+        // On success the browser leaves for GitHub and comes back to the account page.
+        await auth(authClient.linkSocial({ provider: 'github', callbackURL: '/account' }), 'Could not connect GitHub.');
+      } catch (err) {
+        patch((s) => ({ ...s, error: { at: 'github', text: toolMessage(err), stale: false } }));
+      } finally {
+        // Released as the browser leaves too: a page the back button restores from its cache is not locked.
+        patch((s) => ({ ...s, pending: null }));
+      }
     },
 
     async acceptInvitation(invitationId) {

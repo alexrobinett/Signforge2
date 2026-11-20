@@ -5,7 +5,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useId, type SubmitEvent } from 'react';
 import { PageHeader } from '~/components/page';
-import { SaveRow, SettingsSection } from '~/components/settings/parts';
+import { SaveRow, SettingsSection, useFormKey } from '~/components/settings/parts';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { useRole } from '~/lib/live';
@@ -22,6 +22,7 @@ function ScreenSettings() {
   const settings = Route.useLoaderData();
   const canEdit = useRole() === 'owner';
   const id = useId();
+  const formKey = useFormKey();
   const saveScreenDefaults = useAppStore((s) => s.saveScreenDefaults);
   if (!settings) return null;
 
@@ -34,7 +35,7 @@ function ScreenSettings() {
   }
 
   return (
-    <form key={settings.version} onSubmit={submit} className="space-y-6" noValidate>
+    <form key={formKey} onSubmit={submit} className="space-y-6" noValidate>
       <PageHeader title="Screens & groups" description="When screens update, and how long one may be silent before it alerts." />
       <SettingsSection
         id={`${id}-window`}

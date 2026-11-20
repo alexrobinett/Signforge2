@@ -61,8 +61,8 @@ interface BrandKitsState {
   logoFor: 'dark' | 'light' | null;
   /**
    * The kit action running (`default:<kit>`, `duplicate:<kit>`, `assign:<group or screen>`), or
-   * null. While one runs, another is ignored; its controls say so with `aria-disabled`, since a
-   * disabled control loses keyboard focus.
+   * null. While one runs, or a kit saves or is created (`kitActionRunning`), another is ignored;
+   * its controls say so with `aria-disabled`, since a disabled control loses keyboard focus.
    */
   pending: string | null;
   /** Why the last kit action failed, for the kit whose page or row it was started from. */
@@ -119,6 +119,12 @@ interface PreviewLink {
   /** The newest draft compiled while the player had one unanswered: sent when it answers. */
   next: { manifest: ScreenManifest; seq: number } | null;
 }
+
+/**
+ * Whether a kit action, a save or a new kit is on its way. They run one at a time: a Duplicate
+ * during a save would copy the colours from before it, and two that navigate would race.
+ */
+export const kitActionRunning = ({ brandKits: k }: BrandKitsSlice) => k.pending !== null || k.newKit.pending || Object.values(k.edits).some((e) => e.saving);
 
 export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { router, queryClient }) => {
   const kits = (change: (k: BrandKitsState) => BrandKitsState) => set((s) => ({ brandKits: change(s.brandKits) }));
@@ -219,18 +225,22 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     }));
   };
 
-  /** Runs one kit action for `kitId`'s page or row, unless one is running, marking it pending and showing its refusal there, then reads the kits again. */
+  /**
+   * Runs one kit action for `kitId`'s page or row, unless one is running, marking it pending and
+   * showing its refusal there, then reads the kits again. Every way out releases it.
+   */
   async function act(orgId: string, kitId: string, at: string, work: () => Promise<unknown>): Promise<boolean> {
-    if (get().brandKits.pending !== null) return false;
+    if (kitActionRunning(get())) return false;
     kits((k) => ({ ...k, pending: at, actionError: null }));
     try {
       await work();
       await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
-      kits((k) => ({ ...k, pending: null }));
       return true;
     } catch (err) {
-      kits((k) => ({ ...k, pending: null, actionError: { kitId, text: toolMessage(err) } }));
+      kits((k) => ({ ...k, actionError: { kitId, text: toolMessage(err) } }));
       return false;
+    } finally {
+      kits((k) => ({ ...k, pending: null }));
     }
   }
 
@@ -256,7 +266,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
 
     async saveKit(orgId, kit) {
       const { draft, version } = get().brandKits.edits[kit.id] ?? NO_EDIT;
-      if (!draft || version === null) return;
+      if (!draft || version === null || kitActionRunning(get())) return;
       edit(kit.id, (e) => ({ ...e, saving: true, error: null }));
       try {
         const saved = brandKitVersionOf(await callTool('update_brand_kit', updateInput(kit.id, draft, version)));
@@ -292,6 +302,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     nameNewKit: (name) => kits((k) => ({ ...k, newKit: { ...k.newKit, name, error: null } })),
 
     async createKit(orgId) {
+      if (kitActionRunning(get())) return;
       const key = get().brandKits.newKit.key ?? crypto.randomUUID();
       kits((k) => ({ ...k, newKit: { ...k.newKit, key, pending: true, error: null } }));
       try {
