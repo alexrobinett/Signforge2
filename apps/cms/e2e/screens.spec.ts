@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { axe, d1, fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
+import { axe, createOrg, d1, disabledOnServer, fillUntilEnabled, hydrated, publishImage, shots, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -334,4 +334,18 @@ test('the Screens page says when its poll fails, until a good one, and an expire
   // The session ends while the page is open: the next poll goes to sign-in, which comes back here after it.
   await page.context().clearCookies();
   await expect(page).toHaveURL(/\/sign-in\?redirect=%2Fscreens$/, { timeout: 40_000 });
+});
+
+test("a screen's actions are disabled in the server's HTML, until the page has hydrated (#136)", async ({ page, request }) => {
+  // The page hydrates after the app (body[data-hydrated]): a click in between went nowhere.
+  await signInAs(page, `e2e-screen-server-${Date.now()}@example.com`, '192.0.2.17');
+  await createOrg(page, 'Northside Market');
+  const { code } = await startPairing(request);
+  const { screen } = await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
+  const path = `/screens/${screen.id}`;
+  const names = ['Identify (10 s)', 'Restart player', 'More actions: settings, display hours, revoke'];
+  expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
+  // Rendered by the server, they are enabled once the page has hydrated.
+  await page.goto(path);
+  await expect(page.getByRole('button', { name: 'Restart player' })).toBeEnabled();
 });

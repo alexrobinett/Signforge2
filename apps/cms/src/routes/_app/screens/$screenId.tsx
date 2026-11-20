@@ -6,6 +6,7 @@
 import { createFileRoute, getRouteApi, Link, notFound } from '@tanstack/react-router';
 import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon } from 'lucide-react';
 import { useId, type SubmitEvent, type ReactNode } from 'react';
+import { EditorFields } from '~/components/editor';
 import { describeHours, DisplayHoursEditor, hoursProblems, WeekBars } from '~/components/screens/display-hours-editor';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
 import { ScreenStatus } from '~/components/screens/status';
@@ -108,65 +109,67 @@ function ScreenPage() {
           </span>
           {canManage && !revoked && (
             <div className="flex flex-wrap gap-2 sm:ml-auto">
-              <Button
-                variant="outline"
-                disabled={!!busy}
-                onClick={() => run('identify', 'identify_screen', {}, 'Sent. The screen shows its name for 10 seconds, if it is connected.')}
-              >
-                {spinner('identify', <ScanEyeIcon aria-hidden />)} Identify (10 s)
-              </Button>
-              <Button
-                variant="outline"
-                disabled={!!busy}
-                onClick={() => run('restart', 'restart_screen', {}, 'Sent. The player restarts and plays from its cache at once.')}
-              >
-                {spinner('restart', <RotateCwIcon aria-hidden />)} Restart player
-              </Button>
-              {/* A browser tab has no panel to power: it ignores wake and sleep. */}
-              {screen.kind === 'browser' ? null : override ? (
+              <EditorFields>
                 <Button
                   variant="outline"
                   disabled={!!busy}
-                  onClick={() => run('display', 'set_display_override', { state: null }, 'Back to its display hours.')}
+                  onClick={() => run('identify', 'identify_screen', {}, 'Sent. The screen shows its name for 10 seconds, if it is connected.')}
                 >
-                  {spinner('display', <UndoIcon aria-hidden />)} Back to display hours
+                  {spinner('identify', <ScanEyeIcon aria-hidden />)} Identify (10 s)
                 </Button>
-              ) : screen.heartbeat?.displayOn === false || screen.state.kind === 'asleep' ? (
                 <Button
                   variant="outline"
                   disabled={!!busy}
-                  onClick={() => run('display', 'set_display_override', { state: 'on' }, 'Waking it until its next scheduled change.')}
+                  onClick={() => run('restart', 'restart_screen', {}, 'Sent. The player restarts and plays from its cache at once.')}
                 >
-                  {spinner('display', <SunIcon aria-hidden />)} Wake now
+                  {spinner('restart', <RotateCwIcon aria-hidden />)} Restart player
                 </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  disabled={!!busy}
-                  onClick={() => run('display', 'set_display_override', { state: 'off' }, 'Sleeping it until its next scheduled change.')}
-                >
-                  {spinner('display', <MoonIcon aria-hidden />)} Sleep now
-                </Button>
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" aria-label="More actions: settings, display hours, revoke">
-                    <MoreHorizontalIcon aria-hidden />
+                {/* A browser tab has no panel to power: it ignores wake and sleep. */}
+                {screen.kind === 'browser' ? null : override ? (
+                  <Button
+                    variant="outline"
+                    disabled={!!busy}
+                    onClick={() => run('display', 'set_display_override', { state: null }, 'Back to its display hours.')}
+                  >
+                    {spinner('display', <UndoIcon aria-hidden />)} Back to display hours
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => openScreenSettings(screen, groupIds)}>Settings and groups…</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => openDisplayHours(screen)}>Display hours…</DropdownMenuItem>
-                  {owner && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => askToRevoke(true)}>
-                        Revoke…
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                ) : screen.heartbeat?.displayOn === false || screen.state.kind === 'asleep' ? (
+                  <Button
+                    variant="outline"
+                    disabled={!!busy}
+                    onClick={() => run('display', 'set_display_override', { state: 'on' }, 'Waking it until its next scheduled change.')}
+                  >
+                    {spinner('display', <SunIcon aria-hidden />)} Wake now
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    disabled={!!busy}
+                    onClick={() => run('display', 'set_display_override', { state: 'off' }, 'Sleeping it until its next scheduled change.')}
+                  >
+                    {spinner('display', <MoonIcon aria-hidden />)} Sleep now
+                  </Button>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon" aria-label="More actions: settings, display hours, revoke">
+                      <MoreHorizontalIcon aria-hidden />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => openScreenSettings(screen, groupIds)}>Settings and groups…</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openDisplayHours(screen)}>Display hours…</DropdownMenuItem>
+                    {owner && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => askToRevoke(true)}>
+                          Revoke…
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </EditorFields>
             </div>
           )}
         </div>
