@@ -952,6 +952,15 @@ describe('script check', () => {
     ]);
   });
 
+  it('refuses a select that holds script markup, where browsers parse differently, and skips a script in MathML', () => {
+    const select = ['a <select> may not hold a script: browsers parse <select> differently, and none runs in a template'];
+    expect(problems('<select><script>"use strict";x()</script></select>')).toEqual(select);
+    // A script that only Chromium's customizable-select parsing finds: the markup is refused all the same.
+    expect(problems('<select><svg><textarea><script>"use strict";x()</script></textarea></svg></select>')).toEqual(select);
+    expect(problems('<select><option>One</option><option>Two</option></select>')).toEqual([]);
+    expect(problems('<math><script>x()</script></math>')).toEqual([]);
+  });
+
   it('passes text that only looks like a script: in a textarea, a comment, an attribute', () => {
     expect(problems('<textarea><script>x()</script></textarea><!-- <script>y()</script> --><p title="<script>z()</script>">')).toEqual([]);
   });

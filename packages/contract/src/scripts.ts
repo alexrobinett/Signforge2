@@ -1,16 +1,19 @@
 /**
- * The scripts of a template bundle, found as a browser finds them: parse5 follows the HTML standard's
+ * The scripts of a template bundle, read with an HTML parser: parse5 follows the HTML standard's
  * tokenizer and tree builder, so HTML and SVG script elements are found (those in a `<template>` too)
  * with their attributes decoded, and text that only looks like a script (in a textarea, a comment, an
- * attribute) is not one. The bundle check and the player (`containedFrames` in packages/player-core)
- * both read scripts through this, so they agree on which ones a template frame runs and where their
- * text is. See Template containment in docs/architecture.md.
+ * attribute) is not one. A `script` in MathML never runs, and is skipped. Inside a `<select>` parse5
+ * and Chromium disagree (Chromium parses it as a customizable select), so a `<select>` that holds any
+ * script markup is refused and nothing in it is armed. The bundle check and the player
+ * (`containedFrames` in packages/player-core) both read scripts through this, so they agree on which
+ * ones a template frame runs and where their text is. See Template containment in docs/architecture.md.
  */
 import { type DefaultTreeAdapterTypes as Tree, parse } from 'parse5';
 import { TEMPLATE_SCRIPT_START } from './shapes.ts';
 
+/** A script element, or a `<select>` that holds script markup. */
 export interface BundleScript {
-  /** Where the script's text is in the returned `html`, from `start` to `end`. */
+  /** Where the script's text (or the `<select>`) is in the returned `html`, from `start` to `end`. */
   start: number;
   end: number;
   /** Whether a template frame runs it: inline, classic JavaScript, plain text, starting with exactly TEMPLATE_SCRIPT_START. */
@@ -19,7 +22,9 @@ export interface BundleScript {
   problem?: string;
 }
 
+const HTML = 'http://www.w3.org/1999/xhtml';
 const SVG = 'http://www.w3.org/2000/svg';
+const IN_SELECT = 'a <select> may not hold a script: browsers parse <select> differently, and none runs in a template';
 // The HTML standard's JavaScript MIME type essences, and the other types it runs as a script.
 const JAVASCRIPT = new Set([
   'application/ecmascript',
@@ -74,13 +79,26 @@ function classify(el: Tree.Element, html: string): BundleScript {
 export function bundleScripts(bundle: string): { html: string; scripts: BundleScript[] } {
   const html = bundle.replace(/\r\n?/g, '\n');
   const scripts: BundleScript[] = [];
-  const walk = (node: Tree.ParentNode) => {
+  const walk = (node: Tree.ParentNode, inSelect: boolean) => {
     for (const child of node.childNodes) {
       if (!('tagName' in child)) continue;
-      if (child.tagName === 'script') scripts.push(classify(child, html));
-      walk('content' in child ? child.content : child);
+      const select = !inSelect && child.tagName === 'select' && child.namespaceURI === HTML;
+      if (select) {
+        // Text up to the next </select>, not parse5's element: where parse5 closes a <select> early
+        // (at a <textarea>, say), Chromium may go on and find a script that parse5 never sees.
+        const start = child.sourceCodeLocation!.startOffset;
+        const close = html.slice(start).search(/<\/select/i);
+        const end = close < 0 ? html.length : start + close;
+        if (/<script/i.test(html.slice(start, end))) scripts.push({ start, end, runs: false, problem: IN_SELECT });
+      }
+      if (child.tagName === 'script' && (child.namespaceURI === HTML || child.namespaceURI === SVG)) {
+        const found = classify(child, html);
+        // In a <select> the <select> is the problem: its scripts are neither armed nor reported again.
+        scripts.push(inSelect ? { start: found.start, end: found.end, runs: false } : found);
+      }
+      walk('content' in child ? child.content : child, inSelect || select);
     }
   };
-  walk(parse(html, { sourceCodeLocationInfo: true, scriptingEnabled: true }));
+  walk(parse(html, { sourceCodeLocationInfo: true, scriptingEnabled: true }), false);
   return { html, scripts: scripts.sort((a, b) => a.start - b.start) };
 }
