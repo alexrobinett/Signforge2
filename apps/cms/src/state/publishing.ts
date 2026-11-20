@@ -89,15 +89,16 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       made.screens > 0 && failed > 0 && `${screensWord(failed)} could not take it and keep what they play.`,
     ].filter(Boolean);
     const previous = made.previousId;
+    const undoable = undo && previous !== null && made.screens > 0;
     toast.success(made.screens ? `Published ${v} to ${screensWord(made.screens)}` : `Published ${v}`, {
       description: notes.join(' '),
-      // Always set: this toast replaces the last one, and an action left out would keep that one's Undo.
-      action:
-        undo && previous && made.screens
-          ? { label: 'Undo', onClick: () => void get().rollBackTo(orgId, { id: previous, revision: made.revision - 1 }, made.id) }
-          : undefined,
+      // Always set, as are the two below: this toast replaces the last one, and one left out keeps its value.
+      action: undoable ? { label: 'Undo', onClick: () => void get().rollBackTo(orgId, { id: previous, revision: made.revision - 1 }, made.id) } : undefined,
       cancel: viewRollout(made.id),
-      duration: 10_000,
+      // An Undo stays until it is used, closed, or replaced by the next publish: sonner pauses its
+      // timer only under the pointer, so one reached by keyboard would be raced by it.
+      duration: undoable ? Infinity : 10_000,
+      closeButton: undoable,
       // One publish toast at a time: the next replaces it.
       id: TOAST_ID,
     });

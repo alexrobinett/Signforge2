@@ -217,7 +217,8 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
         if (get().playlistEditor.playlistId !== playlist.id) return;
         get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: d.spotIds.toSpliced(Math.min(index, d.spotIds.length), 0, spotId) }));
       };
-      toast(`Removed ${name}`, { action: { label: 'Undo', onClick: undo } });
+      // Kept until used or closed, like a publish's Undo: a timer would race a keyboard reaching it.
+      toast(`Removed ${name}`, { action: { label: 'Undo', onClick: undo }, duration: Infinity, closeButton: true });
     },
 
     moveSpotInPlaylist: (orgId, playlist, from, to) => get().editPlaylist(orgId, playlist, (d) => ({ ...d, spotIds: moved(d.spotIds, from, to) })),

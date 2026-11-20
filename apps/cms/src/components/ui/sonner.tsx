@@ -22,6 +22,8 @@ const toastOptions: ToasterProps['toastOptions'] = {
     content: 'basis-[calc(100%-2rem)]',
     actionButton: 'order-1 h-9! px-3.5! text-sm! font-semibold! bg-white! text-[#101828]! ml-8!',
     cancelButton: 'order-2 h-9! bg-transparent! text-sm! text-[#c7d2fe]! underline! underline-offset-4!',
+    // A toast that stays until used (one with Undo) closes here, in the toast's own colours.
+    closeButton: 'bg-[#101828]! text-white! border-[#667085]! dark:bg-[#262b36]!',
   },
 };
 
