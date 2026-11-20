@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs } from './helpers';
 import { API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -286,4 +286,27 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await shots(page, '47b-settings-notifications-rules-phone');
   await toTop(page.getByRole('region', { name: 'Recent deliveries' }));
   await shots(page, '47c-settings-notifications-log-phone');
+});
+
+test("settings fields that save or show at once are disabled in the server's HTML, until the page has hydrated (#136)", async ({ page }) => {
+  // A page hydrates after the app (body[data-hydrated]): a controlled field changed in between was
+  // set back by React, the change lost (a member's role saved again as it was).
+  const email = `e2e-settings-server-${Date.now()}@example.com`;
+  await signInAs(page, email, '192.0.2.35');
+  await createOrg(page, 'Northside Market');
+  const pages: [path: string, names: string[]][] = [
+    ['/settings/general', ['Name', 'Always on', 'Set hours', 'Save changes']],
+    ['/settings/members', [`Role for ${email}`]],
+    ['/account', ['Light', 'Dark', 'System']],
+  ];
+  for (const [path, names] of pages) {
+    expect(await disabledOnServer(page, path, names), path).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
+  }
+  // Rendered by the server, they are enabled once the page has hydrated.
+  await page.goto('/settings/general');
+  await expect(page.getByRole('radio', { name: 'Set hours' })).toBeEnabled();
+  await page.goto('/settings/members');
+  await expect(page.getByRole('combobox', { name: `Role for ${email}` })).toBeEnabled();
+  await page.goto('/account');
+  await expect(page.getByRole('radio', { name: 'Dark' })).toBeEnabled();
 });

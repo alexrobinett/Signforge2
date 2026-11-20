@@ -5,6 +5,7 @@
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
+import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { ActionError, SettingsSection } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
@@ -143,18 +144,20 @@ function AccountPage() {
         <fieldset>
           <legend className="sr-only">Theme</legend>
           <div className="flex flex-wrap gap-2">
-            {THEMES.map(({ value, label, icon: Icon }) => (
-              <label
-                key={value}
-                className={cn(
-                  'flex h-10 cursor-pointer items-center gap-2 rounded-full border px-4 text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
-                  theme === value ? 'border-foreground bg-foreground text-background' : 'border-border-strong bg-card hover:bg-accent',
-                )}
-              >
-                <input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} className="sr-only" />
-                <Icon className="size-4" aria-hidden /> {label}
-              </label>
-            ))}
+            <EditorFields>
+              {THEMES.map(({ value, label, icon: Icon }) => (
+                <label
+                  key={value}
+                  className={cn(
+                    'flex h-10 cursor-pointer items-center gap-2 rounded-full border px-4 text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
+                    theme === value ? 'border-foreground bg-foreground text-background' : 'border-border-strong bg-card hover:bg-accent',
+                  )}
+                >
+                  <input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} className="sr-only" />
+                  <Icon className="size-4" aria-hidden /> {label}
+                </label>
+              ))}
+            </EditorFields>
           </div>
         </fieldset>
       </SettingsSection>

@@ -8,6 +8,7 @@
 import { createFileRoute, getRouteApi } from '@tanstack/react-router';
 import { CheckIcon, MinusIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
+import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { ActionError, SaveRow, SettingsSection } from '~/components/settings/parts';
 import {
@@ -148,26 +149,28 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
         </div>
         {canEdit ? (
           <div className="flex items-center gap-2">
-            <NativeSelect
-              aria-label={`Role for ${display}`}
-              value={member.role}
-              disabled={pending}
-              onChange={(e) => {
-                if (isRole(e.target.value)) void changeMemberRole(member.id, e.target.value);
-              }}
-              className="w-36"
-            >
-              {ROLES.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
-            </NativeSelect>
-            {!self && (
-              <Button variant="ghost" className="text-destructive" disabled={pending} onClick={() => askToRemoveMember(member)}>
-                Remove
-              </Button>
-            )}
+            <EditorFields>
+              <NativeSelect
+                aria-label={`Role for ${display}`}
+                value={member.role}
+                disabled={pending}
+                onChange={(e) => {
+                  if (isRole(e.target.value)) void changeMemberRole(member.id, e.target.value);
+                }}
+                className="w-36"
+              >
+                {ROLES.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </NativeSelect>
+              {!self && (
+                <Button variant="ghost" className="text-destructive" disabled={pending} onClick={() => askToRemoveMember(member)}>
+                  Remove
+                </Button>
+              )}
+            </EditorFields>
           </div>
         ) : (
           <span className="text-sm">{roleLabel(member.role)}</span>
