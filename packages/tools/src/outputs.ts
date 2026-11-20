@@ -9,6 +9,7 @@
  * as input (a transition, a table mapping) lives here too, and the tool imports it.
  */
 import { BRAND_SHAPES, SCREEN_KINDS, TABLE_ROWS_PATH, TEMPLATE_CHECKS, type DisplayHours, type TemplateManifest } from '@signforge/contract';
+import type { CompileInput } from '@signforge/compiler';
 import { z } from 'zod';
 import { displayHours, draftOutput, orientation, version } from './fields';
 import { NEEDS_YOU_REASONS, STATE_KINDS } from './screen-state';
@@ -702,9 +703,11 @@ export const outputs = {
   get_spot_preview: z.object({
     preview: z
       .looseObject({
-        templates: z.record(z.string(), z.unknown()),
+        // The compiler's input types, not checked: an agent sees any JSON in them.
+        templates: z.record(z.string(), z.custom<CompileInput['templates'][string]>()),
         files: z.record(z.string(), z.object({ size: z.number(), type: z.string() })),
-        dataSources: z.array(z.unknown()),
+        dataSources: z.array(z.custom<CompileInput['dataSources'][number]>()),
+        brand: z.custom<NonNullable<CompileInput['brand']>>().optional(),
       })
       .describe("A compiler input without its screen and content: templates, files, dataSources and brand (the chosen kit as the screen's)"),
     brandKitId: z.string().nullable().describe('The kit the preview wears, or null for none'),
