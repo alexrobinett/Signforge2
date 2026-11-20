@@ -16,7 +16,9 @@
  *                 ?hb=1           with debug, also show a moving speck so every frame is drawn. It costs
  *                                 the Pi 4 about 7% of frames: use it only to validate measurements
  *                 ?spots=a,b      play only these spots, in order, ignoring the schedule (testing)
- *                 ?transition=cut|fade<ms>|<ms>  override the playlist transition (testing)
+ *                 ?transition=cut|crossfade|fade|fade<ms>|<ms>  override the playlist transition (testing): a
+ *                                 crossfade or fade is 500 ms unless given, a bare <ms> is a crossfade, anything else
+ *                                 stops the player at load (src/transition-override.ts)
  *                 ?supervisor=<url>  the device supervisor that powers the panel (default http://127.0.0.1:8091)
  *                 ?source=preview  the CMS editor's preview: play drafts the framing CMS page posts (src/preview.ts)
  *                 ?pairmove=<seconds> how often the pairing code moves (default 60; testing)
@@ -55,6 +57,7 @@ import { Slot } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
 import { contentRetryMs, syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
 import { SOURCE } from './source';
+import { parseTransitionOverride } from './transition-override';
 import { PinSet, UnauthorisedError, filesMissing, loadManifests, rememberGood, requestPersistence, sync, wipeContent } from './store';
 
 declare const __SF_PLAYER_VERSION__: string;
@@ -64,6 +67,8 @@ const CONTENT = query.get('content') ?? './content';
 const POLL_MS = Number(query.get('poll') ?? 30) * 1000;
 const POLL_OVERRIDE = query.has('poll');
 const STALL_OVERRIDE_MS = query.get('stall') ? Number(query.get('stall')) * 1000 : undefined;
+// Refused at load: a measurement that asked for a transition must not play another.
+const TRANSITION_OVERRIDE = parseTransitionOverride(query.get('transition'));
 /** The longest a spot waits for its data feeds' first load. */
 const DATA_WAIT_MS = 3000;
 const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
@@ -829,19 +834,10 @@ function applyOverrides(m: ScreenManifest): ScreenManifest {
     .get('spots')
     ?.split(',')
     .filter((id) => m.spots[id]);
-  const t = query.get('transition');
-  const transition: Transition | undefined =
-    t === 'cut'
-      ? { type: 'cut' }
-      : t?.startsWith('fade')
-        ? { type: 'fade', ms: Number(t.slice(4)) || 500 }
-        : t
-          ? { type: 'crossfade', ms: Number(t) }
-          : undefined;
-  if (!ids?.length && !transition) return m;
+  if (!ids?.length && !TRANSITION_OVERRIDE) return m;
   const playlists = { ...m.playlists };
-  if (ids?.length) playlists.__test = { id: '__test', name: 'Test', transition: transition ?? { type: 'cut' }, items: ids.map((spot) => ({ spot })) };
-  else if (transition) for (const [id, p] of Object.entries(playlists)) playlists[id] = { ...p, transition };
+  if (ids?.length) playlists.__test = { id: '__test', name: 'Test', transition: TRANSITION_OVERRIDE ?? { type: 'cut' }, items: ids.map((spot) => ({ spot })) };
+  else if (TRANSITION_OVERRIDE) for (const [id, p] of Object.entries(playlists)) playlists[id] = { ...p, transition: TRANSITION_OVERRIDE };
   return { ...m, playlists, ...(ids?.length ? { schedule: [], defaultPlaylist: '__test' } : {}) };
 }
 
