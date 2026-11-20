@@ -390,6 +390,8 @@ function watchTakeover(): void {
 }
 
 const hold = (ms: number) => Promise.race([sleep(ms), fellAsleep, tookOver]);
+/** Preview: a draft was adopted. Wakes the wait for the play boundary, so a play prepared from the older draft is prepared again at once. */
+let markDrafted = () => {};
 
 let manifest: ScreenManifest | undefined;
 /** `manifest` as it arrived, before testing overrides: what is stored as the last good one. */
@@ -498,6 +500,7 @@ async function playbackLoop(): Promise<never> {
 
     const m = manifest;
     const chosenAt = new Date(now());
+    const drafted = new Promise<void>((r) => (markDrafted = r));
     const step = sequencer.next(chosenAt, { clockTrusted: clock.trusted });
     chosenTakeover = activeTakeover(m, chosenAt, { clockTrusted: clock.trusted });
     resetTakeoverSignal();
@@ -535,8 +538,16 @@ async function playbackLoop(): Promise<never> {
     if (!ok) return failed(step, m);
 
     // Hold the current spot for its full length; a crossfade overlaps its last moments. A takeover cuts it short.
-    if (currentSpot && !cutIn) await hold(startedAt + currentSpot.durationMs - fadeMs - performance.now());
+    if (currentSpot && !cutIn) await Promise.race([hold(startedAt + currentSpot.durationMs - fadeMs - performance.now()), drafted]);
     if (!state.displayOn) return;
+    // Preview: a draft posted while this spot loaded or waited has made it old. The spot on screen
+    // took the draft at once (adoptDraft); this place is loaded again from it, so the stage never
+    // shows an older draft (#123). A screen plays it: a new manifest shows from the next spot.
+    if (SOURCE === 'preview' && manifest !== m) {
+      slot.clear();
+      sequencer.again();
+      return;
+    }
     // The takeover changed while this spot was chosen and loaded: choose again, so the old schedule never shows.
     if (manifest && activeTakeover(manifest, new Date(now()), { clockTrusted: clock.trusted }) !== chosenTakeover) {
       slot.clear();
@@ -1052,6 +1063,7 @@ let preview: Preview | undefined;
 /** Preview: adopt a draft, and show the new version of the spot on screen at once if it has one. */
 async function adoptDraft(next: ScreenManifest): Promise<string | undefined> {
   adopt(next);
+  markDrafted();
   const slot = slots[front === 0 ? 0 : 1];
   const spot = slot.spot && manifest?.spots[slot.spot.id];
   if (!spot || !manifest) return undefined;

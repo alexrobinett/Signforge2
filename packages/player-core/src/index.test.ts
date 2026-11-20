@@ -211,6 +211,16 @@ describe('Sequencer', () => {
     s.setManifest(m2);
     expect(s.next(at('12:00'))?.spot.id).toBe('a');
   });
+
+  it('returns the same place again after `again`, from the manifest now set', () => {
+    const s = new Sequencer(manifest());
+    expect(s.next(at('12:00'))?.spot.id).toBe('a');
+    const m2 = manifest({ id: 'm2' });
+    s.setManifest(m2);
+    s.again();
+    expect(s.next(at('12:00'))?.spot).toBe(m2.spots.a);
+    expect(s.next(at('12:00'))?.spot.id).toBe('b');
+  });
 });
 
 describe('live data', () => {

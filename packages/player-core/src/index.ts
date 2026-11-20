@@ -232,6 +232,11 @@ export class Sequencer {
     return undefined;
   }
 
+  /** Step back one place, so `next` returns the same place again (from the manifest now set). */
+  again(): void {
+    this.index--;
+  }
+
   /** What `next` would return, without moving. Used to prepare the following spot early. */
   peek(now: Date, opts: { clockTrusted?: boolean } = {}): Step | undefined {
     const saved = { playlistId: this.playlistId, index: this.index };
