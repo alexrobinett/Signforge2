@@ -6,10 +6,12 @@ import { PROTOCOL_VERSION, type TemplateManifest } from '@signforge/contract';
 import { pushFonts, pushTemplate, TemplatePushError, type TemplatePushOptions } from '@signforge/cli/template-push';
 import { FONTS } from '@signforge/compiler';
 import { platform, scoped } from '@signforge/db';
+import { createExecutionContext } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { app } from '../src/index';
 import { baseBlobKey, orgBlobKey } from '../src/r2';
-import { Client, email, testApp } from './client';
+import { Client, clockLimits, email, testApp } from './client';
 
 const TOKEN = 'test-admin-token'; // vitest.config.ts
 const API = 'https://api.test';
@@ -209,13 +211,21 @@ describe('org templates', () => {
     expect(((await res.json()) as { message: string }).message).toMatch(/^the template failed its runtime check: requested/);
   });
 
-  it('are checked at most 10 times a minute per org: the next push is refused before the check', async () => {
+  it('are checked at most 10 times a minute per org: the next push is refused before the check, and the next minute counts anew', async () => {
     const busy = (await member.createOrg('Busy templates')).id;
-    for (let i = 0; i < 10; i++) await push(card({ id: 'busy-card', version: `1.0.${i}` }), { owner: { org: busy } });
-    const message = await rejection(push(card({ id: 'busy-card', version: '1.0.10' }), { owner: { org: busy } }));
-    expect(message).toMatch(/429\ntoo many template checks for this org; wait a minute and try again/);
+    const calm = (await member.createOrg('Calm templates')).id;
+    const bindings = clockLimits();
+    const pushTo = (org: string, version: string) =>
+      push(card({ id: 'busy-card', version }), { owner: { org }, fetch: async (url, init) => app.request(url, init, bindings, createExecutionContext()) });
+    onTestFinished(() => void vi.useRealTimers());
+    vi.setSystemTime('2026-11-20T12:00:00Z');
+    for (let i = 0; i < 10; i++) expect((await pushTo(busy, `1.0.${i}`)).changed, `push ${i + 1}`).toBe(true);
+    vi.setSystemTime('2026-11-20T12:00:59.999Z');
+    expect(await rejection(pushTo(busy, '1.0.10'))).toMatch(/429\ntoo many template checks for this org; wait a minute and try again$/);
     // Another org's limit is its own.
-    expect((await push(card({ id: 'calm-card' }), { owner: { org: orgId } })).changed).toBe(true);
+    expect((await pushTo(calm, '1.0.0')).changed).toBe(true);
+    vi.setSystemTime('2026-11-20T12:01:00Z');
+    expect((await pushTo(busy, '1.0.10')).changed).toBe(true);
   });
 
   it('need an org that exists', async () => {
