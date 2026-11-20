@@ -34,6 +34,14 @@
     "low": {
       "source": "weather-reykjavik",
       "path": "daily.temperature_2m_min.0"
+    },
+    "sunrise": {
+      "source": "weather-reykjavik",
+      "path": "daily.sunrise.0"
+    },
+    "sunset": {
+      "source": "weather-reykjavik",
+      "path": "daily.sunset.0"
     }
   }
 }

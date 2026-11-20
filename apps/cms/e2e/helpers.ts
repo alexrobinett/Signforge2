@@ -126,21 +126,108 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
  * (results axe cannot decide, such as text over a gradient, are not failures). Transitions and
  * animations are off in the top document while it runs: else it reads colours halfway through the
  * theme change, or a dialog's fade. The spot editor's preview is checked too: the real player
- * showing a template, so every base template's text must read on its colours (#57).
+ * showing a template, so every base template's text must read on its colours (#57). Its template
+ * frames keep playing, so each is held at rest, after its intro and before its outro (which starts
+ * at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70). The next play
+ * restarts them. The player's own slots fade between spots, and an analysis during that fade reads
+ * a spot half shown: each analysis waits for the slots to settle and is repeated if a fade began
+ * during it (#95).
  */
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
   const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
   for (const dark of [false, true]) {
     await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), dark);
-    const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-    const found = violations.flatMap((v) =>
-      v.nodes.map((n) => `${dark ? 'dark' : 'light'} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`),
-    );
+    // A play or slot fade that began during an analysis may have shown it a spot mid-intro or half
+    // faded: settle, hold, analyse again. A stage looping 4 s spots can do that several times.
+    let found: string[] = [];
+    let held = false;
+    for (let tries = 0; tries < 5 && !held; tries++) {
+      // Often: between 4 s spots with a long fade, the stage is still for about a second.
+      await expect.poll(() => slotFades(page), { message: 'a player slot is still fading', intervals: [50], timeout: 15_000 }).not.toBeUndefined();
+      const fades = await slotFades(page);
+      if (fades === undefined) continue;
+      await holdTemplates(page);
+      const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
+      found = violations.flatMap((v) =>
+        v.nodes.map((n) => `${dark ? 'dark' : 'light'} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`),
+      );
+      held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
+    }
+    expect(held, 'a template frame started a play, or a player slot a fade, during each of 5 analyses').toBe(true);
     expect(found, page.url()).toEqual([]);
   }
   await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
   await still.evaluate((el) => el.parentNode?.removeChild(el));
+}
+
+/**
+ * The number of slot fades the player has begun, or undefined while one runs. The player (a
+ * document with `.slot`s) shows a spot by fading its slot's opacity: settled, every slot is at 0 or
+ * 1 with no transition on it or around it. The count (from `transitionrun`, watched from the first
+ * call) shows a fade that began and ended between two calls, such as a fade's second half.
+ */
+async function slotFades(page: Page): Promise<number | undefined> {
+  let fades = 0;
+  for (const frame of page.frames()) {
+    const n = await frame
+      .evaluate(() => {
+        const slots = [...document.querySelectorAll<HTMLElement>('.slot')];
+        if (!slots.length) return 0;
+        const root = document.documentElement;
+        if (!root.dataset.sfAxeFades) {
+          root.dataset.sfAxeFades = '0';
+          document.addEventListener(
+            'transitionrun',
+            (e) => {
+              if (e.target instanceof Element && e.target.matches('.slot')) root.dataset.sfAxeFades = String(Number(root.dataset.sfAxeFades) + 1);
+            },
+            true,
+          );
+        }
+        const half = slots.some((el) => {
+          const o = Number(getComputedStyle(el).opacity);
+          return o > 0 && o < 1;
+        });
+        const moving = document.getAnimations().some((a) => {
+          const target = a.effect instanceof KeyframeEffect ? a.effect.target : null;
+          return a.playState !== 'finished' && target instanceof Element && slots.some((el) => target.contains(el));
+        });
+        return half || moving ? -1 : Number(root.dataset.sfAxeFades);
+      })
+      // A frame the player removed in the meantime.
+      .catch(() => 0);
+    if (n < 0) return undefined;
+    fades += n;
+  }
+  return fades;
+}
+
+/**
+ * Hold every template frame (a document with `--sf-duration`) at rest: its animations paused after
+ * its intro and before its outro. True when none was playing: a frame the SDK has just prepared is
+ * paused (at 0) and hidden until it plays, so it is moved to rest but does not count as playing. A
+ * frame the player removed in the meantime is skipped: it is no longer on the page.
+ */
+async function holdTemplates(page: Page): Promise<boolean> {
+  let held = true;
+  for (const frame of page.frames()) {
+    const still = await frame
+      .evaluate(() => {
+        const ms = Number.parseFloat(document.documentElement.style.getPropertyValue('--sf-duration'));
+        if (!ms) return true;
+        const animations = document.getAnimations();
+        const playing = animations.some((a) => a.playState === 'running');
+        for (const a of animations) {
+          a.pause();
+          a.currentTime = ms - 1500;
+        }
+        return !playing;
+      })
+      .catch(() => true);
+    held &&= still;
+  }
+  return held;
 }
 
 /** Whether any frame on the page (the player's template frames included) shows `text`. */

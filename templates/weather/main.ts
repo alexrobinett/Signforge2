@@ -1,4 +1,4 @@
-import { defineTemplate } from '@signforge/template-sdk';
+import { defineTemplate, now } from '@signforge/template-sdk';
 
 type Condition = 'clear' | 'partly' | 'cloudy' | 'fog' | 'rain' | 'snow' | 'storm';
 
@@ -23,9 +23,12 @@ defineTemplate({
     const n = (k: string) => Math.round(Number(data[k]));
     const set = (id: string, text: string) => (document.getElementById(id)!.textContent = text);
     const { condition, label } = describe(Number(data.code));
-    const night = Number(data.isDay) === 0;
     const stage = document.getElementById('stage')!;
+    // The sky for this minute: it changes at most once a minute, however often the spot plays.
+    const cycle = sunCycle(Number(data.sunrise), Number(data.sunset), Math.floor(now().getTime() / 60_000) * 60_000);
+    const night = cycle ? cycle.night : Number(data.isDay) === 0;
     stage.classList.add(condition, night ? 'night' : 'day');
+    const day = cycle ? showCycle(stage, cycle) : undefined;
     // A light kit (light background, dark text): clouds, rain and snow are drawn in the kit's
     // background colour over a darker sky, not in its dark text colour.
     const bg = tokenRgb('--sf-bg');
@@ -36,10 +39,117 @@ defineTemplate({
     set('low', `${n('low')}°`);
     set('wind', `${n('wind')} ${String(data.windUnit)}`);
     set('humidity', `${n('humidity')}%`);
+    // From nothing at sunset to full in the dark, and back by sunrise.
+    if (cycle?.night && (condition === 'clear' || condition === 'partly')) stars(0.85 * (1 - day! / skyDay(0)));
     // Rain and snow are decoration: if drawing them fails, show the forecast without them.
     return precipitation(condition, viewport).catch((err) => console.warn('[weather] no precipitation', err));
   },
 });
+
+const DAY_S = 86_400;
+
+interface Cycle {
+  night: boolean;
+  /** How far the sun is across the day, or the moon across the night: 0 at its rise, 1 at its set. */
+  progress: number;
+  /** Minutes the sun is above the horizon (negative: below it), counted from the nearer sunrise or sunset. */
+  minutes: number;
+  /** Whether the nearer of the two is a sunrise. */
+  morning: boolean;
+  /** The moon's phase: 0 new, 0.5 full. */
+  phase: number;
+}
+
+/**
+ * Where the sun or moon is at `at` (ms), from a day's sunrise and sunset (Unix seconds). The times
+ * repeat every 24 hours, so a snapshot from yesterday, or a night past midnight with today's times,
+ * still places them, a few minutes out for each day it is old. Undefined when the feed gives no
+ * usable pair: none bound (0), or a polar day or night, which has no sunrise or sunset to go by.
+ */
+function sunCycle(sunrise: number, sunset: number, at: number): Cycle | undefined {
+  const day = sunset - sunrise;
+  if (!(sunrise > 0 && day > 0 && day < DAY_S)) return undefined;
+  const t = (((at / 1000 - sunrise) % DAY_S) + DAY_S) % DAY_S;
+  const night = t >= day;
+  const since = night ? t - day : t;
+  const span = night ? DAY_S - day : day;
+  return {
+    night,
+    progress: since / span,
+    minutes: ((night ? -1 : 1) * Math.min(since, span - since)) / 60,
+    morning: night ? since > span / 2 : since < span / 2,
+    phase: moonPhase(at),
+  };
+}
+
+/** A new moon (2000-01-06 18:14 UTC) and the mean synodic month: the phase is within a day of the real one. */
+const NEW_MOON_MS = Date.UTC(2000, 0, 6, 18, 14);
+const SYNODIC_DAYS = 29.530588853;
+
+function moonPhase(at: number): number {
+  const months = (at - NEW_MOON_MS) / 86_400_000 / SYNODIC_DAYS;
+  return months - Math.floor(months);
+}
+
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+
+/** How much of the day sky shows, 0 to 1, `minutes` from the nearer sunrise or sunset (negative: the sun is down). */
+function skyDay(minutes: number): number {
+  const x = clamp01((minutes + 40) / 90);
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * Set the stage's scene from the cycle, once per play: style.css places the orb on its arc from
+ * `--p`, mixes the day and night skies by `--day`, and fades in the dawn or dusk glow by `--glow`.
+ * Returns `--day`, 0 at night to 1 by day.
+ */
+function showCycle(stage: HTMLElement, c: Cycle): number {
+  // Brightest just after sunset and just before sunrise; gone an hour either side.
+  const glow = clamp01(1 - Math.abs(c.minutes + 5) / 70);
+  stage.classList.add('arc');
+  if (glow > 0) stage.classList.add(c.morning ? 'dawn' : 'dusk');
+  const day = skyDay(c.minutes);
+  stage.style.setProperty('--p', c.progress.toFixed(4));
+  stage.style.setProperty('--day', day.toFixed(3));
+  stage.style.setProperty('--glow', glow.toFixed(3));
+  if (!c.night) return day;
+  stage.style.setProperty('--lit', ((1 - Math.cos(2 * Math.PI * c.phase)) / 2).toFixed(3));
+  document.querySelector<HTMLElement>('.orb .shade')!.style.clipPath = unlit(c.phase);
+  return day;
+}
+
+/**
+ * Stars, as bright as `alpha`: small fixed dots scattered over the sky, each its own brightness.
+ * Dots, not CSS gradients or image tiles: on the Pi, twelve full-screen gradient layers took
+ * 170-200 ms to raster as each play began, and a few dozen dots paint in next to nothing.
+ */
+function stars(alpha: number): void {
+  const rand = rng(70);
+  const sky = document.querySelector('.stars')!;
+  for (let i = 0; i < 60; i++) {
+    const star = document.createElement('i');
+    const size = 0.24 + rand() * 0.28;
+    star.style.cssText = `left:${(rand() * 100).toFixed(2)}%;top:${(rand() * 100).toFixed(2)}%;width:${size.toFixed(2)}vmin;height:${size.toFixed(2)}vmin;--a:${(100 * alpha * (0.55 + rand() * 0.45)).toFixed(1)}%`;
+    sky.append(star);
+  }
+}
+
+/**
+ * The moon's dark part as a polygon in percent of its box: the limb on the dark side, back along
+ * the terminator, a half-ellipse whose width follows the phase. Waxing, the light is on the right,
+ * as seen from the northern hemisphere.
+ */
+function unlit(phase: number): string {
+  const side = phase < 0.5 ? -1 : 1;
+  const e = Math.cos(2 * Math.PI * phase);
+  const steps = 32;
+  const at = (i: number) => -Math.PI / 2 + (Math.PI * i) / steps;
+  const pt = (x: number, a: number) => `${(50 + x * 50 * Math.cos(a)).toFixed(2)}% ${(50 + 50 * Math.sin(a)).toFixed(2)}%`;
+  const limb = Array.from({ length: steps + 1 }, (_, i) => pt(side, at(i)));
+  const terminator = Array.from({ length: steps + 1 }, (_, i) => pt(-side * e, at(steps - i)));
+  return `polygon(${[...limb, ...terminator].join(', ')})`;
+}
 
 /** Small seeded generator, so a spot looks the same every play without using Math.random. */
 function rng(seed: number): () => number {

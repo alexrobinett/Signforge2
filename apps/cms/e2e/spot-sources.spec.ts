@@ -26,7 +26,8 @@ const pollFailed = (spotId: string, sourceId: string) =>
 
 const ATLANTA = {
   current: { temperature_2m: 88.4, weather_code: 3, is_day: 1, wind_speed_10m: 7, relative_humidity_2m: 40 },
-  daily: { temperature_2m_max: [91], temperature_2m_min: [70] },
+  // Sunrise and sunset as Open-Meteo sends them with timeformat=unixtime (2026-11-19, 07:14 and 17:31 EST).
+  daily: { temperature_2m_max: [91], temperature_2m_min: [70], sunrise: [1795090440], sunset: [1795127460] },
 };
 
 test.describe.configure({ mode: 'serial' });

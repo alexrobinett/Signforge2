@@ -441,6 +441,25 @@ After the third re-check the player finds a bundle's scripts with an HTML parser
 
 Parsing at every prepare made prepares 30 to 50 ms slower, so the player now keeps the result per bundle hash for the manifest playing. Each run above reloads the page, so about half its prepares still parse a bundle for the first time. A longer pair (240 s each, 27 prepares) split them: a spot's first prepare took 246 ms median on master and 261 ms on the branch; repeats took 213 and 231 ms. Overall dropped frames were 0.37 and 0.49%. Master alone has measured 0.29 to 0.69% across this issue's sessions, so the difference is within the spread, but the branch now tends to the higher side, by about 0.1 point overall and 15 to 20 ms per prepare. All runs are within the 1% budget. Prepares over 500 ms happened in both builds (master 545, 626 ms; branch 694, 713 ms). Nothing was skipped.
 
+## The sun and moon cross the sky (issue #70, 2026-11-18)
+
+weather 1.3.0 places the sun or moon on an arc from sunrise, sunset and `now()`, mixes the day and night skies, and adds a dawn or dusk glow, the moon's phase (a `clip-path`) and stars. Four spots with fixed data, with sunrise and sunset set around the time of the run: clear midday, partly cloudy 5 min after sunset (glow, clouds, faint stars), clear night (moon, stars), rain 5 min after sunset (glow muted, rain tiles). Before: master's weather 1.2.1 with `isDay` instead. This branch's player at a subdirectory of the rig, cut, 45 s per spot after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order before, after, after, before. Portrait by rotating the output (`wlr-randr --transform 90`; cage resizes Chromium to 1080×1920), restored afterwards.
+
+| Orientation | Spot | Overall (before; after) | Playing (before; after) | Worst frame | Prepares, ms (before; after) |
+| --- | --- | --- | --- | --- | --- |
+| Landscape | midday | 0.11, 0.22%; 0.15, 0.22% | 0.00; 0.00% | 33-50; 33-50 ms | 164-182; 166-185 |
+| | dusk | 0.19, 0.19%; 0.15, 0.15% | 0.00; 0.00% | 33; 33 ms | 168-206; 167-183 |
+| | night | 0.00, 0.07%; 0.04, 0.00% | 0.00; 0.00% | 17-33; 17-33 ms | 147-151; 151-154 |
+| | rain at dusk | 1.96, 1.67%; 1.67, 1.63% | 1.23, 1.00; 0.88, 0.96% | 133; 117 ms | 372-500; 385-473 |
+| Portrait | midday | 0.67, 0.59%; 0.70, 0.67% | 0.27, 0.23; 0.30, 0.30% | 67; 67 ms | 238-285; 239-286 |
+| | dusk | 0.59, 0.67%; 0.67, 0.67% | 0.26, 0.34; 0.30, 0.38% | 67; 67 ms | 211-254; 241-275 |
+| | night | 0.19, 0.22%; 0.19, 0.15% | 0.15, 0.19; 0.15, 0.11% | 33; 33 ms | 151-183; 164-535¹ |
+| | rain at dusk | 5.74, 5.33%; 5.77, 5.29% | 4.72, 4.46; 4.55, 4.50% | 100; 83-117 ms | 458-893; 459-904 |
+
+No extra dropped frames and no longer frames. Nothing was skipped. ¹ One of 8 prepares; 12 more, alternating (30 s each), were 164-181 ms after and 150-166 ms before. Rain in portrait drops 4.5-5.7% before and after alike; it is over the 1% budget already in 1.2.1 and is not changed here.
+
+The first version drew the stars as twelve full-screen repeating `radial-gradient` layers, and the stars and glow through `opacity`. In portrait it played dusk and night with a 167-200 ms frame at every play (1.4-1.9% dropped, against 0.3-0.6%), and landscape dusk dropped 0.94% while playing (0.00%). Those layers are rastered as the frame comes on screen. Stars as 60 small dots, and the glow's strength in its gradient stops' alpha, removed it (the table).
+
 ## Accent text measured on its real backdrop, 3:1 for large text (issue #92, 2026-11-19)
 
 agenda 1.2.3 (shipped as 1.3.1 after #98, the same bundle), menu-board 1.2.3 and cstore-promo 1.2.4 measure accent-coloured text against what it sits on, resolved with the SDK's `painted` on a 1x1 canvas: menu-board reads its card's style once after the rows are in, agenda paints each kind of card (ordinary, happening now) over both ends of its gradient, four reads at most instead of one per row, and cstore-promo paints the kit's surface over both ends of its stage. Every template with accent text passes `{ large: true }` to `readableOn` (news 1.3.4, shipped as 1.4.1 with the same bundle, clock 1.2.3 and photo-promo 1.2.3 change only that). Same method as #69: this branch's player at a subdirectory of the rig on its own origin (`http://localhost:8090`, so the kiosk's caches are untouched), `examples/stress` built from master's templates (before) and this branch's (after), with no kit and with the demo kit's colours (a scratch copy with a `brand.json`). Cut, 60 s per run after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Two playlists: sport-drinks, energy, menu, clock; and meeting-room, holidays, news, photo-berries. Order alternated (before, after, after, before), then menu's playlist again for the variants below. The supervisor was stopped during the runs: its liveness check restarts the kiosk 30 s after the kiosk's player stops beating, which it does as soon as the page is navigated away.

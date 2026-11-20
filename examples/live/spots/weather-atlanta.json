@@ -34,6 +34,14 @@
     "low": {
       "source": "weather-atlanta",
       "path": "daily.temperature_2m_min.0"
+    },
+    "sunrise": {
+      "source": "weather-atlanta",
+      "path": "daily.sunrise.0"
+    },
+    "sunset": {
+      "source": "weather-atlanta",
+      "path": "daily.sunset.0"
     }
   }
 }
