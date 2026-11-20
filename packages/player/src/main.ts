@@ -589,15 +589,14 @@ const socket = API
 async function fetchManifest(signal?: AbortSignal): Promise<void> {
   // While falling back, the manifest that failed counts as current: the server's answer is
   // 304 until it publishes something newer.
-  const { manifest } = playback;
   const result = await sync(BASE, {
-    currentId: state.fallback || manifest?.id,
+    currentId: state.fallback || playback.manifest?.id,
     headers: await deviceHeaders(),
     ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
     pinned: pins,
     ...(signal ? { signal } : {}),
     // Falling back, the last good manifest plays: its files are put back too, since the synced one is not playing.
-    ...(state.fallback && manifest ? { fallback: manifest } : {}),
+    ...(state.fallback && playback.manifest ? { fallback: playback.manifest } : {}),
   });
   if (signal?.aborted) return;
   if (result.changed && result.manifest) {

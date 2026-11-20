@@ -319,6 +319,34 @@ describe('playback', () => {
       expect(pins.holders.has('playing')).toBe(false);
       expect(pins.holders.has('preparing')).toBe(false);
     });
+    it('never shows a loaded spot whose turn comes after the display went to sleep', async () => {
+      const { clock, slots, playback, run, shown } = setup();
+      playback.adopt(manifest('m1', [spot('a', 10 * SECOND), spot('b', 10 * SECOND)]));
+      run();
+      // b is ready at 7.4 s and waits for a's end at 10.2 s.
+      await clock.until(8 * SECOND);
+      playback.display(false);
+      await clock.until(20 * SECOND);
+      expect(shown()).toEqual(['a@m1 200']);
+      expect(slots.log.slice(-2)).toEqual(['8000 clear 0', '8000 clear 1']);
+    });
+
+    it('does not count a load that fails after the display went to sleep against its manifest', async () => {
+      const { clock, slots, seen, playback, run } = setup();
+      playback.restore(manifest('good', [spot('g', 10 * SECOND)]));
+      slots.failing.add('x');
+      const open = slots.gateNext();
+      playback.adopt(manifest('bad', [spot('x', 10 * SECOND)]));
+      run();
+      await clock.until(100);
+      playback.display(false);
+      open();
+      await clock.until(5 * SECOND);
+      // One failure is a full pass of this playlist: counted, it would have fallen back.
+      expect(seen.skipped).toEqual(['x: not ready']);
+      expect(seen.fellBack).toEqual([]);
+      expect(playback.manifest?.id).toBe('bad');
+    });
   });
 
   describe('failures and the last good manifest', () => {
