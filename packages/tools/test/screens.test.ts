@@ -3,7 +3,7 @@ import type { DeviceCommand } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { dispatch, manifestKey, registry, type Caller, type ScreenHeartbeat } from '../src';
 import { memberOf } from './member';
 
@@ -19,8 +19,12 @@ const call = async <T = any>(name: string, input: unknown, caller = owner): Prom
 
 const MANIFEST = 'c'.repeat(64);
 const IMAGE = 'd'.repeat(64);
+// The file's clock: Date alone is faked, as D1 needs real timers. Later than every instant the override cases set,
+// so their events are older than the rest.
+const NOW = '2026-11-23T12:00:00Z';
 
 beforeAll(async () => {
+  vi.setSystemTime(NOW);
   o = await seedOrg(env.DB, 'screens-org');
   owner = memberOf(scoped(env.DB, o.orgId), 'owner', {
     notify: {
@@ -60,6 +64,8 @@ beforeAll(async () => {
   await org.screens.update(o.screen, { reportedManifestId: MANIFEST, lastSeenAt: Date.now(), heartbeatJson: JSON.stringify(hb), playerVersion: '1.2.3' });
 });
 
+afterAll(() => vi.useRealTimers());
+
 describe('list_screens and get_screen', () => {
   it('say what each screen is doing, as a fact, and what it should be showing', async () => {
     const { screens } = await call('list_screens', {});
@@ -98,24 +104,35 @@ describe('list_screens and get_screen', () => {
 });
 
 describe('set_display_override', () => {
-  it('wakes a screen until its next scheduled change, persists it and sends it', async () => {
-    // Weekdays 07:00 to 19:00 in London.
+  afterEach(() => vi.setSystemTime(NOW));
+
+  // Weekdays 07:00 to 19:00 in London. A wake lasts until the next change, and at most 12 hours.
+  it.each([
+    ['a weekday morning, until the close', '2026-11-18T10:30:00Z', '2026-11-18T19:00:00.000Z'],
+    ['before 07:00, until the open', '2026-11-18T03:15:00Z', '2026-11-18T07:00:00.000Z'],
+    ['at the close, until the open 12 hours on', '2026-11-19T19:00:00Z', '2026-11-20T07:00:00.000Z'],
+    ['a Friday evening, for 12 hours: Monday is further', '2026-11-20T19:52:00Z', '2026-11-21T07:52:00.000Z'],
+    ['a Saturday, for 12 hours', '2026-11-21T12:00:00Z', '2026-11-22T00:00:00.000Z'],
+    ['a Sunday evening, until Monday 07:00', '2026-11-22T21:00:00Z', '2026-11-23T07:00:00.000Z'],
+    ['the Sunday clocks go forward, until Monday 07:00 BST', '2026-03-29T20:00:00Z', '2026-03-30T06:00:00.000Z'],
+    ['the Sunday clocks go forward, for 12 hours: 07:00 BST is 12.5 hours away', '2026-03-29T17:30:00Z', '2026-03-30T05:30:00.000Z'],
+    ['the Friday before clocks go back, until 19:00 BST', '2026-10-23T09:00:00Z', '2026-10-23T18:00:00.000Z'],
+    ['the Sunday clocks go back, until Monday 07:00 GMT', '2026-10-25T20:00:00Z', '2026-10-26T07:00:00.000Z'],
+  ])('wakes a screen on %s, persists it and sends it', async (_, now, until) => {
+    vi.setSystemTime(now);
     await call('update_screen_settings', { screenId: o.screen, displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '19:00' }] } });
     sent.length = 0;
     const { screen } = await call('set_display_override', { screenId: o.screen, state: 'on' });
-    expect(screen.displayOverride.state).toBe('on');
-    const until = Date.parse(screen.displayOverride.until);
-    expect(until).toBeGreaterThan(Date.now());
-    expect(until - Date.now()).toBeLessThanOrEqual(3 * 86_400_000); // never past the weekend
-    expect(new Date(until).getUTCMinutes()).toBe(0);
+    expect(screen.displayOverride).toEqual({ state: 'on', until });
     expect(sent).toEqual([{ screenId: o.screen, command: { type: 'display', override: screen.displayOverride } }]);
     expect((await call('get_screen', { screenId: o.screen })).screen.displayOverride).toEqual(screen.displayOverride);
   });
 
   it('lasts a fixed time on a screen with no display hours, and clears back to the schedule', async () => {
+    vi.setSystemTime('2026-11-20T19:52:00Z');
     await call('update_screen_settings', { screenId: o.screen, displayHours: null });
     const { screen } = await call('set_display_override', { screenId: o.screen, state: 'off' });
-    expect(Date.parse(screen.displayOverride.until) - Date.now()).toBeGreaterThan(11.9 * 3_600_000);
+    expect(screen.displayOverride).toEqual({ state: 'off', until: '2026-11-21T07:52:00.000Z' });
     sent.length = 0;
     const cleared = await call('set_display_override', { screenId: o.screen, state: null });
     expect(cleared.screen.displayOverride).toBeNull();
