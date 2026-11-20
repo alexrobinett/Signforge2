@@ -1,14 +1,15 @@
 /**
  * Audit log (canvas board SettingsAudit): every change by a person, agent or screen, newest first,
- * beside the settings navigation. Filters by who, what, target and when, and a text search, live
- * in the URL; Load older reads the page after; Export CSV downloads what the filters match
+ * beside the settings navigation. Filters by who, what, target and when live in the URL, so a
+ * link shares them; the text search, which can be an email or a name, lives in the store and
+ * reaches the server in a POST body (#140); Load older reads the page after; Export CSV downloads what the filters match
  * (src/state/audit.ts). Times are in the org's time zone. The board's Location filter waits for
  * locations; Target takes its place.
  */
 import { useSuspenseInfiniteQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link, useRouter } from '@tanstack/react-router';
 import { DownloadIcon, LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
-import { useId, useMemo, type MouseEvent, type SubmitEvent } from 'react';
+import { useDeferredValue, useId, useMemo, type MouseEvent, type SubmitEvent } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { SettingsNav } from '~/components/settings/parts';
@@ -36,17 +37,19 @@ import {
 import { useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { auditQuery } from '~/queries/audit';
+import { backToPage } from '~/server/form-post.server';
 import { getMembers, getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
 
-/** A search param as trimmed text, or nothing: the router reads `?q=142` as a number, and a URL can say anything. */
+/** A search param as trimmed text, or nothing: the router reads `?targetId=142` as a number, and a URL can say anything. */
 function text(v: unknown, max: number): string | undefined {
   const s = (typeof v === 'number' ? String(v) : typeof v === 'string' ? v : '').trim();
   return s && s.length <= max ? s : undefined;
 }
 
 export const Route = createFileRoute('/_app/audit')({
-  validateSearch: (s: Record<string, unknown>): AuditFilters => {
+  // `q: undefined` drops an old link's `?q=`: the search is never read from a URL.
+  validateSearch: (s: Record<string, unknown>): AuditFilters & { q?: undefined } => {
     const target = text(s.target, 40);
     // One target needs its kind: an id alone would say "Only x" over the whole log.
     // Every key, undefined when dropped: the router lays a route's search over the raw params, so a key left out keeps its raw value.
@@ -56,17 +59,19 @@ export const Route = createFileRoute('/_app/audit')({
       target,
       targetId: target && text(s.targetId, 200),
       when: isWhen(s.when) ? s.when : undefined,
-      q: text(s.q, 100),
+      q: undefined,
     };
   },
+  server: { handlers: backToPage },
   loaderDeps: ({ search }) => search,
   // The first page is read again on every load, as after a change elsewhere, never from the cache.
+  // Unsearched: the search is the store's, which a loader can't read; empty in a server render.
   loader: async ({ context: { queryClient }, parentMatchPromise, deps }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     const [settings, people] = await Promise.all([
       getOrgSettings(),
       getMembers(),
-      orgId && queryClient.infiniteQuery({ ...auditQuery(orgId, deps), staleTime: 0 }),
+      orgId && queryClient.infiniteQuery({ ...auditQuery(orgId, deps, ''), staleTime: 0 }),
     ]);
     return { settings, members: people.members, at: Date.now() };
   },
@@ -82,7 +87,11 @@ function AuditLogPage() {
   const orgId = useOrgId();
   const me = app.useLoaderData().user.id;
   const now = useNow(at);
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError, error } = useSuspenseInfiniteQuery(auditQuery(orgId, search));
+  // Deferred: a new search shows the rows it replaces until its own arrive, not the page's fallback.
+  const query = useDeferredValue(useAppStore((s) => s.audit.query));
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError, error, refetch } = useSuspenseInfiniteQuery(
+    auditQuery(orgId, search, query),
+  );
   const router = useRouter();
   const countId = useId();
   const exporting = useAppStore((s) => s.audit.exporting);
@@ -92,16 +101,18 @@ function AuditLogPage() {
   const entries = data.pages.flatMap((p) => p.entries);
   const timezone = settings?.timezone ?? 'UTC';
   const kept = settings ? ` Kept ${settings.auditRetentionDays} days.` : '';
-  const filtered = Object.values(search).some(Boolean);
+  const filtered = Object.values(search).some(Boolean) || query !== '';
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
       <SettingsNav />
       <div className="min-w-0 flex-1 space-y-4">
         <PageHeader title="Audit log" description={`Every change by a person, agent or screen.${kept} Times in ${timezone}.`}>
-          <Button variant="outline" disabled={exporting} onClick={() => void exportAuditLog(auditInput(search, Date.now()), (e) => csvRow(e, names))}>
-            {exporting ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <DownloadIcon aria-hidden />} Export CSV
-          </Button>
+          <EditorFields>
+            <Button variant="outline" disabled={exporting} onClick={() => void exportAuditLog(auditInput(search, query, Date.now()), (e) => csvRow(e, names))}>
+              {exporting ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <DownloadIcon aria-hidden />} Export CSV
+            </Button>
+          </EditorFields>
         </PageHeader>
         <p role="status" className={cn('text-sm empty:hidden', exportNote?.failed ? 'font-medium text-destructive' : 'text-muted-foreground')}>
           {exportNote?.text}
@@ -112,7 +123,7 @@ function AuditLogPage() {
         {search.targetId && (
           <p className="text-sm">
             Only {targetLabel(search.target ?? '')} <span className="font-mono text-[13px]">{search.targetId}</span>.{' '}
-            <Link to="/audit" search={({ targetId: _, ...rest }) => rest} className="font-medium text-primary underline-offset-4 hover:underline">
+            <Link from="/audit" to="/audit" search={({ targetId: _, ...rest }) => rest} className="font-medium text-primary underline-offset-4 hover:underline">
               Show every {targetLabel(search.target ?? '').toLowerCase()}
             </Link>
           </p>
@@ -157,7 +168,8 @@ function AuditLogPage() {
         {isFetchNextPageError && (
           <div role="alert" className="flex flex-wrap items-center gap-2 text-sm font-medium text-destructive">
             Could not load older entries: {error?.message}
-            <Button type="button" variant="outline" size="sm" onClick={() => void router.invalidate()}>
+            {/* The loader reads only the unsearched log again, so a search is read again here. */}
+            <Button type="button" variant="outline" size="sm" onClick={() => void router.invalidate().then(() => (query ? refetch() : undefined))}>
               <RotateCwIcon aria-hidden /> Reload
             </Button>
           </div>
@@ -225,6 +237,7 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
 function TargetLink({ target, className }: { target: { kind: string; id: string }; className: string }) {
   return (
     <Link
+      from="/audit"
       to="/audit"
       search={(s) => ({ ...s, target: target.kind, targetId: target.id })}
       className={cn('font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline', className)}
@@ -239,6 +252,8 @@ function TargetLink({ target, className }: { target: { kind: string; id: string 
 function Filters({ members }: { members: { id: string; name: string }[] }) {
   const id = useId();
   const search = Route.useSearch();
+  const query = useAppStore((s) => s.audit.query);
+  const searchAuditLog = useAppStore((s) => s.searchAuditLog);
   const navigate = Route.useNavigate();
   const set = (key: keyof AuditFilters, value: string) =>
     void navigate({ search: (s) => ({ ...s, [key]: value || undefined, ...(key === 'target' ? { targetId: undefined } : {}) }), replace: true });
@@ -246,20 +261,21 @@ function Filters({ members }: { members: { id: string; name: string }[] }) {
   function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const q = new FormData(e.currentTarget).get('q');
-    set('q', typeof q === 'string' ? q.trim() : '');
+    searchAuditLog(typeof q === 'string' ? q : '');
   }
 
   function clear(e: MouseEvent<HTMLButtonElement>) {
     const q = e.currentTarget.form?.elements.namedItem('q');
     if (q instanceof HTMLInputElement) q.value = '';
+    searchAuditLog('');
     void navigate({ search: {}, replace: true });
   }
 
   return (
     <search aria-label="Filter the audit log">
-      <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
-        {/* The selects and Clear filters navigate, so they wait for the page to hydrate (#140). The
-            search is the browser's own GET of `?q=` until then, which the page reads. */}
+      {/* It waits for the page to hydrate (#140): a filter chosen before then was set back, and the
+          browser's own submit put the search in the URL. It posts, should one get through. */}
+      <form method="post" onSubmit={submit} className="flex flex-wrap items-end gap-3">
         <EditorFields>
           <div className="grid w-full gap-1.5 sm:w-52">
             <Label htmlFor={`${id}-who`}>Who</Label>
@@ -318,18 +334,16 @@ function Filters({ members }: { members: { id: string; name: string }[] }) {
               ))}
             </NativeSelect>
           </div>
-        </EditorFields>
-        <div className="grid min-w-48 flex-1 gap-1.5">
-          <Label htmlFor={`${id}-q`}>Search</Label>
-          <Input id={`${id}-q`} name="q" type="search" defaultValue={search.q} placeholder="Screen, spot, name, agent…" />
-        </div>
-        {Object.values(search).some(Boolean) && (
-          <EditorFields>
+          <div className="grid min-w-48 flex-1 gap-1.5">
+            <Label htmlFor={`${id}-q`}>Search</Label>
+            <Input id={`${id}-q`} name="q" type="search" defaultValue={query} placeholder="Screen, spot, name, agent…" />
+          </div>
+          {(Object.values(search).some(Boolean) || query !== '') && (
             <Button type="button" variant="ghost" onClick={clear}>
               Clear filters
             </Button>
-          </EditorFields>
-        )}
+          )}
+        </EditorFields>
       </form>
     </search>
   );

@@ -297,20 +297,23 @@ function Locations({ groups, screens, onPick }: { groups: GroupView[]; screens: 
         const needs = members.filter((s) => s.state.kind === 'needs_you');
         return (
           <li key={g.id} className="min-w-0 flex-[1_1_16rem]">
-            <button
-              type="button"
-              onClick={() => onPick(g.id)}
-              className="flex w-full flex-col gap-1.5 rounded-xl border bg-card px-4 py-3.5 text-left outline-none hover:border-border-strong focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              <span className="flex items-center justify-between gap-2">
-                <strong className="truncate text-[15px] font-semibold">{g.name}</strong>
-                {kind && <StatusWord tone={toneOf(kind)}>{KIND_WORD[kind]}</StatusWord>}
-              </span>
-              <span className="text-[13px] text-muted-foreground">
-                {members.length} {members.length === 1 ? 'screen' : 'screens'}
-                {needs.length > 0 && ` · ${needs.map((s) => s.name).join(', ')} ${needs.length === 1 ? 'needs' : 'need'} you`}
-              </span>
-            </button>
+            {/* A filter, like the toolbar's: it waits for the page to hydrate (#140). */}
+            <EditorFields>
+              <button
+                type="button"
+                onClick={() => onPick(g.id)}
+                className="flex w-full flex-col gap-1.5 rounded-xl border bg-card px-4 py-3.5 text-left outline-none hover:border-border-strong focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <strong className="truncate text-[15px] font-semibold">{g.name}</strong>
+                  {kind && <StatusWord tone={toneOf(kind)}>{KIND_WORD[kind]}</StatusWord>}
+                </span>
+                <span className="text-[13px] text-muted-foreground">
+                  {members.length} {members.length === 1 ? 'screen' : 'screens'}
+                  {needs.length > 0 && ` · ${needs.map((s) => s.name).join(', ')} ${needs.length === 1 ? 'needs' : 'need'} you`}
+                </span>
+              </button>
+            </EditorFields>
           </li>
         );
       })}

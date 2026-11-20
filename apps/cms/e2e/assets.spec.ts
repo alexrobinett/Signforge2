@@ -13,7 +13,10 @@ test('upload images, search them by name, see which are in use, and delete one n
   await page.getByRole('button', { name: 'Create organization' }).click();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
   await expect(page.getByRole('heading', { name: 'No images yet' })).toBeVisible();
+  // In the server's HTML the file input is disabled: files chosen before the page hydrated were never uploaded (#140).
+  expect(await disabledOnServer(page, '/assets', ['Upload images'])).toEqual({ 'Upload images': [true] });
   await hydrated(page);
+  await expect(page.getByLabel('Upload images')).toBeEnabled();
   await axe(page);
   await shots(page, '20-assets-empty');
 
