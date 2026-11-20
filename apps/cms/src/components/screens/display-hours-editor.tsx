@@ -8,19 +8,9 @@ import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { useId } from 'react';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
+import { DAYS, dayRange } from '~/lib/days';
 import type { DisplayHours } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
-
-/** Monday first, as people read a week; the contract counts 0 as Sunday. */
-const DAYS: [number, string, string][] = [
-  [1, 'Mon', 'Monday'],
-  [2, 'Tue', 'Tuesday'],
-  [3, 'Wed', 'Wednesday'],
-  [4, 'Thu', 'Thursday'],
-  [5, 'Fri', 'Friday'],
-  [6, 'Sat', 'Saturday'],
-  [0, 'Sun', 'Sunday'],
-];
 
 const DEFAULT_HOURS: DisplayHours = { weekly: [{ days: [1, 2, 3, 4, 5, 6, 0], from: '07:00', to: '22:00' }] };
 
@@ -36,15 +26,6 @@ export function describeHours(hours: DisplayHours | null): string {
   if (!hours) return 'Always on';
   if (!hours.weekly.length) return 'Off, except on dated exceptions';
   return hours.weekly.map((w) => `${dayRange(w.days)} ${w.from}–${w.to}`).join(' · ');
-}
-
-function dayRange(days: number[]): string {
-  const order = DAYS.map(([d]) => d).filter((d) => days.includes(d));
-  if (order.length === 7) return 'Every day';
-  const names = DAYS.filter(([d]) => days.includes(d)).map(([, short]) => short);
-  const idx = order.map((d) => DAYS.findIndex(([x]) => x === d));
-  const consecutive = idx.every((v, i) => i === 0 || v === idx[i - 1]! + 1);
-  return consecutive && names.length > 2 ? `${names[0]}–${names.at(-1)}` : names.join(', ');
 }
 
 export function DisplayHoursEditor({ value, onChange }: { value: DisplayHours | null; onChange: (v: DisplayHours | null) => void }) {

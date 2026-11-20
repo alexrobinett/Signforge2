@@ -17,6 +17,7 @@ import { createIntegrationsSlice, type IntegrationsSlice } from './integrations'
 import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
 import { createPublishingSlice, type PublishingSlice } from './publishing';
+import { createScheduleSlice, type ScheduleSlice } from './schedule';
 import { createScreensSlice, type ScreensSlice } from './screens';
 import { createSettingsSlice, type SettingsSlice } from './settings';
 import { createSignInSlice, type SignInSlice } from './sign-in';
@@ -36,7 +37,8 @@ export type AppState = UiSlice &
   IntegrationsSlice &
   AuditSlice &
   BrandKitsSlice &
-  PublishingSlice;
+  PublishingSlice &
+  ScheduleSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -65,6 +67,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createIntegrationsSlice(set, get, deps),
     ...createAuditSlice(set, get, deps),
     ...createPublishingSlice(set, get, deps),
+    ...createScheduleSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);

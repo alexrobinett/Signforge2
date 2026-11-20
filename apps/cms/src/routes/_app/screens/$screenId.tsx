@@ -62,6 +62,9 @@ function ScreenPage() {
   const canManage = useCanManage();
   const owner = useRole() === 'owner';
   const now = useNow(at);
+  const chooseWeekScreen = useAppStore((s) => s.chooseWeekScreen);
+  // What it plays now (M3-19), from its published manifest: what was published, not what is drafted.
+  const plays = screen.showing;
   const pageState = useAppStore((s) => s.screens.page);
   const actOnScreen = useAppStore((s) => s.actOnScreen);
   const openScreenSettings = useAppStore((s) => s.openScreenSettings);
@@ -176,6 +179,15 @@ function ScreenPage() {
         <p className="text-[15px] text-muted-foreground">
           {screen.orientation === 'portrait' ? 'Portrait 1080 × 1920' : 'Landscape 1920 × 1080'} ·{' '}
           {inGroups.length ? `group ${inGroups.map((g) => g.name).join(', ')}` : 'No group'} · {screen.timezone.replaceAll('_', ' ')}
+          {plays?.playlist && (
+            <>
+              {' · '}
+              <Link to="/schedule" onClick={() => chooseWeekScreen(screen.id)} className="underline underline-offset-4">
+                {plays.takeover ? 'takeover: ' : 'plays '}
+                {plays.playlist.name} now
+              </Link>
+            </>
+          )}
         </p>
         <p role="status" className={notice?.ok === false ? 'text-sm font-medium text-destructive' : 'text-sm text-muted-foreground'}>
           {notice?.text}
@@ -370,6 +382,7 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
   const chooseDraftZone = useAppStore((s) => s.chooseDraftZone);
   const chooseDraftOrientation = useAppStore((s) => s.chooseDraftOrientation);
   const toggleDraftGroup = useAppStore((s) => s.toggleDraftGroup);
+  const nameNewGroup = useAppStore((s) => s.nameNewGroup);
   const saveScreenSettings = useAppStore((s) => s.saveScreenSettings);
   const close = useAppStore((s) => s.closeScreenEditor);
   const zones = Intl.supportedValuesOf('timeZone');
@@ -415,9 +428,9 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
               <option value="portrait">Portrait (9:16)</option>
             </NativeSelect>
           </div>
-          {groups.length > 0 && (
-            <fieldset>
-              <legend className="mb-1.5 text-sm font-medium">Groups</legend>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1.5 text-sm font-medium">Groups</legend>
+            {groups.length > 0 && (
               <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {groups.map((g) => (
                   <label key={g.id} className="flex items-center gap-2 text-sm">
@@ -431,8 +444,22 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
                   </label>
                 ))}
               </div>
-            </fieldset>
-          )}
+            )}
+            <div className="grid gap-1.5">
+              <Label htmlFor={`${id}-g`}>New group</Label>
+              <Input
+                id={`${id}-g`}
+                value={draft.newGroup}
+                onChange={(e) => nameNewGroup(e.target.value)}
+                maxLength={100}
+                placeholder="Front of house"
+                aria-describedby={`${id}-g-help`}
+              />
+              <p id={`${id}-g-help`} className="text-xs text-muted-foreground">
+                Made with this screen in it. Schedule a playlist for a group on the Schedule page.
+              </p>
+            </div>
+          </fieldset>
           <SaveError />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={close}>

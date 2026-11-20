@@ -11,6 +11,7 @@ const screen = (over: Partial<ScreenLike> = {}): ScreenLike => ({
     asleep: false,
     wakesAt: null,
     playlist: { id: 'p', name: 'Main loop' },
+    takeover: false,
     spot: { id: 's', name: 'Spring menu', kind: 'template', template: 'menu-board', image: null },
     spots: 3,
   },

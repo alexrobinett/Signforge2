@@ -156,6 +156,8 @@ export interface ToolContext<I, D extends DataScope = OrgScope> {
   actor: Actor;
   /** The caller's role in the org, for what a read may show it (an invitee's email, to owners only). */
   role: Role;
+  /** The scopes the caller holds, as its org has them: for a change that needs more on some rows than the tool's own scope (deleting what screens play). */
+  scopes: readonly Scope[];
   input: I;
   /** The R2 bucket holding blobs and manifests (keys in ./r2.ts). */
   blobs: R2Bucket;

@@ -27,6 +27,7 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   templateVersion: (o) => o.templateVersion,
   spot: (o) => o.templateSpot,
   playlist: (o) => o.playlist,
+  scheduleEntry: (o) => o.scheduleEntry,
   bundle: (o) => files(o).bundle,
   sources: (o) => files(o).sources,
   asset: (o) => o.asset,
@@ -159,6 +160,12 @@ const REACHED_BY: Record<string, (s: Seeded) => unknown> = {
     bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } },
   }),
   'update_spot.bindings.*.dataSourceId': (s) => ({ spotId: s.b.templateSpot, bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } } }),
+  // A schedule entry is aimed at a group or a screen, never both: one input for each.
+  'create_schedule_entry.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen }),
+  'start_takeover.groupId': (s) => ({ playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
+  'start_takeover.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
+  'update_schedule_entry.groupId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'group', groupId: s.a.group, ifVersion: 1 }),
+  'update_schedule_entry.screenId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'screen', screenId: s.a.screen, ifVersion: 1 }),
   // A provider source takes a resource with its connection, and no feed URL.
   'create_data_source.connectionId': (s) => ({ name: 'Rooms', format: 'provider', connectionId: s.a.connection, resource: 'calendar-1' }),
 };
@@ -187,6 +194,7 @@ async function orgAState() {
     authorizations: await a.connections.authorizations.list(),
     snapshots: await a.dataSources.snapshots([s.a.dataSource]),
     spots: await a.spots.list(),
+    scheduleEntries: await a.scheduleEntries.list(),
     alertChannels: await a.alertChannels.list(),
     alertDeliveries: await a.alertDeliveries.list({ take: 100 }),
   };

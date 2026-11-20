@@ -6,7 +6,7 @@
  * played nothing.
  */
 import type { DisplayHours, DisplayOverride, ScreenManifest, Spot } from '@signforge/contract';
-import { displayOn, localTime, nextDisplayChange, resolvePlaylist } from '@signforge/player-core';
+import { activeTakeover, displayOn, localTime, nextDisplayChange, resolvePlaylist } from '@signforge/player-core';
 import type { ScreenHeartbeat } from './heartbeat';
 
 /**
@@ -69,6 +69,8 @@ export interface ShouldBeShowing {
   asleep: boolean;
   wakesAt: string | null;
   playlist: { id: string; name: string } | null;
+  /** Whether a takeover plays it. */
+  takeover: boolean;
   /** The playlist's first spot: the loop's position on the screen is not known here. */
   spot: { id: string; name: string; kind: Spot['kind']; template: string | null; image: string | null } | null;
   /** How many spots the playlist plays. */
@@ -89,7 +91,7 @@ export function shouldBeShowing(m: ScreenManifest, now: number, override?: Displ
   const on = live ? live.state === 'on' : displayOn(hours, localTime(at, m.screen.timezone));
   if (!on) {
     const wakes = live ? new Date(live.until) : nextDisplayChange(hours, m.screen.timezone, at);
-    return { asleep: true, wakesAt: wakes ? wakes.toISOString() : null, playlist: null, spot: null, spots: 0 };
+    return { asleep: true, wakesAt: wakes ? wakes.toISOString() : null, playlist: null, takeover: false, spot: null, spots: 0 };
   }
   const playlist = resolvePlaylist(m, at);
   const first = playlist.items.map((i) => m.spots[i.spot]).find((s): s is Spot => !!s);
@@ -97,6 +99,7 @@ export function shouldBeShowing(m: ScreenManifest, now: number, override?: Displ
     asleep: false,
     wakesAt: null,
     playlist: { id: playlist.id, name: playlist.name },
+    takeover: activeTakeover(m, at) !== undefined,
     spot: first
       ? { id: first.id, name: first.name, kind: first.kind, template: first.kind === 'template' ? first.template : null, image: imageOf(first, m) }
       : null,

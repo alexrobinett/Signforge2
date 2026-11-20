@@ -49,15 +49,3 @@ export function RowText({ title, children }: { title: string; children: ReactNod
     </>
   );
 }
-
-/** The page for one dashboard section, empty until its feature ticket lands. */
-export function SectionPage({ section }: { section: Section }) {
-  return (
-    <div className="space-y-8">
-      <PageHeader title={section.label} description={section.description} />
-      <EmptyState icon={section.icon} title={section.empty.title}>
-        {section.empty.body}
-      </EmptyState>
-    </div>
-  );
-}

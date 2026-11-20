@@ -24,7 +24,7 @@ const asleep: ScreenView = {
   displayOverride: null,
   state: { ...STATE, kind: 'asleep', wakesAt: '2026-11-18T12:00:00.000Z' },
   heartbeat: null,
-  showing: { asleep: true, wakesAt: '2026-11-18T12:00:00.000Z', playlist: null, spot: null, spots: 0 },
+  showing: { asleep: true, wakesAt: '2026-11-18T12:00:00.000Z', playlist: null, takeover: false, spot: null, spots: 0 },
   version: 1,
   createdAt: AT - 86_400_000,
   updatedAt: AT - 86_400_000,

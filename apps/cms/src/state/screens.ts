@@ -36,6 +36,10 @@ interface SettingsDraft {
   timezone: string;
   orientation: Orientation;
   groupIds: string[];
+  /** A group to make with the screen in it; empty for none. */
+  newGroup: string;
+  /** Its idempotency key, kept for retries, so a retry cannot make it twice. */
+  newGroupKey: string;
 }
 
 interface ScreenPageState {
@@ -85,11 +89,12 @@ export interface ScreensSlice {
   openDisplayHours: (screen: ScreenView) => void;
   closeScreenEditor: () => void;
   renameDraft: (name: string) => void;
+  nameNewGroup: (name: string) => void;
   chooseDraftZone: (timezone: string) => void;
   chooseDraftOrientation: (orientation: Orientation) => void;
   toggleDraftGroup: (groupId: string, member: boolean) => void;
   editDraftHours: (hours: DisplayHours | null) => void;
-  /** Saves the settings draft: name, time zone, orientation and groups, each with its own tool. */
+  /** Saves the settings draft: name, time zone, orientation, groups and a new group, each with its own tool. */
   saveScreenSettings: (screen: ScreenView, groups: GroupView[]) => Promise<void>;
   saveDisplayHours: (screenId: string) => Promise<void>;
   /** After a refused save: reads the screen again and closes the editor, to be opened on what is there now. */
@@ -195,7 +200,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
         saving: false,
         saveError: null,
         stale: false,
-        settings: { name: screen.name, timezone: screen.timezone, orientation: screen.orientation, groupIds },
+        settings: { name: screen.name, timezone: screen.timezone, orientation: screen.orientation, groupIds, newGroup: '', newGroupKey: crypto.randomUUID() },
       })),
     openDisplayHours: (screen) =>
       page((p) => ({
@@ -210,6 +215,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
       })),
     closeScreenEditor: () => page((p) => ({ ...p, editing: null, settings: null, hours: null, version: null, saving: false, saveError: null, stale: false })),
     renameDraft: (name) => draft((d) => ({ ...d, name })),
+    nameNewGroup: (newGroup) => draft((d) => ({ ...d, newGroup })),
     chooseDraftZone: (timezone) => draft((d) => ({ ...d, timezone })),
     chooseDraftOrientation: (orientation) => draft((d) => ({ ...d, orientation })),
     toggleDraftGroup: (groupId, member) => draft((d) => ({ ...d, groupIds: toggled(d.groupIds, groupId, member) })),
@@ -233,6 +239,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
           const is = d.groupIds.includes(g.id);
           if (was !== is) await callTool(is ? 'add_group_members' : 'remove_group_members', { groupId: g.id, screenIds: [screen.id] });
         }
+        if (d.newGroup.trim()) await callTool('create_group', { name: d.newGroup.trim(), screenIds: [screen.id], idempotencyKey: d.newGroupKey });
         await router.invalidate();
         get().closeScreenEditor();
       } catch (err) {

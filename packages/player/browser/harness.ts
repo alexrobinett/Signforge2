@@ -62,7 +62,12 @@ export interface Harness {
    * Start a fixture server and open the player on it. `query` adds to or overrides the defaults
    * (`poll=1`); give a function to build it from the server (e.g. `content` on `server.localUrl`).
    */
-  openPlayer(setup?: (server: FixtureServer) => void, query?: Record<string, string> | ((server: FixtureServer) => Record<string, string>)): Promise<Player>;
+  openPlayer(
+    setup?: (server: FixtureServer) => void,
+    query?: Record<string, string> | ((server: FixtureServer) => Record<string, string>),
+    /** Run the page on Playwright's clock from this instant (`page.clock`): time flows, and a test can jump it. */
+    opts?: { clockAt?: Date },
+  ): Promise<Player>;
   /** A blank page in a fresh context, for hosting a template without the player. */
   blankPage(): Promise<Page>;
   /** A fixture server for this test, closed after it: the player at its `url`, for a page to frame. */
@@ -118,7 +123,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
       servers.push(server);
       return server;
     },
-    async openPlayer(setup, query = {}) {
+    async openPlayer(setup, query = {}, opts = {}) {
       const server = await FixtureServer.start(playerDir);
       servers.push(server);
       setup?.(server);
@@ -126,6 +131,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
       const lines: string[] = [];
       page.on('console', (m) => lines.push(`${m.type()}: ${m.text()}`));
       page.on('pageerror', (e) => lines.push(`pageerror: ${e.message}`));
+      if (opts.clockAt) await page.clock.install({ time: opts.clockAt });
       // The supervisor points at the fixture server, so a real one on this machine is never touched.
       const q = new URLSearchParams({ poll: '1', supervisor: `${server.url}/supervisor`, ...(typeof query === 'function' ? query(server) : query) });
       await page.goto(`${server.url}/?${q}`);

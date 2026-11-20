@@ -287,6 +287,9 @@ importers:
       '@signforge/media':
         specifier: workspace:*
         version: link:../../packages/media
+      '@signforge/player-core':
+        specifier: workspace:*
+        version: link:../../packages/player-core
       '@tanstack/react-query':
         specifier: ^5.107.1
         version: 5.108.0(@types/react@19.3.0)(react@19.3.1)

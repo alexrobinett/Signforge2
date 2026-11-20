@@ -10,6 +10,8 @@
  * commit, through the notifier's `manifests` (the API: a queue, 50 screens a message). The same
  * batch deletes the weather sources the spot editor made that no spot binds any more.
  *
+ * `end_takeover` deletes a takeover and publishes that alone, the same way, in one batch.
+ *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
 import { published, type OrgScope } from '@signforge/db';
@@ -19,7 +21,7 @@ import { sha256Hex } from './dispatch';
 import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
 import { keysetPage, nextOutput, pageInput } from './paging';
-import { publishOrg, type DraftKind } from './publishing';
+import { publishOrg, type DraftKind, type DraftPin } from './publishing';
 import { manifestKey } from './r2';
 import { screenState, type ScreenState } from './screen-state';
 import { stateInput } from './screens';
@@ -103,10 +105,72 @@ async function switchScreens(
   return { id: made.id, revision, screens: rows.length, previousId: previous?.id ?? null };
 }
 
+const publishResult = z.object({
+  publish: madeOutput,
+  promoted: z.array(draftRef).describe('Drafts this publish made live'),
+  held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Drafts that failed their checks and keep their published version'),
+  removed: z.array(draftRef).describe('Schedule entries deleted with this publish: deletions it applied, and takeovers that have ended'),
+  removedDataSources: z
+    .array(z.string())
+    .describe('Weather sources the spot editor made that no spot binds any more, deleted with the publish (one a spot was bound to meanwhile stays)'),
+  screens: z.array(
+    z.object({
+      screenId: z.string(),
+      outcome: z.enum(['updated', 'unchanged', 'failed']).describe('failed: it could not be compiled and keeps what it plays'),
+      problems: z.array(z.string()),
+    }),
+  ),
+});
+
+/**
+ * A publish: promote the chosen drafts (all with `drafts` undefined), delete the `end` entries,
+ * compile every screen, store and switch the changed ones. `publish` and `end_takeover`.
+ */
+async function runPublish(
+  ctx: ToolContext<unknown>,
+  drafts: readonly DraftPin[] | undefined,
+  end: readonly string[] = [],
+): Promise<z.infer<typeof publishResult>> {
+  const { org, blobs, write } = ctx;
+  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end);
+  const screens = result.screens.map((s) => ({
+    screenId: s.screenId,
+    outcome: !s.manifest ? ('failed' as const) : s.manifest.id === s.current ? ('unchanged' as const) : ('updated' as const),
+    problems: s.problems,
+  }));
+  const report = { promoted: result.drafts.promoted, held: result.drafts.held, removed: result.drafts.removed, screens };
+  const changed = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.manifest] : []));
+  // Deleted entries go in the same batch as the switches; on their own they make no publish.
+  write({ row: undefined, writes: result.removals });
+  if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report, removedDataSources: [] };
+  write({ row: undefined, writes: result.writes });
+  // The spot editor's weather sources nothing binds: not as drafted, not as published once this
+  // commits, and not as published before it, which Undo sends screens back to (that one goes at
+  // the next publish). One made in the last minutes may be about to be bound by an autosave.
+  const bound = new Set([...result.read.spots, ...result.graph.spots].flatMap((s) => [s.bindingsJson, published(s)?.bindingsJson].flatMap(sourcesIn)));
+  const madeBefore = Date.now() - SOURCE_GRACE_MS;
+  const removedDataSources = (await org.dataSources.list())
+    .filter((d) => madeBySpotEditor(d.id) && !bound.has(d.id) && d.createdAt < madeBefore)
+    .map((d) => d.id)
+    .sort();
+  write(org.dataSources.stage.deleteUnbound(removedDataSources, madeBefore));
+  const made = await switchScreens(
+    ctx,
+    result.revision + 1,
+    changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id })),
+  );
+  // Stored before the switch commits, so a screen told of a manifest can fetch it. Keyed by
+  // content: one stored by a publish that then lost its commit is the same object again.
+  await Promise.all(
+    changed.map((m) => blobs.put(manifestKey(org.orgId, m.screen.id, m.id), JSON.stringify(m), { httpMetadata: { contentType: 'application/json' } })),
+  );
+  return { publish: made, ...report, removedDataSources };
+}
+
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist (set_default_playlist). Returns { publish, promoted, held, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
+    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist (set_default_playlist). Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. Returns { publish, promoted, held, removed, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
@@ -114,61 +178,34 @@ const publish = defineTool({
   input: z.object({
     drafts: z
       .array(draftRef.extend({ version: z.number().int().positive().describe('The version you chose it at') }))
-      .min(1)
       .max(500)
       .optional()
-      .describe('The drafts to publish, each at the version you chose it at; omit to publish every changed draft'),
+      .describe(
+        'The drafts to publish, each at the version you chose it at; omit to publish every changed draft. An empty list publishes no draft and compiles every screen again: for a deleted schedule entry or a new default playlist',
+      ),
   }),
-  output: z.object({
-    publish: madeOutput,
-    promoted: z.array(draftRef).describe('Drafts this publish made live'),
-    held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Drafts that failed their checks and keep their published version'),
-    removedDataSources: z
-      .array(z.string())
-      .describe('Weather sources the spot editor made that no spot binds any more, deleted with the publish (one a spot was bound to meanwhile stays)'),
-    screens: z.array(
-      z.object({
-        screenId: z.string(),
-        outcome: z.enum(['updated', 'unchanged', 'failed']).describe('failed: it could not be compiled and keeps what it plays'),
-        problems: z.array(z.string()),
-      }),
-    ),
-  }),
+  output: publishResult,
   example: {},
   target: (_input, output) => (output.publish ? { kind: 'publish', id: output.publish.id } : undefined),
+  handler: (ctx) => runPublish(ctx, ctx.input.drafts),
+});
+
+const endTakeover = defineTool({
+  name: 'end_takeover',
+  description:
+    'End a takeover now: delete it and publish that alone, in one step, so its screens drop it at once (a screen ends the spot on screen when the winning takeover changes) and nothing is left half done. No draft is published with it. Returns what publish returns; publish is null if the takeover was never published.',
+  scope: 'content:publish',
+  minRole: 'editor',
+  mutates: true,
+  publishes: true,
+  input: z.object({ scheduleEntryId: id('schedule entry').describe('The takeover') }),
+  output: publishResult,
+  example: { scheduleEntryId: 'sch_example' },
+  target: (input) => ({ kind: 'schedule_entry', id: input.scheduleEntryId }),
   handler: async (ctx) => {
-    const { org, blobs, input, write } = ctx;
-    const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, input.drafts);
-    const screens = result.screens.map((s) => ({
-      screenId: s.screenId,
-      outcome: !s.manifest ? ('failed' as const) : s.manifest.id === s.current ? ('unchanged' as const) : ('updated' as const),
-      problems: s.problems,
-    }));
-    const report = { promoted: result.drafts.promoted, held: result.drafts.held, screens };
-    const changed = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.manifest] : []));
-    if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report, removedDataSources: [] };
-    write({ row: undefined, writes: result.writes });
-    // The spot editor's weather sources nothing binds: not as drafted, not as published once this
-    // commits, and not as published before it, which Undo sends screens back to (that one goes at
-    // the next publish). One made in the last minutes may be about to be bound by an autosave.
-    const bound = new Set([...result.read.spots, ...result.graph.spots].flatMap((s) => [s.bindingsJson, published(s)?.bindingsJson].flatMap(sourcesIn)));
-    const madeBefore = Date.now() - SOURCE_GRACE_MS;
-    const removedDataSources = (await org.dataSources.list())
-      .filter((d) => madeBySpotEditor(d.id) && !bound.has(d.id) && d.createdAt < madeBefore)
-      .map((d) => d.id)
-      .sort();
-    write(org.dataSources.stage.deleteUnbound(removedDataSources, madeBefore));
-    const made = await switchScreens(
-      ctx,
-      result.revision + 1,
-      changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id })),
-    );
-    // Stored before the switch commits, so a screen told of a manifest can fetch it. Keyed by
-    // content: one stored by a publish that then lost its commit is the same object again.
-    await Promise.all(
-      changed.map((m) => blobs.put(manifestKey(org.orgId, m.screen.id, m.id), JSON.stringify(m), { httpMetadata: { contentType: 'application/json' } })),
-    );
-    return { publish: made, ...report, removedDataSources };
+    const row = await ctx.org.scheduleEntries.get(ctx.input.scheduleEntryId);
+    if (!row || row.endsAt === null) throw notFound('takeover', ctx.input.scheduleEntryId);
+    return runPublish(ctx, [], [row.id]);
   },
 });
 
@@ -332,4 +369,4 @@ const getPublish = defineTool({
   },
 });
 
-export const publishTools = [publishManifestToScreen, publish, rollBackPublish, listPublishes, getPublish];
+export const publishTools = [publishManifestToScreen, publish, endTakeover, rollBackPublish, listPublishes, getPublish];
