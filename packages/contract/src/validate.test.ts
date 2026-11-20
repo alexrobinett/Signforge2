@@ -899,6 +899,73 @@ describe('brand colour lint', () => {
   });
 });
 
+describe('forbidden code lint', () => {
+  const problems = (sources: Record<string, string>) =>
+    checkTemplateBundle({ manifest: template, html: '<p>', sources: { 'main.ts': '', ...sources } }).checks.find((c) => c.check === 'source-code')?.problems;
+
+  it('refuses inline event handlers and javascript: URLs, which the policy does not run', () => {
+    const handler = ['inline event handlers do not run in a template; use addEventListener'];
+    expect(problems({ 'index.html': '<img src="a.png"\n  onerror="x()">' })).toEqual(handler);
+    expect(problems({ 'main.ts': 'box.innerHTML = `<b onclick="go()">`;' })).toEqual(handler);
+    expect(problems({ 'main.ts': "el.setAttribute('onload', 'x')" })).toEqual(handler);
+    expect(problems({ 'index.html': '<a href="javascript:go()">' })).toEqual(['`javascript:` URLs do not run in a template']);
+  });
+
+  it('passes handlers set as properties or with addEventListener', () => {
+    expect(problems({ 'main.ts': "img.onload = () => done();\nel.addEventListener('click', f);\nconst ok = a < b && c.onx === 1;" })).toEqual([]);
+  });
+});
+
+describe('script check', () => {
+  const problems = (html: string) =>
+    checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'scripts')?.problems;
+  const START = ['every script must start with exactly "use strict"; (sf build makes it so): one that does not, does not run'];
+
+  it('passes classic scripts that start with exactly "use strict";, and data blocks', () => {
+    expect(problems('<script>"use strict";go()</script><script type="text/javascript">"use strict";\r\nmore()</script>')).toEqual([]);
+    expect(problems('<script type="application/json">{"a":1}</script>')).toEqual([]);
+  });
+
+  it('refuses a script that starts any other way, whatever comes first', () => {
+    for (const text of ['\uFEFF"use strict";x()', '/* licence */"use strict";x()', "'use strict';x()", '"use strict"\r\nx()', ' "use strict";x()', 'x()'])
+      expect(problems(`<script>${text}</script>`), JSON.stringify(text)).toEqual(START);
+  });
+
+  it('refuses a module, another executable type and an external script, read as the browser reads them', () => {
+    const type = (t: string) => [`a script with type "${t}" does not run in a template: use no type (sf build makes a classic script)`];
+    const external = ['a script must be inline: an external script does not run in a template'];
+    expect(problems('<script type="module">"use strict";x()</script>')).toEqual(type('module'));
+    expect(problems('<script type="&#109;odule">"use strict";x()</script>')).toEqual(type('module'));
+    expect(problems('<script type=" MODULE ">"use strict";x()</script>')).toEqual(type('module'));
+    expect(problems('<script type="text/ecmascript">"use strict";x()</script>')).toEqual(type('text/ecmascript'));
+    expect(problems('<script language="javascript1.5">"use strict";x()</script>')).toEqual(type('text/javascript1.5'));
+    expect(problems('<script type="importmap">{}</script>')).toEqual(type('importmap'));
+    expect(problems('<script src="x.js"></script>')).toEqual(external);
+    expect(problems('<svg><script href="x.js"/></svg>')).toEqual(external);
+    expect(problems('<svg><script xlink:href="x.js"></script></svg>')).toEqual(external);
+  });
+
+  it('reads a script in SVG and in a template element, and refuses SVG script text that is not plain', () => {
+    expect(problems('<svg><script>"use strict";x()</script></svg><template><script>y()</script></template>')).toEqual(START);
+    expect(problems('<svg><script>"use strict";a &lt; b</script></svg>')).toEqual([
+      'a script must be plain text: no character references, CDATA or elements in it',
+    ]);
+  });
+
+  it('refuses a select that holds script markup, where browsers parse differently, and skips a script in MathML', () => {
+    const select = ['a <select> may not hold a script: browsers parse <select> differently, and none runs in a template'];
+    expect(problems('<select><script>"use strict";x()</script></select>')).toEqual(select);
+    // A script that only Chromium's customizable-select parsing finds: the markup is refused all the same.
+    expect(problems('<select><svg><textarea><script>"use strict";x()</script></textarea></svg></select>')).toEqual(select);
+    expect(problems('<select><option>One</option><option>Two</option></select>')).toEqual([]);
+    expect(problems('<math><script>x()</script></math>')).toEqual([]);
+  });
+
+  it('passes text that only looks like a script: in a textarea, a comment, an attribute', () => {
+    expect(problems('<textarea><script>x()</script></textarea><!-- <script>y()</script> --><p title="<script>z()</script>">')).toEqual([]);
+  });
+});
+
 describe('validatePairStartRequest', () => {
   it('takes an empty body as a device, and a known kind', () => {
     expect(validatePairStartRequest({})).toEqual([]);

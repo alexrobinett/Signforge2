@@ -305,4 +305,4 @@ export function planSync(next: ScreenManifest, have: Iterable<string>): { missin
 
 export { Clock, CLOCK_JUMP_MS, type ClockOptions, type PersistedClock } from './clock';
 export { PlayLedger, hourOf, type PlayBatch } from './plays';
-export { READY_TIMEOUT_MS, TEMPLATE_SANDBOX, WRAPPER_HTML } from './frame';
+export { containedFrames, READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from './frame';

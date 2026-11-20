@@ -13,7 +13,7 @@ import {
   type Spot,
   type TemplateMessage,
 } from '@signforge/contract';
-import { READY_TIMEOUT_MS, resolveSpotData, TEMPLATE_SANDBOX, WRAPPER_HTML } from '@signforge/player-core';
+import { containedFrames, READY_TIMEOUT_MS, resolveSpotData, TEMPLATE_SANDBOX } from '@signforge/player-core';
 import { clock, now } from './clock';
 import { liveData, reportRejected } from './data';
 import { getFile } from './source';
@@ -76,6 +76,24 @@ function brandTheme(manifest: ScreenManifest): Promise<FrameTheme | undefined> {
     });
   }
   return themeCache.theme;
+}
+
+/**
+ * `containedFrames` for each bundle of the manifest last prepared, by bundle hash. Reading a bundle
+ * with the HTML parser takes about 12 ms on a Pi 4 (90 ms the first time): once per bundle, not per play.
+ */
+let framesCache: { manifest: string; frames: Map<string, ReturnType<typeof containedFrames>> } | undefined;
+
+async function framesFor(manifest: ScreenManifest, sha: string): Promise<ReturnType<typeof containedFrames>> {
+  if (framesCache?.manifest !== manifest.id) {
+    const bundles = new Set(Object.values(manifest.templates).map((t) => t.html));
+    const kept = [...(framesCache?.frames ?? [])].filter(([k]) => bundles.has(k));
+    framesCache = { manifest: manifest.id, frames: new Map(kept) };
+  }
+  const cache = framesCache;
+  let frames = cache.frames.get(sha);
+  if (!frames) cache.frames.set(sha, (frames = containedFrames(await (await getFile(sha)).text())));
+  return frames;
 }
 
 async function loadTheme({ brand }: ScreenManifest): Promise<FrameTheme | undefined> {
@@ -196,7 +214,7 @@ export class Slot {
     // Speak the protocol the bundle was built against: published bundles never change.
     const protocol = t.manifest.protocol ?? 1;
     if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
-    const html = await (await getFile(t.html)).text();
+    const { wrapper: wrapperHtml, template: templateHtml } = await framesFor(manifest, t.html);
     const assets = await spotAssets(spot);
     // Protocol 1 bundles predate the theme.
     const theme = protocol >= 2 ? await brandTheme(manifest) : undefined;
@@ -222,13 +240,14 @@ export class Slot {
     // markup of its own runs, and no document can drop a policy it was given. The wrapper's
     // policy, not the template's, also decides where the template's frame may navigate: nowhere
     // (`frame-src` falls back to `default-src 'none'`). A template that tries is replaced by an
-    // error page, without a request. See "Template containment" in docs/architecture.md.
+    // error page, without a request. It runs only the bundle's own scripts, each of which first
+    // takes WebRTC away from its realm (`containedFrames` in packages/player-core). See "Template containment" in docs/architecture.md.
     const wrapperFrame = document.createElement('iframe');
     // A frame needs a title for assistive technology (WCAG 4.1.2); the editor's preview is read by one.
     wrapperFrame.title = spot.name;
     wrapperFrame.style.width = `${w}px`;
     wrapperFrame.style.height = `${h}px`;
-    wrapperFrame.srcdoc = WRAPPER_HTML;
+    wrapperFrame.srcdoc = wrapperHtml;
     const wrapped = new Promise<void>((resolve) => wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal }));
     this.el.appendChild(wrapperFrame);
     await wrapped;
@@ -239,7 +258,7 @@ export class Slot {
     // no popups, forms, or navigating any frame but its own.
     frame.setAttribute('sandbox', TEMPLATE_SANDBOX);
     frame.title = spot.name;
-    frame.srcdoc = html;
+    frame.srcdoc = templateHtml;
 
     const live: LiveFrame = (this.live = {
       frame,
