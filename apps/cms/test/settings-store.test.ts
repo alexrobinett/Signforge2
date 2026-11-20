@@ -209,15 +209,66 @@ describe('a settings save (re-check of #143, 1)', () => {
     expect(errorOf(store.getState().settings, 'general', A)).toMatchObject({ stale: true, text: 'This changed since you opened it.' });
     expect(editsIn(store.getState().settings, 'general', A)).toEqual({ auditRetentionDays: '120' });
 
-    await store.getState().reloadSettings(A);
+    await store.getState().reloadSettings(A, 'general');
     expect(editsIn(store.getState().settings, 'general', A)).toEqual({});
     expect(errorOf(store.getState().settings, 'general', A)).toBeUndefined();
   });
 
-  it('with nothing edited, sends nothing', async () => {
+  it('with nothing edited, sends nothing, and says so', async () => {
     const store = settingsStore();
     await store.getState().saveSettings(A, 'screens', settings);
     expect(calls).toEqual([]);
+    expect(toast).toHaveBeenCalledWith('Nothing to save');
+  });
+});
+
+describe('the settings pages share one version (third re-check of #143)', () => {
+  it("a save moves the org's other drafts on its version to the one it made, so an edit left on General saves after Screens & groups saved", async () => {
+    replies.push(saved(2), saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '111' });
+    store.getState().editSettings(A, 'screens', 1, { unreachableAfterMinutes: '17' });
+    await store.getState().saveSettings(A, 'screens', settings);
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { unreachableAfterMinutes: 17, ifVersion: 1 } });
+    expect(store.getState().settings.drafts.general).toEqual({ orgId: A, version: 2, edits: { auditRetentionDays: '111' } });
+    await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'A' });
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 111, ifVersion: 2 } });
+    expect(errorOf(store.getState().settings, 'general', A)).toBeUndefined();
+  });
+
+  it("leaves a draft on an older version, or another org's, where it is: those really were changed since", async () => {
+    replies.push(saved(5));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'publishing', 3, { editorsPublish: false });
+    store.getState().editSettings(B, 'notifications', 4, { alerts: { agent_refused: { email: false } } });
+    store.getState().editSettings(A, 'screens', 4, { unreachableAfterMinutes: '17' });
+    await store.getState().saveSettings(A, 'screens', { ...settings, version: 4 });
+    expect(store.getState().settings.drafts.publishing?.version).toBe(3);
+    expect(store.getState().settings.drafts.notifications?.version).toBe(4);
+  });
+
+  it("Reload after one form's conflict drops only that form's edits; another page's stay", async () => {
+    replies.push(conflict);
+    const store = settingsStore();
+    store.getState().editSettings(A, 'screens', 1, { updateFrom: '03:15' });
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '222' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
+    await store.getState().reloadSettings(A, 'general');
+    expect(editsIn(store.getState().settings, 'general', A)).toEqual({});
+    expect(editsIn(store.getState().settings, 'screens', A)).toEqual({ updateFrom: '03:15' });
+  });
+
+  it('a rename that fails after the settings were written leaves the edits on the version written', async () => {
+    replies.push(saved(2), saved(3));
+    auth.organization.update.mockResolvedValue({ data: null, error: { message: 'Could not rename the organization.', status: 500 } });
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { name: 'Alpha', auditRetentionDays: '111' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
+    expect(errorOf(store.getState().settings, 'general', A)?.text).toBe('Could not rename the organization.');
+    expect(store.getState().settings.drafts.general?.version).toBe(2);
+    auth.organization.update.mockResolvedValue(ok);
+    await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'A' });
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 111, ifVersion: 2 } });
   });
 });
 

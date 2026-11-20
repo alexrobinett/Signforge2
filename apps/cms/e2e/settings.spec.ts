@@ -549,6 +549,61 @@ test('edits belong to the org they were made in: after a switch, a late answer f
   await expect(page.getByRole('radio', { name: 'Always on' })).toBeChecked();
 });
 
+test("an edit left on one settings page still saves after another page saved, and Reload on one keeps the other's (third re-check of #143)", async ({
+  page,
+}) => {
+  // The pages share one settings version. A save moved only its own edits to the version it made,
+  // so an edit left on General was refused as changed since, and Reload dropped every page's.
+  await signInAs(page, `e2e-settings-pages-${Date.now()}@example.com`, '192.0.2.48');
+  await createOrg(page, 'Northside Market');
+  await page.goto('/settings/general');
+  await hydrated(page);
+  const retention = page.getByLabel('Keep entries for');
+  await expect(retention).toBeEnabled();
+  await retention.fill('111');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+
+  // Screens & groups saves, its answer held, then From is edited and left.
+  await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
+  const minutes = page.getByLabel('Alert after');
+  await expect(minutes).toBeEnabled();
+  await minutes.fill('17');
+  const saving = await holdFirst(page, '/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const saveAnswer = await saving.arrived;
+  expect(Object.keys(saveAnswer.request().postDataJSON()).sort()).toEqual(['ifVersion', 'unreachableAfterMinutes']);
+  await saveAnswer.continue();
+  await expect(page.getByRole('button', { name: 'Save changes' })).not.toHaveAttribute('aria-disabled');
+  await expect(page.getByText('Unsaved changes')).toBeHidden();
+  await page.getByLabel('From').fill('03:15');
+
+  // Back on General, the edit left there saves.
+  await settingsNav(page).getByRole('link', { name: 'General' }).click();
+  await expect(retention).toHaveValue('111');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  const sent = page.waitForRequest('**/api/tools/update_org_settings');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const request = await sent;
+  expect(request.postDataJSON()).toMatchObject({ auditRetentionDays: 111 });
+  expect((await request.response())?.status()).toBe(200);
+  await expect(page.getByText('Unsaved changes')).toBeHidden();
+  await expect(page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' })).toHaveCount(0);
+
+  // Someone else sets the time zone: General's next save is refused, and its Reload drops only
+  // General's edit. Screens & groups' From is kept.
+  await tool(page, 'update_org_settings', { timezone: 'Europe/London' });
+  await retention.fill('222');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' })).toBeVisible();
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(retention).toHaveValue('111');
+  await expect(page.getByLabel('Time zone')).toHaveValue('Europe/London');
+  await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
+  await expect(page.getByLabel('From')).toHaveValue('03:15');
+  await expect(minutes).toHaveValue('17');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+});
+
 test('Keep it waits for a webhook removal that has been sent, and says so (review of #143, 5)', async ({ page }) => {
   // Keep it closed the confirmation while the removal it could no longer stop went on.
   await signInAs(page, `e2e-settings-keep-${Date.now()}@example.com`, '192.0.2.40');
