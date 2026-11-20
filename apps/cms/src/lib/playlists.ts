@@ -4,23 +4,11 @@
  * length and its transition in words.
  */
 import type { Transition } from '@signforge/contract';
+import type { ToolOutput } from '@signforge/tools/outputs';
 import type { SpotView } from './spots';
 
 /** One playlist's draft, as `get_playlist` returns it. */
-export interface PlaylistView {
-  id: string;
-  name: string;
-  transition: Transition;
-  spotIds: string[];
-  version: number;
-  /** The default playlist: every screen plays it when no schedule entry says otherwise. */
-  isDefault: boolean;
-  published: boolean;
-  draftChanged: boolean;
-  publishedAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-}
+export type PlaylistView = ToolOutput<'get_playlist'>['playlist'];
 
 /** What the editor edits: the parts of a playlist's draft a person changes. */
 export interface PlaylistDraft {

@@ -177,6 +177,7 @@ describe('the stage (review of #97)', () => {
       size: 2000,
       width: 1920,
       height: 1080,
+      durationMs: null,
       renditions: [{ orientation: 'landscape', sha256: sha, type: 'image/jpeg', size: 2000, width: 1920, height: 1080 }],
       createdAt: 0,
       updatedAt: 0,

@@ -1,5 +1,5 @@
 import { isRedirect } from '@tanstack/react-router';
-import { OrgChanged } from '~/lib/org-changed';
+import { isOrgChanged } from '~/lib/tools';
 
 /**
  * Retry a failed read up to `tries` times, but never a redirect: a read whose session has ended
@@ -11,4 +11,4 @@ import { OrgChanged } from '~/lib/org-changed';
 export const retryUnlessRedirect =
   (tries: number) =>
   (failures: number, error: Error): boolean =>
-    !isRedirect(error) && !(error instanceof OrgChanged) && failures < tries;
+    !isRedirect(error) && !isOrgChanged(error) && failures < tries;

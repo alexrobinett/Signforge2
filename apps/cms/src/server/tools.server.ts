@@ -1,22 +1,22 @@
 /**
- * How the CMS's loaders read data: tools, called as the signed-in member over the API binding.
- * Switching to a client cache later (docs/research/cms-data-layer.md) changes this and the
- * loaders, not the pages.
+ * How the CMS's loaders read data: tools, called as the signed-in member over the API binding,
+ * their answers read as the browser reads them (`answer` in src/lib/tools.ts): the output typed by
+ * the tool's schema, a refusal a `Refusal` with its code. Switching to a client cache later
+ * (docs/research/cms-data-layer.md) changes this and the loaders, not the pages.
  */
 import { redirect } from '@tanstack/react-router';
 import { getRequest } from '@tanstack/react-start/server';
-import type { AssetView } from '~/lib/assets';
-import type { BrandKitView } from '~/lib/brand-kits';
-import type { ListedSource } from '~/lib/integrations';
+import type { ToolName, ToolOutput } from '@signforge/tools/outputs';
 import { signInBack } from '~/lib/paths';
-import type { SpotView, TemplateView } from '~/lib/spots';
-import type { GroupView, ScreenView } from '~/lib/screen-types';
+import { answer, Refusal } from '~/lib/tools';
 import { callApi } from './api.server';
 
+type Outputs = { [N in ToolName]: ToolOutput<N> };
+
 /** A tool's output, as the signed-in member; with `missing: 'null'`, null for a 404. A session that has ended goes to sign-in. */
-export async function tool<T>(name: string, input: unknown): Promise<T>;
-export async function tool<T>(name: string, input: unknown, opts: { missing: 'null' }): Promise<T | null>;
-export async function tool<T>(name: string, input: unknown, opts?: { missing: 'null' }): Promise<T | null> {
+export async function tool<N extends ToolName>(name: N, input: unknown): Promise<Outputs[N]>;
+export async function tool<N extends ToolName>(name: N, input: unknown, opts: { missing: 'null' }): Promise<Outputs[N] | null>;
+export async function tool<N extends ToolName>(name: N, input: unknown, opts?: { missing: 'null' }): Promise<Outputs[N] | null> {
   const res = await callApi(`/api/tools/${name}`, input);
   if (res.status === 404 && opts?.missing === 'null') return null;
   if (res.status === 401) {
@@ -25,53 +25,29 @@ export async function tool<T>(name: string, input: unknown, opts?: { missing: 'n
     const back = signInBack(req.url, req.headers.get('referer'));
     throw redirect({ to: '/sign-in', search: back === '/' ? {} : { redirect: back } });
   }
-  if (res.status === 403) {
-    const refusal: { error?: string } = await res.clone().json();
-    if (refusal.error === 'no_active_organization') throw new NoActiveOrg();
-  }
-  if (!res.ok) {
-    // A refusal's own message, written to be shown (Load older shows it); anything else by its status.
-    const refusal: unknown = await res.json().catch(() => null);
-    const message = typeof refusal === 'object' && refusal !== null && 'message' in refusal && typeof refusal.message === 'string' ? refusal.message : null;
-    throw new Error(message ?? `${name} failed: ${res.status}`);
-  }
-  // The tool's output, as its output schema in packages/tools says (checked there in tests).
-  const output: T = await res.json();
-  return output;
+  return answer(res, `${name} failed: ${res.status}`);
 }
 
-/** The member has no active org yet: the app shell asks them to pick or create one instead of showing the page. */
-class NoActiveOrg extends Error {}
-
-/** A loader's result, or `empty` while there is no active org to read from. */
+/** A loader's result, or `empty` while there is no active org to read from: the app shell then asks the member to pick or create one. */
 export async function inOrg<T>(read: () => Promise<T>, empty: T): Promise<T> {
   try {
     return await read();
   } catch (err) {
-    if (err instanceof NoActiveOrg) return empty;
+    if (err instanceof Refusal && err.code === 'no_active_organization') return empty;
     throw err;
   }
 }
 
-/** One page of a list tool: its rows under the list's own key, and the cursor for the next. */
-interface ListPage {
-  next: string | null;
-  screens?: ScreenView[];
-  groups?: GroupView[];
-  assets?: AssetView[];
-  spots?: SpotView[];
-  templates?: TemplateView[];
-  brandKits?: BrandKitView[];
-  dataSources?: ListedSource[];
-}
+/** The list tools: those whose output pages, with `next`. */
+type ListName = { [N in ToolName]: ToolOutput<N> extends { next: string | null } ? N : never }[ToolName];
 
-/** Every page of a list tool, the rows `rows` picks from each. A list whose rows are not `ListPage`'s names its page in `rows`. */
-export async function all<T, Page extends { next: string | null } = ListPage>(name: string, rows: (page: Page) => T[] | undefined): Promise<T[]> {
+/** Every page of a list tool, the rows `rows` picks from each. */
+export async function all<N extends ListName, T>(name: N, rows: (page: Outputs[N]) => T[]): Promise<T[]> {
   const out: T[] = [];
   let cursor: string | undefined;
   do {
-    const page = await tool<Page>(name, { limit: 200, ...(cursor ? { cursor } : {}) });
-    out.push(...(rows(page) ?? []));
+    const page = await tool(name, { limit: 200, ...(cursor ? { cursor } : {}) });
+    out.push(...rows(page));
     cursor = page.next ?? undefined;
   } while (cursor);
   return out;

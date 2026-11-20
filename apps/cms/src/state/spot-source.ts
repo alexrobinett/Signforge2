@@ -127,42 +127,6 @@ const initial: SpotSourceState = {
 /** The source state of `spotId`'s page: the store's, or a fresh one for another spot. */
 export const sourceStateOf = (state: SpotSourceState, spotId: string): SpotSourceState => (state.spotId === spotId ? state : initial);
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-
-/** `find_places`'s places, read field by field. */
-function placesOf(output: unknown): PlaceView[] {
-  const places = isRecord(output) && Array.isArray(output.places) ? output.places : [];
-  return places.flatMap((p: unknown) =>
-    isRecord(p) &&
-    typeof p.id === 'number' &&
-    typeof p.name === 'string' &&
-    typeof p.region === 'string' &&
-    typeof p.country === 'string' &&
-    typeof p.latitude === 'number' &&
-    typeof p.longitude === 'number' &&
-    typeof p.timezone === 'string'
-      ? [{ id: p.id, name: p.name, region: p.region, country: p.country, latitude: p.latitude, longitude: p.longitude, timezone: p.timezone }]
-      : [],
-  );
-}
-
-/** `read_table`'s table, read cell by cell. */
-function tableOf(output: unknown): TableFeed {
-  const t = isRecord(output) ? output.table : undefined;
-  const columns = isRecord(t) && Array.isArray(t.columns) ? t.columns.filter((c: unknown) => typeof c === 'string') : [];
-  const rows = isRecord(t) && Array.isArray(t.rows) ? t.rows.filter((r: unknown) => Array.isArray(r)) : [];
-  return {
-    columns,
-    rows: rows.map((r: unknown[]) => columns.map((_, i) => (typeof r[i] === 'string' || typeof r[i] === 'number' ? r[i] : ''))),
-  };
-}
-
-/** The id of the source in a `{ dataSource }` output. */
-function sourceIdOf(output: unknown): string {
-  if (isRecord(output) && isRecord(output.dataSource) && typeof output.dataSource.id === 'string') return output.dataSource.id;
-  throw new Error('SignForge answered without the data source. Reload the page to see it.');
-}
-
 export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, { queryClient }) => {
   const source = (spotId: string, change: (s: SpotSourceState) => SpotSourceState) =>
     set((s) => ({ spotSource: { ...change(sourceStateOf(s.spotSource, spotId)), spotId } }));
@@ -173,7 +137,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
   async function search(spotId: string, query: string) {
     const seq = ++searchSeq;
     try {
-      const places = placesOf(await callTool('find_places', { query }));
+      const places = (await callTool('find_places', { query })).places;
       if (seq === searchSeq) source(spotId, (s) => ({ ...s, places, searching: false }));
     } catch (err) {
       if (seq === searchSeq) source(spotId, (s) => ({ ...s, places: null, searching: false, error: `Could not look the place up: ${toolMessage(err)}` }));
@@ -207,7 +171,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
    */
   async function create(orgId: string, input: Record<string, unknown> & { id?: string }): Promise<string> {
     try {
-      return sourceIdOf(await callTool('create_data_source', { ...input, idempotencyKey: crypto.randomUUID() }));
+      return (await callTool('create_data_source', { ...input, idempotencyKey: crypto.randomUUID() })).dataSource.id;
     } finally {
       void queryClient.invalidateQueries({ queryKey: dataSourceKeys.all(orgId), exact: true });
     }
@@ -279,7 +243,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
           format: tableFormat,
           ...(tableFormat === 'json-table' && rowsPath.trim() ? { rowsPath: rowsPath.trim() } : {}),
         });
-        source(spotId, (s) => ({ ...s, reading: false, table: tableOf(output) }));
+        source(spotId, (s) => ({ ...s, reading: false, table: output.table }));
       } catch (err) {
         source(spotId, (s) => ({ ...s, reading: false, error: toolMessage(err) }));
       }

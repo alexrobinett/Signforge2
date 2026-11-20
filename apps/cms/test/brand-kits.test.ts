@@ -122,6 +122,7 @@ describe('withDraftKit', () => {
     size: 900,
     width: 400,
     height: 100,
+    durationMs: null,
     renditions: [
       { orientation: 'landscape', sha256: 'a'.repeat(64), type: 'image/png', size: 900, width: 400, height: 100 },
       { orientation: 'portrait', sha256: 'b'.repeat(64), type: 'image/png', size: 800, width: 300, height: 75 },

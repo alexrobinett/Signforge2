@@ -22,7 +22,7 @@
  * edit starts from it. `shown` and `edit` decide this the same way, so what a page shows is what
  * its next save sends.
  */
-import { isStale, toolMessage } from '~/lib/tools';
+import { isStale, Refusal, toolMessage } from '~/lib/tools';
 
 /** How the draft's save is going: `invalid` when the server would refuse it as it is, so it is not sent. */
 type DraftStatus = 'unsaved' | 'saving' | 'saved' | 'invalid';
@@ -103,7 +103,7 @@ export const realClock: Clock = {
 export interface DraftsOptions<E, C> {
   /** The drafts in the store's state. */
   state: { read: () => Drafts<E>; write: (change: (drafts: Drafts<E>) => Drafts<E>) => void };
-  /** Sends one save. A refusal is thrown, as `callTool` throws it. */
+  /** Sends one save. A refusal is thrown as a `Refusal`, as `callTool` throws it. */
   save: (call: SaveCall<E, C>) => Promise<Saved<E>>;
   /** Makes an id: a draft's own, and its idempotency key. */
   makeId: () => string;
@@ -116,7 +116,7 @@ export interface DraftsOptions<E, C> {
    * Whether a refusal says the record itself was deleted, for a page that says so: then nothing
    * more is saved. Without it, every refusal is only shown. A create is never gone.
    */
-  gone?: (err: unknown, key: string) => boolean;
+  gone?: (refusal: Refusal, key: string) => boolean;
 }
 
 /** The drafts of one store. */
@@ -248,7 +248,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
       // A refused save is not tried again until it is asked for again.
       flight.next = null;
       if (!here()) return settle((x) => ({ ...x, status: 'unsaved' }));
-      const gone = d.record !== null && (options.gone?.(err, key) ?? false);
+      const gone = d.record !== null && err instanceof Refusal && (options.gone?.(err, key) ?? false);
       settle((x) => ({ ...x, status: 'unsaved', stale: isStale(err), gone, error: isStale(err) ? STALE : toolMessage(err) }));
     }
   }

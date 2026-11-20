@@ -4,7 +4,7 @@
  * from the route loaders.
  */
 import { uploadImage } from '@signforge/media';
-import { callTool, toolMessage } from '~/lib/tools';
+import { callTool, callToolByName, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 
 /**
@@ -52,7 +52,7 @@ export const createAssetsSlice: SliceCreator<AssetsSlice> = (set, get, { router,
       // One at a time: a 4K photo decoded twice is already a lot of memory for a phone.
       for (const { file, key } of queued) {
         try {
-          await uploadImage(file, { callTool, idempotencyKey: key });
+          await uploadImage(file, { callTool: callToolByName, idempotencyKey: key });
           uploads((u) => u.filter((x) => x.key !== key));
           // The library page reads its loader; the spot editor's picker reads the Query cache.
           await Promise.all([router.invalidate(), queryClient.invalidateQueries({ queryKey: ['org'] })]);

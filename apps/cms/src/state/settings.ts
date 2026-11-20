@@ -16,7 +16,7 @@ import { authClient, authErrorMessage } from '~/lib/auth-client';
 import { orgOnScreen } from '~/lib/live';
 import type { AlertChannel, AlertDelivery, AlertKind, AlertRule, Member, OrgSettings } from '~/lib/settings';
 import type { DisplayHours } from '~/lib/screen-types';
-import { callTool, isStale, toolMessage, versionOf } from '~/lib/tools';
+import { callTool, isStale, toolMessage } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
 import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
@@ -202,7 +202,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       if (name !== undefined && !name.trim()) throw new Error('The organization needs a name.');
       const change = changeOf(fields, settings);
       // The versioned write first: a stale save changes nothing, the name included.
-      if (Object.keys(change).length) moved(versionOf(await callTool('update_org_settings', { ...change, ifVersion: draft.version }), 'settings'));
+      if (Object.keys(change).length) moved((await callTool('update_org_settings', { ...change, ifVersion: draft.version })).settings.version);
       if (name !== undefined && renamed && name.trim() !== renamed.name)
         await auth(authClient.organization.update({ organizationId: renamed.id, data: { name: name.trim() } }), 'Could not rename the organization.');
       if (orgOnScreen(router) === draft.orgId) {
