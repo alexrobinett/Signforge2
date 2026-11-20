@@ -27,9 +27,9 @@ Target playlists by time and by screen, group or org.
 
 ## Done when
 
-- [ ] On the Pi, a takeover published mid-spot is on screen within 2 seconds, whatever the current spot's length.
+- [x] On the Pi, a takeover published mid-spot is on screen within 2 seconds, whatever the current spot's length. *(0.10–0.42 s in five trials, cut 4–37 s into a 60 s spot; ending one by a publish 0.26–0.34 s. `spike/pi-perf/RESULTS.md`, "Takeovers cut in and end offline".)*
 
 - [x] The week view agrees with `resolvePlaylist` for every hour of a test week. *(`apps/cms/test/schedule.test.ts`: the week view (`weekOf`) asks `resolvePlaylist` itself; the test checks every hour of a test week against `resolvePlaylist` on a manifest it builds independently, and against a week written out by hand, plus a day the clocks change.)*
-- [ ] A takeover published now plays on the Pi immediately and ends on time with the network down.
+- [x] A takeover published now plays on the Pi immediately and ends on time with the network down. *(On screen 0.1–0.4 s after the push; with the API stopped, it ended 16 ms after its `endsAt`, mid-spot. Same section. In CI: `packages/player/browser/takeover.test.ts`, on a fake clock.)*
 - [x] A test deletes a schedule entry, makes it again with the same id, and sends an edit with the old `ifVersion`: refused `conflict`, nothing written (#64). *(`packages/tools/test/schedule.test.ts`, "an entry made again with a deleted one’s id…".)*
 - [ ] `pnpm typecheck` and `pnpm test` pass; docs touched by the change are updated.

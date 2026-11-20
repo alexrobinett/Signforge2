@@ -499,6 +499,22 @@ menu-board's items from a table binding (1.3.0 here; measured on 1.2.2's bundle,
 
 Order alternated (cut: typed, table, table, typed, typed, table; fade: table first, then typed first). No cost: the ranges overlap run for run, and mapping 24 rows adds nothing visible to a prepare (medians 164 and 165 ms). Only `maxItems` rows reach the template, so a longer file costs the player one pass over its rows (the snapshot limit, 64 kB, bounds it). The one 67 ms frame was in a typed run. Nothing was skipped.
 
+## Takeovers cut in and end offline (M3-19, 2026-11-19)
+
+This branch's player (`m3-19-playlist-assignment`) on the rig, synced from a local API on the Mac over the LAN (`wrangler dev`, the screen's own credential, `?poll=10`), content pushed with `sf push`, which notifies the screen's socket as a publish does. Two playlists of one 60 s image spot each: `main`, the default, and `flash`. A takeover is a schedule entry for `flash` with `startsAt`/`endsAt`, priority 100. Times are the player's own `__sf.log` (`startedAt` of each spot) against the Mac's clock when `sf push` returned; the two clocks agreed to within the ssh round trip (about 0.2 s).
+
+| Trial | Takeover pushed, on screen after | Cut, s into the 60 s spot | Takeover removed by a publish, `main` on screen after | Cut, s into the spot |
+| --- | --- | --- | --- | --- |
+| 1 | 0.42 s | 3.6 | 0.28 s | 27.0 |
+| 2 | 0.41 s | 30.4 | 0.28 s | 38.1 |
+| 3 | 0.18 s | 37.3 | 0.34 s | 24.2 |
+| 4 | 0.10 s | 19.2 | 0.26 s | 35.1 |
+| 5 | 0.20 s | 26.3 | 0.28 s | 21.1 |
+
+Every change of takeover cut the spot on screen within half a second of the push, wherever the spot was; a publish that changes no takeover still waits for the spot's end (the CMS e2e checks that).
+
+Ending offline: a takeover ending 100 s after it was pushed; once it played, the local API was stopped (04:21:56 UTC; the Pi then got no answer from it, and no sync succeeded after 04:21:45). `endsAt` was 04:23:24.000; `main` started at 04:23:24.016, 39 s into the flash spot. The player's `online` flag turned false only at its next sync, 04:26:17: it reports the last sync, not the socket, as before this change.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
