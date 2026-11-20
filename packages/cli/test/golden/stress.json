@@ -15,10 +15,6 @@
   },
   "defaultPlaylist": "stress",
   "files": {
-    "04456a985e7ff087f6713b44d104e65ba72fb665a231ffd4b8539c4ae839275d": {
-      "size": 72527,
-      "type": "text/html"
-    },
     "0953077a5ef91a92d31cad0aebae32d53106ff062c14a59540a261be93eed702": {
       "size": 203915,
       "type": "image/jpeg"
@@ -63,6 +59,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "97f6e0913458ded5a438104f3413a6072246e2979ee7ff2cf0f4151e19c0628b": {
+      "size": 74912,
+      "type": "text/html"
+    },
     "9d3d3e63607683cf54f951e37373695b235fbe471fd87fd603e79f083ef57a91": {
       "size": 74661,
       "type": "text/html"
@@ -88,7 +88,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "a75133b69011459c4a5e9f561d60618ddba542d9803edb8910e96c012ad5b13f",
+  "id": "0a0f15062308aae5a27030473aa9fa5c61dbc286539209db5dff2d671847334d",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -373,7 +373,7 @@
       "id": "photo-berries",
       "kind": "template",
       "name": "Photo promo, 1080p photo",
-      "template": "base/photo-promo@1.2.3"
+      "template": "base/photo-promo@1.3.0"
     },
     "photo-kitchen": {
       "assets": {
@@ -389,7 +389,7 @@
       "id": "photo-kitchen",
       "kind": "template",
       "name": "Photo promo, 4K photo 2",
-      "template": "base/photo-promo@1.2.3"
+      "template": "base/photo-promo@1.3.0"
     },
     "photo-river": {
       "assets": {
@@ -405,7 +405,7 @@
       "id": "photo-river",
       "kind": "template",
       "name": "Photo promo, 4K photo",
-      "template": "base/photo-promo@1.2.3"
+      "template": "base/photo-promo@1.3.0"
     },
     "sport-drinks": {
       "assets": {
@@ -956,8 +956,8 @@
         "version": "1.4.1"
       }
     },
-    "base/photo-promo@1.2.3": {
-      "html": "04456a985e7ff087f6713b44d104e65ba72fb665a231ffd4b8539c4ae839275d",
+    "base/photo-promo@1.3.0": {
+      "html": "97f6e0913458ded5a438104f3413a6072246e2979ee7ff2cf0f4151e19c0628b",
       "manifest": {
         "background": "#000000",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
@@ -1004,7 +1004,7 @@
         ],
         "protocol": 2,
         "uses": [],
-        "version": "1.2.3"
+        "version": "1.3.0"
       }
     },
     "base/weather@1.5.0": {
