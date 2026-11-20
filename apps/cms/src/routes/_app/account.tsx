@@ -7,7 +7,7 @@ import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { ActionError, SettingsSection } from '~/components/settings/parts';
+import { ActionError, SettingsSection, useRunning } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -38,7 +38,7 @@ function AccountPage() {
   const { sessions, github, at } = Route.useLoaderData();
   const { user } = app.useLoaderData();
   const id = useId();
-  const busy = useAppStore((s) => s.settings.pending !== null);
+  const busy = useRunning({ page: 'account', orgId: null }) !== undefined;
   const saveProfile = useAppStore((s) => s.saveProfile);
   const signOutSession = useAppStore((s) => s.signOutSession);
   const signOutOtherSessions = useAppStore((s) => s.signOutOtherSessions);

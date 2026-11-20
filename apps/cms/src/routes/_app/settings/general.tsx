@@ -9,13 +9,14 @@ import { describeHours, DisplayHoursEditor, hoursProblems } from '~/components/s
 import { zones } from '~/components/screens/pair-screen-form';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { SaveRow, SettingsSection, useFormKey } from '~/components/settings/parts';
+import { SaveRow, SettingsSection } from '~/components/settings/parts';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
-import { useRole } from '~/lib/live';
+import { useOrgId, useRole } from '~/lib/live';
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
+import { editsIn, type SettingsEdits } from '~/state/settings';
 
 export const Route = createFileRoute('/_app/settings/general')({
   loader: () => getOrgSettings(),
@@ -41,37 +42,40 @@ function GeneralSettings() {
   const org = app.useLoaderData().organization;
   const canEdit = useRole() === 'owner';
   const id = useId();
-  const formKey = useFormKey();
-  const draftHours = useAppStore((s) => s.settings.hours);
-  const editDefaultHours = useAppStore((s) => s.editDefaultHours);
-  const saveGeneral = useAppStore((s) => s.saveGeneral);
+  const orgId = useOrgId();
+  const edits = useAppStore((s) => editsIn(s.settings, 'general', orgId));
+  const editSettings = useAppStore((s) => s.editSettings);
+  const saveSettings = useAppStore((s) => s.saveSettings);
   if (!settings || !org) return null;
-  const hours = draftHours ? draftHours.value : settings.displayHours;
-  const locales = settings.locale && !LOCALES.includes(settings.locale) ? [settings.locale, ...LOCALES] : LOCALES;
+  // Each field shows its edit, else what the page read: a reload refreshes those not edited.
+  const hours = edits.displayHours !== undefined ? edits.displayHours : settings.displayHours;
+  const timezone = edits.timezone ?? settings.timezone ?? '';
+  const locale = edits.locale ?? settings.locale ?? '';
+  const locales = locale && !LOCALES.includes(locale) ? [locale, ...LOCALES] : LOCALES;
+  const edit = (change: SettingsEdits) => editSettings(orgId, 'general', settings.version, change);
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!org || !settings || hoursProblems(hours).length) return;
-    const form = new FormData(e.currentTarget);
-    const text = (key: string) => {
-      const v = form.get(key);
-      return typeof v === 'string' && v ? v : null;
-    };
-    void saveGeneral(
-      org,
-      { name: text('name') ?? '', timezone: text('timezone'), locale: text('locale'), auditRetentionDays: Number(text('auditRetentionDays')) },
-      settings.version,
-    );
+    void saveSettings(orgId, 'general', settings, org);
   }
 
   return (
-    <form key={formKey} onSubmit={submit} className="flex flex-col gap-6" noValidate>
+    <form onSubmit={submit} className="flex flex-col gap-6" noValidate>
       <EditorFields>
         <PageHeader title="General" description="The organization's name, and what new screens start with." />
         <SettingsSection id={`${id}-org`} title="Organization" description="Shown to members and in invite emails.">
           <div className="grid max-w-md gap-1.5">
             <Label htmlFor={`${id}-name`}>Name</Label>
-            <Input id={`${id}-name`} name="name" defaultValue={org.name} maxLength={100} required disabled={!canEdit} />
+            <Input
+              id={`${id}-name`}
+              name="name"
+              value={edits.name ?? org.name}
+              onChange={(e) => edit({ name: e.target.value })}
+              maxLength={100}
+              required
+              disabled={!canEdit}
+            />
           </div>
         </SettingsSection>
 
@@ -83,7 +87,7 @@ function GeneralSettings() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid content-start gap-1.5">
               <Label htmlFor={`${id}-tz`}>Time zone</Label>
-              <NativeSelect id={`${id}-tz`} name="timezone" defaultValue={settings.timezone ?? ''} disabled={!canEdit}>
+              <NativeSelect id={`${id}-tz`} name="timezone" value={timezone} onChange={(e) => edit({ timezone: e.target.value })} disabled={!canEdit}>
                 <option value="">The browser's, when pairing</option>
                 {zones.map((z) => (
                   <option key={z} value={z}>
@@ -94,7 +98,14 @@ function GeneralSettings() {
             </div>
             <div className="grid content-start gap-1.5">
               <Label htmlFor={`${id}-locale`}>Locale</Label>
-              <NativeSelect id={`${id}-locale`} name="locale" defaultValue={settings.locale ?? ''} disabled={!canEdit} aria-describedby={`${id}-locale-help`}>
+              <NativeSelect
+                id={`${id}-locale`}
+                name="locale"
+                value={locale}
+                onChange={(e) => edit({ locale: e.target.value })}
+                disabled={!canEdit}
+                aria-describedby={`${id}-locale-help`}
+              >
                 <option value="">The player's default</option>
                 {locales.map((tag) => (
                   <option key={tag} value={tag}>
@@ -114,7 +125,11 @@ function GeneralSettings() {
           title="Default display hours"
           description="New screens start with these. Outside them a screen turns its panel off and keeps syncing."
         >
-          {canEdit ? <DisplayHoursEditor value={hours} onChange={editDefaultHours} /> : <p className="text-sm">{describeHours(settings.displayHours)}</p>}
+          {canEdit ? (
+            <DisplayHoursEditor value={hours} onChange={(displayHours) => edit({ displayHours })} />
+          ) : (
+            <p className="text-sm">{describeHours(settings.displayHours)}</p>
+          )}
         </SettingsSection>
 
         <SettingsSection
@@ -132,7 +147,8 @@ function GeneralSettings() {
               max={3650}
               step={1}
               inputMode="numeric"
-              defaultValue={settings.auditRetentionDays}
+              value={edits.auditRetentionDays ?? settings.auditRetentionDays}
+              onChange={(e) => edit({ auditRetentionDays: e.target.value })}
               disabled={!canEdit}
               className="w-24"
               aria-describedby={`${id}-retention-unit`}
@@ -143,7 +159,7 @@ function GeneralSettings() {
           </div>
         </SettingsSection>
 
-        <SaveRow at="general" canEdit={canEdit} />
+        <SaveRow at="general" scope={{ page: 'general', orgId }} canEdit={canEdit} />
       </EditorFields>
     </form>
   );

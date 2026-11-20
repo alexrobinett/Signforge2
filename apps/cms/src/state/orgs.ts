@@ -66,6 +66,8 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
       }));
       try {
         await switchOrganization(router, org.id);
+        // Edits and confirmations belong to the org they were made in.
+        get().forgetOrgSettings();
         if (announce) set((s) => ({ orgs: { ...s.orgs, status: `Switched to ${org.name}.` } }));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not switch organization.';
@@ -85,6 +87,7 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
       draft(form, { pending: true, error: null });
       try {
         await createOrganization(router, name);
+        get().forgetOrgSettings();
         draft(form, emptyDraft);
         if (form === 'switcher') set((s) => ({ orgs: { ...s.orgs, createDialogOpen: false, status: 'Organization created.' } }));
       } catch (err) {

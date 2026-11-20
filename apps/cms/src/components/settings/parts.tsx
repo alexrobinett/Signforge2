@@ -6,8 +6,9 @@ import { Link } from '@tanstack/react-router';
 import { LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '~/components/ui/button';
-import { useOrgId } from '~/lib/live';
+import { useOrgOnScreen } from '~/lib/live';
 import { useAppStore } from '~/state/provider';
+import { errorOf, runningIn, type SettingsScope } from '~/state/settings';
 
 const LINK =
   'flex min-h-10 shrink-0 items-center rounded-md px-3 whitespace-nowrap text-sm font-medium text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[status=active]:bg-accent data-[status=active]:text-accent-foreground';
@@ -62,25 +63,21 @@ export function SettingsSection({ id, title, description, children }: { id: stri
   );
 }
 
-/**
- * A settings form's key. Another org, or Reload after a stale save, remounts the form with what is
- * there now; the form's own save does not, so a change typed while it ran is kept.
- */
-export function useFormKey(): string {
-  const orgId = useOrgId();
-  const reloads = useAppStore((s) => s.settings.reloads);
-  return `${orgId}-${reloads}`;
+/** The action running in `scope`, if one is: its controls then say so, and ignore input (the store's check). */
+export function useRunning(scope: SettingsScope): string | undefined {
+  return useAppStore((s) => runningIn(s.settings, scope));
 }
 
-/** The error of the action `at`, if the last one to fail was it; a reload when the settings changed since the page read them. */
+/** The error of the action `at`, in the org on screen; a reload when the settings changed since the edits were made. */
 export function ActionError({ at }: { at: string }) {
-  const error = useAppStore((s) => (s.settings.error?.at === at ? s.settings.error : null));
+  const orgId = useOrgOnScreen();
+  const error = useAppStore((s) => errorOf(s.settings, at, orgId));
   const reload = useAppStore((s) => s.reloadSettings);
   return (
     <div role="alert" className="flex flex-wrap items-center gap-2 text-sm font-medium text-destructive empty:hidden">
       {error?.text}
       {error?.stale && (
-        <Button type="button" variant="outline" size="sm" onClick={() => void reload()}>
+        <Button type="button" variant="outline" size="sm" onClick={() => void reload(error.orgId)}>
           <RotateCwIcon aria-hidden /> Reload
         </Button>
       )}
@@ -89,15 +86,14 @@ export function ActionError({ at }: { at: string }) {
 }
 
 /** A form's save button and its error; only owners get the button. */
-export function SaveRow({ at, canEdit, label = 'Save changes' }: { at: string; canEdit: boolean; label?: string }) {
-  const pending = useAppStore((s) => s.settings.pending === at);
-  const busy = useAppStore((s) => s.settings.pending !== null);
+export function SaveRow({ at, scope, canEdit, label = 'Save changes' }: { at: string; scope: SettingsScope; canEdit: boolean; label?: string }) {
+  const running = useRunning(scope);
   if (!canEdit) return <p className="text-sm text-muted-foreground">Only owners can change these.</p>;
   return (
     <div className="space-y-2">
       <ActionError at={at} />
-      <Button type="submit" aria-disabled={busy || undefined}>
-        {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} {label}
+      <Button type="submit" aria-disabled={running !== undefined || undefined}>
+        {running === at && <LoaderCircleIcon className="animate-spin" aria-hidden />} {label}
       </Button>
     </div>
   );

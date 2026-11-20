@@ -62,6 +62,12 @@ export function brandKitVersionOf(output: unknown): number {
   throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
 }
 
+/** The version of the settings in `update_org_settings`' output: what the next save of edits made meanwhile sends as `ifVersion`. */
+export function settingsVersionOf(output: unknown): number {
+  if (isRecord(output) && isRecord(output.settings) && typeof output.settings.version === 'number') return output.settings.version;
+  throw new ToolCallError('error', 'SignForge answered without the settings. Reload the page to see them.');
+}
+
 /** Whether a refusal is an `ifVersion` conflict: someone changed the thing since the page read it. */
 export const isStale = (err: unknown) =>
   err instanceof ToolCallError && err.code === 'conflict' && isRecord(err.details) && typeof err.details.version === 'number';

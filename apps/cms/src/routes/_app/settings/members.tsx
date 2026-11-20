@@ -6,11 +6,11 @@
  * every call.
  */
 import { createFileRoute, getRouteApi } from '@tanstack/react-router';
-import { CheckIcon, MinusIcon } from 'lucide-react';
+import { CheckIcon, LoaderCircleIcon, MinusIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { ActionError, SaveRow, SettingsSection, useFormKey } from '~/components/settings/parts';
+import { ActionError, SaveRow, SettingsSection, useRunning } from '~/components/settings/parts';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -24,12 +24,13 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
-import { useRole } from '~/lib/live';
+import { useOrgId, useRole } from '~/lib/live';
 import { isRole, roleTable, ROLES, type Invitation, type Member, type OrgSettings } from '~/lib/settings';
 import { backToPage } from '~/server/form-post.server';
 import { getMembers, getOrgSettings } from '~/server/settings.functions';
 import type { Role } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
+import { editsIn, type SettingsScope } from '~/state/settings';
 
 export const Route = createFileRoute('/_app/settings/members')({
   server: { handlers: backToPage },
@@ -44,6 +45,8 @@ export const Route = createFileRoute('/_app/settings/members')({
 const app = getRouteApi('/_app');
 const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.label ?? role;
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** What runs on this page in `orgId`: one action at a time. */
+const pageOf = (orgId: string): SettingsScope => ({ page: 'members', orgId });
 
 function MembersSettings() {
   const { members, invitations, settings } = Route.useLoaderData();
@@ -86,7 +89,8 @@ function MembersSettings() {
 
 function InviteForm() {
   const id = useId();
-  const busy = useAppStore((s) => s.settings.pending !== null);
+  const orgId = useOrgId();
+  const busy = useRunning(pageOf(orgId)) !== undefined;
   const inviteMembers = useAppStore((s) => s.inviteMembers);
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
@@ -101,7 +105,7 @@ function InviteForm() {
     if (!isRole(role)) return;
     const field = e.currentTarget.elements.namedItem('emails');
     // Cleared once sent, unless other addresses were typed while it ran.
-    void inviteMembers(emails, role).then((sent) => {
+    void inviteMembers(orgId, emails, role).then((sent) => {
       if (sent && field instanceof HTMLInputElement && field.value === raw) field.value = '';
     });
   }
@@ -138,7 +142,10 @@ function InviteForm() {
 
 function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
   const me = app.useLoaderData().user.id;
-  const busy = useAppStore((s) => s.settings.pending !== null);
+  const orgId = useOrgId();
+  const running = useRunning(pageOf(orgId));
+  const busy = running !== undefined;
+  const removing = running === `remove:${member.id}`;
   const role = useAppStore((s) => (s.settings.roleChange?.memberId === member.id ? s.settings.roleChange.role : member.role));
   const changeMemberRole = useAppStore((s) => s.changeMemberRole);
   const askToRemoveMember = useAppStore((s) => s.askToRemoveMember);
@@ -164,7 +171,7 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
                 // Not disabled while an action runs: a disabled select loses keyboard focus. A change then is ignored.
                 aria-disabled={busy || undefined}
                 onChange={(e) => {
-                  if (isRole(e.target.value)) void changeMemberRole(member.id, e.target.value);
+                  if (isRole(e.target.value)) void changeMemberRole(orgId, member.id, e.target.value);
                 }}
                 className="w-36"
               >
@@ -175,8 +182,8 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
                 ))}
               </NativeSelect>
               {!self && (
-                <Button variant="ghost" className="text-destructive" aria-disabled={busy || undefined} onClick={() => askToRemoveMember(member)}>
-                  Remove
+                <Button variant="ghost" className="text-destructive" aria-disabled={busy || undefined} onClick={() => askToRemoveMember(orgId, member)}>
+                  {removing && <LoaderCircleIcon className="animate-spin" aria-hidden />} {removing ? 'Removing…' : 'Remove'}
                 </Button>
               )}
             </EditorFields>
@@ -186,12 +193,15 @@ function MemberRow({ member, canEdit }: { member: Member; canEdit: boolean }) {
         )}
       </div>
       <ActionError at={`role:${member.id}`} />
+      {/* A removal goes on with its dialog closed: how it went shows here too. */}
+      <ActionError at={`remove:${member.id}`} />
     </li>
   );
 }
 
 function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdit: boolean }) {
-  const busy = useAppStore((s) => s.settings.pending !== null);
+  const orgId = useOrgId();
+  const busy = useRunning(pageOf(orgId)) !== undefined;
   const resendInvitation = useAppStore((s) => s.resendInvitation);
   const cancelInvitation = useAppStore((s) => s.cancelInvitation);
   const expires = new Date(invitation.expiresAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
@@ -207,7 +217,12 @@ function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdi
         </div>
         {canEdit && (
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" aria-disabled={busy || undefined} onClick={() => void resendInvitation(invitation.email, invitation.role)}>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-disabled={busy || undefined}
+              onClick={() => void resendInvitation(orgId, invitation.email, invitation.role)}
+            >
               Resend
             </Button>
             <Button
@@ -215,7 +230,7 @@ function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdi
               size="sm"
               className="text-destructive"
               aria-disabled={busy || undefined}
-              onClick={() => void cancelInvitation(invitation.id)}
+              onClick={() => void cancelInvitation(orgId, invitation.id)}
             >
               Revoke
             </Button>
@@ -230,39 +245,44 @@ function InvitationRow({ invitation, canEdit }: { invitation: Invitation; canEdi
 
 function PublishingForm({ settings, canEdit }: { settings: OrgSettings; canEdit: boolean }) {
   const id = useId();
-  const formKey = useFormKey();
-  const saveEditorsPublish = useAppStore((s) => s.saveEditorsPublish);
+  const orgId = useOrgId();
+  const edited = useAppStore((s) => editsIn(s.settings, 'publishing', orgId).editorsPublish);
+  const editSettings = useAppStore((s) => s.editSettings);
+  const saveSettings = useAppStore((s) => s.saveSettings);
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    void saveEditorsPublish(new FormData(e.currentTarget).get('editorsPublish') === 'on', settings.version);
+    void saveSettings(orgId, 'publishing', settings);
   }
 
   return (
-    <form key={formKey} onSubmit={submit} noValidate>
-      <SettingsSection
-        id={`${id}-publishing`}
-        title="Who publishes"
-        description="Owners always publish to screens. Turn this off and editors still edit spots, playlists and assets, and pair, restart and rename screens, but only owners publish."
-      >
-        <label className="flex items-start gap-3 text-sm">
-          <input
-            type="checkbox"
-            name="editorsPublish"
-            defaultChecked={settings.editorsPublish}
-            disabled={!canEdit}
-            aria-describedby={`${id}-publishing-help`}
-            className="mt-0.5 size-5 shrink-0 accent-primary"
-          />
-          <span>
-            <span className="block font-medium">Editors can publish</span>
-            <span id={`${id}-publishing-help`} className="block text-muted-foreground">
-              Their connected agents follow the same rule.
+    <form onSubmit={submit} noValidate>
+      <EditorFields>
+        <SettingsSection
+          id={`${id}-publishing`}
+          title="Who publishes"
+          description="Owners always publish to screens. Turn this off and editors still edit spots, playlists and assets, and pair, restart and rename screens, but only owners publish."
+        >
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              name="editorsPublish"
+              checked={edited ?? settings.editorsPublish}
+              onChange={(e) => editSettings(orgId, 'publishing', settings.version, { editorsPublish: e.target.checked })}
+              disabled={!canEdit}
+              aria-describedby={`${id}-publishing-help`}
+              className="mt-0.5 size-5 shrink-0 accent-primary"
+            />
+            <span>
+              <span className="block font-medium">Editors can publish</span>
+              <span id={`${id}-publishing-help`} className="block text-muted-foreground">
+                Their connected agents follow the same rule.
+              </span>
             </span>
-          </span>
-        </label>
-        <SaveRow at="publishing" canEdit={canEdit} label="Save" />
-      </SettingsSection>
+          </label>
+          <SaveRow at="publishing" scope={pageOf(orgId)} canEdit={canEdit} label="Save" />
+        </SettingsSection>
+      </EditorFields>
     </form>
   );
 }
@@ -311,24 +331,30 @@ function RoleTable({ editorsPublish }: { editorsPublish: boolean }) {
 }
 
 function RemoveDialog() {
-  const member = useAppStore((s) => s.settings.removing);
-  const busy = useAppStore((s) => s.settings.pending !== null);
+  const orgId = useOrgId();
+  const member = useAppStore((s) => (s.settings.removing?.orgId === orgId ? s.settings.removing.member : null));
+  const running = useRunning(pageOf(orgId));
   const askToRemoveMember = useAppStore((s) => s.askToRemoveMember);
   const removeMember = useAppStore((s) => s.removeMember);
   const display = member ? member.user.name || member.user.email : '';
+  const removing = member !== null && running === `remove:${member.id}`;
 
   return (
-    <AlertDialog open={member !== null} onOpenChange={(open) => !open && askToRemoveMember(null)}>
+    <AlertDialog open={member !== null} onOpenChange={(open) => !open && askToRemoveMember(orgId, null)}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Remove {display}?</AlertDialogTitle>
           <AlertDialogDescription>They lose access to this organization at once. You can invite them again later.</AlertDialogDescription>
         </AlertDialogHeader>
+        {/* Once sent, a removal cannot be called back; closing the dialog leaves it running, its row saying so. */}
+        <p role="status" className="text-sm empty:hidden">
+          {removing && 'Removing… Waiting for SignForge to answer. You can close this; it goes on.'}
+        </p>
         {member && <ActionError at={`remove:${member.id}`} />}
         <AlertDialogFooter>
-          <AlertDialogCancel aria-disabled={busy || undefined}>Cancel</AlertDialogCancel>
-          <Button variant="destructive" aria-disabled={busy || undefined} onClick={() => member && void removeMember(member.id)}>
-            Remove
+          <AlertDialogCancel>{removing ? 'Close' : 'Cancel'}</AlertDialogCancel>
+          <Button variant="destructive" aria-disabled={running !== undefined || undefined} onClick={() => member && void removeMember(orgId, member.id)}>
+            {removing && <LoaderCircleIcon className="animate-spin" aria-hidden />} {removing ? 'Removing…' : 'Remove'}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

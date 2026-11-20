@@ -9,12 +9,12 @@ import { useId, type ReactNode, type SubmitEvent } from 'react';
 import { toast } from 'sonner';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { ActionError, SaveRow, SettingsSection, useFormKey } from '~/components/settings/parts';
+import { ActionError, SaveRow, SettingsSection, useRunning } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
-import { useNow, useRole } from '~/lib/live';
+import { useNow, useOrgId, useRole } from '~/lib/live';
 import { ago } from '~/lib/screen-status';
 import {
   ALERTS,
@@ -30,6 +30,7 @@ import {
 import { backToPage } from '~/server/form-post.server';
 import { getNotifications } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
+import { editsIn, type SettingsScope } from '~/state/settings';
 
 export const Route = createFileRoute('/_app/settings/notifications')({
   server: { handlers: backToPage },
@@ -39,6 +40,9 @@ export const Route = createFileRoute('/_app/settings/notifications')({
 });
 
 type Loaded = NonNullable<ReturnType<typeof Route.useLoaderData>>;
+
+/** What runs on this page in `orgId`: one action at a time. */
+const pageOf = (orgId: string): SettingsScope => ({ page: 'notifications', orgId });
 
 function NotificationSettings() {
   const data = Route.useLoaderData();
@@ -177,23 +181,25 @@ function ChannelOf({
 }
 
 function SlackCard(props: CardProps) {
+  const orgId = useOrgId();
   const connectSlack = useAppStore((s) => s.connectSlack);
-  return <ChannelOf kind="slack" {...props} onUrl={(url) => connectSlack(url, props.channel?.version)} />;
+  return <ChannelOf kind="slack" {...props} onUrl={(url) => connectSlack(orgId, url, props.channel?.version)} />;
 }
 
 function WebhookCard(props: CardProps) {
   const setWebhook = useAppStore((s) => s.setWebhook);
   const rotate = useAppStore((s) => s.rotateSigningSecret);
-  const busy = useAppStore((s) => s.settings.pending !== null);
+  const orgId = useOrgId();
+  const busy = useRunning(pageOf(orgId)) !== undefined;
   const { channel } = props;
   return (
     <ChannelOf
       kind="webhook"
       {...props}
-      onUrl={(url) => setWebhook(url, channel?.version)}
+      onUrl={(url) => setWebhook(orgId, url, channel?.version)}
       extra={
         channel && (
-          <Button type="button" variant="outline" aria-disabled={busy || undefined} onClick={() => void rotate(channel.version)}>
+          <Button type="button" variant="outline" aria-disabled={busy || undefined} onClick={() => void rotate(orgId, channel.version)}>
             <RotateCwIcon aria-hidden /> New signing secret
           </Button>
         )
@@ -204,15 +210,17 @@ function WebhookCard(props: CardProps) {
 
 /** Remove, then a second click to confirm: the URL (and secret) are forgotten. */
 function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
-  const asking = useAppStore((s) => s.settings.removingChannel === kind);
+  const orgId = useOrgId();
+  const asking = useAppStore((s) => s.settings.removingChannel?.orgId === orgId && s.settings.removingChannel.kind === kind);
   const ask = useAppStore((s) => s.askToRemoveAlertChannel);
   const remove = useAppStore((s) => s.removeAlertChannel);
-  const busy = useAppStore((s) => s.settings.pending !== null);
-  const removing = useAppStore((s) => s.settings.pending === `remove:${kind}`);
+  const running = useRunning(pageOf(orgId));
+  const busy = running !== undefined;
+  const removing = running === `remove:${kind}`;
   const name = CHANNEL_COPY[kind].title;
   if (!asking)
     return (
-      <Button type="button" variant="ghost" className="text-destructive" aria-disabled={busy || undefined} onClick={() => ask(kind)}>
+      <Button type="button" variant="ghost" className="text-destructive" aria-disabled={busy || undefined} onClick={() => ask(orgId, kind)}>
         Remove {name}
       </Button>
     );
@@ -221,11 +229,11 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
       <p>Stop sending alerts to {name}? Its URL is forgotten, and alerts still waiting for it are not sent.</p>
       <ActionError at={`remove:${kind}`} />
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="destructive" aria-disabled={busy || undefined} onClick={() => void remove(kind)}>
+        <Button type="button" variant="destructive" aria-disabled={busy || undefined} onClick={() => void remove(orgId, kind)}>
           {removing && <LoaderCircleIcon className="animate-spin" aria-hidden />} {removing ? 'Removing…' : 'Remove'}
         </Button>
         {/* Once the removal is sent it cannot be called back, so Keep it waits for the answer. */}
-        <Button type="button" variant="outline" aria-disabled={busy || undefined} onClick={() => ask(null)}>
+        <Button type="button" variant="outline" aria-disabled={busy || undefined} onClick={() => ask(orgId, null)}>
           Keep it
         </Button>
       </div>
@@ -248,8 +256,7 @@ function UrlForm({
   onUrl: (url: string) => Promise<boolean>;
 }) {
   const id = useId();
-  const pending = useAppStore((s) => s.settings.pending === at);
-  const busy = useAppStore((s) => s.settings.pending !== null);
+  const running = useRunning(pageOf(useOrgId()));
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const url = String(new FormData(e.currentTarget).get('url') ?? '');
@@ -267,8 +274,8 @@ function UrlForm({
         <Input id={id} name="url" type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
         <p className="text-xs text-muted-foreground">Kept encrypted, and never shown again.</p>
         <ActionError at={at} />
-        <Button type="submit" aria-disabled={busy || undefined}>
-          {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} {button}
+        <Button type="submit" aria-disabled={running !== undefined || undefined}>
+          {running === at && <LoaderCircleIcon className="animate-spin" aria-hidden />} {button}
         </Button>
       </form>
     </EditorFields>
@@ -276,13 +283,13 @@ function UrlForm({
 }
 
 function TestButton({ channel, label }: { channel: AlertDelivery['channel']; label: string }) {
+  const orgId = useOrgId();
   const test = useAppStore((s) => s.testAlertChannel);
-  const pending = useAppStore((s) => s.settings.pending === `test:${channel}`);
-  const busy = useAppStore((s) => s.settings.pending !== null);
+  const running = useRunning(pageOf(orgId));
   return (
     <>
-      <Button type="button" variant="outline" aria-disabled={busy || undefined} onClick={() => void test(channel)}>
-        {pending ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <SendIcon aria-hidden />} {label}
+      <Button type="button" variant="outline" aria-disabled={running !== undefined || undefined} onClick={() => void test(orgId, channel)}>
+        {running === `test:${channel}` ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <SendIcon aria-hidden />} {label}
       </Button>
       <ActionError at={`test:${channel}`} />
     </>
@@ -291,7 +298,8 @@ function TestButton({ channel, label }: { channel: AlertDelivery['channel']; lab
 
 /** The signing secret just made: shown here once, then only its holder has it. */
 function SigningSecretOnce() {
-  const secret = useAppStore((s) => s.settings.signingSecret);
+  const orgId = useOrgId();
+  const secret = useAppStore((s) => (s.settings.signingSecret?.orgId === orgId ? s.settings.signingSecret.secret : null));
   const dismiss = useAppStore((s) => s.dismissSigningSecret);
   const id = useId();
   if (!secret) return null;
@@ -324,22 +332,18 @@ const COLUMNS = 'sm:grid-cols-[minmax(0,1fr)_12rem_4rem_4rem_4rem]';
 function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
   const { settings, channels } = data;
   const id = useId();
-  const formKey = useFormKey();
-  const saveAlerts = useAppStore((s) => s.saveAlerts);
+  const orgId = useOrgId();
+  const edits = useAppStore((s) => editsIn(s.settings, 'notifications', orgId).alerts);
+  const editSettings = useAppStore((s) => s.editSettings);
+  const saveSettings = useAppStore((s) => s.saveSettings);
+  // A rule shows its edited fields, else what the page read: a reload refreshes the rest.
+  const rule = (kind: AlertKind): AlertRule => ({ ...settings.alerts[kind], ...edits?.[kind] });
+  const edit = (kind: AlertKind, change: Partial<AlertRule>) =>
+    editSettings(orgId, 'notifications', settings.version, { alerts: { ...edits, [kind]: { ...edits?.[kind], ...change } } });
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const alerts: Record<AlertKind, AlertRule> = { ...settings.alerts };
-    for (const { kind } of ALERTS) {
-      const who = form.get(`${kind}.who`);
-      const rule = settings.alerts[kind];
-      // A channel that is not set has its box disabled, which sends nothing: its stored choice stays.
-      const on = (channel: 'email' | 'slack' | 'webhook') =>
-        channel !== 'email' && !channels[channel] ? rule[channel] : form.get(`${kind}.${channel}`) === 'on';
-      alerts[kind] = { who: isAudience(who) ? who : rule.who, email: on('email'), slack: on('slack'), webhook: on('webhook') };
-    }
-    void saveAlerts(alerts, settings.version);
+    void saveSettings(orgId, 'notifications', settings);
   }
 
   const box = (kind: AlertKind, when: string, channel: 'email' | 'slack' | 'webhook') => (
@@ -348,7 +352,8 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
         type="checkbox"
         name={`${kind}.${channel}`}
         aria-label={`${CHANNEL_LABELS[channel]} for: ${when}`}
-        defaultChecked={settings.alerts[kind][channel]}
+        checked={rule(kind)[channel]}
+        onChange={(e) => edit(kind, { [channel]: e.target.checked })}
         disabled={!canEdit || (channel !== 'email' && !channels[channel])}
         className="size-5 accent-primary"
       />
@@ -359,53 +364,63 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
   );
 
   return (
-    <form key={formKey} onSubmit={submit} noValidate>
-      <SettingsSection
-        id={`${id}-who`}
-        title="Who hears about what"
-        description="Who is for email; Slack and the webhook post to their one channel. Set a channel above to choose it here."
-      >
-        {/* A table's columns on wide screens; each rule stacks on a phone, its controls labelled. */}
-        <div className={`hidden ${COLUMNS} gap-4 border-b pb-2 text-sm font-medium text-muted-foreground sm:grid`} aria-hidden>
-          <span>When</span>
-          <span>Who</span>
-          <span className="text-center">Email</span>
-          <span className="text-center">Slack</span>
-          <span className="text-center">Webhook</span>
-        </div>
-        <ul className="divide-y">
-          {ALERTS.map(({ kind, when, note }) => (
-            <li key={kind} className={`grid gap-3 py-3 text-sm ${COLUMNS} sm:items-center sm:gap-4`}>
-              <span>
-                <span className="block font-medium">{when}</span>
-                <span className="block text-muted-foreground">
-                  {kind === 'screen_offline' ? `After ${settings.unreachableAfterMinutes} minutes; one alert each way` : note}
+    <form onSubmit={submit} noValidate>
+      <EditorFields>
+        <SettingsSection
+          id={`${id}-who`}
+          title="Who hears about what"
+          description="Who is for email; Slack and the webhook post to their one channel. Set a channel above to choose it here."
+        >
+          {/* A table's columns on wide screens; each rule stacks on a phone, its controls labelled. */}
+          <div className={`hidden ${COLUMNS} gap-4 border-b pb-2 text-sm font-medium text-muted-foreground sm:grid`} aria-hidden>
+            <span>When</span>
+            <span>Who</span>
+            <span className="text-center">Email</span>
+            <span className="text-center">Slack</span>
+            <span className="text-center">Webhook</span>
+          </div>
+          <ul className="divide-y">
+            {ALERTS.map(({ kind, when, note }) => (
+              <li key={kind} className={`grid gap-3 py-3 text-sm ${COLUMNS} sm:items-center sm:gap-4`}>
+                <span>
+                  <span className="block font-medium">{when}</span>
+                  <span className="block text-muted-foreground">
+                    {kind === 'screen_offline' ? `After ${settings.unreachableAfterMinutes} minutes; one alert each way` : note}
+                  </span>
                 </span>
-              </span>
-              <NativeSelect name={`${kind}.who`} aria-label={`Who hears: ${when}`} defaultValue={settings.alerts[kind].who} disabled={!canEdit}>
-                {AUDIENCES.map((a) => (
-                  <option key={a.value} value={a.value}>
-                    {a.label}
-                  </option>
-                ))}
-              </NativeSelect>
-              <div className="flex flex-wrap gap-4 sm:contents">
-                {box(kind, when, 'email')}
-                {box(kind, when, 'slack')}
-                {box(kind, when, 'webhook')}
-              </div>
-            </li>
-          ))}
-        </ul>
-        <p className="text-sm text-muted-foreground">
-          Offline alerts wait {settings.unreachableAfterMinutes} minutes:{' '}
-          <Link to="/settings/screens" className="text-primary underline underline-offset-4">
-            Screens &amp; groups
-          </Link>
-          .
-        </p>
-        <SaveRow at="notifications" canEdit={canEdit} />
-      </SettingsSection>
+                <NativeSelect
+                  name={`${kind}.who`}
+                  aria-label={`Who hears: ${when}`}
+                  value={rule(kind).who}
+                  onChange={(e) => {
+                    if (isAudience(e.target.value)) edit(kind, { who: e.target.value });
+                  }}
+                  disabled={!canEdit}
+                >
+                  {AUDIENCES.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {a.label}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <div className="flex flex-wrap gap-4 sm:contents">
+                  {box(kind, when, 'email')}
+                  {box(kind, when, 'slack')}
+                  {box(kind, when, 'webhook')}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-muted-foreground">
+            Offline alerts wait {settings.unreachableAfterMinutes} minutes:{' '}
+            <Link to="/settings/screens" className="text-primary underline underline-offset-4">
+              Screens &amp; groups
+            </Link>
+            .
+          </p>
+          <SaveRow at="notifications" scope={pageOf(orgId)} canEdit={canEdit} />
+        </SettingsSection>
+      </EditorFields>
     </form>
   );
 }
@@ -427,8 +442,9 @@ const LOG_COLUMNS = 'sm:grid-cols-[6rem_6rem_minmax(0,1fr)_minmax(0,1fr)_4.5rem_
 
 function DeliveryLog({ deliveries, canEdit, at }: { deliveries: AlertDelivery[]; canEdit: boolean; at: number }) {
   const now = useNow(at);
+  const orgId = useOrgId();
   const retry = useAppStore((s) => s.retryAlertDelivery);
-  const busy = useAppStore((s) => s.settings.pending !== null);
+  const busy = useRunning(pageOf(orgId)) !== undefined;
   if (!deliveries.length) return <p className="text-sm text-muted-foreground">Nothing has been sent to Slack or a webhook yet.</p>;
   return (
     <>
@@ -454,7 +470,7 @@ function DeliveryLog({ deliveries, canEdit, at }: { deliveries: AlertDelivery[];
               </span>
               <span>
                 {canEdit && d.status !== 'delivered' && (
-                  <Button type="button" variant="outline" size="sm" aria-disabled={busy || undefined} onClick={() => void retry(d.id)}>
+                  <Button type="button" variant="outline" size="sm" aria-disabled={busy || undefined} onClick={() => void retry(orgId, d.id)}>
                     <RotateCwIcon aria-hidden /> Retry now
                   </Button>
                 )}
