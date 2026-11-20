@@ -115,12 +115,28 @@ let n = 0;
 export const email = (who: string) => `${who}-${Date.now().toString(36)}-${++n}@signforge.test`;
 
 /**
- * For a beforeEach in a rate limit test. The limiters count in one-minute windows fixed to the wall
- * clock, so a test that ran across a minute boundary would count in two (600 polls, then a 601st that
- * passes). This waits until the test's timeout fits in the window left: a run that finishes, passing
- * or failing, counted in one window.
+ * The bindings, with each rate limit of wrangler.jsonc counted on the tests' clock (`vi.setSystemTime`), so a
+ * rate limit test says which minute each call falls in. Miniflare's limiters count in windows fixed to the real
+ * clock (each minute from :00), in another service the tests' clock does not reach, so a test against them
+ * failed whenever its calls straddled a minute (#161). These count the same way: a key's first `limit` calls
+ * in each `period` window pass. Each call of this starts new counts.
  */
-export async function inOneLimiterWindow(ctx: { task: { timeout: number } }) {
-  const left = 60_000 - (Date.now() % 60_000);
-  if (left < ctx.task.timeout) await new Promise((resolve) => setTimeout(resolve, left));
+export function clockLimits(): Env {
+  const limits: Record<string, { limit: number; period: number }> = JSON.parse(env.RATE_LIMITS);
+  const limiters = Object.entries(limits).map(([name, { limit, period }]): [string, RateLimit] => {
+    const counts = new Map<string, number>();
+    return [
+      name,
+      {
+        limit: async ({ key }) => {
+          const window = `${Math.floor(Date.now() / (period * 1000))} ${key}`;
+          const n = counts.get(window) ?? 0;
+          if (n >= limit) return { success: false };
+          counts.set(window, n + 1);
+          return { success: true };
+        },
+      },
+    ];
+  });
+  return { ...env, ...Object.fromEntries(limiters) };
 }

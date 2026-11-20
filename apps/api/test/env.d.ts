@@ -6,5 +6,7 @@ declare namespace Cloudflare {
     TEMPLATE_BUILDS: string;
     /** JSON: the font catalogue's files, repo path to base64 bytes (vitest.config.ts). */
     FONT_FILES: string;
+    /** JSON: each rate limit binding's `{ limit, period }` (seconds), by name, from wrangler.jsonc (vitest.config.ts). */
+    RATE_LIMITS: string;
   }
 }
