@@ -1,4 +1,4 @@
-import { validateTableFeed } from '@signforge/contract';
+import { type FieldDef, tableItems, validateTableFeed } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
 import { FeedError, LIMITS, normaliseFeed, parseCsv, parseJsonTable } from '../src/index';
 import menu from './fixtures/menu.csv?raw';
@@ -133,6 +133,39 @@ describe('CSV (RFC 4180, header row)', () => {
 
   it('refuses a body over the size limit before reading it', () => {
     expect(code(() => parseCsv(`Item\n${'x'.repeat(50)}`, { maxBytes: 40 }))).toBe('too-large');
+  });
+});
+
+describe('dates and times in cells', () => {
+  const events: Extract<FieldDef, { type: 'list' }> = {
+    type: 'list',
+    label: 'Events',
+    item: { name: { type: 'text', label: 'Name' }, at: { type: 'datetime', label: 'Starts' } },
+  };
+
+  it("writes a spreadsheet's date and time with the ISO T, so a datetime takes it and a sort by the column orders by time, not by separator", () => {
+    const csv = 'Event,Starts\nLate,2026-11-27 18:30\nEarly,2026-11-27T09:00\nNoon,2026-11-27 12:00:00\nNote,see 2026-11-27 18:30\n';
+    const table = parseCsv(csv);
+    expect(table.rows).toEqual([
+      ['Late', '2026-11-27T18:30'],
+      ['Early', '2026-11-27T09:00'],
+      ['Noon', '2026-11-27T12:00:00'],
+      ['Note', 'see 2026-11-27 18:30'],
+    ]);
+    const json = JSON.stringify([
+      { Event: 'Late', Starts: '2026-11-27 18:30' },
+      { Event: 'Early', Starts: '2026-11-27T09:00' },
+    ]);
+    expect(parseJsonTable(json).rows).toEqual([
+      ['Late', '2026-11-27T18:30'],
+      ['Early', '2026-11-27T09:00'],
+    ]);
+    const sorted = tableItems(events, { columns: { name: 'Event', at: 'Starts' }, sort: { column: 'Starts' } }, table, 'en-US');
+    expect(sorted.items).toEqual([
+      { name: 'Early', at: '2026-11-27T09:00' },
+      { name: 'Noon', at: '2026-11-27T12:00' },
+      { name: 'Late', at: '2026-11-27T18:30' },
+    ]);
   });
 });
 

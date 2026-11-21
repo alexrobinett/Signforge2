@@ -90,6 +90,13 @@ function records(text: string): string[][] {
   return out;
 }
 
+/**
+ * A cell as a table holds it, with a date and time a spreadsheet writes with a space
+ * ("2026-11-27 18:30") in the ISO form ("2026-11-27T18:30"): a datetime property takes only that,
+ * and a sort by the column then orders same-day cells by time, not by which separator each has.
+ */
+const isoCell = (c: string) => c.replace(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}(?::\d{2})?)$/, '$1T$2');
+
 /** A CSV file as a TableFeed. Blank lines are skipped, short rows padded with empty cells, and empty columns with no name dropped. */
 export function parseCsv(body: string, options: TableOptions = {}): TableFeed {
   checkSize(body, options.maxBytes ?? LIMITS.maxBytes);
@@ -114,12 +121,12 @@ export function parseCsv(body: string, options: TableOptions = {}): TableFeed {
   if (twice !== undefined) throw malformed(`two columns are named "${twice.slice(0, 40)}"`);
   refuseOversized(columns.length, rest.length);
   // Short rows padded with empty cells.
-  return { columns, rows: rest.map((r) => keep.map((k) => r[k] ?? '')) };
+  return { columns, rows: rest.map((r) => keep.map((k) => isoCell(r[k] ?? ''))) };
 }
 
 /** A JSON value as a cell: text and numbers as they are, true and false as words, anything else empty. */
 function cell(v: unknown): string | number {
-  if (typeof v === 'string') return v;
+  if (typeof v === 'string') return isoCell(v);
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'boolean') return String(v);
   return '';
