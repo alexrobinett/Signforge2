@@ -55,6 +55,33 @@ it('changes no template bundle without a new version', async () => {
   ).toEqual(recorded);
 });
 
+it('checks what a stylesheet that style.css imports brings into the bundle: network URLs and colour literals', async () => {
+  // Under this directory, so main.ts resolves the SDK as a template's own does.
+  const at = mkdtempSync(join(import.meta.dirname, '.imports-'));
+  try {
+    const manifest = JSON.parse(readFileSync(join(dir, 'clock', 'template.json'), 'utf8')) as Record<string, unknown>;
+    writeFileSync(join(at, 'template.json'), JSON.stringify({ ...manifest, id: 'imports' }));
+    writeFileSync(
+      join(at, 'index.html'),
+      '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><script type="module" src="main.ts"></script></body></html>',
+    );
+    writeFileSync(join(at, 'main.ts'), "import { defineTemplate } from '@signforge/template-sdk';\ndefineTemplate({});\n");
+    writeFileSync(join(at, 'style.css'), "@import './extra.css';\n.a { color: var(--sf-text, #fff); }\n");
+    for (const network of [
+      '.b { background: url(//tracker.example/p.gif); }',
+      '.b { background-image: image-set("//tracker.example/p.gif" 1x); }',
+      '.b { background-image: -webkit-image-set("https://tracker.example/p.gif" 1x); }',
+    ]) {
+      writeFileSync(join(at, 'extra.css'), `${network}\n.d { color: #ff0000; }\n`);
+      const { problems, report } = await buildTemplate(at);
+      expect(problems, network).toEqual(['a template may not load anything from the network']);
+      expect(report.warnings, network).toEqual([expect.stringMatching(/extra\.css:2: literal colour #ff0000 in color/)]);
+    }
+  } finally {
+    rmSync(at, { recursive: true, force: true });
+  }
+});
+
 it('refuses scripts a template frame would not run, as the browser reads them', async () => {
   // Under this directory, so main.ts resolves the SDK as a template's own does.
   const at = mkdtempSync(join(import.meta.dirname, '.scripts-'));

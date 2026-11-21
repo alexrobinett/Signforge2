@@ -1,0 +1,708 @@
+/*! The fonts below (latin subsets from @fontsource 5.3.0) are each licensed under the SIL Open Font License,
+   Version 1.1, which asks that every copy carry their copyright notices and the licence:
+
+   Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+   Bricolage Grotesque: Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage)
+   Instrument Serif: Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif)
+   Unbounded: Copyright 2022 The Unbounded Project Authors (https://github.com/googlefonts/unbounded)
+   Space Mono: Copyright 2016 The Space Mono Project Authors (https://github.com/googlefonts/spacemono)
+   Inter Tight: Copyright 2022 The Inter Project Authors (https://github.com/rsms/inter-tight)
+
+   This Font Software is licensed under the SIL Open Font License, Version 1.1.
+   This license is copied below, and is also available with a FAQ at:
+   http://scripts.sil.org/OFL
+
+
+   -----------------------------------------------------------
+   SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+   -----------------------------------------------------------
+
+   PREAMBLE
+   The goals of the Open Font License (OFL) are to stimulate worldwide
+   development of collaborative font projects, to support the font creation
+   efforts of academic and linguistic communities, and to provide a free and
+   open framework in which fonts may be shared and improved in partnership
+   with others.
+
+   The OFL allows the licensed fonts to be used, studied, modified and
+   redistributed freely as long as they are not sold by themselves. The
+   fonts, including any derivative works, can be bundled, embedded,
+   redistributed and/or sold with any software provided that any reserved
+   names are not used by derivative works. The fonts and derivatives,
+   however, cannot be released under any other type of license. The
+   requirement for fonts to remain under this license does not apply
+   to any document created using the fonts or their derivatives.
+
+   DEFINITIONS
+   "Font Software" refers to the set of files released by the Copyright
+   Holder(s) under this license and clearly marked as such. This may
+   include source files, build scripts and documentation.
+
+   "Reserved Font Name" refers to any names specified as such after the
+   copyright statement(s).
+
+   "Original Version" refers to the collection of Font Software components as
+   distributed by the Copyright Holder(s).
+
+   "Modified Version" refers to any derivative made by adding to, deleting,
+   or substituting -- in part or in whole -- any of the components of the
+   Original Version, by changing formats or by porting the Font Software to a
+   new environment.
+
+   "Author" refers to any designer, engineer, programmer, technical
+   writer or other person who contributed to the Font Software.
+
+   PERMISSION & CONDITIONS
+   Permission is hereby granted, free of charge, to any person obtaining
+   a copy of the Font Software, to use, study, copy, merge, embed, modify,
+   redistribute, and sell modified and unmodified copies of the Font
+   Software, subject to the following conditions:
+
+   1) Neither the Font Software nor any of its individual components,
+   in Original or Modified Versions, may be sold by itself.
+
+   2) Original or Modified Versions of the Font Software may be bundled,
+   redistributed and/or sold with any software, provided that each copy
+   contains the above copyright notice and this license. These can be
+   included either as stand-alone text files, human-readable headers or
+   in the appropriate machine-readable metadata fields within text or
+   binary files as long as those fields can be easily viewed by the user.
+
+   3) No Modified Version of the Font Software may use the Reserved Font
+   Name(s) unless explicit written permission is granted by the corresponding
+   Copyright Holder. This restriction only applies to the primary font name as
+   presented to the users.
+
+   4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+   Software shall not be used to promote, endorse or advertise any
+   Modified Version, except to acknowledge the contribution(s) of the
+   Copyright Holder(s) and the Author(s) or with their explicit written
+   permission.
+
+   5) The Font Software, modified or unmodified, in part or in whole,
+   must be distributed entirely under this license, and must not be
+   distributed under any other license. The requirement for fonts to
+   remain under this license does not apply to any document created
+   using the Font Software.
+
+   TERMINATION
+   This license becomes null and void if any of the above conditions are
+   not met.
+
+   DISCLAIMER
+   THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+   OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+   DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+   OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+/* The look kit: four looks a template writes once (docs/template-spec.md, Looks). `applyLook`
+   (src/index.ts) sets `data-look` on the root from the spot's `look` field; each look below sets
+   type, shape, spacing and motion, and its palette over the brand tokens, so a screen's brand kit
+   recolours it and the canvas palette shows only where the screen has no kit. */
+
+/* Each look's faces under a family of its own: a face loads only when text uses its family, so
+   the Pi decodes only the chosen look's files. Latin subsets from @fontsource (OFL, no Reserved
+   Font Name). Inter is the body face of Pop, Poster and Night. */
+@font-face {
+  font-family: 'lk-body';
+  src: url('./node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+}
+@font-face {
+  font-family: 'lk-pop';
+  src: url('./node_modules/@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-wght-normal.woff2') format('woff2');
+  font-weight: 200 800;
+}
+@font-face {
+  font-family: 'lk-poster';
+  src: url('./node_modules/@fontsource/instrument-serif/files/instrument-serif-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'lk-poster';
+  src: url('./node_modules/@fontsource/instrument-serif/files/instrument-serif-latin-400-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+}
+@font-face {
+  font-family: 'lk-night';
+  src: url('./node_modules/@fontsource-variable/unbounded/files/unbounded-latin-wght-normal.woff2') format('woff2');
+  font-weight: 200 900;
+}
+@font-face {
+  font-family: 'lk-night-mono';
+  src: url('./node_modules/@fontsource/space-mono/files/space-mono-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'lk-night-mono';
+  src: url('./node_modules/@fontsource/space-mono/files/space-mono-latin-700-normal.woff2') format('woff2');
+  font-weight: 700;
+}
+/* IBM Plex Sans, the canvas's corporate face, reserves the name "Plex", and a subset may not carry
+   it (fonts/README.md): Inter Tight in its place, for display and body both. */
+@font-face {
+  font-family: 'lk-corporate';
+  src: url('./node_modules/@fontsource-variable/inter-tight/files/inter-tight-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+}
+
+/* Colour roles. The `-ink` and `on-` roles are what text in that colour asks for; `applyLook`
+   replaces each with `readableOn` of it on what it sits on (the page, or the fill), so a kit
+   whose accent does not read on its background gets black or white text there instead. */
+/* Shared by every look. Text in the primary or accent colour on the page: these are what it asks
+   for, and `applyLook` measures them (small text 4.5:1, `-large` 3:1). `--lk-scale` is 1 until a
+   template's layout steps type up into space an element left (`[data-photo='off']`). */
+[data-look] {
+  --lk-primary-ink: var(--lk-primary);
+  --lk-primary-ink-large: var(--lk-primary);
+  --lk-accent-ink: var(--lk-accent);
+  --lk-accent-ink-large: var(--lk-accent);
+  --lk-scale: 1;
+  --lk-cover-motion: none;
+  background: var(--lk-bg);
+  color: var(--lk-text);
+  font-family: var(--lk-font-body);
+}
+[data-look='pop'] {
+  --lk-bg: var(--sf-bg, #fbede7);
+  --lk-surface: var(--sf-surface, #f3ddd3);
+  --lk-text: var(--sf-text, #1e1a17);
+  --lk-muted: var(--sf-muted, #6b5f58);
+  /* Tomato fills with ink on them; never tomato text on the ground (2.71:1). */
+  --lk-primary: var(--sf-primary, #ff5a36);
+  --lk-on-primary: var(--sf-on-primary, #1e1a17);
+  --lk-accent: var(--sf-accent, #2e44d9);
+  --lk-on-accent: var(--sf-on-accent, #ffffff);
+  --lk-rule-color: var(--lk-text);
+
+  --lk-font-display: 'lk-pop', sans-serif;
+  --lk-font-body: 'lk-body', sans-serif;
+  --lk-font-label: 'lk-pop', sans-serif;
+  --lk-display-weight: 800;
+  --lk-display-leading: 0.98;
+  --lk-display-tracking: -0.025em;
+  --lk-figure-weight: 800;
+  --lk-label-weight: 800;
+  --lk-label-case: none;
+  --lk-label-tracking: 0;
+  --lk-size-display: 13.9vmin;
+  --lk-size-title: 4.3vmin;
+  --lk-size-body: 4.1vmin;
+  --lk-size-label: 3.1vmin;
+  --lk-step: 1.18;
+  --lk-pad: 8.5vmin;
+  --lk-gap: 3.3vmin;
+  --lk-radius: 6vmin;
+  --lk-radius-small: 2vmin;
+  --lk-radius-pill: 9999px;
+  --lk-rule: 0.37vmin;
+
+  --lk-ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --lk-in: 0.85s;
+  --lk-out: 0.5s;
+  --lk-stagger: 0.12s;
+  --lk-text-motion: lk-pop-rise;
+  --lk-fade-motion: lk-fade;
+  --lk-badge-motion: lk-pop-in;
+  --lk-photo-motion: lk-pop-slide;
+  --lk-drift-motion: lk-pop-drift;
+  --lk-drift-s: 22s;
+  --lk-wobble-motion: lk-pop-wobble;
+  --lk-pulse-motion: lk-pop-pulse;
+  --lk-pulse-s: 1.2s;
+  --lk-ping-motion: none;
+  --lk-crawl-speed: 9vmin;
+}
+/* Red reads only as large text on paper (3.58:1); small text takes the darker red (4.91:1). */
+[data-look='poster'] {
+  --lk-bg: var(--sf-bg, #f1f1ec);
+  --lk-surface: var(--sf-surface, #e2e2da);
+  --lk-text: var(--sf-text, #111111);
+  --lk-muted: var(--sf-muted, #55554e);
+  --lk-primary: var(--sf-primary, #e8401c);
+  --lk-on-primary: var(--sf-on-primary, #111111);
+  --lk-accent: var(--sf-accent, #e8401c);
+  --lk-on-accent: var(--sf-on-accent, #111111);
+  --lk-accent-ink: var(--sf-accent, #c2330f);
+  --lk-primary-ink: var(--sf-primary, #c2330f);
+  --lk-rule-color: var(--lk-text);
+
+  --lk-font-display: 'lk-poster', serif;
+  --lk-font-body: 'lk-body', sans-serif;
+  --lk-font-label: 'lk-body', sans-serif;
+  --lk-display-weight: 400;
+  --lk-display-leading: 0.94;
+  --lk-display-tracking: -0.015em;
+  --lk-figure-weight: 400;
+  --lk-label-weight: 700;
+  --lk-label-case: uppercase;
+  --lk-label-tracking: 0.16em;
+  --lk-size-display: 17.4vmin;
+  --lk-size-title: 4.3vmin;
+  --lk-size-body: 3.7vmin;
+  --lk-size-label: 2vmin;
+  --lk-step: 1.2;
+  --lk-pad: 8vmin;
+  --lk-gap: 3.3vmin;
+  --lk-radius: 0px;
+  --lk-radius-small: 0px;
+  --lk-radius-pill: 0px;
+  --lk-rule: 0.28vmin;
+
+  --lk-ease: cubic-bezier(0.7, 0, 0.2, 1);
+  --lk-in: 0.9s;
+  --lk-out: 0.6s;
+  --lk-stagger: 0.12s;
+  --lk-text-motion: lk-mask-up;
+  --lk-fade-motion: lk-poster-fade;
+  --lk-badge-motion: lk-poster-stamp;
+  --lk-photo-motion: none;
+  --lk-cover-motion: lk-poster-wipe;
+  --lk-drift-motion: lk-poster-drift;
+  --lk-drift-s: 26s;
+  --lk-wobble-motion: none;
+  --lk-pulse-motion: none;
+  --lk-pulse-s: 1s;
+  --lk-ping-motion: none;
+  --lk-crawl-speed: 8.3vmin;
+}
+[data-look='night'] {
+  --lk-bg: var(--sf-bg, #0e1512);
+  --lk-surface: var(--sf-surface, #18231e);
+  --lk-text: var(--sf-text, #f2f5f0);
+  --lk-muted: var(--sf-muted, #cbd5cf);
+  --lk-primary: var(--sf-primary, #d4ff3a);
+  --lk-on-primary: var(--sf-on-primary, #0e1512);
+  --lk-accent: var(--sf-accent, #c4b5fd);
+  --lk-on-accent: var(--sf-on-accent, #0e1512);
+  --lk-rule-color: color-mix(in srgb, var(--lk-text) 16%, var(--lk-bg));
+
+  --lk-font-display: 'lk-night', sans-serif;
+  --lk-font-body: 'lk-body', sans-serif;
+  --lk-font-label: 'lk-night-mono', monospace;
+  --lk-display-weight: 800;
+  --lk-display-leading: 1.04;
+  --lk-display-tracking: -0.02em;
+  --lk-figure-weight: 800;
+  --lk-label-weight: 400;
+  --lk-label-case: none;
+  --lk-label-tracking: 0;
+  --lk-size-display: 9.6vmin;
+  --lk-size-title: 2.8vmin;
+  --lk-size-body: 3.15vmin;
+  --lk-size-label: 2.4vmin;
+  --lk-step: 1.6;
+  --lk-pad: 5.2vmin;
+  --lk-gap: 3.7vmin;
+  --lk-radius: 3.7vmin;
+  --lk-radius-small: 1.3vmin;
+  --lk-radius-pill: 9999px;
+  --lk-rule: 0.19vmin;
+
+  --lk-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --lk-in: 0.9s;
+  --lk-out: 0.5s;
+  --lk-stagger: 0.12s;
+  --lk-text-motion: lk-mask-up;
+  --lk-fade-motion: lk-night-rise;
+  --lk-badge-motion: lk-night-slide;
+  --lk-photo-motion: lk-night-zoom;
+  --lk-drift-motion: lk-night-pan;
+  --lk-drift-s: 32s;
+  --lk-wobble-motion: none;
+  --lk-pulse-motion: lk-night-pulse;
+  --lk-pulse-s: 1.6s;
+  --lk-ping-motion: lk-night-ping;
+  --lk-crawl-speed: 9vmin;
+}
+/* Navy panels (primary) and one brand blue (accent, 5.12:1 on white). */
+[data-look='corporate'] {
+  --lk-bg: var(--sf-bg, #ffffff);
+  --lk-surface: var(--sf-surface, #f3f5f8);
+  --lk-text: var(--sf-text, #0b1f3a);
+  --lk-muted: var(--sf-muted, #4b5b70);
+  --lk-primary: var(--sf-primary, #0b1f3a);
+  --lk-on-primary: var(--sf-on-primary, #ffffff);
+  --lk-accent: var(--sf-accent, #1f5eff);
+  --lk-on-accent: var(--sf-on-accent, #ffffff);
+  --lk-rule-color: color-mix(in srgb, var(--lk-text) 14%, var(--lk-bg));
+
+  --lk-font-display: 'lk-corporate', sans-serif;
+  --lk-font-body: 'lk-corporate', sans-serif;
+  --lk-font-label: 'lk-corporate', sans-serif;
+  --lk-display-weight: 500;
+  --lk-display-leading: 1.04;
+  --lk-display-tracking: -0.025em;
+  --lk-figure-weight: 300;
+  --lk-label-weight: 600;
+  --lk-label-case: uppercase;
+  --lk-label-tracking: 0.14em;
+  --lk-size-display: 9.6vmin;
+  --lk-size-title: 3vmin;
+  --lk-size-body: 3vmin;
+  --lk-size-label: 1.85vmin;
+  --lk-step: 1.15;
+  --lk-pad: 7vmin;
+  --lk-gap: 3vmin;
+  --lk-radius: 0px;
+  --lk-radius-small: 0px;
+  --lk-radius-pill: 0px;
+  --lk-rule: max(1px, 0.1vmin);
+
+  --lk-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --lk-in: 0.8s;
+  --lk-out: 0.5s;
+  --lk-stagger: 0.11s;
+  --lk-text-motion: lk-corporate-rise;
+  --lk-fade-motion: lk-fade;
+  --lk-badge-motion: lk-fade;
+  --lk-photo-motion: lk-corporate-settle;
+  --lk-drift-motion: lk-corporate-drift;
+  --lk-drift-s: 30s;
+  --lk-wobble-motion: none;
+  --lk-pulse-motion: lk-corporate-breathe;
+  --lk-pulse-s: 3s;
+  --lk-ping-motion: none;
+  --lk-crawl-speed: 7.5vmin;
+}
+/* Motion. Each element gets its look's intro, staggered by `lk-d1` to `lk-d8`, and the same
+   motion reversed as its outro, ending as the spot does (`--sf-duration`). Only transform and
+   opacity move. */
+.lk-text {
+  --lk-motion: var(--lk-text-motion);
+}
+.lk-fade {
+  --lk-motion: var(--lk-fade-motion);
+}
+.lk-badge {
+  --lk-motion: var(--lk-badge-motion);
+}
+.lk-photo {
+  --lk-motion: var(--lk-photo-motion);
+}
+.lk-draw {
+  --lk-motion: lk-draw;
+  transform-origin: left center;
+}
+.lk-text,
+.lk-fade,
+.lk-badge,
+.lk-photo,
+.lk-draw,
+.lk-cover {
+  will-change: transform, opacity;
+  animation:
+    var(--lk-motion) var(--lk-in) var(--lk-ease) calc(var(--lk-i, 0) * var(--lk-stagger)) both,
+    var(--lk-motion) var(--lk-out) var(--lk-ease) calc(var(--sf-duration, 8s) - var(--lk-out)) reverse forwards;
+}
+.lk-d1 {
+  --lk-i: 1;
+}
+.lk-d2 {
+  --lk-i: 2;
+}
+.lk-d3 {
+  --lk-i: 3;
+}
+.lk-d4 {
+  --lk-i: 4;
+}
+.lk-d5 {
+  --lk-i: 5;
+}
+.lk-d6 {
+  --lk-i: 6;
+}
+.lk-d7 {
+  --lk-i: 7;
+}
+.lk-d8 {
+  --lk-i: 8;
+}
+/* Text that slides up out of a mask (Poster, Night) sits in one; descenders keep their room. */
+.lk-mask {
+  padding-bottom: 0.1em;
+  margin-bottom: -0.1em;
+}
+[data-look='poster'] .lk-mask,
+[data-look='night'] .lk-mask {
+  overflow: hidden;
+}
+/* Poster's ink wipe: a block over a photo, scaled away. Nothing in the other looks. */
+.lk-cover {
+  --lk-motion: var(--lk-cover-motion);
+  position: absolute;
+  inset: 0;
+  background: var(--lk-text);
+  transform: scaleX(0);
+  transform-origin: right center;
+}
+:root:not([data-look='poster']) .lk-cover {
+  display: none;
+}
+/* Ambient motion, inside an element that has an intro and outro of its own. */
+.lk-drift {
+  will-change: transform;
+  animation: var(--lk-drift-motion) var(--lk-drift-s) ease-in-out infinite;
+}
+/* A photo drifting across a portrait screen's width took the kit's test template over 1% of frames
+   dropped on the Pi (spike/pi-perf/RESULTS.md, The look kit): still in portrait until a portrait
+   template measures it under 1%. */
+:root[data-orientation='portrait'] .lk-drift {
+  animation: none;
+}
+.lk-wobble {
+  animation: var(--lk-wobble-motion) 3.6s ease-in-out 1.8s infinite;
+}
+.lk-pulse {
+  animation: var(--lk-pulse-motion) var(--lk-pulse-s) ease-in-out infinite;
+}
+.lk-ping {
+  animation: var(--lk-ping-motion) var(--lk-pulse-s) cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+/* A crawl: `crawl()` puts the strip's content in twice and sets the shift (one copy) and the
+   duration, from the look's speed. */
+.lk-crawl {
+  display: block;
+  width: max-content;
+  white-space: nowrap;
+  will-change: transform;
+  animation: lk-crawl var(--lk-crawl-s, 60s) linear infinite;
+}
+.lk-crawl > * {
+  padding-inline-end: calc(var(--lk-gap) * 2);
+}
+
+/* The final frame, still: every element at rest, and the crawl one line cut with an ellipsis. */
+@media (prefers-reduced-motion: reduce) {
+  [data-look] *,
+  [data-look] *::before,
+  [data-look] *::after {
+    /* biome-ignore-start lint/complexity/noImportantStyles: the still frame must override every animation, a template's own too. */
+    animation: none !important;
+    /* biome-ignore-end lint/complexity/noImportantStyles: the still frame */
+  }
+  .lk-crawl {
+    width: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .lk-crawl > [aria-hidden='true'] {
+    display: none;
+  }
+}
+
+@keyframes lk-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes lk-draw {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes lk-mask-up {
+  from {
+    transform: translateY(110%);
+  }
+}
+@keyframes lk-crawl {
+  to {
+    transform: translateX(var(--lk-crawl-shift, -50%));
+  }
+}
+@keyframes lk-pop-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(7.4vmin);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-0.9vmin);
+  }
+  82% {
+    transform: translateY(0.3vmin);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes lk-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  75% {
+    transform: scale(0.95);
+  }
+  90% {
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes lk-pop-slide {
+  0% {
+    opacity: 0;
+    transform: translateX(14.8vmin) rotate(8deg);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(-1.3vmin) rotate(-1deg);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes lk-pop-drift {
+  0%,
+  100% {
+    transform: scale(1.04);
+  }
+  50% {
+    transform: scale(1.1) translate(-1.5%, -1%);
+  }
+}
+@keyframes lk-pop-wobble {
+  0%,
+  100% {
+    transform: rotate(-3deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
+@keyframes lk-pop-pulse {
+  0%,
+  100% {
+    transform: none;
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+@keyframes lk-poster-fade {
+  from {
+    opacity: 0;
+    transform: translateY(2.2vmin);
+  }
+}
+@keyframes lk-poster-stamp {
+  0% {
+    opacity: 0;
+    transform: scale(1.6) rotate(-4deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes lk-poster-wipe {
+  from {
+    transform: scaleX(1);
+  }
+}
+@keyframes lk-poster-drift {
+  0%,
+  100% {
+    transform: scale(1.02);
+  }
+  50% {
+    transform: scale(1.09);
+  }
+}
+@keyframes lk-night-rise {
+  from {
+    opacity: 0;
+    transform: translateY(3.7vmin);
+  }
+}
+@keyframes lk-night-slide {
+  from {
+    opacity: 0;
+    transform: translateX(5.6vmin);
+  }
+}
+@keyframes lk-night-zoom {
+  from {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+}
+@keyframes lk-night-pan {
+  0%,
+  100% {
+    transform: scale(1.08);
+  }
+  50% {
+    transform: scale(1.08) translateX(-2.5%);
+  }
+}
+@keyframes lk-night-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+@keyframes lk-night-ping {
+  from {
+    opacity: 0.6;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+@keyframes lk-corporate-rise {
+  from {
+    opacity: 0;
+    transform: translateY(1.5vmin);
+  }
+}
+@keyframes lk-corporate-settle {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+@keyframes lk-corporate-drift {
+  0%,
+  100% {
+    transform: none;
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+@keyframes lk-corporate-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}

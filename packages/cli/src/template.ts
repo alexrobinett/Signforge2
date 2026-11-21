@@ -4,9 +4,16 @@
  * registered (`sf template push`). Used by `sf build` and `sf template push`.
  */
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { build } from 'esbuild';
-import { checkTemplateBundle, PROTOCOL_VERSION, TEMPLATE_BUDGET, type TemplateCheckReport, type TemplateManifest } from '@signforge/contract';
+import {
+  brandColourWarnings,
+  checkTemplateBundle,
+  PROTOCOL_VERSION,
+  TEMPLATE_BUDGET,
+  type TemplateCheckReport,
+  type TemplateManifest,
+} from '@signforge/contract';
 
 /** The author's own files: what the forbidden-code list is checked against, and what the server receives. */
 export const SOURCE_FILES = ['index.html', 'style.css', 'main.ts'] as const;
@@ -31,7 +38,12 @@ export async function buildTemplate(dir: string): Promise<BuiltTemplate> {
 
   const common = { bundle: true, minify: true, write: false, target: 'chrome120', logLevel: 'silent' } as const;
   const js = await build({ ...common, entryPoints: [join(dir, 'main.ts')], format: 'iife' });
-  const css = await build({ ...common, entryPoints: [join(dir, 'style.css')], loader: { '.woff2': 'dataurl', '.svg': 'dataurl', '.png': 'dataurl' } });
+  const css = await build({
+    ...common,
+    entryPoints: [join(dir, 'style.css')],
+    loader: { '.woff2': 'dataurl', '.svg': 'dataurl', '.png': 'dataurl' },
+    metafile: true,
+  });
   const script = js.outputFiles[0]!.text.replaceAll('</script', '<\\/script');
   const style = css.outputFiles[0]!.text;
 
@@ -46,6 +58,14 @@ export async function buildTemplate(dir: string): Promise<BuiltTemplate> {
 
   const report = checkTemplateBundle({ manifest, html, sources });
   for (const c of report.checks) problems.push(...c.problems);
-  console.log(`  template ${manifest.id}@${manifest.version}  ${(report.bundleBytes / 1024).toFixed(0)} kB (budget ${TEMPLATE_BUDGET.maxBundleBytes / 1000} kB)`);
+  // The server lints only the author's own files; a stylesheet style.css imports (the look kit's)
+  // is linted here, named from the template's directory.
+  const imported = Object.keys(css.metafile.inputs)
+    .filter((f) => f.endsWith('.css') && resolve(f) !== resolve(dir, 'style.css'))
+    .map((f) => [relative(dir, f), readFileSync(f, 'utf8')]);
+  report.warnings = [...(report.warnings ?? []), ...brandColourWarnings(Object.fromEntries(imported))];
+  console.log(
+    `  template ${manifest.id}@${manifest.version}  ${(report.bundleBytes / 1024).toFixed(0)} kB (budget ${TEMPLATE_BUDGET.maxBundleBytes / 1000} kB)`,
+  );
   return { manifest, html, sources, report, problems };
 }
