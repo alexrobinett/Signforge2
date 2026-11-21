@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ScreenManifest } from '@signforge/contract';
+import { MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { DeviceCredential } from './credential';
 import { PinSet, UnauthorisedError, loadActiveManifest, sync } from './store';
 
@@ -38,7 +38,7 @@ const blobPath = { [`/blobs/${A}`]: FILES.a, [`/blobs/${B}`]: FILES.b };
 
 function manifest(id: string, text = 'hello'): ScreenManifest {
   return {
-    schema: 3,
+    schema: MANIFEST_SCHEMA,
     id,
     generatedAt: '2026-11-17T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'UTC', orientation: 'landscape' },

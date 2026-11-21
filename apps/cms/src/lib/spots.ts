@@ -81,6 +81,7 @@ export function startValue(d: ScalarFieldDef): unknown {
   if (d.default !== undefined) return d.default;
   switch (d.type) {
     case 'text':
+    case 'url':
       return '';
     case 'number':
       return d.min ?? 0;
