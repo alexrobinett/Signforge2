@@ -928,12 +928,12 @@ describe('validateManifest', () => {
 
 describe('versions', () => {
   it('plays the current manifest schema and the one before it', () => {
-    expect(MANIFEST_SCHEMA).toBe(6);
-    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([5, 6]);
-    expect(validateManifest({ ...validManifest(), schema: 5 })).toEqual([]);
+    expect(MANIFEST_SCHEMA).toBe(7);
+    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([6, 7]);
     expect(validateManifest({ ...validManifest(), schema: 6 })).toEqual([]);
-    // A player that knows only schemas 4 and 5 refuses a template with a date or datetime field (#192): the server tells it to reload (apps/api sync's canPlay).
-    expect(validateManifest({ ...validManifest(), schema: 4 })).toEqual(['manifest schema 4 is not one this player can play (5, 6)']);
+    expect(validateManifest({ ...validManifest(), schema: 7 })).toEqual([]);
+    // A player that knows only schemas 5 and 6 refuses a template with several live sources (#193): the server tells it to reload (apps/api sync's canPlay).
+    expect(validateManifest({ ...validManifest(), schema: 5 })).toEqual(['manifest schema 5 is not one this player can play (6, 7)']);
   });
 
   it('drives protocol 1 and 2 bundles, and refuses a newer one', () => {

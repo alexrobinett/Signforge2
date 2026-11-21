@@ -15,8 +15,10 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  *      template, so the server tells it to reload, as for 4.
  *   6  a template may declare `date` and `datetime` fields (#192). A player that knows only 4 and 5
  *      refuses such a template, so the server tells it to reload, as for 4.
+ *   7  a template's `live` may name several sources (`sources`, #193). A player that knows only 5
+ *      and 6 refuses such a template, so the server tells it to reload, as for 4.
  */
-export const MANIFEST_SCHEMA = 6;
+export const MANIFEST_SCHEMA = 7;
 /** Manifest schemas this player can play: the current one and the one before it. */
 export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
