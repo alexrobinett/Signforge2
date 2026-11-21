@@ -90,8 +90,20 @@ test('schedule a playlist for a group, see its week, and publish it to the scree
   await page.getByRole('button', { name: 'Schedule a playlist' }).click();
   const dialog = page.getByRole('dialog', { name: 'Schedule a playlist' });
   await dialog.getByLabel('Playlist').selectOption({ label: 'Breakfast' });
-  await dialog.getByLabel('Plays on').selectOption('group');
-  await dialog.getByLabel('Group').selectOption({ label: 'Front (1 screen)' });
+  // Whom it plays on: found by typing part of a group's name, picked with Enter; it says whom the group reaches.
+  await dialog.getByRole('combobox', { name: 'Plays on' }).click();
+  const picker = page.getByRole('dialog', { name: 'Plays on' });
+  await expect(picker.getByRole('combobox', { name: 'Search screens and groups' })).toBeFocused();
+  await page.keyboard.type('fro');
+  await expect(picker.getByRole('option', { name: /Front window/ })).toBeVisible();
+  await expect(picker.getByRole('option', { name: /^Every screen/ })).toHaveCount(0);
+  await expect(picker.getByRole('option', { selected: true })).toHaveText(/^Front\s*1 screen/);
+  await axe(page);
+  await shots(page, '50-schedule-target-picker');
+  await page.keyboard.press('Enter');
+  await expect(picker).toBeHidden();
+  await expect(dialog.getByRole('combobox', { name: 'Plays on' })).toHaveText('Front');
+  await expect(dialog.getByRole('combobox', { name: 'Plays on' })).toHaveAccessibleDescription('1 screen: Front window');
   // A window that ends before it starts runs past midnight; one with an end before the start date is refused.
   await dialog.getByLabel('First date').fill('2030-02-01');
   await dialog.getByLabel('Last date').fill('2030-01-01');
@@ -218,4 +230,56 @@ test('a create whose answer was lost, saved again, makes one entry, and a takeov
   await page.getByRole('region', { name: 'Takeovers' }).getByRole('listitem').first().getByRole('button', { name: 'End now' }).click();
   await expect(page.getByRole('region', { name: 'Takeovers' })).toHaveCount(0);
   await page.unroute('**/api/tools/*');
+});
+
+test('pick one screen by typing part of its name, keyboard only; the picker fills a phone (#180)', async () => {
+  await page.goto('/schedule');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Schedule a playlist' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Schedule a playlist' });
+  await dialog.getByLabel('Playlist').selectOption({ label: 'Breakfast' });
+  await dialog.getByRole('combobox', { name: 'Plays on' }).focus();
+  await page.keyboard.press('Enter');
+  const picker = page.getByRole('dialog', { name: 'Plays on' });
+  // Every screen, the groups and the screens, the current choice marked.
+  await expect(picker.getByRole('option', { name: /^Every screen.*chosen/ })).toBeVisible();
+  await expect(picker.getByRole('group', { name: 'Groups' }).getByRole('option')).toHaveCount(1);
+  await expect(picker.getByRole('combobox', { name: 'Search screens and groups' })).toBeFocused();
+  await page.keyboard.type('WIN');
+  await expect(picker.getByRole('option')).toHaveCount(1);
+  await expect(picker.getByRole('option', { selected: true })).toContainText('Front window');
+  await page.keyboard.press('Enter');
+  await expect(picker).toBeHidden();
+  const plays = dialog.getByRole('combobox', { name: 'Plays on' });
+  await expect(plays).toHaveText('Front window');
+  await expect(plays).toBeFocused();
+  // Escape leaves the picker, not the dialog, and keeps the choice.
+  await page.keyboard.press('Enter');
+  await expect(picker.getByRole('combobox', { name: 'Search screens and groups' })).toBeFocused();
+  await page.keyboard.type('nothing like it');
+  await expect(picker.getByText('No screens and groups match “nothing like it”.')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(picker).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(plays).toHaveText('Front window');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await plays.click();
+  await expect.poll(async () => (await picker.boundingBox())?.width).toBe(390);
+  await expect(picker.getByRole('combobox', { name: 'Search screens and groups' })).toHaveValue('');
+  await axe(page);
+  await shots(page, '56-schedule-target-picker-phone');
+  // Enter on Cancel cancels: it does not pick the result selected meanwhile.
+  await expect(picker.getByRole('combobox', { name: 'Search screens and groups' })).toBeFocused();
+  await page.keyboard.type('every');
+  await expect(picker.getByRole('option', { selected: true })).toHaveText(/^Every screen/);
+  await picker.getByRole('button', { name: 'Cancel' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(picker).toBeHidden();
+  await expect(plays).toHaveText('Front window');
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await dialog.getByRole('button', { name: 'Save draft' }).click();
+  await expect(toastSays('Scheduled, as a draft')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Entries' }).getByRole('listitem').filter({ hasText: 'Front window · Always' })).toHaveCount(1);
 });

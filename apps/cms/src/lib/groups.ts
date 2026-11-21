@@ -6,12 +6,14 @@ import type { BrandKitView } from './brand-kits';
 import type { ScheduleEntryView } from './schedule';
 import { isRetired } from './screen-status';
 import type { GroupView, ScreenView } from './screen-types';
+import { byName } from './targets';
 
-/** The groups with a screen that needs you, each with those screens. A retired screen needs nobody. */
+/** The groups with a screen that needs you, each with those screens, by name. A retired screen needs nobody. */
 export function needingAttention(groups: readonly GroupView[], screens: readonly ScreenView[]) {
   const needs = new Map(screens.filter((s) => s.state.kind === 'needs_you' && !isRetired(s)).map((s) => [s.id, s]));
   return groups.flatMap((group) => {
-    const of = group.screenIds.flatMap((id) => needs.get(id) ?? []);
+    // A group lists its screens by id: the card names them as people read them.
+    const of = group.screenIds.flatMap((id) => needs.get(id) ?? []).sort(byName);
     return of.length ? [{ group, needs: of }] : [];
   });
 }

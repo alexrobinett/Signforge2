@@ -1,0 +1,27 @@
+{
+  "id": "alert",
+  "version": "1.0.0",
+  "name": "Alert",
+  "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
+  "fields": {
+    "severity": { "type": "select", "label": "Severity", "options": ["emergency", "warning", "advisory", "notice"], "default": "emergency" },
+    "headline": { "type": "text", "label": "Headline", "default": "Evacuate the building now", "maxLength": 60 },
+    "instructions": {
+      "type": "text",
+      "label": "Instructions",
+      "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
+      "maxLength": 240
+    },
+    "issuedBy": { "type": "text", "label": "Issued by", "default": "Issued by Building Safety", "maxLength": 48 },
+    "endsAt": { "type": "text", "label": "Ends at", "default": "4:00 PM", "maxLength": 24 },
+    "qrUrl": { "type": "url", "label": "QR code address", "default": "", "maxLength": 200 },
+    "qrLabel": { "type": "text", "label": "QR code label", "default": "Scan for updates", "maxLength": 32 },
+    "showQr": { "type": "boolean", "label": "Show the QR code", "default": true },
+    "showIssuedBy": { "type": "boolean", "label": "Show who issued it", "default": true },
+    "showEndsAt": { "type": "boolean", "label": "Show when it ends", "default": true }
+  },
+  "duration": { "defaultMs": 60000, "minMs": 10000, "maxMs": 3600000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#111827"
+}

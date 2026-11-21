@@ -1,9 +1,12 @@
 /**
  * The command menu's entries: one per sidebar section, then one per tool the member's role may use,
  * read from `GET /api/tools` (the registry's `describeTools`, the list an agent gets). A tool's
- * form comes from its input's JSON Schema.
+ * form comes from its input's JSON Schema. Typing also finds screens and groups by name (#180),
+ * each with its own actions (`targetActions`).
  */
+import type { GroupView, ScreenView } from './screen-types';
 import { SECTIONS, type Section } from './sections';
+import { findTargets } from './targets';
 
 /** One input of a tool's form. `key` is an idempotency key: never shown, filled by `withKey`. */
 export type Field = { name: string; label: string; hint: string; required: boolean; nullable: boolean } & (
@@ -183,3 +186,95 @@ export function resultText(output: unknown): string {
   });
   return parts.join(', ') || 'Done';
 }
+
+/** A screen or a group ⌘K found, whose actions are showing. */
+export type CommandTarget = { kind: 'screen'; id: string } | { kind: 'group'; id: string };
+
+/**
+ * What ⌘K offers on a screen or a group it found. A new action is a case here, a line in
+ * `targetActions`, and a case in the store's `runTargetAction` (src/state/command-menu.ts).
+ */
+export type TargetAction =
+  | { kind: 'open-screen'; label: string; screenId: string }
+  | { kind: 'open-group'; label: string; groupId: string }
+  | { kind: 'tool'; label: string; tool: 'identify_screen' | 'restart_screen'; screenId: string; screenName: string; done: string };
+
+/**
+ * A screen's or a group's actions, those the member's role allows (the tools the shell listed). A
+ * screen gets commands only once `checked`, its record read since the menu opened: a cached one
+ * may be revoked since. A revoked screen can only be opened.
+ */
+export function targetActions(
+  target: { kind: 'screen'; screen: ScreenView } | { kind: 'group'; group: GroupView },
+  tools: ToolListing[],
+  checked: boolean,
+): TargetAction[] {
+  if (target.kind === 'group') return [{ kind: 'open-group', label: 'Show its screens', groupId: target.group.id }];
+  const { id: screenId, name: screenName, status } = target.screen;
+  const may = (tool: string) => checked && status !== 'revoked' && tools.some((t) => t.name === tool);
+  const actions: TargetAction[] = [{ kind: 'open-screen', label: 'Open', screenId }];
+  if (may('identify_screen'))
+    actions.push({
+      kind: 'tool',
+      label: 'Identify (10 s)',
+      tool: 'identify_screen',
+      screenId,
+      screenName,
+      done: 'Sent. The screen shows its name for 10 seconds, if it is connected.',
+    });
+  if (may('restart_screen'))
+    actions.push({
+      kind: 'tool',
+      label: 'Restart player',
+      tool: 'restart_screen',
+      screenId,
+      screenName,
+      done: 'Sent. The player restarts and plays from its cache at once.',
+    });
+  return actions;
+}
+
+/**
+ * A found screen's or group's item key, from its keywords: cmdk reads an item's keywords only when
+ * its value changes, so a change to them remounts it. JSON, as a join would make "North,East" one
+ * group's name and two groups' the same.
+ */
+export const targetItemKey = (value: string, keywords: string[]) => `${value}:${JSON.stringify(keywords)}`;
+
+/** The screens and groups ⌘K lists for a search, as its item values in the order it lists them: screens, then groups, each by name. */
+export function foundValues(query: string, screens: readonly ScreenView[], groups: readonly GroupView[]): string[] {
+  if (!query.trim()) return [];
+  const found = findTargets(query, screens, groups);
+  return [...found.screens.map((s) => `screen:${s.id}`), ...found.groups.map((g) => `group:${g.id}`)];
+}
+
+/** The item selected, and the found items it was selected among (`foundValues`, as JSON). */
+export interface Selection {
+  value: string;
+  among: string;
+}
+
+/**
+ * The item ⌘K shows selected. cmdk moves its selection only when the search changes, so a list read
+ * that lands after typing would leave a tool selected over the screens it found: cmdk's own pick,
+ * made among other found items, gives way to the first found. One the member `moved` to stays.
+ * Empty lets cmdk select its first item.
+ */
+export function selectedItem(selection: Selection | null, found: readonly string[], moved: boolean): string {
+  if (selection && (moved || selection.among === JSON.stringify(found))) return selection.value;
+  return found[0] ?? selection?.value ?? '';
+}
+
+/** The keys cmdk 1.1.1 moves its selection with: arrows, Home and End, and its vim bindings (Ctrl+N, J, P, K). Not PageUp or PageDown, which it ignores. */
+const MOVE_KEYS = new Set(['ArrowUp', 'ArrowDown', 'Home', 'End']);
+
+/** Whether a key press is the member moving ⌘K's selection themselves (`moved`). */
+export const movesSelection = (e: { key: string; ctrlKey: boolean; altKey: boolean }) =>
+  !e.altKey && (MOVE_KEYS.has(e.key) || (e.ctrlKey && ['n', 'j', 'p', 'k'].includes(e.key)));
+
+/**
+ * Whether a pointer move is the member moving ⌘K's selection: cmdk selects by pointer only over an
+ * enabled item, so a move over the search, the footer or the item already selected is not one.
+ */
+export const pointerMovesSelection = (under: { value: string; disabled: boolean } | null, selected: string) =>
+  under !== null && !under.disabled && under.value !== selected;

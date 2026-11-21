@@ -4,7 +4,8 @@
  * time: the schedule, display hours, play counts and templates.
  *
  * - Each sync measures `offsetMs` (server time minus device time, taking the request's midpoint)
- *   and returns it with the corrected time it was measured at (`syncedAt`), for the caller to persist.
+ *   and returns it with the server's time from that answer (`syncedAt`), for the caller to persist:
+ *   the real time was at least that when the answer came, whatever the two legs of the round trip took.
  * - A jump of the device clock against the monotonic clock of more than 2 s (NTP stepping it) is
  *   folded into the offset, so corrected time stays continuous until the next sync.
  * - At start the persisted offset is used, but the clock is not trusted if corrected time is
@@ -15,6 +16,7 @@
 /** What the caller persists after a sync. */
 export interface PersistedClock {
   offsetMs: number;
+  /** The server's time in the last good answer: no later than the real time when it arrived. */
   syncedAt: number;
 }
 
@@ -28,6 +30,14 @@ export interface ClockOptions {
   persisted?: PersistedClock;
 }
 
+/**
+ * How far the screen trusts `now`. Untrusted, the clock is behind by an unknown amount, and
+ * `notBefore` is the earliest the real time can be: when the player was built, or its last sync,
+ * whichever is later, plus the time the screen has run since this page started (both were before
+ * it, and the monotonic clock never jumps).
+ */
+export type ClockTrust = { clockTrusted?: true } | { clockTrusted: false; notBefore: number };
+
 /** A device clock jump bigger than this is a step, not drift. */
 export const CLOCK_JUMP_MS = 2000;
 
@@ -36,13 +46,23 @@ export class Clock {
   trusted: boolean;
   private markWall: number;
   private markMono: number;
+  /** The monotonic clock when this page started: `trust()` counts the time run since. */
+  private readonly startMono: number;
 
   constructor(private readonly o: ClockOptions) {
     this.offsetMs = Number.isFinite(o.persisted?.offsetMs) ? o.persisted!.offsetMs : 0;
     this.markWall = o.deviceNow();
     this.markMono = o.monoNow();
+    this.startMono = this.markMono;
     const corrected = this.markWall + this.offsetMs;
     this.trusted = corrected >= o.buildTime && (o.persisted === undefined || corrected >= o.persisted.syncedAt);
+  }
+
+  /** Whether the schedule may trust `now()`, and if not, the earliest the real time can be. */
+  trust(): ClockTrust {
+    if (this.trusted) return {};
+    const known = Math.max(this.o.buildTime, this.o.persisted?.syncedAt ?? this.o.buildTime);
+    return { clockTrusted: false, notBefore: known + (this.o.monoNow() - this.startMono) };
   }
 
   /** Corrected time, in ms since the epoch. */
@@ -65,6 +85,6 @@ export class Clock {
     this.markWall = this.o.deviceNow();
     this.markMono = this.o.monoNow();
     this.trusted = true;
-    return { offsetMs: this.offsetMs, syncedAt: receivedAt + this.offsetMs };
+    return { offsetMs: this.offsetMs, syncedAt: serverMs };
   }
 }

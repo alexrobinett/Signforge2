@@ -8,7 +8,18 @@
  */
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { ChevronDownIcon, CloudOffIcon, LayoutGridIcon, PlusIcon, SearchIcon, TableIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ChevronDownIcon,
+  CloudOffIcon,
+  LayoutGridIcon,
+  PlusIcon,
+  SearchIcon,
+  TableIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from 'lucide-react';
 import { useMemo } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
@@ -30,6 +41,7 @@ import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
 import { byWord, publishTitle } from '~/lib/publishes';
+import { byName, isScreenSort, sortScreens, type ScreenSort } from '~/lib/targets';
 import { publishQuery } from '~/queries/publishes';
 import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
@@ -44,6 +56,8 @@ interface Search {
   q?: string;
   group?: string;
   status?: StatusFilter;
+  /** Absent: by name. */
+  sort?: ScreenSort;
 }
 
 const isStatusFilter = (v: unknown): v is StatusFilter => v === 'retired' || isStateKind(v);
@@ -54,6 +68,7 @@ export const Route = createFileRoute('/_app/screens/')({
     ...(typeof s.q === 'string' && s.q ? { q: s.q } : {}),
     ...(typeof s.group === 'string' && s.group ? { group: s.group } : {}),
     ...(isStatusFilter(s.status) ? { status: s.status } : {}),
+    ...(isScreenSort(s.sort) && s.sort !== 'name' ? { sort: s.sort } : {}),
   }),
   // The org's settings give the pairing form its defaults for new screens. The list is read again
   // on every load, as after a change (`router.invalidate()` in the store's actions), never from the cache.
@@ -90,7 +105,8 @@ function ScreensPage() {
   const active = screens.filter((s) => !isRetired(s));
   const activeIds = new Set(active.map((s) => s.id));
   const retired = search.status === 'retired';
-  const shown = (retired ? screens.filter(isRetired) : active).filter((s) => {
+  const sort = search.sort ?? 'name';
+  const matching = (retired ? screens.filter(isRetired) : active).filter((s) => {
     if (search.group && !groupsOf.get(s.id)?.some((g) => g.id === search.group)) return false;
     if (search.status && !retired && s.state.kind !== search.status) return false;
     if (search.q) {
@@ -99,6 +115,7 @@ function ScreensPage() {
     }
     return true;
   });
+  const shown = sortScreens(matching, sort);
   const set = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
 
   if (!screens.length) {
@@ -141,7 +158,7 @@ function ScreensPage() {
             <label htmlFor="screen-group">Group</label>
             <NativeSelect id="screen-group" value={search.group ?? ''} onChange={(e) => set({ group: e.target.value || undefined })}>
               <option value="">All groups</option>
-              {groups.map((g) => (
+              {[...groups].sort(byName).map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.name} ({g.screenIds.filter((id) => activeIds.has(id)).length})
                 </option>
@@ -197,7 +214,7 @@ function ScreensPage() {
       ) : view === 'tiles' ? (
         <Tiles screens={shown} groupsOf={groupsOf} now={now} />
       ) : (
-        <ScreenTable screens={shown} groups={groups} groupsOf={groupsOf} now={now} canManage={canManage} />
+        <ScreenTable screens={shown} groups={groups} groupsOf={groupsOf} now={now} canManage={canManage} sort={sort} />
       )}
     </div>
   );
@@ -388,7 +405,8 @@ function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: st
   const add = useAppStore((s) => s.addScreensToGroup);
   const remove = useAppStore((s) => s.removeScreensFromGroup);
   const clear = useAppStore((s) => s.clearScreenSelection);
-  const holding = groups.filter((g) => g.screenIds.some((id) => selected.includes(id)));
+  const byNameGroups = [...groups].sort(byName);
+  const holding = byNameGroups.filter((g) => g.screenIds.some((id) => selected.includes(id)));
   const menu = (label: string, choices: GroupView[], act: (g: GroupView) => void) => (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -411,7 +429,7 @@ function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: st
         {selected.length} selected
       </p>
       <div className="flex flex-wrap gap-2">
-        {menu('Add to group', groups, (g) => void add(orgId, g, selected))}
+        {menu('Add to group', byNameGroups, (g) => void add(orgId, g, selected))}
         {menu(
           'Remove from group',
           holding,
@@ -430,18 +448,54 @@ function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: st
   );
 }
 
+/** A column the table sorts by: a link to the sort, the other way when it is the sort already. */
+function SortHeader({
+  column,
+  sort,
+  align = 'left',
+  children,
+}: {
+  column: 'name' | 'status' | 'heard';
+  sort: ScreenSort;
+  align?: 'left' | 'right';
+  children: string;
+}) {
+  const desc: ScreenSort = `-${column}`;
+  const on = sort === column ? 'ascending' : sort === desc ? 'descending' : undefined;
+  const Arrow = on === 'descending' ? ArrowDownIcon : ArrowUpIcon;
+  const next = on === 'ascending' ? desc : column;
+  return (
+    <th scope="col" aria-sort={on} className={cn('px-3 py-2.5 font-semibold', align === 'right' ? 'text-right' : 'text-left')}>
+      <Link
+        to="/screens"
+        search={(prev) => ({ ...prev, sort: next === 'name' ? undefined : next })}
+        replace
+        className={cn(
+          'inline-flex items-center gap-1 rounded outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50',
+          on && 'text-foreground',
+        )}
+      >
+        {children}
+        <Arrow className={cn('size-3.5', !on && 'invisible')} aria-hidden />
+      </Link>
+    </th>
+  );
+}
+
 function ScreenTable({
   screens,
   groups,
   groupsOf,
   now,
   canManage,
+  sort,
 }: {
   screens: ScreenView[];
   groups: GroupView[];
   groupsOf: Map<string, GroupView[]>;
   now: number;
   canManage: boolean;
+  sort: ScreenSort;
 }) {
   const orgId = useOrgId();
   const ticked = useAppStore((s) => selectedIn(s.screens, orgId));
@@ -475,12 +529,12 @@ function ScreenTable({
                 <th scope="col" className="px-3 py-2.5 pl-4 text-left font-semibold">
                   Should be showing
                 </th>
-                <th scope="col" className="px-3 py-2.5 text-left font-semibold">
+                <SortHeader column="name" sort={sort}>
                   Screen
-                </th>
-                <th scope="col" className="px-3 py-2.5 text-left font-semibold">
+                </SortHeader>
+                <SortHeader column="status" sort={sort}>
                   Status
-                </th>
+                </SortHeader>
                 <th scope="col" className="px-3 py-2.5 text-left font-semibold">
                   What it is doing
                 </th>
@@ -490,9 +544,9 @@ function ScreenTable({
                 <th scope="col" className="px-3 py-2.5 text-right font-semibold">
                   Version
                 </th>
-                <th scope="col" className="px-3 py-2.5 text-right font-semibold">
+                <SortHeader column="heard" sort={sort} align="right">
                   Last heard
-                </th>
+                </SortHeader>
                 <th scope="col" className="px-3 py-2.5 pr-4">
                   <span className="sr-only">Action</span>
                 </th>

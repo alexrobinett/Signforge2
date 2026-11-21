@@ -23,6 +23,14 @@ describe('needingAttention', () => {
     expect(out.map((g) => [g.group.id, g.needs.map((s) => s.id)])).toEqual([['front', ['b']]]);
   });
 
+  it('names the screens that need you by name, not in the id order the group lists them (#180)', () => {
+    const named = [
+      { ...screen('scr_1', state('needs_you', 'behind')), name: 'Window' },
+      { ...screen('scr_2', state('needs_you', 'fallback')), name: 'Annex' },
+    ];
+    expect(needingAttention([group('front', ['scr_1', 'scr_2'])], named)[0]!.needs.map((s) => s.name)).toEqual(['Annex', 'Window']);
+  });
+
   it('leaves out a retired screen: a group whose only problem is a revoked screen is fine', () => {
     expect(needingAttention([group('old', ['a', 'c'])], screens)).toEqual([]);
   });
