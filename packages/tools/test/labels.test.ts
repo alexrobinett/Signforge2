@@ -2,9 +2,11 @@
 import { LABEL_LIMITS, startPairing } from '@signforge/db';
 import { seedOrg, testScope, type SeededOrg, type TestScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
 import { member } from './member';
+
+const NOW = Date.parse('2026-11-21T12:00:00Z');
 
 let o: SeededOrg;
 let org: TestScope;
@@ -21,10 +23,13 @@ const labelsOf = async (screenId: string) => (await call('get_screen', { screenI
 const picked = async (selector: unknown) => (await call('list_screens', { selector, limit: 200 })).screens.map((s: { name: string }) => s.name).toSorted();
 
 beforeAll(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
   o = await seedOrg(env.DB, 'labels-tools');
   org = testScope(env.DB, o.orgId);
   editor = member(o.orgId, 'editor');
 });
+afterAll(() => vi.useRealTimers());
 
 describe('update_screen_labels', () => {
   it('merges: a set key takes its value, a removed key goes, the rest stay', async () => {
@@ -143,7 +148,7 @@ describe('the org', () => {
     const last = (await scope.screens.labels.list()).find((l) => l.key === `k${n - 1}`)!;
     expect((await run('update_screen_labels', { screenIds: [last.screenId], set: { another: 'v' }, remove: [last.key] }, as)).ok).toBe(true);
     // A claim's labels count too.
-    await startPairing(env.DB, { code: 'LBL234', pollTokenHash: 'b'.repeat(64), now: Date.now() });
+    await startPairing(env.DB, { code: 'LBL234', pollTokenHash: 'b'.repeat(64), now: NOW });
     expect(
       await run('claim_screen', { code: 'LBL234', name: 'New', timezone: 'Europe/London', orientation: 'portrait', labels: { brand: 'new' } }, as),
     ).toMatchObject({ ok: false, error: 'conflict' });
@@ -295,7 +300,7 @@ describe('list_label_keys', () => {
 
 describe('claim_screen', () => {
   it('takes the first labels, checked as update_screen_labels checks them', async () => {
-    await startPairing(env.DB, { code: 'LAB234', pollTokenHash: 'c'.repeat(64), now: Date.now() });
+    await startPairing(env.DB, { code: 'LAB234', pollTokenHash: 'c'.repeat(64), now: NOW });
     const claim = { code: 'LAB234', name: 'Claimed', timezone: 'Europe/London', orientation: 'portrait' };
     expect(await run('claim_screen', { ...claim, labels: { orientation: 'landscape' } })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await run('claim_screen', { ...claim, labels: JSON.parse('{"region":"North","__proto__":"invalid"}') })).toMatchObject({
