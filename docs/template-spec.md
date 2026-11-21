@@ -117,7 +117,7 @@ A template that offers the four looks of the template set (#189), Pop, Poster, N
 
 `packages/template-looks/looks-test` is a template that uses every part of the kit, for the tests and the Pi. It is not in `templates/`, so it is never seeded. `templates/announcement` is the first shipped template on the kit. Two things it does that the next ones will want:
 
-- **Nothing to show is off.** An element whose content is empty (no photo uploaded, no QR address, no logo in the kit, no facts, an empty line) is passed to `applyLook` as switched off, so the layout closes up around it as for a toggle.
+- **Nothing to show is off.** An element whose content is empty (no QR address, no logo in the kit, no facts, an empty line) is passed to `applyLook` as switched off, so the layout closes up around it as for a toggle.
 - **Long copy steps down.** Its copy is a grid of `min-content` rows (an `auto` row lets an element with `overflow: hidden`, as a clamped one is, shrink below its text, and the next row overlaps it) around one flexible row. After `applyLook`, `main.ts` steps the headline's size (`--fit-headline`), then the body's and the facts' (`--fit-body`), down from the look's own until each fits its clamp and nothing falls below the copy, measured from the layout's offsets, not painted boxes, which the intros' transforms move. Short copy costs one layout; text at every field's `maxLength` ends in its clamp's ellipsis at the smallest step.
 
 The kit's build test (all four looks within the bundle budget, the colour lint, the licence notice) is `packages/cli/test/looks.test.ts`: a template on the kit is a devDependency of the CLI, whose tests build every template, so the kit cannot depend on the CLI.

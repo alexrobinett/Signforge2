@@ -1202,15 +1202,15 @@ describe('announcement (#197)', () => {
     }
   });
 
-  it('leaves out what has nothing to show: no photo, no QR address, no logo in the kit, no facts, an empty line', async () => {
-    const k = await screenFrame(t(), 'landscape', {});
+  it('leaves out what has nothing to show: no QR address, no logo in the kit, no facts, an empty line', async () => {
+    const k = await screenFrame(t(), 'landscape', photo);
     for (const look of looks) {
       const f = await k.play({ look, qrUrl: '', facts: [], eyebrow: '', body: '', meta: '' });
       const left = await f.evaluate(() => ({
-        marks: ['photo', 'qr', 'eyebrow', 'body', 'meta', 'facts', 'logo'].map((m) => `${m}=${document.documentElement.getAttribute(`data-${m}`)}`),
-        present: ['.photo', '.qr', '.eyebrow', '.body', '.meta', '.facts', '.logo'].filter((s) => document.querySelector(s)),
+        marks: ['qr', 'eyebrow', 'body', 'meta', 'facts', 'logo'].map((m) => `${m}=${document.documentElement.getAttribute(`data-${m}`)}`),
+        present: ['.qr', '.eyebrow', '.body', '.meta', '.facts', '.logo'].filter((s) => document.querySelector(s)),
       }));
-      expect(left, look).toEqual({ marks: ['photo=off', 'qr=off', 'eyebrow=off', 'body=off', 'meta=off', 'facts=off', 'logo=off'], present: [] });
+      expect(left, look).toEqual({ marks: ['qr=off', 'eyebrow=off', 'body=off', 'meta=off', 'facts=off', 'logo=off'], present: [] });
     }
   });
 

@@ -207,6 +207,13 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await page.getByLabel('Name').fill('Pier 9 opening');
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name: 'Pier 9 opening', level: 1 })).toBeVisible();
+  await hydrated(page);
+  // Every image field needs an image, the photo too: the one the test above uploaded.
+  await page.getByRole('button', { name: 'Choose image for Photo' }).click();
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: /berries\.png/ })
+    .click();
   const stage = page.getByRole('region', { name: 'Live preview' });
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
 
