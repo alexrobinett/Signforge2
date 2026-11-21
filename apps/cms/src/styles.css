@@ -77,19 +77,10 @@
   --chart-4: #858fa1;
   --chart-5: #0e9384;
 
-  /* An org's avatar (orgColours in src/lib/paths.ts): six hues, so orgs with the same initials differ. */
-  --org-1: #1f3fbf;
-  --org-1-foreground: #ffffff;
-  --org-2: #0f766e;
-  --org-2-foreground: #ffffff;
-  --org-3: #b45309;
-  --org-3-foreground: #ffffff;
-  --org-4: #6d28d9;
-  --org-4-foreground: #ffffff;
-  --org-5: #be123c;
-  --org-5-foreground: #ffffff;
-  --org-6: #475467;
-  --org-6-foreground: #ffffff;
+  /* An org's avatar: its hue (orgHues in src/lib/paths.ts) at this saturation and lightness, every hue 4.5:1. */
+  --org-saturation: 60%;
+  --org-lightness: 29%;
+  --org-foreground: #ffffff;
   color-scheme: light;
 }
 
@@ -149,18 +140,9 @@
   --chart-4: #8a93a3;
   --chart-5: #2dd4bf;
 
-  --org-1: #7b93ff;
-  --org-1-foreground: #0b0d12;
-  --org-2: #2dd4bf;
-  --org-2-foreground: #0b0d12;
-  --org-3: #f59e0b;
-  --org-3-foreground: #0b0d12;
-  --org-4: #c4b5fd;
-  --org-4-foreground: #0b0d12;
-  --org-5: #fda4af;
-  --org-5-foreground: #0b0d12;
-  --org-6: #a3acbd;
-  --org-6-foreground: #0b0d12;
+  --org-saturation: 60%;
+  --org-lightness: 66%;
+  --org-foreground: #0b0d12;
   color-scheme: dark;
 }
 

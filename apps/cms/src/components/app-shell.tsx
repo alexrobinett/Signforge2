@@ -9,12 +9,12 @@ import { Button } from '~/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '~/components/ui/sheet';
 import { Toaster } from '~/components/ui/sonner';
 import { UserMenu } from '~/components/user-menu';
-import { orgColours } from '~/lib/paths';
+import { orgHues } from '~/lib/paths';
 import { SECTIONS } from '~/lib/sections';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
-function Sidebar({ shell, colours }: { shell: Shell; colours: Map<string, number> }) {
+function Sidebar({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const openCommandMenu = useAppStore((s) => s.openCommandMenu);
   return (
     <div className="flex h-full flex-col gap-6 p-4">
@@ -22,7 +22,7 @@ function Sidebar({ shell, colours }: { shell: Shell; colours: Map<string, number
         <Link to="/" className="block rounded-md px-1.5 py-1 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" aria-label="SignForge home">
           <Logo />
         </Link>
-        <OrgSwitcher shell={shell} colours={colours} />
+        <OrgSwitcher shell={shell} hues={hues} />
       </div>
       <Button variant="outline" className="justify-start gap-2.5 text-muted-foreground" onClick={openCommandMenu}>
         <SearchIcon className="size-4" aria-hidden />
@@ -61,7 +61,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
   const openDrawer = useAppStore((s) => s.openDrawer);
   const closeDrawer = useAppStore((s) => s.closeDrawer);
   const status = useAppStore((s) => s.orgs.status);
-  const colours = orgColours(shell.organizations.map((o) => o.id));
+  const hues = orgHues(shell.organizations.map((o) => o.id));
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
@@ -69,7 +69,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
         Skip to content
       </a>
       <aside className="sticky top-0 hidden h-dvh border-r bg-sidebar text-sidebar-foreground lg:block" aria-label="Sidebar">
-        <Sidebar shell={shell} colours={colours} />
+        <Sidebar shell={shell} hues={hues} />
       </aside>
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/90 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/75 lg:hidden">
@@ -82,7 +82,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
             <SheetContent>
               <SheetTitle className="sr-only">Navigation</SheetTitle>
               <SheetDescription className="sr-only">Organization, sections and account</SheetDescription>
-              <Sidebar shell={shell} colours={colours} />
+              <Sidebar shell={shell} hues={hues} />
             </SheetContent>
           </Sheet>
           <Link to="/" aria-label="SignForge home" className="rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
@@ -96,7 +96,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
           {children}
         </main>
       </div>
-      <CommandMenu shell={shell} colours={colours} />
+      <CommandMenu shell={shell} hues={hues} />
       <CreateOrgDialog />
       <p role="status" className="sr-only">
         {status}

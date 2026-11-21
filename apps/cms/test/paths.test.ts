@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initials, ORG_COLOURS, orgColours, safeRedirect, signInBack, slugify } from '../src/lib/paths';
+import { initials, orgHues, safeRedirect, signInBack, slugify } from '../src/lib/paths';
 
 describe('signInBack', () => {
   const fn = 'https://cms.test/_serverFn/abc';
@@ -91,24 +91,20 @@ describe('initials', () => {
   });
 });
 
-describe('orgColours', () => {
+describe('orgHues', () => {
   const ids = (n: number) => Array.from({ length: n }, (_, i) => `org_${i.toString(36).padStart(24, 'q')}`);
+  const gap = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
 
-  it('gives up to six orgs six different colours, so two with the same initials are told apart', () => {
-    for (let n = 1; n <= ORG_COLOURS; n++) {
-      const colours = orgColours(ids(n));
-      expect(new Set(colours.values()).size, `${n} orgs`).toBe(n);
-      for (const c of colours.values()) expect(c).toBeGreaterThanOrEqual(1);
-      for (const c of colours.values()) expect(c).toBeLessThanOrEqual(ORG_COLOURS);
+  it('gives every org in the list its own hue, spread evenly round the wheel, past six orgs too (review of #208, 6)', () => {
+    for (const n of [2, 6, 7, 13, 40]) {
+      const hues = [...orgHues(ids(n)).values()];
+      expect(new Set(hues).size, `${n} orgs`).toBe(n);
+      for (const [i, a] of hues.entries()) for (const b of hues.slice(i + 1)) expect(gap(a, b), `${n} orgs`).toBeGreaterThanOrEqual(360 / n - 1e-9);
     }
   });
 
-  it("keeps an org's colour whatever order the list comes in", () => {
-    const list = ids(5);
-    expect(orgColours([...list].reverse())).toEqual(orgColours(list));
-  });
-
-  it('repeats colours only past six orgs', () => {
-    expect(new Set(orgColours(ids(ORG_COLOURS + 2)).values()).size).toBe(ORG_COLOURS);
+  it("keeps an org's hue whatever order the list comes in", () => {
+    const list = ids(9);
+    expect(orgHues([...list].reverse())).toEqual(orgHues(list));
   });
 });

@@ -58,23 +58,12 @@ export function initials(text: string): string {
   return letters.toUpperCase();
 }
 
-/** How many org colours there are: `--org-1` to `--org-6` in styles.css. */
-export const ORG_COLOURS = 6;
-
 /**
- * Each org's colour, 1 to `ORG_COLOURS`, for its avatar. Its id picks one; an org whose pick an
- * earlier one (in id order) has takes the next free, so up to six orgs never share a colour and two
- * with the same initials ("Harbor Coffee", "Harbor Coffee Franchise East") are told apart (#182).
+ * Each org's avatar hue, in degrees: the orgs in id order, spread evenly round the wheel from the
+ * brand's blue, so every org in the list has its own and two with the same initials ("Harbor
+ * Coffee", "Harbor Coffee Franchise East") are told apart, however many there are (#182).
  */
-export function orgColours(ids: string[]): Map<string, number> {
-  const colours = new Map<string, number>();
-  const taken = new Set<number>();
-  for (const id of [...ids].sort()) {
-    if (taken.size === ORG_COLOURS) taken.clear();
-    let colour = [...id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 1_000_003, 7) % ORG_COLOURS;
-    while (taken.has(colour)) colour = (colour + 1) % ORG_COLOURS;
-    taken.add(colour);
-    colours.set(id, colour + 1);
-  }
-  return colours;
+export function orgHues(ids: string[]): Map<string, number> {
+  const sorted = [...ids].sort();
+  return new Map(sorted.map((id, i) => [id, (228 + (i * 360) / sorted.length) % 360]));
 }

@@ -5,7 +5,7 @@ import { CreateOrgForm } from '~/components/create-org-form';
 import { OrgAvatar } from '~/components/org-switcher';
 import { PageHeader } from '~/components/page';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card';
-import { orgColours } from '~/lib/paths';
+import { orgHues } from '~/lib/paths';
 import { getShell, type Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
@@ -37,7 +37,7 @@ function NoActiveOrg({ shell }: { shell: Shell }) {
   const error = useAppStore((s) => s.orgs.pickerError);
   const switchOrg = useAppStore((s) => s.switchOrg);
   const first = shell.organizations.length === 0;
-  const colours = orgColours(shell.organizations.map((o) => o.id));
+  const hues = orgHues(shell.organizations.map((o) => o.id));
 
   return (
     <div className="mx-auto max-w-xl space-y-8">
@@ -63,7 +63,7 @@ function NoActiveOrg({ shell }: { shell: Shell }) {
                   disabled={pending !== null}
                   className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset disabled:opacity-60"
                 >
-                  <OrgAvatar name={org.name} colour={colours.get(org.id)!} />
+                  <OrgAvatar name={org.name} hue={hues.get(org.id)!} />
                   <span className="flex-1 truncate font-medium">{org.name}</span>
                   {pending === org.id ? (
                     <LoaderCircleIcon className="size-4 animate-spin" aria-label="Switching" />

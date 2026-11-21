@@ -143,7 +143,7 @@ function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> })
  * "Switch organization…": the member's orgs as buttons, the active one marked, the first focused.
  * Not a second cmdk list: cmdk 1.1.1 leaves `aria-activedescendant` on an item a filter removed.
  */
-function OrgList({ shell, colours }: { shell: Shell; colours: Map<string, number> }) {
+function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const back = useAppStore((s) => s.backToCommands);
   const chooseOrg = useAppStore((s) => s.chooseOrg);
   const switchingTo = useAppStore((s) => s.orgs.switchingTo);
@@ -169,7 +169,7 @@ function OrgList({ shell, colours }: { shell: Shell; colours: Map<string, number
                 aria-current={active || undefined}
                 className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
               >
-                <OrgAvatar name={org.name} colour={colours.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
+                <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
                 <span className="min-w-0 flex-1 truncate">{org.name}</span>
                 {active && <CheckIcon className="size-4" aria-hidden />}
               </button>
@@ -186,7 +186,7 @@ function OrgList({ shell, colours }: { shell: Shell; colours: Map<string, number
  * every signed-in page. The tools are the registry agents call (src/lib/command-menu.ts). It opens
  * with no motion.
  */
-export function CommandMenu({ shell, colours }: { shell: Shell; colours: Map<string, number> }) {
+export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const open = useAppStore((s) => s.commandMenu.open);
   const form = useAppStore((s) => s.commandMenu.form);
   const choosingOrg = useAppStore((s) => s.commandMenu.choosingOrg);
@@ -226,7 +226,7 @@ export function CommandMenu({ shell, colours }: { shell: Shell; colours: Map<str
           {picked?.kind === 'tool' ? (
             <ToolForm key={picked.id} entry={picked} />
           ) : choosingOrg ? (
-            <OrgList shell={shell} colours={colours} />
+            <OrgList shell={shell} hues={hues} />
           ) : (
             <Command label="Search pages and actions" loop>
               <CommandInput placeholder="Go to a page, or type an action">

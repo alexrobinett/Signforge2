@@ -13,13 +13,13 @@ import { cn } from '~/lib/utils';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
-/** An org's initials on its colour (`orgColours`), so two orgs with the same initials differ. */
-export function OrgAvatar({ name, colour, className }: { name: string; colour: number; className?: string }) {
+/** An org's initials on its hue (`orgHues`), so two orgs with the same initials differ. */
+export function OrgAvatar({ name, hue, className }: { name: string; hue: number; className?: string }) {
   return (
     <span
       aria-hidden
       className={cn('grid size-8 shrink-0 place-items-center rounded-md text-xs font-semibold', className)}
-      style={{ background: `var(--org-${colour})`, color: `var(--org-${colour}-foreground)` }}
+      style={{ background: `hsl(${hue} var(--org-saturation) var(--org-lightness))`, color: 'var(--org-foreground)' }}
     >
       {initials(name)}
     </span>
@@ -30,7 +30,7 @@ export function OrgAvatar({ name, colour, className }: { name: string; colour: n
  * The active org's name under the logo, as quiet text (#182). Only a member of two or more orgs
  * gets a menu to switch; creating one is in the account menu and ⌘K.
  */
-export function OrgSwitcher({ shell, colours }: { shell: Shell; colours: Map<string, number> }) {
+export function OrgSwitcher({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const switchingTo = useAppStore((s) => s.orgs.switchingTo);
   const switchOrg = useAppStore((s) => s.switchOrg);
   const active = shell.organization;
@@ -56,7 +56,7 @@ export function OrgSwitcher({ shell, colours }: { shell: Shell; colours: Map<str
         <DropdownMenuRadioGroup value={active?.id ?? ''} onValueChange={choose}>
           {shell.organizations.map((org) => (
             <DropdownMenuRadioItem key={org.id} value={org.id} disabled={switchingTo !== null}>
-              <OrgAvatar name={org.name} colour={colours.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
+              <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
               <span className="min-w-0 truncate">{org.name}</span>
             </DropdownMenuRadioItem>
           ))}
