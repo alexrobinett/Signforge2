@@ -102,7 +102,7 @@ test('a menu board fed by a CSV link: read it, map its columns, see its rows; th
   await expect(first.getByRole('columnheader')).toHaveText(['Item', 'Price', 'Description', 'Section']);
   await expect(first.getByRole('row')).toHaveCount(6);
   await expect(form.getByRole('status').filter({ hasText: '24 rows, 4 columns.' })).toBeVisible();
-  await form.locator('#source-table-name').fill('Lunch menu file');
+  await form.locator('[id="source.table-name"]').fill('Lunch menu file');
   // The stage has drawn the spot's typed (empty) menu, past its intro animation.
   await expect.poll(() => stageShows(page, 'Menu'), { timeout: 15_000 }).toBe(true);
   await stageSettled(page);

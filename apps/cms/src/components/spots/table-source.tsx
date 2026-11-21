@@ -283,36 +283,36 @@ function TablePicker({ target, ids, sources, boundId }: { target: SourceTarget; 
   const tables = sources.filter((d) => isTableFormat(d.format));
   return (
     <div className="flex flex-col gap-3">
-      {tables.length > 0 && <SourceChoice target={target} sources={tables} boundId={boundId} id={`${ids}-table`} label="Table" word="table" />}
+      {tables.length > 0 && <SourceChoice target={target} sources={tables} boundId={boundId} id={`${ids}.table`} label="Table" word="table" />}
       {st.adding ? (
         <fieldset className="rounded-[10px] border p-3">
           {/* Floated, so it sits inside the frame instead of cutting its border. */}
           <legend className="float-left mb-3 font-medium">From a CSV or JSON link</legend>
           <div className="clear-left flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
-              <label htmlFor={`${ids}-table-url`} className="text-sm font-medium">
+              <label htmlFor={`${ids}.table-url`} className="text-sm font-medium">
                 Address
               </label>
               <Input
-                id={`${ids}-table-url`}
+                id={`${ids}.table-url`}
                 type="url"
                 inputMode="url"
                 value={st.tableUrl}
                 onChange={(e) => editTable(target, { tableUrl: e.target.value })}
-                aria-describedby={`${ids}-table-url-help`}
+                aria-describedby={`${ids}.table-url-help`}
               />
-              <p id={`${ids}-table-url-help`} className="text-sm text-muted-foreground">
+              <p id={`${ids}.table-url-help`} className="text-sm text-muted-foreground">
                 An https link to a CSV file with a header row, or to JSON: a published spreadsheet, a file on your site. It is stored encrypted and never shown
                 again.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
               <div className="flex flex-col gap-1.5">
-                <label htmlFor={`${ids}-table-format`} className="text-sm font-medium">
+                <label htmlFor={`${ids}.table-format`} className="text-sm font-medium">
                   The file is
                 </label>
                 <NativeSelect
-                  id={`${ids}-table-format`}
+                  id={`${ids}.table-format`}
                   value={st.tableFormat}
                   onChange={(e) => editTable(target, { tableFormat: e.target.value === 'json-table' ? 'json-table' : 'csv' })}
                 >
@@ -322,18 +322,18 @@ function TablePicker({ target, ids, sources, boundId }: { target: SourceTarget; 
               </div>
               {st.tableFormat === 'json-table' && (
                 <div className="flex min-w-40 flex-1 flex-col gap-1.5">
-                  <label htmlFor={`${ids}-table-rows`} className="text-sm font-medium">
+                  <label htmlFor={`${ids}.table-rows`} className="text-sm font-medium">
                     Where the list is
                   </label>
                   <Input
-                    id={`${ids}-table-rows`}
+                    id={`${ids}.table-rows`}
                     value={st.rowsPath}
                     placeholder="data.items"
                     maxLength={200}
                     onChange={(e) => editTable(target, { rowsPath: e.target.value })}
-                    aria-describedby={`${ids}-table-rows-help`}
+                    aria-describedby={`${ids}.table-rows-help`}
                   />
-                  <p id={`${ids}-table-rows-help`} className="text-sm text-muted-foreground">
+                  <p id={`${ids}.table-rows-help`} className="text-sm text-muted-foreground">
                     Empty when the file is the list.
                   </p>
                 </div>
@@ -349,10 +349,10 @@ function TablePicker({ target, ids, sources, boundId }: { target: SourceTarget; 
             {st.table && (
               <>
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor={`${ids}-table-name`} className="text-sm font-medium">
+                  <label htmlFor={`${ids}.table-name`} className="text-sm font-medium">
                     Name
                   </label>
-                  <Input id={`${ids}-table-name`} value={st.tableName} maxLength={100} onChange={(e) => editTable(target, { tableName: e.target.value })} />
+                  <Input id={`${ids}.table-name`} value={st.tableName} maxLength={100} onChange={(e) => editTable(target, { tableName: e.target.value })} />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" disabled={st.pending || !st.table.columns.length} onClick={() => void addTable(target)}>

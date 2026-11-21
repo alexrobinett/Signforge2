@@ -95,14 +95,17 @@ function LiveValues({
   const now = useNow(dataUpdatedAt);
   const focusRequested = useAppStore((s) => sourceStateOf(s.spotSource, target).focusChange);
   const focusedChange = useAppStore((s) => s.focusedChange);
-  // After a bind the control that had focus is gone; this takes it, once.
+  // After a bind the control that had focus is gone; this takes it, once. It depends on the
+  // picker's names, not on `target`, which its section makes anew on every render.
+  const spotId = target.spot.id;
+  const source = target.source;
   const takeFocus = useCallback(
     (el: HTMLButtonElement | null) => {
       if (!el || !focusRequested) return;
       el.focus();
-      focusedChange(target);
+      focusedChange({ spot: { id: spotId }, source });
     },
-    [focusRequested, focusedChange, target],
+    [focusRequested, focusedChange, spotId, source],
   );
   if (!read)
     return (
@@ -185,10 +188,10 @@ function PlacePicker({ target, ids, draft, bound }: { target: SourceTarget; ids:
     if (def?.type !== 'select') return null;
     return (
       <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${ids}-${kind}`} className="font-medium">
+        <label htmlFor={`${ids}.${kind}`} className="font-medium">
           {label}
         </label>
-        <NativeSelect id={`${ids}-${kind}`} value={units[kind]} onChange={(e) => pickUnits(target, withUnit(units, kind, e.target.value))}>
+        <NativeSelect id={`${ids}.${kind}`} value={units[kind]} onChange={(e) => pickUnits(target, withUnit(units, kind, e.target.value))}>
           {def.options.map((o) => (
             <option key={o} value={o}>
               {o}
@@ -201,18 +204,18 @@ function PlacePicker({ target, ids, draft, bound }: { target: SourceTarget; ids:
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
-        <label htmlFor={`${ids}-place`} className="font-medium">
+        <label htmlFor={`${ids}.place`} className="font-medium">
           Place
         </label>
         <Input
-          id={`${ids}-place`}
+          id={`${ids}.place`}
           type="search"
           autoComplete="off"
           value={st.placeQuery}
           onChange={(e) => typePlace(target, e.target.value)}
-          aria-describedby={`${ids}-place-help`}
+          aria-describedby={`${ids}.place-help`}
         />
-        <p id={`${ids}-place-help`} className="text-sm text-muted-foreground">
+        <p id={`${ids}.place-help`} className="text-sm text-muted-foreground">
           Type a city or town and pick it. The forecast comes from Open-Meteo.
         </p>
       </div>
@@ -272,7 +275,7 @@ function FeedPicker({
   return (
     <div className="flex flex-col gap-3">
       {mine.length > 0 && (
-        <SourceChoice target={target} sources={mine} boundId={boundId} id={`${ids}-feed`} label={format === 'ical' ? 'Calendar' : 'News feed'} word={word} />
+        <SourceChoice target={target} sources={mine} boundId={boundId} id={`${ids}.feed`} label={format === 'ical' ? 'Calendar' : 'News feed'} word={word} />
       )}
       {st.adding || mine.length === 0 ? (
         <fieldset className="rounded-[10px] border p-3">
@@ -280,36 +283,36 @@ function FeedPicker({
           <legend className="float-left mb-3 font-medium">Add a {word}</legend>
           <div className="clear-left flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
-              <label htmlFor={`${ids}-url`} className="text-sm font-medium">
+              <label htmlFor={`${ids}.url`} className="text-sm font-medium">
                 Address
               </label>
               <Input
-                id={`${ids}-url`}
+                id={`${ids}.url`}
                 type="url"
                 inputMode="url"
                 value={st.feedUrl}
                 onChange={(e) => editFeed(target, { feedUrl: e.target.value })}
-                aria-describedby={`${ids}-url-help`}
+                aria-describedby={`${ids}.url-help`}
               />
-              <p id={`${ids}-url-help`} className="text-sm text-muted-foreground">
+              <p id={`${ids}.url-help`} className="text-sm text-muted-foreground">
                 {format === 'ical'
                   ? 'An https iCal address (.ics), such as a Google or Outlook calendar shared by link. It is stored encrypted and never shown again.'
                   : 'An https RSS or Atom address. It is stored encrypted and never shown again.'}
               </p>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label htmlFor={`${ids}-name`} className="text-sm font-medium">
+              <label htmlFor={`${ids}.name`} className="text-sm font-medium">
                 Name
               </label>
-              <Input id={`${ids}-name`} value={st.feedName} maxLength={100} onChange={(e) => editFeed(target, { feedName: e.target.value })} />
+              <Input id={`${ids}.name`} value={st.feedName} maxLength={100} onChange={(e) => editFeed(target, { feedName: e.target.value })} />
             </div>
             {format === 'ical' && (
               <div className="flex items-center justify-between gap-3">
-                <label htmlFor={`${ids}-horizon`} className="text-sm font-medium">
+                <label htmlFor={`${ids}.horizon`} className="text-sm font-medium">
                   Days ahead
                 </label>
                 <Input
-                  id={`${ids}-horizon`}
+                  id={`${ids}.horizon`}
                   type="number"
                   inputMode="numeric"
                   min={1}
@@ -353,7 +356,7 @@ type SectionProps = {
   onChange: Edit;
 };
 
-/** One of the template's sources: where its fields come from, their live values, and their fallback. `ids` starts its controls' element ids. */
+/** One of the template's sources: where its fields come from, their live values, and their fallback. `ids` starts its controls' element ids, joined to each by a dot, which a source name cannot hold, so no two sources' ids meet. */
 function LiveSource({
   target,
   ids,
@@ -405,14 +408,14 @@ function LiveSource({
         <button
           type="button"
           aria-expanded={fallbackShown}
-          aria-controls={`${ids}-fallback`}
+          aria-controls={`${ids}.fallback`}
           onClick={() => toggleFallback(target, fallbackBad || !fallbackShown)}
           className="flex w-full cursor-pointer items-center gap-2 rounded-[10px] px-3 py-2.5 text-left text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <ChevronRightIcon className={cn('size-4 text-muted-foreground transition-transform', fallbackShown && 'rotate-90')} aria-hidden />
           If the source is down
         </button>
-        <div id={`${ids}-fallback`} hidden={!fallbackShown} className="flex flex-col gap-4 px-3 pb-4">
+        <div id={`${ids}.fallback`} hidden={!fallbackShown} className="flex flex-col gap-4 px-3 pb-4">
           <p className="text-sm text-muted-foreground">What screens show while the source has no fresh data. They start as the template's own values.</p>
           <FieldForm fields={fallback} draft={draft} assets={assets} onChange={onChange} />
         </div>

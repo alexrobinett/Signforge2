@@ -214,7 +214,7 @@ Any non-image field can be bound to a data source instead of a fixed value. The 
 }
 ```
 
-- A name is an id (`ID_PATTERN`). A field is fed by one source at most, and a field a source names as its `place` or `units` is one no source fills.
+- A name is an id (`ID_PATTERN`). A field is fed by one source at most, and a field a source names as its `place` or `units` is one no source fills and no other source names: picking a source sets those fields, so two sources sharing one would overwrite each other.
 - A spot binds each field to a data source of its own, so each source goes stale, fails or falls back on its own: the weather can show its fallback while the headlines stay live.
 - `liveSources` in `packages/contract` reads either form by name; the one source of a template that declares one is named `source`.
 - A template that declares `sources` needs manifest schema 7 (`MANIFEST_SCHEMA`). A player before #193 refuses it in any manifest, so the server tells it to reload (`canPlay`), as for schema 4. Templates that declare one source are unchanged.
