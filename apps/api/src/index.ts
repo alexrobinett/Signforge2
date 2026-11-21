@@ -7,7 +7,7 @@
  * the photos of news feeds' stories that the poller queues (src/data/images.ts).
  * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
  * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
- * keys, audit rows and alert deliveries (packages/db retention.ts).
+ * keys, audit rows and alert deliveries (packages/db retention.ts), and forgets feed photos no poll names (src/data/images.ts).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.
@@ -20,7 +20,7 @@ import { createApi } from './api';
 import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
-import { type FeedImageJob, storeFeedImages } from './data/images';
+import { type FeedImageJob, forgetFeedImages, storeFeedImages } from './data/images';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
 import { emailSenderFor } from './email';
@@ -52,7 +52,7 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // The offline alert check and the finished rollouts (src/alerts.ts), every 5 minutes: screens sync that
   // often, so a shorter period finds nothing new. Then the alert deliveries to Slack and webhooks (src/deliveries.ts), the new ones and the retries due,
   // started once the check has queued its alerts and whether or not it failed, so neither holds up the other.
-  // The 00:00 UTC run also expires idempotency keys, audit rows and the delivery log: a daily job with no
+  // The 00:00 UTC run also expires idempotency keys, audit rows, the delivery log and unnamed feed photos: a daily job with no
   // trigger of its own, since the Free plan allows five Cron Triggers per account and demo and prod use four.
   // Settled, not raced: a failed retention delete must not end the run before an alert's email goes.
   '*/5 * * * *': async (env, now) => {
@@ -64,7 +64,7 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
       // Claimed at the time it claims: the checks may have taken minutes, and a lease counted from the
       // schedule could run out before the sends do, letting the next run send them again.
       Promise.allSettled(checks).then(() => deliverAlerts(env, email, { now: Date.now() })),
-      ...(daily ? [expireAuditRows(env.DB, now), expireIdempotencyKeys(env.DB, now), expireAlertDeliveries(env.DB, now)] : []),
+      ...(daily ? [expireAuditRows(env.DB, now), expireIdempotencyKeys(env.DB, now), expireAlertDeliveries(env.DB, now), forgetFeedImages(env, now)] : []),
     ]);
     const audit = results[checks.length + 1];
     if (audit?.status === 'fulfilled' && audit.value === AUDIT_ROWS_PER_RUN)

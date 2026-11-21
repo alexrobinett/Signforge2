@@ -50,13 +50,13 @@
         { "tag": "v3", "new_sqlite_classes": ["OrgObject"] }
       ],
       // A publish tells its screens through this queue, 50 a message (src/publish.ts). The poller queues the
-      // stories' photos it has not fetched to the other (src/data/images.ts): 4 a batch, each about ten
-      // subrequests (DNS, the fetch, the Images binding, R2), within the Free plan's 50 per invocation.
+      // stories' photos it has not fetched to the other (src/data/images.ts): one a batch, so an invocation's
+      // memory, CPU and subrequests (up to 12 fetches, at most two Images calls, R2) are one photo's, within the Free plan's.
       "queues": {
         "producers": [{ "binding": "PUBLISH_NOTICES", "queue": "signforge-publish-notices" }, { "binding": "FEED_IMAGES", "queue": "signforge-feed-images" }],
         "consumers": [
           { "queue": "signforge-publish-notices", "max_batch_size": 10, "max_retries": 3 },
-          { "queue": "signforge-feed-images", "max_batch_size": 4, "max_retries": 2 }
+          { "queue": "signforge-feed-images", "max_batch_size": 1, "max_retries": 2 }
         ]
       },
       // Decodes and scales the stories' photos off the Worker's CPU (src/data/images.ts).
@@ -120,7 +120,7 @@
         ],
         "consumers": [
           { "queue": "signforge-publish-notices-demo", "max_batch_size": 10, "max_retries": 3 },
-          { "queue": "signforge-feed-images-demo", "max_batch_size": 4, "max_retries": 2 }
+          { "queue": "signforge-feed-images-demo", "max_batch_size": 1, "max_retries": 2 }
         ]
       },
       "images": { "binding": "IMAGES" },
@@ -172,7 +172,7 @@
         ],
         "consumers": [
           { "queue": "signforge-publish-notices-prod", "max_batch_size": 10, "max_retries": 3 },
-          { "queue": "signforge-feed-images-prod", "max_batch_size": 4, "max_retries": 2 }
+          { "queue": "signforge-feed-images-prod", "max_batch_size": 1, "max_retries": 2 }
         ]
       },
       "images": { "binding": "IMAGES" },

@@ -14,8 +14,10 @@
  * then fail as `needs-reconnect` without asking the provider again, until a person reconnects it.
  * Sources sharing a connection refresh it once per run.
  *
- * A news (`rss`) source with `photos` on gives its first stories the org's copies of their photos,
- * and queues the ones it has none of yet (./images.ts).
+ * A news (`rss`) source with `photos` on — when at least one published spot binds it to a template
+ * field that uses images (an `image` field or a `list` whose items have an `image` property) —
+ * gives its first stories the org's copies of their photos, and once its snapshot is saved (so a
+ * refused one costs no fetches), queues the ones it has none of yet (./images.ts).
  *
  * Writes per poll: one row (the source's next poll) and, when the feed still says the same, the
  * snapshot's `checked_at`, or when it changed, the snapshot; for a provider source, also the
@@ -31,7 +33,7 @@ import { type Grant, type ProviderAdapter, ProviderError, type ProviderFetch, pr
 import { openGrant, sealGrant } from '../connectors/vault';
 import { openFeedUrl } from './cipher';
 import { FetchError, type FetchGuards, feedGuards, guardedFetch } from './fetch';
-import { newsWithPhotos, sha256Hex } from './images';
+import { newsWithPhotos, queuePhotos, sha256Hex } from './images';
 
 /**
  * Sources polled per run. Each takes three external fetches (two DNS lookups and the feed), more
@@ -81,6 +83,8 @@ interface Run {
   connectors: ConnectorDeps;
   /** Per connection, the grant this run uses (and per connection again, `!` after its id, the one it refreshed after a refusal): shared by its sources. */
   grants: Map<string, Promise<Held>>;
+  /** Serialises per-org photo budget checks + holds within one poll run so concurrent sources cannot overshoot NEW_PER_ORG_PER_DAY. */
+  photoQueues: Map<string, Promise<void>>;
 }
 
 /** A grant, and as it is stored: what a refresh of it is saved over. */
@@ -99,7 +103,7 @@ export async function pollDataSources(
   }: { now?: number; guards?: FetchGuards; connectors?: ConnectorDeps } = {},
 ): Promise<void> {
   const claimed = await claimDueDataSources(env.DB, now, { limit: POLLS_PER_RUN, leaseMs: LEASE_MS, backoffMaxMs: BACKOFF_MAX_MS });
-  const pass: Run = { env, now, guards, connectors, grants: new Map() };
+  const pass: Run = { env, now, guards, connectors, grants: new Map(), photoQueues: new Map() };
   const hosts = new Map<string, Promise<void>[]>();
   const one = async ({ orgId, id }: { orgId: string; id: string }) => {
     const org = scoped(env.DB, orgId);
@@ -130,24 +134,32 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, locator: str
   try {
     if (!locator) throw new PollFailure('sealed-url');
     const ok = { nextPollAt, failures: 0, lastError: null };
-    const res = await read(run, org, row, locator);
+    // Re-checked every poll: skip photo work when no published spot binding this source can display images.
+    let bound: BoundField[] | undefined;
+    const wantPhotos = row.format === 'rss' && row.photos ? usesPhotos((bound = await publishedBoundFields(org, row.id))) : false;
+    const res = await read(run, org, row, locator, wantPhotos);
     if (res.status === 'not-modified') {
       await org.dataSources.savePoll(row.id, { source: ok, checkedAt: now });
       return;
     }
-    const { data } = res;
+    const { data, photos } = res;
     if (snapshotBytes(data) > MAX_SNAPSHOT_BYTES) throw new PollFailure('too-large');
     const dataJson = canonicalJson(data);
     const version = await sha256Hex(new TextEncoder().encode(dataJson));
     const source = { ...ok, etag: res.etag, lastModified: res.lastModified };
     const held = await org.dataSources.snapshot(row.id);
-    if (held?.version === version) {
-      await org.dataSources.savePoll(row.id, { source, checkedAt: now });
-      return;
+    if (held?.version === version) await org.dataSources.savePoll(row.id, { source, checkedAt: now });
+    else {
+      const { refused } = snapshotFit(bound ?? (await publishedBoundFields(org, row.id)), data);
+      if (refused) throw new PollFailure(refused);
+      await org.dataSources.savePoll(row.id, { source, snapshot: { version, fetchedAt: now, checkedAt: now, dataJson } });
     }
-    const { refused } = snapshotFit(await publishedBoundFields(org, row.id), data);
-    if (refused) throw new PollFailure(refused);
-    await org.dataSources.savePoll(row.id, { source, snapshot: { version, fetchedAt: now, checkedAt: now, dataJson } });
+    if (photos && (photos.again.length || photos.fresh.length)) {
+      const prev = run.photoQueues.get(org.orgId);
+      const next = (prev ?? Promise.resolve()).then(() => queuePhotos(run.env, org, row.id, photos, now));
+      run.photoQueues.set(org.orgId, next);
+      await next;
+    }
   } catch (e) {
     if (!(e instanceof PollFailure || e instanceof FetchError || e instanceof FeedError || e instanceof ProviderError)) throw e;
     const failures = row.failures + 1;
@@ -156,10 +168,13 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, locator: str
   }
 }
 
-type Read = { status: 'not-modified' } | { status: 'ok'; data: unknown; etag: string | null; lastModified: string | null };
+/** `photos`: a news source's photo URLs to queue once its snapshot is saved. */
+type Read =
+  | { status: 'not-modified' }
+  | { status: 'ok'; data: unknown; etag: string | null; lastModified: string | null; photos?: { again: string[]; fresh: string[] } };
 
 /** What the source says now: a feed fetched through the guards and converted, or a provider's resource through its adapter. */
-async function read(run: Run, org: OrgScope, row: DataSourceRow, locator: string): Promise<Read> {
+async function read(run: Run, org: OrgScope, row: DataSourceRow, locator: string, wantPhotos: boolean): Promise<Read> {
   const { format } = row;
   if (format === 'provider') {
     if (!row.connectionId) throw new PollFailure('disconnected');
@@ -169,12 +184,13 @@ async function read(run: Run, org: OrgScope, row: DataSourceRow, locator: string
   const validators = format === 'ical' ? {} : { etag: row.etag, lastModified: row.lastModified };
   const res = await guardedFetch(locator, validators, run.guards);
   if (res.status === 'not-modified') return res;
-  // The feed's URL, which a photo's relative link resolves against last.
-  const data =
-    format === 'rss' && row.photos
-      ? await newsWithPhotos(run.env, org, row.id, parseNews(res.body, { url: locator }), run.now)
-      : convert(format, row, res.body, run.now);
-  return { status: 'ok', data, etag: res.etag, lastModified: res.lastModified };
+  const validated = { etag: res.etag, lastModified: res.lastModified };
+  if (format === 'rss' && wantPhotos) {
+    // The feed's URL, which a photo's relative link resolves against last.
+    const { data, again, fresh } = await newsWithPhotos(org, parseNews(res.body, { url: locator }), run.now);
+    return { status: 'ok', data, ...validated, photos: { again, fresh } };
+  }
+  return { status: 'ok', data: convert(format, row, res.body, run.now), ...validated };
 }
 
 /** A provider resource's data, read with the connection's grant. */
@@ -262,6 +278,21 @@ function convert(format: Exclude<DataSourceRow['format'], 'provider'>, { horizon
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+/**
+ * Whether any published spot binding this source uses an `image` field or a `list` whose items
+ * hold an `image` property (such as News 2.0, #196/#202). Sources bound only by text-only templates
+ * (News 1.4.1, Info frame's crawl) or unbound sources skip photo work altogether.
+ */
+function usesPhotos(bound: readonly BoundField[]): boolean {
+  return bound.some(({ fields, field }) => {
+    if (!isObject(fields)) return false;
+    const def = fields[field];
+    if (!isObject(def)) return false;
+    if (def.type === 'image') return true;
+    return def.type === 'list' && isObject(def.item) && Object.values(def.item).some((p) => isObject(p) && p.type === 'image');
+  });
+}
 
 /**
  * The fields published spots bind to `sourceId` (drafts do not count: screens play what was
