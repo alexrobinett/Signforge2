@@ -58,6 +58,10 @@ const cases: Record<string, { a: Data; b: Data; assetsA?: Record<string, string>
     b: { events: [{ title: 'Lunch', start: at(-0.5), end: at(1), allDay: false, location: 'Canteen' }], rows: 3 },
   },
   clock: { a: { greeting: 'Welcome', message: 'Doors open at 6', seconds: true }, b: { hour24: true } },
+  countdown: {
+    a: { look: 'pop', target: '2026-11-29T18:00' },
+    b: { look: 'night', mode: 'up', target: '2026-04-21T09:00', recordDays: 301, units: 'days and hours' },
+  },
   'cstore-promo': {
     a: { promo: 'Buy any 3', product: 'Energy', price: '6' },
     b: { detail: 'All sizes' },
@@ -145,8 +149,8 @@ interface Host {
   dom(frame: string): Promise<string>;
 }
 
-/** A page of frames, each the size of a 1080p screen at half scale in `orientation`, or with `full`, at its own size. */
-async function host(orientation: Orientation = 'landscape', full = false): Promise<Host> {
+/** A page of frames, each the size of a 1080p screen at half scale in `orientation`, or with `full`, at its own size, in the screen's `timezone`. */
+async function host(orientation: Orientation = 'landscape', full = false, timezone = 'UTC'): Promise<Host> {
   const page = await h.blankPage();
   const [long, short] = full ? [1920, 1080] : [960, 540];
   const size = orientation === 'landscape' ? { width: long, height: short } : { width: short, height: long };
@@ -196,7 +200,7 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
       const samples = sampled ? Object.fromEntries(Object.keys(assets).map((field) => [field, sampleAsset(field)])) : {};
       const broken = sampled === 'broken';
       await page.evaluate(
-        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs }) => {
+        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone }) => {
           const w = window as unknown as {
             frames_: Record<string, HTMLIFrameElement>;
             SFSample: typeof import('@signforge/media/sample');
@@ -243,14 +247,14 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
             durationMs,
             orientation,
             viewport: size,
-            timezone: 'UTC',
+            timezone,
             locale: 'en-US',
             clock: { now, offsetMs: now - Date.now() },
             theme,
           };
           w.frames_[frame]!.contentWindow!.postMessage(init, '*');
         },
-        { frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs },
+        { frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone },
       );
     },
     post: (frame, type) =>
@@ -1053,4 +1057,47 @@ describe('the look kit (#190)', () => {
       b = spotData(t.manifest, { look: 'night', showCrawl: false });
     await expectSameAsFresh(await host('landscape', true), t.html, a, b, photo, photo);
   });
+});
+
+describe('countdown (#198)', () => {
+  const looks = ['pop', 'poster', 'night', 'corporate'] as const;
+  const t = () => built.get('countdown')!;
+
+  /** One frame at a screen's own size in `timezone`; `show` inits it with the template's defaults under `data` and waits for ready. */
+  async function screen(orientation: Orientation = 'landscape', timezone = 'UTC') {
+    const hst = await host(orientation, true, timezone);
+    await hst.open('fresh', t().html);
+    let inits = 0;
+    return {
+      hst,
+      async show(data: Data, now = NOW, theme?: FrameTheme, durationMs?: number) {
+        await hst.init('fresh', spotData(t().manifest, data), {}, now, theme, false, durationMs);
+        await hst.waitFor('fresh', 'ready', ++inits);
+        return hst.page.mainFrame().childFrames()[0]!;
+      },
+    };
+  }
+
+  it.only('SHOTS', async () => {
+    const dir = process.env.SHOTS!;
+    const sets: [string, Data][] = [
+      ['down', { target: '2026-11-29T18:00' }],
+      ['down-hm', { target: '2026-11-29T18:00', units: 'days, hours and minutes', facts: [{ label: 'Where', value: 'Pier 9 roof' }, { label: 'Dress', value: 'Smart casual' }] }],
+      ['up', { mode: 'up', target: '2026-04-21T00:00', recordDays: 301, facts: [{ label: 'Site', value: 'Riverside warehouse' }] }],
+      ['done', { target: '2026-11-10T18:00' }],
+      ['long', { target: '2027-03-29T18:00', units: 'days and hours', title: 'The winter party on the Pier 9 roof terrace, with the band!!', facts: [{ label: 'Where exactly', value: 'Pier 9 roof terrace, north side' }, { label: 'Dress code tonight', value: 'Smart casual, bring a warm coat' }, { label: 'Tickets', value: 'From reception, free for staff' }] }],
+      ['off', { mode: 'up', target: '2026-04-21T00:00', recordDays: 301, showProgress: false, showRecord: false, showFacts: false, showDetail: false }],
+    ];
+    for (const orientation of (process.env.ORIENT ?? 'landscape,portrait').split(',') as Orientation[]) {
+      const s = await screen(orientation);
+      for (const look of (process.env.LOOKS ?? looks.join(',')).split(','))
+        for (const [name, data] of sets) {
+          const f = await s.show({ look, ...data });
+          await f.evaluate(() => {
+            for (const a of document.getAnimations()) a.currentTime = 3000;
+          });
+          await s.hst.page.screenshot({ path: `${dir}/${look}-${orientation}-${name}.png` });
+        }
+    }
+  }, 300_000);
 });

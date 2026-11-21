@@ -126,7 +126,8 @@ defineTemplate({
     const runUp = up ? undefined : RUN_UPS.find((w) => w >= days);
     const share = up ? (record ? Math.min(1, days / record) : undefined) : runUp && (runUp - days) / runUp;
     const beaten = days > record;
-    const toBeat = beaten ? 'A new record' : plural(record + 1 - days, 'more day', 'more days');
+    const more = record + 1 - days;
+    const toBeat = beaten ? 'A new record' : plural(more, 'more day', 'more days');
     const pct = share === undefined ? '' : `${Math.floor(share * 100)}%`;
     const progressLabel = up ? (beaten ? 'A new record' : `${pct} of the way to the record`) : `Day ${runUp! - days} of ${runUp}`;
 
@@ -136,7 +137,7 @@ defineTemplate({
     put('.done', String(data.doneText));
     put('.best', `Best: ${plural(record, 'day', 'days')}`);
     put('.record .v', record.toLocaleString(ctx.locale));
-    put('.record .s', beaten ? 'days: a new record' : `days: ${toBeat} to beat it`);
+    put('.record .s', beaten ? 'days, now beaten' : `days, ${more.toLocaleString(ctx.locale)} more to beat it`);
 
     // Night's and Corporate's facts start with the date and the record, then the spot's own.
     const factRow = document.querySelector<HTMLTemplateElement>('#fact')!.content.firstElementChild!;
@@ -155,7 +156,7 @@ defineTemplate({
       fact(look === 'night' ? 'record' : 'Record', plural(record, 'day', 'days'), 'record');
       fact(look === 'night' ? 'to beat it' : 'To beat it', toBeat, 'record');
     }
-    if (look === 'poster') put('.band .lk-crawl', facts.map((f) => `${f.label}  ${f.value}`).join('  ·  '));
+    if (look === 'poster') put('.band .lk-crawl', facts.map((f) => `${f.label}: ${f.value}`).join('  ·  '));
     else for (const f of facts) fact(f.label, f.value, 'facts');
 
     if (share !== undefined)

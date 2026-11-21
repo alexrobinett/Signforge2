@@ -18,6 +18,7 @@
     "@signforge/media": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
     "@signforge/template-clock": "workspace:*",
+    "@signforge/template-countdown": "workspace:*",
     "@signforge/template-cstore-promo": "workspace:*",
     "@signforge/template-looks": "workspace:*",
     "@signforge/template-menu-board": "workspace:*",
