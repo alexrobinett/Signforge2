@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Town Hall Hour</title>
+    <link>https://podcast.townhall.example/</link>
+    <image>
+      <url>/art/logo-1400.png</url>
+      <title>Town Hall Hour</title>
+      <link>https://podcast.townhall.example/</link>
+    </image>
+    <itunes:image href="https://podcast.townhall.example/art/cover-3000.jpg"/>
+    <item>
+      <title>Episode 41: the new library</title>
+      <link>https://podcast.townhall.example/41</link>
+      <pubDate>Thu, 19 Nov 2026 12:00:00 +0000</pubDate>
+      <enclosure url="https://podcast.townhall.example/audio/41.mp3" length="48211340" type="audio/mpeg"/>
+      <enclosure url="https://podcast.townhall.example/art/41.jpg" length="211340" type="image/jpeg"/>
+      <itunes:image href="https://podcast.townhall.example/art/41-square.jpg"/>
+    </item>
+    <item>
+      <title>Episode 40: budget night</title>
+      <link>https://podcast.townhall.example/40</link>
+      <pubDate>Thu, 12 Nov 2026 12:00:00 +0000</pubDate>
+      <enclosure url="https://podcast.townhall.example/audio/40.mp3" length="50211340" type="audio/mpeg"/>
+      <itunes:image href="https://podcast.townhall.example/art/40-square.jpg"/>
+    </item>
+    <item>
+      <title>Episode 39: bin day changes</title>
+      <link>https://podcast.townhall.example/39</link>
+      <pubDate>Thu, 05 Nov 2026 12:00:00 +0000</pubDate>
+      <enclosure url="https://podcast.townhall.example/audio/39.mp3" length="49211340" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+  <title>Observatory Notes</title>
+  <link rel="alternate" href="https://observatory.example/notes/"/>
+  <id>tag:observatory.example,2021:notes</id>
+  <updated>2026-11-20T21:00:00Z</updated>
+  <entry>
+    <title>The comet is visible tonight</title>
+    <link rel="alternate" href="https://observatory.example/notes/comet"/>
+    <id>tag:observatory.example,2026-11-20:comet</id>
+    <updated>2026-11-20T21:00:00Z</updated>
+    <content type="xhtml" xml:base="https://observatory.example/media/2026/">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <p>Look low in the west after sunset.<img src="https://stats.observatory.example/pixel.gif" width="1" height="1" alt=""/></p>
+        <figure><img src="comet-1600.jpg" width="1600" height="1067" alt="The comet over the dome"/></figure>
+      </div>
+    </content>
+  </entry>
+  <entry>
+    <title>Open night on Saturday</title>
+    <link rel="alternate" href="https://observatory.example/notes/open-night"/>
+    <id>tag:observatory.example,2026-11-18:open-night</id>
+    <updated>2026-11-18T21:00:00Z</updated>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml"><p>Telescopes from 7 p.m. No pictures this time.</p></div>
+    </content>
+  </entry>
+</feed>
