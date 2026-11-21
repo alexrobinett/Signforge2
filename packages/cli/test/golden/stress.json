@@ -28,6 +28,10 @@
       "size": 77514,
       "type": "text/html"
     },
+    "1cd48aa96096ac70ce01aecdce737986e9f4bd7f90a9dfac1074c2467fa76c50": {
+      "size": 395995,
+      "type": "text/html"
+    },
     "2ab42d80861eae3aa89e8fb4c422c0b26df924e41f6e6eb5125d8b399a28274a": {
       "size": 76424,
       "type": "text/html"
@@ -72,10 +76,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "aa8ea068299931d9e8aef020416f8fd04d2cf1caab602bc31577c4054fd1f4a1": {
-      "size": 395640,
-      "type": "text/html"
-    },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
@@ -107,7 +107,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "c1dc9ccbcb044440c4844944b1c62125bc8840679ae87f3e22a49007a1ffb272",
+  "id": "872dfe810ad9b5a7e68f9332fc307a93905e7007d4c3f1469b8142fce0c91ba9",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -749,7 +749,7 @@
       }
     },
     "base/countdown@1.0.0": {
-      "html": "aa8ea068299931d9e8aef020416f8fd04d2cf1caab602bc31577c4054fd1f4a1",
+      "html": "1cd48aa96096ac70ce01aecdce737986e9f4bd7f90a9dfac1074c2467fa76c50",
       "manifest": {
         "background": "#000000",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
