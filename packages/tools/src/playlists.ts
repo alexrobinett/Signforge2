@@ -11,33 +11,16 @@
 import type { Transition } from '@signforge/contract';
 import { draftChanged, published, type OrgScope, type PlaylistRow } from '@signforge/db';
 import { z } from 'zod';
-import { draftOutput, id, idempotencyKey, ifVersion, name, version } from './fields';
-import { nextOutput, page, pageInput } from './paging';
+import { id, idempotencyKey, ifVersion, name } from './fields';
+import { page, pageInput } from './paging';
 import { ended } from './schedule';
 import { defineTool, notFound, ToolError } from './tool';
+import { outputs, transition, type PlaylistView } from './outputs';
 
 /** A new playlist's transition when none is given: fade, the player's default (docs/architecture.md, Transitions). */
 const DEFAULT_TRANSITION: Transition = { type: 'fade', ms: 500 };
 
-const ms = z.number().int().min(1).max(10_000).describe('How long the transition takes, in ms');
-const transition = z
-  .discriminatedUnion('type', [z.object({ type: z.literal('cut') }), z.object({ type: z.literal('fade'), ms }), z.object({ type: z.literal('crossfade'), ms })])
-  .describe(
-    'How one spot gives way to the next. cut: instant. fade: out to black, then in, one spot on screen at a time. crossfade: both spots on screen while one fades over the other, which doubles the GPU work for its length (about 10% dropped frames on a Raspberry Pi 4)',
-  );
 const spotIds = z.array(id('spot')).max(500).describe("The spots in play order: the whole list, replacing the draft's. A spot may appear more than once");
-
-const playlistOutput = z.object({
-  id: z.string(),
-  name: z.string(),
-  transition,
-  spotIds: z.array(z.string()).describe('The spots in play order'),
-  version: version.describe('Moves on with every edit of the draft, its spots too; pass it as ifVersion to update only what you read'),
-  isDefault: z.boolean().describe('Whether it is the default playlist: what every screen plays when no schedule entry says otherwise'),
-  ...draftOutput,
-});
-type PlaylistView = z.infer<typeof playlistOutput>;
-const playlistResult = z.object({ playlist: playlistOutput });
 
 const playlistView = (row: PlaylistRow, items: string[], defaultId: string | null | undefined): PlaylistView => ({
   id: row.id,
@@ -70,7 +53,7 @@ const listPlaylists = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ playlists: z.array(playlistOutput), next: nextOutput }),
+  output: outputs.list_playlists,
   example: {},
   handler: async ({ org, input }) => {
     // Rows before items: an edit of the order moves its playlist's version on, so items read after
@@ -89,7 +72,7 @@ const getPlaylist = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ playlistId: id('playlist') }),
-  output: playlistResult,
+  output: outputs.get_playlist,
   example: { playlistId: 'pls_example' },
   handler: async ({ org, input }) => {
     const row = await requirePlaylist(org, input.playlistId);
@@ -107,7 +90,7 @@ const createPlaylist = defineTool({
   mutates: true,
   idempotent: true,
   input: z.object({ name: name('playlist'), transition: transition.optional(), spotIds: spotIds.optional(), idempotencyKey }),
-  output: playlistResult,
+  output: outputs.create_playlist,
   example: { name: 'Weekend promos', transition: { type: 'fade', ms: 600 }, spotIds: ['spt_example'] },
   target: (_input, output) => ({ kind: 'playlist', id: output.playlist.id }),
   handler: async ({ org, input, write }) => {
@@ -127,7 +110,7 @@ const updatePlaylist = defineTool({
   input: z
     .object({ playlistId: id('playlist'), name: name('playlist').optional(), transition: transition.optional(), spotIds: spotIds.optional(), ifVersion })
     .refine((v) => v.name !== undefined || v.transition !== undefined || v.spotIds !== undefined, 'nothing to change'),
-  output: playlistResult,
+  output: outputs.update_playlist,
   example: { playlistId: 'pls_example', spotIds: ['spt_example'], ifVersion: 2 },
   target,
   handler: async ({ org, input, write }) => {
@@ -165,7 +148,7 @@ const deletePlaylist = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ playlistId: id('playlist') }),
-  output: z.object({ deleted: z.string().describe("The deleted playlist's id") }),
+  output: outputs.delete_playlist,
   example: { playlistId: 'pls_example' },
   target,
   handler: async ({ org, input, write }) => {
@@ -188,7 +171,7 @@ const setDefaultPlaylist = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ playlistId: id('playlist') }),
-  output: playlistResult,
+  output: outputs.set_default_playlist,
   example: { playlistId: 'pls_example' },
   target,
   handler: async ({ org, input, write }) => {

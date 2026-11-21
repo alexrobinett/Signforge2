@@ -32,7 +32,7 @@ import { ago, describeScreen, localClock } from '~/lib/screen-status';
 import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
-import { editorDraft, hoursDraftOf, settingsDraftOf } from '~/state/screens';
+import { editorDraft, hoursDraftOf, settingsDraftOf, type ScreenAction } from '~/state/screens';
 
 export const Route = createFileRoute('/_app/screens/$screenId')({
   loader: async ({ params }) => {
@@ -82,7 +82,8 @@ function ScreenPage() {
   const d = describeScreen(screen, now);
   const inGroups = groups.filter((g) => groupIds.includes(g.id));
   const revoked = screen.status === 'revoked';
-  const run = (label: string, tool: string, input: Record<string, unknown>, done: string) => void actOnScreen(screen.id, { label, tool, input, done });
+  const run = (label: string, tool: ScreenAction['tool'], input: Record<string, unknown>, done: string) =>
+    void actOnScreen(screen.id, { label, tool, input, done });
 
   const spinner = (label: string, icon: ReactNode) => (busy === label ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : icon);
   const override = screen.displayOverride;

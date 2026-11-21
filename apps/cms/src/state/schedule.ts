@@ -15,7 +15,7 @@ import { scheduleEntryProblems } from '@signforge/contract';
 import { toast } from 'sonner';
 import { orgOnScreen } from '~/lib/live';
 import type { ScheduleEntryView } from '~/lib/schedule';
-import { callTool, entryIdOf, toolMessage } from '~/lib/tools';
+import { callTool, toolMessage } from '~/lib/tools';
 import { scheduleKey, scheduleQuery } from '~/queries/schedule';
 import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
@@ -144,7 +144,7 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
           ? await callTool('create_schedule_entry', { ...fields, idempotencyKey })
           : await callTool('update_schedule_entry', { scheduleEntryId: record, ...fields, ifVersion: version });
       await refresh(orgId);
-      return { record: entryIdOf(out) };
+      return { record: out.entry.id };
     },
   });
 
@@ -154,7 +154,7 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
     async save({ draft: { orgId, edit: d, idempotencyKey } }) {
       const made = await callTool('start_takeover', { playlistId: d.playlistId, ...aim(d), endsAt: new Date(d.until).toISOString(), idempotencyKey });
       await refresh(orgId);
-      return { record: entryIdOf(made) };
+      return { record: made.entry.id };
     },
   });
 

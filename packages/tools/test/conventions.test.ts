@@ -16,6 +16,7 @@ import {
   type AnyTool,
   type Caller,
 } from '../src';
+import { outputs, type ToolName } from '../src/outputs';
 import { seededMembers } from './member';
 
 const { o, as } = seededMembers('conv-org');
@@ -35,6 +36,11 @@ describe('every registered tool', () => {
       expect(t.output, `${t.name} has no output schema`).toBeInstanceOf(z.ZodType);
       expect(() => z.toJSONSchema(t.output, { io: 'output', unrepresentable: 'any' }), t.name).not.toThrow();
     }
+  });
+
+  it('returns the output its name has in outputs.ts, the schema the CMS types its calls by', () => {
+    for (const t of all) expect(t.output === outputs[t.name as ToolName], `${t.name}'s output is not outputs.${t.name}`).toBe(true);
+    expect(Object.keys(outputs).sort()).toEqual(TOOLS.map((t) => t.name).sort());
   });
 
   it('pages if it lists: limit and cursor in, next out', () => {

@@ -7,34 +7,12 @@
 import { BRAND_PAIRS, brandFont, contrastRatio, HEX_COLOR, MIN_CONTRAST, onColor } from '@signforge/compiler';
 import { assetFile } from '@signforge/compiler/draft';
 import type { BrandColor, BrandColors, BrandKit, BrandShape, Orientation } from '@signforge/contract';
+import type { ToolOutput } from '@signforge/tools/outputs';
 import type { AssetView } from './assets';
 import type { SpotPreview } from './spots';
 
-type FontRef = { id: string; family: string } | null;
-
 /** One kit, as the brand tools give it. */
-export interface BrandKitView {
-  id: string;
-  name: string;
-  colors: BrandColors;
-  /** On-colours derived for contrast rather than set by hand. */
-  derived: ('onPrimary' | 'onAccent')[];
-  shape: BrandShape;
-  displayFont: FontRef;
-  bodyFont: FontRef;
-  logo: { onDarkAssetId: string; onLightAssetId: string | null } | null;
-  isDefault: boolean;
-  groupIds: string[];
-  screenIds: string[];
-  /** Screens that get this kit at the next publish: where an edit to it will show. */
-  reach: string[];
-  conflicts: { screenId: string; problem: string }[];
-  /** Pairs below 4.5:1, in the tools' words. */
-  warnings: string[];
-  version: number;
-  createdAt: number;
-  updatedAt: number;
-}
+export type BrandKitView = ToolOutput<'get_brand_kit'>['brandKit'];
 
 /** What the kit editor edits. A null on-colour is derived (black or white, for 4.5:1); a null font is the template's. */
 export interface KitDraft {

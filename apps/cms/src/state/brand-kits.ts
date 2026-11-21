@@ -17,7 +17,7 @@ import { duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraf
 import { orgOnScreen } from '~/lib/live';
 import { playerMessage } from '~/lib/preview';
 import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/spots';
-import { brandKitIdOf, callTool, toolMessage, versionOf } from '~/lib/tools';
+import { callTool, toolMessage } from '~/lib/tools';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
@@ -126,7 +126,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     state: { read: () => get().brandKits.drafts, write: (change) => kits((k) => ({ ...k, drafts: change(k.drafts) })) },
     async save({ key: kitId, draft }) {
       // A kit's draft always starts from the kit, with its version (editKit): only a create has none.
-      const version = versionOf(await callTool('update_brand_kit', updateInput(kitId, draft.edit, draft.version!)), 'brandKit');
+      const version = (await callTool('update_brand_kit', updateInput(kitId, draft.edit, draft.version!))).brandKit.version;
       // Still saving until the page has the kit as saved, which the next edit builds on.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: brandKitsQuery(draft.orgId).queryKey, exact: true }),
@@ -329,7 +329,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       try {
         const out = await callTool('create_brand_kit', { name: get().brandKits.newKit.name.trim(), colors: NEW_KIT_COLORS, idempotencyKey: key });
         await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
-        if (stillAt(from, orgId)) await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId: brandKitIdOf(out) } });
+        if (stillAt(from, orgId)) await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId: out.brandKit.id } });
         kits((k) => ({ ...k, newKit: newKit() }));
       } catch (err) {
         kits((k) => ({ ...k, newKit: { ...k.newKit, pending: false, error: toolMessage(err) } }));
@@ -343,7 +343,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       let kitId: string | undefined;
       const from = where();
       const done = await act(orgId, kit.id, `duplicate:${kit.id}`, async () => {
-        kitId = brandKitIdOf(await callTool('create_brand_kit', duplicateInput(kit, key)));
+        kitId = (await callTool('create_brand_kit', duplicateInput(kit, key))).brandKit.id;
       });
       if (!done || !kitId) return;
       duplicateKeys.delete(of);

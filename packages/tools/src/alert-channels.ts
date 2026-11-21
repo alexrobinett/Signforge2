@@ -11,9 +11,10 @@
 import { type AlertChannelRow, type AlertDeliveryRow, newId } from '@signforge/db';
 import { feedUrlProblem, type FeedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
-import { id, ifVersion, version } from './fields';
-import { keysetPage, nextOutput, pageInput } from './paging';
+import { id, ifVersion } from './fields';
+import { keysetPage, pageInput } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
+import { ALERT_CHANNEL_KINDS, ALERT_CHANNELS, type channelView, type deliveryView, outputs } from './outputs';
 
 /** How long an alert is retried before it is given up on. */
 export const ALERT_RETRY_MS = 24 * 60 * 60_000;
@@ -43,9 +44,6 @@ export type AlertEvent = { id: string; occurredAt: string; org: { id: string; na
     }
   | { type: 'test'; data: { message: string } }
 );
-
-const KINDS = ['slack', 'webhook'] as const;
-const CHANNELS = ['email', ...KINDS] as const;
 
 /** Slack's incoming-webhook URL (docs.slack.dev, Sending messages using incoming webhooks, read 2026-11-18). */
 const SLACK_WEBHOOK = /^https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]+\/[A-Z0-9]+\/[A-Za-z0-9]+$/;
@@ -81,16 +79,6 @@ const signingSecret = z
     'The secret each POST is signed with, which you make and keep: 32 to 128 random characters of A-Z, a-z, 0-9, _ and -, such as whsec_ and 32 random bytes in base64url. Stored encrypted and never shown again',
   );
 
-const channelView = z.object({
-  kind: z.enum(KINDS),
-  host: z.string().describe('The host it posts to; the rest of the URL is sealed and never shown'),
-  connectedBy: z.string().describe('Who set it last: a user id, or an agent grant id'),
-  secretSetAt: z.number().nullable().describe('The webhook: when its signing secret was last set. Null for Slack'),
-  version: version.describe('Moves on with every change; pass it as ifVersion to change only what you read'),
-  createdAt: z.number(),
-  updatedAt: z.number(),
-});
-
 const viewOf = (c: AlertChannelRow): z.infer<typeof channelView> => ({
   kind: c.kind,
   host: c.host,
@@ -99,20 +87,6 @@ const viewOf = (c: AlertChannelRow): z.infer<typeof channelView> => ({
   version: c.rowVersion,
   createdAt: c.createdAt,
   updatedAt: c.updatedAt,
-});
-
-const deliveryView = z.object({
-  id: z.string(),
-  channel: z.enum(CHANNELS),
-  eventType: z.string().describe('screen.offline, screen.back, or test'),
-  eventId: z.string().describe("The event's id, the same on every channel it went to"),
-  status: z.enum(['pending', 'delivered', 'failed']).describe('failed: given up on, after 24 hours of retries (a test, after one try)'),
-  attempts: z.number(),
-  lastAttemptAt: z.number().nullable(),
-  lastHttpStatus: z.number().nullable().describe("The receiver's HTTP status on the last attempt; null for no answer, or for email"),
-  lastError: z.string().nullable().describe('Why the last attempt failed, as a category (http-status, timeout, private-address, ...)'),
-  nextAttemptAt: z.number().nullable().describe('When it is tried next, while pending'),
-  createdAt: z.number(),
 });
 
 const deliveryOf = (d: AlertDeliveryRow): z.infer<typeof deliveryView> => ({
@@ -139,7 +113,7 @@ const getAlertChannels = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({}),
-  output: z.object({ slack: channelView.nullable(), webhook: channelView.nullable() }),
+  output: outputs.get_alert_channels,
   example: {},
   handler: async ({ org }) => {
     const [slack, webhook] = await Promise.all([org.alertChannels.get('slack'), org.alertChannels.get('webhook')]);
@@ -156,7 +130,7 @@ const setSlackAlertChannel = defineTool({
   mutates: true,
   needs: ['alertSecrets'],
   input: z.object({ webhookUrl: slackWebhookUrl, ifVersion }),
-  output: z.object({ channel: channelView }),
+  output: outputs.set_slack_alert_channel,
   example: { webhookUrl: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX' },
   target: () => channelTarget('slack'),
   handler: async ({ org, actor, input, write, services: { alertSecrets } }) => {
@@ -183,7 +157,7 @@ const setWebhookAlertChannel = defineTool({
   input: z
     .object({ webhookUrl: outgoingUrl.optional(), signingSecret: signingSecret.optional(), ifVersion })
     .refine((v) => v.webhookUrl !== undefined || v.signingSecret !== undefined, 'nothing to change'),
-  output: z.object({ channel: channelView }),
+  output: outputs.set_webhook_alert_channel,
   example: { webhookUrl: 'https://ops.example.com/hooks/signforge', signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD' },
   target: () => channelTarget('webhook'),
   handler: async ({ org, actor, input, write, services: { alertSecrets } }) => {
@@ -210,8 +184,8 @@ const removeAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
-  input: z.object({ channel: z.enum(KINDS) }),
-  output: z.object({ removed: z.boolean() }),
+  input: z.object({ channel: z.enum(ALERT_CHANNEL_KINDS) }),
+  output: outputs.remove_alert_channel,
   example: { channel: 'slack' },
   target: (input) => channelTarget(input.channel),
   handler: async ({ org, input, write }) => {
@@ -228,8 +202,8 @@ const testAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
-  input: z.object({ channel: z.enum(CHANNELS).describe('email goes to the member who asks') }),
-  output: z.object({ delivery: deliveryView }),
+  input: z.object({ channel: z.enum(ALERT_CHANNELS).describe('email goes to the member who asks') }),
+  output: outputs.test_alert_channel,
   example: { channel: 'email' },
   target: (input) => channelTarget(input.channel),
   handler: async ({ org, actor, input, write, deliverNow }) => {
@@ -269,7 +243,7 @@ const listAlertDeliveries = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ deliveries: z.array(deliveryView), next: nextOutput }),
+  output: outputs.list_alert_deliveries,
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = await keysetPage(
@@ -289,7 +263,7 @@ const retryAlertDelivery = defineTool({
   minRole: 'owner',
   mutates: true,
   input: z.object({ alertDeliveryId: id('alert delivery') }),
-  output: z.object({ delivery: deliveryView }),
+  output: outputs.retry_alert_delivery,
   example: { alertDeliveryId: 'dlv_0123456789' },
   target: (input) => ({ kind: 'alert_delivery', id: input.alertDeliveryId }),
   handler: async ({ org, input, write, deliverNow }) => {

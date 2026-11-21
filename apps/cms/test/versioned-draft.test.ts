@@ -2,7 +2,7 @@
 // answers the test holds and lets go one by one; autosave runs on a fake clock the test moves.
 // Nothing waits on real time.
 import { describe, expect, it, vi } from 'vitest';
-import { ToolCallError } from '../src/lib/tools';
+import { Refusal } from '../src/lib/tools';
 import { autosave, createVersionedDrafts, shown, type Clock, type Draft, type Drafts, type Saved } from '../src/state/versioned-draft';
 
 // tools.ts names the tab's org from the page's router, which this test has none of.
@@ -46,7 +46,7 @@ interface Sent {
 
 type Edit = { name: string };
 
-function setup({ invalid, gone }: { invalid?: (d: Draft<Edit>) => boolean; gone?: (err: unknown, key: string) => boolean } = {}) {
+function setup({ invalid, gone }: { invalid?: (d: Draft<Edit>) => boolean; gone?: (refusal: Refusal, key: string) => boolean } = {}) {
   let drafts: Drafts<Edit> = {};
   let org: string | undefined = A;
   let ids = 0;
@@ -79,7 +79,7 @@ const named = (name: string) => () => ({ name });
 /** Lets the module's awaits run. */
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-const stale = () => new ToolCallError('conflict', 'stale', { version: 9 });
+const stale = () => new Refusal('conflict', 'stale', { version: 9 });
 
 describe('saves run one at a time', () => {
   it('a save asked for while one runs is one follow-up with the latest edit, on the version the first returned', async () => {
@@ -204,7 +204,7 @@ describe('after a save', () => {
     void module.save('general', '');
     await settle();
     sent[0]!.moved(2);
-    sent[0]!.refuse(new ToolCallError('error', 'Could not rename the organization.'));
+    sent[0]!.refuse(new Refusal('error', 'Could not rename the organization.'));
     await settle();
     expect(draft('general')).toMatchObject({ version: 2, status: 'unsaved', error: 'Could not rename the organization.', stale: false });
     expect(draft('screens')?.version).toBe(2);
@@ -308,11 +308,11 @@ describe('a conflict', () => {
   });
 
   it('a record the store says is deleted is gone: its refusal is shown, and nothing more is saved', async () => {
-    const { module, sent, draft } = setup({ gone: (err) => err instanceof ToolCallError && err.message === 'playlist pls_1 not found' });
+    const { module, sent, draft } = setup({ gone: (refusal) => refusal.message === 'playlist pls_1 not found' });
     module.edit('pls_1', start('pls_1', 1), named('One'));
     void module.save('pls_1', '');
     await settle();
-    sent[0]!.refuse(new ToolCallError('not_found', 'playlist pls_1 not found'));
+    sent[0]!.refuse(new Refusal('not_found', 'playlist pls_1 not found'));
     await settle();
     expect(draft('pls_1')).toMatchObject({ gone: true, error: 'playlist pls_1 not found' });
     module.update('pls_1', named('Two'));
@@ -321,11 +321,11 @@ describe('a conflict', () => {
   });
 
   it('a not_found about a row the edit refers to (a deleted playlist) is shown, and a fixed save is sent (review of #153, 3)', async () => {
-    const { module, sent, draft } = setup({ gone: (err) => err instanceof ToolCallError && err.message === 'playlist pls_1 not found' });
+    const { module, sent, draft } = setup({ gone: (refusal) => refusal.message === 'playlist pls_1 not found' });
     module.edit('pls_1', start('pls_1', 1), named('One'));
     void module.save('pls_1', '');
     await settle();
-    sent[0]!.refuse(new ToolCallError('not_found', 'spot spt_9 not found'));
+    sent[0]!.refuse(new Refusal('not_found', 'spot spt_9 not found'));
     await settle();
     expect(draft('pls_1')).toMatchObject({ gone: false, error: 'spot spt_9 not found', status: 'unsaved' });
     module.update('pls_1', named('Two'));
@@ -339,7 +339,7 @@ describe('a conflict', () => {
     plain.module.open('dialog', start(null, null, 'Breakfast'));
     void plain.module.save('dialog', '');
     await settle();
-    plain.sent[0]!.refuse(new ToolCallError('not_found', 'playlist pls_deleted not found'));
+    plain.sent[0]!.refuse(new Refusal('not_found', 'playlist pls_deleted not found'));
     await settle();
     expect(plain.draft('dialog')).toMatchObject({ gone: false, error: 'playlist pls_deleted not found' });
     plain.module.update('dialog', named('Lunch'));
@@ -351,7 +351,7 @@ describe('a conflict', () => {
     creating.module.open('dialog', start(null, null, 'Breakfast'));
     void creating.module.save('dialog', '');
     await settle();
-    creating.sent[0]!.refuse(new ToolCallError('not_found', 'playlist pls_deleted not found'));
+    creating.sent[0]!.refuse(new Refusal('not_found', 'playlist pls_deleted not found'));
     await settle();
     expect(creating.draft('dialog')).toMatchObject({ gone: false, error: 'playlist pls_deleted not found' });
   });
@@ -359,7 +359,7 @@ describe('a conflict', () => {
   it('another refusal says why and is sent again only when asked', async () => {
     const { module, sent, draft } = setup();
     module.edit('spt_1', start('spt_1', 1), named('One'));
-    await Promise.all([module.save('spt_1', ''), settle().then(() => sent[0]!.refuse(new ToolCallError('error', 'Refused')))]);
+    await Promise.all([module.save('spt_1', ''), settle().then(() => sent[0]!.refuse(new Refusal('error', 'Refused')))]);
     expect(draft('spt_1')).toMatchObject({ status: 'unsaved', error: 'Refused', stale: false });
     void module.save('spt_1', '');
     await settle();
@@ -432,7 +432,7 @@ describe('a draft dropped and opened again at the same key (review of #153, 2)',
     await settle();
     expect(sent.map((s) => s.draft.edit.name)).toEqual(['First']);
 
-    sent[0]!.refuse(new ToolCallError('error', 'Refused'));
+    sent[0]!.refuse(new Refusal('error', 'Refused'));
     expect(await first).toMatchObject({ status: 'unsaved', pending: false, error: 'Refused', edit: { name: 'First' } });
     await settle();
     expect(sent.map((s) => s.draft.edit.name)).toEqual(['First', 'Second']);
@@ -461,9 +461,9 @@ describe('a draft dropped and opened again at the same key (review of #153, 2)',
     await settle();
     module.open('dialog', start(null, null, 'Second'));
     void module.save('dialog', '');
-    sent[0]!.refuse(new ToolCallError('error', 'Refused'));
+    sent[0]!.refuse(new Refusal('error', 'Refused'));
     await settle();
-    sent[1]!.refuse(new ToolCallError('error', 'Refused too'));
+    sent[1]!.refuse(new Refusal('error', 'Refused too'));
     await settle();
     expect(draft('dialog')).toMatchObject({ status: 'unsaved', pending: false, error: 'Refused too' });
     void module.save('dialog', '');
@@ -478,7 +478,7 @@ describe('a create', () => {
     module.open('dialog', start(null, null, 'Lunch'));
     void module.save('dialog', '');
     await settle();
-    sent[0]!.refuse(new ToolCallError('network', 'Could not reach SignForge.'));
+    sent[0]!.refuse(new Refusal('network', 'Could not reach SignForge.'));
     await settle();
     void module.save('dialog', '');
     await settle();

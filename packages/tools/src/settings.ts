@@ -1,31 +1,9 @@
-/**
- * Org settings (M3-42): defaults for new screens, the update window, how long a screen may go
- * unheard from before it alerts, who gets which alert, whether editors publish (Q7) and how long audit rows are kept (#41). One row per org (`org_settings`),
- * absent until an owner first sets something; every field reads as its default until then.
- */
-import type { DisplayHours } from '@signforge/contract';
 import { DEFAULT_AUDIT_RETENTION_DAYS, type OrgScope, type OrgSettings } from '@signforge/db';
 import { z } from 'zod';
-import { displayHours, ifVersion, locale, timezone, version } from './fields';
+import { displayHours, ifVersion, locale, timezone } from './fields';
 import { UNREACHABLE_AFTER_MS } from './screen-state';
 import { defineTool } from './tool';
-
-/** The alerts there are. `screen_offline` and `publish_finished` are sent (by email, to Slack and to the webhook); agents (Milestone 4) send `agent_refused`. */
-const ALERT_KINDS = ['screen_offline', 'publish_finished', 'agent_refused'] as const;
-type AlertKind = (typeof ALERT_KINDS)[number];
-
-/** Who gets an alert: owners, owners and editors, or every member. */
-const AUDIENCES = ['owners', 'editors', 'everyone'] as const;
-export type Audience = (typeof AUDIENCES)[number];
-
-/** Who gets the email, and which channels get it: `who` is for email only, as Slack and the webhook post to one place (#88). */
-const rule = z.object({
-  who: z.enum(AUDIENCES).describe('Who gets it by email'),
-  email: z.boolean().describe('Send it by email'),
-  slack: z.boolean().describe("Post it to the org's Slack channel, if one is set (set_slack_alert_channel)"),
-  webhook: z.boolean().describe("Send it to the org's webhook, if one is set (set_webhook_alert_channel)"),
-});
-type AlertRule = z.output<typeof rule>;
+import { auditRetentionDays, editorsPublish, outputs, rule, type AlertKind, type AlertRule, type SettingsView } from './outputs';
 
 const DEFAULT_ALERTS: Record<AlertKind, AlertRule> = {
   screen_offline: { who: 'editors', email: true, slack: false, webhook: false },
@@ -53,33 +31,6 @@ const updateWindow = z
 
 /** A screen syncs every 5 minutes, so less than that would alert on a sync that is merely due. */
 const unreachableAfterMinutes = z.number().int().min(5).max(1440).describe('Minutes without a heartbeat before a screen alerts, 5 to 1440');
-
-const editorsPublish = z.boolean().describe('Whether editors may publish to screens; when false, only owners publish');
-
-/**
- * At least a month, so an owner cannot clear the record of what was just done; at most ten years,
- * so the log D1 holds stays bounded.
- */
-const auditRetentionDays = z
-  .number()
-  .int()
-  .min(30)
-  .max(3650)
-  .describe('Days audit rows are kept before the daily job deletes them, 30 to 3650; 365 by default');
-
-const settingsView = z.object({
-  timezone: z.string().nullable().describe('Default time zone for new screens; null for none set'),
-  locale: z.string().nullable().describe('Default locale for new screens; null for the player default'),
-  displayHours: z.custom<DisplayHours>().nullable().describe('Default display hours for new screens; null for always on'),
-  updateWindow: z.object({ from: z.string(), to: z.string() }),
-  unreachableAfterMinutes: z.number(),
-  editorsPublish,
-  auditRetentionDays,
-  alerts: z.object({ screen_offline: rule, publish_finished: rule, agent_refused: rule }),
-  version: version.describe('1 until first set, then moves on with every change; pass it as ifVersion to update only what you read'),
-  updatedAt: z.number().nullable(),
-});
-type SettingsView = z.output<typeof settingsView>;
 
 /** The org's settings with every default filled in. */
 export async function orgSettings(org: OrgScope): Promise<SettingsView> {
@@ -115,7 +66,7 @@ const getOrgSettings = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({}),
-  output: z.object({ settings: settingsView }),
+  output: outputs.get_org_settings,
   example: {},
   handler: async ({ org }) => ({ settings: await orgSettings(org) }),
 });
@@ -143,7 +94,7 @@ const updateOrgSettings = defineTool({
       ifVersion,
     })
     .refine((v) => Object.keys(v).some((k) => k !== 'ifVersion'), 'nothing to change'),
-  output: z.object({ settings: settingsView }),
+  output: outputs.update_org_settings,
   example: { unreachableAfterMinutes: 15 },
   target: () => ({ kind: 'org', id: 'settings' }),
   handler: async ({ org, input, write }) => {

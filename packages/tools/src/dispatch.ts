@@ -48,9 +48,9 @@ import {
   type Scope,
   type ScreenNotifier,
   type ServiceName,
-  type ToolErrorCode,
   type ToolServices,
 } from './tool';
+import type { ToolErrorCode } from './outputs';
 
 /** Who is calling, resolved by the adapter (the `/api` route, `/admin`, later MCP and WebMCP). */
 export interface Caller<D extends DataScope = OrgScope> {

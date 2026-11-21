@@ -11,6 +11,7 @@ const asset = (over: Partial<AssetView> = {}): AssetView => ({
   size: 412_000,
   width: 1920,
   height: 1080,
+  durationMs: null,
   renditions: [],
   createdAt: 0,
   updatedAt: 0,

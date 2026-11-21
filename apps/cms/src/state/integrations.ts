@@ -5,7 +5,7 @@
  * The page's filter and search are in its URL.
  */
 import type { ConnectionView, ListedSource, SourceFormat, SourceKind } from '~/lib/integrations';
-import { callTool, isStale, toolMessage } from '~/lib/tools';
+import { callTool, isStale, Refusal, toolMessage } from '~/lib/tools';
 import { connectionKeys } from '~/queries/integrations';
 import { dataSourceKeys } from '~/queries/spots';
 import type { SliceCreator } from './store';
@@ -85,15 +85,9 @@ const initial: IntegrationsState = {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** The consent page in a `start_connection` output. */
-function authorizeUrlOf(output: unknown): string {
-  if (isRecord(output) && typeof output.authorizeUrl === 'string') return output.authorizeUrl;
-  throw new Error('SignForge answered without the provider’s page. Try again.');
-}
-
 /** The names of the spots a refused delete names (`details.spotIds`), from the page's list. */
 function blockedBy(err: unknown, source: ListedSource): string | null {
-  if (!(err instanceof Error) || !('details' in err) || !isRecord(err.details) || !Array.isArray(err.details.spotIds)) return null;
+  if (!(err instanceof Refusal) || !isRecord(err.details) || !Array.isArray(err.details.spotIds)) return null;
   const names = source.spots.map((s) => s.name);
   return `${source.name} is used by ${names.length ? names.join(', ') : `${err.details.spotIds.length} spots`}. Choose another source in those spots first.`;
 }
@@ -168,7 +162,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
     async connect(provider, connectionId) {
       integrations((s) => ({ ...s, connecting: { id: connectionId ?? provider, doing: 'connect' }, connectError: null }));
       try {
-        window.location.assign(authorizeUrlOf(await callTool('start_connection', { provider, ...(connectionId ? { connectionId } : {}) })));
+        window.location.assign((await callTool('start_connection', { provider, ...(connectionId ? { connectionId } : {}) })).authorizeUrl);
       } catch (err) {
         integrations((s) => ({ ...s, connecting: null, connectError: toolMessage(err) }));
       }

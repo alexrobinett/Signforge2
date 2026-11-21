@@ -24,13 +24,12 @@ import {
 } from '@signforge/contract';
 import { draftChanged, type OrgScope, type SpotRow } from '@signforge/db';
 import { z } from 'zod';
-import { draftOutput, id, idempotencyKey, ifVersion, name, orientation, version } from './fields';
-import { nextOutput, page, pageInput } from './paging';
+import { id, idempotencyKey, ifVersion, name, orientation } from './fields';
+import { page, pageInput } from './paging';
 import { loadOrg, previewInput, spotDraft } from './publishing';
 import { defineTool, notFound, ToolError } from './tool';
+import { outputs, SPOT_FITS, SPOT_KINDS, tableMapping, type SpotView } from './outputs';
 
-const KINDS = ['template', 'image', 'video', 'url'] as const;
-const FITS = ['cover', 'contain'] as const;
 /** A new image, video or URL spot's length when none is given. */
 const DEFAULT_MEDIA_MS = 10_000;
 
@@ -45,19 +44,6 @@ const data = z
   .describe("The template's field values by field name: the whole set, replacing the draft's. A field left out takes its default");
 const assets = z.record(z.string(), id('asset')).describe("Image fields to verified asset ids, by field name: the whole set, replacing the draft's");
 const url = z.string().refine(safeUrl, 'must be an https URL').describe('An https page on another origin');
-const column = z.string().min(1).max(200);
-const tableMapping = z
-  .object({
-    columns: z.record(z.string(), column).describe('Item property to the column that fills it, such as { "name": "Item", "price": "Price" }'),
-    filter: z
-      .object({ column, equals: z.string().max(200) })
-      .optional()
-      .describe('Only rows whose cell in column is equals, ignoring case'),
-    sort: z.object({ column, descending: z.boolean().optional() }).optional().describe("Rows in the order of a column; absent, the file's order"),
-  })
-  .describe(
-    `A list field filled from a csv or json-table source's rows (path ${TABLE_ROWS_PATH}): each row an item, at most the field's maxItems. Properties left out take their defaults`,
-  );
 const binding = z.object({
   dataSourceId: id('data source'),
   path: z
@@ -79,30 +65,9 @@ const kindInput = {
   assets: assets.optional(),
   bindings: bindings.optional(),
   assetId: id('asset').optional(),
-  fit: z.enum(FITS).optional(),
+  fit: z.enum(SPOT_FITS).optional(),
   url: url.optional(),
 };
-
-const spotOutput = z.object({
-  id: z.string(),
-  name: z.string(),
-  kind: z.enum(KINDS),
-  durationMs: z.number(),
-  templateVersionId: z.string().nullable().describe('Template spots: the template version it plays'),
-  data: z.record(z.string(), z.unknown()).nullable().describe('Template spots: field values by field name'),
-  assets: z.record(z.string(), z.string()).nullable().describe('Template spots: image fields to asset ids'),
-  bindings: z
-    .record(z.string(), z.object({ dataSourceId: z.string(), path: z.string(), table: tableMapping.optional() }))
-    .nullable()
-    .describe('Template spots: fields bound to a data source, as update_spot takes them'),
-  assetId: z.string().nullable().describe('Image and video spots'),
-  fit: z.enum(FITS).nullable().describe('Image and video spots'),
-  url: z.string().nullable().describe('URL spots'),
-  version: version.describe('Moves on with every edit of the draft; pass it as ifVersion to update only what you read'),
-  ...draftOutput,
-});
-export type SpotView = z.infer<typeof spotOutput>;
-const spotResult = z.object({ spot: spotOutput });
 
 /** A JSON column as the repository stored it. */
 function parsed<T>(text: string | null): T | null {
@@ -267,7 +232,7 @@ const listSpots = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ spots: z.array(spotOutput), next: nextOutput }),
+  output: outputs.list_spots,
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = page(await org.spots.list(), (s) => [-s.updatedAt, s.id], input);
@@ -282,7 +247,7 @@ const getSpot = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ spotId: id('spot') }),
-  output: spotResult,
+  output: outputs.get_spot,
   example: { spotId: 'spt_example' },
   handler: async ({ org, input }) => ({ spot: spotView(await requireSpot(org, input.spotId)) }),
 });
@@ -297,13 +262,13 @@ const createSpot = defineTool({
   idempotent: true,
   input: z.object({
     name: name('spot'),
-    kind: z.enum(KINDS),
+    kind: z.enum(SPOT_KINDS),
     durationMs: durationMs.optional(),
     templateVersionId: id('template version').optional(),
     ...kindInput,
     idempotencyKey,
   }),
-  output: spotResult,
+  output: outputs.create_spot,
   example: { name: 'Fresh picked', kind: 'template', templateVersionId: 'tpv_example', data: { title: 'Fresh picked' } },
   target: (_input, output) => ({ kind: 'spot', id: output.spot.id }),
   handler: async ({ org, input, write }) => {
@@ -357,7 +322,7 @@ const updateSpot = defineTool({
     ...kindInput,
     ifVersion,
   }),
-  output: spotResult,
+  output: outputs.update_spot,
   example: { spotId: 'spt_example', name: 'Fresh picked', durationMs: 12_000 },
   target: (input) => ({ kind: 'spot', id: input.spotId }),
   handler: async ({ org, input, write }) => {
@@ -396,18 +361,7 @@ const getSpotPreview = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ orientation, templateVersionId: id('template version').optional(), brandKitId: id('brand kit').optional() }),
-  output: z.object({
-    preview: z
-      .looseObject({
-        templates: z.record(z.string(), z.unknown()),
-        files: z.record(z.string(), z.object({ size: z.number(), type: z.string() })),
-        dataSources: z.array(z.unknown()),
-      })
-      .describe("A compiler input without its screen and content: templates, files, dataSources and brand (the chosen kit as the screen's)"),
-    brandKitId: z.string().nullable().describe('The kit the preview wears, or null for none'),
-    problems: z.array(z.string()),
-    timezone: z.string().nullable().describe("The organization's time zone for new screens, or null for none set: the probe screen's"),
-  }),
+  output: outputs.get_spot_preview,
   example: { orientation: 'landscape', templateVersionId: 'tpv_example', brandKitId: 'bk_example' },
   handler: async ({ org, input }) => {
     if (input.templateVersionId) await requireVersion(org, input.templateVersionId);

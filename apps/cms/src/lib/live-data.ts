@@ -18,41 +18,17 @@ import {
   type TemplateManifest,
   type WEATHER_UNITS,
 } from '@signforge/contract';
+import type { ToolOutput } from '@signforge/tools/outputs';
 import { ago } from './screen-status';
 
 /** One data source, as the data source tools show it. Its feed URL is sealed and never shown. */
-export interface DataSourceView {
-  id: string;
-  name: string;
-  format: 'json' | 'ical' | 'rss' | TableFormat | 'provider';
-  /** A json-table source: the path to its list of objects. */
-  rowsPath: string | null;
-  refreshS: number;
-  horizonDays: number | null;
-  failures: number;
-  lastError: string | null;
-  version: number;
-}
+export type DataSourceView = ToolOutput<'get_data_source'>['dataSource'];
 
 /** `get_data_source`'s latest snapshot: what a spot bound to the source shows. */
-export interface SnapshotView {
-  id: string;
-  version: number;
-  fetchedAt: string;
-  checkedAt: string;
-  data: unknown;
-}
+export type SnapshotView = NonNullable<ToolOutput<'get_data_source'>['snapshot']>;
 
 /** A `find_places` result. */
-export interface PlaceView {
-  id: number;
-  name: string;
-  region: string;
-  country: string;
-  latitude: number;
-  longitude: number;
-  timezone: string;
-}
+export type PlaceView = ToolOutput<'find_places'>['places'][number];
 
 /** A spot's binding as the spot tools take it. */
 export type BindingInput = DraftBinding;

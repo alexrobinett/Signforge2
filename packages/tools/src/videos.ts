@@ -11,10 +11,11 @@
 import { VIDEO_SPEC } from '@signforge/contract';
 import { checkVideo, EXPORT_ADVICE } from '@signforge/media-check';
 import { z } from 'zod';
-import { assetOutput, assetView, requireAsset, SHA256 } from './assets';
+import { assetView, requireAsset, SHA256 } from './assets';
 import { id, idempotencyKey, name } from './fields';
 import { orgBlobKey, uploadKey } from './r2';
 import { defineTool, ToolError } from './tool';
+import { outputs, VIDEO_TYPES } from './outputs';
 
 /**
  * Every part but the last is this size, as R2 requires (at least 5 MiB, all but the last equal).
@@ -23,10 +24,6 @@ import { defineTool, ToolError } from './tool';
 const VIDEO_PART_BYTES = 16 * 1024 * 1024;
 /** How long the part URLs work. Each part must start before then; a 500 MB file at 5 Mbit/s takes about 15 minutes. */
 const VIDEO_UPLOAD_URL_SECONDS = 60 * 60;
-const VIDEO_TYPES = ['video/mp4'] as const;
-
-const partOutput = z.object({ partNumber: z.number(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), size: z.number() });
-
 const createVideoUpload = defineTool({
   name: 'create_video_upload',
   description: `Start uploading a video. It must already be one screens play: H.264 MP4, Baseline, Main or High profile up to level 4.2, 8-bit 4:2:0, progressive, at most 1920x1080 (either way round), ${VIDEO_SPEC.maxFps} fps, ${VIDEO_SPEC.maxBitrate / 1e6} Mbit/s and ${VIDEO_SPEC.maxBytes / 1e6} MB; the CMS checks this first with @signforge/media-check. Pass the file's SHA-256 and byte size. Returns { asset, upload }: the new asset, pending, and a multipart upload: PUT each part (bytes [ (partNumber-1)*partBytes, +size )) to its URL with the given headers before expiresAt, keep each response's ETag, then call finalize_video_upload with uploadId and the ETags. upload is null when the org already holds the file; call finalize_video_upload with just the assetId. Pass an idempotencyKey so a retry cannot create the asset twice.`,
@@ -46,13 +43,7 @@ const createVideoUpload = defineTool({
       .max(VIDEO_SPEC.maxBytes, `a video may be at most ${VIDEO_SPEC.maxBytes / 1e6} MB`),
     idempotencyKey,
   }),
-  output: z.object({
-    asset: assetOutput,
-    upload: z
-      .object({ uploadId: z.string(), partBytes: z.number(), parts: z.array(partOutput), expiresAt: z.number() })
-      .nullable()
-      .describe('Null when the org already holds the file'),
-  }),
+  output: outputs.create_video_upload,
   example: { name: 'Summer promo', sha256: '1'.repeat(64), type: 'video/mp4', size: 48_000_000 },
   target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
   handler: async ({ org, blobs, input, write, services: { uploads } }) => {
@@ -115,7 +106,7 @@ const finalizeVideoUpload = defineTool({
       .max(10_000)
       .optional(),
   }),
-  output: z.object({ asset: assetOutput, changed: z.boolean() }),
+  output: outputs.finalize_video_upload,
   example: { assetId: 'ast_example', uploadId: 'upload-id', parts: [{ partNumber: 1, etag: '"etag"' }] },
   target: (input) => ({ kind: 'asset', id: input.assetId }),
   handler: async ({ org, blobs, input, write }) => {

@@ -4,7 +4,7 @@
  * Writes go from the browser (src/state/settings.ts).
  */
 import { createServerFn } from '@tanstack/react-start';
-import type { AlertChannel, AlertDelivery, Invitation, Member, OrgSettings, SessionRow } from '~/lib/settings';
+import type { Invitation, Member, SessionRow } from '~/lib/settings';
 import { callApi } from './api.server';
 import type { Role } from './shell.functions';
 import { inOrg, tool } from './tools.server';
@@ -17,9 +17,7 @@ async function read<T>(path: `/api/${string}`): Promise<T> {
   return body;
 }
 
-export const getOrgSettings = createServerFn({ method: 'GET' }).handler(() =>
-  inOrg(async () => (await tool<{ settings: OrgSettings }>('get_org_settings', {})).settings, null),
-);
+export const getOrgSettings = createServerFn({ method: 'GET' }).handler(() => inOrg(async () => (await tool('get_org_settings', {})).settings, null));
 
 /**
  * The Notifications page: the alert rules, the Slack and webhook channels, the 20 newest deliveries,
@@ -28,9 +26,9 @@ export const getOrgSettings = createServerFn({ method: 'GET' }).handler(() =>
 export const getNotifications = createServerFn({ method: 'GET' }).handler(() =>
   inOrg(async () => {
     const [{ settings }, channels, { deliveries }, { members }] = await Promise.all([
-      tool<{ settings: OrgSettings }>('get_org_settings', {}),
-      tool<{ slack: AlertChannel | null; webhook: AlertChannel | null }>('get_alert_channels', {}),
-      tool<{ deliveries: AlertDelivery[] }>('list_alert_deliveries', { limit: 20 }),
+      tool('get_org_settings', {}),
+      tool('get_alert_channels', {}),
+      tool('list_alert_deliveries', { limit: 20 }),
       read<{ members: Member[] }>('/api/auth/organization/list-members?limit=200'),
     ]);
     const names: Record<string, string> = Object.fromEntries(members.map((m) => [m.userId, m.user.name || m.user.email]));
