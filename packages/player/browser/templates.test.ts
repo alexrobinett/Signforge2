@@ -59,6 +59,12 @@ const cases: Record<string, { a: Data; b: Data; assetsA?: Record<string, string>
     b: { events: [{ title: 'Lunch', start: at(-0.5), end: at(1), allDay: false, location: 'Canteen' }], rows: 3 },
   },
   clock: { a: { greeting: 'Welcome', message: 'Doors open at 6', seconds: true }, b: { hour24: true } },
+  'info-frame': {
+    a: { look: 'night', rail: 'left', items: [{ title: 'Ferry runs late', published: '', source: '' }] },
+    b: { look: 'pop', rail: 'off', ticker: 'top', showForecast: false, items: [] },
+    assetsA: { photo: '#963' },
+    assetsB: { photo: '#369' },
+  },
   'room-status': {
     a: { look: 'corporate', events: [{ title: 'Design review', start: at(-0.5), end: at(0.5), allDay: false, organizer: 'Priya Shah' }] },
     b: { look: 'pop', showSchedule: false, events: [{ title: 'Hiring sync', start: at(1), end: at(2), allDay: false, organizer: '' }] },
@@ -103,6 +109,18 @@ const DEMO_KIT: BrandColors = {
   muted: '#a5b4cb',
 };
 
+/** A light kit: white ground, dark text, an amber accent. */
+const LIGHT_KIT: BrandColors = {
+  primary: '#1d4ed8',
+  onPrimary: '#ffffff',
+  accent: '#f59e0b',
+  onAccent: '#000000',
+  background: '#ffffff',
+  surface: '#f1f5f9',
+  text: '#0f172a',
+  muted: '#475569',
+};
+
 /** No kit, the demo kit and `light`: the kits a template's painted contrast is measured under. */
 const noDemoAndLight = (light: BrandColors): [string, FrameTheme | undefined][] => [
   ['no kit', undefined],
@@ -133,6 +151,7 @@ interface Host {
   /**
    * With `sampled`, each image goes with its sample (`sampleAsset`), as a screen sends an image
    * uploaded with one; `'broken'`, with a PNG header and nothing that decodes. A play lasts 8 s unless `durationMs` says otherwise.
+   * An asset under `$brand.logo` is the kit's logo, sent in `theme`.
    */
   init(
     frame: string,
@@ -241,18 +260,19 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
             sc.getContext('2d')!.putImageData(new ImageData(sample.data, sample.width, sample.height), 0, 0);
             blobs[key] = await png(sc);
           }
+          const { '$brand.logo': logo, ...images } = blobs;
           const init = {
             sf,
             type: 'init',
             data,
-            assets: blobs,
+            assets: images,
             durationMs,
             orientation,
             viewport: size,
             timezone,
             locale: 'en-US',
             clock: { now, offsetMs: now - Date.now() },
-            theme,
+            theme: theme && logo ? { ...theme, logo: { onDark: logo } } : theme,
           };
           w.frames_[frame]!.contentWindow!.postMessage(init, '*');
         },
@@ -367,8 +387,12 @@ async function paintedContrast(page: Page, f: Frame, scope = '.info'): Promise<s
       const out: string[] = [];
       for (const t of texts) {
         const ratios: number[] = [];
-        for (let y = t.rect.y; y < t.rect.y + t.rect.h; y++)
-          for (let x = t.rect.x; x < t.rect.x + t.rect.w; x++) {
+        // Only what is on the screenshot: a crawl runs past its card, and its second copy may not have come in yet.
+        const [x0, x1] = [Math.max(0, t.rect.x), Math.min(a.w, t.rect.x + t.rect.w)];
+        const [y0, y1] = [Math.max(0, t.rect.y), Math.min(a.d.length / 4 / a.w, t.rect.y + t.rect.h)];
+        if (x0 >= x1 || y0 >= y1) continue;
+        for (let y = y0; y < y1; y++)
+          for (let x = x0; x < x1; x++) {
             const i = (y * a.w + x) * 4;
             if (a.d[i] === b.d[i] && a.d[i + 1] === b.d[i + 1] && a.d[i + 2] === b.d[i + 2]) continue;
             const [hi, lo] = [lum(a.d, i), lum(b.d, i)].sort((p, q) => q - p);
@@ -1582,21 +1606,11 @@ describe('room status (#199)', () => {
       expect(found).toEqual([]);
     }, 300_000);
 
-  const lightKit: BrandColors = {
-    primary: '#1d4ed8',
-    onPrimary: '#ffffff',
-    accent: '#f59e0b',
-    onAccent: '#000000',
-    background: '#ffffff',
-    surface: '#f1f5f9',
-    text: '#0f172a',
-    muted: '#475569',
-  };
   for (const orientation of ['landscape', 'portrait'] as const)
     it(`every text reads as painted in every look, with no kit, the demo kit and a light kit, ${orientation}`, async () => {
       const r = await room(orientation);
       const found: string[] = [];
-      for (const [kit, theme] of noDemoAndLight(lightKit))
+      for (const [kit, theme] of noDemoAndLight(LIGHT_KIT))
         for (const look of looks)
           for (const [day, data] of days)
             for (const set of day === 'empty' ? [allOn] : [allOn, allOff]) {
@@ -1670,6 +1684,356 @@ describe('room status (#199)', () => {
     await r.hst.page.emulateMedia({ reducedMotion: 'reduce' });
     for (const look of looks) {
       const f = await r.show({ look, events: today });
+      await r.hst.post('fresh', 'play');
+      expect(await f.evaluate(() => document.getAnimations().length), look).toBe(0);
+    }
+  });
+});
+
+describe('info frame (#201)', () => {
+  const looks = ['pop', 'poster', 'night', 'corporate'] as const;
+  const t = () => built.get('info-frame')!;
+  const demo: FrameTheme = { colors: DEMO_KIT, shape: 'soft', fonts: {} };
+  const headlines = (n: number, title: string) => Array.from({ length: n }, (_, i) => ({ title: `${title} ${i + 1}`, published: '', source: '' }));
+  const news = { items: headlines(3, 'Council approves the riverside park') };
+  /** Every text field at its `maxLength`, figures at their widest, and headlines longer than feeds send. */
+  const sentence = 'Any large coffee with a fresh almond croissant or a cinnamon bun, at all six Harbor stores, while they last. ';
+  const longest: Data = {
+    captionTitle: sentence.slice(0, 64),
+    captionLine: sentence.slice(0, 80),
+    price: '$1,299.9',
+    city: 'Llanfairpwllgwyngyllgogo',
+    crawlLabel: 'Neighborhood',
+    temp: -104,
+    high: 118,
+    low: -100,
+    code: 95,
+    ...Object.fromEntries(
+      [1, 2, 3].flatMap((i) => [
+        [`day${i}High`, 118],
+        [`day${i}Low`, -100],
+        [`day${i}Code`, 85],
+      ]),
+    ),
+    items: headlines(30, sentence.repeat(2).slice(0, 190)),
+  };
+
+  /**
+   * One frame at a screen's own size; `show` inits it with the template's defaults under `data`, a
+   * photo, and the demo kit with a logo unless `theme` says otherwise, and waits for ready.
+   */
+  async function frame(orientation: Orientation = 'landscape') {
+    const hst = await host(orientation, true);
+    await hst.open('fresh', t().html);
+    let inits = 0;
+    return {
+      hst,
+      async show(data: Data, theme: FrameTheme | null = demo, now = NOW, timezone = 'UTC') {
+        await hst.init('fresh', spotData(t().manifest, data), { photo: '#963', '$brand.logo': '#fff' }, now, theme ?? undefined, false, 15_000, timezone);
+        await hst.waitFor('fresh', 'ready', ++inits);
+        return hst.page.mainFrame().childFrames()[0]!;
+      },
+    };
+  }
+
+  const toggles = ['showClock', 'showWeather', 'showForecast', 'showCaption', 'showLogo'];
+  /** Every rail, crawl and toggle setting: 3 × 3 × 32. */
+  const settings: Data[] = ['right', 'left', 'off'].flatMap((rail) =>
+    ['bottom', 'top', 'off'].flatMap((ticker) =>
+      Array.from({ length: 32 }, (_, bits) => ({ rail, ticker, ...Object.fromEntries(toggles.map((k, i) => [k, Boolean(bits & (1 << i))])) })),
+    ),
+  );
+  const named = (set: Data) =>
+    [`rail ${set.rail}`, `crawl ${set.ticker}`, ...toggles.filter((k) => !set[k]).map((k) => `${k.slice(4).toLowerCase()} off`)].join(', ');
+  /** Faults of the layout: the logo and the weather glyphs count as text, and every text stays on its card. */
+  const layoutFaults = (f: Frame) => faults(f, { marks: '.logo, .glyph', inside: '.card' });
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    for (const look of looks)
+      it(`${look}, ${orientation}: in every rail, crawl and toggle setting, at the longest copy, every text fits and nothing overlaps`, async () => {
+        const r = await frame(orientation);
+        const found: string[] = [];
+        for (const set of settings) for (const fault of await layoutFaults(await r.show({ look, ...longest, ...set }))) found.push(`${named(set)}: ${fault}`);
+        expect(found).toEqual([]);
+      }, 600_000);
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`the defaults fit at the look's own size, nothing shrunk, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const look of looks) {
+        const f = await r.show({ look, ...news });
+        for (const fault of await layoutFaults(f)) found.push(`${look}: ${fault}`);
+        const shrunk = await f.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('[style*="--if-"]')]
+            .filter((el) => ['--if-fit', '--if-title-fit'].some((v) => el.style.getPropertyValue(v) && Number(el.style.getPropertyValue(v)) !== 1))
+            .map((el) => el.className),
+        );
+        for (const el of shrunk) found.push(`${look}: ${el} is shrunk`);
+      }
+      expect(found).toEqual([]);
+    }, 120_000);
+
+  /** Each rail and crawl place with everything on, the chip and the corner logo, each toggle off alone, and all off. */
+  const contrastSets: Data[] = [
+    { rail: 'right', ticker: 'bottom' },
+    { rail: 'left', ticker: 'top' },
+    { rail: 'off', ticker: 'bottom' },
+    ...toggles.map((k) => ({ rail: 'right', ticker: 'bottom', [k]: false })),
+    { rail: 'right', ticker: 'bottom', ...Object.fromEntries(toggles.map((k) => [k, false])) },
+  ];
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`every text reads as painted in every look and layout, with no kit, the demo kit and a light kit, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const [kit, theme] of noDemoAndLight(LIGHT_KIT))
+        for (const look of looks)
+          for (const set of contrastSets) {
+            const f = await r.show({ look, ...news, ...set }, theme ?? null);
+            for (const l of await paintedContrast(r.hst.page, f, '.stage'))
+              found.push(`${look}, ${kit}, ${named({ ...Object.fromEntries(toggles.map((k) => [k, true])), ...set })}: ${l}`);
+          }
+      expect(found).toEqual([]);
+    }, 600_000);
+
+  it("keeps the canvas's rules: a logo-only rail is dropped, the clock and the weather go onto the photo without one, and type grows into what is left", async () => {
+    for (const orientation of ['landscape', 'portrait'] as const) {
+      const r = await frame(orientation);
+      const read = (f: Frame) =>
+        f.evaluate(() => {
+          const box = (sel: string) => document.querySelector(sel)?.getBoundingClientRect();
+          const size = (sel: string) => Number.parseFloat(getComputedStyle(document.querySelector(sel)!).fontSize);
+          return {
+            rail: document.documentElement.dataset.rail,
+            ticker: document.documentElement.dataset.ticker,
+            parts: ['.rail', '.rail-logo', '.chip', '.chip-time', '.chip-weather', '.corner-logo', '.ticker', '.forecast', '.caption'].filter((s) =>
+              document.querySelector(s),
+            ),
+            clock: document.querySelector('.rail-time') ? size('.rail-time') : 0,
+            temp: document.querySelector('.now .temp-now') ? size('.now .temp-now') : 0,
+            railAt: box('.rail') && { x: box('.rail')!.x - box('.panel')!.x, y: box('.rail')!.y - box('.panel')!.y },
+            tickerAbove: box('.ticker') ? box('.ticker')!.y < box('.main')!.y : undefined,
+          };
+        });
+      for (const look of looks) {
+        const where = `${look}, ${orientation}`;
+        const all = await read(await r.show({ look, ...news }));
+        expect(all, where).toMatchObject({
+          rail: 'right',
+          ticker: 'bottom',
+          parts: ['.rail', '.rail-logo', '.ticker', '.forecast', '.caption'],
+          tickerAbove: false,
+        });
+        // The rail is after the photo: to its right in landscape, under it in portrait. Left is before it.
+        expect(orientation === 'landscape' ? all.railAt!.x > 0 : all.railAt!.y > 0, where).toBe(true);
+        const left = await read(await r.show({ look, ...news, rail: 'left', ticker: 'top' }));
+        expect(orientation === 'landscape' ? left.railAt!.x < 0 : left.railAt!.y < 0, where).toBe(true);
+        expect(left.tickerAbove, where).toBe(true);
+        expect((await read(await r.show({ look, ...news, showClock: false, showWeather: false }))).parts, `${where}, logo only`).toEqual([
+          '.corner-logo',
+          '.ticker',
+          '.caption',
+        ]);
+        expect((await read(await r.show({ look, ...news, rail: 'off' }))).parts, `${where}, rail off`).toEqual([
+          '.chip',
+          '.chip-time',
+          '.chip-weather',
+          '.corner-logo',
+          '.ticker',
+          '.caption',
+        ]);
+        expect((await read(await r.show({ look, ...news, rail: 'off', showWeather: false }))).parts, `${where}, rail off`).toEqual([
+          '.chip',
+          '.chip-time',
+          '.corner-logo',
+          '.ticker',
+          '.caption',
+        ]);
+        // No headlines, or no kit logo: what is empty is off.
+        expect((await read(await r.show({ look, ticker: 'top' }, null))).parts, `${where}, nothing to crawl`).toEqual(['.rail', '.forecast', '.caption']);
+        expect((await read(await r.show({ look, ...news, ticker: 'off' }))).ticker, where).toBe('off');
+        expect((await read(await r.show({ look, ...news, showForecast: false }))).temp, `${where}: the weather grows without the forecast`).toBeGreaterThan(
+          all.temp,
+        );
+        expect((await read(await r.show({ look, ...news, showWeather: false }))).clock, `${where}: the clock grows without the weather`).toBeGreaterThan(
+          all.clock,
+        );
+      }
+    }
+  }, 300_000);
+
+  it('marks each toggle on the root and removes what is off', async () => {
+    const r = await frame();
+    const read = (f: Frame) =>
+      f.evaluate(() => ({
+        marks: ['clock', 'weather', 'forecast', 'caption', 'logo'].map((m) => `${m}=${document.documentElement.getAttribute(`data-${m}`)}`),
+        present: ['.rail-time', '.weather', '.forecast', '.caption', '.logo'].filter((s) => document.querySelector(s)),
+      }));
+    for (const look of looks) {
+      expect(await read(await r.show({ look, ...news })), look).toEqual({
+        marks: ['clock=on', 'weather=on', 'forecast=on', 'caption=on', 'logo=on'],
+        present: ['.rail-time', '.weather', '.forecast', '.caption', '.logo'],
+      });
+      expect(await read(await r.show({ look, ...news, showClock: false, showForecast: false, showCaption: false, showLogo: false })), look).toEqual({
+        marks: ['clock=off', 'weather=on', 'forecast=off', 'caption=off', 'logo=off'],
+        present: ['.weather'],
+      });
+    }
+  });
+
+  it('shows the time and date from the screen clock, in 12 or 24 hours, and the next three days from its zone', async () => {
+    const r = await frame();
+    const read = (f: Frame) =>
+      f.evaluate(() => ({
+        time: document.querySelector('.rail-time .time')!.textContent,
+        ap: document.querySelector('.rail-time .ap')?.textContent ?? null,
+        date: document.querySelector('.date')!.textContent,
+        days: [...document.querySelectorAll('.dname')].map((d) => d.textContent),
+      }));
+    expect(await read(await r.show({ look: 'pop' }))).toEqual({ time: '3:00', ap: null, date: 'Tuesday, November 17', days: ['Wed', 'Thu', 'Fri'] });
+    expect(await read(await r.show({ look: 'corporate' }))).toEqual({ time: '3:00', ap: 'PM', date: 'Tuesday, November 17', days: ['Wed', 'Thu', 'Fri'] });
+    expect(await read(await r.show({ look: 'corporate', hour24: true }))).toEqual({
+      time: '15:00',
+      ap: '',
+      date: 'Tuesday, November 17',
+      days: ['Wed', 'Thu', 'Fri'],
+    });
+    expect(await read(await r.show({ look: 'night', hour24: true }))).toEqual({ time: '15:00', ap: null, date: 'Tue, Nov 17', days: ['Wed', 'Thu', 'Fri'] });
+    // 22:30 on Tuesday in New York, then 0:30 on Wednesday: the days follow the screen's zone, not UTC's.
+    const ny = (at: string) => r.show({ look: 'pop', hour24: true }, demo, Date.parse(at), 'America/New_York');
+    expect(await read(await ny('2026-11-18T03:30:00Z'))).toEqual({ time: '22:30', ap: null, date: 'Tuesday, November 17', days: ['Wed', 'Thu', 'Fri'] });
+    expect(await read(await ny('2026-11-18T05:30:00Z'))).toEqual({ time: '00:30', ap: null, date: 'Wednesday, November 18', days: ['Thu', 'Fri', 'Sat'] });
+  });
+
+  it('turns the minute with the screen clock, writing the time at most once a second', async () => {
+    const hst = await host('landscape', true);
+    // The frame's clock is Playwright's, stepped by hand: no test time passes on its own.
+    await hst.page.clock.install({ time: NOW });
+    await hst.page.clock.pauseAt(NOW);
+    await hst.open('fresh', t().html);
+    // 15:00:59.5 on the screen.
+    await hst.init('fresh', spotData(t().manifest, { look: 'corporate', ...news }), { photo: '#963' }, NOW + 59_500, undefined, false, 300_000);
+    const f = hst.page.mainFrame().childFrames()[0]!;
+    const ready = async () => (await hst.page.evaluate(() => (window as unknown as { msgs: Record<string, string[]> }).msgs.fresh!)).includes('ready');
+    for (let i = 0; i < 500 && !(await ready()); i++) await hst.page.clock.runFor(16);
+    expect(await f.evaluate(() => document.querySelector('.rail-time .time')!.textContent)).toBe('3:00');
+    await hst.post('fresh', 'play');
+    await f.evaluate(() => {
+      const w = window as unknown as { writes: number };
+      w.writes = 0;
+      new MutationObserver((m) => (w.writes += m.length)).observe(document.querySelector('.rail-time')!, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+    });
+    const step = async (ms: number) => {
+      await hst.page.clock.runFor(ms);
+      return f.evaluate(() => [document.querySelector('.rail-time .time')!.textContent, (window as unknown as { writes: number }).writes]);
+    };
+    // The minute turns half a second in; then nothing until the next one, a minute on.
+    expect(await step(600)).toEqual(['3:01', 1]);
+    expect(await step(59_000)).toEqual(['3:01', 1]);
+    expect(await step(1_000)).toEqual(['3:02', 2]);
+  });
+
+  it('names the weather from its code, day and night, and each look draws the forecast its way', async () => {
+    const r = await frame();
+    const read = (f: Frame) =>
+      f.evaluate(() => ({
+        line: document.querySelector('.wline')!.textContent,
+        cond: document.querySelector('.cond')?.textContent ?? null,
+        glyph: Boolean(document.querySelector('.now .glyph svg')),
+        days: [...document.querySelectorAll('.day')].map((d) => d.textContent),
+      }));
+    const week = { day1Code: 0, day2Code: 63, day3Code: 75 };
+    expect(await read(await r.show({ look: 'pop', ...week }))).toEqual({
+      line: 'Partly cloudy · H 78° L 61°',
+      cond: null,
+      glyph: true,
+      days: ['Wed75°60°', 'Thu70°57°', 'Fri73°58°'],
+    });
+    expect(await read(await r.show({ look: 'poster', code: 0, isDay: 0, ...week }))).toEqual({
+      line: 'High 78° · low 61° · Atlanta',
+      cond: 'Clear night',
+      glyph: false,
+      days: ['WedClear75° / 60°', 'ThuRain70° / 57°', 'FriSnow73° / 58°'],
+    });
+    expect(await read(await r.show({ look: 'night', code: 95, ...week }))).toEqual({
+      line: 'Thunderstorm · h78 l61',
+      cond: null,
+      glyph: true,
+      days: ['Wed75°', 'Thu70°', 'Fri73°'],
+    });
+    expect(await read(await r.show({ look: 'corporate', code: 71, ...week }))).toEqual({
+      line: 'Snow · High 78° · Low 61°',
+      cond: null,
+      glyph: true,
+      days: ['Wed75°60°', 'Thu70°57°', 'Fri73°58°'],
+    });
+  });
+
+  it('crawls every headline at the look speed times the spot speed', async () => {
+    const r = await frame();
+    const read = (f: Frame) =>
+      f.evaluate(() => {
+        const strip = document.querySelector<HTMLElement>('.lk-crawl')!;
+        return { s: Number.parseFloat(strip.style.getPropertyValue('--lk-crawl-s')), text: strip.firstElementChild!.textContent };
+      });
+    const normal = await read(await r.show({ look: 'poster', ...news }));
+    expect(normal.text).toBe('Council approves the riverside park 1  —  Council approves the riverside park 2  —  Council approves the riverside park 3');
+    expect((await read(await r.show({ look: 'poster', ...news, crawlSpeed: 'slow' }))).s / normal.s).toBeCloseTo(1 / 0.7, 2);
+    expect((await read(await r.show({ look: 'poster', ...news, crawlSpeed: 'fast' }))).s / normal.s).toBeCloseTo(1 / 1.4, 2);
+  });
+
+  it("keeps Poster's photo unpainted until play, under its ink block, and every other look's painted at ready", async () => {
+    const r = await frame();
+    const hidden = (f: Frame) => f.evaluate(() => getComputedStyle(document.querySelector('.photo')!).visibility === 'hidden');
+    for (const look of looks) expect(await hidden(await r.show({ look })), look).toBe(look === 'poster');
+    const f = await r.show({ look: 'poster' });
+    await r.hst.post('fresh', 'play');
+    await f.waitForFunction(() => getComputedStyle(document.querySelector('.photo')!).visibility === 'visible');
+  });
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`every element has an intro and an outro timed from --sf-duration, moving only transform and opacity, within the cap; in ${orientation}, ${orientation === 'portrait' ? 'only the crawl loops' : 'the ambient motion loops'}`, async () => {
+      const r = await frame(orientation);
+      const durationMs = 13_000;
+      for (const [i, look] of looks.entries()) {
+        await r.hst.init('fresh', spotData(t().manifest, { look, ...longest }), { photo: '#963', '$brand.logo': '#fff' }, NOW, demo, false, durationMs);
+        await r.hst.waitFor('fresh', 'ready', i + 1);
+        const f = r.hst.page.mainFrame().childFrames()[0]!;
+        const seen = await f.evaluate((durationMs) => {
+          const props = new Set<string>();
+          const moving = new Set<Element>();
+          const looping = new Set<string>();
+          const unended: string[] = [];
+          for (const a of document.getAnimations()) {
+            const effect = a.effect as KeyframeEffect;
+            for (const k of effect.getKeyframes())
+              for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
+            moving.add(effect.target!);
+            if (effect.getComputedTiming().iterations === Number.POSITIVE_INFINITY) looping.add(effect.target!.className);
+          }
+          for (const el of document.querySelectorAll('.lk-text, .lk-fade, .lk-badge, .lk-photo, .lk-cover, .lk-draw')) {
+            const ends = el.getAnimations().map((a) => Math.round(a.effect!.getComputedTiming().endTime as number));
+            if (ends.length && !ends.includes(durationMs)) unended.push(el.className);
+          }
+          return { props: [...props].sort(), moving: moving.size, looping: [...looping].sort(), unended };
+        }, durationMs);
+        expect(seen.props, look).toEqual(['opacity', 'transform']);
+        expect(seen.moving, look).toBeLessThanOrEqual(50);
+        expect(seen.unended, look).toEqual([]);
+        if (orientation === 'portrait') expect(seen.looping, look).toEqual(['lk-crawl']);
+        else expect(seen.looping.length, look).toBeGreaterThan(1);
+      }
+    });
+
+  it('with reduced motion, shows the final frame with nothing animating, the crawl one line', async () => {
+    const r = await frame();
+    await r.hst.page.emulateMedia({ reducedMotion: 'reduce' });
+    for (const look of looks) {
+      const f = await r.show({ look, ...news });
       await r.hst.post('fresh', 'play');
       expect(await f.evaluate(() => document.getAnimations().length), look).toBe(0);
     }
