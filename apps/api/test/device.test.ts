@@ -1,6 +1,6 @@
 // The device tree against local D1 and R2: credentials, the three content routes, and what a
 // screen may not reach.
-import type { ScreenManifest } from '@signforge/contract';
+import { MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
@@ -15,7 +15,7 @@ const sha = (c: string) => c.repeat(64);
 /** Enough of a manifest for the routes: they read its files, templates and data sources. */
 function manifest(id: string, files: string[], extra: Partial<ScreenManifest> = {}): ScreenManifest {
   return {
-    schema: 3,
+    schema: MANIFEST_SCHEMA,
     id,
     generatedAt: '2026-11-17T00:00:00.000Z',
     screen: { id: 'x', name: 'x', timezone: 'UTC', orientation: 'landscape' },

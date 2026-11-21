@@ -3,7 +3,7 @@ import { axe, createOrg, disabledOnServer, holdFirst, hydrated, shots, signInAs,
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
-const ADDRESS = '192.0.2.41';
+const ADDRESS = '192.0.2.132';
 
 /** A brand colour as the SDK set it in a template frame of the kit page's previews (`--sf-<name>`), from every frame that has one. */
 async function themed(page: Page, name: string) {
@@ -28,7 +28,7 @@ test.beforeAll(async ({ browser }) => {
   const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));
   const version = clock.versions.findLast((v: { status: string }) => v.status === 'approved');
   await tool(page, 'create_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: version.id, data: { greeting: 'Good to see you' } });
-  const start = await page.request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.42' } });
+  const start = await page.request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.133' } });
   const { code } = await start.json();
   const { screen } = await tool(page, 'claim_screen', { code, name: 'Coffee bar', timezone: 'UTC', orientation: 'landscape' });
   await tool(page, 'create_group', { name: 'Café screens', screenIds: [screen.id] });

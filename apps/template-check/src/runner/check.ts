@@ -77,8 +77,14 @@ function fallback(def: ScalarFieldDef): unknown {
       return DEFAULT_BRAND_COLORS.accent;
     case 'select':
       return def.options[0];
+    case 'url':
+      // The first sample within the field's limit, else empty: a value a spot could hold, never one the contract refuses.
+      return URL_SAMPLES.find((u) => !def.maxLength || u.length <= def.maxLength) ?? '';
   }
 }
+
+/** Sample addresses for a url field, longest first; the shortest is the shortest https address worth drawing. */
+const URL_SAMPLES = ['https://example.com/', 'https://x.io'];
 
 /** The given value, else the field's default, else a sample; brand tokens resolved as for a screen with no kit. */
 function value(def: ScalarFieldDef, given: unknown): unknown {
@@ -88,7 +94,7 @@ function value(def: ScalarFieldDef, given: unknown): unknown {
 }
 
 /** Each field's example value, and which fields are images. */
-function exampleData(fields: Record<string, FieldDef>): { data: Record<string, unknown>; images: string[] } {
+export function exampleData(fields: Record<string, FieldDef>): { data: Record<string, unknown>; images: string[] } {
   const data: Record<string, unknown> = {};
   const images: string[] = [];
   for (const [name, def] of Object.entries(fields)) {

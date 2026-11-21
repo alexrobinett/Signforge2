@@ -11,8 +11,10 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  *   4  a template may declare a `table` live source, and a binding a `table` mapping (#84). A player
  *      that knows only 3 refuses such a template, so it must not get one: it reports [2, 3], and
  *      the server tells it to reload into a player that plays 4.
+ *   5  a template may declare a `url` field (#191). A player that knows only 3 and 4 refuses such a
+ *      template, so the server tells it to reload, as for 4.
  */
-export const MANIFEST_SCHEMA = 4;
+export const MANIFEST_SCHEMA = 5;
 /** Manifest schemas this player can play: the current one and the one before it. */
 export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
@@ -55,7 +57,16 @@ export type ScalarFieldDef =
   | { type: 'number'; label: string; default?: number; min?: number; max?: number /** Counted from `min`, or from 0 without one. */; step?: number }
   | { type: 'boolean'; label: string; default?: boolean }
   | { type: 'color'; label: string; default?: string }
-  | { type: 'select'; label: string; options: string[]; default?: string };
+  | { type: 'select'; label: string; options: string[]; default?: string }
+  /** A web address people type, such as a QR code's: `https:` only, at most `MAX_URL_BYTES`, or empty for none. */
+  | { type: 'url'; label: string; default?: string; maxLength?: number };
+
+/**
+ * The most a `url` field holds, in bytes of UTF-8 (the form a QR code carries it in), whatever its
+ * `maxLength`. A QR code at error correction M carries at most 2,331 bytes (version 40), so every
+ * address a spot may hold can be drawn.
+ */
+export const MAX_URL_BYTES = 2048;
 
 export type FieldDef =
   | ScalarFieldDef

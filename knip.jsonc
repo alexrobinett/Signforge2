@@ -31,8 +31,8 @@
       "entry": ["test/fixtures/hostile/main.ts", "src/runner/main.ts"],
       "ignoreDependencies": ["@signforge/template-.*"]
     },
-    // templates.test.ts builds every template from templates/: declared as for apps/api.
-    "packages/cli": { "ignoreDependencies": ["@signforge/template-.*"] },
+    // templates.test.ts builds every template from templates/ (declared as for apps/api), and the QR fixture.
+    "packages/cli": { "entry": ["test/fixtures/qr/main.ts"], "ignoreDependencies": ["@signforge/template-.*"] },
     // Bundled into a Worker by the upload e2e test.
     "packages/tools": { "entry": ["test/harness-worker.ts"] },
     // Read by url() in each template's style.css; the template build inlines it as a data URL.

@@ -1,13 +1,16 @@
 /**
  * The Screens pages: pairing a screen, the actions on one screen (identify, restart, wake or
  * sleep, revoke), and the settings and display-hours drafts, each a versioned draft of the screen
- * (./versioned-draft.ts). The view and filters of the list are in the URL (`/screens?view=table`),
+ * (./versioned-draft.ts); and the table's selection, with adding it to a group or removing it from
+ * one, one call each. The view and filters of the list are in the URL (`/screens?view=table`),
  * and screens themselves come from the route loaders.
  */
 import type { ToolName } from '@signforge/tools/outputs';
+import { toast } from 'sonner';
 import { orgOnScreen } from '~/lib/live';
 import type { DisplayHours, GroupView, ScreenView } from '~/lib/screen-types';
 import { callTool, toolMessage } from '~/lib/tools';
+import { putGroup } from '~/queries/screens';
 import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
 
@@ -62,6 +65,10 @@ interface ScreensState {
   page: ScreenPageState;
   /** The editors' drafts, by `editorKey`: one record, the screen, so their saves take turns and move each other's version. */
   drafts: Drafts<ScreenEdit>;
+  /** The Screens table's ticked rows, in the org they were ticked in. */
+  selection: { orgId: string | null; ids: string[] };
+  /** Adding the selection to a group, or removing it from one, is on its way: another is ignored. */
+  bulkPending: boolean;
 }
 
 /** A command or change sent from a screen's page, with what to say when it worked. */
@@ -101,6 +108,13 @@ export interface ScreensSlice {
   askToRevoke: (open: boolean) => void;
   /** Revokes every live credential of the screen. */
   revokeScreen: (screenId: string, credentialIds: string[]) => Promise<void>;
+  /** Ticks or unticks rows of the Screens table in `orgId`: one, or all it shows. */
+  selectScreens: (orgId: string, screenIds: string[], selected: boolean) => void;
+  clearScreenSelection: () => void;
+  /** Puts the screens in the group, in one call; a screen already in it stays. */
+  addScreensToGroup: (orgId: string, group: GroupView, screenIds: string[]) => Promise<void>;
+  /** Takes the screens out of the group, in one call. */
+  removeScreensFromGroup: (orgId: string, group: GroupView, screenIds: string[]) => Promise<void>;
 }
 
 const newPairing = (): PairingDraft => ({
@@ -123,7 +137,12 @@ const newPage = (): ScreenPageState => ({
   revoking: false,
 });
 
-const initialScreens: ScreensState = { pairing: newPairing(), page: newPage(), drafts: {} };
+const initialScreens: ScreensState = { pairing: newPairing(), page: newPage(), drafts: {}, selection: { orgId: null, ids: [] }, bulkPending: false };
+
+const NONE: string[] = [];
+
+/** The rows ticked in `orgId`: none when they were ticked in another. */
+export const selectedIn = (s: ScreensState, orgId: string) => (s.selection.orgId === orgId ? s.selection.ids : NONE);
 
 /** Where an editor's draft for a screen is kept. */
 const editorKey = (editor: 'settings' | 'hours', screenId: string) => `${editor}:${screenId}`;
@@ -147,7 +166,7 @@ export function hoursDraftOf(s: ScreensState, screenId: string): DisplayHours | 
 
 const toggled = (ids: string[], id: string, member: boolean) => (member ? [...new Set([...ids, id])] : ids.filter((x) => x !== id));
 
-export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { router }) => {
+export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { router, queryClient }) => {
   const pairing = (change: (p: PairingDraft) => PairingDraft) => set((s) => ({ screens: { ...s.screens, pairing: change(s.screens.pairing) } }));
   const page = (change: (p: ScreenPageState) => ScreenPageState) => set((s) => ({ screens: { ...s.screens, page: change(s.screens.page) } }));
   const screens = (change: (s: ScreensState) => ScreensState) => set((s) => ({ screens: change(s.screens) }));
@@ -196,6 +215,22 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
     const key = editorKey(editor, screen.id);
     const saved = await drafts.save(key, { screen, groups });
     if (saved?.status === 'saved' && get().screens.drafts[key]?.id === saved.id) get().closeScreenEditor();
+  }
+
+  /** One call over many screens for one group, said in a toast. */
+  async function changeMembers(orgId: string, group: GroupView, screenIds: string[], add: boolean) {
+    if (get().screens.bulkPending) return;
+    screens((s) => ({ ...s, bulkPending: true }));
+    const n = `${screenIds.length} ${screenIds.length === 1 ? 'screen' : 'screens'}`;
+    try {
+      const out = await callTool(add ? 'add_group_members' : 'remove_group_members', { groupId: group.id, screenIds });
+      putGroup(queryClient, orgId, out.group);
+      if (orgOnScreen(router) === orgId) toast.success(add ? `Added ${n} to ${group.name}` : `Removed ${n} from ${group.name}`);
+    } catch (err) {
+      if (orgOnScreen(router) === orgId) toast.error(add ? `Not added to ${group.name}` : `Not removed from ${group.name}`, { description: toolMessage(err) });
+    } finally {
+      screens((s) => ({ ...s, bulkPending: false }));
+    }
   }
 
   return {
@@ -290,5 +325,14 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
         });
       }
     },
+
+    selectScreens: (orgId, screenIds, selected) =>
+      screens((s) => {
+        const ids = selectedIn(s, orgId);
+        return { ...s, selection: { orgId, ids: selected ? [...new Set([...ids, ...screenIds])] : ids.filter((id) => !screenIds.includes(id)) } };
+      }),
+    clearScreenSelection: () => screens((s) => ({ ...s, selection: { orgId: null, ids: [] } })),
+    addScreensToGroup: (orgId, group, screenIds) => changeMembers(orgId, group, screenIds, true),
+    removeScreensFromGroup: (orgId, group, screenIds) => changeMembers(orgId, group, screenIds, false),
   };
 };

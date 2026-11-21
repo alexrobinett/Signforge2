@@ -23,8 +23,6 @@ const PILL: Record<Tone, string> = {
   'needs-you': 'bg-status-needs-you-muted text-status-needs-you-foreground',
 };
 
-export const toneOf = (kind: StateKind): Tone => (kind === 'unreachable' ? 'offline' : kind === 'needs_you' ? 'needs-you' : kind);
-
 function StatusGlyph({ tone, className }: { tone: Tone; className?: string }) {
   const c = cn('size-3 flex-none', GLYPH_COLOR[tone], className);
   switch (tone) {
@@ -82,23 +80,6 @@ export function ScreenStatus({ screen, now, className }: { screen: ScreenLike; n
     <StatusPill tone={d.tone} className={className}>
       {d.word}
     </StatusPill>
-  );
-}
-
-/** A shape and a word, no pill: for a location's rollup. */
-export function StatusWord({ tone, children }: { tone: Tone; children: string }) {
-  const text: Record<Tone, string> = {
-    online: 'text-status-online-foreground dark:text-status-online-foreground',
-    updating: 'text-status-updating-foreground',
-    asleep: 'text-status-asleep-foreground',
-    offline: 'text-status-offline-foreground',
-    'needs-you': 'text-status-needs-you-foreground',
-  };
-  return (
-    <span className={cn('inline-flex items-center gap-1.5 text-[13px] font-semibold', text[tone])}>
-      <StatusGlyph tone={tone} />
-      {children}
-    </span>
   );
 }
 

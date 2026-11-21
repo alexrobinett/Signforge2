@@ -100,3 +100,13 @@ it('refuses scripts a template frame would not run, as the browser reads them', 
     rmSync(at, { recursive: true, force: true });
   }
 });
+
+describe('a template that draws a QR code', () => {
+  it("carries the QR encoder's MIT notice in its bundle, which the licence requires of every copy", async () => {
+    const built = await buildTemplate(join(import.meta.dirname, 'fixtures/qr'));
+    expect(built.problems).toEqual([]);
+    expect(built.html).toContain('Copyright (c) Project Nayuki');
+    expect(built.html).toContain('Copyright (c) 2023 Anthony Fu');
+    expect(built.html).toContain('The above copyright notice and this permission notice shall be included in all');
+  });
+});

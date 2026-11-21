@@ -29,14 +29,27 @@ export async function signIn(page: Page, email: string) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
 
+/** The org switcher under the logo: a menu only for a member of two or more orgs (#182). */
 export const orgSwitcher = (page: Page) => page.getByRole('button', { name: /switch organization$/ });
 
-/** With `E2E_SCREENSHOTS=<dir>`, save a screenshot once menus and drawers have finished animating. */
+/** The account menu's button in the sidebar (wide screens). */
+export const accountMenu = (page: Page) => page.getByRole('button', { name: /account and settings$/ });
+
+/** Create an org from the account menu's dialog; it becomes the active org. */
+export async function createOrgFromAccountMenu(page: Page, name: string) {
+  await accountMenu(page).click();
+  await page.getByRole('menuitem', { name: 'Create organization…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create organization' });
+  await dialog.getByLabel('Organization name').fill(name);
+  await dialog.getByRole('button', { name: 'Create organization' }).click();
+  await expect(dialog).toBeHidden();
+}
+
+/** With `E2E_SCREENSHOTS=<dir>`, save a screenshot: Playwright finishes menus' and drawers' animations first, with no wait on a clock. */
 export async function screenshot(page: Page, name: string) {
   const dir = process.env.E2E_SCREENSHOTS;
   if (!dir) return;
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: `${dir}/${name}.png` });
+  await page.screenshot({ path: `${dir}/${name}.png`, animations: 'disabled' });
 }
 
 /**
@@ -109,9 +122,15 @@ export async function signInAs(page: Page, email: string, address: string) {
     }),
   );
   await request.dispose();
-  // The page's calls come from `address` too (the CMS passes it to the API). Better Auth counts a
-  // path's calls per address until 10 s pass with none, so on one shared address every spec's
-  // shell read added up and a long run got 429.
+  await fromAddress(page, address);
+}
+
+/**
+ * The page's calls come from `address` (the CMS passes it to the API), sign-in's included. Better
+ * Auth counts a path's calls per address until 10 s pass with none, so on one shared address every
+ * spec's shell read added up and a long run got 429.
+ */
+export async function fromAddress(page: Page, address: string) {
   await page
     .context()
     .route(`${CMS_URL}/**`, async (route) => route.fallback({ headers: { ...(await route.request().allHeaders()), 'cf-connecting-ip': address } }));

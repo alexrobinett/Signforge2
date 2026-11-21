@@ -24,6 +24,7 @@ import {
   MAX_SYNC_PLAY_COUNTS,
   PREVIEW_PROTOCOL,
   SCREEN_KINDS,
+  MAX_URL_BYTES,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
   TABLE_ROWS_PATH,
@@ -117,7 +118,7 @@ export function safeUrl(url: unknown): boolean {
 
 // ----------------------------------------------------------- template fields
 
-const SCALAR_TYPES = ['text', 'number', 'boolean', 'color', 'select'] as const;
+const SCALAR_TYPES = ['text', 'number', 'boolean', 'color', 'select', 'url'] as const;
 
 /** Whether `v` sits on the step grid, counted from `min` (or 0), allowing for float rounding. */
 function onStep(v: number, step: number, base: number): boolean {
@@ -145,6 +146,16 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       return isStr(v) ? undefined : `field "${name}" must be a colour`;
     case 'select':
       return isStr(v) && def.options.includes(v) ? undefined : `field "${name}" must be one of ${def.options.join(', ')}`;
+    case 'url':
+      if (!isStr(v)) return `field "${name}" must be an https address`;
+      // A lone surrogate has no UTF-8 form: no QR code can carry it. In a `u` pattern a pair is one code point, so only lone ones match.
+      if (/\p{Surrogate}/u.test(v)) return `field "${name}" must be well-formed text`;
+      // The URL parser ignores space around an address, but the value is stored and drawn as typed: a QR code would carry it.
+      if (v !== v.trim()) return `field "${name}" must not start or end with a space`;
+      if (v !== '' && !safeUrl(v)) return `field "${name}" must be an https address`;
+      if (new TextEncoder().encode(v).length > MAX_URL_BYTES) return `field "${name}" is longer than ${MAX_URL_BYTES} bytes`;
+      if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
+      return undefined;
   }
 }
 
@@ -160,6 +171,7 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
   };
   switch (def.type) {
     case 'text':
+    case 'url':
       optional('maxLength', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');
       break;
     case 'number':
@@ -417,6 +429,7 @@ function cellValue(def: ScalarFieldDef, cell: string | number, locale: string): 
         ? text
         : new Intl.NumberFormat(locale, { minimumFractionDigits: Number.isInteger(cell) ? 0 : 2, maximumFractionDigits: 2 }).format(cell);
     case 'color':
+    case 'url':
       return isStr(cell) ? text : undefined;
     case 'number':
       return isStr(cell) ? (text === '' ? undefined : Number(text)) : cell;

@@ -14,7 +14,7 @@ Target playlists by time and by screen, group or org.
 
 ## Scope
 
-- Screen groups CRUD and membership. *(The tools came with M3-12 (`create_group`, `rename_group`, `set_group_members`, …), and a screen's settings already joined and left groups. Here a screen's settings also make a new group with the screen in it, so the CMS alone can aim a playlist at a group; renaming and deleting a group stay with the tools.)*
+- Screen groups CRUD and membership. *(The tools came with M3-12 (`create_group`, `rename_group`, `set_group_members`, …), and a screen's settings already joined and left groups. Here a screen's settings also make a new group with the screen in it, so the CMS alone can aim a playlist at a group. Since #183 groups are managed in the CMS too: renamed, deleted and given their screens in Settings, Screens & groups, and filled from a selection on the Screens table.)*
 - Schedule entries: playlist, priority, target, dates, days, window. Validated with `player-core`.
 - Takeover: an entry with an end time under 24 hours (`startsAt` and `endsAt`, manifest schema 3). *(Was "compiled into a dated window", for schema-2 players, which ignore `endsAt`; no supported player plays schema 2 any more, so none is compiled, 2026-11-19.)*
 - A takeover cuts in at once: when a screen receives a manifest whose active takeover differs from what it is playing, it ends the current spot (with the normal transition) instead of waiting for the spot boundary. Every other publish waits for the boundary (decided 2026-11-17, see M3-06).
