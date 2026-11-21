@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { png, rotatedPhoto } from '@signforge/media/testing';
-import { axe, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, disabledOnServer, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.21';
@@ -13,7 +13,10 @@ test('upload images, search them by name, see which are in use, and delete one n
   await page.getByRole('button', { name: 'Create organization' }).click();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
   await expect(page.getByRole('heading', { name: 'No images yet' })).toBeVisible();
+  // In the server's HTML the file input is disabled: files chosen before the page hydrated were never uploaded (#140).
+  expect(await disabledOnServer(page, '/assets', ['Upload images'])).toEqual({ 'Upload images': [true] });
   await hydrated(page);
+  await expect(page.getByLabel('Upload images')).toBeEnabled();
   await axe(page);
   await shots(page, '20-assets-empty');
 
@@ -40,6 +43,11 @@ test('upload images, search them by name, see which are in use, and delete one n
   await shots(page, '21-assets-library');
   await page.getByRole('button', { name: 'Dismiss notes.png' }).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
+
+  // The search filters as it is typed in: in the server's HTML it is disabled, as typing there
+  // before the page hydrates was lost (#140). The page here has hydrated, so it is enabled.
+  expect(await disabledOnServer(page, '/assets', ['Search images'])).toEqual({ 'Search images': [true] });
+  await expect(page.getByLabel('Search images')).toBeEnabled();
 
   // Search by name, in any case, carried in the URL.
   await page.getByLabel('Search images').fill('RASP');

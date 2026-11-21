@@ -5,6 +5,7 @@
  */
 import { LoaderCircleIcon, UploadIcon, XIcon } from 'lucide-react';
 import type { ChangeEvent } from 'react';
+import { EditorFields } from '~/components/editor';
 import { buttonVariants } from '~/components/ui/button';
 import { useAppStore } from '~/state/provider';
 
@@ -16,11 +17,21 @@ export function UploadButton({ id }: { id: string }) {
     e.currentTarget.value = '';
     if (files.length) void uploadImages(files);
   };
+  // It waits for its page to hydrate (#140): files chosen before then were never uploaded.
   return (
-    <label htmlFor={id} className={buttonVariants({ size: 'lg', className: 'cursor-pointer has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50' })}>
-      <UploadIcon aria-hidden /> Upload images
-      <input id={id} type="file" accept="image/*" multiple className="sr-only" onChange={chosen} />
-    </label>
+    <EditorFields>
+      <label
+        htmlFor={id}
+        className={buttonVariants({
+          size: 'lg',
+          className:
+            'cursor-pointer has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50 has-disabled:pointer-events-none has-disabled:bg-primary-disabled has-disabled:text-primary-disabled-foreground',
+        })}
+      >
+        <UploadIcon aria-hidden /> Upload images
+        <input id={id} type="file" accept="image/*" multiple className="sr-only" onChange={chosen} />
+      </label>
+    </EditorFields>
   );
 }
 

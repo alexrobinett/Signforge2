@@ -6,6 +6,7 @@
 import { sessionBlobPath } from '@signforge/contract';
 import { SearchIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { EditorFields } from '~/components/editor';
 import { Input } from '~/components/ui/input';
 import { type AssetView, assetFacts, usageText } from '~/lib/assets';
 import { cn } from '~/lib/utils';
@@ -53,7 +54,10 @@ export function AssetSearch({ id, value, onChange }: { id: string; value: string
         Search images
       </label>
       <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-      <Input id={id} type="search" placeholder="Search by name" defaultValue={value} onChange={(e) => onChange(e.target.value)} className="pl-9" />
+      {/* It filters as it is typed in, so it waits for its page to hydrate (#140). */}
+      <EditorFields>
+        <Input id={id} type="search" placeholder="Search by name" defaultValue={value} onChange={(e) => onChange(e.target.value)} className="pl-9" />
+      </EditorFields>
     </div>
   );
 }
