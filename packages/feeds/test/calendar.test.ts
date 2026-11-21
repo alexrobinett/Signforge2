@@ -8,8 +8,8 @@ import weekly from './fixtures/weekly-meeting.ics?raw';
 // Tuesday 17 November 2026, 09:00 in New York.
 const now = new Date('2026-11-17T14:00:00Z');
 
-const timed = (title: string, start: string, end: string, location = '') => ({ title, start, end, allDay: false, location });
-const allDay = (title: string, start: string, end: string, location = '') => ({ title, start, end, allDay: true, location });
+const timed = (title: string, start: string, end: string, location = '', organizer = '') => ({ title, start, end, allDay: false, location, organizer });
+const allDay = (title: string, start: string, end: string, location = '', organizer = '') => ({ title, start, end, allDay: true, location, organizer });
 
 /** A minimal calendar around some VEVENT lines. */
 const ics = (...events: string[][]) =>
@@ -65,7 +65,7 @@ describe('Google Calendar export', () => {
       timed('Standup', '2026-11-18T09:30:00-05:00', '2026-11-18T09:45:00-05:00'),
       // Floating time: read in X-WR-TIMEZONE.
       timed('Lunch & learn', '2026-11-18T12:00:00-05:00', '2026-11-18T13:00:00-05:00'),
-      timed('Design review', '2026-11-18T13:00:00-05:00', '2026-11-18T14:30:00-05:00', 'Room 4B, 2nd floor'),
+      timed('Design review', '2026-11-18T13:00:00-05:00', '2026-11-18T14:30:00-05:00', 'Room 4B, 2nd floor', 'Room 4B'),
       timed('Standup', '2026-11-19T09:30:00-05:00', '2026-11-19T09:45:00-05:00'),
       // UTC stays UTC; the folded SUMMARY is unfolded.
       timed(
@@ -220,6 +220,16 @@ describe('edge cases', () => {
   it('defaults an untitled event and skips a broken one without losing the rest', () => {
     const cal = ics(['UID:a@test', 'DTSTART:20261118T120000Z'], ['UID:b@test', 'DTSTART:20261118T130000Z', 'SUMMARY:Fine'], ['UID:c@test', 'SUMMARY:No start']);
     expect(parseCalendar(cal, { now }).events.map((e) => e.title)).toEqual(['Untitled', 'Fine']);
+  });
+
+  it("names the organiser by their display name and never by their address (#199)", () => {
+    const cal = ics(
+      ['UID:a@test', 'DTSTART:20261118T120000Z', 'SUMMARY:Named', 'ORGANIZER;CN="Shah, Priya":mailto:priya@example.com'],
+      ['UID:b@test', 'DTSTART:20261118T130000Z', 'SUMMARY:Address only', 'ORGANIZER:mailto:priya@example.com'],
+    );
+    const events = parseCalendar(cal, { now }).events;
+    expect(events.map((e) => e.organizer)).toEqual(['Shah, Priya', '']);
+    expect(JSON.stringify(events)).not.toContain('example.com');
   });
 
   it('is reachable through normaliseFeed', () => {

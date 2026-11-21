@@ -149,7 +149,7 @@ function checkTemplateDraft(
 const TABLE_SHAPE = { what: 'a table', shape: { columns: [''], rows: [['']] } };
 const FEED_SHAPES = {
   rss: { what: 'a news feed', shape: { title: '', language: '', items: [{ title: '', published: '', source: '' }] } },
-  ical: { what: 'a calendar feed', shape: { events: [{ title: '', start: '', end: '', allDay: false, location: '' }] } },
+  ical: { what: 'a calendar feed', shape: { events: [{ title: '', start: '', end: '', allDay: false, location: '', organizer: '' }] } },
   csv: TABLE_SHAPE,
   'json-table': TABLE_SHAPE,
 } as const;
