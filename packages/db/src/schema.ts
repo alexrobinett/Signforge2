@@ -352,6 +352,9 @@ export const assetRenditions = sqliteTable(
     size: integer('size').notNull(),
     width: integer('width').notNull(),
     height: integer('height').notNull(),
+    /** The rendition's sample (`ManifestFile.sample`), a PNG; null for SVG, an image with transparency, or an upload from before samples (0028). */
+    sampleSha256: text('sample_sha256'),
+    sampleSize: integer('sample_size'),
     createdAt: created(),
   },
   (t) => [
