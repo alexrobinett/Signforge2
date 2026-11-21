@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./contrast": "./src/contrast.ts"
+    "./contrast": "./src/contrast.ts",
+    "./backdrop": "./src/backdrop.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",
