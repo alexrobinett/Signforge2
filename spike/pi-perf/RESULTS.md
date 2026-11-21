@@ -747,6 +747,32 @@ The same player and method, the bundles rebuilt with the fonts' licence notice (
 - First prepares, after a cold load of the page, were 558 to 727 ms: over the 500 ms budget, as for every template carrying the four looks (The look kit; Room status).
 - **Portrait holds the ambient motion still.** An earlier build kept Pop's tile and stickers wobbling, its last dot and Night's live dot pulsing and pinging, and Night's ring sweeping in, in portrait too. Portrait cuts were under 1% (0.39 to 0.89%), but fades into a portrait countdown were not: Pop 1.11, 1.28, 1.78 and 1.61, 1.11% (the third with a 250 ms stall while playing), Night 0.94, 1.28 and 1.17, 1.33%, dropping 4 to 11% of frames while fading. The same build with the ambient motion held still in portrait: Pop 0.39, 0.22%; Night 0.67, 0.94%, and with the ring's sweep held too 0.61, 0.22%. Prepares fell with it, about 350 to about 230 ms in portrait (two runs each, interleaved, one session). The template now holds both still in portrait, as the kit holds `.lk-drift` (The look kit). Landscape keeps them: 0.28 to 0.56% in both builds.
 - **Night's ring** is two half-discs, each rotated inside its own clipping half, with the end cap on a rotating arm: transforms only, no `stroke-dashoffset`. On the Pi the halves' meeting edge at 6 o'clock showed the track through as a 1 px hairline once the ring was past half: the ring is 70.4vmin, 760.32 px, so the centre line falls on a fraction of a pixel and both edges are smoothed there. A 0.4vmin strip of the fill over the join, shown as the left half starts, removes it; 12 o'clock is under the start cap. Screenshots on the Pi of a full ring and one at 52% after the fix show no seam at either.
+## The Alert template (issue #200, 2026-11-21)
+
+`templates/alert` at `99832a4`, each severity a 10 s spot with its defaults and a QR code, played on its own. The branch's player was at `http://localhost:8090/cp200/<orientation>/` with content built per orientation; portrait was set with `wlr-randr --transform 90` and restored afterwards. Method as for the look kit: `device/pi/isolate.py`'s measurement pointed at that player, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed before each spec, the supervisor stopped (the soak logger was already off), `__sf.prepares` read after each spec. The first of a spec's five prepares follows a cold load.
+
+| Orientation | Transition | Severity | Overall | Playing | Loading next | Worst frame | Prepares (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | emergency | 0.11% | 0.00% | 6.1% | 33 ms | 476, 317, 171, 168, 170 |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 336, 163, 162, 149, 146 |
+| | | advisory | 0.06% | 0.00% | 3.2% | 33 ms | 428, 204, 156, 173, 169 |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 322, 180, 161, 161, 224 |
+| | fade | emergency | 0.17% | 0.00% | 8.8% | 33 ms | 323, 180, 179, 195, 177 |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 326, 163, 163, 147, 159 |
+| | | advisory | 0.11% | 0.00% | 3.0% | 33 ms | 316, 180, 162, 161, 209 |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 326, 163, 161, 162, 145 |
+| portrait | cut | emergency | 0.17% | 0.00% | 7.0% | 33 ms | 354, 229, 229, 244, 228 |
+| | | warning | 0.06% | 0.00% | 3.1% | 33 ms | 364, 197, 158, 173, 173 |
+| | | advisory | 0.11% | 0.00% | 5.4% | 33 ms | 328, 177, 250, 174, 172 |
+| | | notice | 0.11% | 0.06% | 2.8% | 33 ms | 324, 178, 178, 222, 172 |
+| | fade | emergency | 0.22% | 0.00% | 9.5% | 50 ms | 337, 214, 231, 231, 230 |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 399, 246, 206, 163, 159 |
+| | | advisory | 0.17% | 0.00% | 0.0% | 33 ms | 363, 215, 228, 175, 172 |
+| | | notice | 0.06% | 0.00% | 2.8% | 33 ms | 315, 163, 177, 228, 173 |
+
+- Every case is far inside the budget: at most 0.22% of frames dropped overall, 0.06% while playing, no frame over 50 ms, nothing skipped.
+- Prepares after the first: medians about 165 ms in landscape and 175 to 230 ms in portrait. First prepares were 315 to 476 ms. The 120 kB bundle carries two faces (Space Grotesk and Inter) and not the look kit, which is about half the time of the kit's test template (300 to 500 ms). An alert starts quickly.
+- Emergency's pulse (the band's glow and its icon, every 2 s) costs nothing measurable while playing (0.00%). It drops a little more than the others while the next spot loads (6 to 10%), as its two layers keep animating under the load.
 
 ## Baseline: the same player on a Mac (2026-11-17)
 

@@ -48,6 +48,7 @@
     "@signforge/feeds": "workspace:*",
     "@signforge/player": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
+    "@signforge/template-alert": "workspace:*",
     "@signforge/template-clock": "workspace:*",
     "@signforge/template-countdown": "workspace:*",
     "@signforge/template-cstore-promo": "workspace:*",

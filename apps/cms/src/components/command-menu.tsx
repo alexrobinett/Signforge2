@@ -1,14 +1,36 @@
+import { useQuery } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
-import { ArrowLeftIcon, Building2Icon, CornerDownLeftIcon, LoaderCircleIcon } from 'lucide-react';
+import { defaultFilter } from 'cmdk';
+import { ArrowLeftIcon, Building2Icon, CornerDownLeftIcon, LoaderCircleIcon, UsersIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useCallback } from 'react';
+import { OrgAvatar } from '~/components/org-switcher';
+import { KIND_WORD, StatusGlyph, toneOf } from '~/components/screens/status';
 import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { OrgAvatar } from '~/components/org-switcher';
-import { commandEntries, NULL_CHOICE, orgCommands, type CommandEntry, type Field } from '~/lib/command-menu';
+import {
+  commandEntries,
+  foundValues,
+  movesSelection,
+  NULL_CHOICE,
+  orgCommands,
+  pointerMovesSelection,
+  selectedItem,
+  targetActions,
+  targetItemKey,
+  type CommandEntry,
+  type CommandTarget,
+  type Field,
+  type ToolListing,
+} from '~/lib/command-menu';
+import { useOrgId } from '~/lib/live';
+import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { SECTIONS } from '~/lib/sections';
+import { byName, matchesQuery, screenKeywords } from '~/lib/targets';
+import { retryUnlessRedirect } from '~/queries/retry';
+import { screensQuery } from '~/queries/screens';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
@@ -24,6 +46,90 @@ const focusFirstButton = (list: HTMLUListElement | null) => list?.querySelector(
 
 /** The form's first field takes focus when the form appears. Stable, so it runs once per form. */
 const focusFirstField = (form: HTMLFormElement | null) => form?.querySelector<HTMLElement>('input, select, textarea')?.focus();
+
+/** A search takes focus when its view appears within an open menu (Back). Stable, so it runs once per view. */
+const focusSearch = (input: HTMLInputElement | null) => input?.focus();
+
+/** A found screen's or group's item value: cmdk matches it with `matchesQuery` (lib/targets.ts), the target picker's search. */
+const TARGET = /^(screen|group):/;
+const filter = (value: string, search: string, keywords?: string[]) =>
+  TARGET.test(value) ? (matchesQuery(search, keywords ?? []) ? 1 : 0) : defaultFilter(value, search, keywords);
+
+const screenCount = (n: number) => `${n} ${n === 1 ? 'screen' : 'screens'}`;
+
+/**
+ * A found screen's or group's actions (`targetActions`): Open first, so Enter opens it. A screen's
+ * commands wait for the list read on this opening (`checked`). The header is outside cmdk's root,
+ * which takes Enter for the selected action: Enter on Back goes back.
+ */
+function TargetView({
+  target,
+  screens,
+  groups,
+  tools,
+  checked,
+  checking,
+  failed,
+}: {
+  target: CommandTarget;
+  screens: ScreenView[];
+  groups: GroupView[];
+  tools: ToolListing[];
+  checked: boolean;
+  checking: boolean;
+  /** The list read on this opening failed, and is not being tried again. */
+  failed: boolean;
+}) {
+  const running = useAppStore((s) => s.commandMenu.running);
+  const back = useAppStore((s) => s.backToCommands);
+  const run = useAppStore((s) => s.runTargetAction);
+  const screen = target.kind === 'screen' ? screens.find((s) => s.id === target.id) : undefined;
+  const group = target.kind === 'group' ? groups.find((g) => g.id === target.id) : undefined;
+  const actions = screen ? targetActions({ kind: 'screen', screen }, tools, checked) : group ? targetActions({ kind: 'group', group }, tools, checked) : [];
+  const name = screen?.name ?? group?.name ?? (checking ? 'Checking…' : 'Not found');
+  // Said only where the role has commands and the screen is not known to be revoked: only the check is missing.
+  const waiting = screen && !checked && screen.status !== 'revoked' && tools.some((t) => t.name === 'identify_screen' || t.name === 'restart_screen');
+
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b py-2.5 pr-4 pl-2">
+        <Button type="button" variant="ghost" size="icon" onClick={back} aria-label="Back to commands">
+          <ArrowLeftIcon className="size-4.5" aria-hidden />
+        </Button>
+        {screen && <StatusGlyph tone={toneOf(screen.state.kind)} />}
+        {group && <UsersIcon className="size-4 text-muted-foreground" aria-hidden />}
+        <h3 className="min-w-0 flex-1 truncate text-base font-semibold">{name}</h3>
+        <span className="shrink-0 text-[13px] text-muted-foreground">
+          {screen ? KIND_WORD[screen.state.kind] : group ? screenCount(group.screenIds.length) : ''}
+        </span>
+      </div>
+      <Command label={`Actions for ${name}`} loop>
+        <CommandInput ref={focusSearch} placeholder={`Filter the actions for ${name}`} />
+        <CommandList>
+          <CommandEmpty>
+            {screen || group ? 'No action matches.' : checking ? 'Checking it is still here…' : 'It is no longer here. Go back and search again.'}
+          </CommandEmpty>
+          <CommandGroup heading="Actions">
+            {actions.map((a) => (
+              <CommandItem key={a.label} value={a.label} disabled={running} onSelect={() => void run(a)}>
+                <span className="min-w-0 flex-1 truncate">{a.label}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+        <p role="status" className="border-t px-4 py-3 text-[13px] text-muted-foreground empty:sr-only">
+          {running
+            ? 'A call is on its way: these wait for its answer.'
+            : waiting && checking
+              ? `Checking ${name} before Identify and Restart…`
+              : waiting && failed
+                ? `Couldn’t check ${name}, so Identify and Restart are off. Close ⌘K and open it again to retry.`
+                : ''}
+        </p>
+      </Command>
+    </>
+  );
+}
 
 function FieldInput({
   field,
@@ -180,20 +286,75 @@ function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
 }
 
 /**
- * ⌘K: go to any section, run any tool the member's role allows, or switch or create an org, from
- * every signed-in page. The tools are the registry agents call (src/lib/command-menu.ts). It opens
- * with no motion.
+ * ⌘K: go to any section, run any tool the member's role allows, switch or create an org, or find a
+ * screen or group by name and act on it, from every signed-in page. The tools are the registry
+ * agents call (src/lib/command-menu.ts). It opens with no motion.
  */
 export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const open = useAppStore((s) => s.commandMenu.open);
-  const form = useAppStore((s) => s.commandMenu.form);
-  const choosingOrg = useAppStore((s) => s.commandMenu.choosingOrg);
-  const running = useAppStore((s) => s.commandMenu.running);
   const openMenu = useAppStore((s) => s.openCommandMenu);
   const close = useAppStore((s) => s.closeCommandMenu);
-  const choose = useAppStore((s) => s.chooseCommand);
 
-  const entries = [...commandEntries(shell.tools), ...orgCommands(shell.organizations.length)];
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={(o) => (o ? openMenu() : close())}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/70" />
+        <DialogPrimitive.Content className="fixed top-[12dvh] left-1/2 z-50 w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl outline-none dark:border-border-strong">
+          <DialogPrimitive.Title className="sr-only">Command menu</DialogPrimitive.Title>
+          <DialogPrimitive.Description className="sr-only">
+            Go to a page, or run an action. Type to filter; Enter runs the selected one.
+          </DialogPrimitive.Description>
+          <MenuBody shell={shell} hues={hues} />
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+}
+
+/** The open menu: the list, a tool's form, the org list, or a found screen's or group's actions. Mounted on each open, so it reads the screens again then. */
+function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
+  const { tools } = shell;
+  const query = useAppStore((s) => s.commandMenu.query);
+  const choosingOrg = useAppStore((s) => s.commandMenu.choosingOrg);
+  const form = useAppStore((s) => s.commandMenu.form);
+  const target = useAppStore((s) => s.commandMenu.target);
+  const running = useAppStore((s) => s.commandMenu.running);
+  const choose = useAppStore((s) => s.chooseCommand);
+  const search = useAppStore((s) => s.searchCommands);
+  const selection = useAppStore((s) => s.commandMenu.selection);
+  const moved = useAppStore((s) => s.commandMenu.moved);
+  const backed = useAppStore((s) => s.commandMenu.backed);
+  const select = useAppStore((s) => s.selectCommand);
+  const move = useAppStore((s) => s.moveCommandSelection);
+  const chooseTarget = useAppStore((s) => s.chooseTarget);
+  // The org's screens and groups (`list_screens`, `list_groups`): the Screens page's list, shown from its cache and read again
+  // on each opening (this body mounts on each), so a screen or group someone else made since is found.
+  const orgId = useOrgId();
+  // One retry, not the app's three: someone is waiting at the menu, and opening it again tries again.
+  const fleet = useQuery({ ...screensQuery(orgId), enabled: orgId !== '', refetchOnMount: 'always', retry: retryUnlessRedirect(1) });
+  // Read since this opening, and it worked: only then may a screen be sent a command. A read already on its way as the
+  // menu opens (leaving Screens, say) is joined, not repeated: it began moments before.
+  const checked = fleet.isFetchedAfterMount && fleet.isSuccess;
+  const failed = fleet.isError && !fleet.isFetching;
+  const screens = fleet.data?.screens ?? [];
+  const groups = fleet.data?.groups ?? [];
+  const searching = query.trim() !== '';
+  const found = foundValues(query, screens, groups);
+  const shownSelection = selectedItem(selection, found, moved);
+  // Said in the list, as the tools' long descriptions match almost any search, so the empty text seldom shows.
+  const listStatus = running
+    ? 'A call is on its way: the commands wait for its answer.'
+    : !searching
+      ? ''
+      : failed
+        ? fleet.data
+          ? 'Couldn’t check the screens: they are as last read, and Identify and Restart are off. Close ⌘K and open it again to retry.'
+          : 'Couldn’t read the screens, so none are listed. Close ⌘K and open it again to retry.'
+        : !checked && fleet.isFetching && !found.length
+          ? 'Looking for screens…'
+          : '';
+
+  const entries = [...commandEntries(tools), ...orgCommands(shell.organizations.length)];
   const picked = entries.find((e) => e.kind === 'tool' && e.tool.name === form);
   const go = entries.filter((e) => e.kind === 'go');
   const org = entries.filter((e) => e.kind === 'org');
@@ -212,38 +373,82 @@ export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, n
     );
   };
 
-  return (
-    <DialogPrimitive.Root open={open} onOpenChange={(o) => (o ? openMenu() : close())}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/70" />
-        <DialogPrimitive.Content className="fixed top-[12dvh] left-1/2 z-50 w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl outline-none dark:border-border-strong">
-          <DialogPrimitive.Title className="sr-only">Command menu</DialogPrimitive.Title>
-          <DialogPrimitive.Description className="sr-only">
-            Go to a page, or run an action. Type to filter; Enter runs the selected one.
-          </DialogPrimitive.Description>
-          {picked?.kind === 'tool' ? (
-            <ToolForm key={picked.id} entry={picked} />
-          ) : choosingOrg ? (
-            <OrgList shell={shell} hues={hues} />
-          ) : (
-            <Command label="Search pages and actions" loop>
-              <CommandInput placeholder="Go to a page, or type an action">
-                <kbd className="rounded-md border px-1.5 py-0.5 font-mono text-xs text-muted-foreground">esc</kbd>
-              </CommandInput>
-              <CommandList>
-                <CommandEmpty>No page or action matches. Try a verb like “rename” or “restart”.</CommandEmpty>
-                <CommandGroup heading="Go to">{go.map(item)}</CommandGroup>
-                <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>
-                {actions.length > 0 && <CommandGroup heading="Actions">{actions.map(item)}</CommandGroup>}
-              </CommandList>
-              <p className="flex items-center gap-2 border-t bg-muted/50 px-4 py-3 text-[13px] text-muted-foreground">
-                <CornerDownLeftIcon className="size-3.5 shrink-0" aria-hidden />
-                These actions are the tool registry: the same names and roles agents call. The audit log records them by name.
-              </p>
-            </Command>
-          )}
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+  return picked?.kind === 'tool' ? (
+    <ToolForm key={picked.id} entry={picked} />
+  ) : choosingOrg ? (
+    <OrgList shell={shell} hues={hues} />
+  ) : target ? (
+    <TargetView target={target} screens={screens} groups={groups} tools={tools} checked={checked} checking={fleet.isFetching} failed={failed} />
+  ) : (
+    <Command
+      label="Search pages, screens and actions"
+      loop
+      filter={filter}
+      value={shownSelection}
+      onValueChange={(value) => select(value, JSON.stringify(found))}
+      onKeyDown={(e) => movesSelection(e) && move()}
+      // cmdk selects by pointer only over an enabled item, in each item's own handler, which replaces one passed to it.
+      onPointerMove={(e) => {
+        const item = e.target instanceof Element ? e.target.closest('[cmdk-item]') : null;
+        const under = item && { value: item.getAttribute('data-value') ?? '', disabled: item.getAttribute('aria-disabled') === 'true' };
+        if (pointerMovesSelection(under, shownSelection)) move();
+      }}
+    >
+      {/* On opening, Radix's focus trap focuses the search, once it holds focus: a focus before that is lost to a menu still closing. */}
+      <CommandInput ref={backed ? focusSearch : undefined} value={query} onValueChange={search} placeholder="Go to a page, find a screen, or type an action">
+        <kbd className="rounded-md border px-1.5 py-0.5 font-mono text-xs text-muted-foreground">esc</kbd>
+      </CommandInput>
+      <p role="status" className="border-b px-4 py-2 text-[13px] text-muted-foreground empty:sr-only">
+        {listStatus}
+      </p>
+      <CommandList>
+        <CommandEmpty>No page, screen or action matches. Try part of a screen’s name, or a verb like “rename”.</CommandEmpty>
+        {/* Found by name only: listed before anything is typed, a fleet of 200 would bury the pages. */}
+        {searching && screens.length > 0 && (
+          <CommandGroup heading="Screens">
+            {[...screens].sort(byName).map((s) => {
+              const keywords = screenKeywords(s, groups);
+              return (
+                <CommandItem
+                  key={targetItemKey(s.id, keywords)}
+                  value={`screen:${s.id}`}
+                  keywords={keywords}
+                  disabled={running}
+                  onSelect={() => chooseTarget({ kind: 'screen', id: s.id })}
+                >
+                  <StatusGlyph tone={toneOf(s.state.kind)} />
+                  <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                  <span className="text-[13px] text-muted-foreground">{KIND_WORD[s.state.kind]}</span>
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+        )}
+        {searching && groups.length > 0 && (
+          <CommandGroup heading="Groups">
+            {[...groups].sort(byName).map((g) => (
+              <CommandItem
+                key={targetItemKey(g.id, [g.name])}
+                value={`group:${g.id}`}
+                keywords={[g.name]}
+                disabled={running}
+                onSelect={() => chooseTarget({ kind: 'group', id: g.id })}
+              >
+                <UsersIcon className="size-4 text-muted-foreground" aria-hidden />
+                <span className="min-w-0 flex-1 truncate">{g.name}</span>
+                <span className="text-[13px] text-muted-foreground">{screenCount(g.screenIds.length)}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        <CommandGroup heading="Go to">{go.map(item)}</CommandGroup>
+        <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>
+        {actions.length > 0 && <CommandGroup heading="Actions">{actions.map(item)}</CommandGroup>}
+      </CommandList>
+      <p className="flex items-center gap-2 border-t bg-muted/50 px-4 py-3 text-[13px] text-muted-foreground">
+        <CornerDownLeftIcon className="size-3.5 shrink-0" aria-hidden />
+        These actions are the tool registry: the same names and roles agents call. The audit log records them by name.
+      </p>
+    </Command>
   );
 }

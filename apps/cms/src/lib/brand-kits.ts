@@ -10,6 +10,7 @@ import type { BrandColor, BrandColors, BrandKit, BrandShape, Orientation } from 
 import type { ToolOutput } from '@signforge/tools/outputs';
 import type { AssetView } from './assets';
 import type { SpotPreview } from './spots';
+import { namesOf } from './targets';
 
 /** One kit, as the brand tools give it. */
 export type BrandKitView = ToolOutput<'get_brand_kit'>['brandKit'];
@@ -202,4 +203,11 @@ export function pairFix(colors: BrandColors, fg: BrandColor, bg: BrandColor): { 
       if (contrastRatio(hex, colors[bg]) >= MIN_CONTRAST) break;
     }
   return { hex, ratio: ratioText(contrastRatio(hex, colors[bg])) };
+}
+
+/** The screens with these ids, by name as a list of them reads, an id no screen has by itself: a few, then how many more. A kit's reach and its conflicts. */
+export function screensText(ids: readonly string[], screens: readonly { id: string; name: string }[]): string {
+  const names = namesOf(ids, screens);
+  if (names.length <= 3) return names.join(', ');
+  return `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
 }

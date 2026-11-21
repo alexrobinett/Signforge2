@@ -1,0 +1,10 @@
+{
+  "name": "Evacuation alert",
+  "kind": "template",
+  "template": "alert",
+  "durationMs": 10000,
+  "data": {
+    "severity": "emergency",
+    "qrUrl": "https://example.com/updates"
+  }
+}

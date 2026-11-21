@@ -23,7 +23,8 @@ describe('Clock', () => {
     // Sent at device T-1h, answered 200 ms later, server said T+100.
     const saved = c.synced(T + 100, T - 3_600_000, T - 3_600_000 + 200);
     expect(c.offsetMs).toBe(3_600_000);
-    expect(saved).toEqual({ offsetMs: 3_600_000, syncedAt: T + 200 });
+    // The server's own time: the real time was at least that when the answer arrived.
+    expect(saved).toEqual({ offsetMs: 3_600_000, syncedAt: T + 100 });
     t.advance(200);
     expect(c.now()).toBe(T + 200);
   });
@@ -55,5 +56,26 @@ describe('Clock', () => {
     const e = new Clock(early.opts);
     e.synced(T, BUILD - 1, BUILD - 1);
     expect(e.trusted).toBe(true);
+  });
+
+  it('untrusted, says the real time is at least its last sync or its build, plus the time run since (#200)', () => {
+    const back = device(T - 86_400_000);
+    const c = new Clock({ ...back.opts, persisted: { offsetMs: 0, syncedAt: T } });
+    expect(c.trust()).toEqual({ clockTrusted: false, notBefore: T });
+    // The device clock stays put; the time run since the clock was made raises the bound.
+    back.d.mono += 90_000;
+    expect(c.trust()).toEqual({ clockTrusted: false, notBefore: T + 90_000 });
+    expect(new Clock(device(BUILD - 1).opts).trust()).toEqual({ clockTrusted: false, notBefore: BUILD });
+    c.synced(T + 1000, T - 86_400_000, T - 86_400_000);
+    expect(c.trust()).toEqual({});
+  });
+
+  it("after a reboot, bounds the real time by the last sync's server time, never by half its round trip (#200)", () => {
+    // A 20 s round trip whose answer came back fast: the server's time was stamped just before it
+    // arrived, so the server time plus half the round trip would run 10 s ahead of the real time.
+    const t = device(T);
+    const saved = new Clock(t.opts).synced(T + 19_000, T, T + 20_000);
+    const back = device(T - 86_400_000);
+    expect(new Clock({ ...back.opts, persisted: saved }).trust()).toEqual({ clockTrusted: false, notBefore: T + 19_000 });
   });
 });
