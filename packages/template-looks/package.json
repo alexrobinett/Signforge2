@@ -8,8 +8,7 @@
     "./looks.css": "./looks.css"
   },
   "scripts": {
-    "typecheck": "tsc -p .",
-    "test": "vitest run"
+    "typecheck": "tsc -p ."
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "5.3.0",
@@ -21,9 +20,6 @@
     "@signforge/template-sdk": "workspace:*"
   },
   "devDependencies": {
-    "@signforge/cli": "workspace:*",
-    "@signforge/contract": "workspace:*",
-    "@types/node": "^26.6.6",
-    "vitest": "^5.1.0"
+    "@types/node": "^26.6.6"
   }
 }

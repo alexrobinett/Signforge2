@@ -530,6 +530,9 @@ importers:
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
+      '@signforge/template-looks':
+        specifier: workspace:*
+        version: link:../template-looks
       '@signforge/template-menu-board':
         specifier: workspace:*
         version: link:../../templates/menu-board
@@ -764,18 +767,9 @@ importers:
         specifier: workspace:*
         version: link:../template-sdk
     devDependencies:
-      '@signforge/cli':
-        specifier: workspace:*
-        version: link:../cli
-      '@signforge/contract':
-        specifier: workspace:*
-        version: link:../contract
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
-      vitest:
-        specifier: ^5.1.0
-        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/template-sdk:
     dependencies:

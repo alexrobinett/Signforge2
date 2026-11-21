@@ -8,11 +8,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TEMPLATE_BUDGET } from '@signforge/contract';
-import { buildTemplate } from '@signforge/cli/template';
+import { LOOKS } from '@signforge/template-looks';
 import { expect, it } from 'vitest';
-import { LOOKS } from '../src/index';
+import { buildTemplate } from '../src/template';
 
-const dir = join(import.meta.dirname, '..');
+/** The look kit's package (packages/template-looks). Here, not there: the kit's templates build with the CLI, which builds them all. */
+const dir = join(import.meta.dirname, '../../template-looks');
 const css = readFileSync(join(dir, 'looks.css'), 'utf8');
 
 it('styles every look, and the test template offers each', () => {
