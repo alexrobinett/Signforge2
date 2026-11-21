@@ -57,6 +57,7 @@ import {
 } from '@signforge/contract';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
 import { compileScreen, fontById, fontFilePath, onColor, spotProblems, type CompileInput, type TargetedEntry } from '@signforge/compiler';
+import { imageSample } from '@signforge/media/sample';
 import { push, PushError } from './push';
 import { buildTemplate, type BuiltTemplate } from './template';
 import { checkVideoFile } from './video';
@@ -97,6 +98,24 @@ async function fitImage(data: Buffer, type: string, box: ScreenBox): Promise<{ d
           ? await resized.avif({ quality: 60 }).toBuffer()
           : await resized.jpeg({ quality: 85, mozjpeg: true }).toBuffer();
   return { data: out, note: `${w}x${h} -> ${size.width}x${size.height}, ${(data.length / 1024).toFixed(0)} -> ${(out.length / 1024).toFixed(0)} kB` };
+}
+
+/**
+ * A fitted raster image's sample (`ManifestFile.sample`) as a PNG, made from its bytes decoded
+ * again as a screen decodes them; undefined for SVG, video and an image with transparent pixels.
+ * libvips decodes a JPEG a level apart from Chromium on some pixels, which no contrast check feels.
+ */
+async function sampleImage(data: Buffer, type: string): Promise<Buffer | undefined> {
+  if (!['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(type)) return undefined;
+  const { data: rgba, info } = await sharp(data).rotate().ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const sample = imageSample(rgba, info.width, info.height);
+  return (
+    sample &&
+    sharp(sample.data, { raw: { width: sample.width, height: sample.height, channels: 4 } })
+      .removeAlpha()
+      .png()
+      .toBuffer()
+  );
 }
 
 const sha256 = (data: Buffer | string) => createHash('sha256').update(data).digest('hex');
@@ -143,6 +162,8 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
     return hash;
   };
   const fitted = new Map<string, Buffer>();
+  /** Each image file's sample, by the image's hash. */
+  const samples = new Map<string, string>();
   const addMedia = async (rel: string, where: string): Promise<string> => {
     const path = join(projectDir, 'media', rel);
     if (!existsSync(path)) {
@@ -163,6 +184,8 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
       const { data, note } = await fitImage(readFileSync(path), type, SCREEN_BOX[screen.orientation]);
       if (note) console.log(`  image ${rel}  ${note}`);
       fitted.set(rel, data);
+      const sample = await sampleImage(data, type);
+      if (sample) samples.set(sha256(data), addBlob(sample, 'image/png'));
     }
     return addBlob(fitted.get(rel)!, type);
   };
@@ -239,7 +262,10 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
   const brand = await readBrand(projectDir, problems, addBlob, addMedia);
 
   const files: CompileInput['files'] = {};
-  for (const [hash, b] of blobs) files[hash] = { size: b.data.length, type: b.type };
+  for (const [hash, b] of blobs) {
+    const sample = samples.get(hash);
+    files[hash] = { size: b.data.length, type: b.type, ...(sample ? { sample } : {}) };
+  }
 
   const result = await compileScreen(
     {

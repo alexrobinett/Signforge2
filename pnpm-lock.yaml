@@ -499,6 +499,9 @@ importers:
       '@signforge/feeds':
         specifier: workspace:*
         version: link:../feeds
+      '@signforge/media':
+        specifier: workspace:*
+        version: link:../media
       '@signforge/media-check':
         specifier: workspace:*
         version: link:../media-check
@@ -663,6 +666,9 @@ importers:
       '@signforge/cli':
         specifier: workspace:*
         version: link:../cli
+      '@signforge/media':
+        specifier: workspace:*
+        version: link:../media
       '@signforge/template-agenda':
         specifier: workspace:*
         version: link:../../templates/agenda

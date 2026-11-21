@@ -20,6 +20,7 @@
     "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/feeds": "workspace:*",
+    "@signforge/media": "workspace:*",
     "@signforge/media-check": "workspace:*",
     "esbuild": "^0.28.2",
     "sharp": "^0.35.5"
