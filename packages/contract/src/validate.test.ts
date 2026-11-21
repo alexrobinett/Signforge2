@@ -967,6 +967,20 @@ describe('forbidden code lint', () => {
   it('passes handlers set as properties or with addEventListener', () => {
     expect(problems({ 'main.ts': "img.onload = () => done();\nel.addEventListener('click', f);\nconst ok = a < b && c.onx === 1;" })).toEqual([]);
   });
+
+  it("passes a style.css that imports another package's stylesheet, which the build bundles (the look kit)", () => {
+    expect(problems({ 'style.css': "@import '@signforge/template-looks/looks.css';\n.a { color: var(--lk-text); }" })).toEqual([]);
+  });
+});
+
+describe('forbidden CSS', () => {
+  const problems = (html: string) =>
+    checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'forbidden-css')?.problems;
+
+  it('refuses a bundle that still imports a stylesheet at run time', () => {
+    expect(problems('<style>@import "x.css";.a{color:red}</style>')).toEqual(['stylesheets must be bundled, not imported at run time']);
+    expect(problems('<style>.a{color:red}</style>')).toEqual([]);
+  });
 });
 
 describe('script check', () => {
