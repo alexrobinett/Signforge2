@@ -57,3 +57,13 @@ export function initials(text: string): string {
   const letters = words.length > 1 ? words[0]![0]! + words[1]![0]! : (words[0] ?? '?').slice(0, 2);
   return letters.toUpperCase();
 }
+
+/**
+ * Each org's avatar hue, in degrees: the orgs in id order, spread evenly round the wheel from the
+ * brand's blue, so every org in the list has its own and two with the same initials ("Harbor
+ * Coffee", "Harbor Coffee Franchise East") are told apart, however many there are (#182).
+ */
+export function orgHues(ids: string[]): Map<string, number> {
+  const sorted = [...ids].sort();
+  return new Map(sorted.map((id, i) => [id, (228 + (i * 360) / sorted.length) % 360]));
+}

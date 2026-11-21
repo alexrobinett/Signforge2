@@ -76,6 +76,11 @@
   --chart-3: #6e82d6;
   --chart-4: #858fa1;
   --chart-5: #0e9384;
+
+  /* An org's avatar: its hue (orgHues in src/lib/paths.ts) at this saturation and lightness, every hue 4.5:1. */
+  --org-saturation: 60%;
+  --org-lightness: 29%;
+  --org-foreground: #ffffff;
   color-scheme: light;
 }
 
@@ -134,6 +139,10 @@
   --chart-3: #818cf8;
   --chart-4: #8a93a3;
   --chart-5: #2dd4bf;
+
+  --org-saturation: 60%;
+  --org-lightness: 66%;
+  --org-foreground: #0b0d12;
   color-scheme: dark;
 }
 

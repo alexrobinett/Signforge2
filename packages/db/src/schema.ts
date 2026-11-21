@@ -84,6 +84,8 @@ export const user = sqliteTable('user', {
   image: text('image'),
   createdAt: date('createdAt').notNull(),
   updatedAt: date('updatedAt').notNull(),
+  /** The org the user last made active, which a new session starts in (`startingOrg`). Ours, declared to Better Auth as an additional field. */
+  lastActiveOrganizationId: text('lastActiveOrganizationId'),
 });
 
 export const session = sqliteTable(

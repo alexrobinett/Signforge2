@@ -139,14 +139,29 @@ export interface AuthDeps {
   appUrl: string;
   /** Appends a row to an org's audit log (`scoped(db, orgId).auditLog.append`). */
   audit: (orgId: string, entry: Parameters<OrgScope['auditLog']['append']>[0]) => Promise<unknown>;
+  /** The org a new session starts in, or null to let the member choose (`startingOrg`). */
+  startingOrg: (userId: string) => Promise<string | null>;
 }
 
-export function authOptions({ email, appUrl, audit }: AuthDeps) {
+export function authOptions({ email, appUrl, audit, startingOrg }: AuthDeps) {
   return {
     basePath: '/api/auth',
     // Password hashing does not fit the free plan's CPU limit; sign-in is passwordless.
     emailAndPassword: { enabled: false },
     session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
+    user: { additionalFields: { lastActiveOrganizationId: { type: 'string', required: false, input: false, returned: false } } },
+    // A session starts in the member's only org, or the one they last made active (#182), so only a
+    // member of several orgs who never chose one is asked. Set at creation, so the cookie cache the
+    // sign-in sets carries it, and the tab check (#129) sees it from the first request. The read is
+    // not atomic with Better Auth's insert: the insert's trigger clears an org left in between
+    // (migration 0029), and every request checks membership again. Triggers remember each switch.
+    databaseHooks: {
+      session: {
+        create: {
+          before: async ({ userId }) => ({ data: { activeOrganizationId: await startingOrg(userId) } }),
+        },
+      },
+    },
     // Stored in D1, so limits hold across isolates and restarts. Per IP and path; Better Auth's
     // defaults are 100 per 10 s, 3 per 10 s for sign-in, and 3 per minute for sending a code.
     rateLimit: { enabled: true, storage: 'database' as const },

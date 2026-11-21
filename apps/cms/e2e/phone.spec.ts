@@ -1,8 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { axe, fillUntilEnabled, orgSwitcher, screenshot, signIn } from './helpers';
+import { axe, fillUntilEnabled, fromAddress, orgSwitcher, screenshot, signIn } from './helpers';
+
+/** This spec's own client address, for its own sign-in rate limit. */
+const ADDRESS = '192.0.2.124';
 
 test('at phone width, navigation is a drawer and the dashboard works', async ({ page }) => {
   const email = `e2e-phone-${Date.now()}@example.com`;
+  await fromAddress(page, ADDRESS);
   await page.goto('/sign-in');
   await signIn(page, email);
   await fillUntilEnabled(page, 'Organization name', 'Pocket Signs', 'Create organization');
@@ -16,7 +20,9 @@ test('at phone width, navigation is a drawer and the dashboard works', async ({ 
 
   await page.getByRole('button', { name: 'Open navigation' }).click();
   const drawer = page.getByRole('dialog', { name: 'Navigation' });
-  await expect(orgSwitcher(page)).toContainText('Pocket Signs');
+  // One org: its name, with no menu to switch.
+  await expect(drawer.getByText('Pocket Signs')).toBeVisible();
+  await expect(orgSwitcher(page)).toHaveCount(0);
   await axe(page);
   await screenshot(page, '09-phone-drawer');
   await drawer.getByRole('link', { name: 'Playlists' }).click();

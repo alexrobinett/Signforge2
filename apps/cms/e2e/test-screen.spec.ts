@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { axe, fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
-const ADDRESS = '192.0.2.31';
+const ADDRESS = '192.0.2.131';
 
 /** What the player in the tab says about itself (`window.__sf`). */
 const player = (tab: Page) =>
