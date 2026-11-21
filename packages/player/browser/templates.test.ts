@@ -142,7 +142,7 @@ interface Host {
     sampled?: boolean | 'broken',
     durationMs?: number,
   ): Promise<void>;
-  post(frame: string, type: 'play' | 'reset'): Promise<void>;
+  post(frame: string, type: 'play' | 'reset' | 'stop'): Promise<void>;
   /** Wait until the frame has sent `type` `count` times in all. */
   waitFor(frame: string, type: string, count: number): Promise<void>;
   /** The frame's whole document, with object URLs (which differ per load) made equal. */
@@ -1078,26 +1078,386 @@ describe('countdown (#198)', () => {
     };
   }
 
-  it.only('SHOTS', async () => {
-    const dir = process.env.SHOTS!;
-    const sets: [string, Data][] = [
-      ['down', { target: '2026-11-29T18:00' }],
-      ['down-hm', { target: '2026-11-29T18:00', units: 'days, hours and minutes', facts: [{ label: 'Where', value: 'Pier 9 roof' }, { label: 'Dress', value: 'Smart casual' }] }],
-      ['up', { mode: 'up', target: '2026-04-21T00:00', recordDays: 301, facts: [{ label: 'Site', value: 'Riverside warehouse' }] }],
-      ['done', { target: '2026-11-10T18:00' }],
-      ['long', { target: '2027-03-29T18:00', units: 'days and hours', title: 'The winter party on the Pier 9 roof terrace, with the band!!', facts: [{ label: 'Where exactly', value: 'Pier 9 roof terrace, north side' }, { label: 'Dress code tonight', value: 'Smart casual, bring a warm coat' }, { label: 'Tickets', value: 'From reception, free for staff' }] }],
-      ['off', { mode: 'up', target: '2026-04-21T00:00', recordDays: 301, showProgress: false, showRecord: false, showFacts: false, showDetail: false }],
+  /** What the screen says: the state, the figures, the unit, the done text and the progress. */
+  const reads = (f: Frame) =>
+    f.evaluate(() => {
+      const text = (sel: string) => document.querySelector(sel)?.textContent ?? null;
+      return {
+        state: document.querySelector<HTMLElement>('.stage')!.dataset.state,
+        number: text('.number'),
+        rest: text('.rest'),
+        unit: text('.unit'),
+        done: text('.done'),
+        detail: text('.detail'),
+        progress: text('.progress-label'),
+      };
+    });
+  const minutes = 'days, hours and minutes';
+
+  it('works out the count from the screen clock: before, at and after the target', async () => {
+    const s = await screen();
+    const target = '2026-11-29T18:00';
+    // NOW is Tuesday 17 November, 15:00 in the screen's zone (UTC).
+    const ahead = (ms: number) => Date.parse('2026-11-29T18:00:00Z') + ms;
+    const seen: Record<string, unknown> = {};
+    const cases: [string, Data, number?][] = [
+      ['12 days before, in days', { target }],
+      ['in days and hours', { target, units: 'days and hours' }],
+      ['in days, hours and minutes', { target, units: minutes }],
+      ['a minute and a half before, in days', { target }, ahead(-90_000)],
+      ['a minute and a half before, in minutes', { target, units: minutes }, ahead(-90_000)],
+      ['at the target', { target, units: minutes }, ahead(0)],
+      ['a day after', { target }, ahead(24 * 3_600_000)],
+      ['after, with no done text', { target, units: minutes, doneText: '' }, ahead(60_000)],
     ];
-    for (const orientation of (process.env.ORIENT ?? 'landscape,portrait').split(',') as Orientation[]) {
-      const s = await screen(orientation);
-      for (const look of (process.env.LOOKS ?? looks.join(',')).split(','))
-        for (const [name, data] of sets) {
-          const f = await s.show({ look, ...data });
-          await f.evaluate(() => {
-            for (const a of document.getAnimations()) a.currentTime = 3000;
-          });
-          await s.hst.page.screenshot({ path: `${dir}/${look}-${orientation}-${name}.png` });
-        }
+    for (const [name, data, now] of cases) seen[name] = await reads(await s.show({ look: 'pop', ...data }, now));
+    const count = (number: string, rest: string | null, unit = 'days to go') => ({ state: 'count', number, rest, unit, done: null });
+    const done = { state: 'done', number: null, rest: null, unit: null, done: "It's here!" };
+    const progress = (p: string | null) => ({ detail: 'Sunday, November 29 · 6:00 PM', progress: p });
+    expect(seen).toEqual({
+      '12 days before, in days': { ...count('12', null), ...progress('Day 2 of 14') },
+      'in days and hours': { ...count('12', '03 h'), ...progress('Day 2 of 14') },
+      'in days, hours and minutes': { ...count('12', '03 h 00 min'), ...progress('Day 2 of 14') },
+      // On the day itself: no days to go, and the run-up full.
+      'a minute and a half before, in days': { ...count('0', null), ...progress('Day 7 of 7') },
+      // Rounded up: the last minute shows a minute to go, not none.
+      'a minute and a half before, in minutes': { ...count('0', '00 h 02 min'), ...progress('Day 7 of 7') },
+      'at the target': { ...done, ...progress(null) },
+      'a day after': { ...done, ...progress(null) },
+      'after, with no done text': { ...count('0', '00 h 00 min'), ...progress(null) },
+    });
+  });
+
+  it('counts wall-clock days across a DST change, in the screen zone', async () => {
+    // New York leaves DST at 02:00 on Sunday 1 November 2026 and starts it at 02:00 on Sunday 14 March 2027.
+    const s = await screen('landscape', 'America/New_York');
+    const seen: Record<string, unknown> = {};
+    const cases: [string, Data, string][] = [
+      // 49 hours of real time, two days on the wall.
+      ['down, over the night the clocks go back', { target: '2026-11-02T18:00', units: minutes }, '2026-10-31T22:00:00Z'],
+      ['down, in days, the same night', { target: '2026-11-02T18:00' }, '2026-10-31T22:00:00Z'],
+      // 47 hours of real time.
+      ['down, over the night the clocks go forward', { target: '2027-03-15T09:00', units: 'days and hours' }, '2027-03-13T14:00:00Z'],
+      ['up, over the night the clocks go back', { mode: 'up', target: '2026-10-31T18:00', units: minutes }, '2026-11-02T23:00:00Z'],
+      // 23:30 in New York, 03:30 the next day in UTC: still the 31st on the screen's wall.
+      ['up, in days, late in the evening', { mode: 'up', target: '2026-10-30T09:00' }, '2026-11-01T03:30:00Z'],
+    ];
+    for (const [name, data, now] of cases) {
+      const r = await reads(await s.show({ look: 'corporate', ...data }, Date.parse(now)));
+      seen[name] = [r.number, r.rest, r.unit];
     }
-  }, 300_000);
+    expect(seen).toEqual({
+      'down, over the night the clocks go back': ['2', '00 h 00 min', 'days to go'],
+      'down, in days, the same night': ['2', null, 'days to go'],
+      'down, over the night the clocks go forward': ['2', '00 h', 'days to go'],
+      'up, over the night the clocks go back': ['2', '00 h 00 min', 'days since'],
+      'up, in days, late in the evening': ['1', null, 'day since'],
+    });
+  });
+
+  it('counts up from the target, with a record to beat and without one', async () => {
+    const s = await screen();
+    // 210 days since Tuesday 21 April.
+    const since = { mode: 'up', target: '2026-04-21T09:00' };
+    const seen: Record<string, unknown> = {};
+    for (const look of looks)
+      for (const [name, data] of [
+        ['a record of 301', { ...since, recordDays: 301 }],
+        ['a record of 200', { ...since, recordDays: 200 }],
+        ['no record', since],
+      ] as const) {
+        const f = await s.show({ look, ...data, facts: [] });
+        seen[`${look}, ${name}`] = await f.evaluate(() => {
+          const texts = (sel: string) => [...document.querySelectorAll(sel)].map((e) => e.textContent?.replace(/\s+/g, ' ').trim());
+          return [
+            document.documentElement.dataset.record,
+            document.documentElement.dataset.progress,
+            ...texts('.number, .tile .v'),
+            ...texts('.best, .record, .fact[data-show="record"], .progress-label, .ends'),
+          ];
+        });
+      }
+    expect(seen).toEqual({
+      'pop, a record of 301': ['on', 'on', '210', 'Best: 301 days', '69% of the way to the record'],
+      'pop, a record of 200': ['on', 'on', '210', 'Best: 200 days', 'A new record'],
+      'pop, no record': ['off', 'off', '210'],
+      'poster, a record of 301': ['on', 'on', '210', 'Record to beat301days, 92 more to beat it'],
+      'poster, a record of 200': ['on', 'on', '210', 'Record to beat200days, now beaten'],
+      // Poster's progress is its tiles' split, which needs no record.
+      'poster, no record': ['off', 'on', '210'],
+      'night, a record of 301': ['on', 'on', '210', 'record301 days', 'to beat it92 more days'],
+      'night, a record of 200': ['on', 'on', '210', 'record200 days', 'to beat itA new record'],
+      'night, no record': ['off', 'off', '210'],
+      'corporate, a record of 301': ['on', 'on', '210', '210 days of 301Record', 'Record301 days', 'To beat it92 more days'],
+      'corporate, a record of 200': ['on', 'on', '210', '210 days of 200Record', 'Record200 days', 'To beat itA new record'],
+      'corporate, no record': ['off', 'off', '210'],
+    });
+  });
+
+  it("fills Night's ring with two half-discs turned by transforms, never a stroke", async () => {
+    const s = await screen();
+    const turns: Record<string, number[]> = {};
+    // 4 of 14 days, then 69% and 100% of the way to a record.
+    for (const [name, data] of [
+      ['under half', { target: '2026-11-27T18:00' }],
+      ['over half', { mode: 'up', target: '2026-04-21T09:00', recordDays: 301 }],
+      ['full', { mode: 'up', target: '2026-04-21T09:00', recordDays: 100 }],
+    ] as const) {
+      const f = await s.show({ look: 'night', ...data });
+      turns[name] = await f.evaluate(() => {
+        for (const a of document.getAnimations()) a.currentTime = 5000;
+        const angle = (sel: string) => {
+          const m = new DOMMatrix(getComputedStyle(document.querySelector(sel)!).transform);
+          return Math.round((((Math.atan2(m.b, m.a) * 180) / Math.PI + 360) % 360) * 10) / 10;
+        };
+        if (document.querySelector('.ring svg, .ring [stroke-dashoffset]')) return [-1];
+        return [angle('.fill.a'), angle('.fill.b'), angle('.arm')];
+      });
+    }
+    expect(turns).toEqual({ 'under half': [102.9, 0, 102.9], 'over half': [180, 71.2, 251.2], full: [180, 180, 0] });
+  });
+
+  it('changes its figures at most once a second, from one timer that stop clears', async () => {
+    const hst = await host('landscape', true);
+    await hst.page.clock.install({ time: NOW });
+    await hst.open('fresh', t().html);
+    // 2 days, 3 hours and 0 minutes to go.
+    await hst.init('fresh', spotData(t().manifest, { look: 'night', target: '2026-11-19T18:00', units: minutes }));
+    await hst.waitFor('fresh', 'ready', 1);
+    const f = hst.page.mainFrame().childFrames()[0]!;
+    await hst.page.clock.pauseAt(NOW + 10_000);
+    await f.evaluate(() => {
+      const w = window as unknown as { seen: string[] };
+      w.seen = [];
+      new MutationObserver((ms) => {
+        for (const m of ms) w.seen.push(`${(m.target.parentElement ?? m.target).textContent}`);
+      }).observe(document.querySelector('.stage')!, { subtree: true, childList: true, characterData: true });
+    });
+    await hst.post('fresh', 'play');
+    const read = () => f.evaluate(() => [document.querySelector('.sub')!.textContent, (window as unknown as { seen: string[] }).seen.splice(0)]);
+    const ticks: unknown[] = [];
+    for (const ms of [1000, 48_000, 2000, 1000, 60_000]) {
+      await hst.page.clock.runFor(ms);
+      ticks.push(await read());
+    }
+    await hst.post('fresh', 'stop');
+    await hst.page.clock.runFor(180_000);
+    ticks.push(await read());
+    // Played 10 s into the minute, read at 11, 59, 61, 62 and 122 s: the minutes go down as each
+    // minute turns, nothing else is written, and nothing at all once stopped.
+    expect(ticks).toEqual([
+      ['days · 03h · 00m · 71%', []],
+      ['days · 03h · 00m · 71%', []],
+      ['days · 02h · 59m · 71%', ['days · 02h · 59m · 71%']],
+      ['days · 02h · 59m · 71%', []],
+      ['days · 02h · 58m · 71%', ['days · 02h · 58m · 71%']],
+      ['days · 02h · 58m · 71%', []],
+    ]);
+  });
+
+  it('keeps each figure the same width whatever its digits, in every look', async () => {
+    const s = await screen();
+    const widths: Record<string, number[]> = {};
+    for (const look of looks)
+      for (let d = 10; d < 20; d++) {
+        // d days, d hours and d minutes to go: every digit from 0 to 9 in each place. (Night's
+        // percentage beside them is fixed for a play.)
+        const target = new Date(NOW + ((d * 24 + d) * 60 + d) * 60_000).toISOString().slice(0, 16);
+        const f = await s.show({ look, target, units: minutes, showProgress: false });
+        const w = await f.evaluate(() => {
+          for (const a of document.getAnimations()) a.currentTime = 5000;
+          return [...document.querySelectorAll<HTMLElement>('.number, .rest, .sub, .tile .v')].map((e) => {
+            const r = document.createRange();
+            r.selectNodeContents(e);
+            return Math.round(r.getBoundingClientRect().width * 10) / 10;
+          });
+        });
+        for (const [i, x] of w.entries()) (widths[`${look} ${i}`] ??= []).push(x);
+      }
+    for (const [figure, w] of Object.entries(widths)) expect(new Set(w).size, `${figure}: ${w.join(', ')}`).toBe(1);
+  });
+
+  /** Copy at its longest: every text at its maxLength, three facts, and the figures at their widest. */
+  const longest = {
+    title: 'The winter party on the Pier 9 roof terrace, with the bandzz',
+    doneText: 'The doors are open: come up to the roofz',
+    facts: [
+      { label: 'Where exactly??', value: 'Pier 9 roof terrace, north sidez' },
+      { label: 'Dress code toni', value: 'Smart casual and a warm coat, ok' },
+      { label: 'Tickets from rr', value: 'Reception, free for every staffz' },
+    ],
+  };
+  const states: [string, Data][] = [
+    ['down', { ...longest, target: '2026-12-21T18:00', units: minutes }],
+    ['far off', { ...longest, target: '2099-12-31T23:59', units: 'days and hours' }],
+    ['up', { ...longest, mode: 'up', target: '1900-01-01T00:00', recordDays: 99999 }],
+    ['done', { ...longest, target: '2026-11-17T09:00' }],
+  ];
+  const toggles = ['showProgress', 'showRecord', 'showFacts', 'showDetail'];
+  /** Every toggle on, each one off on its own, and all of them off. */
+  const toggleSets: Data[] = [{}, ...toggles.map((k) => ({ [k]: false })), Object.fromEntries(toggles.map((k) => [k, false]))];
+
+  /**
+   * What is wrong with the layout at rest: text past the screen, past its clamp or cut by a box
+   * around it, and texts that overlap. Each text is its lines' boxes, cut to every box that clips it.
+   */
+  const faults = (f: Frame) =>
+    f.evaluate(() => {
+      for (const a of document.getAnimations()) a.currentTime = 5000;
+      type Box = { l: number; t: number; r: number; b: number };
+      const cut = (a: Box, b: Box): Box => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
+      const box = (r: DOMRect): Box => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+      const clips = (el: Element) => getComputedStyle(el).overflow !== 'visible';
+      const name = (el: Element) => `.${[...el.classList].filter((c) => !c.startsWith('lk-')).join('.') || el.tagName}`;
+      // A clamp or an ellipsis is a cut the layout means; the crawl is a strip that runs past its band.
+      const meant = (p: Element) =>
+        getComputedStyle(p).webkitLineClamp !== 'none' || getComputedStyle(p).textOverflow === 'ellipsis' || p.matches('.band, .lk-crawl');
+      const found: string[] = [];
+      const texts: { el: Element; boxes: Box[] }[] = [];
+      const screen = { l: 0, t: 0, r: innerWidth, b: innerHeight };
+      for (const el of document.querySelectorAll('.stage *')) {
+        const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
+        if (!own.length || el.closest('.band')) continue;
+        const s = getComputedStyle(el);
+        const em = Number.parseFloat(s.fontSize);
+        if (s.display !== 'inline' && clips(el) && !meant(el)) {
+          if (el.scrollHeight > el.clientHeight + em / 2) found.push(`${name(el)} runs ${el.scrollHeight - el.clientHeight}px past its box`);
+          if (el.scrollWidth > el.clientWidth + 1) found.push(`${name(el)} runs ${el.scrollWidth - el.clientWidth}px wide`);
+        }
+        // A line's box, not its glyphs' font box: display type set solid has glyph boxes that overlap the lines around them.
+        const lineHeight = Number.parseFloat(s.lineHeight) || Number.POSITIVE_INFINITY;
+        const range = document.createRange();
+        range.setStartBefore(own[0]!);
+        range.setEndAfter(own.at(-1)!);
+        const boxes: Box[] = [];
+        for (const line of range.getClientRects()) {
+          let b = box(line);
+          const middle = (b.t + b.b) / 2;
+          const half = Math.min(b.b - b.t, lineHeight) / 2;
+          b = { ...b, t: middle - half, b: middle + half };
+          if (clips(el) && s.display !== 'inline') b = cut(b, box(el.getBoundingClientRect()));
+          for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+            if (!clips(p)) continue;
+            const c = cut(b, box(p.getBoundingClientRect()));
+            if (!meant(p) && (b.b - c.b > em / 2 || c.t - b.t > em / 2 || b.r - c.r > 1 || c.l - b.l > 1)) found.push(`${name(el)} is cut by ${name(p)}`);
+            b = c;
+          }
+          if (b.r - b.l < 1 || b.b - b.t < 1) continue;
+          const on = cut(b, screen);
+          if (on.r - on.l < b.r - b.l - 1 || on.b - on.t < b.b - b.t - 1) found.push(`${name(el)} runs off the screen`);
+          boxes.push(b);
+        }
+        texts.push({ el, boxes });
+      }
+      for (let i = 0; i < texts.length; i++)
+        for (let j = i + 1; j < texts.length; j++) {
+          const [a, b] = [texts[i]!, texts[j]!];
+          if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
+          const meet = a.boxes.some((p) => b.boxes.some((q) => Math.min(p.r, q.r) - Math.max(p.l, q.l) > 1 && Math.min(p.b, q.b) - Math.max(p.t, q.t) > 1));
+          if (meet) found.push(`${name(a.el)} meets ${name(b.el)}`);
+        }
+      return [...new Set(found)];
+    });
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`every text fits and nothing overlaps at the longest copy, in every look and toggle, ${orientation}`, async () => {
+      const s = await screen(orientation);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const [state, data] of states)
+          for (const set of toggleSets) {
+            const off = Object.keys(set).join(', ') || 'all on';
+            for (const fault of await faults(await s.show({ look, ...data, ...set }))) found.push(`${look}, ${state}, ${off}: ${fault}`);
+          }
+      expect(found).toEqual([]);
+    }, 300_000);
+
+  const lightKit: BrandColors = {
+    primary: '#1d4ed8',
+    onPrimary: '#ffffff',
+    accent: '#f59e0b',
+    onAccent: '#000000',
+    background: '#ffffff',
+    surface: '#f1f5f9',
+    text: '#0f172a',
+    muted: '#475569',
+  };
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`every text reads as painted in every look, with no kit, the demo kit and a light kit, ${orientation}`, async () => {
+      const s = await screen(orientation);
+      const found: string[] = [];
+      const allOff = toggleSets.at(-1)!;
+      for (const [kit, theme] of noDemoAndLight(lightKit))
+        for (const look of looks)
+          for (const [state, data] of states)
+            for (const set of state === 'done' ? [{}] : [{}, allOff]) {
+              const f = await s.show({ look, ...data, ...set }, NOW, theme);
+              for (const l of await paintedContrast(s.hst.page, f, '.stage')) found.push(`${look}, ${kit}, ${state}${set === allOff ? ', all off' : ''}: ${l}`);
+            }
+      expect(found).toEqual([]);
+    }, 300_000);
+
+  it('marks each toggle on the root, removes what is off, and steps the title up into a screen without them', async () => {
+    const s = await screen();
+    const read = (f: Frame) =>
+      f.evaluate(() => ({
+        marks: ['progress', 'record', 'facts', 'detail'].map((m) => `${m}=${document.documentElement.getAttribute(`data-${m}`)}`),
+        present: [
+          '.dots, .ring, .split, .scale',
+          '.best, .record, .fact[data-show="record"]',
+          '.facts .fact[data-show="facts"], .band',
+          '.detail, .fact[data-show="detail"]',
+        ].filter((sel) => document.querySelector(sel)),
+        title: Number.parseFloat(getComputedStyle(document.querySelector('.title')!).fontSize),
+      }));
+    const data = { mode: 'up', target: '2026-04-21T09:00', recordDays: 301, title: 'Safe days' };
+    for (const look of looks) {
+      const on = await read(await s.show({ look, ...data }));
+      const off = await read(await s.show({ look, ...data, ...toggleSets.at(-1)! }));
+      expect(on.marks, look).toEqual(['progress=on', 'record=on', 'facts=on', 'detail=on']);
+      expect(on.present, look).toHaveLength(4);
+      expect(off.marks, look).toEqual(['progress=off', 'record=off', 'facts=off', 'detail=off']);
+      expect(off.present, look).toEqual([]);
+      const step = Number(await (await s.show({ look, ...data })).evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--lk-step')));
+      expect(off.title / on.title, look).toBeCloseTo(step, 2);
+    }
+  });
+
+  it('every element has an intro and an outro timed from --sf-duration, moving only transform and opacity, within the cap', async () => {
+    const s = await screen();
+    const durationMs = 11_000;
+    for (const look of looks)
+      for (const [, data] of states) {
+        const f = await s.show({ look, ...data }, NOW, undefined, durationMs);
+        const seen = await f.evaluate((durationMs) => {
+          const props = new Set<string>();
+          const moving = new Set<Element>();
+          const unended: string[] = [];
+          for (const a of document.getAnimations()) {
+            const effect = a.effect as KeyframeEffect;
+            for (const k of effect.getKeyframes())
+              for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
+            moving.add(effect.target!);
+          }
+          for (const el of document.querySelectorAll('.lk-text, .lk-fade, .lk-badge, .lk-draw')) {
+            const ends = el.getAnimations().map((a) => Math.round(a.effect!.getComputedTiming().endTime as number));
+            if (!ends.includes(durationMs)) unended.push(el.className);
+          }
+          return { props: [...props].sort(), moving: moving.size, unended };
+        }, durationMs);
+        expect(seen.props, look).toEqual(['opacity', 'transform']);
+        expect(seen.moving, look).toBeLessThanOrEqual(50);
+        expect(seen.unended, look).toEqual([]);
+      }
+  });
+
+  it('with reduced motion, shows the final frame with nothing animating', async () => {
+    const s = await screen();
+    await s.hst.page.emulateMedia({ reducedMotion: 'reduce' });
+    for (const look of looks) {
+      const f = await s.show({ look, mode: 'up', target: '2026-04-21T09:00', recordDays: 301, units: minutes });
+      await s.hst.post('fresh', 'play');
+      expect(await f.evaluate(() => document.getAnimations().length), look).toBe(0);
+    }
+  });
 });

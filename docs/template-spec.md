@@ -2,7 +2,7 @@
 
 Version 1. This is what a template author, human or agent, builds against and what a reviewer checks. The types and limits here are defined in code in `packages/contract/src/shapes.ts`; if the two disagree, the code is right.
 
-Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl) and `menu-board` (a list typed by people or filled from a CSV or JSON link).
+Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl), `menu-board` (a list typed by people or filled from a CSV or JSON link) and `countdown` (the days to go to a `datetime`, or the days since one with a record to beat, worked out from `now()` in the screen's zone and ticking once a second at most, in the four looks of the look kit, with toggles).
 
 ## What a template is
 

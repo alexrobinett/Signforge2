@@ -6,10 +6,11 @@ import { createOrg, d1, hydrated, signInAs, spotIdOf, tool } from './helpers';
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.140';
 
+// Not the base Countdown (#198): an org's own template, named apart from it.
 const countdown = {
-  id: 'countdown',
+  id: 'launch-countdown',
   version: '1.0.0',
-  name: 'Countdown',
+  name: 'Launch countdown',
   fields: { title: { type: 'text', label: 'Title', default: 'Doors open' }, target: { type: 'datetime', label: 'Target' } },
   duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 },
   orientations: ['landscape'],
@@ -30,7 +31,7 @@ test.beforeAll(async ({ browser }) => {
   const at = Date.now();
   const report = JSON.stringify({ ok: true, bundleBytes: 1000, checks: [], checkedAt: at, sourcesSha256: '0'.repeat(64) });
   d1(
-    `INSERT INTO templates (id, org_id, key, name, created_at, updated_at) VALUES ('tpl_e2e_${at}', '${orgId}', 'countdown', 'Countdown', ${at}, ${at}); ` +
+    `INSERT INTO templates (id, org_id, key, name, created_at, updated_at) VALUES ('tpl_e2e_${at}', '${orgId}', 'launch-countdown', 'Launch countdown', ${at}, ${at}); ` +
       'INSERT INTO template_versions (id, org_id, template_id, version, manifest_json, bundle_sha256, status, check_report_json, created_at, updated_at) ' +
       `VALUES ('tv_e2e_${at}', '${orgId}', 'tpl_e2e_${at}', '1.0.0', '${JSON.stringify(countdown)}', '${'f'.repeat(64)}', 'approved', '${report}', ${at}, ${at})`,
   );
@@ -42,7 +43,7 @@ test('a new spot leaves a datetime with no default for the editor to pick, says 
   await page.goto('/spots');
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
-  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: 'Countdown' });
+  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: 'Launch countdown' });
   await page.getByLabel('Name').fill('Grand opening');
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name: 'Grand opening', level: 1 })).toBeVisible();

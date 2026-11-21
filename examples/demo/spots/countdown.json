@@ -1,0 +1,14 @@
+{
+  "name": "Days without an accident",
+  "kind": "template",
+  "template": "countdown",
+  "durationMs": 10000,
+  "data": {
+    "look": "poster",
+    "mode": "up",
+    "target": "2026-04-21T09:00",
+    "title": "Days without a lost-time accident",
+    "recordDays": 301,
+    "facts": [{ "label": "Site", "value": "Riverside warehouse" }]
+  }
+}

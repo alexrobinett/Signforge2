@@ -72,6 +72,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "aa8ea068299931d9e8aef020416f8fd04d2cf1caab602bc31577c4054fd1f4a1": {
+      "size": 395640,
+      "type": "text/html"
+    },
     "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f": {
       "size": 639,
       "type": "image/svg+xml"
@@ -103,7 +107,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "f33c1c4d6e50daa80c5811de6f906e53d985c8eb55b4c106140ea6be864735c5",
+  "id": "c1dc9ccbcb044440c4844944b1c62125bc8840679ae87f3e22a49007a1ffb272",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -143,6 +147,9 @@
         },
         {
           "spot": "meeting-room"
+        },
+        {
+          "spot": "countdown"
         },
         {
           "spot": "energy"
@@ -187,6 +194,33 @@
       "kind": "template",
       "name": "Clock",
       "template": "base/clock@1.2.3"
+    },
+    "countdown": {
+      "assets": {},
+      "data": {
+        "doneText": "It's here!",
+        "facts": [
+          {
+            "label": "Where",
+            "value": "Pier 9 roof terrace"
+          }
+        ],
+        "look": "night",
+        "mode": "up",
+        "recordDays": 400,
+        "showDetail": true,
+        "showFacts": true,
+        "showProgress": true,
+        "showRecord": true,
+        "target": "2026-04-21T09:00",
+        "title": "Since the Riverside warehouse opened",
+        "units": "days, hours and minutes"
+      },
+      "durationMs": 10000,
+      "id": "countdown",
+      "kind": "template",
+      "name": "Countdown (minutes ticking)",
+      "template": "base/countdown@1.0.0"
     },
     "energy": {
       "assets": {
@@ -712,6 +746,126 @@
         "protocol": 2,
         "uses": [],
         "version": "1.2.3"
+      }
+    },
+    "base/countdown@1.0.0": {
+      "html": "aa8ea068299931d9e8aef020416f8fd04d2cf1caab602bc31577c4054fd1f4a1",
+      "manifest": {
+        "background": "#000000",
+        "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
+        "duration": {
+          "defaultMs": 10000,
+          "maxMs": 60000,
+          "minMs": 5000
+        },
+        "fields": {
+          "doneText": {
+            "default": "It's here!",
+            "label": "Once it is here",
+            "maxLength": 40,
+            "type": "text"
+          },
+          "facts": {
+            "default": [
+              {
+                "label": "Where",
+                "value": "Pier 9 roof terrace"
+              }
+            ],
+            "item": {
+              "label": {
+                "label": "Label",
+                "maxLength": 16,
+                "type": "text"
+              },
+              "value": {
+                "label": "Value",
+                "maxLength": 32,
+                "type": "text"
+              }
+            },
+            "label": "Facts",
+            "maxItems": 3,
+            "type": "list"
+          },
+          "look": {
+            "default": "pop",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "type": "select"
+          },
+          "mode": {
+            "default": "down",
+            "label": "Count",
+            "options": [
+              "down",
+              "up"
+            ],
+            "type": "select"
+          },
+          "recordDays": {
+            "default": 0,
+            "label": "Record in days, counting up (0 for none)",
+            "max": 99999,
+            "min": 0,
+            "step": 1,
+            "type": "number"
+          },
+          "showDetail": {
+            "default": true,
+            "label": "Show the date line",
+            "type": "boolean"
+          },
+          "showFacts": {
+            "default": true,
+            "label": "Show the facts",
+            "type": "boolean"
+          },
+          "showProgress": {
+            "default": true,
+            "label": "Show the progress",
+            "type": "boolean"
+          },
+          "showRecord": {
+            "default": true,
+            "label": "Show the record",
+            "type": "boolean"
+          },
+          "target": {
+            "label": "Counts down to, or up from",
+            "type": "datetime"
+          },
+          "title": {
+            "default": "The winter party",
+            "label": "What it counts to",
+            "maxLength": 60,
+            "type": "text"
+          },
+          "units": {
+            "default": "days",
+            "label": "Units",
+            "options": [
+              "days",
+              "days and hours",
+              "days, hours and minutes"
+            ],
+            "type": "select"
+          }
+        },
+        "id": "countdown",
+        "name": "Countdown",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 2,
+        "uses": [],
+        "version": "1.0.0"
       }
     },
     "base/cstore-promo@1.2.4": {

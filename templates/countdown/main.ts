@@ -174,7 +174,8 @@ defineTemplate({
       ...ctx,
       data: {
         ...data,
-        showProgress: on('showProgress', share !== undefined && !done),
+        // Poster's progress is its tiles' flip-clock split, which needs no share.
+        showProgress: on('showProgress', (share !== undefined || look === 'poster') && !first.done),
         showRecord: on('showRecord', record),
         showFacts: on('showFacts', facts.length),
       },
@@ -196,7 +197,14 @@ defineTemplate({
       };
       const unit = `${values[0] === 1 ? 'day' : 'days'} ${up ? 'since' : 'to go'}`;
       for (const e of document.querySelectorAll('.number')) set(e, values[0]!.toLocaleString(ctx.locale));
-      for (const e of document.querySelectorAll('.rest')) set(e, values.slice(1).map((v, i) => `${two(v)} ${i ? 'min' : 'h'}`).join(' '));
+      for (const e of document.querySelectorAll('.rest'))
+        set(
+          e,
+          values
+            .slice(1)
+            .map((v, i) => `${two(v)} ${i ? 'min' : 'h'}`)
+            .join(' '),
+        );
       for (const e of document.querySelectorAll('.unit')) set(e, unit);
       const sub = [values[0] === 1 ? 'day' : 'days', ...values.slice(1).map((v, i) => `${two(v)}${i ? 'm' : 'h'}`)];
       for (const e of document.querySelectorAll('.sub')) set(e, [...sub, ...(el('.ring') ? [pct] : [])].join(' · '));
