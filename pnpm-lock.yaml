@@ -612,7 +612,7 @@ importers:
         specifier: workspace:*
         version: link:../contract
       fast-xml-parser:
-        specifier: ^5.12.1
+        specifier: 5.12.1
         version: 5.12.1
       ical.js:
         specifier: ^2.2.1

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>Harbour Daily</title>
+    <link>https://news.harbour.example/</link>
+    <item>
+      <title>Ferry timetable changes from Monday</title>
+      <link>https://news.harbour.example/2026/11/ferry-timetable</link>
+      <pubDate>Fri, 20 Nov 2026 09:00:00 +0000</pubDate>
+      <media:group>
+        <media:content url="https://cdn.harbour.example/video/ferry.mp4" medium="video" type="video/mp4" width="1920" height="1080"/>
+        <media:content url="https://cdn.harbour.example/audio/ferry.mp3" type="audio/mpeg"/>
+        <media:content url="https://cdn.harbour.example/img/ferry-640.jpg" medium="image" type="image/jpeg" width="640" height="360"/>
+        <media:content url="https://cdn.harbour.example/img/ferry-1600.jpg?w=1600&amp;q=80" medium="image" type="image/jpeg" width="1600" height="900"/>
+        <media:content url="https://cdn.harbour.example/img/ferry-1024.jpg" medium="image" width="1024" height="576"/>
+        <media:thumbnail url="https://cdn.harbour.example/img/ferry-thumb.jpg" width="144" height="81"/>
+      </media:group>
+    </item>
+    <item>
+      <title>Lighthouse reopens to visitors</title>
+      <link>https://news.harbour.example/2026/11/lighthouse</link>
+      <pubDate>Fri, 20 Nov 2026 08:00:00 +0000</pubDate>
+      <media:content url="https://cdn.harbour.example/img/lighthouse.jpg" width="1200"/>
+    </item>
+    <item>
+      <title>Storm warning for the coast</title>
+      <link>https://news.harbour.example/2026/11/storm</link>
+      <pubDate>Fri, 20 Nov 2026 07:00:00 +0000</pubDate>
+      <media:content url="https://cdn.harbour.example/video/storm.mp4" medium="video">
+        <media:thumbnail url="https://cdn.harbour.example/img/storm-480.jpg" width="480" height="270"/>
+      </media:content>
+      <media:thumbnail url="https://cdn.harbour.example/img/storm-144.jpg" width="144" height="81"/>
+    </item>
+  </channel>
+</rss>

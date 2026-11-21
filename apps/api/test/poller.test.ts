@@ -168,6 +168,26 @@ describe('pollDataSources', () => {
     expect(feed.requests.filter((r) => r.url === 'https://cal.test/h.ics').map((r) => r.headers.get('if-none-match'))).toEqual([null, null]);
   });
 
+  it("stores a news feed's text alone: the images and the logo it names stay out of the snapshot", async () => {
+    const news = await source('rss', 'https://pics.test/rss');
+    const body = `<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+      <channel><title>Pics</title><image><url>/logo.png</url></image>
+        <item><title>One</title><link>https://pics.test/1</link><pubDate>Tue, 17 Nov 2026 13:00:00 GMT</pubDate><media:content url="https://cdn.pics.test/1.jpg" medium="image" width="1600"/></item>
+        <item><title>Two</title><pubDate>Tue, 17 Nov 2026 12:00:00 GMT</pubDate><enclosure url="https://cdn.pics.test/2.jpg" type="image/jpeg"/><content:encoded><![CDATA[<img src="/3.jpg">]]></content:encoded></item>
+      </channel></rss>`;
+    await poll(feedsAt({ 'https://pics.test/rss': { body } }).guards);
+    const json = (await o.scope.dataSources.snapshots([news]))[0]!.dataJson;
+    expect(JSON.parse(json)).toEqual({
+      title: 'Pics',
+      language: '',
+      items: [
+        { title: 'One', published: '2026-11-17T13:00:00+00:00', source: 'Pics' },
+        { title: 'Two', published: '2026-11-17T12:00:00+00:00', source: 'Pics' },
+      ],
+    });
+    expect(json).not.toMatch(/\.(jpg|png)|image|logo/);
+  });
+
   it('refuses a feed that is not what its format says, or converts to more than 64 kB', async () => {
     const bad = await source('json', 'https://bad.test/');
     const big = await source('json', 'https://big.test/');

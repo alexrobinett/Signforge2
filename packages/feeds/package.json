@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@signforge/contract": "workspace:*",
-    "fast-xml-parser": "^5.12.1",
+    "fast-xml-parser": "5.12.1",
     "ical.js": "^2.2.1"
   },
   "devDependencies": {
