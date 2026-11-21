@@ -3,8 +3,7 @@
 // Time is never read from the machine's clock: what plays is resolved at fixed instants, and the
 // takeover tests fix `Date`.
 import type { ScreenManifest } from '@signforge/contract';
-import { scoped } from '@signforge/db';
-import { seedOrganization } from '@signforge/db/testing';
+import { seedOrganization, testScope } from '@signforge/db/testing';
 import { resolvePlaylist } from '@signforge/player-core';
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -20,7 +19,7 @@ const at = (iso: string) => new Date(`${iso}Z`);
  */
 async function setup(orgId: string) {
   await seedOrganization(env.DB, orgId);
-  const org = scoped(env.DB, orgId);
+  const org = testScope(env.DB, orgId);
   const lobby = await org.screens.insert({ name: 'Lobby', timezone: 'Europe/London', orientation: 'landscape' });
   const hall = await org.screens.insert({ name: 'Hall', timezone: 'Europe/London', orientation: 'landscape' });
   const front = await org.screenGroups.insert({ name: 'Front' });

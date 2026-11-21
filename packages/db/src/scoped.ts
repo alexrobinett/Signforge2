@@ -83,23 +83,30 @@ function chunk<T>(rows: T[], columns: number): T[][] {
 type Ids = 'content' | 'server';
 
 /**
- * A first statement for a batch that fails it unless the row is still `version` when it runs, so
- * a change made from an old read writes nothing (`commit` throws `StaleVersionError`). A draft
- * made again with its id continues its versions (`drafts`), so the version tells the rows apart;
- * a publish passes the draft's `incarnation` too, as a second check (./schema.ts).
+ * A first statement for a batch that fails it unless `holds` is true when it runs, so a change made
+ * from an old read writes nothing: `commit` then throws `StaleVersionError` with `id` and the
+ * version `stale` reads now. Every version check inside a batch is one of these.
+ */
+function staleGuard(db: Db, orgId: string, id: string, version: number, holds: SQL, stale: () => Promise<number | undefined>): Write {
+  // json() of text that is not JSON raises an error, which aborts the batch.
+  const check = db
+    .select({ ok: sql`json(CASE WHEN ${holds} THEN '1' ELSE 'stale version' END)` })
+    .from(s.organization)
+    .where(eq(s.organization.id, orgId));
+  return guard(check, { id, version, stale });
+}
+
+/**
+ * A guard (`staleGuard`) that holds while the row is still `version`. A draft made again with its
+ * id continues its versions (`drafts`), so the version tells the rows apart; a publish passes the
+ * draft's `incarnation` too, as a second check (./schema.ts).
  * A draft deleted since it was read is stale too, at version 0, not `NotInOrgError`: a publish
  * targets the org, not the draft, so it is a conflict to load and compile again after.
  */
 function versionGuard(db: Db, orgId: string, t: typeof s.screens | typeof s.spots, id: string, version: number, incarnation?: string | null): Write {
   // Only drafts have the column; the others have no way to be made again with an id.
   const sameRow = incarnation === undefined ? sql`1` : sql`${sql.identifier('incarnation')} IS ${incarnation}`;
-  const check = db
-    .select({
-      // json() of text that is not JSON raises an error, which aborts the batch.
-      ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${t} WHERE ${t.orgId} = ${orgId} AND ${t.id} = ${id} AND ${t.rowVersion} = ${version} AND ${sameRow}) THEN '1' ELSE 'stale version' END)`,
-    })
-    .from(s.organization)
-    .where(eq(s.organization.id, orgId));
+  const holds = sql`EXISTS (SELECT 1 FROM ${t} WHERE ${t.orgId} = ${orgId} AND ${t.id} = ${id} AND ${t.rowVersion} = ${version} AND ${sameRow})`;
   const stale = async () => {
     const r = await db
       .select({ version: t.rowVersion, same: sql<number>`${sameRow}` })
@@ -112,10 +119,13 @@ function versionGuard(db: Db, orgId: string, t: typeof s.screens | typeof s.spot
     }
     return r.version === version && r.same ? undefined : r.version;
   };
-  return guard(check, { id, version, stale });
+  return staleGuard(db, orgId, id, version, holds, stale);
 }
 
-/** get / list / insert / update / delete over a table with an org and an id. */
+/**
+ * get / list over a table with an org and an id, and its writes, staged. Tests write directly
+ * through `testScope` (./testing.ts), which commits these.
+ */
 function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: string, ids: Ids = 'server') {
   const idFor = (values: { id?: string }) => {
     const id = ids === 'content' ? (values.id ?? newId(prefix)) : newId(prefix);
@@ -168,27 +178,7 @@ function entity<T extends TenantTable>(db: Db, orgId: string, table: T, prefix: 
         )
       ).flat() as Row[],
     list: async (): Promise<Row[]> => (await db.select().from(t).where(eq(t.orgId, orgId)).orderBy(asc(t.id)).all()) as Row[],
-    insert: async (values: NewRow<T>): Promise<Row> => {
-      const id = idFor(values);
-      return (await db
-        .insert(t)
-        .values({ ...strip(values as object), id, orgId } as never)
-        .returning()
-        .get()) as Row;
-    },
-    /** Returns the updated row, or undefined if the org has no such row. An empty patch changes nothing. */
-    update: async (id: string, patch: RowPatch<T>): Promise<Row | undefined> => {
-      const set = strip(patch as Record<string, unknown>);
-      if (!Object.values(set).some((v) => v !== undefined)) return (await db.select().from(t).where(mine(id)).get()) as Row | undefined;
-      return (await db
-        .update(t)
-        .set(bump(set) as never)
-        .where(mine(id))
-        .returning()
-        .get()) as Row | undefined;
-    },
-    delete: async (id: string): Promise<boolean> => (await db.delete(t).where(mine(id)).returning({ id: t.id }).all()).length > 0,
-    /** The same changes, staged for the scope's `commit` (./writes.ts). */
+    /** Changes, staged for the scope's `commit` (./writes.ts). */
     stage: {
       insert: (values: NewRow<T>): Staged<Row> => {
         const id = idFor(values);
@@ -272,14 +262,6 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
   };
   return {
     ...rows,
-    insert: async (values: NewRow<T>): Promise<Row> => {
-      const id = idFor(values);
-      return (await db
-        .insert(t)
-        .values({ ...strip(values as object), id, orgId, rowVersion: firstVersion(id) } as never)
-        .returning()
-        .get()) as Row;
-    },
     stage: {
       ...rows.stage,
       insert: async (values: NewRow<T>): Promise<Staged<Row>> => {
@@ -349,6 +331,11 @@ export interface SyncWrite {
 }
 
 type Snapshot = Omit<typeof s.dataSnapshots.$inferInsert, 'orgId' | 'dataSourceId'>;
+/** A snapshot's fields without its key, which is the scope's org and the source it is put on, whatever the caller passes. */
+const snapshotFields = (v: Snapshot): Snapshot => {
+  const { orgId: _o, dataSourceId: _d, ...rest } = v as typeof s.dataSnapshots.$inferInsert;
+  return rest;
+};
 
 const statusCredentials = (more: SQL = sql`1`) =>
   sql`SELECT 1 FROM ${s.screenCredentials} WHERE ${s.screenCredentials.orgId} = ${s.screens.orgId} AND ${s.screenCredentials.screenId} = ${s.screens.id} AND ${more}`;
@@ -428,7 +415,7 @@ export function scoped(d1: D1Database, orgId: string) {
     (
       await db
         .update(cn)
-        .set(updateSet(cn, set))
+        .set(updateSet(cn, strip(set)))
         .where(and(eq(cn.orgId, orgId), eq(cn.id, id), eq(cn.credentialsSealed, from)))
         .returning({ id: cn.id })
         .all()
@@ -436,8 +423,54 @@ export function scoped(d1: D1Database, orgId: string) {
 
   const m = s.screenGroupMembers;
   const os = s.orgSettings;
-  const inc = s.screenIncidents;
   const ac = s.alertChannels;
+  /**
+   * Stage setting `values` on a single-row versioned record (the org's settings, an alert channel),
+   * the row its `key` names (the scope's org, and a channel's kind): made from `fresh` if absent,
+   * and its version moved on; a record with no row is at version `absent`. The key comes from
+   * `key` alone: `values` never sets it, nor any field `strip` guards, so no write moves the row to
+   * another org or key, whatever the caller passes. With `ifVersion`, refused (`StaleVersionError`,
+   * id `id`) unless it is still that version: now, if it is already another, and again by a guard
+   * inside the batch.
+   */
+  const upsertVersioned = async <T extends typeof os | typeof ac>(
+    table: T,
+    r: {
+      id: string;
+      key: { orgId: string } & Partial<T['$inferSelect']>;
+      absent: number;
+      fresh: (at: number) => Partial<T['$inferSelect']>;
+    },
+    values: Omit<RowPatch<T>, 'kind' | 'updatedAt'>,
+    ifVersion: number | undefined,
+  ): Promise<Staged<T['$inferSelect']>> => {
+    // Drizzle's builders do not type-check over a union of tables; the signature carries the types.
+    const t = table as unknown as typeof os;
+    const columns = getTableColumns(table) as Record<string, SQLiteColumn>;
+    const keyColumns = Object.keys(r.key).map((k) => columns[k]!);
+    const where = and(...Object.entries(r.key).map(([k, v]) => eq(columns[k]!, v)))!;
+    const set = Object.fromEntries(Object.entries(strip(values)).filter(([k]) => !(k in r.key) && k !== 'updatedAt'));
+    const current = (await db.select().from(t).where(where).get()) as T['$inferSelect'] | undefined;
+    const version = current?.rowVersion ?? r.absent;
+    if (ifVersion !== undefined && version !== ifVersion) throw new StaleVersionError(r.id, version);
+    const at = Date.now();
+    const row = { ...r.fresh(at), ...current, ...set, ...r.key, rowVersion: version + 1, updatedAt: at } as T['$inferSelect'];
+    const upsert = staged(
+      row,
+      db
+        .insert(t)
+        .values(row as never)
+        .onConflictDoUpdate({ target: keyColumns, set: { ...set, rowVersion: sql`${t.rowVersion} + 1`, updatedAt: at } }),
+    );
+    if (ifVersion === undefined) return upsert;
+    const now = sql`COALESCE((SELECT ${t.rowVersion} FROM ${t} WHERE ${where}), ${r.absent})`;
+    const stale = async () => {
+      const v = (await db.select({ v: t.rowVersion }).from(t).where(where).get())?.v ?? r.absent;
+      return v === ifVersion ? undefined : v;
+    };
+    return { row, writes: [staleGuard(db, orgId, r.id, ifVersion, sql`${now} = ${ifVersion}`, stale), ...upsert.writes] };
+  };
+  const inc = s.screenIncidents;
   const ad = s.alertDeliveries;
   const alertDeliveries = entity(db, orgId, ad, 'dlv');
   /**
@@ -534,7 +567,9 @@ export function scoped(d1: D1Database, orgId: string) {
   return {
     orgId,
     /** Run staged writes (from any `stage` of this scope) in one atomic batch: all of them take effect, or none. */
-    commit: (writes: readonly Write[]) => commit(db, writes),
+    commit: async (writes: readonly Write[]) => {
+      await commit(db, writes);
+    },
     screens: {
       ...screens,
       credentials: {
@@ -922,14 +957,6 @@ export function scoped(d1: D1Database, orgId: string) {
 
     spots: {
       ...spotRows,
-      insert: async (values: NewRow<typeof s.spots>) => {
-        await checkSpot(values);
-        return spotRows.insert(values);
-      },
-      update: async (id: string, patch: RowPatch<typeof s.spots>) => {
-        await checkSpot(patch);
-        return spotRows.update(id, patch);
-      },
       stage: {
         ...spotRows.stage,
         insert: async (values: NewRow<typeof s.spots>) => {
@@ -1027,15 +1054,9 @@ export function scoped(d1: D1Database, orgId: string) {
          * checked now and again in the batch, as `stage.update` is; an org with no row is at 1.
          */
         set: async (values: RowPatch<typeof os>, ifVersion?: number): Promise<Staged<typeof os.$inferSelect>> => {
-          const patch = strip(values);
-          const id = patch.defaultPlaylistId;
+          const id = values.defaultPlaylistId;
           if (id != null && !(await playlists.get(id))) throw new NotInOrgError('playlist', id);
-          const current = await db.select().from(os).where(eq(os.orgId, orgId)).get();
-          const version = current?.rowVersion ?? 1;
-          if (ifVersion !== undefined && version !== ifVersion) throw new StaleVersionError('settings', version);
-          const updatedAt = Date.now();
-          const row: typeof os.$inferSelect = {
-            orgId,
+          const fresh = () => ({
             defaultPlaylistId: null,
             timezone: null,
             locale: null,
@@ -1046,31 +1067,8 @@ export function scoped(d1: D1Database, orgId: string) {
             publishRevision: 0,
             editorsPublish: true,
             auditRetentionDays: null,
-            ...current,
-            ...patch,
-            rowVersion: version + 1,
-            updatedAt,
-          };
-          const upsert = staged(
-            row,
-            db
-              .insert(os)
-              .values(row)
-              .onConflictDoUpdate({ target: os.orgId, set: { ...patch, rowVersion: sql`${os.rowVersion} + 1`, updatedAt } }),
-          );
-          if (ifVersion === undefined) return upsert;
-          const stale = async () => {
-            const now = (await db.select({ v: os.rowVersion }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 1;
-            return now === ifVersion ? undefined : now;
-          };
-          const check = db
-            .select({
-              // json() of text that is not JSON raises an error, which aborts the batch.
-              ok: sql`json(CASE WHEN COALESCE((SELECT ${os.rowVersion} FROM ${os} WHERE ${os.orgId} = ${orgId}), 1) = ${ifVersion} THEN '1' ELSE 'stale version' END)`,
-            })
-            .from(s.organization)
-            .where(eq(s.organization.id, orgId));
-          return { row, writes: [guard(check, { id: 'settings', version: ifVersion, stale }), ...upsert.writes] };
+          });
+          return upsertVersioned(os, { id: 'settings', key: { orgId }, absent: 1, fresh }, values, ifVersion);
         },
       },
     },
@@ -1135,33 +1133,8 @@ export function scoped(d1: D1Database, orgId: string) {
          * channel is at 0). With `ifVersion`, refused (`StaleVersionError`) unless it is still
          * that version, checked now and again in the batch, as `stage.update` is.
          */
-        put: async (kind: AlertChannelKind, values: AlertChannelValues, ifVersion?: number): Promise<Staged<AlertChannel>> => {
-          const mine = and(eq(ac.orgId, orgId), eq(ac.kind, kind));
-          const current = await db.select().from(ac).where(mine).get();
-          const version = current?.rowVersion ?? 0;
-          if (ifVersion !== undefined && version !== ifVersion) throw new StaleVersionError(`${kind} channel`, version);
-          const at = Date.now();
-          const row: AlertChannel = { ...values, orgId, kind, rowVersion: version + 1, createdAt: current?.createdAt ?? at, updatedAt: at };
-          const upsert = staged(
-            row,
-            db
-              .insert(ac)
-              .values(row)
-              .onConflictDoUpdate({ target: [ac.orgId, ac.kind], set: { ...values, rowVersion: sql`${ac.rowVersion} + 1`, updatedAt: at } }),
-          );
-          if (ifVersion === undefined) return upsert;
-          const now = sql`COALESCE((SELECT ${ac.rowVersion} FROM ${ac} WHERE ${mine}), 0)`;
-          const stale = async () => {
-            const v = (await db.select({ v: ac.rowVersion }).from(ac).where(mine).get())?.v ?? 0;
-            return v === ifVersion ? undefined : v;
-          };
-          // json() of text that is not JSON raises an error, which aborts the batch.
-          const check = db
-            .select({ ok: sql`json(CASE WHEN ${now} = ${ifVersion} THEN '1' ELSE 'stale version' END)` })
-            .from(s.organization)
-            .where(eq(s.organization.id, orgId));
-          return { row, writes: [guard(check, { id: `${kind} channel`, version: ifVersion, stale }), ...upsert.writes] };
-        },
+        put: (kind: AlertChannelKind, values: AlertChannelValues, ifVersion?: number): Promise<Staged<AlertChannel>> =>
+          upsertVersioned(ac, { id: `${kind} channel`, key: { orgId, kind }, absent: 0, fresh: (at) => ({ createdAt: at }) }, values, ifVersion),
         remove: (kind: AlertChannelKind): Staged => staged(undefined, db.delete(ac).where(and(eq(ac.orgId, orgId), eq(ac.kind, kind)))),
       },
     },
@@ -1226,14 +1199,6 @@ export function scoped(d1: D1Database, orgId: string) {
      */
     brandKits: {
       ...brandKitRows,
-      insert: async (values: NewRow<typeof s.brandKits>) => {
-        await checkLogos(values);
-        return brandKitRows.insert(values);
-      },
-      update: async (id: string, patch: RowPatch<typeof s.brandKits>) => {
-        await checkLogos(patch);
-        return brandKitRows.update(id, patch);
-      },
       stage: {
         ...brandKitRows.stage,
         insert: async (values: NewRow<typeof s.brandKits>) => {
@@ -1296,12 +1261,8 @@ export function scoped(d1: D1Database, orgId: string) {
           // The ids go as one JSON value, past the 100-parameter limit.
           const sc = s.screens;
           const found = sql`(SELECT count(*) FROM ${sc} WHERE ${sc.orgId} = ${orgId} AND ${sc.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)})))`;
-          const check = db
-            .select({ ok: sql`json(CASE WHEN ${found} = ${ids.length} THEN '1' ELSE 'stale version' END)` })
-            .from(s.organization)
-            .where(eq(s.organization.id, orgId));
           const stale = async () => ((await screens.getMany(ids)).length === ids.length ? undefined : 0);
-          return { row: undefined, writes: [guard(check, { id: 'screens', version: ids.length, stale }), ...inserts.writes] };
+          return { row: undefined, writes: [staleGuard(db, orgId, 'screens', ids.length, sql`${found} = ${ids.length}`, stale), ...inserts.writes] };
         },
         /**
          * Put a publish in order: stage moving the org's publish revision on from `revision`, the
@@ -1313,13 +1274,6 @@ export function scoped(d1: D1Database, orgId: string) {
          */
         advance: (revision: number): Staged => {
           const read = sql`COALESCE((SELECT ${os.publishRevision} FROM ${os} WHERE ${os.orgId} = ${orgId}), 0)`;
-          const check = db
-            .select({
-              // json() of text that is not JSON raises an error, which aborts the batch.
-              ok: sql`json(CASE WHEN ${read} = ${revision} THEN '1' ELSE 'stale version' END)`,
-            })
-            .from(s.organization)
-            .where(eq(s.organization.id, orgId));
           const stale = async () => {
             const now = (await db.select({ v: os.publishRevision }).from(os).where(eq(os.orgId, orgId)).get())?.v ?? 0;
             return now === revision ? undefined : now;
@@ -1329,7 +1283,10 @@ export function scoped(d1: D1Database, orgId: string) {
             .insert(os)
             .values({ orgId, publishRevision: 1 })
             .onConflictDoUpdate({ target: os.orgId, set: { publishRevision: sql`${os.publishRevision} + 1`, updatedAt: sql`${os.updatedAt}` } });
-          return { row: undefined, writes: [guard(check, { id: 'publish revision', version: revision, stale }), ...staged(undefined, move).writes] };
+          return {
+            row: undefined,
+            writes: [staleGuard(db, orgId, 'publish revision', revision, sql`${read} = ${revision}`, stale), ...staged(undefined, move).writes],
+          };
         },
       },
       /**
@@ -1427,14 +1384,6 @@ export function scoped(d1: D1Database, orgId: string) {
 
     dataSources: {
       ...dataSources,
-      insert: async (values: NewRow<typeof s.dataSources>) => {
-        await checkConnection(values.connectionId);
-        return dataSources.insert(values);
-      },
-      update: async (id: string, patch: RowPatch<typeof s.dataSources>) => {
-        await checkConnection(patch.connectionId);
-        return dataSources.update(id, patch);
-      },
       stage: {
         ...dataSources.stage,
         insert: async (values: NewRow<typeof s.dataSources>) => {
@@ -1519,10 +1468,11 @@ export function scoped(d1: D1Database, orgId: string) {
           : [],
       putSnapshot: async (dataSourceId: string, v: Snapshot) => {
         if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId);
+        const fields = snapshotFields(v);
         await db
           .insert(snap)
-          .values({ orgId, dataSourceId, ...v })
-          .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: { ...v } })
+          .values({ ...fields, orgId, dataSourceId })
+          .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: fields })
           .run();
       },
       /**
@@ -1546,17 +1496,18 @@ export function scoped(d1: D1Database, orgId: string) {
               .where(and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId))),
           ).writes,
         ];
-        if (poll.snapshot)
+        if (poll.snapshot) {
+          const fields = snapshotFields(poll.snapshot);
           writes.push(
             ...staged(
               undefined,
               db
                 .insert(snap)
-                .values({ orgId, dataSourceId, ...poll.snapshot })
-                .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: { ...poll.snapshot } }),
+                .values({ ...fields, orgId, dataSourceId })
+                .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: fields }),
             ).writes,
           );
-        else if (poll.checkedAt !== undefined) writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(mineSnap)).writes);
+        } else if (poll.checkedAt !== undefined) writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(mineSnap)).writes);
         await commit(db, writes);
       },
     },
@@ -1575,10 +1526,6 @@ export function scoped(d1: D1Database, orgId: string) {
       markNeedsReconnect: (id: string, from: string, lastError: string) => changeGrant(id, from, { status: 'needs_reconnect', lastError }),
       authorizations: {
         ...authorizations,
-        insert: async (values: NewRow<typeof s.connectionAuthorizations>) => {
-          await checkConnection(values.connectionId);
-          return authorizations.insert(values);
-        },
         /** The live authorization whose state hashes to `stateHash`, in this org. */
         byState: (stateHash: string, now: number) =>
           db
@@ -1612,7 +1559,13 @@ export function scoped(d1: D1Database, orgId: string) {
     },
 
     auditLog: {
-      append: (entry: NewRow<typeof s.auditLog>) => audit.insert(entry),
+      /** One statement, not a batch: for a change made outside ours (Better Auth's), which no batch of ours records. */
+      append: async (entry: NewRow<typeof s.auditLog>) =>
+        db
+          .insert(s.auditLog)
+          .values({ ...strip(entry), id: newId('aud'), orgId })
+          .returning()
+          .get(),
       /** The audit row for a change, staged to commit with it. */
       stage: (entry: NewRow<typeof s.auditLog>) => audit.stage.insert(entry),
       /**
@@ -1702,7 +1655,7 @@ export function scoped(d1: D1Database, orgId: string) {
       /** Add plays to the hourly totals. */
       add: async (screenId: string, counts: readonly { hour: number; spotId: string; plays: number; ms: number }[]) => {
         if (!(await screens.get(screenId))) throw new NotInOrgError('screen', screenId);
-        const rows = counts.map((c) => ({ orgId, screenId, ...c }));
+        const rows = counts.map((c) => ({ hour: c.hour, spotId: c.spotId, plays: c.plays, ms: c.ms, orgId, screenId }));
         if (!rows.length) return;
         await db.batch(
           chunk(rows, 6).map((part) =>

@@ -1,7 +1,8 @@
 // Alerts to Slack and signed outgoing webhooks (#88): a screen going offline is queued for each
 // channel its rule names, sent after the check through the fetch guards, retried with backoff
 // while the receiver fails, and shown in the delivery log. No network: fetch and DNS are stubbed.
-import { orgMembers, scoped } from '@signforge/db';
+import { orgMembers } from '@signforge/db';
+import { testScope } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
@@ -73,7 +74,7 @@ async function orgWithChannels() {
 }
 
 async function pairedScreen(orgId: string, name: string, lastSeenAt: number) {
-  const org = scoped(env.DB, orgId);
+  const org = testScope(env.DB, orgId);
   const screen = await org.screens.insert({ name, timezone: 'UTC', orientation: 'landscape', lastSeenAt, kind: 'device' });
   await org.screens.credentials.insert({ screenId: screen.id, secretHash: '0'.repeat(64) });
   return screen.id;
@@ -153,7 +154,7 @@ describe('alerts to Slack and webhooks', () => {
     expect(hook!.headers.get('signforge-signature')).not.toBe(`v1=${await hmacHex('another secret', `${timestamp}.${body}`)}`);
 
     // Back: one more of each, with the same event id on both channels.
-    await scoped(env.DB, org.id).screens.update(screenId, { lastSeenAt: start + 30 * MIN });
+    await testScope(env.DB, org.id).screens.update(screenId, { lastSeenAt: start + 30 * MIN });
     await checkScreenAlerts(env, outbox, start + 31 * MIN);
     await deliverAlerts(env, outbox, { now: start + 31 * MIN, guards });
     const back = await to(webhookUrl)[1]!.json<{ type: string; id: string; data: { offlineSince: string } }>();
@@ -169,7 +170,7 @@ describe('alerts to Slack and webhooks', () => {
     const { owner, org, slackUrl, webhookUrl, outbox } = await orgWithChannels();
     await owner.ok('/api/tools/update_org_settings', { alerts: { publish_finished: { slack: true, webhook: true } } });
     const start = Date.now();
-    const o = scoped(env.DB, org.id);
+    const o = testScope(env.DB, org.id);
     const screens = [await pairedScreen(org.id, 'Till 1', start), await pairedScreen(org.id, 'Till 2', start)];
     const made = o.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision: 1 });
     const rows = screens.map((screenId, i) => ({ screenId, manifestId: String(i + 1).repeat(64) }));
@@ -263,7 +264,7 @@ describe('alerts to Slack and webhooks', () => {
     const { owner, org, webhookUrl, outbox } = await orgWithChannels();
     await owner.ok('/api/tools/update_org_settings', { alerts: { publish_finished: { webhook: true } } });
     const start = Date.now();
-    const o = scoped(env.DB, org.id);
+    const o = testScope(env.DB, org.id);
     const screens = [await pairedScreen(org.id, 'Till 1', start), await pairedScreen(org.id, 'Till 2', start)];
     const publishTo = async (revision: number, manifest: (i: number) => string) => {
       const p = o.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision });
@@ -367,7 +368,7 @@ describe('alerts to Slack and webhooks', () => {
     expect(failed).toMatchObject({ channel: 'webhook', status: 'failed', attempts: 2, lastHttpStatus: 503 });
 
     // Tried once more (retry_alert_delivery, tested in packages/tools), here with the stubbed guards.
-    const o = scoped(env.DB, org.id);
+    const o = testScope(env.DB, org.id);
     const [row] = await o.alertDeliveries.list({ take: 1 });
     const later = start + 30 * HOUR;
     await o.commit(o.alertDeliveries.stage.retry(row!, later).writes);
@@ -419,7 +420,7 @@ describe('alerts to Slack and webhooks', () => {
 
   it('stores the URLs and the secret sealed, and keeps them out of the audit log', async () => {
     const { org, slackUrl, webhookUrl } = await orgWithChannels();
-    const o = scoped(env.DB, org.id);
+    const o = testScope(env.DB, org.id);
     const stored = JSON.stringify([await o.alertChannels.list(), await o.auditLog.list({ limit: 100 })]);
     for (const secret of [slackUrl, 'secretpart', webhookUrl, 'key=k', SECRET]) expect(stored).not.toContain(secret);
   });
@@ -432,7 +433,7 @@ describe("a delivery run's D1 queries", () => {
     for (let i = 0; i < 3; i++) {
       const { org, webhookUrl } = await orgWithChannels();
       answers[webhookUrl] = [200];
-      const o = scoped(env.DB, org.id);
+      const o = testScope(env.DB, org.id);
       const event = { type: 'test', occurredAt: new Date(now).toISOString(), org: { id: org.id, name: org.name }, data: { message: 'Budget' } };
       await o.commit(
         [0, 1, 2, 3].flatMap(
@@ -491,7 +492,7 @@ describe('the five-minute Cron Trigger', () => {
   /** An email test delivery to the org's owner, due at `due`, with `message` as its subject's end. */
   async function emailDue(message: string, due: number) {
     const { org } = await orgWithChannels();
-    const o = scoped(env.DB, org.id);
+    const o = testScope(env.DB, org.id);
     const outbox = emailSenderFor(env);
     if (!(outbox instanceof RecordingEmailSender)) throw new Error('dev should send through the recorder');
     const [member] = await orgMembers(env.DB, org.id);

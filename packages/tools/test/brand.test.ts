@@ -2,8 +2,8 @@
 // and an edit reaches screens only at the next publish.
 import type { Spot, TemplateManifest } from '@signforge/contract';
 import { fontById } from '@signforge/compiler';
-import { scoped, type OrgScope } from '@signforge/db';
-import { seedOrganization } from '@signforge/db/testing';
+import type { OrgScope } from '@signforge/db';
+import { seedOrganization, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { dispatch, publishOrg, registry } from '../src';
@@ -30,7 +30,7 @@ const branded: TemplateManifest = {
 /** An org with two screens in group "front", one spot on the branded template, published content. */
 async function setup(orgId: string) {
   await seedOrganization(env.DB, orgId);
-  const org = scoped(env.DB, orgId);
+  const org = testScope(env.DB, orgId);
   const lobby = await org.screens.insert({ name: 'Lobby', timezone: 'UTC', orientation: 'landscape' });
   const hall = await org.screens.insert({ name: 'Hall', timezone: 'UTC', orientation: 'landscape' });
   const front = await org.screenGroups.insert({ id: `${orgId}-front`, name: 'Front' });

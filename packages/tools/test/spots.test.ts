@@ -2,8 +2,7 @@
 // refuse them, and the preview input the editor's stage compiles a draft against.
 import { compileScreen } from '@signforge/compiler';
 import type { TemplateManifest } from '@signforge/contract';
-import { scoped } from '@signforge/db';
-import { seedOrganization } from '@signforge/db/testing';
+import { seedOrganization, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { editorCalls, ok } from './calls';
@@ -29,7 +28,7 @@ const promo: TemplateManifest = {
 
 async function setup(orgId: string) {
   await seedOrganization(env.DB, orgId);
-  const org = scoped(env.DB, orgId);
+  const org = testScope(env.DB, orgId);
   const t = await org.templates.insert({ key: 'promo', name: 'Promo' });
   const v = await org.templates.versions.insert({
     templateId: t.id,

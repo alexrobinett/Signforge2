@@ -1,6 +1,6 @@
 // The API's connectors stubbed for the generated tests (isolation, write guard): no provider is
 // reached, and finish_connection's example state can be made pending for a caller.
-import { scoped } from '@signforge/db';
+import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { type Connectors, registry } from '../src';
 
@@ -17,7 +17,7 @@ export async function pendingFor(orgId: string, actorId: string) {
   const example = registry.get('finish_connection')!.example as { oauthState: string };
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(example.oauthState));
   const stateHash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await scoped(env.DB, orgId).connections.authorizations.insert({
+  await testScope(env.DB, orgId).connections.authorizations.insert({
     provider: 'google',
     stateHash,
     verifierSealed: 'sealed-verifier',

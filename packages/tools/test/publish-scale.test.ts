@@ -1,8 +1,7 @@
 // A 1,000-screen org publishes inside a Worker invocation's limits (M3-18): the D1 queries, R2
 // calls and screen notices one publish makes, counted through bindings that pass everything on.
 // Limits: docs/backend-plan.md#publishing and spike/m3-platform/RESULTS.md.
-import { scoped } from '@signforge/db';
-import { seedOrganization } from '@signforge/db/testing';
+import { seedOrganization, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
@@ -64,7 +63,7 @@ function countingR2(real: R2Bucket) {
 
 async function seedFleet(orgId: string) {
   await seedOrganization(env.DB, orgId);
-  const org = scoped(env.DB, orgId);
+  const org = testScope(env.DB, orgId);
   await org.commit(
     Array.from({ length: SCREENS }, (_, i) =>
       org.screens.stage.insert({ name: `Screen ${i}`, timezone: 'Europe/London', orientation: i % 4 ? 'landscape' : 'portrait' }),
@@ -86,7 +85,7 @@ describe('a 1,000-screen org', () => {
     const r2 = countingR2(env.BLOBS);
     const told: number[] = [];
     const caller: Caller = {
-      org: scoped(d1.db, orgId),
+      org: testScope(d1.db, orgId),
       role: 'owner',
       actor: { kind: 'user', id: 'user-1', clientId: 'cms' },
       blobs: r2.bucket,

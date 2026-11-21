@@ -1,6 +1,5 @@
 // What each tool does in its own org.
-import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, manifestKey, registry, type Caller } from '../src';
@@ -18,7 +17,7 @@ const refusal = (name: string, input: unknown) => dispatch(registry, name, input
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'tools-org');
-  owner = memberOf(scoped(env.DB, o.orgId), 'owner');
+  owner = memberOf(testScope(env.DB, o.orgId), 'owner');
 });
 
 describe('screens', () => {
@@ -65,7 +64,7 @@ describe('screens', () => {
   });
 
   it('revokes a credential once, and only one of the named screen', async () => {
-    const other = await scoped(env.DB, o.orgId).screens.insert({ name: 'Other', timezone: 'UTC', orientation: 'landscape' });
+    const other = await testScope(env.DB, o.orgId).screens.insert({ name: 'Other', timezone: 'UTC', orientation: 'landscape' });
     expect(await refusal('revoke_screen_credential', { screenId: other.id, credentialId: o.credential })).toMatchObject({ ok: false, error: 'not_found' });
     const first = (await call('revoke_screen_credential', { screenId: o.screen, credentialId: o.credential })).credential;
     expect(first.revokedAt).toEqual(expect.any(Number));
@@ -76,7 +75,7 @@ describe('screens', () => {
 
 describe('groups', () => {
   it('creates, renames, sets members and deletes', async () => {
-    const extra = await scoped(env.DB, o.orgId).screens.insert({ name: 'Extra', timezone: 'UTC', orientation: 'landscape' });
+    const extra = await testScope(env.DB, o.orgId).screens.insert({ name: 'Extra', timezone: 'UTC', orientation: 'landscape' });
     const { group } = await call('create_group', { name: 'Windows', screenIds: [o.screen, o.screen] });
     expect(group).toMatchObject({ name: 'Windows', screenIds: [o.screen] });
     expect((await call('rename_group', { groupId: group.id, name: 'Shop windows' })).group.name).toBe('Shop windows');
@@ -95,13 +94,13 @@ describe('groups', () => {
 
   it('will not set members it cannot find, and changes nothing then', async () => {
     expect(await refusal('set_group_members', { groupId: o.group, screenIds: [o.screen, 'scr_nope'] })).toMatchObject({ ok: false, error: 'not_found' });
-    expect(await scoped(env.DB, o.orgId).screenGroups.members(o.group)).toEqual([o.screen]);
+    expect(await testScope(env.DB, o.orgId).screenGroups.members(o.group)).toEqual([o.screen]);
   });
 
   it('refuses to delete a group a schedule entry targets', async () => {
     const r = await refusal('delete_group', { groupId: o.group });
     expect(r).toMatchObject({ ok: false, error: 'conflict', details: { scheduleEntryIds: [o.scheduleEntry] } });
-    expect(await scoped(env.DB, o.orgId).screenGroups.get(o.group)).toBeDefined();
+    expect(await testScope(env.DB, o.orgId).screenGroups.get(o.group)).toBeDefined();
   });
 });
 
@@ -118,7 +117,7 @@ describe('publish_manifest_to_screen', () => {
   });
 
   it('will not publish a manifest uploaded for another screen', async () => {
-    const other = await scoped(env.DB, o.orgId).screens.insert({ name: 'Elsewhere', timezone: 'UTC', orientation: 'landscape' });
+    const other = await testScope(env.DB, o.orgId).screens.insert({ name: 'Elsewhere', timezone: 'UTC', orientation: 'landscape' });
     expect(await refusal('publish_manifest_to_screen', { screenId: other.id, manifestId: '1'.repeat(64) })).toMatchObject({ ok: false, error: 'not_found' });
   });
 });

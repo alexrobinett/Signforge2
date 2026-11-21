@@ -2,13 +2,13 @@
 // checked inside the batch that writes it.
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { NotInOrgError, scoped, StaleVersionError } from '../src';
-import { seedOrg } from '../src/testing';
+import { NotInOrgError, StaleVersionError } from '../src';
+import { seedOrg, testScope } from '../src/testing';
 
 describe('row versions', () => {
   it('start at 1 and move on with every change', async () => {
     const o = await seedOrg(env.DB, 'ver-move');
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const screen = (await org.screens.get(o.screen))!;
     expect(screen.rowVersion).toBe(1);
     const renamed = org.screens.stage.update(screen, { name: 'Renamed' });
@@ -19,7 +19,7 @@ describe('row versions', () => {
 
   it('refuse a change staged against an old version, before anything is staged', async () => {
     const o = await seedOrg(env.DB, 'ver-stale');
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const screen = (await org.screens.get(o.screen))!;
     expect(() => org.screens.stage.update(screen, { name: 'Late' }, 7)).toThrow(StaleVersionError);
     try {
@@ -31,7 +31,7 @@ describe('row versions', () => {
 
   it('refuse in the batch a change whose row moved on after it was read, writing nothing', async () => {
     const o = await seedOrg(env.DB, 'ver-race');
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const read = (await org.screens.get(o.screen))!;
     const mine = org.screens.stage.update(read, { name: 'Mine' }, read.rowVersion);
     const audit = org.auditLog.stage({ actorKind: 'user', actorId: 'u', action: 'rename_screen' });
@@ -48,7 +48,7 @@ describe('row versions', () => {
 
   it('commit a change made at the current version', async () => {
     const o = await seedOrg(env.DB, 'ver-ok');
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const read = (await org.screens.get(o.screen))!;
     await org.commit(org.screens.stage.update(read, { name: 'Mine' }, read.rowVersion).writes);
     expect(await org.screens.get(o.screen)).toMatchObject({ name: 'Mine', rowVersion: 2 });
@@ -56,7 +56,7 @@ describe('row versions', () => {
 
   it('say not found for a guarded row deleted before the commit', async () => {
     const o = await seedOrg(env.DB, 'ver-gone');
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const group = (await org.screenGroups.get(o.group))!;
     const mine = org.screenGroups.stage.update(group, { name: 'Mine' }, group.rowVersion);
     await org.commit(org.screenGroups.stage.delete(group.id).writes);
@@ -65,7 +65,7 @@ describe('row versions', () => {
 
   it("move a group's version when its members change, and guard it like a field", async () => {
     const o = await seedOrg(env.DB, 'ver-members');
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const extra = await org.screens.insert({ name: 'Extra', timezone: 'UTC', orientation: 'landscape' });
     const group = (await org.screenGroups.get(o.group))!;
 
@@ -88,7 +88,7 @@ describe('row versions', () => {
 
   it('guard org settings too, counting an org with no settings row as version 1', async () => {
     const o = await seedOrg(env.DB, 'ver-settings');
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     // Two first saves made from the same read: the one that commits second is refused in the batch.
     const mine = await org.settings.stage.set({ locale: 'en-GB' }, 1);
     await org.commit((await org.settings.stage.set({ timezone: 'Asia/Tokyo' }, 1)).writes);

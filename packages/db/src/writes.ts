@@ -64,13 +64,16 @@ export const guard = (query: unknown, g: VersionGuard): Write => ({ [QUERY]: que
 /**
  * Run writes in one atomic batch. Nothing to write runs nothing. A batch failed by a version
  * guard throws `StaleVersionError` (`NotInOrgError` if the row is gone, but version 0 for a draft that vanished during promotion), so a caller can tell a
- * refusal from a fault; any other failure is rethrown as it is.
+ * refusal from a fault; any other failure is rethrown as it is. Returns how many rows each write
+ * changed, as D1 counts them (with its triggers' and cascades'; 0 for a guard), which `testScope`
+ * reports from (./testing.ts).
  */
-export async function commit(db: Db, writes: readonly Write[]): Promise<void> {
-  if (!writes.length) return;
+export async function commit(db: Db, writes: readonly Write[]): Promise<number[]> {
+  if (!writes.length) return [];
   const [first, ...rest] = writes.map((w) => w[QUERY]);
   try {
-    await db.batch([first!, ...rest]);
+    const results = await db.batch([first!, ...rest]);
+    return results.map((r) => (r as { meta?: { changes?: number } }).meta?.changes ?? 0);
   } catch (err) {
     for (const g of writes.flatMap((w) => w[GUARD] ?? [])) {
       const now = await g.stale();

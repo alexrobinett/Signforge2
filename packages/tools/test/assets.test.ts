@@ -1,8 +1,7 @@
 // Asset tools: upload targets, the server's check of what landed in R2, usage and delete.
 // The files here are image headers only: the server reads type and size from the header and never
 // decodes. Real images through the browser and real presigned PUTs: packages/media/test/upload.test.ts.
-import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, orgBlobKey, r2Presigner, registry, uploadKey, type Caller } from '../src';
@@ -58,7 +57,7 @@ async function upload(name: string, files: { landscape: [Uint8Array, unknown]; p
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'assets-org');
-  owner = memberOf(scoped(env.DB, o.orgId), 'owner', {
+  owner = memberOf(testScope(env.DB, o.orgId), 'owner', {
     uploads: r2Presigner({
       endpoint: 'https://acct.r2.cloudflarestorage.com',
       bucket: 'signforge-test',
@@ -236,7 +235,7 @@ describe('finalize_asset', () => {
     // Written before M3-33, when an asset and its renditions were separate writes: the portrait row never landed.
     const l = png(1920, 1080, 8);
     const c = await claim(l, 'image/png', 1920, 1080);
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const asset = await org.assets.insert({
       kind: 'image',
       name: 'Half',
@@ -268,7 +267,7 @@ describe('finalize_asset', () => {
 
 describe('list, usage and delete', () => {
   it('lists with usage counts and search, and refuses to delete an asset in use', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     // The seeded image spot uses o.asset; a template spot uses it through its asset map too.
     const tpl = await org.spots.insert({
       name: 'Menu',

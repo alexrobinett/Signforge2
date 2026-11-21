@@ -1,7 +1,6 @@
 // The screen tools the CMS's Screens pages use: state, what it should be showing, display overrides, identify and restart.
 import type { DeviceCommand } from '@signforge/contract';
-import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { dispatch, manifestKey, registry, type Caller, type ScreenHeartbeat } from '../src';
@@ -26,7 +25,7 @@ const NOW = '2026-11-23T12:00:00Z';
 beforeAll(async () => {
   vi.setSystemTime(NOW);
   o = await seedOrg(env.DB, 'screens-org');
-  owner = memberOf(scoped(env.DB, o.orgId), 'owner', {
+  owner = memberOf(testScope(env.DB, o.orgId), 'owner', {
     notify: {
       manifest: async () => {},
       manifests: async () => {},
@@ -34,7 +33,7 @@ beforeAll(async () => {
       command: async (screenId, command) => void sent.push({ screenId, command }),
     },
   });
-  const org = scoped(env.DB, o.orgId);
+  const org = testScope(env.DB, o.orgId);
   await env.BLOBS.put(
     manifestKey(o.orgId, o.screen, MANIFEST),
     JSON.stringify({
@@ -79,7 +78,7 @@ describe('list_screens and get_screen', () => {
   });
 
   it('show nothing to play for a screen with nothing published', async () => {
-    const fresh = await scoped(env.DB, o.orgId).screens.insert({ name: 'New', timezone: 'UTC', orientation: 'portrait' });
+    const fresh = await testScope(env.DB, o.orgId).screens.insert({ name: 'New', timezone: 'UTC', orientation: 'portrait' });
     const { screen } = await call('get_screen', { screenId: fresh.id });
     expect(screen).toMatchObject({ state: { kind: 'unreachable' }, heartbeat: null, showing: null });
   });
@@ -167,7 +166,7 @@ describe('identify_screen and restart_screen', () => {
 
 describe('a revoked screen', () => {
   it('needs you once every credential it had is revoked, though one never paired does not', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const waiting = await org.screens.insert({ name: 'Waiting', timezone: 'UTC', orientation: 'landscape' });
     expect((await call('get_screen', { screenId: waiting.id })).screen.state).toMatchObject({ kind: 'unreachable', reason: null });
 

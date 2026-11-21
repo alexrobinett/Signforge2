@@ -1,6 +1,5 @@
 // The dispatcher: role and scope checks, input validation, and the audit log.
-import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -31,7 +30,7 @@ let o: SeededOrg;
 /** An agent's limiter that always allows: these tests are about something else. */
 const unlimited: AgentLimiter = { take: async () => ({ ok: true }), audited: async () => {} };
 const caller = (role: Role, scopes?: Scope[], actor: Caller['actor'] = { kind: 'user', id: 'user-1', clientId: 'cms' }): Caller => ({
-  org: scoped(env.DB, o.orgId),
+  org: testScope(env.DB, o.orgId),
   role,
   scopes,
   actor,
@@ -259,7 +258,7 @@ describe('roles and scopes', () => {
 describe('whether editors publish (Q7, an org setting)', () => {
   let q: SeededOrg;
   const as = (role: Role, scopes?: Scope[], actor: Caller['actor'] = { kind: 'user', id: `q7-${role}`, clientId: 'cms' }): Caller => ({
-    org: scoped(env.DB, q.orgId),
+    org: testScope(env.DB, q.orgId),
     role,
     scopes,
     actor,
@@ -319,7 +318,7 @@ describe('input', () => {
 
 describe('the audit log', () => {
   it('records each change with actor kind and id, client, action, target and input', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const agent = caller('editor', undefined, { kind: 'agent', id: 'grant-9', clientId: 'oauth-client-9' });
     expect(await dispatch(registry, 'rename_group', { groupId: o.group, name: 'Audited' }, agent)).toMatchObject({ ok: true });
     const [entry] = await org.auditLog.list({ limit: 1 });
@@ -335,7 +334,7 @@ describe('the audit log', () => {
   });
 
   it('does not record reads or refusals', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const count = async () => (await org.auditLog.list({ limit: 1000 })).length;
     const n = await count();
     await dispatch(registry, 'list_screens', {}, caller('owner'));
@@ -364,7 +363,7 @@ describe('the audit log', () => {
     const reg = new Map([[secretive.name, secretive]]);
     const input = { screenId: o.screen, apiKey: 'sk_live_123', nested: { token: 'tok_456', credentialId: 'crd_1' } };
     expect(await dispatch(reg, 'set_feed_secret', input, caller('owner'))).toMatchObject({ ok: true });
-    const [entry] = await scoped(env.DB, o.orgId).auditLog.list({ limit: 1 });
+    const [entry] = await testScope(env.DB, o.orgId).auditLog.list({ limit: 1 });
     expect(entry!.detailJson).not.toMatch(/sk_live_123|tok_456/);
     expect(JSON.parse(entry!.detailJson!)).toEqual({
       input: { screenId: o.screen, apiKey: '[redacted]', nested: { token: '[redacted]', credentialId: 'crd_1' } },
@@ -434,7 +433,7 @@ describe('write safety', () => {
   });
 
   it('rolls the change back when its audit row cannot be written', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const before = await org.screenGroups.get(o.group);
     await env.DB.exec("CREATE TRIGGER audit_down BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
     try {
@@ -445,7 +444,7 @@ describe('write safety', () => {
     expect(await org.screenGroups.get(o.group)).toEqual(before);
   });
   it('creates once for a retried key, returning the first result and writing nothing', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const audits = async () => (await org.auditLog.list({ limit: 1000 })).length;
     const groups = async () => (await org.screenGroups.list()).filter((g) => g.name === 'Retried').length;
     const input = { name: 'Retried', screenIds: [o.screen], idempotencyKey: 'retry-key-1' };
@@ -463,7 +462,7 @@ describe('write safety', () => {
     const [x, y] = await Promise.all([1, 2].map(() => dispatch(registry, 'create_group', input, caller('editor'))));
     expect(x).toMatchObject({ ok: true });
     expect(y).toEqual(x);
-    expect((await scoped(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Raced')).toHaveLength(1);
+    expect((await testScope(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Raced')).toHaveLength(1);
   });
 
   it('refuses a key reused for a different input, and keeps keys apart between orgs', async () => {
@@ -471,9 +470,9 @@ describe('write safety', () => {
     expect(await dispatch(registry, 'create_group', input, caller('editor'))).toMatchObject({ ok: true });
     expect(await dispatch(registry, 'create_group', { ...input, name: 'Other' }, caller('editor'))).toMatchObject({ ok: false, error: 'conflict' });
     const other = await seedOrg(env.DB, 'disp-org-2');
-    const r = await dispatch(registry, 'create_group', input, { ...caller('editor'), org: scoped(env.DB, other.orgId) });
+    const r = await dispatch(registry, 'create_group', input, { ...caller('editor'), org: testScope(env.DB, other.orgId) });
     expect(r).toMatchObject({ ok: true });
-    expect(await scoped(env.DB, other.orgId).screenGroups.list()).toContainEqual(expect.objectContaining({ name: 'Keyed' }));
+    expect(await testScope(env.DB, other.orgId).screenGroups.list()).toContainEqual(expect.objectContaining({ name: 'Keyed' }));
   });
 });
 
@@ -492,7 +491,7 @@ describe("an agent grant's limits", () => {
     };
     return { asked, audited, agentLimiter };
   };
-  const audits = () => scoped(env.DB, o.orgId).auditLog.list({ limit: 1000 });
+  const audits = () => testScope(env.DB, o.orgId).auditLog.list({ limit: 1000 });
 
   it('refuse a call over a limit before the handler runs, writing nothing and leaving its key unused', async () => {
     let over = true;
@@ -506,12 +505,12 @@ describe("an agent grant's limits", () => {
       message: 'this agent grant made 30 changes this minute, its limit; try again in 12 s',
       details: { limit: 'writes_per_minute', retryAfterSeconds: 12 },
     });
-    expect((await scoped(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Limited')).toHaveLength(0);
+    expect((await testScope(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Limited')).toHaveLength(0);
     expect(await audits()).toHaveLength(n);
     // After the reset, the same key creates.
     over = false;
     expect(await dispatch(registry, 'create_group', input, { ...caller('editor', undefined, agent), agentLimiter })).toMatchObject({ ok: true });
-    expect((await scoped(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Limited')).toHaveLength(1);
+    expect((await testScope(env.DB, o.orgId).screenGroups.list()).filter((g) => g.name === 'Limited')).toHaveLength(1);
   });
 
   it("record a window's refusals in one row, however often the limiter asks for it", async () => {
@@ -603,7 +602,7 @@ describe('screen notices', () => {
 
   it('tell the screen about a revoked credential once the change is committed', async () => {
     const { told, screens } = recorder();
-    const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '9'.repeat(64) });
+    const cred = await testScope(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '9'.repeat(64) });
     const r = await revoke(cred.id, screens);
     expect(r.ok).toBe(true);
     expect(told).toEqual([{ revoked: { screenId: o.screen, credentialId: cred.id } }]);
@@ -614,7 +613,7 @@ describe('screen notices', () => {
 
   it('are not sent when the change is rolled back', async () => {
     const { told, screens } = recorder();
-    const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '8'.repeat(64) });
+    const cred = await testScope(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '8'.repeat(64) });
     await env.DB.exec("CREATE TRIGGER audit_down BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
     try {
       await expect(revoke(cred.id, screens)).rejects.toThrow();
@@ -631,7 +630,7 @@ describe('screen notices', () => {
       command: async () => {},
       revoked: async () => Promise.reject(new Error('object unreachable')),
     };
-    const cred = await scoped(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '7'.repeat(64) });
+    const cred = await testScope(env.DB, o.orgId).screens.credentials.insert({ screenId: o.screen, secretHash: '7'.repeat(64) });
     const r = await revoke(cred.id, screens);
     expect(r.ok).toBe(true);
   });
@@ -700,10 +699,10 @@ describe('claim_screen racing', () => {
     await startPairing(env.DB, { code, pollTokenHash: '9'.repeat(64), now: Date.now() });
     const other = await seedOrg(env.DB, 'disp-race');
     const input = { code, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' };
-    const winner = await dispatch(registry, 'claim_screen', input, { ...caller('editor'), org: scoped(env.DB, other.orgId) });
+    const winner = await dispatch(registry, 'claim_screen', input, { ...caller('editor'), org: testScope(env.DB, other.orgId) });
     expect(winner).toMatchObject({ ok: true });
     // The loser saw the code open just before the winner committed.
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const before = await org.screens.list();
     let checks = 0;
     const stale = { ...org, pairing: { ...org.pairing, open: async (c: string, now: number) => (checks++ === 0 ? 'device' : org.pairing.open(c, now)) } };
