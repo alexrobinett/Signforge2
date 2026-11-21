@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { ScheduleEntryView } from '../src/lib/schedule';
-import { callTool } from '../src/lib/tools';
+import { callTool, Refusal } from '../src/lib/tools';
 import { getPlaylists } from '../src/server/playlists.functions';
 import { getSchedule } from '../src/server/schedule.functions';
 import { getSpots } from '../src/server/spots.functions';
@@ -140,5 +140,26 @@ describe('one entry published alone (#181)', () => {
     const s = setup([mine]);
     await s.publishEntry(ORG, 'sch_mine');
     expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', { drafts: [{ kind: 'schedule_entry', id: 'sch_mine', version: 4 }] });
+  });
+
+  /** The toasts sonner holds, as title and description. */
+  const said = () => toast.getToasts().flatMap((t) => ('title' in t ? [{ title: t.title, description: t.description }] : []));
+
+  it('says the entry is saved as a draft when its publish is refused (#181 review)', async () => {
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [list('pls_holiday', {})] } as never);
+    vi.mocked(callTool).mockRejectedValueOnce(new Refusal('forbidden', 'Only owners publish in this organization'));
+    const s = setup([mine]);
+    await s.publishEntry(ORG, 'sch_mine');
+    expect(said()).toContainEqual({ title: 'Saved as a draft, not published', description: 'Only owners publish in this organization' });
+  });
+
+  it('says so too when the read before the publish fails, and publishes nothing', async () => {
+    vi.mocked(getSchedule).mockRejectedValueOnce(new Refusal('network', 'Could not reach SignForge. Check your connection and try again.'));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const store = createStore<PublishingSlice>()((set, get) => createPublishingSlice(set as never, get as never, { router: {}, queryClient } as never));
+    vi.mocked(callTool).mockClear();
+    await store.getState().publishEntry(ORG, 'sch_mine');
+    expect(said()).toContainEqual({ title: 'Saved as a draft, not published', description: 'Could not reach SignForge. Check your connection and try again.' });
+    expect(vi.mocked(callTool)).not.toHaveBeenCalled();
   });
 });

@@ -67,8 +67,11 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   const refresh = (orgId: string) => queryClient.invalidateQueries({ queryKey: ['org', orgId] });
   const viewRollout = (id: string) => ({ label: 'View rollout', onClick: () => void router.navigate({ to: '/publishes', search: { id } }) });
 
-  /** The toast for a publish's answer: what reached screens, else why nothing did; with Undo unless `undo` is false. */
-  function told(orgId: string, r: ToolOutput<'publish'>, undo = true) {
+  /**
+   * The toast for a publish's answer: what reached screens, else why nothing did; with Undo unless
+   * `undo` is false. `refused` titles a publish that was held back, as it does a refused one.
+   */
+  function told(orgId: string, r: ToolOutput<'publish'>, undo = true, refused = 'Not published') {
     const held = r.held.flatMap((h) => h.problems)[0];
     const noDefault = r.screens.some((s) => s.problems.includes('the organization has no default playlist'));
     // Every screen refused it: say the screens' own reason, not a guess.
@@ -82,7 +85,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
           ? 'No screen plays it yet: add it to a playlist that screens play.'
           : 'No screen is paired yet.';
     if (!r.publish) {
-      if (held) toast.error('Not published', { description: `It does not pass its checks: ${held}.` });
+      if (held) toast.error(refused, { description: `It does not pass its checks: ${held}.` });
       else if (noDefault || allFailed) toast.error('No screen can play it yet', { description: reachesNone });
       else toast('Nothing to publish', { description: 'Every screen already plays this.' });
       return;
@@ -112,24 +115,30 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
 
   /**
    * The schedule, playlists and spots, read now, not from the cache: a draft edited in another tab,
-   * or an entry just saved, is pinned at its version now.
+   * or an entry just saved, is pinned at its version now. Null when the read fails, said under `refused`.
    */
-  async function readDrafts(orgId: string) {
-    const [{ entries }, { playlists }, { spots }] = await Promise.all([
-      queryClient.query({ ...scheduleQuery(orgId), staleTime: 0 }),
-      queryClient.query({ ...playlistsQuery(orgId), staleTime: 0 }),
-      queryClient.query({ ...spotsQuery(orgId), staleTime: 0 }),
-    ]);
-    return { entries, playlists, spots };
+  async function readDrafts(orgId: string, refused: string) {
+    try {
+      const [{ entries }, { playlists }, { spots }] = await Promise.all([
+        queryClient.query({ ...scheduleQuery(orgId), staleTime: 0 }),
+        queryClient.query({ ...playlistsQuery(orgId), staleTime: 0 }),
+        queryClient.query({ ...spotsQuery(orgId), staleTime: 0 }),
+      ]);
+      return { entries, playlists, spots };
+    } catch (err) {
+      toast.error(refused, { description: toolMessage(err) });
+      return null;
+    }
   }
 
-  async function publish(orgId: string, pins: Pin[], undo = true) {
+  /** Publishes `pins`; `refused` titles a refusal, as `told` does a publish held back. */
+  async function publish(orgId: string, pins: Pin[], undo = true, refused = 'Not published') {
     pending(true);
     try {
-      told(orgId, await callTool('publish', { drafts: pins }), undo);
+      told(orgId, await callTool('publish', { drafts: pins }), undo, refused);
       await refresh(orgId);
     } catch (err) {
-      toast.error('Not published', {
+      toast.error(refused, {
         description: isStale(err) ? 'It changed since you opened it, perhaps in another tab. Reload and publish again.' : toolMessage(err),
       });
     } finally {
@@ -194,7 +203,9 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     },
 
     async publishSchedule(orgId, entryIds) {
-      const { entries, playlists, spots } = await readDrafts(orgId);
+      const drafts = await readDrafts(orgId, 'Not published');
+      if (!drafts) return;
+      const { entries, playlists, spots } = drafts;
       const chosen = entries.filter((e) => (entryIds ? entryIds.includes(e.id) : e.draftChanged));
       const needed = new Set(chosen.filter((e) => !e.deleted).map((e) => e.playlistId));
       const lists = playlists.filter((p) => needed.has(p.id));
@@ -211,20 +222,29 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     },
 
     async publishEntry(orgId, entryId) {
-      const { entries, playlists, spots } = await readDrafts(orgId);
+      // Called once the entry is saved: every way this ends without a publish says the draft is kept.
+      const refused = 'Saved as a draft, not published';
+      const drafts = await readDrafts(orgId, refused);
+      if (!drafts) return;
+      const { entries, playlists, spots } = drafts;
       const entry = entries.find((e) => e.id === entryId);
       if (!entry) {
-        toast.error('Not published', { description: 'The entry is no longer there: someone may have removed it.' });
+        toast.error(refused, { description: 'The entry is no longer there: someone may have removed it.' });
         return;
       }
       const playlist = playlists.find((p) => p.id === entry.playlistId);
       const first = playlist && !playlist.published ? playlist : null;
       const inIt = new Set(first?.spotIds ?? []);
-      await publish(orgId, [
-        { kind: 'schedule_entry', id: entry.id, version: entry.version },
-        ...(first ? [{ kind: 'playlist', id: first.id, version: first.version } satisfies Pin] : []),
-        ...spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
-      ]);
+      await publish(
+        orgId,
+        [
+          { kind: 'schedule_entry', id: entry.id, version: entry.version },
+          ...(first ? [{ kind: 'playlist', id: first.id, version: first.version } satisfies Pin] : []),
+          ...spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+        ],
+        true,
+        refused,
+      );
     },
 
     async endTakeover(orgId, entryId) {
