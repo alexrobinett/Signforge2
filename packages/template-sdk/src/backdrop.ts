@@ -12,8 +12,8 @@
 export function readableOver(pixels: Uint8ClampedArray, text: string, { large = false } = {}): string | undefined {
   const min = large ? 3 : 4.5;
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text.trim())?.[1];
-  const t =
-    hex === undefined ? undefined : luminance(...(hex.length === 3 ? [...hex].map((c) => c + c) : hex.match(/../g)!).map((c) => Number.parseInt(c, 16)));
+  const [r, g, b] = (hex?.length === 3 ? [...hex].map((c) => c + c) : (hex?.match(/../g) ?? [])).map((c) => Number.parseInt(c, 16));
+  const t = r === undefined ? undefined : luminance(r, g!, b!);
   let darkest = 1;
   let lightest = 0;
   let worst = t === undefined ? 0 : Number.POSITIVE_INFINITY;
@@ -30,11 +30,10 @@ export function readableOver(pixels: Uint8ClampedArray, text: string, { large = 
   return black >= white ? '#000000' : '#ffffff';
 }
 
+/** WCAG's linear value of each 8-bit sRGB channel value, looked up: a photo has tens of thousands of pixels. */
+const LINEAR = Float64Array.from({ length: 256 }, (_, v) => (v / 255 <= 0.04045 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4));
+
 /** WCAG relative luminance of 8-bit sRGB channels; `contrast` keeps its own copy, for the reason above. */
-function luminance(...rgb: number[]): number {
-  const [r, g, b] = rgb.map((v) => {
-    const c = v / 255;
-    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+function luminance(r: number, g: number, b: number): number {
+  return 0.2126 * LINEAR[r]! + 0.7152 * LINEAR[g]! + 0.0722 * LINEAR[b]!;
 }
