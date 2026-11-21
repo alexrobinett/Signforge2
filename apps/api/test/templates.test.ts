@@ -69,7 +69,18 @@ beforeAll(async () => {
 
 describe('sf template seed', () => {
   it('builds all ten templates cleanly', () => {
-    expect(BUILDS.map((b) => b.dir)).toEqual(['agenda', 'alert', 'clock', 'cstore-promo', 'info-frame', 'menu-board', 'news', 'photo-promo', 'room-status', 'weather']);
+    expect(BUILDS.map((b) => b.dir)).toEqual([
+      'agenda',
+      'alert',
+      'clock',
+      'cstore-promo',
+      'info-frame',
+      'menu-board',
+      'news',
+      'photo-promo',
+      'room-status',
+      'weather',
+    ]);
     for (const b of BUILDS) expect(b.problems, b.dir).toEqual([]);
   });
 
