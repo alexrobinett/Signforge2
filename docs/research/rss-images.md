@@ -7,7 +7,7 @@ Research for the template set's feed photos (#189), 2026-11-21. `packages/feeds`
 There is no single standard. Real feeds use one or more of these, so the parser tries them in order and takes the first usable image.
 
 1. **Media RSS** (`xmlns:media="http://search.yahoo.com/mrss/"`, spec 1.5.1, rssboard.org/media-rss).
-   - `<media:content url width height medium="image" type="image/jpeg">`, directly on the item or inside `<media:group>` (several sizes of one picture). Pick the widest image, preferring `medium="image"` or a `type` starting `image/`; skip video and audio entries.
+   - `<media:content url width height medium="image" type="image/jpeg">`, directly on the item or inside `<media:group>` (several sizes of one picture). Pick the smallest image covering `SCREEN_BOX.landscape` (1920×1080), or the widest when none covers it, preferring `medium="image"` or a `type` starting `image/`; skip video and audio entries.
    - `<media:thumbnail url width height>`, on the item, inside `media:content` or inside `media:group`. Often small (YouTube: 480×360; some news sites: 144 px). Fine for a list thumbnail, too small for a lead photo.
 2. **RSS 2.0 `<enclosure url length type>`** (rssboard.org RSS 2.0). Use only when `type` starts with `image/`: podcasts and some news feeds put audio or video there first. The spec is unclear on how many an item may have, so read all of them.
 3. **Atom `<link rel="enclosure" href type length>`** (RFC 4287 §4.2.7.2), with the same `image/` rule. `length` is advisory.
@@ -17,7 +17,7 @@ There is no single standard. Real feeds use one or more of these, so the parser 
    - avatars and emoji: `gravatar.com`, `s.w.org/images/core/emoji`;
    - `data:` URLs.
 
-   Take the largest `srcset` candidate. Resolve a relative `src` against `xml:base`, then the item's `<link>`, then the feed URL. WordPress feeds usually have images only here. The NPR fixture we already have (`packages/feeds/test/fixtures/npr-news.xml`) carries 10 body `<img>` tags and no Media RSS or enclosure, so this step matters.
+   Take the smallest `srcset` candidate covering 1920 px, else the largest. Resolve a relative `src` against `xml:base`, then the item's `<link>`, then the feed URL. WordPress feeds usually have images only here. The NPR fixture we already have (`packages/feeds/test/fixtures/npr-news.xml`) carries 10 body `<img>` tags and no Media RSS or enclosure, so this step matters.
 6. **Nothing.** The template shows the source's monogram or a bigger headline (the canvas boards already do).
 
 **Not in v1: the article page's `og:image`.** Some readers (Piano ESP, ScreenCloud through Embedly) fetch the article and read its `og:image` when the feed has no image. That is one more request per item per poll. Google News items redirect and block it. It also makes the server crawl third-party sites. Leave it for later, opt-in per source, cached for days.
@@ -34,14 +34,15 @@ There is no single standard. Real feeds use one or more of these, so the parser 
 Screens and templates have no network, and a feed's image URL is untrusted input. So the **server** fetches, checks and stores, and the screen only ever gets a blob through the sync, as it gets manifest files.
 
 - **Fetching rules:** the same as for feed URLs (`feedUrlProblem`, then every redirect, then the resolved addresses: no private ranges). https only. Many feeds still serve `http://` images: try the same URL over https once, else drop the image. A size cap before reading the body (for example 8 MB). A content type of `image/jpeg`, `png`, `webp` or `avif`, confirmed by sniffing the bytes, not by the header or extension (ScreenCloud notes WebP failing to extract; decode-check it).
-- **Checking and resizing**, as uploads are (`packages/media`: `image-info`, `renditions`): a decode check, resized to fit `SCREEN_BOX`, plus the small thumbnail rendition #169 asks for (contrast checks and list thumbnails). Store by content hash, so one picture used by many feeds or orgs is stored once per org.
+- **Checking and resizing**, as uploads are (`packages/media`: `image-info`): a JPEG or WebP already within 1.25× `SCREEN_BOX.landscape` (2400×1350) and 1 MB is stored untouched (no Images call; the header check stays and the player's fallback covers corrupt files), while oversized or PNG/AVIF photos are decoded and scaled via the Images binding. A thumbnail covering `NEWS_THUMB_BOX` (480×270) is made only when the photo is larger than the thumb box (otherwise `file` is reused). No contrast sample is stored (templates put text over feed photos behind a scrim). Dedupe by content hash per org before any transform, and store by content hash in the org's R2 prefix.
 - **Cost per poll:** polls run every 5 minutes on a Worker with 30 s of CPU shared with other orgs' sources. So:
-  - fetch only images for items that will be shown (the first `maxItems`, at most 10 per source);
-  - remember URL → hash with the response's `ETag` / `Last-Modified` and skip unchanged URLs;
-  - run the resize off the poll path (#195: uploads resize in the browser and a Worker has no decoder, so the poll queues each photo and the queue's consumer has the Images binding decode and scale it);
-  - a source keeps its last good images when a fetch fails.
+  - skip photo work when no published spot binds the source to a template field that uses images;
+  - fetch only images for items that will be shown (the first `maxItems`, at most 10 per source), within daily budgets (10/source/day, 20/org/day);
+  - remember URL → hash with the response's `ETag` / `Last-Modified`, recheck weekly, and skip unchanged URLs;
+  - run the fetch and any resize off the poll path via the `FEED_IMAGES` queue (`max_batch_size: 1`) and the Images binding;
+  - a source keeps its last good images when a fetch fails, with growing backoff up to 24 h and daily cleanup of expired unreferenced rows and blobs.
 - **Sync and player:** the snapshot lists the hashes it uses; the sync sends missing blobs; the player pins them for as long as a snapshot it holds refers to them (as for manifest files) and evicts afterwards. A story whose image did not arrive plays as a story with no image.
-- **Templates:** an item's image is an asset URL or empty, never a remote URL. Contrast over a photo uses the thumbnail (`readableOver`), as photo-promo does.
+- **Templates:** an item's image is an asset URL or empty, never a remote URL. Text over a feed photo sits behind a scrim (no contrast sample needed).
 
 ## Test fixtures to add
 
