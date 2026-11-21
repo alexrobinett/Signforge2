@@ -141,7 +141,7 @@ Text in the primary or accent colour on the page uses `--lk-primary-ink` or `--l
 | Night | Unbounded, Space Mono, Inter | variable, 400 and 700, variable | 67,895 + 44,374 + 64,367 |
 | Corporate | Inter Tight | variable | 59,855 |
 
-Inter is shared by three looks. The OFL asks that every copy carry each font's copyright notice and the licence: a `/*! … */` comment at the top of `looks.css` holds both, and the build keeps it in the bundle (5,357 bytes). A bundle with all four looks is 375,089 bytes, the test template included (`packages/template-looks/test/kit.test.ts`).
+Inter is shared by three looks. The OFL asks that every copy carry each font's copyright notice and the licence: a `/*! … */` comment at the top of `looks.css` holds both, and the build keeps it in the bundle (5,357 bytes). A bundle with all four looks is 375,089 bytes, the test template included (`packages/cli/test/looks.test.ts`).
 
 On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other looks' faces costs more (`spike/pi-perf/RESULTS.md`, The look kit). The player reads every bundle before it frames it, about 30 ms more for this one than for a bundle with only Pop's faces. The first prepare after a page loads takes about 180 ms more. After that, prepares fall into a fast mode (about 300 ms in landscape for the test template) or a slow one (about 420 to 480 ms). The four-look bundle's runs land in the slow mode more often. A trace finds no thread doing more work for it, so the slow mode's cause is not known yet.
 
