@@ -34,24 +34,27 @@ export const WHO_OPTIONS: { value: keyof typeof WHO_KINDS; label: string }[] = [
   { value: 'system', label: 'System' },
 ];
 
-/** The page's filters, as its URL carries them. */
+/**
+ * The page's filters, as its URL carries them: kinds, ids and a time span, nothing a person
+ * typed. The text search is not here: it can be an email or a name, so it lives in the store
+ * and reaches the server in a POST body, never a URL (#140).
+ */
 export interface AuditFilters {
   who?: string;
   what?: string;
   target?: string;
   targetId?: string;
   when?: When;
-  q?: string;
 }
 
-/** `list_audit_log`'s input for the filters, `when` counted back from `now`. */
-export function auditInput(f: AuditFilters, now: number): Record<string, unknown> {
+/** `list_audit_log`'s input for the filters and the search (`query`), `when` counted back from `now`. */
+export function auditInput(f: AuditFilters, query: string, now: number): Record<string, unknown> {
   return {
     ...(f.who ? { actor: isWhoKind(f.who) ? { kind: WHO_KINDS[f.who] } : { id: f.who } } : {}),
     ...(f.what ? { action: f.what } : {}),
     ...(f.target ? { target: { kind: f.target, ...(f.targetId ? { id: f.targetId } : {}) } } : {}),
     ...(f.when ? { from: now - WHEN[f.when] } : {}),
-    ...(f.q ? { query: f.q } : {}),
+    ...(query ? { query } : {}),
   };
 }
 

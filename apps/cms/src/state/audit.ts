@@ -12,6 +12,8 @@ const EXPORT_LIMIT = 10_000;
 const EXPORT_PAGE = 200;
 
 interface AuditState {
+  /** The log's text search, kept here and out of the URL: it can be an email or a name (#140). */
+  query: string;
   exporting: boolean;
   /** What the last export did, or why it failed. */
   exportNote: { text: string; failed: boolean } | null;
@@ -19,6 +21,8 @@ interface AuditState {
 
 export interface AuditSlice {
   audit: AuditState;
+  /** Searches the log for `query` (trimmed); empty shows it all. */
+  searchAuditLog: (query: string) => void;
   /** Downloads the entries `input` matches as CSV, each row as `row` words it. */
   exportAuditLog: (input: Record<string, unknown>, row: (e: AuditEntry) => string[]) => Promise<void>;
 }
@@ -26,7 +30,11 @@ export interface AuditSlice {
 export const createAuditSlice: SliceCreator<AuditSlice> = (set) => {
   const audit = (change: Partial<AuditState>) => set((s) => ({ audit: { ...s.audit, ...change } }));
   return {
-    audit: { exporting: false, exportNote: null },
+    audit: { query: '', exporting: false, exportNote: null },
+
+    searchAuditLog(query) {
+      audit({ query: query.trim() });
+    },
 
     async exportAuditLog(input, row) {
       audit({ exporting: true, exportNote: null });

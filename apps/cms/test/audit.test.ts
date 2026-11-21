@@ -69,18 +69,18 @@ describe('the audit log in words', () => {
 describe('auditInput', () => {
   it('turns the page’s filters into list_audit_log’s input', () => {
     const now = Date.UTC(2026, 10, 18);
-    expect(auditInput({}, now)).toEqual({});
-    expect(auditInput({ who: 'agents', what: 'update_spot', target: 'spot', targetId: 'spt_1', when: 'day', q: 'latte' }, now)).toEqual({
+    expect(auditInput({}, '', now)).toEqual({});
+    expect(auditInput({ who: 'agents', what: 'update_spot', target: 'spot', targetId: 'spt_1', when: 'day' }, 'latte', now)).toEqual({
       actor: { kind: 'agent' },
       action: 'update_spot',
       target: { kind: 'spot', id: 'spt_1' },
       from: now - 86_400_000,
       query: 'latte',
     });
-    expect(auditInput({ who: 'usr_jun' }, now)).toEqual({ actor: { id: 'usr_jun' } });
+    expect(auditInput({ who: 'usr_jun' }, '', now)).toEqual({ actor: { id: 'usr_jun' } });
     // A name every object has is no filter of ours: one actor's id, never a kind.
     expect(isWhen('constructor')).toBe(false);
-    expect(auditInput({ who: 'constructor' }, now)).toEqual({ actor: { id: 'constructor' } });
+    expect(auditInput({ who: 'constructor' }, '', now)).toEqual({ actor: { id: 'constructor' } });
   });
 });
 

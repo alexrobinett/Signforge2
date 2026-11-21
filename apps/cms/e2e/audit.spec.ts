@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, tool } from './helpers';
 import { API_PORT, CMS_URL } from './servers';
 
 /** This spec's own client addresses, so its sign-in and pairing have their own rate limits. */
@@ -130,4 +130,50 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
     'Could not load older entries: This tab is on Northside Market; you switched to Other Co in another tab. Reload.',
   );
   await expect(rows).toHaveCount(50);
+});
+
+test("the audit log's filters, search and Export CSV are disabled in the server's HTML, until the page has hydrated (#140)", async ({ page }) => {
+  // The page hydrates after the app (body[data-hydrated]): a filter chosen in between was set back
+  // by React, the browser's own submit put the search in the URL, and Export CSV made no file.
+  await signInAs(page, `e2e-audit-server-${Date.now()}@example.com`, '192.0.2.49');
+  await createOrg(page, 'Northside Market');
+  const names = ['Who', 'What', 'Target', 'When', 'Search', 'Export CSV'];
+  expect(await disabledOnServer(page, '/audit', names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
+  expect(await disabledOnServer(page, '/audit?when=day', ['Clear filters'])).toEqual({ 'Clear filters': [true] });
+  // Rendered by the server, they are enabled once the page has hydrated.
+  await page.goto('/audit');
+  await hydrated(page);
+  await expect(page.getByLabel('When', { exact: true })).toBeEnabled();
+});
+
+test("searching the audit log for an invitee's email keeps it out of the page's URL and every request's (#140)", async ({ page }) => {
+  // A search can be an email or a name: in a URL it reaches history, a Referer and the Worker's request logs.
+  await signInAs(page, `e2e-audit-search-${Date.now()}@example.com`, '192.0.2.50');
+  await createOrg(page, 'Northside Market');
+  const invitee = `e2e-audit-invitee-${Date.now()}@example.com`;
+  await page.goto('/settings/members');
+  await hydrated(page);
+  await page.getByLabel('Emails, separated by commas').fill(invitee);
+  await page.getByRole('button', { name: 'Send invites' }).click();
+  await expect(page.getByRole('region', { name: 'Waiting for a reply' })).toContainText(invitee);
+
+  const requests: { url: string; body: string }[] = [];
+  page.on('request', (r) => requests.push({ url: decodeURIComponent(r.url()), body: r.postData() ?? '' }));
+  await page.goto('/audit?what=invite_member');
+  await hydrated(page);
+  const rows = page.locator('tbody tr');
+  await expect(rows).toHaveCount(1);
+  // The search narrows within the link's filters.
+  await page.getByLabel('Search').fill('nobody-here@example.com');
+  await page.getByLabel('Search').press('Enter');
+  await expect(page.getByText('Nothing matches these filters.')).toBeVisible();
+  await page.getByLabel('Search').fill(invitee);
+  await page.getByLabel('Search').press('Enter');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText(invitee);
+
+  // The link keeps the filters, not the search; the server got the search in a body.
+  expect(new URL(page.url()).search).toBe('?what=invite_member');
+  expect(requests.filter((r) => r.url.includes(invitee) || r.url.includes('nobody-here'))).toEqual([]);
+  expect(requests.some((r) => r.body.includes(invitee))).toBe(true);
 });
