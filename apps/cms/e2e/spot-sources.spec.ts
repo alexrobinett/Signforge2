@@ -3,7 +3,7 @@
 // a test writes the snapshot it would have fetched into the run's local D1.
 import { expect, test, type Page } from '@playwright/test';
 import { canonicalJson } from '@signforge/contract';
-import { parseNews } from '@signforge/feeds';
+import { normaliseFeed } from '@signforge/feeds';
 import { axe, d1, fillUntilEnabled, hydrated, newSpot, orgOf, shots, signInAs, spotIdOf, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit. */
@@ -180,12 +180,24 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
   });
 
   // The feed as the poller converts it: one dated item, one undated, the feed's title as their source.
-  const pubDate = new Date(Date.now() - 20 * 60_000).toUTCString();
-  const rss = `<?xml version="1.0"?><rss version="2.0"><channel><title>World desk</title><language>en</language>
-    <item><title>Harbour bridge reopens after repairs</title><pubDate>${pubDate}</pubDate></item>
-    <item><title>City library extends its weekend hours</title></item>
+  // It names a logo and photos; what the poller stores, and the tools give, has none of them.
+  const published = new Date(Date.now() - 20 * 60_000);
+  const rss = `<?xml version="1.0"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+    <channel><title>World desk</title><language>en</language><image><url>/logo.png</url></image>
+    <item><title>Harbour bridge reopens after repairs</title><pubDate>${published.toUTCString()}</pubDate>
+      <media:content url="https://cdn.feeds.example.com/bridge.jpg" medium="image" width="1600"/></item>
+    <item><title>City library extends its weekend hours</title><enclosure url="https://cdn.feeds.example.com/library.jpg" type="image/jpeg"/>
+      <content:encoded><![CDATA[<img src="/reading-room.jpg">]]></content:encoded></item>
   </channel></rss>`;
-  pollFound(spotId, feed.id, parseNews(rss));
+  pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/world.rss' }));
+  expect((await tool(page, 'get_data_source', { dataSourceId: feed.id })).snapshot.data).toEqual({
+    title: 'World desk',
+    language: 'en',
+    items: [
+      { title: 'Harbour bridge reopens after repairs', published: `${published.toISOString().slice(0, 19)}+00:00`, source: 'World desk' },
+      { title: 'City library extends its weekend hours', published: '', source: 'World desk' },
+    ],
+  });
   await page.reload();
   await hydrated(page);
   await expect(form.getByRole('listitem').filter({ hasText: 'Harbour bridge reopens after repairs' })).toBeVisible();
