@@ -116,7 +116,12 @@ describe('schedule', () => {
     const early = new Date(0);
     function screen(lastSync: string) {
       const run = { ms: 0 };
-      const clock = new Clock({ deviceNow: () => 0, monoNow: () => run.ms, buildTime: at('09:00').getTime(), persisted: { offsetMs: 0, syncedAt: at(lastSync).getTime() } });
+      const clock = new Clock({
+        deviceNow: () => 0,
+        monoNow: () => run.ms,
+        buildTime: at('09:00').getTime(),
+        persisted: { offsetMs: 0, syncedAt: at(lastSync).getTime() },
+      });
       return { run, clock };
     }
 

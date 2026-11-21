@@ -308,7 +308,12 @@ describe('playback', () => {
      */
     function untrusted() {
       const t = setup();
-      const screen = new Clock({ deviceNow: () => t.clock.t, monoNow: () => t.clock.t, buildTime: T0 - HOUR, persisted: { offsetMs: 0, syncedAt: T0 + 10 * MINUTE } });
+      const screen = new Clock({
+        deviceNow: () => t.clock.t,
+        monoNow: () => t.clock.t,
+        buildTime: T0 - HOUR,
+        persisted: { offsetMs: 0, syncedAt: T0 + 10 * MINUTE },
+      });
       t.clock.now = () => screen.now();
       t.clock.trust = () => screen.trust();
       t.playback.adopt(manifest('m1', [spot('a', HOUR), alert], { takeover: { from: 0, to: 30 * MINUTE } }));
