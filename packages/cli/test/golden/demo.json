@@ -115,7 +115,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "ffaf02c77e374ecf195b4e2905acdf74fb72c4a59c402717b244b06792483ec1",
+  "id": "a8debc3e2f57189e508cc8306e0ca49777ace45787382ef8a8ba54e44c83b4d3",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -168,7 +168,7 @@
       "to": "10:00"
     }
   ],
-  "schema": 6,
+  "schema": 7,
   "screen": {
     "displayHours": {
       "exceptions": [

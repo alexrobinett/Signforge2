@@ -1,0 +1,34 @@
+{
+  "id": "two-sources",
+  "version": "1.0.0",
+  "name": "Weather and headlines (test)",
+  "description": "Test fixture: the temperature from an Open-Meteo forecast and headlines from a news feed, two named sources in one template (#193).",
+  "fields": {
+    "city": { "type": "text", "label": "City", "default": "Atlanta", "maxLength": 40 },
+    "temp": { "type": "number", "label": "Temperature", "default": 72 },
+    "unit": { "type": "select", "label": "Unit", "options": ["°F", "°C"], "default": "°F" },
+    "items": {
+      "type": "list",
+      "label": "Headlines",
+      "maxItems": 5,
+      "default": [{ "title": "Fallback headline" }],
+      "item": { "title": { "type": "text", "label": "Headline", "maxLength": 200 } }
+    }
+  },
+  "duration": { "defaultMs": 10000, "minMs": 4000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#000",
+  "live": {
+    "sources": {
+      "weather": {
+        "label": "Weather",
+        "source": "open-meteo",
+        "fields": { "temp": "current.temperature_2m" },
+        "place": "city",
+        "units": { "temperature": "unit" }
+      },
+      "headlines": { "label": "News", "source": "rss", "fields": { "items": "items" } }
+    }
+  }
+}

@@ -15,8 +15,10 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  *      template, so the server tells it to reload, as for 4.
  *   6  a template may declare `date` and `datetime` fields (#192). A player that knows only 4 and 5
  *      refuses such a template, so the server tells it to reload, as for 4.
+ *   7  a template's `live` may name several sources (`sources`, #193). A player that knows only 5
+ *      and 6 refuses such a template, so the server tells it to reload, as for 4.
  */
-export const MANIFEST_SCHEMA = 6;
+export const MANIFEST_SCHEMA = 7;
 /** Manifest schemas this player can play: the current one and the one before it. */
 export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
@@ -122,11 +124,11 @@ export const WEATHER_UNITS = { temperature: ['°F', '°C'], wind: ['mph', 'km/h'
 export const BINDING_PATH = /^[^.\s]+(?:\.[^.\s]+)*$/;
 
 /**
- * Which fields of a template are live data: the kind of feed they come from and each field's path
- * in its snapshot. The editor binds them to a source of that kind with these paths; the fields keep
- * their values as the fallback a screen shows without fresh data. Other fields are typed by people.
+ * One feed a template's live fields come from: its kind and each field's path in its snapshot.
+ * The editor binds them to a source of that kind with these paths; the fields keep their values as
+ * the fallback a screen shows without fresh data. Other fields are typed by people.
  */
-export interface LiveData {
+export interface LiveSourceDef {
   source: LiveSource;
   /**
    * Field name to its path in the source's snapshot, as a `Binding` names it. A `table` source
@@ -138,6 +140,18 @@ export interface LiveData {
   /** Open-Meteo: the select fields that say which units the forecast is fetched in (`WEATHER_UNITS`). */
   units?: { temperature?: string; wind?: string };
 }
+
+/**
+ * Which fields of a template are live data: one source, or from manifest schema 7 several by name
+ * (#193), such as weather from Open-Meteo and headlines from a feed in one frame. Each named source
+ * has a label, shown over its picker in the editor, and feeds its own fields: a field comes from
+ * one source at most, and a field a source names as its place or units is one no source fills.
+ * A spot binds each field to a data source of its own, so the sources go stale apart.
+ */
+export type LiveData = LiveSourceDef | { sources: Record<string, LiveSourceDef & { label: string }> };
+
+/** A template's live sources by name. The one source of a template that declares one is named `source`. */
+export const liveSources = (live: LiveData): Record<string, LiveSourceDef & { label?: string }> => ('sources' in live ? live.sources : { source: live });
 
 /** Who owns a template: `base` for the platform's own, otherwise the org's id. */
 export type TemplateOwner = 'base' | (string & {});

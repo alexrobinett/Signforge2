@@ -2,17 +2,21 @@
 // for a save on its way and publishes the latest edit, and a spot left with an edit waiting is
 // saved (#150). Tool calls go through a stubbed `fetch`, held open until the test answers; the
 // autosave's second is fake time.
-import { PREVIEW_PROTOCOL, type TemplateManifest } from '@signforge/contract';
+import { liveSources, PREVIEW_PROTOCOL, type TemplateManifest } from '@signforge/contract';
 import news from '@signforge/template-news/template.json';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { type ComponentProps, createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { AssetView } from '../src/lib/assets';
 import type { SpotView } from '../src/lib/spots';
-import { assetsQuery, spotKeys, spotPreviewQuery, templatesQuery } from '../src/queries/spots';
+import { assetsQuery, dataSourceKeys, spotKeys, spotPreviewQuery, templatesQuery } from '../src/queries/spots';
+import { SourceSection } from '../src/components/spots/source-section';
+import { StoreProvider } from '../src/state/provider';
 import { getDataSource } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
-import { createSpotSourceSlice, type SpotSourceSlice } from '../src/state/spot-source';
+import { createSpotSourceSlice, sourceStateOf, type SpotSourceSlice } from '../src/state/spot-source';
 import { draftOf, fieldProblems } from '../src/lib/spots';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
 
@@ -59,6 +63,18 @@ let answers: ((body: unknown) => void)[] = [];
 let calls: { name: string; input: Record<string, unknown> }[] = [];
 /** The router as the store reads it: the org its shell shows. */
 const router = { state: { matches: [{ routeId: '/_app', loaderData: { organization: { id: ORG } } }] } };
+
+/** A store of the spot editor's and the source pickers' slices; `pickers` opens some from the start, as a server render reads it. */
+function sourceStore(queryClient: QueryClient, pickers?: (s: SpotSourceSlice['spotSource']) => SpotSourceSlice['spotSource']) {
+  return createStore<SpotEditorSlice & SpotSourceSlice>()((set, get) => {
+    const sources = createSpotSourceSlice(set as never, get as never, { router, queryClient } as never);
+    return {
+      ...createSpotEditorSlice(set as never, get as never, { router, queryClient } as never),
+      ...sources,
+      ...(pickers ? { spotSource: pickers(sources.spotSource) } : {}),
+    };
+  });
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -325,10 +341,7 @@ describe('an edit after a save, once someone else has saved since (review of #15
 describe('a place picked while a typed edit saves (re-check of #153, 2)', () => {
   it('binds on top of the edit as saved, at the version it saved, not on the spot as it was when the pick began', async () => {
     const queryClient = new QueryClient();
-    const store = createStore<SpotEditorSlice & SpotSourceSlice>()((set, get) => ({
-      ...createSpotEditorSlice(set as never, get as never, { router, queryClient } as never),
-      ...createSpotSourceSlice(set as never, get as never, { router, queryClient } as never),
-    }));
+    const store = sourceStore(queryClient);
     const manifest = news as unknown as TemplateManifest;
     const v4: SpotView = { ...spot('spt_news', 4), kind: 'template', templateVersionId: 'tpv_news', url: null, data: {}, assets: {}, bindings: {} };
     queryClient.setQueryData(spotKeys.one(ORG, v4.id), v4);
@@ -339,7 +352,9 @@ describe('a place picked while a typed edit saves (re-check of #153, 2)', () => 
     void store.getState().saveSpotDraft(v4.id);
     await vi.advanceTimersByTimeAsync(0);
     // The pick starts from the page's spot at 4, then waits on the source's read.
-    const binding = store.getState().connectSource({ orgId: ORG, spot: v4, manifest, live: manifest.live! }, 'dsrc_news');
+    const binding = store
+      .getState()
+      .connectSource({ orgId: ORG, spot: v4, manifest, source: 'source', live: liveSources(manifest.live!).source! }, 'dsrc_news');
     await vi.advanceTimersByTimeAsync(0);
     // Meanwhile the typed edit's save is answered: the spot is at 5.
     answers[0]!({ spot: { ...v4, name: 'Typed', version: 5 } });
@@ -350,5 +365,79 @@ describe('a place picked while a typed edit saves (re-check of #153, 2)', () => 
       version: 5,
       edit: { name: 'Typed', bindings: { items: { dataSourceId: 'dsrc_news' } } },
     });
+  });
+});
+
+describe('a template with two sources (#193)', () => {
+  it("keeps each picker to itself, and binds a source's fields only, leaving the other source's bindings", async () => {
+    const queryClient = new QueryClient();
+    const store = sourceStore(queryClient);
+    const weather = { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'city' } as const;
+    const headlines = { label: 'Headlines', source: 'rss', fields: { items: 'items' } } as const;
+    const manifest: TemplateManifest = { ...(news as unknown as TemplateManifest), live: { sources: { weather, headlines } } };
+    const v4: SpotView = {
+      ...spot('spt_frame', 4),
+      kind: 'template',
+      templateVersionId: 'tpv_frame',
+      url: null,
+      data: {},
+      assets: {},
+      bindings: { temp: { dataSourceId: 'weather-1', path: 'current.temperature_2m' } },
+    };
+    queryClient.setQueryData(spotKeys.one(ORG, v4.id), v4);
+    vi.mocked(getDataSource).mockResolvedValue({ dataSource: { id: 'dsrc_news' }, snapshot: null } as never);
+    const at = (source: string) => ({ spot: v4, source });
+
+    store.getState().editFeed(at('headlines'), { feedUrl: 'https://feeds.example.com/world.rss' });
+    store.getState().openFeedForm(at('weather'), true);
+    expect(sourceStateOf(store.getState().spotSource, at('headlines'))).toMatchObject({ feedUrl: 'https://feeds.example.com/world.rss', adding: false });
+    expect(sourceStateOf(store.getState().spotSource, at('weather'))).toMatchObject({ feedUrl: '', adding: true });
+
+    await store.getState().connectSource({ orgId: ORG, spot: v4, manifest, source: 'headlines', live: headlines }, 'dsrc_news');
+    expect(store.getState().spotEditor.drafts.spt_frame?.edit.bindings).toEqual({
+      temp: { dataSourceId: 'weather-1', path: 'current.temperature_2m' },
+      items: { dataSourceId: 'dsrc_news', path: 'items' },
+    });
+    // The bind closed the headlines picker only.
+    expect(sourceStateOf(store.getState().spotSource, at('headlines')).focusChange).toBe(true);
+    expect(sourceStateOf(store.getState().spotSource, at('weather')).adding).toBe(true);
+  });
+});
+
+describe('the Source section of a template with two named sources (#193)', () => {
+  it('gives every control an id of its own, even when one source is named like another with a suffix', () => {
+    // A table source `a` and a feed source `a-table`: "source-" + name + "-table-url" would be the same for both.
+    const item = { title: { type: 'text', label: 'Title' } } as const;
+    const manifest: TemplateManifest = {
+      ...(news as unknown as TemplateManifest),
+      fields: { rows: { type: 'list', label: 'Rows', default: [], item }, items: { type: 'list', label: 'Headlines', default: [], item } },
+      live: {
+        sources: {
+          a: { label: 'Menu', source: 'table', fields: { rows: 'rows' } },
+          'a-table': { label: 'News', source: 'rss', fields: { items: 'items' } },
+        },
+      },
+    };
+    const frame: SpotView = { ...spot('spt_frame', 1), kind: 'template', templateVersionId: 'tpv_frame', url: null, data: {}, assets: {}, bindings: {} };
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(dataSourceKeys.all(ORG), { dataSources: [] });
+    // Both forms open: the table's link form and, with no feed in the org, the feed's.
+    const store = sourceStore(queryClient, (s) => ({ spotId: frame.id, pickers: { a: { ...sourceStateOf(s, { spot: frame, source: 'a' }), adding: true } } }));
+    const section = createElement(SourceSection, {
+      orgId: ORG,
+      spot: frame,
+      manifest,
+      live: manifest.live!,
+      draft: draftOf(frame),
+      assets: [],
+      canManage: true,
+      onChange: () => {},
+    });
+    // StoreProvider's props name its children; built apart, as createElement's arguments cannot satisfy them.
+    const provider: ComponentProps<typeof StoreProvider> = { store: store as never, children: section };
+    const html = renderToStaticMarkup(createElement(QueryClientProvider, { client: queryClient }, createElement(StoreProvider, provider)));
+    const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+    expect(ids.length).toBeGreaterThan(4);
+    expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
   });
 });

@@ -1,8 +1,9 @@
 // The live values the spot editor shows read from snapshots as the poller stores them: the
 // normalised feed through canonicalJson, which sorts every object's keys.
-import { canonicalJson, readPath, type FieldDef, type TemplateManifest } from '@signforge/contract';
+import { canonicalJson, liveSources, parseTemplateManifest, readPath, type FieldDef, type TemplateManifest } from '@signforge/contract';
 import { parseCalendar, parseNews } from '@signforge/feeds';
 import { describe, expect, it } from 'vitest';
+import twoSources from '../e2e/fixtures/two-sources/template.json';
 import { bindAll, guessMapping, madeByEditor, rowTitles, tableRows, typedFields, weatherSource } from '../src/lib/live-data';
 
 /** What the poller writes as a snapshot's data (apps/api/src/data/poller.ts). */
@@ -95,7 +96,7 @@ describe('a table template (issue #84)', () => {
 
   it('types its list fields until they are bound, then they are live', () => {
     expect(Object.keys(typedFields(m, {}))).toEqual(['title', 'items']);
-    const bound = bindAll(m, m.live!, {}, 'src_menu', ['Item', 'Price']);
+    const bound = bindAll(m, manifest.live, {}, 'src_menu', ['Item', 'Price']);
     expect(bound).toEqual({ items: { dataSourceId: 'src_menu', path: 'rows', table: { columns: { name: 'Item', price: 'Price' } } } });
     expect(Object.keys(typedFields(m, bound))).toEqual(['title']);
   });
@@ -120,5 +121,18 @@ describe('a table template (issue #84)', () => {
 
   it('is a source a person added, which the editor never deletes', () => {
     expect(madeByEditor('src_8f2k3j4h5g6f7d8s')).toBe(false);
+  });
+});
+
+describe('a template with two sources (#193)', () => {
+  // The e2e's fixture: the temperature from a forecast (with its place and unit) and headlines from a feed.
+  const parsed = parseTemplateManifest(twoSources);
+  if (!parsed.ok) throw new Error(parsed.problems.join('; '));
+  const m = parsed.value;
+
+  it("leaves every source's fields and settings out of the typed ones, and binds one source's fields without touching the other's", () => {
+    expect(Object.keys(typedFields(m, {}))).toEqual(['city']);
+    const weather = { temp: { dataSourceId: 'weather-1', path: 'current.temperature_2m' } };
+    expect(bindAll(m, liveSources(m.live!).headlines!, weather, 'news')).toEqual({ ...weather, items: { dataSourceId: 'news', path: 'items' } });
   });
 });

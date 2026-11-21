@@ -474,6 +474,78 @@ describe('live data', () => {
   });
 });
 
+describe('a template with two sources (#193)', () => {
+  const NOW = Date.parse('2026-11-17T12:00:00Z');
+  const fields: Record<string, FieldDef> = {
+    city: { type: 'text', label: 'City' },
+    temp: { type: 'number', label: 'Temperature' },
+    items: { type: 'list', label: 'Headlines', item: { title: { type: 'text', label: 'Title' } } },
+  };
+  const t: TemplateManifest = {
+    id: 'frame',
+    version: '1.0.0',
+    name: 'Frame',
+    fields,
+    background: '#000',
+    orientations: ['landscape'],
+    uses: [],
+    duration: { minMs: 1000, defaultMs: 5000, maxMs: 10_000 },
+    live: {
+      sources: {
+        weather: { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'city' },
+        headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items' } },
+      },
+    },
+  };
+  const frame: Extract<Spot, { kind: 'template' }> = {
+    id: 'f',
+    name: 'f',
+    kind: 'template',
+    template: 'base/frame@1.0.0',
+    durationMs: 5000,
+    assets: {},
+    data: { city: 'Atlanta', temp: 72, items: [{ title: 'Fallback' }] },
+    bindings: { temp: { source: 'forecast', path: 'current.temperature_2m' }, items: { source: 'news', path: 'items' } },
+  };
+  const snap = (id: string, data: unknown, checkedAt = '2026-11-17T11:55:00Z'): DataSnapshot => ({
+    id,
+    version: 1,
+    fetchedAt: '2026-11-17T09:00:00Z',
+    checkedAt,
+    data,
+  });
+  const forecast = snap('forecast', { current: { temperature_2m: 41.2 } });
+  const live = [{ title: 'Live 1', published: '', source: 'Desk' }];
+  const news = snap('news', { title: 'Desk', language: 'en', items: live });
+  const play = (...snapshots: DataSnapshot[]) => resolveSpotData(frame, fields, new Map(snapshots.map((x) => [x.id, x])), NOW, 'en-US');
+
+  it('is a template a player plays, and its manifest binds each field to its own source', () => {
+    const m = manifest({
+      templates: { 'base/frame@1.0.0': { manifest: t, html: 'h' } },
+      files: { h: { size: 1, type: 'text/html' } },
+      spots: { f: frame },
+      playlists: { all: { id: 'all', name: 'All', transition: { type: 'cut' }, items: [{ spot: 'f' }] } },
+      dataSources: { forecast: { id: 'forecast', refreshS: 900 }, news: { id: 'news', refreshS: 900 } },
+      schedule: [],
+    });
+    expect(validateManifest(m)).toEqual([]);
+    const bound = manifestBoundFields(m);
+    expect([...bound.keys()]).toEqual(['forecast', 'news']);
+    // Each source's snapshot is judged by the fields it feeds only.
+    expect(snapshotFit(bound.get('forecast')!, forecast.data)).toEqual({ refused: null, problems: [] });
+    expect(snapshotFit(bound.get('news')!, news.data)).toEqual({ refused: null, problems: [] });
+    expect(snapshotFit(bound.get('news')!, forecast.data).refused).toBe('unfit');
+  });
+
+  it('plays both sources live, one stale with its fields on their fallback, and neither with every fallback', () => {
+    expect(play(forecast, news)).toEqual({ data: { city: 'Atlanta', temp: 41.2, items: live }, rejected: [] });
+    const stale = { ...forecast, checkedAt: '2026-11-16T11:59:59Z' };
+    expect(play(stale, news)).toEqual({ data: { city: 'Atlanta', temp: 72, items: live }, rejected: [] });
+    expect(play(forecast, { ...news, checkedAt: '2026-11-16T11:59:59Z' }).data).toEqual({ city: 'Atlanta', temp: 41.2, items: [{ title: 'Fallback' }] });
+    expect(play()).toEqual({ data: frame.data, rejected: [] });
+  });
+});
+
 describe('files', () => {
   it('lists what to download and what to drop', () => {
     expect(planSync(manifest(), ['sha-a', 'sha-old'])).toEqual({ missing: ['sha-b', 'sha-c'], stale: ['sha-old'] });
@@ -546,10 +618,10 @@ describe('files', () => {
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
     // A release plays schema N and N-1, so a screen updated while offline keeps its cached manifest.
-    expect(validateManifest(manifest({ schema: 5 }))).toEqual([]);
     expect(validateManifest(manifest({ schema: 6 }))).toEqual([]);
-    expect(validateManifest(manifest({ schema: 4 }))).toEqual(['manifest schema 4 is not one this player can play (5, 6)']);
-    expect(validateManifest(manifest({ schema: 7 }))).toEqual(['manifest schema 7 is not one this player can play (5, 6)']);
+    expect(validateManifest(manifest({ schema: 7 }))).toEqual([]);
+    expect(validateManifest(manifest({ schema: 5 }))).toEqual(['manifest schema 5 is not one this player can play (6, 7)']);
+    expect(validateManifest(manifest({ schema: 8 }))).toEqual(['manifest schema 8 is not one this player can play (6, 7)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);

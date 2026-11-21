@@ -6,7 +6,7 @@
  * The stage's orientation, scale, brand kit and data are in the URL:
  * `?o=portrait&scale=actual&kit=<id>&data=fallback`.
  */
-import { safeUrl, sessionBlobPath } from '@signforge/contract';
+import { liveSources, safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, notFound } from '@tanstack/react-router';
 import { AssetPicker } from '~/components/assets/asset-picker';
@@ -38,13 +38,13 @@ export const Route = createFileRoute('/_app/spots/$spotId')({
     ]);
     if (!spot) throw notFound();
     const live = versionsById(templates).get(spot.templateVersionId ?? '')?.manifest.live;
-    const bound = live && boundSource(live, spot.bindings ?? {});
+    const bound = live ? Object.values(liveSources(live)).flatMap((def) => boundSource(def, spot.bindings ?? {}) ?? []) : [];
     await Promise.all([
       queryClient.query(
         spotPreviewQuery(orgId, { orientation: deps.o ?? 'landscape', templateVersionId: spot.templateVersionId ?? undefined, brandKitId: deps.kit }),
       ),
       live && queryClient.query(dataSourcesQuery(orgId)),
-      bound && queryClient.query(dataSourceQuery(orgId, bound)),
+      ...bound.map((id) => queryClient.query(dataSourceQuery(orgId, id))),
     ]);
   },
   head: () => ({ meta: [{ title: 'Spot · SignForge' }] }),
