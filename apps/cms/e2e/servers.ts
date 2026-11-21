@@ -21,14 +21,25 @@ export const API_LOG = `${RUN_DIR}api.log`;
 /** What the run's file server serves, by file name, for every feed the API fetches (`FEED_STUB_URL`, global-setup.ts). */
 export const FEEDS_DIR = `${RUN_DIR}feeds/`;
 
-/** The newest sign-in code the dev API printed for `email`, as a developer would read it. */
+/** How many codes have been read for each email, so a second sign-in waits for its own code. */
+const codesRead = new Map<string, number>();
+
+/**
+ * The newest sign-in code the dev API printed for `email`, as a developer would read it, once one
+ * more has been printed than were read before: a second sign-in never gets the first one's code
+ * from a log the API has not written the new one to yet.
+ */
 export async function codeFor(email: string, timeoutMs = 10_000): Promise<string> {
   const pattern = new RegExp(`\\[email\\] to ${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: Your SignForge code: (\\d{6})`, 'g');
+  const read = codesRead.get(email) ?? 0;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const matches = [...readFileSync(API_LOG, 'utf8').matchAll(pattern)];
-    const last = matches.at(-1)?.[1];
-    if (last) return last;
+    const last = matches.length > read ? matches.at(-1)?.[1] : undefined;
+    if (last) {
+      codesRead.set(email, matches.length);
+      return last;
+    }
     await new Promise((r) => setTimeout(r, 200));
   }
   throw new Error(`no code for ${email} in ${API_LOG}`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initials, safeRedirect, signInBack, slugify } from '../src/lib/paths';
+import { initials, ORG_COLOURS, orgColours, safeRedirect, signInBack, slugify } from '../src/lib/paths';
 
 describe('signInBack', () => {
   const fn = 'https://cms.test/_serverFn/abc';
@@ -88,5 +88,27 @@ describe('initials', () => {
     expect(initials('Acme Coffee')).toBe('AC');
     expect(initials('jane.doe@example.com')).toBe('JD');
     expect(initials('sam@example.com')).toBe('SA');
+  });
+});
+
+describe('orgColours', () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `org_${i.toString(36).padStart(24, 'q')}`);
+
+  it('gives up to six orgs six different colours, so two with the same initials are told apart', () => {
+    for (let n = 1; n <= ORG_COLOURS; n++) {
+      const colours = orgColours(ids(n));
+      expect(new Set(colours.values()).size, `${n} orgs`).toBe(n);
+      for (const c of colours.values()) expect(c).toBeGreaterThanOrEqual(1);
+      for (const c of colours.values()) expect(c).toBeLessThanOrEqual(ORG_COLOURS);
+    }
+  });
+
+  it("keeps an org's colour whatever order the list comes in", () => {
+    const list = ids(5);
+    expect(orgColours([...list].reverse())).toEqual(orgColours(list));
+  });
+
+  it('repeats colours only past six orgs', () => {
+    expect(new Set(orgColours(ids(ORG_COLOURS + 2)).values()).size).toBe(ORG_COLOURS);
   });
 });

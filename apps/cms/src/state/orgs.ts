@@ -4,9 +4,9 @@ import type { SliceCreator } from './store';
 
 /**
  * Where a create-organization form sits. Each has its own draft, since both can be on screen:
- * the first-org card on the org picker, and the switcher's dialog.
+ * the first-org card on the org picker, and the dialog the account menu and ⌘K open.
  */
-export type CreateOrgFormId = 'picker' | 'switcher';
+export type CreateOrgFormId = 'picker' | 'dialog';
 
 interface CreateOrgDraft {
   name: string;
@@ -17,7 +17,7 @@ interface CreateOrgDraft {
 export interface OrgsState {
   /** The org being switched to, while the switch runs. */
   switchingTo: string | null;
-  /** What the switcher announces to screen readers. */
+  /** What a switch or create from the menus announces to screen readers. */
   status: string;
   /** Why the last switch from the org picker failed. */
   pickerError: string | null;
@@ -27,10 +27,11 @@ export interface OrgsState {
 
 export interface OrgsSlice {
   orgs: OrgsState;
-  /** Makes `org` active. From the switcher it announces progress; from the picker it shows an error only. */
+  /** Makes `org` active. From the switcher or ⌘K it announces progress; from the picker it shows an error only. */
   switchOrg: (org: { id: string; name: string }, from: 'switcher' | 'picker') => Promise<void>;
+  /** Opens the create dialog, closing the phone drawer it may be opened from. */
   openCreateOrg: () => void;
-  /** Closes the switcher's dialog and drops its draft, as cancelling should. */
+  /** Closes the create dialog and drops its draft, as cancelling should. */
   closeCreateOrg: () => void;
   editOrgName: (form: CreateOrgFormId, name: string) => void;
   /** Creates the org from that form's draft; it becomes the active org. */
@@ -44,7 +45,7 @@ export const initialOrgs: OrgsState = {
   status: '',
   pickerError: null,
   createDialogOpen: false,
-  drafts: { picker: emptyDraft, switcher: emptyDraft },
+  drafts: { picker: emptyDraft, dialog: emptyDraft },
 };
 
 export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) => {
@@ -77,8 +78,8 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
       }
     },
 
-    openCreateOrg: () => set((s) => ({ orgs: { ...s.orgs, createDialogOpen: true } })),
-    closeCreateOrg: () => set((s) => ({ orgs: { ...s.orgs, createDialogOpen: false, drafts: { ...s.orgs.drafts, switcher: emptyDraft } } })),
+    openCreateOrg: () => set((s) => ({ orgs: { ...s.orgs, createDialogOpen: true }, ui: { ...s.ui, drawerOpen: false } })),
+    closeCreateOrg: () => set((s) => ({ orgs: { ...s.orgs, createDialogOpen: false, drafts: { ...s.orgs.drafts, dialog: emptyDraft } } })),
     editOrgName: (form, name) => draft(form, { name }),
 
     async createOrg(form) {
@@ -89,7 +90,7 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
         await createOrganization(router, name);
         get().forgetOrgSettings();
         draft(form, emptyDraft);
-        if (form === 'switcher') set((s) => ({ orgs: { ...s.orgs, createDialogOpen: false, status: 'Organization created.' } }));
+        if (form === 'dialog') set((s) => ({ orgs: { ...s.orgs, createDialogOpen: false, status: 'Organization created.' } }));
       } catch (err) {
         draft(form, { pending: false, error: err instanceof Error ? err.message : 'Could not create the organization.' });
       }

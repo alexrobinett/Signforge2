@@ -1,6 +1,22 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, orgSwitcher, requestCode, screenshot } from './helpers';
-import { codeFor } from './servers';
+import {
+  accountMenu,
+  axe,
+  createOrg,
+  createOrgFromAccountMenu,
+  fillUntilEnabled,
+  fromAddress,
+  hydrated,
+  orgSwitcher,
+  requestCode,
+  screenshot,
+  signIn,
+  signInAs,
+} from './helpers';
+import { CMS_URL, codeFor } from './servers';
+
+/** Each test's own client address, for its own sign-in rate limit. */
+const ADDRESS = { switching: '192.0.2.121', oneOrg: '192.0.2.122', lastOrg: '192.0.2.123' };
 
 async function activeOrgId(page: Page) {
   const res = await page.request.get('/api/session');
@@ -10,6 +26,7 @@ async function activeOrgId(page: Page) {
 
 test('sign in with an email code, create two orgs and switch between them', async ({ page }) => {
   const email = `e2e-${Date.now()}@example.com`;
+  await fromAddress(page, ADDRESS.switching);
 
   // Signed out: a dashboard page sends you to sign-in, and remembers where you were going.
   await page.goto('/screens');
@@ -43,14 +60,17 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await fillUntilEnabled(page, 'Organization name', 'Acme Coffee', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name: 'Screens', level: 1 })).toBeVisible();
+  // One org: its name under the logo, and no menu to switch.
+  const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
+  await expect(sidebar.getByText('Acme Coffee', { exact: true })).toBeVisible();
   const switcher = orgSwitcher(page);
-  await expect(switcher).toContainText('Acme Coffee');
+  await expect(switcher).toHaveCount(0);
   const acme = await activeOrgId(page);
   expect(acme).toMatch(/^org_/);
 
-  // A second org, created from the switcher, becomes active.
-  await switcher.click();
-  await page.getByRole('menuitem', { name: 'Create organization' }).click();
+  // A second org, created from the account menu, becomes active, and now there is a choice.
+  await accountMenu(page).click();
+  await page.getByRole('menuitem', { name: 'Create organization…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Create organization' });
   await dialog.getByLabel('Organization name').fill('Blue Harbour Cinemas');
   await axe(page);
@@ -70,6 +90,23 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await expect(switcher).toContainText('Acme Coffee');
   expect(await activeOrgId(page)).toBe(acme);
 
+  // ⌘K switches too: "Switch organization…" lists the orgs.
+  const menu = page.getByRole('dialog', { name: 'Command menu' });
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('switch organization');
+  await expect(menu.getByRole('option', { selected: true })).toHaveText('Switch organization…');
+  await page.keyboard.press('Enter');
+  await expect(menu.getByRole('option', { name: 'Acme Coffee' })).toBeVisible();
+  await page.keyboard.type('blue');
+  await axe(page);
+  await screenshot(page, '05b-command-switch-org');
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeHidden();
+  await expect(switcher).toContainText('Blue Harbour Cinemas');
+  await orgSwitcher(page).click();
+  await page.getByRole('menuitemradio', { name: 'Acme Coffee' }).click();
+  await expect(switcher).toContainText('Acme Coffee');
+
   // The switch is held by the session, not the page.
   await page.reload();
   await hydrated(page);
@@ -88,7 +125,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await screenshot(page, '06-overview');
 
   // Dark theme, from the account menu; it survives a reload.
-  const account = page.getByRole('button', { name: /account and settings$/ });
+  const account = accountMenu(page);
   await account.click();
   await page.getByRole('menuitem', { name: 'Theme' }).click();
   await page.getByRole('menuitemradio', { name: 'Dark' }).click();
@@ -105,4 +142,40 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await expect(page).toHaveURL(/\/sign-in$/);
   await page.goto('/');
   await expect(page).toHaveURL(/\/sign-in$/);
+});
+
+test('a member of one org signs in on it: Overview, with its name and no menu to switch', async ({ page }) => {
+  const email = `e2e-one-org-${Date.now()}@example.com`;
+  await signInAs(page, email, ADDRESS.oneOrg);
+  await createOrg(page, 'Solo Bakery');
+  await accountMenu(page).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/sign-in$/);
+
+  // A new session: the only org is active at once, not "Choose an organization".
+  await signIn(page, email);
+  await expect(page).toHaveURL(`${CMS_URL}/`);
+  await expect(page.getByRole('heading', { name: 'Solo Bakery', level: 1 })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Sidebar' }).getByText('Solo Bakery', { exact: true })).toBeVisible();
+  await expect(orgSwitcher(page)).toHaveCount(0);
+  await axe(page);
+  await screenshot(page, '06b-one-org');
+});
+
+test('a member of two orgs signs in on the one they last switched to', async ({ page }) => {
+  const email = `e2e-last-org-${Date.now()}@example.com`;
+  await signInAs(page, email, ADDRESS.lastOrg);
+  await createOrg(page, 'Northside Market');
+  await createOrgFromAccountMenu(page, 'Southside Deli');
+  await orgSwitcher(page).click();
+  await page.getByRole('menuitemradio', { name: 'Northside Market' }).click();
+  await expect(orgSwitcher(page)).toContainText('Northside Market');
+  await accountMenu(page).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/sign-in$/);
+
+  await signInAs(page, email, ADDRESS.lastOrg);
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Northside Market', level: 1 })).toBeVisible();
+  await expect(orgSwitcher(page)).toContainText('Northside Market');
 });

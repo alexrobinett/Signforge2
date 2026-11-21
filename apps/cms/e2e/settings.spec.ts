@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, createOrgFromAccountMenu, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool } from './helpers';
 import { API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -503,12 +503,8 @@ test('edits belong to the org they were made in: after a switch, a late answer f
   test.setTimeout(90_000);
   await signInAs(page, `e2e-settings-orgs-${Date.now()}@example.com`, '192.0.2.47');
   await createOrg(page, 'Alpha Market');
+  await createOrgFromAccountMenu(page, 'Beta Market');
   const switcher = orgSwitcher(page);
-  await switcher.click();
-  await page.getByRole('menuitem', { name: 'Create organization' }).click();
-  const create = page.getByRole('dialog', { name: 'Create organization' });
-  await create.getByLabel('Organization name').fill('Beta Market');
-  await create.getByRole('button', { name: 'Create organization' }).click();
   await expect(switcher).toContainText('Beta Market');
   const switchTo = async (name: string) => {
     await switcher.click();
