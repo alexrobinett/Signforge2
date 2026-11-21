@@ -451,6 +451,12 @@
   will-change: transform;
   animation: var(--lk-drift-motion) var(--lk-drift-s) ease-in-out infinite;
 }
+/* A photo drifting across a portrait screen's width took the kit's test template over 1% of frames
+   dropped on the Pi (spike/pi-perf/RESULTS.md, The look kit): still in portrait until a portrait
+   template measures it under 1%. */
+:root[data-orientation='portrait'] .lk-drift {
+  animation: none;
+}
 .lk-wobble {
   animation: var(--lk-wobble-motion) 3.6s ease-in-out 1.8s infinite;
 }
