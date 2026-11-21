@@ -56,6 +56,12 @@ describe('a template that misbehaves', () => {
     ]);
   });
 
+  it('fills a url field with no default with a sample https address', async () => {
+    const manifest = inMode('link');
+    manifest.fields.link = { type: 'url', label: 'Link' };
+    expect((await checkTemplate(browser, manifest, hostile.html)).problems).toEqual([]);
+  });
+
   const cases: [string, string[]][] = [
     ['fetch', ['requested https://example.com/leak (blocked)']],
     ['image', ['requested https://example.com/leak (blocked)']],

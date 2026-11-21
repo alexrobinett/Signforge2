@@ -25,7 +25,8 @@
         "image",
         "on-play",
         "spin-on-play",
-        "fetch-then-spin-on-play"
+        "fetch-then-spin-on-play",
+        "link"
       ],
       "default": "ok"
     },

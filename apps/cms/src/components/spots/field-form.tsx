@@ -1,8 +1,9 @@
 /**
  * `FieldForm` (docs/proposals/cms-ui.md): a template's fields as a form, in the order the template
- * lists them: text, number, boolean, colour (a brand colour or a custom one), select, image (the
- * asset picker) and list (repeating rows, up to `maxItems`). The contract's message for a field
- * (`validateSpotData`) sits under it. Values a spot leaves out show the template's default.
+ * lists them: text, number, boolean, colour (a brand colour or a custom one), select, url (an https
+ * address), image (the asset picker) and list (repeating rows, up to `maxItems`). The contract's
+ * message for a field (`validateSpotData`) sits under it. Values a spot leaves out show the
+ * template's default.
  */
 import { BRAND_COLORS, type FieldDef, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
@@ -59,6 +60,18 @@ function ScalarInput({
   switch (def.type) {
     case 'text':
       return <Input id={id} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} {...aria} />;
+    case 'url':
+      return (
+        <Input
+          id={id}
+          type="url"
+          inputMode="url"
+          placeholder="https://"
+          value={typeof value === 'string' ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
+          {...aria}
+        />
+      );
     case 'number':
       return (
         <Input

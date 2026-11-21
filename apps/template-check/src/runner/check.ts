@@ -77,6 +77,8 @@ function fallback(def: ScalarFieldDef): unknown {
       return DEFAULT_BRAND_COLORS.accent;
     case 'select':
       return def.options[0];
+    case 'url':
+      return 'https://example.com/';
   }
 }
 
