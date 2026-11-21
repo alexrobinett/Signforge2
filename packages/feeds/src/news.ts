@@ -23,7 +23,7 @@ export interface FeedImage {
 
 /** A `NewsFeed` with each item's image and the feed's logo, for the server to fetch and store. */
 export interface ParsedNews extends Omit<NewsFeed, 'items'> {
-  items: (NewsFeed['items'][number] & { image?: FeedImage })[];
+  items: (Omit<NewsFeed['items'][number], 'image'> & { image?: FeedImage })[];
   logo?: string;
 }
 
@@ -503,7 +503,7 @@ function root(doc: El, local: string, namespaces: string[]): { ns: string; el: E
 }
 
 interface Story {
-  item: NewsFeed['items'][number];
+  item: Omit<NewsFeed['items'][number], 'image'>;
   image: (search: Search) => FeedImage | undefined;
 }
 

@@ -47,6 +47,10 @@ const rowsPath = z
   .regex(BINDING_PATH, 'must be a dot path such as data.items')
   .describe('json-table only: the dot path to the list of objects, such as data.items. Absent: the document is the list');
 const ROWS_PATH_ONLY_JSON_TABLE = 'rowsPath is for json-table sources only';
+const photos = z
+  .boolean()
+  .describe("rss only: whether screens get the stories' photos, which the server fetches, checks and stores (default true). False: headlines only");
+const PHOTOS_ONLY_RSS = 'photos is for rss sources only';
 const resource = z
   .string()
   .trim()
@@ -70,6 +74,7 @@ const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   refreshS: d.refreshS,
   horizonDays: d.horizonDays,
   rowsPath: d.rowsPath,
+  photos: d.photos,
   nextPollAt: d.nextPollAt,
   failures: d.failures,
   lastError: d.lastError,
@@ -96,6 +101,7 @@ function sourcesBound(json: string | null | undefined): string[] {
 
 const calendarOnly = (f: string, days: number | null | undefined) => days == null || f === 'ical';
 const jsonTableOnly = (f: string, path: string | null | undefined) => path == null || f === 'json-table';
+const rssOnly = (f: string, on: boolean | undefined) => on === undefined || f === 'rss';
 const HORIZON_ONLY_ICAL = 'horizonDays is for ical sources only';
 
 const target = (input: { dataSourceId: string }) => ({ kind: 'data_source', id: input.dataSourceId });
@@ -177,10 +183,12 @@ const createDataSource = defineTool({
       refreshS: refreshS.default(MIN_REFRESH_S),
       horizonDays: horizonDays.optional(),
       rowsPath: rowsPath.optional(),
+      photos: photos.optional(),
       idempotencyKey,
     })
     .refine((v) => calendarOnly(v.format, v.horizonDays), { message: HORIZON_ONLY_ICAL, path: ['horizonDays'] })
-    .refine((v) => jsonTableOnly(v.format, v.rowsPath), { message: ROWS_PATH_ONLY_JSON_TABLE, path: ['rowsPath'] }),
+    .refine((v) => jsonTableOnly(v.format, v.rowsPath), { message: ROWS_PATH_ONLY_JSON_TABLE, path: ['rowsPath'] })
+    .refine((v) => rssOnly(v.format, v.photos), { message: PHOTOS_ONLY_RSS, path: ['photos'] }),
   output: outputs.create_data_source,
   example: {
     id: 'weather',
@@ -206,6 +214,7 @@ const createDataSource = defineTool({
         refreshS: input.refreshS,
         horizonDays: input.horizonDays ?? null,
         rowsPath: input.rowsPath ?? null,
+        photos: input.photos ?? true,
       }),
     );
     return { dataSource: viewOf(row) };
@@ -215,7 +224,7 @@ const createDataSource = defineTool({
 const updateDataSource = defineTool({
   name: 'update_data_source',
   description:
-    "Change a data source: its name, feed URL (a provider source: its resource), refresh, calendar look-ahead or a json-table's rows path (null clears either). A new URL or resource is polled afresh within a minute. Only what is given changes. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { dataSource }.",
+    "Change a data source: its name, feed URL (a provider source: its resource), refresh, calendar look-ahead, a json-table's rows path (null clears either) or whether a news feed's photos are shown. A new URL or resource is polled afresh within a minute. Only what is given changes. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { dataSource }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -228,6 +237,7 @@ const updateDataSource = defineTool({
     refreshS: refreshS.optional(),
     horizonDays: horizonDays.nullable().optional(),
     rowsPath: rowsPath.nullable().optional(),
+    photos: photos.optional(),
     ifVersion,
   }),
   output: outputs.update_data_source,
@@ -237,18 +247,20 @@ const updateDataSource = defineTool({
     const row = await requireSource(org, input.dataSourceId);
     if (!calendarOnly(row.format, input.horizonDays)) throw new ToolError('invalid_input', HORIZON_ONLY_ICAL);
     if (!jsonTableOnly(row.format, input.rowsPath)) throw new ToolError('invalid_input', ROWS_PATH_ONLY_JSON_TABLE);
+    if (!rssOnly(row.format, input.photos)) throw new ToolError('invalid_input', PHOTOS_ONLY_RSS);
     if ((row.format === 'provider' && input.feedUrl) || (row.format !== 'provider' && input.resource)) throw new ToolError('invalid_input', PROVIDER_FIELDS);
     // A new feed, or new rows in it, starts clean: the old one's validators and failures say nothing about it.
+    // Photos switched on or off are read afresh too: the feed may answer 304 to a poll that would now add or drop them.
     const locator = input.feedUrl ?? input.resource;
     const clean = { etag: null, lastModified: null, failures: 0, lastError: null, nextPollAt: 0 };
     const fresh = {
       ...(locator ? { urlEncrypted: await feedUrls.seal({ orgId: org.orgId, id: row.id }, locator), ...clean } : {}),
-      ...(input.rowsPath !== undefined ? clean : {}),
+      ...(input.rowsPath !== undefined || (input.photos !== undefined && input.photos !== row.photos) ? clean : {}),
     };
     const updated = write(
       await org.dataSources.stage.update(
         row,
-        { name: input.name, refreshS: input.refreshS, horizonDays: input.horizonDays, rowsPath: input.rowsPath, ...fresh },
+        { name: input.name, refreshS: input.refreshS, horizonDays: input.horizonDays, rowsPath: input.rowsPath, photos: input.photos, ...fresh },
         input.ifVersion,
       ),
     );
