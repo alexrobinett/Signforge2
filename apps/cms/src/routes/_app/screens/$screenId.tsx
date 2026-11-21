@@ -30,6 +30,7 @@ import { useCanManage, useNow, useOrgId, useRole } from '~/lib/live';
 import { eventText } from '~/lib/audit';
 import { ago, describeScreen, localClock } from '~/lib/screen-status';
 import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
+import { byName } from '~/lib/targets';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
 import { editorDraft, hoursDraftOf, settingsDraftOf, type ScreenAction } from '~/state/screens';
@@ -80,7 +81,7 @@ function ScreenPage() {
   const editing = ours ? pageState.editing : null;
   const revoking = pageState.revoking;
   const d = describeScreen(screen, now);
-  const inGroups = groups.filter((g) => groupIds.includes(g.id));
+  const inGroups = groups.filter((g) => groupIds.includes(g.id)).toSorted(byName);
   const revoked = screen.status === 'revoked';
   const run = (label: string, tool: ScreenAction['tool'], input: Record<string, unknown>, done: string) =>
     void actOnScreen(screen.id, { label, tool, input, done });
@@ -435,7 +436,7 @@ function SettingsDialog({ screen, groups }: { screen: ScreenView; groups: GroupV
             <legend className="mb-1.5 text-sm font-medium">Groups</legend>
             {groups.length > 0 && (
               <div className="flex flex-wrap gap-x-4 gap-y-2">
-                {groups.map((g) => (
+                {groups.toSorted(byName).map((g) => (
                   <label key={g.id} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"

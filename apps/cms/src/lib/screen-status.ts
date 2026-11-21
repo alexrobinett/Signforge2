@@ -82,6 +82,9 @@ const NEEDS_YOU: Record<NonNullable<ScreenView['state']['reason']>, string> = {
  */
 export const isRetired = (s: { state: Pick<ScreenView['state'], 'kind' | 'reason'> }) => s.state.kind === 'needs_you' && s.state.reason === 'revoked';
 
+/** Most urgent first. Asleep is on purpose, so it is never a problem and ranks below online. */
+export const URGENCY: StateKind[] = ['needs_you', 'unreachable', 'updating', 'online', 'asleep'];
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** The line under the Screens heading. */

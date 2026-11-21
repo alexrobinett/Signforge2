@@ -86,6 +86,10 @@
       "size": 23664,
       "type": "font/woff2"
     },
+    "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402": {
+      "size": 122679,
+      "type": "text/html"
+    },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
@@ -115,7 +119,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "98f6d7d024ad08b85068c5f81fec741870f7d86db8e0c25d378ab429d782f9ba",
+  "id": "e5f34584cf1014ccb9e9cb45ac6edf0813d71346dfb14a63cfd93d29ffd29c8f",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -131,6 +135,9 @@
         },
         {
           "spot": "coffee"
+        },
+        {
+          "spot": "fire-drill"
         }
       ],
       "name": "All day",
@@ -267,6 +274,26 @@
       "name": "Energy drinks 3 for $7",
       "template": "base/cstore-promo@1.2.4"
     },
+    "fire-drill": {
+      "assets": {},
+      "data": {
+        "endsAt": "2:15 PM",
+        "headline": "Fire drill at 2 PM today",
+        "instructions": "When the alarm sounds, leave by your usual route and gather at the north car park. It lasts about 15 minutes.",
+        "issuedBy": "Issued by Building Safety",
+        "qrLabel": "Scan for the route",
+        "qrUrl": "https://example.com/fire-drill",
+        "severity": "notice",
+        "showEndsAt": true,
+        "showIssuedBy": true,
+        "showQr": true
+      },
+      "durationMs": 10000,
+      "id": "fire-drill",
+      "kind": "template",
+      "name": "Fire drill notice",
+      "template": "base/alert@1.0.0"
+    },
     "sport-drinks": {
       "assets": {
         "imageCenter": "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f",
@@ -290,6 +317,91 @@
     }
   },
   "templates": {
+    "base/alert@1.0.0": {
+      "html": "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402",
+      "manifest": {
+        "background": "#111827",
+        "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
+        "duration": {
+          "defaultMs": 60000,
+          "maxMs": 3600000,
+          "minMs": 10000
+        },
+        "fields": {
+          "endsAt": {
+            "default": "4:00 PM",
+            "label": "Ends at",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "headline": {
+            "default": "Evacuate the building now",
+            "label": "Headline",
+            "maxLength": 60,
+            "type": "text"
+          },
+          "instructions": {
+            "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
+            "label": "Instructions",
+            "maxLength": 240,
+            "type": "text"
+          },
+          "issuedBy": {
+            "default": "Issued by Building Safety",
+            "label": "Issued by",
+            "maxLength": 48,
+            "type": "text"
+          },
+          "qrLabel": {
+            "default": "Scan for updates",
+            "label": "QR code label",
+            "maxLength": 32,
+            "type": "text"
+          },
+          "qrUrl": {
+            "default": "",
+            "label": "QR code address",
+            "maxLength": 200,
+            "type": "url"
+          },
+          "severity": {
+            "default": "emergency",
+            "label": "Severity",
+            "options": [
+              "emergency",
+              "warning",
+              "advisory",
+              "notice"
+            ],
+            "type": "select"
+          },
+          "showEndsAt": {
+            "default": true,
+            "label": "Show when it ends",
+            "type": "boolean"
+          },
+          "showIssuedBy": {
+            "default": true,
+            "label": "Show who issued it",
+            "type": "boolean"
+          },
+          "showQr": {
+            "default": true,
+            "label": "Show the QR code",
+            "type": "boolean"
+          }
+        },
+        "id": "alert",
+        "name": "Alert",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 2,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
     "base/announcement@1.0.0": {
       "html": "f69dedcbd97fc31f338a5fe1feba800af9768c73e660af2759bddba60683bb9d",
       "manifest": {

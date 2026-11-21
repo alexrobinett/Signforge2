@@ -17,6 +17,7 @@
     "@signforge/cli": "workspace:*",
     "@signforge/media": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
+    "@signforge/template-alert": "workspace:*",
     "@signforge/template-announcement": "workspace:*",
     "@signforge/template-clock": "workspace:*",
     "@signforge/template-cstore-promo": "workspace:*",

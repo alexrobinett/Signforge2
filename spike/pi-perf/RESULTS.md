@@ -814,6 +814,33 @@ Measured at 9672eac.
 - The test monitor is 700 mm wide (`wlr-randr`: 700x390 mm, a 32-inch panel), so the tile is about 12 cm on it. On a 55-inch panel it is about 20 cm.
 - No phone has scanned it yet.
 
+## The Alert template (issue #200, 2026-11-21)
+
+`templates/alert` at `99832a4`, each severity a 10 s spot with its defaults and a QR code, played on its own. The branch's player was at `http://localhost:8090/cp200/<orientation>/` with content built per orientation; portrait was set with `wlr-randr --transform 90` and restored afterwards. Method as for the look kit: `device/pi/isolate.py`'s measurement pointed at that player, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed before each spec, the supervisor stopped (the soak logger was already off), `__sf.prepares` read after each spec. The first of a spec's five prepares follows a cold load.
+
+| Orientation | Transition | Severity | Overall | Playing | Loading next | Worst frame | Prepares (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | emergency | 0.11% | 0.00% | 6.1% | 33 ms | 476, 317, 171, 168, 170 |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 336, 163, 162, 149, 146 |
+| | | advisory | 0.06% | 0.00% | 3.2% | 33 ms | 428, 204, 156, 173, 169 |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 322, 180, 161, 161, 224 |
+| | fade | emergency | 0.17% | 0.00% | 8.8% | 33 ms | 323, 180, 179, 195, 177 |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 326, 163, 163, 147, 159 |
+| | | advisory | 0.11% | 0.00% | 3.0% | 33 ms | 316, 180, 162, 161, 209 |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 326, 163, 161, 162, 145 |
+| portrait | cut | emergency | 0.17% | 0.00% | 7.0% | 33 ms | 354, 229, 229, 244, 228 |
+| | | warning | 0.06% | 0.00% | 3.1% | 33 ms | 364, 197, 158, 173, 173 |
+| | | advisory | 0.11% | 0.00% | 5.4% | 33 ms | 328, 177, 250, 174, 172 |
+| | | notice | 0.11% | 0.06% | 2.8% | 33 ms | 324, 178, 178, 222, 172 |
+| | fade | emergency | 0.22% | 0.00% | 9.5% | 50 ms | 337, 214, 231, 231, 230 |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 399, 246, 206, 163, 159 |
+| | | advisory | 0.17% | 0.00% | 0.0% | 33 ms | 363, 215, 228, 175, 172 |
+| | | notice | 0.06% | 0.00% | 2.8% | 33 ms | 315, 163, 177, 228, 173 |
+
+- Every case is far inside the budget: at most 0.22% of frames dropped overall, 0.06% while playing, no frame over 50 ms, nothing skipped.
+- Prepares after the first: medians about 165 ms in landscape and 175 to 230 ms in portrait. First prepares were 315 to 476 ms. The 120 kB bundle carries two faces (Space Grotesk and Inter) and not the look kit, which is about half the time of the kit's test template (300 to 500 ms). An alert starts quickly.
+- Emergency's pulse (the band's glow and its icon, every 2 s) costs nothing measurable while playing (0.00%). It drops a little more than the others while the next spot loads (6 to 10%), as its two layers keep animating under the load.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.

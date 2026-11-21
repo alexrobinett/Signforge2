@@ -4,13 +4,13 @@
  * across; within an hour each playlist fills the minutes it plays. A playlist's name shows where it
  * starts, with the time when that is not on the hour, and is read for every hour.
  */
-import { useId } from 'react';
-import { NativeSelect } from '~/components/ui/select';
 import type { PlaylistView } from '~/lib/playlists';
 import { weekOf, type ScheduleEntryView } from '~/lib/schedule';
+import { byName } from '~/lib/targets';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
+import { TargetPicker } from './target-picker';
 
 /** The chart tokens, the default playlist on the neutral one; past four, mixes of them. */
 const COLOURS = [
@@ -42,8 +42,7 @@ export function WeekView({
 }) {
   const chosen = useAppStore((s) => s.schedule.weekScreenId);
   const choose = useAppStore((s) => s.chooseWeekScreen);
-  const id = useId();
-  const screen = screens.find((s) => s.id === chosen) ?? screens[0];
+  const screen = screens.find((s) => s.id === chosen) ?? [...screens].sort(byName)[0];
   if (!screen) return <p className="text-sm text-muted-foreground">Pair a screen to see its week.</p>;
 
   const week = weekOf({ screen, groups, entries, defaultPlaylistId, at: new Date(now) });
@@ -58,18 +57,15 @@ export function WeekView({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="grid gap-1.5">
-          <label htmlFor={`${id}-screen`} className="text-sm font-medium">
-            Screen
-          </label>
-          <NativeSelect id={`${id}-screen`} value={screen.id} onChange={(e) => choose(e.target.value)} className="w-64">
-            {screens.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
+        <TargetPicker
+          label="Screen"
+          value={{ target: 'screen', groupId: '', screenId: screen.id }}
+          screens={screens}
+          groups={groups}
+          kinds={['screen']}
+          onPick={(aim) => choose(aim.screenId)}
+          className="w-64"
+        />
         <p className="pb-2 text-sm text-muted-foreground">Times in {screen.timezone.replaceAll('_', ' ')}, as drafted.</p>
       </div>
       <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Playlists this week">

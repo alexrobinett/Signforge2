@@ -23,7 +23,10 @@ const PILL: Record<Tone, string> = {
   'needs-you': 'bg-status-needs-you-muted text-status-needs-you-foreground',
 };
 
-function StatusGlyph({ tone, className }: { tone: Tone; className?: string }) {
+export const toneOf = (kind: StateKind): Tone => (kind === 'unreachable' ? 'offline' : kind === 'needs_you' ? 'needs-you' : kind);
+
+/** The state's shape in its colour, without the word: beside a name that is with its word. */
+export function StatusGlyph({ tone, className }: { tone: Tone; className?: string }) {
   const c = cn('size-3 flex-none', GLYPH_COLOR[tone], className);
   switch (tone) {
     case 'online':
