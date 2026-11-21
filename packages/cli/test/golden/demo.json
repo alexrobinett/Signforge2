@@ -90,6 +90,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "a6459771d481a34d1373723ed513f4d93c9fc9be16469ea39f41d3a4da1524cd": {
+      "size": 402685,
+      "type": "text/html"
+    },
     "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d": {
       "size": 24400,
       "type": "font/woff2"
@@ -115,7 +119,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "a8debc3e2f57189e508cc8306e0ca49777ace45787382ef8a8ba54e44c83b4d3",
+  "id": "35e09429cbb9455eed31ad9131e866da5d7cf04e7b3465eabe0d6994136717c6",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -131,6 +135,9 @@
         },
         {
           "spot": "coffee"
+        },
+        {
+          "spot": "info-frame"
         },
         {
           "spot": "fire-drill"
@@ -262,6 +269,65 @@
       "kind": "template",
       "name": "Fire drill notice",
       "template": "base/alert@1.0.0"
+    },
+    "info-frame": {
+      "assets": {
+        "photo": "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb"
+      },
+      "data": {
+        "captionLine": "Every weekday until 11 am",
+        "captionTitle": "Large coffee and a pastry",
+        "city": "Atlanta",
+        "code": 2,
+        "crawlLabel": "Latest",
+        "crawlSpeed": "normal",
+        "day1Code": 1,
+        "day1High": 75,
+        "day1Low": 60,
+        "day2Code": 61,
+        "day2High": 70,
+        "day2Low": 57,
+        "day3Code": 3,
+        "day3High": 73,
+        "day3Low": 58,
+        "high": 78,
+        "hour24": false,
+        "isDay": 1,
+        "items": [
+          {
+            "published": "",
+            "source": "",
+            "title": "Council approves the riverside park"
+          },
+          {
+            "published": "",
+            "source": "",
+            "title": "Farmers market moves to Sundays"
+          },
+          {
+            "published": "",
+            "source": "",
+            "title": "5th Ave closed this weekend"
+          }
+        ],
+        "look": "poster",
+        "low": 61,
+        "price": "$5.99",
+        "rail": "right",
+        "showCaption": true,
+        "showClock": true,
+        "showForecast": true,
+        "showLogo": true,
+        "showWeather": true,
+        "temp": 72,
+        "ticker": "bottom",
+        "unit": "°F"
+      },
+      "durationMs": 15000,
+      "id": "info-frame",
+      "kind": "template",
+      "name": "Coffee info frame",
+      "template": "base/info-frame@1.0.0"
     },
     "room-status": {
       "assets": {},
@@ -468,6 +534,271 @@
         "protocol": 2,
         "uses": [],
         "version": "1.2.4"
+      }
+    },
+    "base/info-frame@1.0.0": {
+      "html": "a6459771d481a34d1373723ed513f4d93c9fc9be16469ea39f41d3a4da1524cd",
+      "manifest": {
+        "background": "#000000",
+        "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
+        "duration": {
+          "defaultMs": 15000,
+          "maxMs": 300000,
+          "minMs": 6000
+        },
+        "fields": {
+          "captionLine": {
+            "default": "Every weekday until 11 am",
+            "label": "Caption line",
+            "maxLength": 80,
+            "type": "text"
+          },
+          "captionTitle": {
+            "default": "Large coffee and a pastry",
+            "label": "Caption",
+            "maxLength": 64,
+            "type": "text"
+          },
+          "city": {
+            "default": "Atlanta",
+            "label": "Place",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "code": {
+            "default": 2,
+            "label": "WMO weather code",
+            "type": "number"
+          },
+          "crawlLabel": {
+            "default": "Latest",
+            "label": "Crawl label",
+            "maxLength": 12,
+            "type": "text"
+          },
+          "crawlSpeed": {
+            "default": "normal",
+            "label": "Crawl speed",
+            "options": [
+              "slow",
+              "normal",
+              "fast"
+            ],
+            "type": "select"
+          },
+          "day1Code": {
+            "default": 1,
+            "label": "Day 1 WMO weather code",
+            "type": "number"
+          },
+          "day1High": {
+            "default": 75,
+            "label": "Day 1 high",
+            "type": "number"
+          },
+          "day1Low": {
+            "default": 60,
+            "label": "Day 1 low",
+            "type": "number"
+          },
+          "day2Code": {
+            "default": 61,
+            "label": "Day 2 WMO weather code",
+            "type": "number"
+          },
+          "day2High": {
+            "default": 70,
+            "label": "Day 2 high",
+            "type": "number"
+          },
+          "day2Low": {
+            "default": 57,
+            "label": "Day 2 low",
+            "type": "number"
+          },
+          "day3Code": {
+            "default": 3,
+            "label": "Day 3 WMO weather code",
+            "type": "number"
+          },
+          "day3High": {
+            "default": 73,
+            "label": "Day 3 high",
+            "type": "number"
+          },
+          "day3Low": {
+            "default": 58,
+            "label": "Day 3 low",
+            "type": "number"
+          },
+          "high": {
+            "default": 78,
+            "label": "Today's high",
+            "type": "number"
+          },
+          "hour24": {
+            "default": false,
+            "label": "24-hour time",
+            "type": "boolean"
+          },
+          "isDay": {
+            "default": 1,
+            "label": "Daytime (1) or night (0)",
+            "type": "number"
+          },
+          "items": {
+            "default": [],
+            "item": {
+              "published": {
+                "default": "",
+                "label": "Published (ISO time)",
+                "type": "text"
+              },
+              "source": {
+                "default": "",
+                "label": "Source",
+                "type": "text"
+              },
+              "title": {
+                "label": "Headline",
+                "maxLength": 200,
+                "type": "text"
+              }
+            },
+            "label": "Headlines",
+            "maxItems": 30,
+            "type": "list"
+          },
+          "look": {
+            "default": "pop",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "type": "select"
+          },
+          "low": {
+            "default": 61,
+            "label": "Today's low",
+            "type": "number"
+          },
+          "photo": {
+            "label": "Photo",
+            "type": "image"
+          },
+          "price": {
+            "default": "$5.99",
+            "label": "Price (optional)",
+            "maxLength": 8,
+            "type": "text"
+          },
+          "rail": {
+            "default": "right",
+            "label": "Rail",
+            "options": [
+              "right",
+              "left",
+              "off"
+            ],
+            "type": "select"
+          },
+          "showCaption": {
+            "default": true,
+            "label": "Show the caption",
+            "type": "boolean"
+          },
+          "showClock": {
+            "default": true,
+            "label": "Show the clock",
+            "type": "boolean"
+          },
+          "showForecast": {
+            "default": true,
+            "label": "Show the three-day forecast",
+            "type": "boolean"
+          },
+          "showLogo": {
+            "default": true,
+            "label": "Show the logo",
+            "type": "boolean"
+          },
+          "showWeather": {
+            "default": true,
+            "label": "Show the weather",
+            "type": "boolean"
+          },
+          "temp": {
+            "default": 72,
+            "label": "Temperature",
+            "type": "number"
+          },
+          "ticker": {
+            "default": "bottom",
+            "label": "Crawl",
+            "options": [
+              "bottom",
+              "top",
+              "off"
+            ],
+            "type": "select"
+          },
+          "unit": {
+            "default": "°F",
+            "label": "Temperature unit",
+            "options": [
+              "°F",
+              "°C"
+            ],
+            "type": "select"
+          }
+        },
+        "id": "info-frame",
+        "live": {
+          "sources": {
+            "headlines": {
+              "fields": {
+                "items": "items"
+              },
+              "label": "Headlines",
+              "source": "rss"
+            },
+            "weather": {
+              "fields": {
+                "code": "current.weather_code",
+                "day1Code": "daily.weather_code.1",
+                "day1High": "daily.temperature_2m_max.1",
+                "day1Low": "daily.temperature_2m_min.1",
+                "day2Code": "daily.weather_code.2",
+                "day2High": "daily.temperature_2m_max.2",
+                "day2Low": "daily.temperature_2m_min.2",
+                "day3Code": "daily.weather_code.3",
+                "day3High": "daily.temperature_2m_max.3",
+                "day3Low": "daily.temperature_2m_min.3",
+                "high": "daily.temperature_2m_max.0",
+                "isDay": "current.is_day",
+                "low": "daily.temperature_2m_min.0",
+                "temp": "current.temperature_2m"
+              },
+              "label": "Weather",
+              "place": "city",
+              "source": "open-meteo",
+              "units": {
+                "temperature": "unit"
+              }
+            }
+          }
+        },
+        "name": "Info frame",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 2,
+        "uses": [],
+        "version": "1.0.0"
       }
     },
     "base/room-status@1.0.0": {
