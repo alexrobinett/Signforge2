@@ -10,8 +10,8 @@ BEGIN
 	UPDATE `session` SET `activeOrganizationId` = NULL WHERE `id` = NEW.`id`;
 END;
 --> statement-breakpoint
--- The org a session switches to is remembered with the switch, in the same statement, and only
--- when the org changes: an expiry refresh from another device leaves the remembered org alone.
+-- The org a session switches to is remembered with the switch, in the same statement. Replaced
+-- by 0030, which drops this trigger's `IS NOT OLD` condition: the column list keeps refreshes out.
 CREATE TRIGGER `session_org_remembered` AFTER UPDATE OF `activeOrganizationId` ON `session`
 	WHEN NEW.`activeOrganizationId` IS NOT NULL AND NEW.`activeOrganizationId` IS NOT OLD.`activeOrganizationId`
 BEGIN

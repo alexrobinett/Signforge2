@@ -21,6 +21,7 @@ export function CreateOrgForm({
   className?: string;
 }) {
   const { name, pending, error } = useAppStore((s) => s.orgs.drafts[form]);
+  const switching = useAppStore((s) => s.orgs.switchingTo !== null);
   const editOrgName = useAppStore((s) => s.editOrgName);
   const createOrg = useAppStore((s) => s.createOrg);
   const id = useId();
@@ -52,7 +53,7 @@ export function CreateOrgForm({
       </p>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         {footer}
-        <Button type="submit" disabled={pending || !name.trim()}>
+        <Button type="submit" disabled={pending || switching || !name.trim()}>
           {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />}
           {pending ? 'Creating…' : submitLabel}
         </Button>
