@@ -244,6 +244,7 @@ test('pick one screen by typing part of its name, keyboard only; the picker fill
   // Every screen, the groups and the screens, the current choice marked.
   await expect(picker.getByRole('option', { name: /^Every screen.*chosen/ })).toBeVisible();
   await expect(picker.getByRole('group', { name: 'Groups' }).getByRole('option')).toHaveCount(1);
+  await expect(picker.getByRole('combobox', { name: 'Search screens and groups' })).toBeFocused();
   await page.keyboard.type('WIN');
   await expect(picker.getByRole('option')).toHaveCount(1);
   await expect(picker.getByRole('option', { selected: true })).toContainText('Front window');
@@ -254,6 +255,7 @@ test('pick one screen by typing part of its name, keyboard only; the picker fill
   await expect(plays).toBeFocused();
   // Escape leaves the picker, not the dialog, and keeps the choice.
   await page.keyboard.press('Enter');
+  await expect(picker.getByRole('combobox', { name: 'Search screens and groups' })).toBeFocused();
   await page.keyboard.type('nothing like it');
   await expect(picker.getByText('No screens and groups match “nothing like it”.')).toBeVisible();
   await page.keyboard.press('Escape');
@@ -267,8 +269,14 @@ test('pick one screen by typing part of its name, keyboard only; the picker fill
   await expect(picker.getByRole('combobox', { name: 'Search screens and groups' })).toHaveValue('');
   await axe(page);
   await shots(page, '56-schedule-target-picker-phone');
-  await picker.getByRole('button', { name: 'Cancel' }).click();
+  // Enter on Cancel cancels: it does not pick the result selected meanwhile.
+  await expect(picker.getByRole('combobox', { name: 'Search screens and groups' })).toBeFocused();
+  await page.keyboard.type('every');
+  await expect(picker.getByRole('option', { selected: true })).toHaveText(/^Every screen/);
+  await picker.getByRole('button', { name: 'Cancel' }).focus();
+  await page.keyboard.press('Enter');
   await expect(picker).toBeHidden();
+  await expect(plays).toHaveText('Front window');
   await page.setViewportSize({ width: 1280, height: 720 });
 
   await dialog.getByRole('button', { name: 'Save draft' }).click();

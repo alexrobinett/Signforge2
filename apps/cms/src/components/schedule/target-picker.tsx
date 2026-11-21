@@ -6,7 +6,7 @@
  */
 import { CheckIcon, ChevronsUpDownIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
-import { useId } from 'react';
+import { useId, useRef } from 'react';
 import { KIND_WORD, StatusGlyph, toneOf } from '~/components/screens/status';
 import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
@@ -47,6 +47,7 @@ export function TargetPicker({
   className?: string;
 }) {
   const id = useId();
+  const searchInput = useRef<HTMLInputElement>(null);
   const open = useAppStore((s) => s.targetPicker.open === id);
   const query = useAppStore((s) => s.targetPicker.query);
   const openPicker = useAppStore((s) => s.openTargetPicker);
@@ -101,17 +102,24 @@ export function TargetPicker({
           {/* Full-screen on a phone, where a list in a dialog in a dialog has no room; a panel like ⌘K's above it. */}
           <DialogPrimitive.Content
             aria-describedby={undefined}
+            // The search, not the first control Radix would choose (Cancel, on a phone).
+            onOpenAutoFocus={(e) => {
+              e.preventDefault();
+              searchInput.current?.focus();
+            }}
             className="fixed inset-0 z-50 flex flex-col bg-popover text-popover-foreground outline-none sm:inset-auto sm:top-[12dvh] sm:left-1/2 sm:w-[calc(100%-2rem)] sm:max-w-lg sm:-translate-x-1/2 sm:overflow-hidden sm:rounded-xl sm:border sm:shadow-2xl dark:sm:border-border-strong"
           >
-            <DialogPrimitive.Title className="sr-only">{label}</DialogPrimitive.Title>
+            {/* On a phone, a bar with Cancel, outside cmdk's root: it takes Enter for the selected result, so Enter on Cancel would pick it. */}
+            <div className="flex items-center gap-2 border-b py-2 pr-2 pl-4 sm:border-0 sm:p-0">
+              <DialogPrimitive.Title className="min-w-0 flex-1 truncate text-base font-semibold sm:sr-only">{label}</DialogPrimitive.Title>
+              <DialogPrimitive.Close asChild>
+                <Button variant="ghost" size="sm" className="sm:hidden">
+                  Cancel
+                </Button>
+              </DialogPrimitive.Close>
+            </div>
             <Command label={`Search ${what}`} shouldFilter={false} loop defaultValue={current} className="min-h-0 flex-1">
-              <CommandInput value={query} onValueChange={search} placeholder={`Type part of a name: ${what}`}>
-                <DialogPrimitive.Close asChild>
-                  <Button variant="ghost" size="sm" className="sm:hidden">
-                    Cancel
-                  </Button>
-                </DialogPrimitive.Close>
-              </CommandInput>
+              <CommandInput ref={searchInput} value={query} onValueChange={search} placeholder={`Type part of a name: ${what}`} />
               <CommandList className="max-h-none flex-1 sm:max-h-[min(470px,60dvh)]">
                 <CommandEmpty>
                   No {what} match “{query}”.
