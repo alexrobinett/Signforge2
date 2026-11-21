@@ -107,6 +107,16 @@ describe('create_asset_upload', () => {
     });
   });
 
+  it("refuses one file claimed at two sizes, a sample's included", async () => {
+    const l = { sha256: '5'.repeat(64), type: 'image/jpeg', size: 1000, width: 1920, height: 1080 };
+    const p = { sha256: '6'.repeat(64), type: 'image/jpeg', size: 1000, width: 1080, height: 1920 };
+    const r = await run('create_asset_upload', {
+      name: 'x',
+      renditions: { landscape: { ...l, sample: { sha256: '7'.repeat(64), size: 300 } }, portrait: { ...p, sample: { sha256: '7'.repeat(64), size: 301 } } },
+    });
+    expect(r).toMatchObject({ ok: false, error: 'invalid_input', details: [{ path: 'renditions', message: 'the same file cannot have two types or sizes' }] });
+  });
+
   it('refuses a sample of an SVG', async () => {
     const c = { ...(await claim(svg, 'image/svg+xml', null, null)), sample: { sha256: '4'.repeat(64), size: 100 } };
     expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: c, portrait: c } })).toMatchObject({

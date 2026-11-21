@@ -89,20 +89,27 @@ async function backdrop(
   if (url && width) {
     const sample = new Image();
     sample.src = url;
-    await sample.decode();
-    // The photo's size is known from its sample to the cell, before the photo loads: the cells under
-    // the box at every size it can be. A photo painted at more than twice its size has a quarter of
-    // the screen's pixels or fewer, quick to decode, and a cell would stand for more than 32 px of
-    // screen: it is measured itself.
-    const k = IMAGE_SAMPLE_CELL;
-    const [cols, rows] = [sample.naturalWidth, sample.naturalHeight / 2];
-    const sizes = [cols * k - k + 1, cols * k].flatMap((nw) => [rows * k - k + 1, rows * k].map((nh) => under(nw, nh)));
-    if (sizes.every((r) => r.scale <= 2)) return cells(sample, sizes, cols, rows, opacity(top), opacity(top + height), bg);
+    // The server checks a sample's header, not its data: one that does not decode leaves the photo.
+    const decoded = await sample.decode().then(
+      () => true,
+      () => false,
+    );
+    if (decoded) {
+      // The photo's size is known from its sample to the cell, before the photo loads: the cells
+      // under the box at every size it can be. A photo painted at more than twice its size has a
+      // quarter of the screen's pixels or fewer, quick to decode, and a cell would stand for more
+      // than 32 px of screen: it is measured itself.
+      const k = IMAGE_SAMPLE_CELL;
+      const [cols, rows] = [sample.naturalWidth, sample.naturalHeight / 2];
+      const sizes = [cols * k - k + 1, cols * k].flatMap((nw) => [rows * k - k + 1, rows * k].map((nh) => under(nw, nh)));
+      if (sizes.every((r) => r.scale <= 2)) return cells(sample, sizes, cols, rows, opacity(top), opacity(top + height), bg);
+    }
   }
 
   // drawImage decodes the photo for the canvas itself: awaiting img.decode() first decoded it twice
   // (on the Pi, 100 ms more per prepare). A photo that does not load is not shown, and the copy then
-  // sits on the background.
+  // sits on the background. (Measured from its sample, the photo is taken to load: both are files
+  // the screen has verified.)
   if (img.src && !img.complete)
     await new Promise((loaded) => {
       img.addEventListener('load', loaded, { once: true });

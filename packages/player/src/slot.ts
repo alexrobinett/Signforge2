@@ -55,15 +55,20 @@ interface LiveFrame {
 
 /**
  * A template spot's image fields, as Blobs: the frame has no network and an opaque origin. An
- * image with a sample has it beside it, under `sampleAsset(field)`.
+ * image with a sample has it beside it, under `sampleAsset(field)`, when the sample can be read.
  */
 async function spotAssets(spot: TemplateSpot, manifest: ScreenManifest): Promise<Record<string, Blob>> {
-  const files = Object.entries(spot.assets).flatMap(([field, sha]) => {
-    const sample = manifest.files[sha]?.sample;
-    return [[field, sha] as const, ...(sample ? [[sampleAsset(field), sample] as const] : [])];
-  });
   const assets: Record<string, Blob> = {};
-  await Promise.all(files.map(async ([key, sha]) => (assets[key] = await getFile(sha))));
+  await Promise.all(
+    Object.entries(spot.assets).map(async ([field, sha]) => {
+      assets[field] = await getFile(sha);
+      const sample = manifest.files[sha]?.sample;
+      // A sample only spares the template a decode: one not held yet (a manifest a player stored
+      // before it knew samples, until a sync fetches them) leaves the template to measure the photo.
+      const blob = sample && (await getFile(sample).catch(() => undefined));
+      if (blob) assets[sampleAsset(field)] = blob;
+    }),
+  );
   return assets;
 }
 

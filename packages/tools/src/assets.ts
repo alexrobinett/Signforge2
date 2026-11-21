@@ -162,7 +162,9 @@ const createAssetUpload = defineTool({
       const { landscape: l, portrait: p } = renditions;
       if ((l.type === 'image/svg+xml') !== (p.type === 'image/svg+xml'))
         ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'an SVG is sent as it is for both orientations' });
-      if (l.sha256 === p.sha256 && (l.type !== p.type || l.size !== p.size))
+      // Renditions and samples alike: a file is stored and checked once, by its hash.
+      const files = [l, p].flatMap((r) => [r, ...(r.sample ? [{ ...r.sample, type: 'image/png' }] : [])]);
+      if (files.some((f) => files.some((g) => f.sha256 === g.sha256 && (f.type !== g.type || f.size !== g.size))))
         ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'the same file cannot have two types or sizes' });
     }),
   output: outputs.create_asset_upload,

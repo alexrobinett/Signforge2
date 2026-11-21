@@ -32,7 +32,7 @@ import type { BrandShape, FrameTheme, HostMessage, InitPayload, TemplateMessage 
 import { BRAND_CSS_VARS, PROTOCOL_VERSION } from '@signforge/contract/frame';
 
 export interface TemplateContext extends Omit<InitPayload, 'assets' | 'theme'> {
-  /** Image fields as object URLs; `$brand.logo` too when the brand kit has a logo. */
+  /** Image fields as object URLs, and an image's sample under `sampleAsset(field)` when init carries one; `$brand.logo` too when the brand kit has a logo. */
   assets: Record<string, string>;
   root: HTMLElement;
 }

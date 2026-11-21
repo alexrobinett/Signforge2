@@ -76,16 +76,18 @@ function stableNames(m: Manifest, sources: Set<string>): Map<string, string> {
 /** `built` with `golden`'s hash and size for each bundle and derived file they share by name, and its id recomputed. */
 function withFilesOf(built: Manifest, golden: Manifest, sources: Set<string>): Manifest {
   const goldenByName = new Map([...stableNames(golden, sources)].map(([sha, name]) => [name, sha]));
-  let json = JSON.stringify(built);
+  const swaps: [string, string][] = [];
   const files = { ...built.files };
   for (const [sha, name] of stableNames(built, sources)) {
     const g = goldenByName.get(name);
     if (!g || g === sha) continue;
     delete files[sha];
     if (golden.files[g]) files[g] = golden.files[g]!;
-    json = json.replaceAll(sha, g);
+    swaps.push([sha, g]);
   }
-  const m = { ...(JSON.parse(json) as Manifest), files };
+  // In the file entries kept as built too: a source image's entry names its derived sample.
+  const swapped = (value: unknown) => JSON.parse(swaps.reduce((text, [sha, g]) => text.replaceAll(sha, g), JSON.stringify(value)));
+  const m = { ...(swapped(built) as Manifest), files: swapped(files) as Manifest['files'] };
   return { ...m, id: idOf(m) };
 }
 
