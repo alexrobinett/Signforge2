@@ -196,3 +196,38 @@ test('every base template can be configured and previewed', async () => {
   await axe(page);
   await shots(page, '34-spot-editor-phone');
 });
+
+test('make an Announcement in a look, with a QR code, and see both on the real player', async () => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' }).click();
+  await hydrated(page);
+  await page.getByRole('button', { name: 'New spot' }).click();
+  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: 'Announcement' });
+  await page.getByLabel('Name').fill('Pier 9 opening');
+  await page.getByRole('button', { name: 'Create spot' }).click();
+  await expect(page.getByRole('heading', { name: 'Pier 9 opening', level: 1 })).toBeVisible();
+  const stage = page.getByRole('region', { name: 'Live preview' });
+  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+
+  await page.getByLabel('Look').selectOption('night');
+  await page.getByLabel('Headline').fill('Pier 9 opens Monday');
+  await expect.poll(() => stageShows(page, 'Pier 9 opens Monday'), { timeout: 10_000 }).toBe(true);
+  // No address, no code: it appears once one is typed, named by its label.
+  const qr = async () => {
+    for (const frame of page.frames())
+      if (
+        await frame
+          .getByRole('img', { name: 'Scan for the floor plan' })
+          .count()
+          .catch(() => 0)
+      )
+        return true;
+    return false;
+  };
+  expect(await qr()).toBe(false);
+  await page.getByLabel('QR code link').fill('https://example.com/pier-9');
+  await expect.poll(qr, { timeout: 10_000 }).toBe(true);
+  await expect(page.getByText(/Saved \d/)).toBeVisible();
+  await axe(page);
+});

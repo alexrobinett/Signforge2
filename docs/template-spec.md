@@ -2,7 +2,7 @@
 
 Version 1. This is what a template author, human or agent, builds against and what a reviewer checks. The types and limits here are defined in code in `packages/contract/src/shapes.ts`; if the two disagree, the code is right.
 
-Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl) and `menu-board` (a list typed by people or filled from a CSV or JSON link).
+Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl), `menu-board` (a list typed by people or filled from a CSV or JSON link) and `announcement` (company news in the look kit's four looks, with toggles, facts and a QR code).
 
 ## What a template is
 
@@ -115,7 +115,12 @@ A template that offers the four looks of the template set (#189), Pop, Poster, N
 2. Declare the field: `"look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" }` (`LOOKS`).
 3. In `prepare`, first `await applyLook(ctx)` (from `@signforge/template-looks`). It sets `data-look` on the root, the toggles (below), the text colours (below), and waits for the look's fonts, so text measured in `prepare` (a crawl, `fitWords`) is in the look's own type.
 
-`packages/template-looks/looks-test` is a template that uses every part of the kit, for the tests and the Pi. It is not in `templates/`, so it is never seeded.
+`packages/template-looks/looks-test` is a template that uses every part of the kit, for the tests and the Pi. It is not in `templates/`, so it is never seeded. `templates/announcement` is the first shipped template on the kit. Two things it does that the next ones will want:
+
+- **Nothing to show is off.** An element whose content is empty (no photo uploaded, no QR address, no logo in the kit, no facts, an empty line) is passed to `applyLook` as switched off, so the layout closes up around it as for a toggle.
+- **Long copy steps down.** Its copy is a grid of `min-content` rows (an `auto` row lets an element with `overflow: hidden`, as a clamped one is, shrink below its text, and the next row overlaps it) around one flexible row. After `applyLook`, `main.ts` steps the headline's size (`--fit-headline`), then the body's and the facts' (`--fit-body`), down from the look's own until each fits its clamp and nothing falls below the copy, measured from the layout's offsets, not painted boxes, which the intros' transforms move. Short copy costs one layout; text at every field's `maxLength` ends in its clamp's ellipsis at the smallest step.
+
+The kit's build test (all four looks within the bundle budget, the colour lint, the licence notice) is `packages/cli/test/looks.test.ts`: a template on the kit is a devDependency of the CLI, whose tests build every template, so the kit cannot depend on the CLI.
 
 **Colours.** Each look maps its palette onto the brand tokens, the canvas colour as the fallback:
 
