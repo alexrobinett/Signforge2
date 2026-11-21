@@ -247,6 +247,14 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await expect(search).toBeFocused();
   await page.keyboard.type('deli');
   await expect(listStatus).toHaveText('Looking for screens…');
+  // Neither is the member choosing: a pointer over the search or the footer selects nothing, and cmdk ignores PageDown.
+  const centre = async (target: ReturnType<typeof menu.getByText>) => {
+    const box = (await target.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  };
+  await centre(search);
+  await centre(menu.getByText(/These actions are the tool registry/));
+  await page.keyboard.press('PageDown');
   release();
   await expect(selected).toContainText('Deli counter');
   await page.keyboard.press('Enter');

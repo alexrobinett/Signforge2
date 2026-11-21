@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   commandEntries,
   foundValues,
+  movesSelection,
   needsInput,
   NULL_CHOICE,
   parseToolList,
+  pointerMovesSelection,
   resultText,
   selectedItem,
   targetActions,
@@ -176,5 +178,26 @@ describe("⌘K's selection when the screens arrive after typing (#180)", () => {
     const found = foundValues('front', [deli], [front]);
     expect(selectedItem({ value: 'group:grp_1', among: JSON.stringify(found) }, found, false)).toBe('group:grp_1');
     expect(selectedItem(null, [], false)).toBe('');
+  });
+});
+
+describe("what counts as the member moving ⌘K's selection (#180)", () => {
+  const key = (k: string, mods: { ctrlKey?: boolean; altKey?: boolean } = {}) => ({ key: k, ctrlKey: false, altKey: false, ...mods });
+
+  it('counts the keys cmdk moves with: arrows, Home and End, and Ctrl with N, J, P or K', () => {
+    for (const k of ['ArrowUp', 'ArrowDown', 'Home', 'End']) expect(movesSelection(key(k))).toBe(true);
+    for (const k of ['n', 'j', 'p', 'k']) expect(movesSelection(key(k, { ctrlKey: true }))).toBe(true);
+  });
+
+  it('does not count PageUp or PageDown, which cmdk ignores, a letter typed, or Alt with an arrow', () => {
+    for (const k of ['PageUp', 'PageDown', 'n', 'Enter']) expect(movesSelection(key(k))).toBe(false);
+    expect(movesSelection(key('ArrowDown', { altKey: true }))).toBe(false);
+  });
+
+  it('counts a pointer move only onto an enabled item other than the one selected', () => {
+    expect(pointerMovesSelection({ value: 'tool:list_screens', disabled: false }, 'tool:test_alert_channel')).toBe(true);
+    expect(pointerMovesSelection(null, 'tool:test_alert_channel')).toBe(false);
+    expect(pointerMovesSelection({ value: 'tool:test_alert_channel', disabled: false }, 'tool:test_alert_channel')).toBe(false);
+    expect(pointerMovesSelection({ value: 'tool:list_screens', disabled: true }, 'tool:test_alert_channel')).toBe(false);
   });
 });

@@ -264,3 +264,17 @@ export function selectedItem(selection: Selection | null, found: readonly string
   if (selection && (moved || selection.among === JSON.stringify(found))) return selection.value;
   return found[0] ?? selection?.value ?? '';
 }
+
+/** The keys cmdk 1.1.1 moves its selection with: arrows, Home and End, and its vim bindings (Ctrl+N, J, P, K). Not PageUp or PageDown, which it ignores. */
+const MOVE_KEYS = new Set(['ArrowUp', 'ArrowDown', 'Home', 'End']);
+
+/** Whether a key press is the member moving ⌘K's selection themselves (`moved`). */
+export const movesSelection = (e: { key: string; ctrlKey: boolean; altKey: boolean }) =>
+  !e.altKey && (MOVE_KEYS.has(e.key) || (e.ctrlKey && ['n', 'j', 'p', 'k'].includes(e.key)));
+
+/**
+ * Whether a pointer move is the member moving ⌘K's selection: cmdk selects by pointer only over an
+ * enabled item, so a move over the search, the footer or the item already selected is not one.
+ */
+export const pointerMovesSelection = (under: { value: string; disabled: boolean } | null, selected: string) =>
+  under !== null && !under.disabled && under.value !== selected;

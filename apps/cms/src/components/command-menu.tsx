@@ -13,8 +13,10 @@ import { Label } from '~/components/ui/label';
 import {
   commandEntries,
   foundValues,
+  movesSelection,
   NULL_CHOICE,
   orgCommands,
+  pointerMovesSelection,
   selectedItem,
   targetActions,
   targetItemKey,
@@ -44,10 +46,6 @@ const focusFirstButton = (list: HTMLUListElement | null) => list?.querySelector(
 
 /** The form's first field takes focus when the form appears. Stable, so it runs once per form. */
 const focusFirstField = (form: HTMLFormElement | null) => form?.querySelector<HTMLElement>('input, select, textarea')?.focus();
-/** A key cmdk moves its selection with, its vim bindings (Ctrl+N, J, P, K) included: the member's own move. */
-const MOVES = new Set(['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
-const isMove = (e: { key: string; ctrlKey: boolean; altKey: boolean }) =>
-  !e.altKey && (MOVES.has(e.key) || (e.ctrlKey && ['n', 'j', 'p', 'k'].includes(e.key)));
 
 /** A search takes focus when its view appears within an open menu (Back). Stable, so it runs once per view. */
 const focusSearch = (input: HTMLInputElement | null) => input?.focus();
@@ -342,6 +340,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const groups = fleet.data?.groups ?? [];
   const searching = query.trim() !== '';
   const found = foundValues(query, screens, groups);
+  const shownSelection = selectedItem(selection, found, moved);
   // Said in the list, as the tools' long descriptions match almost any search, so the empty text seldom shows.
   const listStatus = running
     ? 'A call is on its way: the commands wait for its answer.'
@@ -385,10 +384,15 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       label="Search pages, screens and actions"
       loop
       filter={filter}
-      value={selectedItem(selection, found, moved)}
+      value={shownSelection}
       onValueChange={(value) => select(value, JSON.stringify(found))}
-      onKeyDown={(e) => isMove(e) && move()}
-      onPointerMove={move}
+      onKeyDown={(e) => movesSelection(e) && move()}
+      // cmdk selects by pointer only over an enabled item, in each item's own handler, which replaces one passed to it.
+      onPointerMove={(e) => {
+        const item = e.target instanceof Element ? e.target.closest('[cmdk-item]') : null;
+        const under = item && { value: item.getAttribute('data-value') ?? '', disabled: item.getAttribute('aria-disabled') === 'true' };
+        if (pointerMovesSelection(under, shownSelection)) move();
+      }}
     >
       {/* On opening, Radix's focus trap focuses the search, once it holds focus: a focus before that is lost to a menu still closing. */}
       <CommandInput ref={backed ? focusSearch : undefined} value={query} onValueChange={search} placeholder="Go to a page, find a screen, or type an action">
