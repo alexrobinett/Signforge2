@@ -55,6 +55,7 @@
     "@signforge/template-menu-board": "workspace:*",
     "@signforge/template-news": "workspace:*",
     "@signforge/template-photo-promo": "workspace:*",
+    "@signforge/template-room-status": "workspace:*",
     "@signforge/template-weather": "workspace:*",
     "@signforge/tools": "workspace:*",
     "@tailwindcss/vite": "^4.3.5",

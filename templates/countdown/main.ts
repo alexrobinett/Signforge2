@@ -16,13 +16,7 @@ const DAY = 24 * HOUR;
 /** The `units` field's options, as how many units each shows. */
 const UNITS: Record<string, number> = { days: 1, 'days and hours': 2, 'days, hours and minutes': 3 };
 const UNIT_NAMES = ['Days', 'Hours', 'Minutes'];
-/**
- * The run-ups a countdown's progress is drawn over: the shortest that holds the days to go. A
- * countdown has no start, so "Day 2 of 14" is its place in the last fortnight. Further off than a
- * year, it has no progress to show.
- */
-const RUN_UPS = [7, 14, 30, 60, 90, 180, 365];
-/** Pop's dots: one a day over a week or a fortnight, else each a share of the run-up. */
+/** Pop's dots: one a day over a fortnight or less, else each a share of the span. */
 const MAX_DOTS = 14;
 /** Night's ring fills in this long, after the figure has faded in. */
 const SWEEP_S = 1.8;
@@ -50,7 +44,9 @@ interface Count {
  * them: tomorrow is a day to go at any hour. With hours or minutes, it is the time between the two
  * wall clocks, so a day is always 24 hours, across a DST change too: 18:00 two days before an 18:00
  * target is 2 days and 0 hours. A countdown rounds up to its smallest unit and a count-up down, so
- * neither reaches a figure before its time. A countdown is done when the target's instant passes.
+ * neither reaches a figure before its time. A countdown is done when the target's instant passes,
+ * and from then on shows zeros: in the hour the clocks repeat, the wall clock can still be behind a
+ * target whose instant has gone.
  */
 function counter(ctx: TemplateContext, target: string, up: boolean, units: number): (now: Date) => Count {
   const clock = new Intl.DateTimeFormat('en-US', {
@@ -73,6 +69,7 @@ function counter(ctx: TemplateContext, target: string, up: boolean, units: numbe
   return (now) => {
     const from = wall(now);
     const done = !up && now.getTime() >= at.getTime();
+    if (done) return { values: Array<number>(units).fill(0), done };
     if (units === 1) {
       const days = Math.floor(goal / DAY) - Math.floor(from / DAY);
       return { values: [Math.max(0, up ? -days : days)], done };
@@ -122,14 +119,16 @@ defineTemplate({
     const date = formatter(ctx, { weekday: style, day: 'numeric', month: style, ...(year(at) === year(now) ? {} : { year: 'numeric' }) }).format(at);
     const when = target.endsWith('T00:00') ? date : `${date} · ${formatter(ctx, { hour: 'numeric', minute: '2-digit' }).format(at)}`;
 
-    // The progress: a countdown's place in its run-up, or a count-up's way to its record.
-    const runUp = up ? undefined : RUN_UPS.find((w) => w >= days);
-    const share = up ? (record ? Math.min(1, days / record) : undefined) : runUp && (runUp - days) / runUp;
+    // The progress: a countdown's way through its last `progressDays` (it has no start, and a span that
+    // changed as the days went by would run backwards), shown once the days to go fit in it; or a
+    // count-up's way to its record.
+    const span = Number(data.progressDays);
+    const share = up ? (record ? Math.min(1, days / record) : undefined) : days <= span ? (span - days) / span : undefined;
     const beaten = days > record;
     const more = record + 1 - days;
     const toBeat = beaten ? 'A new record' : plural(more, 'more day', 'more days');
     const pct = share === undefined ? '' : `${Math.floor(share * 100)}%`;
-    const progressLabel = up ? (beaten ? 'A new record' : `${pct} of the way to the record`) : `Day ${runUp! - days} of ${runUp}`;
+    const progressLabel = up ? (beaten ? 'A new record' : `${pct} of the way to the record`) : `Day ${span - days} of ${span}`;
 
     put('.title', String(data.title));
     put('.detail', up ? `Since ${when}` : when);
@@ -144,12 +143,12 @@ defineTemplate({
     const list = el('.facts');
     const fact = (label: string, value: string, toggle: string) => {
       const row = factRow.cloneNode(true);
-      if (!(row instanceof HTMLElement) || !list) return;
+      if (!(row instanceof HTMLElement)) return;
       row.dataset.show = toggle;
       row.querySelector('dt')!.textContent = label;
       row.querySelector('dd')!.textContent = value;
-      row.style.setProperty('--lk-i', String(4 + list.childElementCount));
-      list.append(row);
+      row.style.setProperty('--lk-i', String(4 + list!.childElementCount));
+      list!.append(row);
     };
     if (look === 'night') fact(up ? 'since' : 'when', when, 'detail');
     if (look === 'night' || look === 'corporate') {
@@ -162,7 +161,7 @@ defineTemplate({
     if (share !== undefined)
       progress(look, share, {
         label: progressLabel,
-        dots: up ? MAX_DOTS : Math.min(runUp!, MAX_DOTS),
+        dots: up ? MAX_DOTS : Math.min(span, MAX_DOTS),
         from: up ? `${plural(days, 'day', 'days')} of ${record.toLocaleString(ctx.locale)}` : progressLabel,
         to: up ? 'Record' : date,
       });
@@ -180,6 +179,8 @@ defineTemplate({
         showFacts: on('showFacts', facts.length),
       },
     });
+    // A reset while the look's faces loaded has put the next init's document in place: leave it be.
+    if (!stage.isConnected) return;
     if (done) drop('.number, .rest, .sticker:has(.unit), .unit-row, .tiles, .sub');
     else drop('.done, .done-box');
     if (units === 1) drop('.rest');

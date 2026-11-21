@@ -4,5 +4,5 @@
     "type": "fade",
     "ms": 600
   },
-  "items": ["sport-drinks", "energy", "countdown", "coffee", "fire-drill"]
+  "items": ["sport-drinks", "energy", "room-status", "countdown", "coffee", "fire-drill"]
 }

@@ -11,6 +11,7 @@
     "doneText": { "type": "text", "label": "Once it is here", "default": "It's here!", "maxLength": 40 },
     "units": { "type": "select", "label": "Units", "options": ["days", "days and hours", "days, hours and minutes"], "default": "days" },
     "recordDays": { "type": "number", "label": "Record in days, counting up (0 for none)", "default": 0, "min": 0, "max": 99999, "step": 1 },
+    "progressDays": { "type": "number", "label": "Show the progress over the last days, counting down", "default": 14, "min": 1, "max": 999, "step": 1 },
     "facts": {
       "type": "list",
       "label": "Facts",

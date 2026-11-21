@@ -16,6 +16,7 @@ import {
   type TargetAction,
   type ToolListing,
 } from '~/lib/command-menu';
+import { orgOnScreen } from '~/lib/live';
 import { callTool, callToolByName, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
@@ -153,6 +154,16 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           close();
           await router.navigate({ to: '/screens', search: { group: action.groupId } });
           return;
+        case 'play-here':
+        case 'take-over': {
+          const orgId = orgOnScreen(router);
+          close();
+          if (!orgId) return;
+          const preset = { target: 'screen', screenId: action.screenId } as const;
+          if (action.kind === 'play-here') get().openNewEntry(orgId, preset);
+          else get().openTakeover(orgId, preset);
+          return;
+        }
         case 'tool': {
           const from = start();
           if (from === null) return;

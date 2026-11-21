@@ -170,6 +170,13 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page).toHaveURL(/sort=-heard/);
   await expect(heard).toHaveAttribute('aria-sort', 'descending');
   await expect(page.getByRole('columnheader', { name: 'Screen', exact: true })).not.toHaveAttribute('aria-sort');
+  // A row's menu plays a playlist on its screen, in the schedule's entry dialog aimed at it (#181).
+  await page.getByRole('button', { name: 'Actions for Lobby' }).click();
+  await page.getByRole('menuitem', { name: 'Play on this screen…' }).click();
+  const entry = page.getByRole('dialog', { name: 'Schedule a playlist' });
+  await expect(entry.getByRole('combobox', { name: 'Plays on' })).toHaveText('Lobby');
+  await entry.getByRole('button', { name: 'Cancel' }).click();
+  await expect(entry).toBeHidden();
   await axe(page);
   await shots(page, '15-screens-table');
 

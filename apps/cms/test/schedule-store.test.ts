@@ -25,11 +25,13 @@ const router = { state: { matches: [{ routeId: '/_app', loaderData: { organizati
 function scheduleStore() {
   const queryClient = new QueryClient();
   const publishSchedule = vi.fn(async () => {});
-  const store = createStore<ScheduleSlice & { publishSchedule: typeof publishSchedule }>()((set, get) => ({
+  const publishEntry = vi.fn(async () => {});
+  const store = createStore<ScheduleSlice & { publishSchedule: typeof publishSchedule; publishEntry: typeof publishEntry }>()((set, get) => ({
     ...createScheduleSlice(set as never, get as never, { router, queryClient } as never),
     publishSchedule,
+    publishEntry,
   }));
-  return { store, queryClient, publishSchedule };
+  return { store, queryClient, publishSchedule, publishEntry };
 }
 
 beforeEach(() => {
@@ -163,5 +165,27 @@ describe('a not_found about the playlist an entry names (review of #153, 3)', ()
     await store.getState().saveEntry(ORG);
     expect(calls.map((c) => c.input.playlistId)).toEqual(['pls_deleted', 'pls_lunch']);
     expect(store.getState().schedule.entries).toEqual({});
+  });
+});
+
+describe('save and publish (#181)', () => {
+  it('saves the entry, closes the dialog and publishes the entry it saved, alone', async () => {
+    const { store, publishEntry } = scheduleStore();
+    store.getState().openNewEntry(ORG, { playlistId: 'pls_holiday', target: 'screen', screenId: 'scr_1' });
+    replies.push(made);
+    await store.getState().saveAndPublishEntry(ORG);
+    expect(calls.map((c) => c.name)).toEqual(['create_schedule_entry']);
+    expect(calls[0]!.input).toMatchObject({ playlistId: 'pls_holiday', target: 'screen', screenId: 'scr_1' });
+    expect(publishEntry).toHaveBeenCalledWith(ORG, 'sch_1');
+    expect(store.getState().schedule.entries).toEqual({});
+  });
+
+  it('publishes nothing when the save is refused, and keeps the dialog with the refusal', async () => {
+    const { store, publishEntry } = scheduleStore();
+    store.getState().openNewEntry(ORG, { playlistId: 'pls_holiday', target: 'screen', screenId: 'scr_1' });
+    replies.push({ status: 400, body: { error: 'invalid_input', message: 'Choose a playlist that exists.' } });
+    await store.getState().saveAndPublishEntry(ORG);
+    expect(publishEntry).not.toHaveBeenCalled();
+    expect(store.getState().schedule.entries[DIALOG]).toMatchObject({ error: 'Choose a playlist that exists.' });
   });
 });
