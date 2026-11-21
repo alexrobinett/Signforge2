@@ -90,10 +90,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "a6459771d481a34d1373723ed513f4d93c9fc9be16469ea39f41d3a4da1524cd": {
-      "size": 402685,
-      "type": "text/html"
-    },
     "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d": {
       "size": 24400,
       "type": "font/woff2"
@@ -114,12 +110,16 @@
       "size": 401771,
       "type": "text/html"
     },
+    "b253345bff2933998060f91b9313009cbf40ca90156d1e0c62b418516870d2a5": {
+      "size": 402658,
+      "type": "text/html"
+    },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
       "size": 24452,
       "type": "font/woff2"
     }
   },
-  "id": "35e09429cbb9455eed31ad9131e866da5d7cf04e7b3465eabe0d6994136717c6",
+  "id": "b1d30d11bea5ec8595f8bcd1fc4fdfb348c8ee801a02e08f48aff0025d3617ec",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -537,7 +537,7 @@
       }
     },
     "base/info-frame@1.0.0": {
-      "html": "a6459771d481a34d1373723ed513f4d93c9fc9be16469ea39f41d3a4da1524cd",
+      "html": "b253345bff2933998060f91b9313009cbf40ca90156d1e0c62b418516870d2a5",
       "manifest": {
         "background": "#000000",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
