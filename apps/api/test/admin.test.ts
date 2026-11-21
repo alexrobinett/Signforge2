@@ -1,7 +1,7 @@
 // The temporary /admin tree that `sf push` uploads through (its publish step runs the tool),
 // driven by the real client (packages/cli/src/push.ts) against local D1 and R2, then read back
 // through the device API.
-import { manifestIdInput, type ScreenManifest } from '@signforge/contract';
+import { MANIFEST_SCHEMA, manifestIdInput, type ScreenManifest } from '@signforge/contract';
 import { push, PushError, type PushOptions } from '@signforge/cli/push';
 import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
@@ -40,7 +40,7 @@ async function build(seed: string): Promise<Build> {
     protocol: 1,
   };
   const body: Omit<ScreenManifest, 'id' | 'generatedAt'> = {
-    schema: 3,
+    schema: MANIFEST_SCHEMA,
     screen: { id: 'local', name: 'Local', timezone: 'UTC', orientation: 'landscape' },
     files: { [htmlSha]: { size: html.byteLength, type: 'text/html' }, [imageSha]: { size: image.byteLength, type: 'image/png' } },
     templates: { 'base/card@1.0.0': { manifest: tm, html: htmlSha } },

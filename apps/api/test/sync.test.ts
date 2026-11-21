@@ -341,6 +341,16 @@ describe('commands', () => {
     expect((await sync(s, oldProtocol)).commands).toEqual([{ type: 'reload' }]);
   });
 
+  it('tell a player from before #191, which refuses url fields, to reload for a template with one: a player that knows them is not', async () => {
+    const s = await setUp('sync-url-field');
+    const manifest = { fields: { qrUrl: { type: 'url', label: 'QR link', default: '' } }, protocol: 2 };
+    await publish(s, 'm-url', { schema: MANIFEST_SCHEMA, templates: { 'base/announcement@1.0.0': { html: 'a'.repeat(64), manifest } } });
+    // What master's player reports before #191: schemas 3 and 4. Its validator refuses the url field in any manifest.
+    const before = body({ player: { version: '1.0.0', manifestSchemas: [3, 4], protocols: [1, 2] } });
+    expect((await sync(s, before)).commands).toEqual([{ type: 'reload' }]);
+    expect((await sync(s, body())).commands).toEqual([]);
+  });
+
   it("carry the screen's display override while the screen reports another, and its clearing", async () => {
     const s = await setUp('sync-override');
     const until = new Date(Date.now() + 3_600_000).toISOString();
