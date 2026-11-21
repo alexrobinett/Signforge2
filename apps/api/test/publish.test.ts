@@ -13,14 +13,6 @@ import { syncAs, syncBody } from './sync-client';
 
 const BASE = 'https://api.test/v1/device';
 
-async function until(check: () => boolean | Promise<boolean>, ms = 5000) {
-  const end = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > end) throw new Error('timed out');
-    await new Promise((r) => setTimeout(r, 20));
-  }
-}
-
 describe('publish through the API', () => {
   it("switches a screen and reaches its open socket through the queue, holding the org's lock", async () => {
     const seed = await seedOrg(env.DB, 'api-publish');
@@ -32,7 +24,13 @@ describe('publish through the API', () => {
     const ws = res.webSocket!;
     ws.accept();
     const messages: ServerSocketMessage[] = [];
-    ws.addEventListener('message', (e) => void messages.push(JSON.parse(String(e.data)) as ServerSocketMessage));
+    const told = new Promise<void>((resolve) =>
+      ws.addEventListener('message', (e) => {
+        const message = JSON.parse(String(e.data)) as ServerSocketMessage;
+        messages.push(message);
+        if (message.type === 'manifest') resolve();
+      }),
+    );
 
     let locked = 0;
     const lock = publishLock(env, seed.orgId);
@@ -49,7 +47,7 @@ describe('publish through the API', () => {
     expect(r).toMatchObject({ ok: true, output: { publish: { revision: 1, screens: 1 } } });
     expect(locked).toBe(1);
     const desired = (await org.screens.get(seed.screen))!.desiredManifestId!;
-    await until(() => messages.some((m) => m.type === 'manifest'));
+    await told;
     expect(messages).toEqual([{ type: 'manifest', id: desired }]);
     // The screen can fetch what it was told of.
     const manifest = await exports.default.fetch(`${BASE}/manifest.json`, { headers: { authorization: `Bearer ${credential}` } });
@@ -99,15 +97,19 @@ describe('the queue', () => {
 describe("the org's publish lock", () => {
   it('lets one publish hold it at a time, and is taken over once a lease has run out', async () => {
     const org = env.ORGS.get(env.ORGS.idFromName('lock-org'));
+    // Calls on one stub start in order and the object's storage answers in order, so once a
+    // release() made after an acquire() has returned, that acquire() has read the lease and
+    // taken it or is waiting. The lease is read through runInDurableObject, after that.
+    const lease = () => runInDurableObject(org, (_o: OrgObject, state) => state.storage.get<{ token: string }>('publish'));
     const first = await org.acquire();
-    let second: string | undefined;
-    const waiting = org.acquire().then((t) => (second = t));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(second).toBeUndefined();
+    const waiting = org.acquire();
+    // A token that holds nothing releases nothing.
+    await org.release(crypto.randomUUID());
+    expect(await lease()).toMatchObject({ token: first });
     await org.release(first);
-    await waiting;
-    expect(second).toBeDefined();
+    const second = await waiting;
     expect(second).not.toBe(first);
+    expect(await lease()).toMatchObject({ token: second });
 
     // A holder that died: its lease runs out, and the next call takes the lock.
     await runInDurableObject(org, async (_o: OrgObject, state) => {
@@ -115,13 +117,11 @@ describe("the org's publish lock", () => {
     });
     const third = await org.acquire();
     expect(third).not.toBe(second);
+    const fourth = org.acquire();
     // A late release from the dead holder releases nothing.
-    await org.release(second!);
-    let fourth: string | undefined;
-    void org.acquire().then((t) => (fourth = t));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(fourth).toBeUndefined();
+    await org.release(second);
+    expect(await lease()).toMatchObject({ token: third });
     await org.release(third);
-    await until(() => fourth !== undefined);
+    expect(await fourth).not.toBe(third);
   });
 });

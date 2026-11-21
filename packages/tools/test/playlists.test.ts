@@ -125,34 +125,30 @@ describe('playlist drafts', () => {
 describe('playlist tools racing another commit (review of #97)', () => {
   it('lists each playlist with the order of the version it lists: an edit landing mid-read never pairs a new version with old items', async () => {
     const { o, org } = await setup('pl-race-list');
-    let edited = () => {};
-    const done = new Promise<void>((r) => {
-      edited = r;
-    });
-    // Another edit commits right after the items are read; the rows are read as late as the listing lets them be.
-    const racing = {
-      ...org,
-      playlists: {
-        ...org.playlists,
-        list: async () => {
-          await Promise.race([done, new Promise((r) => setTimeout(r, 50))]);
-          return org.playlists.list();
-        },
-        allItems: async () => {
-          const items = await org.playlists.allItems();
-          const row = (await org.playlists.get(o.playlist))!;
-          await org.commit((await org.playlists.stage.update(row, {}, row.rowVersion, [o.imageSpot])).writes);
-          edited();
-          return items;
-        },
-      },
+    const edit = async () => {
+      const row = (await org.playlists.get(o.playlist))!;
+      await org.commit((await org.playlists.stage.update(row, {}, row.rowVersion, [o.imageSpot])).writes);
     };
+    // Another edit commits between the listing's two reads, whichever it makes first: after the
+    // first returns and before the second starts.
+    let between: Promise<void> | undefined;
+    const inTurn =
+      <T>(read: () => Promise<T>) =>
+      async () => {
+        if (between !== undefined) {
+          await between;
+          return read();
+        }
+        const out = read();
+        between = out.then(edit);
+        await between;
+        return out;
+      };
+    const racing = { ...org, playlists: { ...org.playlists, list: inTurn(() => org.playlists.list()), allItems: inTurn(() => org.playlists.allItems()) } };
     const { playlists } = await ok(editorCalls(racing)('list_playlists', {}));
     const listed = (playlists as { id: string; version: number; spotIds: string[] }[]).find((p) => p.id === o.playlist)!;
-    expect([
-      [2, [o.templateSpot, o.imageSpot]],
-      [3, [o.imageSpot]],
-    ]).toContainEqual([listed.version, listed.spotIds]);
+    // Version 2 with the newer order: an edit made from this listing's version is refused, never lost.
+    expect([listed.version, listed.spotIds]).toEqual([2, [o.imageSpot]]);
   });
 
   it('refuses a delete with conflict, not a fault, when the playlist is made the default or scheduled between its check and its commit', async () => {

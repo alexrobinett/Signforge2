@@ -5,7 +5,7 @@ import { orgMembers } from '@signforge/db';
 import { testScope } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { checkScreenAlerts, finishRollouts } from '../src/alerts';
 import type { FetchGuards } from '../src/data/fetch';
 import { deliverAlert, deliverAlerts } from '../src/deliveries';
@@ -124,6 +124,9 @@ describe('alerts to Slack and webhooks', () => {
     await checkScreenAlerts({ ...env, CMS_ORIGIN: 'https://cms.test' }, outbox, start + 16 * MIN);
     // Queued by the check, sent by the run after it.
     expect(to(slackUrl)).toEqual([]);
+    // Signed when sent, 2.5 s into the run.
+    onTestFinished(() => void vi.useRealTimers());
+    vi.setSystemTime(start + 16 * MIN + 2_500);
     await deliverAlerts(env, outbox, { now: start + 16 * MIN, guards });
 
     const [slack] = to(slackUrl);
@@ -148,7 +151,7 @@ describe('alerts to Slack and webhooks', () => {
       data: { screen: { id: screenId, name: 'Lobby east', url: `https://cms.test/screens/${screenId}` }, lastSeenAt: new Date(start).toISOString() },
     });
     const timestamp = hook!.headers.get('signforge-timestamp')!;
-    expect(Math.abs(Number(timestamp) - Date.now() / 1000)).toBeLessThan(60);
+    expect(timestamp).toBe(String(Math.floor((start + 16 * MIN + 2_500) / 1000)));
     expect(hook!.headers.get('signforge-event-id')).toBe(event.id);
     expect(hook!.headers.get('signforge-signature')).toBe(`v1=${await hmacHex(SECRET, `${timestamp}.${body}`)}`);
     expect(hook!.headers.get('signforge-signature')).not.toBe(`v1=${await hmacHex('another secret', `${timestamp}.${body}`)}`);
