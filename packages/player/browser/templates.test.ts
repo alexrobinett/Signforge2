@@ -1127,7 +1127,9 @@ describe('alert (#200)', () => {
             if (body.scrollHeight > body.clientHeight || body.scrollWidth > body.clientWidth) out.push('the copy overflows');
             const box = body.getBoundingClientRect();
             // Each line box: the foot line's two parts are inline, and share a line.
-            const parts = ['.headline', '.instructions', '.issued', '.ends', '.qr'].flatMap((sel) => [...(document.querySelector(sel)?.getClientRects() ?? [])].map((r) => [sel, r] as const));
+            const parts = ['.headline', '.instructions', '.issued', '.ends', '.qr'].flatMap((sel) =>
+              [...(document.querySelector(sel)?.getClientRects() ?? [])].map((r) => [sel, r] as const),
+            );
             for (const [sel, r] of parts) if (r.left < box.left || r.right > box.right || r.top < box.top || r.bottom > box.bottom) out.push(`${sel} outside`);
             for (const [i, [a, ra]] of parts.entries())
               for (const [b, rb] of parts.slice(i + 1))
@@ -1176,16 +1178,24 @@ describe('alert (#200)', () => {
         const ambient: string[] = [];
         for (const a of document.getAnimations()) {
           const effect = a.effect as KeyframeEffect;
-          for (const kf of effect.getKeyframes()) for (const p of Object.keys(kf)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
+          for (const kf of effect.getKeyframes())
+            for (const p of Object.keys(kf)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
           const t = effect.getComputedTiming();
-          if (t.iterations === Number.POSITIVE_INFINITY) ambient.push(`${(effect.target as Element).getAttribute("class")} every ${t.duration} ms`);
+          if (t.iterations === Number.POSITIVE_INFINITY) ambient.push(`${(effect.target as Element).getAttribute('class')} every ${t.duration} ms`);
         }
         const timed = (sel: string) =>
           document
             .querySelector(sel)!
             .getAnimations()
-            .map((a) => `${(a as CSSAnimation).animationName} ${Math.round(a.effect!.getComputedTiming().endTime as number) === durationMs ? 'outro' : 'intro'}`);
-        return { props: [...props].sort(), band: timed('.band'), outros: ['.band', '.icon', '.label', '.headline', '.instructions', '.meta', '.qr'].map((s) => timed(s).at(-1)), ambient: ambient.sort() };
+            .map(
+              (a) => `${(a as CSSAnimation).animationName} ${Math.round(a.effect!.getComputedTiming().endTime as number) === durationMs ? 'outro' : 'intro'}`,
+            );
+        return {
+          props: [...props].sort(),
+          band: timed('.band'),
+          outros: ['.band', '.icon', '.label', '.headline', '.instructions', '.meta', '.qr'].map((s) => timed(s).at(-1)),
+          ambient: ambient.sort(),
+        };
       }, durationMs);
     }
     const hard = (ambient: string[]) => ({
@@ -1221,4 +1231,3 @@ describe('alert (#200)', () => {
     }
   });
 });
-

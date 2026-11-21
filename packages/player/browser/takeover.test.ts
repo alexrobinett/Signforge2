@@ -42,7 +42,9 @@ function alertContent(takeover: Pick<ScheduleEntry, 'startsAt' | 'endsAt'>) {
   const html = Buffer.from(alert.html);
   const sha = createHash('sha256').update(html).digest('hex');
   const key = templateKey(alert.manifest);
-  const data = Object.fromEntries(Object.entries(alert.manifest.fields as Record<string, FieldDef>).flatMap(([k, f]) => ('default' in f ? [[k, f.default]] : [])));
+  const data = Object.fromEntries(
+    Object.entries(alert.manifest.fields as Record<string, FieldDef>).flatMap(([k, f]) => ('default' in f ? [[k, f.default]] : [])),
+  );
   const c = h.content([{ id: 'a', durationMs: HOUR }], {
     edit: (m) => {
       m.files[sha] = { size: html.byteLength, type: 'text/html' };
@@ -113,4 +115,3 @@ describe('takeovers', () => {
     expect(played(await q.until((s) => played(s).length > 0))).toEqual(['a']);
   });
 });
-

@@ -245,42 +245,6 @@ body {
   grid-template-areas: 'headline' 'instructions' 'meta';
 }
 
-/* Portrait: the band taller, the copy full width, and who issued it and when it ends beside the
-   code at the foot, on lines of their own. */
-:root[data-orientation='portrait'] .band {
-  height: 18.5vmin;
-  padding: 0 6.67vmin;
-  gap: 2.6vmin;
-}
-:root[data-orientation='portrait'] .beat {
-  width: 7.8vmin;
-  height: 7.8vmin;
-}
-:root[data-orientation='portrait'] .body {
-  grid-template-areas:
-    'headline headline'
-    'instructions instructions'
-    'meta qr';
-  gap: 4.44vmin 3.7vmin;
-  padding: 8.15vmin 6.67vmin 7.4vmin;
-}
-:root[data-orientation='portrait'][data-qr='off'] .body {
-  grid-template-areas: 'headline' 'instructions' 'meta';
-}
-:root[data-orientation='portrait'] .headline {
-  font-size: calc(11.5vmin * var(--scale) * var(--fit));
-}
-:root[data-orientation='portrait'] .instructions {
-  max-width: none;
-  font-size: calc(4.44vmin * var(--scale) * var(--fit));
-}
-:root[data-orientation='portrait'] .meta span {
-  display: block;
-}
-:root[data-orientation='portrait'] .issued + .ends::before {
-  content: none;
-}
-
 /* Motion. Emergency and warning arrive hard: the band drops in and the copy rises after it.
    Advisory and notice fade in. Each element's outro is its intro reversed, ending as the play does
    (`--sf-duration`). Only transform and opacity move. */
@@ -355,6 +319,42 @@ body {
   --len: 0.9s;
   --d: 0.7s;
 }
+/* Portrait: the band taller, the copy full width, and who issued it and when it ends beside the
+   code at the foot, on lines of their own. */
+:root[data-orientation='portrait'] .band {
+  height: 18.5vmin;
+  padding: 0 6.67vmin;
+  gap: 2.6vmin;
+}
+:root[data-orientation='portrait'] .beat {
+  width: 7.8vmin;
+  height: 7.8vmin;
+}
+:root[data-orientation='portrait'] .body {
+  grid-template-areas:
+    'headline headline'
+    'instructions instructions'
+    'meta qr';
+  gap: 4.44vmin 3.7vmin;
+  padding: 8.15vmin 6.67vmin 7.4vmin;
+}
+:root[data-orientation='portrait'][data-qr='off'] .body {
+  grid-template-areas: 'headline' 'instructions' 'meta';
+}
+:root[data-orientation='portrait'] .headline {
+  font-size: calc(11.5vmin * var(--scale) * var(--fit));
+}
+:root[data-orientation='portrait'] .instructions {
+  max-width: none;
+  font-size: calc(4.44vmin * var(--scale) * var(--fit));
+}
+:root[data-orientation='portrait'] .meta span {
+  display: block;
+}
+:root[data-orientation='portrait'] .issued + .ends::before {
+  content: none;
+}
+
 /* Only an emergency pulses its band: once every 2 s, 0.5 Hz, well under the 3 flashes a second
    WCAG 2.3.1 allows. */
 :root[data-severity='emergency'] .glow {
