@@ -711,6 +711,126 @@ The same player and method, the bundles rebuilt with the fonts' licence notice (
 - The photo is also most of the prepare: with it off, prepares fall from about 480 to about 330 ms, as photo-promo's decode cost (Photo samples, above).
 - Dropping `will-change` does not help.
 
+## The Announcement (issue #197, 2026-11-21)
+
+`templates/announcement` in each look, everything on: eyebrow, headline, body, three facts, the meta line and a QR code (`https://example.com/pier-9`) beside a 4K photo (river-4k, scaled by `sf build` to the screen's rendition). Same method as The look kit above: the branch's player at `http://localhost:8090/cp197/`, content built per orientation, each look a spot of 10 s played on its own, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed, the supervisor stopped, `__sf.prepares` read after each spec, portrait set with `wlr-randr --transform 90`. Bundle 397,258 bytes with all four looks (349,236 of it the looks' fonts). Measured at 059d2d8; the one later change to the bundle drops a check for a photo that every spot has.
+
+| Orientation | Transition | Look | Overall | Playing | Loading next | Worst frame | Prepares after the first (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | Pop | 0.39% | 0.00% | 9.6% | 67 ms | 476, 397, 410, 392 |
+| | | Poster | 0.28% | 0.00% | 5.2% | 50 ms | 432, 464, 530, 590 |
+| | | Night | 0.39% | 0.00% | 11.3% | 67 ms | 330, 329, 344, 343 |
+| | | Corporate | 0.28% | 0.00% | 7.6% | 50 ms | 493, 406, 340, 322 |
+| | fade | Pop | 0.33% | 0.00% | 8.1% | 50 ms | 396, 394, 412, 409 |
+| | | Poster | 0.33% | 0.00% | 7.6% | 50 ms | 478, 433, 428, 445 |
+| | | Night | 0.56% | 0.12% | 11.6% | 67 ms | 313, 378, 364, 394 |
+| | | Corporate | 0.33% | 0.00% | 10.2% | 50 ms | 330, 311, 311, 343 |
+| portrait | cut | Pop | 0.61% | 0.12% | 5.9% | 67 ms | 798, 847, 868, 827 |
+| | | Poster | 0.56% | 0.30% | 4.2% | 50 ms | 595, 609, 641, 691 |
+| | | Night | 0.39% | 0.12% | 6.5% | 50 ms | 428, 428, 423, 422 |
+| | | Corporate | 0.56% | 0.35% | 5.1% | 50 ms | 449, 427, 427, 424 |
+| | fade | Pop | 1.22% | 0.13% | 6.4% | 67 ms | 819, 880, 920, 1049 |
+| | | Poster | 0.56% | 0.19% | 5.4% | 50 ms | 596, 612, 611, 610 |
+| | | Night | 0.89% | 0.18% | 5.1% | 67 ms | 434, 428, 445, 427 |
+| | | Corporate | 0.61% | 0.24% | 5.4% | 50 ms | 502, 421, 402, 419 |
+
+Prepare medians over cut and fade (8 each, the first left out): landscape Pop 403, Poster 455, Night 344, Corporate 335 ms; portrait Pop 858, Poster 611, Night 428, Corporate 426 ms. Each spec's first prepare follows a cold load: 612 to 857 ms in landscape, 929 to 1,095 ms in portrait. While fading, landscape dropped 0% and portrait 1 to 10% of the transition's frames. Nothing was skipped.
+
+- **Within budget in landscape**, every look under 1% overall and none dropped while playing (Night 0.12% in one run), prepares under 500 ms at the median.
+- **Portrait: frames within budget except Pop with a fade (1.22%), prepares not for Pop and Poster.** Night and Corporate prepare in about 425 ms, Poster in about 610 and Pop in about 860.
+- **What the portrait prepares are made of** (portrait, cut, one run each, prepares after the first): Pop with the photo off 293 to 307 ms, Pop with the facts off 528 to 548, Poster with the photo off 228 to 262. So the photo is most of it, as in The look kit and Photo samples above, and in Pop the facts on top (with them its long-copy fitting takes a step, below). Not the cause: `text-wrap: balance` and `pretty` (Pop 810 to 846, Poster 611 to 670 with plain wrapping), Pop's tilted card and Poster's ink block (Pop 815 to 988, Poster 595 to 665 without them), Bricolage Grotesque's optical sizes (landscape, Pop 396 to 413 with `font-optical-sizing: none`). Night and Corporate carry the same photo at about 425 ms, so why it costs Pop and Poster more is not found yet.
+- **Fitting long copy costs a layout per step.** The first build stepped the headline down one size at a time, with the sizes set on the root: Pop, which needs three steps for the default copy in landscape, prepared in 553 to 624 ms (cut). With the sizes set on the copy and the steps searched by halves, and the photo upright (below), it prepares in about 400 ms; with the facts off, which needs no step, 346 to 376 ms.
+- **Pop's photo stands straight.** The canvas tilts it 2°; tilted, a drifting photo in a rounded frame dropped 0.77% of frames while playing in landscape (cut, 1.22% overall). Upright, 0.00%.
+- Two single long frames came in variants that do not ship (300 ms in the optical-size variant, 333 ms in the plain-wrapping one), both while playing; neither came in the 16 runs of the table.
+- **The QR code**, then 18 to 20vmin (version 2, 25 modules and the quiet zone), read back with jsQR from the player's own screenshot (CDP `Page.captureScreenshot`) of Night and Pop in landscape, and still at 30% of the screenshot's size (25% for Night). The review asked for 30vmin: see below.
+
+### Re-measured after the review (2026-11-21, 09:57 to 10:16)
+
+The review of #222 asked for three changes, measured here with the same method and content (the defaults, a QR code and the 4K photo):
+
+- the QR tile at 30vmin in every look;
+- facts defaulting to none, so the defaults play at the looks' own sizes with no fit step;
+- Poster's photo fading in under its ink block, so that it starts unpainted.
+
+Measured at 9672eac.
+
+| Orientation | Transition | Look | Overall | Playing | Loading next | Worst frame | Prepares after the first (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | Pop | 0.50% | 0.00% | 13.4% | 67 ms | 363, 362, 378, 359 |
+| | | Poster | 0.44% | 0.00% | 13.1% | 67 ms | 313, 328, 328, 343 |
+| | | Night | 0.28% | 0.00% | 8.1% | 50 ms | 393, 326, 343, 342 |
+| | | Corporate | 0.50% | 0.00% | 12.9% | 67 ms | 312, 372, 456, 324 |
+| | fade | Pop | 0.61% | 0.12% | 12.5% | 67 ms | 350, 360, 344, 342 |
+| | | Poster | 0.39% | 0.00% | 11.5% | 67 ms | 329, 329, 328, 344 |
+| | | Night | 0.50% | 0.00% | 11.5% | 67 ms | 429, 424, 440, 404 |
+| | | Corporate | 0.44% | 0.00% | 14.0% | 67 ms | 313, 312, 312, 309 |
+| portrait | cut | Pop | 0.78% | 0.41% | 6.9% | 67 ms | 808, 547, 547, 574 |
+| | | Poster | 0.50% | 0.23% | 6.1% | 50 ms | 411, 410, 425, 506 |
+| | | Night | 0.39% | 0.12% | 6.5% | 50 ms | 413, 427, 407, 421 |
+| | | Corporate | 0.33% | 0.12% | 5.3% | 50 ms | 626, 405, 404, 418 |
+| | fade | Pop | 1.33% | 0.25% | 7.1% | 67 ms | 899, 749, 557, 800 |
+| | | Poster | 1.39% | 0.43% | 7.2% | 67 ms | 468, 448, 466, 465 |
+| | | Night | 0.89% | 0.12% | 5.2% | 50 ms | 428, 411, 427, 426 |
+| | | Corporate | 0.44% | 0.12% | 6.5% | 50 ms | 426, 406, 405, 439 |
+
+**Prepare medians** over cut and fade (8 each):
+
+| | Pop | Poster | Night | Corporate |
+| --- | --- | --- | --- | --- |
+| landscape | 360 ms | 329 ms | 399 ms | 313 ms |
+| portrait | 662 ms (858 before) | 457 ms (611 before) | 424 ms | 412 ms |
+
+**Poster's photo fading in under the ink block is the reviewer's #168 effect.** (That fade sat on the frame that holds the ink block, so it also hid the wipe; replaced below.)
+
+- Without the fade (the same build otherwise), Poster prepares in 591 to 611 ms in portrait: cut 600, 594, 591, 596; fade 583, 599, 595, 611.
+- With it, Poster prepares in 410 to 506 ms.
+- One trace of each (browser-wide, 22 s after 12 s to settle) puts the difference in the GPU image decode:
+  - without the fade: 141 ms a prepare in `GpuImageDecodeTaskImpl`, in 0.6 decodes a prepare;
+  - with it: 46 ms in 0.3 decodes a prepare.
+- The photo painted at the intro's first frame was decoded for the screen while the SDK's own decode waited.
+
+**Pop in portrait is still over 500 ms** at a median of 662 ms, though it now takes no fit step. Its prepares spread from 547 to 899 ms.
+
+- A trace of Pop against Night (portrait, cut) finds the same decode work: 44 and 55 ms a prepare.
+- The renderer's main thread is the same too: 566 and 620 ms a prepare.
+- Pop's compositor, GPU and viz threads do more: 505 against 316 ms, 403 against 343, and 319 against 221 ms a prepare. That is raster and compositing, not script or layout.
+- Taking its tilted card away did not help in the first round (above). What else Pop composites that Night does not is the cobalt QR card, which pops in from 0.3 scale, and the wobbling eyebrow. Not found yet.
+
+**Fading.** Portrait Pop and Poster are over 1% with a fade (1.33 and 1.39%), almost all of it in the transition (12 to 13% of its frames).
+
+- One run each. Poster's photo without its fade-in faded at 0.39%, and Poster faded at 0.56% in the first round, so fade runs vary run to run.
+- Everything else is under 1%.
+
+**Worst frames.** Pop, Poster and Corporate in landscape, and Pop and Poster fading in portrait, have 67 ms worst frames. That is over the 50 ms rule (`TEMPLATE_BUDGET.maxFrameMs`), and all come while the next spot loads.
+
+**The QR code at 30vmin** reads back from the player's screenshot in every look in landscape, including a 100-character address (version 6, 41 modules):
+
+| Address | Reads down to (share of the screenshot's size) |
+| --- | --- |
+| short (26 characters), Pop and Corporate | 15%, the smallest tried |
+| short, Poster | 20% |
+| 100 characters, Pop and Night | 25% |
+
+- The test monitor is 700 mm wide (`wlr-randr`: 700x390 mm, a 32-inch panel), so the tile is about 12 cm on it. On a 55-inch panel it is about 20 cm.
+- No phone has scanned it yet.
+
+### Second re-check: the ink wipe kept (2026-11-21, 11:11 to 11:26)
+
+The re-check of #222 found the fade above had taken Poster's ink wipe away: the fade sat on `.photo`, which holds the ink block, so the block faded in with the photo and no frame showed ink. Two ways to keep the photo unpainted with the block opaque over it, Poster in portrait, the defaults with a QR code:
+
+| Poster, portrait | Overall | Playing | Worst frame | Prepares after the first (ms) |
+| --- | --- | --- | --- | --- |
+| the image's own wrapper at opacity 0 until 50 ms into play, cut, 3 runs | 0.28, 0.44, 0.39% | 0.06, 0.12, 0.12% | 50 ms | 592–657 |
+| the same, fade, 3 runs | 0.22, 0.33, 0.39% | 0.00, 0.06, 0.00% | 50 ms | 591–620 |
+| the image `visibility: hidden` until the `play` hook, cut, 3 runs | 0.33, 0.33, 0.28% | 0.00, 0.00, 0.06% | 50 ms | 412–532 |
+| the same, fade, 3 runs | 0.33, 0.33, 0.33% | 0.00% | 50 ms | 410–432 |
+
+- **At opacity 0 it still costs the decode.** A wrapper at opacity 0 inside the frame (the image a layer of its own, the drift's `will-change`) is back at about 600 ms, as with the photo painted. So the fade on `.photo` saved the decode because it hid the whole layer, ink block and all.
+- **Hidden until play keeps both.** The template keeps the image `visibility: hidden` until `play`, the block opaque over it, and Poster prepares at a median of 429 ms (24 prepares) with no frame dropped while playing. The ink block covers the frame whole as play starts, and a browser test reads the frame's centre: ink at the start of play, the photo once the wipe is done.
+- **Pop's portrait fade, 3 runs:** 1.50, 1.44 and 1.61% overall (0.43 to 0.51% while playing, 11 to 13% of the transition's frames). Worst frames 83, 67 and 83 ms. Prepares 533 to 1,028 ms, median 564. Over 1% every time, so not noise. Its cut stays under 1% (0.78%, above).
+- **Pop with three facts and a QR code** (the issue's "date, time, place"), portrait, cut, one run: 0.78% overall, 0.36% playing, a 67 ms worst frame. Prepares 802–854 ms: the fit takes a step, about 280 ms more than the defaults.
+- So Pop in portrait misses the budget on prepare (median 564 to 662 ms) and on the fade (about 1.5%). That is left for the owner to waive, with a follow-up for its three ablations.
+
 ## Countdown (issue #198, 2026-11-21)
 
 `templates/countdown` at `6524776`, each look a 10 s spot played on its own, in the screen's zone (New York): a countdown 12 days, 3 hours and minutes away, in days, hours and minutes (its minutes tick), with two facts and every toggle on, and a count-up 210 days since its target with a record of 301 (Poster's record panel, Night's record cards, Corporate's scale). The branch's player was at `http://localhost:8090/cp198/<orientation>/` with content built per orientation; portrait was set with `wlr-randr --transform 90` and restored afterwards. Method as for Room status: `device/pi/isolate.py`'s measurement pointed at that player, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed before each spec, the supervisor and the soak logger stopped, `__sf.prepares` read after each spec. The first of a spec's five prepares follows a cold load.
