@@ -6,7 +6,7 @@
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { EllipsisIcon, LoaderCircleIcon, RotateCwIcon, SearchIcon } from 'lucide-react';
-import { useId, type ReactNode, type SubmitEvent } from 'react';
+import { useId, type SubmitEvent } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { SaveRow, SettingsSection } from '~/components/settings/parts';
@@ -64,7 +64,8 @@ function ScreenSettings() {
   }
 
   return (
-    <div className="space-y-6">
+    // Space enough that the form's Save reads as the form's, not the Groups list's.
+    <div className="space-y-10">
       <form onSubmit={submit} className="space-y-6" noValidate>
         <EditorFields>
           <PageHeader title="Screens & groups" description="When screens update, how long one may be silent before it alerts, and the groups they are in." />
@@ -262,13 +263,12 @@ function Groups() {
 }
 
 /** Why the dialog's last action was refused. */
-function Refused({ children }: { children?: ReactNode }) {
+function Refused() {
   const error = useAppStore((s) => s.groups.error);
   return (
-    <div role="alert" className="space-y-2 text-sm font-medium text-destructive empty:hidden">
-      {error && <p>{error}</p>}
-      {error && children}
-    </div>
+    <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+      {error}
+    </p>
   );
 }
 
@@ -331,6 +331,7 @@ function DeleteDialog({ orgId, group, blockedBy, entries }: { orgId: string; gro
   const close = useAppStore((s) => s.closeGroupDialog);
   const { playlists } = useSuspenseQuery(playlistsQuery(orgId)).data;
   const names = new Map(playlists.map((p) => [p.id, p.name]));
+  const blocked = blockedBy.length > 0;
   return (
     <Dialog open onOpenChange={(o) => !o && close()}>
       <DialogContent>
@@ -338,29 +339,36 @@ function DeleteDialog({ orgId, group, blockedBy, entries }: { orgId: string; gro
           <DialogTitle>Delete {group.name}?</DialogTitle>
           <DialogDescription>Its screens stay; only the group goes. A schedule entry aimed at it must be removed or aimed elsewhere first.</DialogDescription>
         </DialogHeader>
-        <Refused>
-          {blockedBy.length > 0 && (
-            <ul aria-label="Entries aimed at it" className="list-disc space-y-1 pl-5 font-normal text-foreground">
+        {blocked ? (
+          // The refusal's own words name the group by id: the dialog says it in the page's.
+          <div role="alert" className="space-y-2 text-sm">
+            <p className="font-medium text-destructive">
+              {blockedBy.length === 1 ? '1 schedule entry is' : `${blockedBy.length} schedule entries are`} aimed at {group.name}. Remove{' '}
+              {blockedBy.length === 1 ? 'it' : 'them'} or aim {blockedBy.length === 1 ? 'it' : 'them'} elsewhere, then delete the group.
+            </p>
+            <ul aria-label="Entries aimed at it" className="list-disc space-y-1 pl-5">
               {blockedBy.map((id) => {
                 const e = entries.find((x) => x.id === id);
-                return (
-                  <li key={id}>
-                    <Link to="/schedule" className="underline underline-offset-4">
-                      {e ? entryText(e, names) : `Entry ${id}`}
-                    </Link>
-                  </li>
-                );
+                return <li key={id}>{e ? entryText(e, names) : `Entry ${id}`}</li>;
               })}
             </ul>
-          )}
-        </Refused>
+          </div>
+        ) : (
+          <Refused />
+        )}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={close}>
             Cancel
           </Button>
-          <Button type="button" variant="destructive" onClick={() => void deleteGroup(orgId)} aria-disabled={pending || undefined}>
-            {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} Delete
-          </Button>
+          {blocked ? (
+            <Button asChild>
+              <Link to="/schedule">Open the schedule</Link>
+            </Button>
+          ) : (
+            <Button type="button" variant="destructive" onClick={() => void deleteGroup(orgId)} aria-disabled={pending || undefined}>
+              {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} Delete
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

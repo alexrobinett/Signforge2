@@ -101,8 +101,10 @@ test('add three selected screens to a group at once, rename a group, refuse to d
   await page.getByRole('menuitem', { name: 'Delete…' }).click();
   const del = page.getByRole('dialog', { name: 'Delete North?' });
   await del.getByRole('button', { name: 'Delete' }).click();
-  await expect(del.getByRole('alert')).toContainText('targeted by 1 schedule entries');
-  await expect(del.getByRole('list', { name: 'Entries aimed at it' }).getByRole('link')).toHaveText(/^Breakfast · .*06:00–10:30$/);
+  await expect(del.getByRole('alert')).toContainText('1 schedule entry is aimed at North.');
+  await expect(del.getByRole('list', { name: 'Entries aimed at it' }).getByRole('listitem')).toHaveText(/^Breakfast · .*06:00–10:30$/);
+  await expect(del.getByRole('button', { name: 'Delete' })).toBeHidden();
+  await expect(del.getByRole('link', { name: 'Open the schedule' })).toBeVisible();
   await axe(page);
   await shots(page, '91-group-delete-refused');
   await del.getByRole('button', { name: 'Cancel' }).click();
