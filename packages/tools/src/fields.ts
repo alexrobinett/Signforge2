@@ -1,4 +1,5 @@
 /** Input fields shared by several tools. */
+import { MAX_TERMS, SELECTOR_OPS, SYSTEM_KEYS } from '@signforge/compiler/selector';
 import { displayHoursProblems, ID_PATTERN, validTimezone } from '@signforge/contract';
 import { z } from 'zod';
 
@@ -82,3 +83,58 @@ export const displayHours = z
   .superRefine((hours, ctx) => {
     for (const message of displayHoursProblems(hours)) ctx.addIssue({ code: 'custom', message });
   });
+
+const LABEL_KEY = /^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$/;
+/** A screen's name, id and live status are not labels, so no label or selector names them; `sf.` keys are SignForge's. */
+const REFUSED_KEYS = new Set(['name', 'id', 'status']);
+const anyKey = z
+  .string()
+  .regex(LABEL_KEY, 'a label key is 1 to 63 lowercase letters, digits, - _ or ., starting and ending with a letter or digit')
+  .refine((k) => !REFUSED_KEYS.has(k), 'name, id and status are not labels')
+  .refine((k) => !k.startsWith('sf.'), 'keys starting sf. are reserved');
+const SYSTEM = new Set<string>(SYSTEM_KEYS);
+
+/** A key a label may have: not a system label's, which the screen's settings give. */
+export const labelKey = anyKey
+  .refine((k) => !SYSTEM.has(k), `${SYSTEM_KEYS.join(', ')} are system labels, from the screen's settings: change them with update_screen_settings`)
+  .describe('A label key, such as region or store: lowercase letters, digits, - _ and .');
+
+/** Stored as typed, less the spaces around it; compared case-insensitively. */
+const labelValue = z
+  .string()
+  .trim()
+  .min(1, 'a label value cannot be empty')
+  .max(63, 'a label value is at most 63 characters')
+  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u, 'a label value is printable characters, spaces allowed')
+  .describe('Up to 63 characters, spaces allowed; matched case-insensitively');
+
+/** Labels to set, by key, as `claim_screen` and `update_screen_labels` take them; the tools check the limits. */
+export const labels = z.record(z.string(), labelValue).superRefine((set, ctx) => {
+  // Checked here, not as the record's key schema, whose refusal says only "Invalid key in record".
+  for (const key of Object.keys(set)) {
+    const checked = labelKey.safeParse(key);
+    if (!checked.success) ctx.addIssue({ code: 'custom', path: [key], message: checked.error.issues[0]!.message });
+  }
+});
+
+/** How many values each op takes. */
+const valueCount = (op: (typeof SELECTOR_OPS)[number], n: number) => (op === 'eq' || op === 'neq' ? n === 1 : op === 'in' || op === 'notin' ? n >= 1 : n === 0);
+
+/** `@signforge/compiler/selector`'s `Selector`, checked. */
+export const selector = z
+  .object({
+    all: z
+      .array(
+        z
+          .object({
+            key: anyKey.describe('A label key, or a system label: orientation, kind (device or browser), timezone, locale'),
+            op: z.enum(SELECTOR_OPS),
+            values: z.array(labelValue).default([]).describe('One for eq and neq, one or more for in and notin, none for exists and missing'),
+          })
+          .refine((t) => valueCount(t.op, t.values.length), 'eq and neq take one value, in and notin one or more, exists and missing none'),
+      )
+      .max(MAX_TERMS, `a selector has at most ${MAX_TERMS} terms`),
+  })
+  .describe(
+    'Screens whose labels match every term: { all: [{ key, op, values }] }. Values match case-insensitively; a screen without the key matches only missing, so neq and notin need it. System labels count: { key: "orientation", op: "eq", values: ["portrait"] }',
+  );

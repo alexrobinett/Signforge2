@@ -89,6 +89,7 @@ export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value ==
  */
 export const ACTIONS: Record<string, { group: string; words: string }> = {
   claim_screen: { group: 'Screens', words: 'Paired' },
+  update_screen_labels: { group: 'Screens', words: 'Labels changed' },
   rename_screen: { group: 'Screens', words: 'Renamed' },
   update_screen_settings: { group: 'Screens', words: 'Settings changed' },
   set_display_override: { group: 'Screens', words: 'Woken or put to sleep' },

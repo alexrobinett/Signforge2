@@ -8,7 +8,8 @@
  */
 import type { Orientation, ScreenKind } from '@signforge/contract';
 
-type Op = 'eq' | 'neq' | 'in' | 'notin' | 'exists' | 'missing';
+export const SELECTOR_OPS = ['eq', 'neq', 'in', 'notin', 'exists', 'missing'] as const;
+type Op = (typeof SELECTOR_OPS)[number];
 
 /** Every term must hold. `values` has one value for eq and neq, one or more for in and notin, none for exists and missing. */
 export interface Selector {
@@ -23,6 +24,9 @@ type Facts = Readonly<Record<string, string>>;
 
 /** What two values are compared as. */
 export const foldValue = (v: string) => v.trim().toLowerCase();
+
+/** The keys of `systemLabels`: no label may have one. */
+export const SYSTEM_KEYS = ['orientation', 'kind', 'timezone', 'locale'] as const;
 
 /** Labels every screen has from its settings, never stored: no `locale` on a screen set to none. */
 export const systemLabels = (s: { orientation: Orientation; kind: ScreenKind; timezone: string; locale: string | null }): Record<string, string> => ({

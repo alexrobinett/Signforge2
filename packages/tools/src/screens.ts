@@ -3,7 +3,9 @@ import type { DisplayHours, DisplayOverride, ScreenManifest } from '@signforge/c
 import type { OrgScope, Screen, ScreenCredential } from '@signforge/db';
 import { nextDisplayChange } from '@signforge/player-core';
 import { z } from 'zod';
-import { displayHours, id, ifVersion, locale, name, orientation, timezone } from './fields';
+import { matches, systemLabels } from '@signforge/compiler/selector';
+import { displayHours, id, ifVersion, locale, name, orientation, selector, timezone } from './fields';
+import { labelsByScreen } from './labels';
 import { parseHeartbeat } from './heartbeat';
 import { keysetPage, page, pageInput } from './paging';
 import { manifestKey } from './r2';
@@ -59,8 +61,8 @@ export function liveOverride(json: string | null, now: number): DisplayOverride 
 const isRevoked = (s: Screen, creds: readonly ScreenCredential[]) => s.status === 'revoked' || (creds.length > 0 && creds.every((c) => c.revokedAt != null));
 
 /**
- * A screen as tools return it. `credentials` are the screen's, and `unreachableMs` the org's
- * threshold, when the caller has them already (a list reads each once); a screen whose every
+ * A screen as tools return it. `credentials` and `labels` are the screen's, and `unreachableMs` the
+ * org's threshold, when the caller has them already (a list reads each once); a screen whose every
  * credential is revoked is revoked, while one that never collected a credential is waiting to pair.
  */
 export async function screenView(
@@ -70,8 +72,13 @@ export async function screenView(
   now = Date.now(),
   credentials?: readonly ScreenCredential[],
   unreachableMs?: number,
+  labels?: Readonly<Record<string, string>>,
 ): Promise<ScreenView> {
-  const [creds, afterMs] = await Promise.all([credentials ?? org.screens.credentials.forScreen(s.id), unreachableMs ?? unreachableAfterMs(org)]);
+  const [creds, afterMs, own] = await Promise.all([
+    credentials ?? org.screens.credentials.forScreen(s.id),
+    unreachableMs ?? unreachableAfterMs(org),
+    labels ?? org.screens.labels.list(s.id).then((rows) => labelsByScreen(rows).get(s.id) ?? {}),
+  ]);
   const revoked = isRevoked(s, creds);
   const hb = parseHeartbeat(s.heartbeatJson);
   const hours = hoursOf(s);
@@ -94,6 +101,8 @@ export async function screenView(
     orientation: s.orientation,
     kind: s.kind,
     displayHours: hours,
+    labels: { ...own },
+    systemLabels: systemLabels(s),
     status: revoked ? 'revoked' : 'active',
     desiredManifestId: s.desiredManifestId,
     previousManifestId: s.previousManifestId,
@@ -153,19 +162,28 @@ const EVENTS = 20;
 const listScreens = defineTool({
   name: 'list_screens',
   description:
-    'List the screens in the organization with their settings, status and manifests, ordered by id, a page at a time. Returns { screens: Screen[], next }; pass next as cursor for the following page.',
+    'List the screens in the organization with their settings, labels, status and manifests, ordered by id, a page at a time. Give a selector to list only the screens it matches, such as every north drive-thru ({ all: [{ key: "region", op: "eq", values: ["north"] }, { key: "type", op: "eq", values: ["drive-thru"] }] }) or every portrait screen ({ all: [{ key: "orientation", op: "eq", values: ["portrait"] }] }); list_label_keys says which keys and values exist. Returns { screens: Screen[], next }; pass next as cursor for the following page.',
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: z.object({ selector: selector.optional().describe('Only the screens it matches; omit for every screen'), ...pageInput }),
   output: outputs.list_screens,
-  example: {},
+  example: { selector: { all: [{ key: 'orientation', op: 'eq', values: ['portrait'] }] } },
   handler: async ({ org, input, blobs }) => {
-    const [all, credentials, afterMs] = await Promise.all([org.screens.list(), org.screens.credentials.list(), unreachableAfterMs(org)]);
-    const { rows, next } = page(all, (s) => [s.id], input);
+    const [all, credentials, afterMs, labelRows] = await Promise.all([
+      org.screens.list(),
+      org.screens.credentials.list(),
+      unreachableAfterMs(org),
+      org.screens.labels.list(),
+    ]);
+    const labels = labelsByScreen(labelRows);
+    const of = (id: string) => labels.get(id) ?? {};
+    const { selector: wanted } = input;
+    const picked = wanted ? all.filter((s) => matches(wanted, { ...of(s.id), ...systemLabels(s) })) : all;
+    const { rows, next } = page(picked, (s) => [s.id], input);
     const now = Date.now();
-    const of = (id: string) => credentials.filter((c) => c.screenId === id);
-    return { screens: await Promise.all(rows.map((s) => screenView(org, s, blobs, now, of(s.id), afterMs))), next };
+    const credentialsOf = (id: string) => credentials.filter((c) => c.screenId === id);
+    return { screens: await Promise.all(rows.map((s) => screenView(org, s, blobs, now, credentialsOf(s.id), afterMs, of(s.id)))), next };
   },
 });
 
@@ -203,7 +221,7 @@ const listScreenStatus = defineTool({
 const getScreen = defineTool({
   name: 'get_screen',
   description:
-    'Get one screen by id: its settings, state, last heartbeat, what it should be showing, manifests, the ids of the groups it is in, its credentials (never their secrets) and its recent events (what was done to it, newest first). Returns { screen, groupIds, credentials, events }.',
+    'Get one screen by id: its settings, labels, state, last heartbeat, what it should be showing, manifests, the ids of the groups it is in, its credentials (never their secrets) and its recent events (what was done to it, newest first). Returns { screen, groupIds, credentials, events }.',
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
