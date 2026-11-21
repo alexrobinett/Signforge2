@@ -884,11 +884,10 @@ export const feedImages = sqliteTable(
     url: text('url').notNull(),
     /** The source whose poll first named it: what a source's daily budget of new photos counts. No foreign key: the row may outlive the source until it expires. */
     sourceId: text('source_id').notNull(),
-    /** The fetched bytes' hash: a fetch that brings the same bytes again is not decoded again. */
+    /** The fetched bytes' hash: another URL in the org bringing the same bytes reuses its copies. */
     sourceSha256: text('source_sha256'),
-    /** `NewsImage.file`, `.sample` and `.thumb`; null until a fetch succeeds. */
+    /** `NewsImage.file` and `.thumb`; null until a fetch succeeds. */
     fileSha256: text('file_sha256'),
-    sampleSha256: text('sample_sha256'),
     thumbSha256: text('thumb_sha256'),
     etag: text('etag'),
     lastModified: text('last_modified'),
@@ -902,7 +901,7 @@ export const feedImages = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: updated(),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.url] })],
+  (t) => [primaryKey({ columns: [t.orgId, t.url] }), index('feed_images_org_source_sha_idx').on(t.orgId, t.sourceSha256)],
 );
 
 // --------------------------------------------------------------- connections

@@ -1521,13 +1521,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "sample_sha256": {
-          "name": "sample_sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "thumb_sha256": {
           "name": "thumb_sha256",
           "type": "text",
@@ -1586,7 +1579,13 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "feed_images_org_source_sha_idx": {
+          "name": "feed_images_org_source_sha_idx",
+          "columns": ["org_id", "source_sha256"],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "feed_images_org_id_organization_id_fk": {
           "name": "feed_images_org_id_organization_id_fk",

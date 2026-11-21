@@ -511,12 +511,25 @@ describe('feed images', () => {
     expect(await s.b.scope.feedImages.madeSince(t, 'one')).toEqual({ org: 0, source: 0 });
   });
 
+  it('finds existing renditions by content hash within the same org only', async () => {
+    const a = s.a.scope.feedImages;
+    const b = s.b.scope.feedImages;
+    const sha = (c: string) => c.repeat(64);
+    await a.hold(['https://dedupe.example/one.jpg', 'https://dedupe.example/pending.jpg'], { until: 10, now: 1, sourceId: 'news' });
+    await a.save('https://dedupe.example/one.jpg', { sourceSha256: sha('a'), fileSha256: sha('f'), thumbSha256: sha('t'), nextCheckAt: 20 });
+    // A row with sourceSha256 but no stored renditions is ignored.
+    await a.save('https://dedupe.example/pending.jpg', { sourceSha256: sha('p'), nextCheckAt: 20 });
+    expect(await a.bySourceSha(sha('a'))).toEqual({ fileSha256: sha('f'), thumbSha256: sha('t') });
+    expect(await a.bySourceSha(sha('p'))).toBeUndefined();
+    expect(await b.bySourceSha(sha('a'))).toBeUndefined();
+  });
+
   it('forgets rows and gives the hashes nothing else of the org names, keeping a row a snapshot still names', async () => {
     const a = s.a.scope.feedImages;
     const sha = (c: string) => c.repeat(64);
     const urls = ['https://gc.example/alone.jpg', 'https://gc.example/shared.jpg', 'https://gc.example/twin.jpg', 'https://gc.example/shown.jpg'];
     await a.hold(urls, { until: 1, now: 1, sourceId: 'news' });
-    await a.save(urls[0]!, { fileSha256: sha('1'), thumbSha256: sha('2'), sampleSha256: sha('3'), nextCheckAt: 1 });
+    await a.save(urls[0]!, { fileSha256: sha('1'), thumbSha256: sha('2'), nextCheckAt: 1 });
     // Its file is also an asset's, and its thumbnail also another row's.
     await a.save(urls[1]!, { fileSha256: (await s.a.scope.assets.get(s.a.asset))!.sha256, thumbSha256: sha('5'), nextCheckAt: 1 });
     await a.save(urls[2]!, { fileSha256: sha('6'), thumbSha256: sha('5'), nextCheckAt: 1 });
@@ -532,7 +545,7 @@ describe('feed images', () => {
     await s.b.scope.feedImages.hold([urls[0]!], { until: 1, now: 1, sourceId: 'news' });
     await s.b.scope.feedImages.save(urls[0]!, { fileSha256: sha('1'), nextCheckAt: 1 });
 
-    expect((await a.forget(urls.slice(0, 2).concat(urls[3]!))).sort()).toEqual([sha('1'), sha('2'), sha('3')]);
+    expect((await a.forget(urls.slice(0, 2).concat(urls[3]!))).sort()).toEqual([sha('1'), sha('2')]);
     expect((await a.get(urls)).map((r) => r.url).sort()).toEqual([urls[2], urls[3]].sort());
     expect(await s.b.scope.feedImages.get([urls[0]!])).toHaveLength(1);
     // Once the twin goes too, the thumbnail both named is free.

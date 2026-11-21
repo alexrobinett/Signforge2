@@ -9,7 +9,26 @@
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
 import type { ScreenKind } from '@signforge/contract';
-import { and, asc, desc, eq, getTableColumns, getTableName, gt, gte, inArray, isNull, lt, lte, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  getTableName,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { alias, type SQLiteColumn, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
@@ -1599,6 +1618,14 @@ export function scoped(d1: D1Database, orgId: string) {
           .get();
         return { org: row?.org ?? 0, source: row?.source ?? 0 };
       },
+      /** Another row in this org that already stored copies for these exact fetched bytes. */
+      bySourceSha: (sourceSha256: string) =>
+        db
+          .select({ fileSha256: fi.fileSha256, thumbSha256: fi.thumbSha256 })
+          .from(fi)
+          .where(and(eq(fi.orgId, orgId), eq(fi.sourceSha256, sourceSha256), isNotNull(fi.fileSha256), isNotNull(fi.thumbSha256)))
+          .limit(1)
+          .get(),
       /**
        * Delete these rows, but not one whose copy the org's latest snapshots still name (a source
        * whose polls fail keeps playing its last good one). Returns the hashes of the deleted rows'
@@ -1606,7 +1633,7 @@ export function scoped(d1: D1Database, orgId: string) {
        * blobs may go.
        */
       forget: async (urls: readonly string[]): Promise<string[]> => {
-        const shasOf = (r: typeof fi.$inferSelect) => [r.fileSha256, r.sampleSha256, r.thumbSha256].filter((x): x is string => x !== null);
+        const shasOf = (r: typeof fi.$inferSelect) => [r.fileSha256, r.thumbSha256].filter((x): x is string => x !== null);
         const rows = urls.length
           ? (
               await Promise.all(
@@ -1638,7 +1665,7 @@ export function scoped(d1: D1Database, orgId: string) {
             db
               .select()
               .from(fi)
-              .where(and(eq(fi.orgId, orgId), or(inArray(fi.fileSha256, part), inArray(fi.sampleSha256, part), inArray(fi.thumbSha256, part))))
+              .where(and(eq(fi.orgId, orgId), or(inArray(fi.fileSha256, part), inArray(fi.thumbSha256, part))))
               .all(),
             db
               .select({ sha256: s.assets.sha256 })
