@@ -93,3 +93,42 @@ describe('one switch at a time (review of #208, 3)', () => {
     expect(orgs.switchOrganization).toHaveBeenLastCalledWith(router, 'org_c');
   });
 });
+
+describe('creating an org and switching, one at a time (re-check of #208)', () => {
+  it('a create asked for while a switch is on its way does nothing, and its draft waits', async () => {
+    let release = () => {};
+    orgs.switchOrganization.mockClear();
+    orgs.createOrganization.mockClear();
+    orgs.switchOrganization.mockImplementationOnce(() => new Promise<void>((resolve) => (release = resolve)));
+    const store = appStore();
+    const switching = store.getState().switchOrg({ id: 'org_b', name: 'Harbor East' }, 'switcher');
+    store.getState().openCreateOrg();
+    store.getState().editOrgName('dialog', 'Harbor West');
+    await store.getState().createOrg('dialog');
+    expect(orgs.createOrganization).not.toHaveBeenCalled();
+    expect(store.getState().orgs.drafts.dialog).toMatchObject({ name: 'Harbor West', pending: false });
+
+    release();
+    await switching;
+    orgs.createOrganization.mockResolvedValueOnce({ id: 'org_c' });
+    await store.getState().createOrg('dialog');
+    expect(orgs.createOrganization).toHaveBeenCalledWith(router, 'Harbor West');
+  });
+
+  it('a switch asked for while a create is on its way does nothing', async () => {
+    let release = (_: unknown) => {};
+    orgs.switchOrganization.mockClear();
+    orgs.createOrganization.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    const store = appStore();
+    store.getState().editOrgName('dialog', 'Harbor West');
+    const creating = store.getState().createOrg('dialog');
+    await store.getState().switchOrg({ id: 'org_b', name: 'Harbor East' }, 'switcher');
+    await store.getState().chooseOrg({ id: 'org_b', name: 'Harbor East' });
+    expect(orgs.switchOrganization).not.toHaveBeenCalled();
+
+    release({ id: 'org_c' });
+    await creating;
+    await store.getState().switchOrg({ id: 'org_b', name: 'Harbor East' }, 'switcher');
+    expect(orgs.switchOrganization).toHaveBeenCalledWith(router, 'org_b');
+  });
+});
