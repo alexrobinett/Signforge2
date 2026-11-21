@@ -99,6 +99,16 @@ describe('validateSpotData', () => {
     expect(validateSpotData(fields, { price: 9.25 }, {})).toEqual(['field "price" must be a multiple of 0.5']);
     expect(validateSpotData(fields, { price: Number.NaN }, {})).toEqual(['field "price" must be a number']);
   });
+
+  it('holds a url to an https address within its maxLength, or empty for none', () => {
+    const qr: Record<string, FieldDef> = { qrUrl: { type: 'url', label: 'QR link', maxLength: 40 } };
+    expect(validateSpotData(qr, { qrUrl: 'https://example.com/plan' }, {})).toEqual([]);
+    expect(validateSpotData(qr, { qrUrl: '' }, {})).toEqual([]);
+    for (const bad of ['http://example.com/', 'javascript:alert(1)', '/floor-plan', 'example.com', 'data:text/html,hi'])
+      expect(validateSpotData(qr, { qrUrl: bad }, {})).toEqual(['field "qrUrl" must be an https address']);
+    expect(validateSpotData(qr, { qrUrl: `https://example.com/${'a'.repeat(30)}` }, {})).toEqual(['field "qrUrl" is longer than 40']);
+    expect(validateSpotData(qr, { qrUrl: 42 }, {})).toEqual(['field "qrUrl" must be an https address']);
+  });
 });
 
 describe('image size', () => {
@@ -367,13 +377,24 @@ describe('validateTemplateManifest', () => {
     bad.fields.size = { type: 'select', label: 'Size', options: [] };
     bad.fields.items = { type: 'list', label: 'Items', item: { pic: { type: 'image', label: 'Pic' } } };
     bad.fields.odd = { type: 'video', label: 'Odd' };
+    bad.fields.link = { type: 'url', label: 'Link', maxLength: 0 };
     expect(validateTemplateManifest(bad)).toEqual([
       'field "price": step must be a number above 0',
       'field "price": min must not be above max',
       'field "items.pic": a list row cannot hold an image',
       'field "size": options must be a list of text',
-      'field "odd": type must be one of text, number, boolean, color, select, image, list',
+      'field "odd": type must be one of text, number, boolean, color, select, url, image, list',
+      'field "link": maxLength must be a whole number above 0',
     ]);
+  });
+
+  it('takes url fields, in list rows too, with a default that is https or empty', () => {
+    const m = structuredClone(template);
+    m.fields.qrUrl = { type: 'url', label: 'QR link', maxLength: 300, default: '' };
+    m.fields.links = { type: 'list', label: 'Links', item: { href: { type: 'url', label: 'Link', default: 'https://example.com/' } } };
+    expect(validateTemplateManifest(m)).toEqual([]);
+    m.fields.qrUrl = { type: 'url', label: 'QR link', default: 'http://example.com/' };
+    expect(validateTemplateManifest(m)).toEqual(['field "qrUrl" default: field "qrUrl" must be an https address']);
   });
 
   it('holds a default to its own field', () => {
@@ -533,6 +554,22 @@ describe('table bindings', () => {
       price: '4,50',
       tag: '',
       hot: false,
+    });
+  });
+
+  it('fills a url property from a trimmed cell, leaving out a row whose address is not https', () => {
+    const links: Extract<FieldDef, { type: 'list' }> = {
+      type: 'list',
+      label: 'Links',
+      item: { name: { type: 'text', label: 'Name' }, href: { type: 'url', label: 'Link', default: '' } },
+    };
+    const table = { columns: ['Name', 'Link'], rows: [['Plan', ' https://example.com/plan '], ['Menu', 'http://example.com/menu'], ['Desk', '']] };
+    expect(tableItems(links, { columns: { name: 'Name', href: 'Link' } }, table, 'en-US')).toEqual({
+      items: [
+        { name: 'Plan', href: 'https://example.com/plan' },
+        { name: 'Desk', href: '' },
+      ],
+      problems: ['row 2: href must be an https address'],
     });
   });
 

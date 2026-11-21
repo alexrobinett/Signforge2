@@ -55,7 +55,9 @@ export type ScalarFieldDef =
   | { type: 'number'; label: string; default?: number; min?: number; max?: number /** Counted from `min`, or from 0 without one. */; step?: number }
   | { type: 'boolean'; label: string; default?: boolean }
   | { type: 'color'; label: string; default?: string }
-  | { type: 'select'; label: string; options: string[]; default?: string };
+  | { type: 'select'; label: string; options: string[]; default?: string }
+  /** A web address people type, such as a QR code's: `https:` only, or empty for none. */
+  | { type: 'url'; label: string; default?: string; maxLength?: number };
 
 export type FieldDef =
   | ScalarFieldDef

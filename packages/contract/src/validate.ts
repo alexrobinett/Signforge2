@@ -117,7 +117,7 @@ export function safeUrl(url: unknown): boolean {
 
 // ----------------------------------------------------------- template fields
 
-const SCALAR_TYPES = ['text', 'number', 'boolean', 'color', 'select'] as const;
+const SCALAR_TYPES = ['text', 'number', 'boolean', 'color', 'select', 'url'] as const;
 
 /** Whether `v` sits on the step grid, counted from `min` (or 0), allowing for float rounding. */
 function onStep(v: number, step: number, base: number): boolean {
@@ -145,6 +145,10 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       return isStr(v) ? undefined : `field "${name}" must be a colour`;
     case 'select':
       return isStr(v) && def.options.includes(v) ? undefined : `field "${name}" must be one of ${def.options.join(', ')}`;
+    case 'url':
+      if (!isStr(v) || (v !== '' && !safeUrl(v))) return `field "${name}" must be an https address`;
+      if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
+      return undefined;
   }
 }
 
@@ -160,6 +164,7 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
   };
   switch (def.type) {
     case 'text':
+    case 'url':
       optional('maxLength', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');
       break;
     case 'number':
@@ -417,6 +422,7 @@ function cellValue(def: ScalarFieldDef, cell: string | number, locale: string): 
         ? text
         : new Intl.NumberFormat(locale, { minimumFractionDigits: Number.isInteger(cell) ? 0 : 2, maximumFractionDigits: 2 }).format(cell);
     case 'color':
+    case 'url':
       return isStr(cell) ? text : undefined;
     case 'number':
       return isStr(cell) ? (text === '' ? undefined : Number(text)) : cell;
