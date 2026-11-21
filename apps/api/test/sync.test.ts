@@ -363,14 +363,20 @@ describe('commands', () => {
 
   it('tell a player from before #193, which refuses several live sources, to reload for a template that names them: a player that knows them is not', async () => {
     const s = await setUp('sync-live-sources');
-    const fields = { temp: { type: 'number', label: 'Temperature', default: 72 }, items: { type: 'list', label: 'Headlines', item: { title: { type: 'text', label: 'Title' } } } };
+    const fields = {
+      temp: { type: 'number', label: 'Temperature', default: 72 },
+      items: { type: 'list', label: 'Headlines', item: { title: { type: 'text', label: 'Title' } } },
+    };
     const live = {
       sources: {
         weather: { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' } },
         headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items' } },
       },
     };
-    await publish(s, 'm-sources', { schema: MANIFEST_SCHEMA, templates: { 'base/frame@1.0.0': { html: 'a'.repeat(64), manifest: { fields, live, protocol: 2 } } } });
+    await publish(s, 'm-sources', {
+      schema: MANIFEST_SCHEMA,
+      templates: { 'base/frame@1.0.0': { html: 'a'.repeat(64), manifest: { fields, live, protocol: 2 } } },
+    });
     // What master's player reports before #193: schemas 5 and 6. Its validator refuses live.sources in any manifest.
     const before = body({ player: { version: '1.0.0', manifestSchemas: [5, 6], protocols: [1, 2] } });
     expect((await sync(s, before)).commands).toEqual([{ type: 'reload' }]);
