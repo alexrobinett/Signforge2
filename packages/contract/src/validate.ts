@@ -118,7 +118,21 @@ export function safeUrl(url: unknown): boolean {
 
 // ----------------------------------------------------------- template fields
 
-const SCALAR_TYPES = ['text', 'number', 'boolean', 'color', 'select', 'url'] as const;
+const SCALAR_TYPES = ['text', 'number', 'boolean', 'color', 'select', 'url', 'date', 'datetime'] as const;
+
+/** How a `date` and a `datetime` are written, and how a message names them. */
+const CALENDAR = {
+  date: { form: /^\d{4}-\d{2}-\d{2}$/, what: 'a date (YYYY-MM-DD)' },
+  datetime: { form: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, what: 'a date and time (YYYY-MM-DDTHH:mm)' },
+} as const;
+
+/** Whether `v` is a `date` or `datetime` value that exists on the calendar: no 30 February, no 24:00. */
+function onCalendar(type: keyof typeof CALENDAR, v: unknown): v is string {
+  if (!isStr(v) || !CALENDAR[type].form.test(v)) return false;
+  // Read as UTC only to check the fields: a date that rolls over (31 April is 1 May) comes back different.
+  const t = new Date(`${type === 'date' ? `${v}T00:00` : v}Z`);
+  return !Number.isNaN(t.getTime()) && t.toISOString().startsWith(v);
+}
 
 /** Whether `v` sits on the step grid, counted from `min` (or 0), allowing for float rounding. */
 function onStep(v: number, step: number, base: number): boolean {
@@ -156,6 +170,15 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       if (new TextEncoder().encode(v).length > MAX_URL_BYTES) return `field "${name}" is longer than ${MAX_URL_BYTES} bytes`;
       if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
       return undefined;
+    case 'date':
+    case 'datetime': {
+      if (!onCalendar(def.type, v)) return `field "${name}" must be ${CALENDAR[def.type].what}`;
+      // Both forms are fixed-width, so text order is time order.
+      const [on, shown] = def.type === 'date' ? ['on', (s: string) => s] : ['at', (s: string) => s.replace('T', ' ')];
+      if (def.min !== undefined && v < def.min) return `field "${name}" must be ${on} or after ${shown(def.min)}`;
+      if (def.max !== undefined && v > def.max) return `field "${name}" must be ${on} or before ${shown(def.max)}`;
+      return undefined;
+    }
   }
 }
 
@@ -183,6 +206,14 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
     case 'boolean':
     case 'color':
       break;
+    case 'date':
+    case 'datetime': {
+      const type = def.type;
+      optional('min', (v) => onCalendar(type, v), CALENDAR[type].what);
+      optional('max', (v) => onCalendar(type, v), CALENDAR[type].what);
+      if (onCalendar(type, def.min) && onCalendar(type, def.max) && def.min > def.max) out.push(`${where}: min must not be after max`);
+      break;
+    }
     case 'select':
       if (!Array.isArray(def.options) || !def.options.length || !def.options.every(isStr)) out.push(`${where}: options must be a list of text`);
       break;
@@ -430,7 +461,11 @@ function cellValue(def: ScalarFieldDef, cell: string | number, locale: string): 
         : new Intl.NumberFormat(locale, { minimumFractionDigits: Number.isInteger(cell) ? 0 : 2, maximumFractionDigits: 2 }).format(cell);
     case 'color':
     case 'url':
+    case 'date':
       return isStr(cell) ? text : undefined;
+    case 'datetime':
+      // A spreadsheet writes the same wall time with a space, or with seconds.
+      return isStr(cell) ? text.replace(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::00)?$/, '$1T$2') : undefined;
     case 'number':
       return isStr(cell) ? (text === '' ? undefined : Number(text)) : cell;
     case 'boolean': {
