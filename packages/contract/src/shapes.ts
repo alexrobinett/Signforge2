@@ -683,7 +683,9 @@ export interface ScheduleEntry {
    * time zone and with the network down, and when the takeover that wins changes (one published,
    * starting or ending) the player ends the spot on screen at once instead of at its end. A screen
    * that does not trust its clock skips any entry with either bound rather than risk running a
-   * takeover forever.
+   * takeover forever, except a takeover that plays a base `alert` spot (owner, #200): that plays
+   * unless it ended before the earliest the real time can be (the player's build or its last sync),
+   * and ends on time from the first sync that makes the clock trusted again.
    */
   startsAt?: string;
   endsAt?: string;
