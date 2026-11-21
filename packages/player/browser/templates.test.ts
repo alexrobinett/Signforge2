@@ -1636,7 +1636,9 @@ describe('countdown (#198)', () => {
       for (const look of looks) {
         const f = await s.show({ look, mode: 'up', target: '2026-04-21T09:00', recordDays: 301 });
         (moving[orientation] ??= []).push(
-          await f.evaluate(() => [...document.querySelectorAll('.lk-wobble, .lk-pulse, .lk-ping, .ring .fill, .arm')].filter((e) => e.getAnimations().length).length),
+          await f.evaluate(
+            () => [...document.querySelectorAll('.lk-wobble, .lk-pulse, .lk-ping, .ring .fill, .arm')].filter((e) => e.getAnimations().length).length,
+          ),
         );
       }
     }
