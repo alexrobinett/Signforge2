@@ -86,22 +86,50 @@ interface Search {
 }
 
 /**
- * Entity declarations are how XML bombs work, and no real feed needs them. A DOCTYPE can only
- * appear before the root element; `<!ENTITY` is refused anywhere.
+ * Where a tag that fast-xml-parser reads from `from` ends: the index of `close`, quoted values
+ * skipped as the parser skips them (`tagExpWithClosingIndex`), or -1 when it never ends.
+ */
+function tagEnd(text: string, from: number, close: '>' | '?>'): number {
+  for (let j = from; j < text.length; j++) {
+    const c = text[j];
+    if (c === '"' || c === "'") {
+      j = text.indexOf(c, j + 1);
+      if (j === -1) return -1;
+    } else if (c === close[0] && (close === '>' || text[j + 1] === '>')) return j;
+  }
+  return -1;
+}
+
+/**
+ * Entity declarations are how XML bombs work, and no real feed needs them: `<!ENTITY` is refused
+ * anywhere, and a DOCTYPE wherever fast-xml-parser 5 would read one. To agree with the parser by
+ * construction, the document is walked as its own loop walks it (`OrderedObjParser.parseXml`), each
+ * kind of markup ending where the parser ends it: a closing tag at the next `>`; a processing
+ * instruction at `?>` from just after its `<`, and an opening tag at `>` from there, both skipping
+ * quoted values; a comment at `-->` after its `<!--`; CDATA at `]]>`. What the parser would refuse
+ * as never closed is refused here as `malformed`. A test checks the walk against the parser on
+ * generated prologs. `<!d` is refused too, though the parser reads only `<!D` as a DOCTYPE.
  */
 function refuseDeclarations(text: string): void {
-  // The prolog, read forward once: a comment or processing instruction is skipped whole (what looks
-  // like a tag inside one is not), and the first element ends it.
-  for (let i = text.indexOf('<'); i !== -1; i = text.indexOf('<', i + 1)) {
-    const end = text.startsWith('<!--', i) ? '-->' : text.startsWith('<?', i) ? '?>' : '';
-    if (end) {
-      i = text.indexOf(end, i + 2);
-      if (i === -1) throw new FeedError('malformed', 'a comment or processing instruction before the feed is never closed');
-    } else if (text.slice(i, i + 9).toUpperCase() === '<!DOCTYPE') {
-      throw new FeedError('doctype', 'feed declares a DOCTYPE or entities');
-    } else if (/[A-Za-z_]/.test(text[i + 1] ?? '')) break;
-  }
   if (/<!ENTITY/i.test(text)) throw new FeedError('doctype', 'feed declares a DOCTYPE or entities');
+  for (let i = text.indexOf('<'); i !== -1; i = text.indexOf('<', i + 1)) {
+    let end: number;
+    if (text[i + 1] === '/') end = text.indexOf('>', i);
+    else if (text[i + 1] === '?') {
+      const q = tagEnd(text, i + 1, '?>');
+      end = q === -1 ? -1 : q + 1;
+    } else if (text.startsWith('!--', i + 1)) {
+      const e = text.indexOf('-->', i + 4);
+      end = e === -1 ? -1 : e + 2;
+    } else if (text[i + 1] === '!' && (text[i + 2] === 'D' || text[i + 2] === 'd')) {
+      throw new FeedError('doctype', 'feed declares a DOCTYPE or entities');
+    } else if (text.startsWith('![', i + 1)) {
+      const e = text.indexOf(']]>', i);
+      end = e === -1 ? -1 : e + 2;
+    } else end = tagEnd(text, i + 1, '>');
+    if (end === -1) throw new FeedError('malformed', 'a tag, comment, CDATA section or processing instruction is never closed');
+    i = end;
+  }
 }
 
 /** The text of an element, whether it parsed as a string or as an object with attributes. */
@@ -245,19 +273,37 @@ function unescapeHtml(v: string): string {
   });
 }
 
+/** Gravatar avatars, WordPress emoji and feedburner's pixels, by host and path. */
+const NOT_A_PHOTO_URL = /(?:^|\.)gravatar\.com\/|feedburner|^s\.w\.org\/images\/core\/emoji\//i;
+
+/** Names a tracking pixel or spacer goes by, as a host label or a folder. */
+const TRACKER = new Set(['pixel', 'spacer', 'tracking']);
+
+/** Words a tracking pixel's or spacer's file name is made of, and nothing else: `tracking-pixel.gif`, `spacer_1x1.gif`. */
+const TRACKER_FILE = new Set([...TRACKER, '1x1', 'blank', 'transparent']);
+
 /**
- * Pictures in a story's body that are not its photo: tracking pixels and spacers (a host, folder or
- * file named so, a `tracking` folder, or feedburner's), Gravatar avatars and WordPress emoji, by URL
- * or by class. A name is matched whole: `google-pixel-10-review.jpg` is a photo.
+ * Whether a body picture is a tracking pixel or spacer by its URL: a host label or folder named
+ * `pixel`, `spacer` or `tracking`, or a file named only with tracker words. Names match whole, so
+ * `google-pixel-10-review.jpg` and `/pixels/` are photos.
  */
-const NOT_A_PHOTO_URL =
-  /^pixel\.|\/(?:pixel|spacer|tracking)\/|\/(?:pixel|spacer)(?:\.[a-z0-9]+)?$|(?:^|\.)gravatar\.com\/|feedburner|^s\.w\.org\/images\/core\/emoji\//i;
+function trackerUrl(u: URL): boolean {
+  const folders = u.pathname.toLowerCase().split('/');
+  const file = folders.pop() ?? '';
+  const stem = file.includes('.') ? file.slice(0, file.lastIndexOf('.')) : file;
+  return (
+    u.hostname.split('.').some((label) => TRACKER.has(label)) ||
+    folders.some((folder) => TRACKER.has(folder)) ||
+    (stem !== '' && stem.split(/[-_.]/).every((word) => TRACKER_FILE.has(word)))
+  );
+}
+
 const NOT_A_PHOTO_CLASS = /(?:^|\s)(?:emoji|wp-smiley|avatar)(?:\s|$)/i;
 
 /** `raw` as the URL of a body picture that may be the story's photo. */
 function photoUrl(raw: string, base: string | undefined, search: Search): string | undefined {
   const u = imageUrl(raw, base, search);
-  return u && !NOT_A_PHOTO_URL.test(u.host + u.pathname) ? u.href : undefined;
+  return u && !NOT_A_PHOTO_URL.test(u.host + u.pathname) && !trackerUrl(u) ? u.href : undefined;
 }
 
 const isSpace = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f';

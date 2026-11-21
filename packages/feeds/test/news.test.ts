@@ -1,5 +1,6 @@
+import { XMLParser } from 'fast-xml-parser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type FeedImage, LIMITS, normaliseFeed, parseNews } from '../src/index';
+import { type FeedImage, FeedError, LIMITS, normaliseFeed, parseNews } from '../src/index';
 import atom03 from './fixtures/atom-03.xml?raw';
 import atom from './fixtures/atom.xml?raw';
 import atomEnclosures from './fixtures/atom-enclosures.xml?raw';
@@ -84,9 +85,74 @@ describe('XML safety', () => {
       rss('<item><title>x</title></item>', '<?x <!-- ?><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">'),
       rss('<item><title>x</title></item>', '<?x <!-- ?><!DOCTYPE rss [<!ATTLIST rss foo CDATA "bar">]>'),
       rss('<item><title>x</title></item>', '<?x <a ?><!DOCTYPE rss>'),
+      // Each kind of markup ends where the parser ends it: `-->` from after `<!--`, `?>` from after `<`.
+      `<?xml version="1.0"?><!--><a --><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">${rss('')}`,
+      `<!---><a --><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">${rss('')}`,
+      `<!--><a --><!DOCTYPE rss [<!ATTLIST rss foo CDATA "bar">]>${rss('')}`,
+      `<?xml version="1.0"?><?><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd"><?x ?>${rss('')}`,
+      // A CDATA section is skipped whole, and a DOCTYPE the parser would read inside the feed is refused too.
+      `<![CDATA[<a]]><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">${rss('')}`,
+      rss('<item><title>x</title></item><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">'),
     ]) {
       expect(() => parseNews(body)).toThrow(expect.objectContaining({ code: 'doctype' }));
     }
+  });
+
+  it('refuses a DOCTYPE exactly when fast-xml-parser would read one, over generated prologs', () => {
+    // The parser's own reading: an entity the DOCTYPE declares is expanded only if the parser read it.
+    const oracle = new XMLParser({ processEntities: true });
+    const pieces = [
+      '<!--',
+      '-->',
+      '<!-->',
+      '<!--->',
+      '<?x',
+      '<?>',
+      '?>',
+      ' ?>',
+      '<![CDATA[',
+      ']]>',
+      '<!DOCTYPE rss>',
+      '<a>',
+      '</a>',
+      '<a',
+      '>',
+      '"',
+      "'",
+      ' ',
+      'x',
+    ];
+    let seed = 0x5eed194;
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31;
+      return seed / 2 ** 31;
+    };
+    const tally = { read: 0, notRead: 0, parserRefused: 0 };
+    // The parser's validator refuses most random prologs, so many are made for a few hundred of each other outcome.
+    for (let n = 0; n < 40_000; n++) {
+      const prolog = Array.from({ length: 1 + Math.floor(random() * 7) }, () => pieces[Math.floor(random() * pieces.length)]).join('');
+      const doc = (doctype: string) =>
+        `<?xml version="1.0"?>${prolog.replaceAll('<!DOCTYPE rss>', doctype)}<rss version="2.0"><channel><title>&seen;</title></channel></rss>`;
+      let read: boolean;
+      try {
+        read = JSON.stringify(oracle.parse(doc('<!DOCTYPE rss [<!ENTITY seen "yes">]>'), true)).includes('"yes"');
+      } catch {
+        tally.parserRefused++;
+        continue;
+      }
+      let code: unknown = 'accepted';
+      try {
+        parseNews(doc('<!DOCTYPE rss>'));
+      } catch (e) {
+        code = e instanceof FeedError ? e.code : e;
+      }
+      if (read) tally.read++;
+      else tally.notRead++;
+      // Where the parser reads a DOCTYPE the feed is refused, and where it does not, no DOCTYPE is claimed.
+      expect({ prolog, doctype: code === 'doctype' }).toEqual({ prolog, doctype: read });
+    }
+    // Every outcome is exercised, so the agreement means something.
+    expect(Math.min(tally.read, tally.notRead)).toBeGreaterThan(500);
   });
 
   it('refuses a prolog whose processing instruction or comment is never closed', () => {
@@ -180,6 +246,7 @@ describe('images in the story body', () => {
       { url: 'https://example.com/2026/google-pixel-10-review.jpg' },
     ]);
     expect(images(body('<img src="/pixels/sunset.jpg">'))).toEqual([{ url: 'https://example.com/pixels/sunset.jpg' }]);
+    expect(images(body('<img src="/2026/11/pixel-art-show.jpg">'))).toEqual([{ url: 'https://example.com/2026/11/pixel-art-show.jpg' }]);
     for (const tracker of [
       '/pixel.gif',
       '/t/pixel?id=1',
@@ -187,6 +254,13 @@ describe('images in the story body', () => {
       '/assets/spacer.png',
       'https://pixel.wp.com/g.gif',
       '/include/images/tracking/npr-rss-pixel.png',
+      'https://ad.pixel.example.com/i.gif',
+      '/tracking-pixel.gif',
+      '/pixel-1x1.gif',
+      '/1x1-pixel.png',
+      '/spacer_1x1.gif',
+      '/img/blank-spacer.gif',
+      '/1x1.gif',
     ]) {
       expect(images(body(`<img src="${tracker}"><img src="/real.jpg">`))).toEqual([{ url: 'https://example.com/real.jpg' }]);
     }
