@@ -6,6 +6,7 @@
  */
 import type { GroupView, ScreenView } from './screen-types';
 import { SECTIONS, type Section } from './sections';
+import { findTargets } from './targets';
 
 /** One input of a tool's form. `key` is an idempotency key: never shown, filled by `withKey`. */
 export type Field = { name: string; label: string; hint: string; required: boolean; nullable: boolean } & (
@@ -239,3 +240,26 @@ export function targetActions(
  * group's name and two groups' the same.
  */
 export const targetItemKey = (value: string, keywords: string[]) => `${value}:${JSON.stringify(keywords)}`;
+
+/** The screens and groups ⌘K lists for a search, as its item values in the order it lists them: screens, then groups, each by name. */
+export function foundValues(query: string, screens: readonly ScreenView[], groups: readonly GroupView[]): string[] {
+  if (!query.trim()) return [];
+  const found = findTargets(query, screens, groups);
+  return [...found.screens.map((s) => `screen:${s.id}`), ...found.groups.map((g) => `group:${g.id}`)];
+}
+
+/** The item selected, and the found items it was selected among (`foundValues`, as JSON). */
+export interface Selection {
+  value: string;
+  among: string;
+}
+
+/**
+ * The item ⌘K shows selected. cmdk moves its selection only when the search changes, so a list read
+ * that lands after typing would leave a tool selected over the screens it found: a selection made
+ * among other found items gives way to the first found. Empty lets cmdk select its first item.
+ */
+export function selectedItem(selection: Selection | null, found: readonly string[]): string {
+  if (selection?.among === JSON.stringify(found)) return selection.value;
+  return found[0] ?? selection?.value ?? '';
+}

@@ -12,8 +12,10 @@ import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import {
   commandEntries,
+  foundValues,
   NULL_CHOICE,
   orgCommands,
+  selectedItem,
   targetActions,
   targetItemKey,
   type CommandEntry,
@@ -25,6 +27,7 @@ import { useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { SECTIONS } from '~/lib/sections';
 import { byName, matchesQuery, screenKeywords } from '~/lib/targets';
+import { retryUnlessRedirect } from '~/queries/retry';
 import { screensQuery } from '~/queries/screens';
 import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
@@ -63,6 +66,7 @@ function TargetView({
   tools,
   checked,
   checking,
+  failed,
 }: {
   target: CommandTarget;
   screens: ScreenView[];
@@ -70,6 +74,8 @@ function TargetView({
   tools: ToolListing[];
   checked: boolean;
   checking: boolean;
+  /** The list read on this opening failed, and is not being tried again. */
+  failed: boolean;
 }) {
   const running = useAppStore((s) => s.commandMenu.running);
   const back = useAppStore((s) => s.backToCommands);
@@ -109,7 +115,13 @@ function TargetView({
           </CommandGroup>
         </CommandList>
         <p role="status" className="border-t px-4 py-3 text-[13px] text-muted-foreground empty:sr-only">
-          {waiting && (checking ? `Checking ${name} before Identify and Restart…` : `Identify and Restart wait until SignForge answers about ${name}.`)}
+          {running
+            ? 'A call is on its way: these wait for its answer.'
+            : waiting && checking
+              ? `Checking ${name} before Identify and Restart…`
+              : waiting && failed
+                ? `Couldn’t check ${name}, so Identify and Restart are off. Close ⌘K and open it again to retry.`
+                : ''}
         </p>
       </Command>
     </>
@@ -303,16 +315,34 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const running = useAppStore((s) => s.commandMenu.running);
   const choose = useAppStore((s) => s.chooseCommand);
   const search = useAppStore((s) => s.searchCommands);
+  const selection = useAppStore((s) => s.commandMenu.selection);
+  const select = useAppStore((s) => s.selectCommand);
   const chooseTarget = useAppStore((s) => s.chooseTarget);
   // The org's screens and groups (`list_screens`, `list_groups`): the Screens page's list, shown from its cache and read again
   // on each opening (this body mounts on each), so a screen or group someone else made since is found.
   const orgId = useOrgId();
-  const fleet = useQuery({ ...screensQuery(orgId), enabled: orgId !== '', refetchOnMount: 'always' });
-  // Read since this opening, and it worked: only then may a screen be sent a command.
+  // One retry, not the app's three: someone is waiting at the menu, and opening it again tries again.
+  const fleet = useQuery({ ...screensQuery(orgId), enabled: orgId !== '', refetchOnMount: 'always', retry: retryUnlessRedirect(1) });
+  // Read since this opening, and it worked: only then may a screen be sent a command. A read already on its way as the
+  // menu opens (leaving Screens, say) is joined, not repeated: it began moments before.
   const checked = fleet.isFetchedAfterMount && fleet.isSuccess;
+  const failed = fleet.isError && !fleet.isFetching;
   const screens = fleet.data?.screens ?? [];
   const groups = fleet.data?.groups ?? [];
   const searching = query.trim() !== '';
+  const found = foundValues(query, screens, groups);
+  // Said in the list, as the tools' long descriptions match almost any search, so the empty text seldom shows.
+  const listStatus = running
+    ? 'A call is on its way: the commands wait for its answer.'
+    : !searching
+      ? ''
+      : failed
+        ? fleet.data
+          ? 'Couldn’t check the screens: they are as last read, and Identify and Restart are off. Close ⌘K and open it again to retry.'
+          : 'Couldn’t read the screens, so none are listed. Close ⌘K and open it again to retry.'
+        : !checked && fleet.isFetching && !found.length
+          ? 'Looking for screens…'
+          : '';
 
   const entries = [...commandEntries(tools), ...orgCommands(shell.organizations.length)];
   const picked = entries.find((e) => e.kind === 'tool' && e.tool.name === form);
@@ -338,18 +368,23 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   ) : choosingOrg ? (
     <OrgList shell={shell} hues={hues} />
   ) : target ? (
-    <TargetView target={target} screens={screens} groups={groups} tools={tools} checked={checked} checking={fleet.isFetching} />
+    <TargetView target={target} screens={screens} groups={groups} tools={tools} checked={checked} checking={fleet.isFetching} failed={failed} />
   ) : (
-    <Command label="Search pages, screens and actions" loop filter={filter}>
+    <Command
+      label="Search pages, screens and actions"
+      loop
+      filter={filter}
+      value={selectedItem(selection, found)}
+      onValueChange={(value) => select(value, JSON.stringify(found))}
+    >
       <CommandInput ref={focusSearch} value={query} onValueChange={search} placeholder="Go to a page, find a screen, or type an action">
         <kbd className="rounded-md border px-1.5 py-0.5 font-mono text-xs text-muted-foreground">esc</kbd>
       </CommandInput>
+      <p role="status" className="border-b px-4 py-2 text-[13px] text-muted-foreground empty:sr-only">
+        {listStatus}
+      </p>
       <CommandList>
-        <CommandEmpty>
-          {searching && !checked && fleet.isFetching
-            ? 'Looking for screens…'
-            : 'No page, screen or action matches. Try part of a screen’s name, or a verb like “rename”.'}
-        </CommandEmpty>
+        <CommandEmpty>No page, screen or action matches. Try part of a screen’s name, or a verb like “rename”.</CommandEmpty>
         {/* Found by name only: listed before anything is typed, a fleet of 200 would bury the pages. */}
         {searching && screens.length > 0 && (
           <CommandGroup heading="Screens">

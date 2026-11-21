@@ -12,6 +12,7 @@ import {
   type CommandEntry,
   type CommandTarget,
   type PendingCall,
+  type Selection,
   type TargetAction,
   type ToolListing,
 } from '~/lib/command-menu';
@@ -24,6 +25,8 @@ interface CommandMenuState {
   query: string;
   /** The tool whose form is showing, by name; null shows the list. */
   form: string | null;
+  /** The list's selected item, as cmdk reports it (`selectedItem` in src/lib/command-menu.ts); null until it has. */
+  selection: Selection | null;
   /** The screen or group whose actions are showing; null shows the list. */
   target: CommandTarget | null;
   /** Showing the member's orgs, from "Switch organization…", instead of the commands. */
@@ -45,6 +48,8 @@ export interface CommandMenuSlice {
   chooseCommand: (entry: CommandEntry) => Promise<void>;
   backToCommands: () => void;
   searchCommands: (query: string) => void;
+  /** cmdk moved the list's selection, to `value`, among the screens and groups found then (`foundValues`, as JSON). */
+  selectCommand: (value: string, among: string) => void;
   /** Shows a found screen's or group's actions. */
   chooseTarget: (target: CommandTarget) => void;
   runTargetAction: (action: TargetAction) => Promise<void>;
@@ -56,6 +61,7 @@ export interface CommandMenuSlice {
 const CLOSED: CommandMenuState = {
   open: false,
   query: '',
+  selection: null,
   form: null,
   target: null,
   choosingOrg: false,
@@ -125,6 +131,7 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
     // The search stays as typed, so Back returns to what it found.
     backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, target: null, choosingOrg: false, fieldError: null } })),
     searchCommands: (query) => set((s) => ({ commandMenu: { ...s.commandMenu, query } })),
+    selectCommand: (value, among) => set((s) => ({ commandMenu: { ...s.commandMenu, selection: { value, among } } })),
     chooseTarget: (target) => set((s) => ({ commandMenu: { ...s.commandMenu, target } })),
     async runTargetAction(action) {
       const close = () => set((s) => ({ commandMenu: closed(s.commandMenu) }));

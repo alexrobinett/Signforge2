@@ -2,16 +2,18 @@ import { describeTools, registry, TOOLS, type Role } from '@signforge/tools';
 import { describe, expect, it } from 'vitest';
 import {
   commandEntries,
+  foundValues,
   needsInput,
   NULL_CHOICE,
   parseToolList,
   resultText,
+  selectedItem,
   targetActions,
   targetItemKey,
   toolInput,
   withKey,
 } from '../../src/lib/command-menu';
-import type { ScreenView } from '../../src/lib/screen-types';
+import type { GroupView, ScreenView } from '../../src/lib/screen-types';
 import { SECTIONS } from '../../src/lib/sections';
 
 // What `GET /api/tools` sends: `describeTools` for the member's role, in an org where editors publish (the default).
@@ -147,5 +149,27 @@ describe("a found screen's and group's actions (#180)", () => {
   it("shows a group's screens on the Screens page", () => {
     const group = { id: 'grp_1', name: 'North', screenIds: [], version: 1, createdAt: 0, updatedAt: 0 };
     expect(targetActions({ kind: 'group', group }, listed('viewer'), false)).toEqual([{ kind: 'open-group', label: 'Show its screens', groupId: 'grp_1' }]);
+  });
+});
+
+describe("⌘K's selection when the screens arrive after typing (#180)", () => {
+  const deli = { id: 'scr_1', name: 'Deli counter' } as ScreenView;
+  const front = { id: 'grp_1', name: 'Front of house', screenIds: ['scr_1'] } as GroupView;
+
+  it('lists what a search found as item values: screens, then groups, each by name, and nothing for no search', () => {
+    expect(foundValues('front', [deli], [front])).toEqual(['screen:scr_1', 'group:grp_1']);
+    expect(foundValues('  ', [deli], [front])).toEqual([]);
+  });
+
+  it('selects the first screen found once the list lands, over the tool selected while it was on its way', () => {
+    const typed = { value: 'tool:test_alert_channel', among: JSON.stringify([]) };
+    expect(selectedItem(typed, [])).toBe('tool:test_alert_channel');
+    expect(selectedItem(typed, foundValues('deli', [deli], []))).toBe('screen:scr_1');
+  });
+
+  it('keeps a selection made among the same found items, and lets cmdk choose before it has reported one', () => {
+    const found = foundValues('front', [deli], [front]);
+    expect(selectedItem({ value: 'group:grp_1', among: JSON.stringify(found) }, found)).toBe('group:grp_1');
+    expect(selectedItem(null, [])).toBe('');
   });
 });
