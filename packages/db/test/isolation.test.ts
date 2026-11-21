@@ -82,6 +82,13 @@ describe("a call made for org B with org A's ids", () => {
     expect(ids).toEqual([s.b.screen]);
   });
 
+  it("lists only the locales of org B's screens", async () => {
+    // Its rows carry no org: org A has a screen in a locale org B's screens do not use.
+    await s.a.scope.screens.insert({ name: 'Montreal', timezone: 'America/Toronto', orientation: 'landscape', locale: 'fr-CA' });
+    expect(await s.a.scope.screens.locales()).toContain('fr-CA');
+    expect(await s.b.scope.screens.locales()).toEqual([null]);
+  });
+
   it('lists nothing of org A', async () => {
     const b = s.b.scope;
     const lists = {

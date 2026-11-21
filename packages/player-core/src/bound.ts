@@ -25,22 +25,21 @@ export interface BindingSpot {
   bindings: Readonly<Record<string, Binding>> | undefined;
 }
 
-/** One field a spot binds to a source, in one locale a screen plays it in. */
+/** One field a spot binds to a source, and the locales screens play it in: it fits if it fits in one of them. */
 export interface BoundField {
   spot: string;
   field: string;
   binding: Binding;
   fields: unknown;
-  locale: string;
+  locales: readonly string[];
 }
 
-/** The fields `spots` bind, by source, once in each of `locales`. */
+/** The fields `spots` bind, by source, each played in `locales`. */
 export function boundFields(spots: Iterable<BindingSpot>, locales: readonly string[]): Map<string, BoundField[]> {
   const out = new Map<string, BoundField[]>();
   for (const spot of spots)
     for (const [field, binding] of Object.entries(spot.bindings ?? {}))
-      for (const locale of locales)
-        out.set(binding.source, [...(out.get(binding.source) ?? []), { spot: spot.id, field, binding, fields: spot.fields, locale }]);
+      out.set(binding.source, [...(out.get(binding.source) ?? []), { spot: spot.id, field, binding, fields: spot.fields, locales }]);
   return out;
 }
 
@@ -57,9 +56,15 @@ export function snapshotFit(bound: readonly BoundField[], data: unknown): { refu
   const problems: string[] = [];
   let fits = 0;
   for (const b of bound) {
-    const { value, problems: p } = boundValue(b.fields, b.field, b.binding, data, b.locale);
-    problems.push(...p.map((e) => `spot "${b.spot}": ${e}`));
-    if (value !== undefined) fits++;
+    // Checked in each locale until it fits; its problems are those of the locale it fits in, or of the first.
+    let found: ReturnType<typeof boundValue> | undefined;
+    for (const locale of b.locales) {
+      const r = boundValue(b.fields, b.field, b.binding, data, locale);
+      if (!found || r.value !== undefined) found = r;
+      if (r.value !== undefined) break;
+    }
+    problems.push(...(found?.problems ?? []).map((e) => `spot "${b.spot}": ${e}`));
+    if (found?.value !== undefined) fits++;
   }
   const columns = readPath(data, 'columns');
   if (Array.isArray(columns) && bound.some((b) => b.binding.table && missingColumns(columns, b.binding.table).length > 0))

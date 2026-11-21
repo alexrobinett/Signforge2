@@ -358,12 +358,26 @@ describe('live data', () => {
     expect(
       manifestBoundFields(m)
         .get('weather')
-        ?.map((b) => b.locale),
-    ).toEqual(['en-US', 'en-US', 'en-US']);
+        ?.map((b) => b.locales),
+    ).toEqual([['en-US'], ['en-US'], ['en-US']]);
     m.screen.locale = 'de-DE';
     expect(manifestBoundFields(m).get('elsewhere')).toEqual([
-      { spot: 'other', field: 'temp', binding: { source: 'elsewhere', path: 'x' }, fields, locale: 'de-DE' },
+      { spot: 'other', field: 'temp', binding: { source: 'elsewhere', path: 'x' }, fields, locales: ['de-DE'] },
     ]);
+  });
+
+  it("keeps a value that fits in one of the locales its screens play in, with that locale's problems", () => {
+    const priced: Record<string, FieldDef> = {
+      items: { type: 'list', label: 'Items', item: { price: { type: 'text', label: 'Price', maxLength: 7 } } },
+    };
+    const spots = [{ id: 's', fields: priced, bindings: { items: { source: 'menu', path: 'rows', table: { columns: { price: 'Price' } } } } }];
+    // es-ES writes 1234.5 as "1234,50", 7 characters; en-US as "1,234.50", 8.
+    const data = { columns: ['Price'], rows: [[1234.5]] };
+    expect(snapshotFit(boundFields(spots, ['en-US']).get('menu')!, data)).toEqual({
+      refused: 'unfit',
+      problems: ['spot "s": field "items": row 1: price is longer than 7'],
+    });
+    expect(snapshotFit(boundFields(spots, ['en-US', 'es-ES']).get('menu')!, data)).toEqual({ refused: null, problems: [] });
   });
 
   it('refuses a table that lacks a column a table binding maps, whatever else it fills', () => {

@@ -388,7 +388,7 @@ export async function rolloutCounts(db: Db, where: SQL | undefined): Promise<Map
     .innerJoin(ps, and(eq(ps.orgId, p.orgId), eq(ps.publishId, p.id)))
     .innerJoin(s.screens, and(eq(s.screens.orgId, ps.orgId), eq(s.screens.id, ps.screenId)))
     .where(where)
-    .groupBy(p.id, sql`2`, sql`3`, sql`4`)
+    .groupBy(p.id, rolloutFacts.reports, rolloutFacts.current, rolloutFacts.revoked)
     .all();
   const out = new Map<string, RolloutCount[]>();
   for (const { publishId, ...count } of rows) out.set(publishId, [...(out.get(publishId) ?? []), count]);

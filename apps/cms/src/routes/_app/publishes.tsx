@@ -10,7 +10,7 @@ import { EmptyState, PageHeader } from '~/components/page';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { Button } from '~/components/ui/button';
 import { useCanPublish, useNow, useOrgId } from '~/lib/live';
-import { byWord, publishTitle, standing, versionName, type PublishView } from '~/lib/publishes';
+import { byWord, publishTitle, rolloutComplete, standing, versionName, type PublishView } from '~/lib/publishes';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
 import { publishesQuery, publishQuery } from '~/queries/publishes';
@@ -73,7 +73,7 @@ function PublishesPage() {
           </h2>
           <p className="text-sm text-muted-foreground">
             <strong className="font-mono text-base font-semibold text-foreground">{done}</strong> of {screens.length} playing it
-            {publish.open === 0 && screens.length > 0 ? ' · complete' : ''}
+            {rolloutComplete(publish) ? ' · complete' : ''}
           </p>
         </div>
         {screens.length ? (
