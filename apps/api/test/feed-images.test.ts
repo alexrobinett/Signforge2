@@ -249,7 +249,12 @@ function feedOf(stories: number, photo: (i: number) => string | undefined) {
 const take = () => sent.splice(0);
 
 /** Run the consumer on these jobs at `at`; the messages it acked and retried. */
-async function consume(jobs: FeedImageJob[], deps: Omit<PhotoDeps, 'now'>, at = NOW, { attempts = 1, customEnv = env } = {}) {
+async function consume(
+  jobs: FeedImageJob[],
+  deps: Omit<PhotoDeps, 'now'>,
+  at = NOW,
+  { attempts = 1, customEnv = env }: { attempts?: number; customEnv?: Env } = {},
+) {
   const acked: string[] = [];
   const retried: string[] = [];
   const messages = jobs.map((body) => ({
