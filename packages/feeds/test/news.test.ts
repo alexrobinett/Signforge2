@@ -106,7 +106,8 @@ describe('XML safety', () => {
 
   // fast-xml-parser is pinned (package.json): an upgrade must rerun this test, which is what notices
   // if the parser's loop has moved away from refuseDeclarations' walk.
-  it('refuses a DOCTYPE exactly when fast-xml-parser would read one, over generated documents', () => {
+  // About 0.2 s on a laptop and 5.4 s on CI's runner (run 44896481147): the timeout is set from CI, not the default.
+  it('refuses a DOCTYPE exactly when fast-xml-parser would read one, over generated documents', { timeout: 60_000 }, () => {
     // The parser's own reading: an entity the DOCTYPE declares is expanded only if the parser read it.
     const oracle = new XMLParser({ processEntities: true });
     const pieces = [
