@@ -67,7 +67,7 @@ const updateScreenLabels = defineTool({
   input: change,
   output: outputs.update_screen_labels,
   example: { screenIds: ['scr_example'], set: { region: 'north', type: 'drive-thru' }, remove: ['legacy'] },
-  target: (input) => (input.screenIds.length === 1 ? { kind: 'screen', id: input.screenIds[0]! } : undefined),
+  target: (input) => (new Set(input.screenIds).size === 1 ? { kind: 'screen', id: input.screenIds[0]! } : undefined),
   handler: async ({ org, input, write }) => {
     const screenIds = [...new Set(input.screenIds)].toSorted();
     const rows = await org.screens.labels.list();
