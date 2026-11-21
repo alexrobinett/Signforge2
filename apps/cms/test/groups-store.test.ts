@@ -1,13 +1,13 @@
 // The Groups list in the store (#183): rename (a versioned draft), delete (refused while entries
 // target the group, with them shown) and members (added and removed, never replaced). Tool calls
 // go to a stubbed `callTool` the test answers in turn; nothing waits on a clock.
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { GroupView } from '../src/lib/screen-types';
 import { Refusal } from '../src/lib/tools';
 import { screensQuery, screenStatusQuery } from '../src/queries/screens';
-import { getScreenStatus } from '../src/server/screens.functions';
+import { getScreens, getScreenStatus } from '../src/server/screens.functions';
 import { createGroupsSlice, memberChecked, type GroupsSlice } from '../src/state/groups';
 
 /** The tool calls the store makes, answered in turn by the test. */
@@ -57,11 +57,16 @@ function heldStatus() {
   return () => release();
 }
 
-/** A tool call the test answers later. */
+/** A tool call the test answers later; `called` settles once the store has made it. */
 function held() {
   let settle: { answer: (out: unknown) => void; refuse: (err: Refusal) => void } = { answer: () => {}, refuse: () => {} };
-  callTool.mockReturnValueOnce(new Promise((answer, refuse) => (settle = { answer, refuse })));
-  return settle;
+  let made: () => void = () => {};
+  const called = new Promise<void>((resolve) => (made = resolve));
+  callTool.mockImplementationOnce(() => {
+    made();
+    return new Promise((answer, refuse) => (settle = { answer, refuse }));
+  });
+  return { ...settle, answer: (out: unknown) => settle.answer(out), refuse: (err: Refusal) => settle.refuse(err), called };
 }
 
 type Store = ReturnType<typeof groupsStore>['store'];
@@ -77,10 +82,10 @@ async function reloadAround(store: Store, meanwhile: () => void) {
   return store.getState().groups.dialog;
 }
 
-/** Members with scr_2 ticked, saved while its status read waits: what is done meanwhile, then the calls made. */
-async function saveAround(store: Store, meanwhile: () => void) {
+/** Members with `edits` (by default scr_2 ticked), saved while its status read waits: what is done meanwhile, then the calls made. */
+async function saveAround(store: Store, meanwhile: () => void, edits: Record<string, boolean> = { scr_2: true }) {
   store.getState().openGroupMembers(ORG, front);
-  store.getState().chooseGroupMember('scr_2', true);
+  for (const [id, member] of Object.entries(edits)) store.getState().chooseGroupMember(id, member);
   const release = heldStatus();
   const saving = store.getState().saveGroupMembers(ORG, front);
   meanwhile();
@@ -130,6 +135,25 @@ describe('rename', () => {
       store.getState().closeGroupDialog();
     });
     expect(dialog).toBeNull();
+  });
+
+  it('Reload says it is working, and the name takes no typing until it reopens on what is there now (follow-up to #205)', async () => {
+    const { store, queryClient } = groupsStore();
+    // The page reads the list, so Reload reads it again; its answer waits for the test.
+    const unsubscribe = new QueryObserver(queryClient, screensQuery(ORG)).subscribe(() => {});
+    let release: () => void = () => {};
+    vi.mocked(getScreens).mockReturnValueOnce(
+      new Promise((resolve) => (release = () => resolve({ screens: [], groups: [{ ...front, name: 'Front of store', version: 5 }], at: 1 } as never))),
+    );
+    const dialog = await reloadAround(store, () => {
+      expect(store.getState().groups.dialog).toMatchObject({ kind: 'rename', reloading: true });
+      store.getState().nameGroup('Typed meanwhile');
+      expect(store.getState().groups.renames.dialog?.edit.name).toBe('Front');
+      release();
+    });
+    unsubscribe();
+    expect(dialog).toMatchObject({ kind: 'rename', reloading: false });
+    expect(store.getState().groups.renames.dialog).toMatchObject({ version: 5, edit: { name: 'Front of store' } });
   });
 });
 
@@ -261,6 +285,41 @@ describe('members', () => {
   it('Cancel while Save reads status sends nothing (re-check of #205)', async () => {
     const { store } = groupsStore();
     expect(await saveAround(store, () => store.getState().closeGroupDialog())).toEqual([]);
+  });
+
+  it('closed while Save reads status, with only a removal to send, sends nothing (follow-up to #205)', async () => {
+    const { store } = groupsStore();
+    expect(await saveAround(store, () => store.getState().closeGroupDialog(), { scr_1: false })).toEqual([]);
+  });
+
+  it('closed while its removal is on its way, the add is not sent (follow-up to #205)', async () => {
+    const { store } = groupsStore();
+    store.getState().openGroupMembers(ORG, front);
+    store.getState().chooseGroupMember('scr_1', false);
+    store.getState().chooseGroupMember('scr_2', true);
+    const removal = held();
+    const saving = store.getState().saveGroupMembers(ORG, front);
+    await removal.called;
+    store.getState().closeGroupDialog();
+    removal.answer({ group: { ...front, screenIds: ['scr_old'], version: 5 } });
+    await saving;
+    expect(calls()).toEqual([{ name: 'remove_group_members', input: { groupId: front.id, screenIds: ['scr_1'] } }]);
+  });
+
+  it('Cancel waits while Save runs: the save is all or nothing (follow-up to #205)', async () => {
+    const { store } = groupsStore();
+    answer({ group: { ...front, screenIds: ['scr_old'], version: 5 } });
+    answer({ group: { ...front, screenIds: ['scr_2', 'scr_old'], version: 6 } });
+    const sent = await saveAround(
+      store,
+      () => {
+        store.getState().cancelGroupDialog();
+        expect(store.getState().groups.dialog).toMatchObject({ kind: 'members', pending: true });
+      },
+      { scr_1: false, scr_2: true },
+    );
+    expect(sent.map((c) => c.name)).toEqual(['remove_group_members', 'add_group_members']);
+    expect(store.getState().groups.dialog).toBeNull();
   });
 
   it('with nothing changed, sends nothing and closes', async () => {
