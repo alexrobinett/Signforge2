@@ -1,6 +1,6 @@
 import type { FieldDef } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { compileProbe, spotFromDraft, unsetFields, type DraftAsset, type DraftReads, type Probe, type SpotDraft } from '../src/draft';
+import { compileProbe, draftCheck, spotFromDraft, type DraftAsset, type DraftReads, type Probe, type SpotDraft } from '../src/draft';
 import { opts, promo } from './fixtures';
 
 const sha = (c: string) => c.repeat(64);
@@ -41,20 +41,52 @@ const draft = (d: Partial<SpotDraft> & Pick<SpotDraft, 'kind'>): SpotDraft => ({
   ...d,
 });
 
-describe('unsetFields', () => {
-  it('names an image with no asset and a date or datetime not picked: what a draft may save without, and a publish holds back for', () => {
-    const fields: Record<string, FieldDef> = {
-      photo: { type: 'image', label: 'Photo' },
-      logo: { type: 'image', label: 'Logo' },
-      target: { type: 'datetime', label: 'Target' },
-      opens: { type: 'date', label: 'Opens', default: '2026-12-01' },
-      closes: { type: 'date', label: 'Closes', default: '2026-12-31' },
-      title: { type: 'text', label: 'Title' },
-    };
+describe('draftCheck', () => {
+  const fields: Record<string, FieldDef> = {
+    photo: { type: 'image', label: 'Photo' },
+    logo: { type: 'image', label: 'Logo' },
+    target: { type: 'datetime', label: 'Target' },
+    opens: { type: 'date', label: 'Opens', default: '2026-12-01' },
+    closes: { type: 'date', label: 'Closes', default: '2026-12-31' },
+    title: { type: 'text', label: 'Title' },
+    events: {
+      type: 'list',
+      label: 'Events',
+      item: { name: { type: 'text', label: 'Name' }, at: { type: 'datetime', label: 'At', min: '2026-01-01T00:00' }, day: { type: 'date', label: 'Day' } },
+    },
+  };
+
+  it('leaves out an image with no asset and a date or datetime not picked: what a draft may save without, and a publish holds back for', () => {
     // A default stands in for a value left out; a value cleared to '' is not picked.
-    const draft = { data: { target: '', closes: '', title: '' }, assets: { logo: 'ast_1' }, bindings: {} };
-    expect(unsetFields(fields, draft)).toEqual(new Set(['photo', 'target', 'closes']));
-    expect(unsetFields(fields, { ...draft, data: { target: '2026-12-24T18:00' } })).toEqual(new Set(['photo']));
+    const draft = { data: { target: '', closes: '', title: '', extra: 1 }, assets: { logo: 'ast_1' }, bindings: {} };
+    const checked = draftCheck(fields, draft);
+    expect(Object.keys(checked.fields)).toEqual(['logo', 'opens', 'title', 'events']);
+    expect(checked.data).toEqual({ extra: 1, title: '' });
+    expect(Object.keys(draftCheck(fields, { ...draft, data: { target: '2026-12-24T18:00' } }).fields)).toEqual([
+      'logo',
+      'target',
+      'opens',
+      'closes',
+      'title',
+      'events',
+    ]);
+  });
+
+  it('keeps a bound date, unpicked or not, as it keeps a bound image: a bound field needs its fallback', () => {
+    const checked = draftCheck(fields, { data: { target: '' }, assets: {}, bindings: { target: {}, photo: {} } });
+    expect(Object.keys(checked.fields)).toEqual(['photo', 'target', 'opens', 'closes', 'title', 'events']);
+    expect(checked.data).toEqual({ target: '' });
+  });
+
+  it("checks a list row with a value its field takes in an unpicked date's place, and the rest of the row as it is", () => {
+    const events = [{ name: 'Doors', at: '', day: '' }, { name: 'Talk', at: '2026-11-27T18:00', day: '2026-11-27' }, { name: 'Late' }];
+    expect(draftCheck(fields, { data: { events }, assets: {}, bindings: {} }).data).toEqual({
+      events: [
+        { name: 'Doors', at: '2026-01-01T00:00', day: '1900-01-01' },
+        { name: 'Talk', at: '2026-11-27T18:00', day: '2026-11-27' },
+        { name: 'Late', at: '2026-01-01T00:00', day: '1900-01-01' },
+      ],
+    });
   });
 });
 

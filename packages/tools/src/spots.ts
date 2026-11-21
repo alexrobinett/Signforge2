@@ -8,7 +8,7 @@
  * holds it back until then.
  */
 import { spotProblems } from '@signforge/compiler';
-import { bindingOf, DEFAULT_FIT, unsetFields, unverified } from '@signforge/compiler/draft';
+import { bindingOf, DEFAULT_FIT, draftCheck, unverified } from '@signforge/compiler/draft';
 import {
   BINDING_PATH,
   missingColumns,
@@ -18,7 +18,6 @@ import {
   templateKey,
   validateTableFeed,
   type Binding,
-  type FieldDef,
   type TableFeed,
   type TemplateManifest,
 } from '@signforge/contract';
@@ -108,16 +107,15 @@ const invalid = (path: string, problems: string[]) =>
   );
 
 /**
- * Refuses a template draft a screen would refuse. The fields a draft may leave unset
- * (`unsetFields`: an image with no asset, a date not picked) are left out of the check, and every
- * other field must pass, so a new spot can be saved before its photo or its day is picked.
+ * Refuses a template draft a screen would refuse, but for what a draft may leave without a value
+ * for now (`draftCheck`: an image with no asset, a date not picked), so a new spot can be saved
+ * before its photo or its day is picked.
  */
 function checkTemplateDraft(
   t: { key: string; manifest: TemplateManifest; html: string },
   draft: { durationMs: number; data: Record<string, unknown>; assets: Record<string, string>; bindings: Record<string, Binding> },
 ) {
-  const unset = unsetFields(t.manifest.fields, draft);
-  const fields: Record<string, FieldDef> = Object.fromEntries(Object.entries(t.manifest.fields).filter(([name]) => !unset.has(name)));
+  const checked = draftCheck(t.manifest.fields, draft);
   for (const name of Object.keys(draft.assets))
     if (t.manifest.fields[name]?.type !== 'image') throw invalid('assets', [`"${name}" is not an image field of ${t.key}`]);
   const problems = spotProblems(
@@ -127,11 +125,11 @@ function checkTemplateDraft(
       kind: 'template',
       template: t.key,
       durationMs: draft.durationMs,
-      data: Object.fromEntries(Object.entries(draft.data).filter(([name]) => !unset.has(name))),
+      data: checked.data,
       assets: draft.assets,
       bindings: draft.bindings,
     },
-    { [t.key]: { manifest: { ...t.manifest, fields }, html: t.html } },
+    { [t.key]: { manifest: { ...t.manifest, fields: checked.fields }, html: t.html } },
   );
   const range = problems.filter((p) => p.startsWith('duration'));
   if (range.length) throw invalid('durationMs', range);
