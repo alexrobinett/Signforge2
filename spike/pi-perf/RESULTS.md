@@ -803,4 +803,4 @@ Switch modes with `wlr-randr --output HDMI-A-1 --mode 1920x1080@60` (set `XDG_RU
   - Portrait medians: Pop 404, Poster 281, Night 423, Corporate 365 ms.
   - 5 of 48 portrait prepares came in over the 500 ms budget: Night 505, 521 and 582, Corporate 519 and Pop 586 ms. Each was a single slow prepare in a spec whose others were 260 to 473 ms.
 - First prepares, which follow a cold load of the page, were 540 to 748 ms in every spec, over the 500 ms budget. That is the four-look bundle's cold start (The look kit: 520 to 661 ms for its test template), not this layout.
-- Poster, the timeline drawn as a column of hours, is the quickest in both orientations. Night and Pop are the slowest in portrait: Night's status word and Pop's cards are the largest areas of type on the screen.
+- Poster is the quickest look in both orientations, and Night and Pop the slowest in portrait. Why was not measured.
