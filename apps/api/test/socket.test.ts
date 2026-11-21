@@ -1,7 +1,7 @@
 // The nudge socket (M3-06): sync issues a ticket, `/v1/device/ws` trades it for a hibernating
 // WebSocket on the screen's Durable Object, publishing and revoking reach that socket, and the
 // screen's `applied` is written through to D1.
-import type { ScreenManifest, ServerSocketMessage, SyncRequest, SyncResponse } from '@signforge/contract';
+import { MANIFEST_SCHEMA, type ScreenManifest, type ServerSocketMessage, type SyncRequest, type SyncResponse } from '@signforge/contract';
 import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { dispatch, registry, type Caller } from '@signforge/tools';
@@ -30,7 +30,7 @@ async function setUp(orgId: string): Promise<Screen> {
   const row = await seed.scope.screens.credentials.insert({ screenId: seed.screen, secretHash });
   for (const id of [M1, M2]) {
     const manifest: ScreenManifest = {
-      schema: 3,
+      schema: MANIFEST_SCHEMA,
       id,
       generatedAt: '2026-11-17T00:00:00.000Z',
       screen: { id: seed.screen, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' },

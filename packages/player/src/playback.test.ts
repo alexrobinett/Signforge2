@@ -3,7 +3,7 @@
  * between awaits, which the browser tests can only reach through Playwright. Time moves only when a
  * test advances the fake clock; between timers every pending promise settles (`settle`).
  */
-import type { ScheduleEntry, ScreenManifest, Spot, Transition } from '@signforge/contract';
+import { MANIFEST_SCHEMA, type ScheduleEntry, type ScreenManifest, type Spot, type Transition } from '@signforge/contract';
 import type { Step } from '@signforge/player-core';
 import { describe, expect, it } from 'vitest';
 import { Playback, type PlaybackClock, type PlaybackSlots, type SlotIndex } from './playback';
@@ -119,7 +119,7 @@ function manifest(
     ? [{ id: 'tk', playlist: 'takeover', priority: 100, target: 'org', startsAt: iso(opts.takeover.from), endsAt: iso(opts.takeover.to) }]
     : [];
   return {
-    schema: 3,
+    schema: MANIFEST_SCHEMA,
     id,
     generatedAt: '2026-11-16T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'UTC', orientation: 'landscape' },

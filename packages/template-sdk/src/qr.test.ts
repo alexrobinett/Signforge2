@@ -81,7 +81,8 @@ function read(p: Photo): Uint8Array | undefined {
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const base = 'https://example.com/';
 
-describe('qrSvg in Chromium', () => {
+// Each case rasterises and decodes in Chromium: the browser tests' timeout, as template-check's.
+describe('qrSvg in Chromium', { timeout: 30_000 }, () => {
   const addresses: [string, string][] = [
     ['a short address', 'https://example.com/'],
     ['a query and a fragment', 'https://intranet.example.com/floor-plans/pier-9?floor=3&wing=north#lobby'],
