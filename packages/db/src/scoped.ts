@@ -631,6 +631,8 @@ export function scoped(d1: D1Database, orgId: string) {
             .run();
         },
       },
+      /** The locales the org's screens are set to, each once; null for a screen set to none (the player's default). */
+      locales: async () => (await db.selectDistinct({ locale: s.screens.locale }).from(s.screens).where(eq(s.screens.orgId, orgId)).all()).map((r) => r.locale),
       /**
        * Up to `limit` screens after `afterId`, by id, with only what their state is worked out
        * from: for the fleet poll, which must not read the org's whole list. One statement over the

@@ -10,3 +10,9 @@ _Avoid_: dependencies, context fields.
 
 **Draft to spot**: turning a spot's draft (as `get_spot` gives it) into the contract's `Spot` for one orientation, and compiling the probe screen a draft is checked on. One module (`@signforge/compiler/draft`) does it for the publish and the CMS's stage; each reads assets and template versions its own way (`DraftReads`). Only a verified asset gives a spot a file, on both sides.
 _Avoid_: preview conversion, toSpot.
+
+**Rollout outcome**: where a screen a publish switched stands on the manifest it gave it (playing, replaced, revoked, or open: waiting, downloading, asleep, offline, fell back), and whether the rollout is over (no screen open). One module (`packages/tools/src/rollout.ts`) decides it for `get_publish`, `list_publishes` and the five-minute check that marks a publish finished and sends its alert; `packages/db` reads only the facts it is decided from.
+_Avoid_: rollout status, applied.
+
+**Bound fields**: the fields a data source feeds (each spot's bindings to it, with its template's field definitions, in a locale a screen plays in), and whether a snapshot of it may replace the last good one. One module (`packages/player-core/src/bound.ts`) answers it for the player, the sync and the poller; the screen's locale, or for the poller every locale the org's screens play in.
+_Avoid_: fit, fitting fields.

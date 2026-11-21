@@ -299,27 +299,6 @@ export function resolveSpotData(
   return { data, rejected };
 }
 
-/**
- * How a snapshot serves the spots of a manifest: how many bound values it would fill, and what is
- * wrong with the rest. A snapshot that fills none while some spot binds to it is broken for this
- * screen, and must not replace the last good one.
- */
-export function snapshotFit(manifest: ScreenManifest, snapshot: DataSnapshot): { fits: number; problems: string[] } {
-  let fits = 0;
-  const problems: string[] = [];
-  for (const spot of Object.values(manifest.spots)) {
-    if (spot.kind !== 'template') continue;
-    const fields = manifest.templates[spot.template]?.manifest.fields;
-    for (const [field, b] of Object.entries(spot.bindings ?? {})) {
-      if (b.source !== snapshot.id) continue;
-      const { value, problems: p } = boundValue(fields, field, b, snapshot.data, manifest.screen.locale ?? 'en-US');
-      problems.push(...p.map((e) => `spot "${spot.id}": ${e}`));
-      if (value !== undefined) fits++;
-    }
-  }
-  return { fits, problems };
-}
-
 // --------------------------------------------------------------------- files
 
 /**
@@ -350,3 +329,4 @@ export function planSync(next: ScreenManifest, have: Iterable<string>): { missin
 export { Clock, CLOCK_JUMP_MS, type ClockOptions, type PersistedClock } from './clock';
 export { PlayLedger, hourOf, type PlayBatch } from './plays';
 export { containedFrames, READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from './frame';
+export { boundFields, manifestBoundFields, PLAYER_LOCALE, screenLocale, snapshotFit, type BindingSpot, type BoundField } from './bound';

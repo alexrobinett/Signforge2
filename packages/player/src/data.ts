@@ -5,13 +5,13 @@
  * source in the manifest (`startDataLoop`). Either way the latest is kept in memory for spots to
  * read and stored on disk, so the last good value survives a restart with no network.
  *
- * Live data is checked twice. A snapshot is kept only if it is well formed and fills at least one
- * field bound to it in the current manifest; and each bound value is checked against its field
- * again when a spot plays (`resolveSpotData`), so a value that does not fit leaves the spot's
+ * Live data is checked twice. A snapshot is kept only if it is well formed and fits the fields
+ * bound to it in the current manifest (player-core's `snapshotFit`, which the server runs too);
+ * and each bound value is checked against its field again when a spot plays (`resolveSpotData`), so a value that does not fit leaves the spot's
  * fallback on screen. Every refusal is counted against its source in `dataRejections`.
  */
 import { MIN_REFRESH_S, parseDataSnapshot, type DataSnapshot, type ScreenManifest, type SyncResponse } from '@signforge/contract';
-import { snapshotFit, type Rejected } from '@signforge/player-core';
+import { manifestBoundFields, snapshotFit, type Rejected } from '@signforge/player-core';
 
 const STATE = 'sf-state-v1';
 const key = (id: string) => `/_sf/data/${id}`;
@@ -79,10 +79,11 @@ async function offer(id: string, input: unknown, manifest: ScreenManifest | unde
   // Keep the newest: an older snapshot can arrive after a newer one. (A copy stored before
   // snapshots had versions has none, and any versioned one replaces it.)
   if (next.version <= (snapshots.get(id)?.version ?? -1)) return;
-  // Nor does one that fits none of the fields bound to it: the last good one stays the latest.
-  const fit = manifest ? snapshotFit(manifest, next) : { fits: true, problems: [] };
-  if (fit.problems.length && !fit.fits) {
-    reportRejected([{ source: id, problem: `snapshot fits no bound field: ${fit.problems[0]}` }]);
+  // Nor does one that fits none of the fields bound to it, or lacks a column a table maps: the last good one stays the latest.
+  const fit = manifest ? snapshotFit(manifestBoundFields(manifest).get(id) ?? [], next.data) : undefined;
+  if (fit?.refused) {
+    const why = fit.refused === 'unfit' ? 'fits no bound field' : 'lacks a column a table maps';
+    reportRejected([{ source: id, problem: `snapshot ${why}: ${fit.problems[0]}` }]);
     return;
   }
   snapshots.set(id, next);

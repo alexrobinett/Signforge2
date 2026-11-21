@@ -50,7 +50,16 @@ describe('a rollout', () => {
   });
 
   it('tells a finished publish its screens played from one replaced before any did', () => {
-    const p = { id: 'pub_1', revision: 2, restoresId: null, restoresRevision: null, by: { kind: 'user', id: 'u', name: 'Maria' }, createdAt: 0, screens: 2, open: 0 };
+    const p = {
+      id: 'pub_1',
+      revision: 2,
+      restoresId: null,
+      restoresRevision: null,
+      by: { kind: 'user', id: 'u', name: 'Maria' },
+      createdAt: 0,
+      screens: 2,
+      open: 0,
+    };
     // Played by both, then a later publish switched them: complete, though none plays it now.
     expect(standing({ ...p, finishedAt: 10, reached: 2, playing: 0, replaced: 2 })).toBe('complete');
     expect(standing({ ...p, finishedAt: 10, reached: 1, playing: 0, replaced: 2 })).toBe('played on 1 of 2');

@@ -12,6 +12,8 @@ import {
   planSync,
   resolvePlaylist,
   resolveSpotData,
+  boundFields,
+  manifestBoundFields,
   snapshotFit,
   spotFiles,
   validateManifest,
@@ -334,7 +336,7 @@ describe('live data', () => {
     });
   });
 
-  it('counts how many bound values in a manifest a snapshot fits', () => {
+  it("keeps a snapshot that fills a field bound to it in a manifest, in its screen's locale", () => {
     const m = manifest();
     const t: TemplateManifest = {
       id: 't',
@@ -349,9 +351,41 @@ describe('live data', () => {
     m.templates['t@1.0.0'] = { manifest: t, html: 'h' };
     m.spots.w = bound;
     m.spots.other = { ...bound, id: 'other', bindings: { city: { source: 'weather', path: 'city' }, temp: { source: 'elsewhere', path: 'x' } } };
-    expect(snapshotFit(m, weather)).toEqual({ fits: 2, problems: ['spot "other": field "city" must be text'] });
-    expect(snapshotFit(m, { ...weather, data: {} }).fits).toBe(0);
-    expect(snapshotFit(m, { ...weather, id: 'unbound' })).toEqual({ fits: 0, problems: [] });
+    const fitOf = (snap: DataSnapshot) => snapshotFit(manifestBoundFields(m).get(snap.id) ?? [], snap.data);
+    expect(fitOf(weather)).toEqual({ refused: null, problems: ['spot "other": field "city" must be text'] });
+    expect(fitOf({ ...weather, data: {} }).refused).toBe('unfit');
+    expect(fitOf({ ...weather, id: 'unbound' })).toEqual({ refused: null, problems: [] });
+    expect(
+      manifestBoundFields(m)
+        .get('weather')
+        ?.map((b) => b.locale),
+    ).toEqual(['en-US', 'en-US', 'en-US']);
+    m.screen.locale = 'de-DE';
+    expect(manifestBoundFields(m).get('elsewhere')).toEqual([
+      { spot: 'other', field: 'temp', binding: { source: 'elsewhere', path: 'x' }, fields, locale: 'de-DE' },
+    ]);
+  });
+
+  it('refuses a table that lacks a column a table binding maps, whatever else it fills', () => {
+    const listFields: Record<string, FieldDef> = {
+      title: { type: 'text', label: 'Title' },
+      items: { type: 'list', label: 'Items', item: { name: { type: 'text', label: 'Name' } } },
+    };
+    const bound = boundFields(
+      [
+        {
+          id: 's',
+          fields: listFields,
+          bindings: { title: { source: 'menu', path: 'columns.1' }, items: { source: 'menu', path: 'rows', table: { columns: { name: 'Item' } } } },
+        },
+      ],
+      ['en-US'],
+    ).get('menu')!;
+    expect(snapshotFit(bound, { columns: ['Item', 'Price'], rows: [['Soup', 4]] })).toEqual({ refused: null, problems: [] });
+    expect(snapshotFit(bound, { columns: ['Dish', 'Price'], rows: [['Soup', 4]] })).toEqual({
+      refused: 'missing-column',
+      problems: ['spot "s": field "items": the table has no column "Item"'],
+    });
   });
 });
 

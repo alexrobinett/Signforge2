@@ -164,7 +164,9 @@ export const publishOutput = z.object({
   open: z
     .number()
     .int()
-    .describe('Of those, how many it still waits on: neither playing, replaced nor revoked. Its rollout is over at 0, and the five-minute check then marks it finished'),
+    .describe(
+      'Of those, how many it still waits on: neither playing, replaced nor revoked. Its rollout is over at 0, and the five-minute check then marks it finished',
+    ),
 });
 
 export const OUTCOMES = ['playing', 'downloading', 'asleep', 'offline', 'waiting', 'fell_back', 'revoked', 'replaced'] as const;
