@@ -1,6 +1,7 @@
 import { LoaderCircleIcon } from 'lucide-react';
 import { useId, type SubmitEvent, type ReactNode } from 'react';
 import { Button } from '~/components/ui/button';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { cn } from '~/lib/utils';
@@ -57,5 +58,32 @@ export function CreateOrgForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/** The create-organization dialog the account menu and ⌘K open, once in the shell. */
+export function CreateOrgDialog() {
+  const open = useAppStore((s) => s.orgs.createDialogOpen);
+  const openCreateOrg = useAppStore((s) => s.openCreateOrg);
+  const closeCreateOrg = useAppStore((s) => s.closeCreateOrg);
+  return (
+    <Dialog open={open} onOpenChange={(o) => (o ? openCreateOrg() : closeCreateOrg())}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create organization</DialogTitle>
+          <DialogDescription>An organization holds screens and content. You will be its owner, and it becomes your active organization.</DialogDescription>
+        </DialogHeader>
+        <CreateOrgForm
+          form="dialog"
+          footer={
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+          }
+        />
+      </DialogContent>
+    </Dialog>
   );
 }

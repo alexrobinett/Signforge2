@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { defaultFilter } from 'cmdk';
-import { ArrowLeftIcon, CornerDownLeftIcon, LoaderCircleIcon, UsersIcon } from 'lucide-react';
+import { ArrowLeftIcon, Building2Icon, CheckIcon, CornerDownLeftIcon, LoaderCircleIcon, UsersIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useCallback } from 'react';
+import { OrgAvatar } from '~/components/org-switcher';
 import { KIND_WORD, StatusGlyph, toneOf } from '~/components/screens/status';
 import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
@@ -12,6 +13,7 @@ import { Label } from '~/components/ui/label';
 import {
   commandEntries,
   NULL_CHOICE,
+  orgCommands,
   targetActions,
   targetItemKey,
   type CommandEntry,
@@ -24,6 +26,7 @@ import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { SECTIONS } from '~/lib/sections';
 import { byName, matchesQuery, screenKeywords } from '~/lib/targets';
 import { screensQuery } from '~/queries/screens';
+import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
 const FIELD =
@@ -32,6 +35,9 @@ const FIELD =
 const Mono = ({ children, className = '' }: { children: string; className?: string }) => (
   <span className={`shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground ${className}`}>{children}</span>
 );
+
+/** The org list's first button takes focus when the list replaces the commands. Stable, so it runs once. */
+const focusFirstButton = (list: HTMLUListElement | null) => list?.querySelector('button')?.focus();
 
 /** The form's first field takes focus when the form appears. Stable, so it runs once per form. */
 const focusFirstField = (form: HTMLFormElement | null) => form?.querySelector<HTMLElement>('input, select, textarea')?.focus();
@@ -224,11 +230,49 @@ function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> })
   );
 }
 
+function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
+  const back = useAppStore((s) => s.backToCommands);
+  const chooseOrg = useAppStore((s) => s.chooseOrg);
+  const switchingTo = useAppStore((s) => s.orgs.switchingTo);
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center gap-2 border-b py-2.5 pr-4 pl-2">
+        <Button type="button" variant="ghost" size="icon" onClick={back} aria-label="Back to commands">
+          <ArrowLeftIcon className="size-4.5" aria-hidden />
+        </Button>
+        <h3 id="switch-org-heading" className="text-base font-semibold">
+          Switch organization
+        </h3>
+      </div>
+      <ul ref={focusFirstButton} aria-labelledby="switch-org-heading" className="max-h-[min(470px,60dvh)] space-y-0.5 overflow-y-auto p-2">
+        {shell.organizations.map((org) => {
+          const active = org.id === shell.organization?.id;
+          return (
+            <li key={org.id}>
+              <button
+                type="button"
+                onClick={() => void chooseOrg(org)}
+                disabled={switchingTo !== null}
+                aria-current={active || undefined}
+                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
+              >
+                <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
+                <span className="min-w-0 flex-1 truncate">{org.name}</span>
+                {active && <CheckIcon className="size-4" aria-hidden />}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * ⌘K: go to any section, or run any tool the member's role allows, from every signed-in page.
  * The entries are the tool registry agents call (src/lib/command-menu.ts). It opens with no motion.
  */
-export function CommandMenu({ tools }: { tools: ToolListing[] }) {
+export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const open = useAppStore((s) => s.commandMenu.open);
   const openMenu = useAppStore((s) => s.openCommandMenu);
   const close = useAppStore((s) => s.closeCommandMenu);
@@ -242,16 +286,18 @@ export function CommandMenu({ tools }: { tools: ToolListing[] }) {
           <DialogPrimitive.Description className="sr-only">
             Go to a page, or run an action. Type to filter; Enter runs the selected one.
           </DialogPrimitive.Description>
-          <MenuBody tools={tools} />
+          <MenuBody shell={shell} hues={hues} />
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   );
 }
 
-/** The open menu: the list, a tool's form, or a found screen's or group's actions. Mounted on each open, so it reads the screens again then. */
-function MenuBody({ tools }: { tools: ToolListing[] }) {
+/** The open menu: the list, a tool's form, the org list, or a found screen's or group's actions. Mounted on each open, so it reads the screens again then. */
+function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
+  const { tools } = shell;
   const query = useAppStore((s) => s.commandMenu.query);
+  const choosingOrg = useAppStore((s) => s.commandMenu.choosingOrg);
   const form = useAppStore((s) => s.commandMenu.form);
   const target = useAppStore((s) => s.commandMenu.target);
   const running = useAppStore((s) => s.commandMenu.running);
@@ -268,9 +314,10 @@ function MenuBody({ tools }: { tools: ToolListing[] }) {
   const groups = fleet.data?.groups ?? [];
   const searching = query.trim() !== '';
 
-  const entries = commandEntries(tools);
+  const entries = [...commandEntries(tools), ...orgCommands(shell.organizations.length)];
   const picked = entries.find((e) => e.kind === 'tool' && e.tool.name === form);
   const go = entries.filter((e) => e.kind === 'go');
+  const org = entries.filter((e) => e.kind === 'org');
   const actions = entries.filter((e) => e.kind === 'tool');
   const icon = (to: string) => SECTIONS.find((s) => s.to === to)?.icon;
 
@@ -279,6 +326,7 @@ function MenuBody({ tools }: { tools: ToolListing[] }) {
     return (
       <CommandItem key={e.id} value={e.id} keywords={[e.label, ...e.keywords]} disabled={running} onSelect={() => void choose(e)}>
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
+        {e.kind === 'org' && <Building2Icon className="size-4 text-muted-foreground" aria-hidden />}
         <span className="line-clamp-2 min-w-0 flex-1 sm:truncate">{e.label}</span>
         {e.kind === 'tool' && <Mono className="hidden sm:inline">{e.tool.name}</Mono>}
       </CommandItem>
@@ -287,6 +335,8 @@ function MenuBody({ tools }: { tools: ToolListing[] }) {
 
   return picked?.kind === 'tool' ? (
     <ToolForm key={picked.id} entry={picked} />
+  ) : choosingOrg ? (
+    <OrgList shell={shell} hues={hues} />
   ) : target ? (
     <TargetView target={target} screens={screens} groups={groups} tools={tools} checked={checked} checking={fleet.isFetching} />
   ) : (
@@ -339,6 +389,7 @@ function MenuBody({ tools }: { tools: ToolListing[] }) {
           </CommandGroup>
         )}
         <CommandGroup heading="Go to">{go.map(item)}</CommandGroup>
+        <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>
         {actions.length > 0 && <CommandGroup heading="Actions">{actions.map(item)}</CommandGroup>}
       </CommandList>
       <p className="flex items-center gap-2 border-t bg-muted/50 px-4 py-3 text-[13px] text-muted-foreground">

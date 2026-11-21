@@ -23,7 +23,8 @@ export interface ToolListing {
 
 export type CommandEntry =
   | { kind: 'go'; id: string; label: string; to: Section['to']; keywords: string[] }
-  | { kind: 'tool'; id: string; label: string; tool: ToolListing; keywords: string[] };
+  | { kind: 'tool'; id: string; label: string; tool: ToolListing; keywords: string[] }
+  | { kind: 'org'; id: string; label: string; action: 'switch' | 'create'; keywords: string[] };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
@@ -86,6 +87,13 @@ export function commandEntries(tools: ToolListing[]): CommandEntry[] {
       (tool): CommandEntry => ({ kind: 'tool', id: `tool:${tool.name}`, label: labelOf(tool.description), tool, keywords: [tool.name, tool.description] }),
     ),
   ];
+}
+
+/** The organization commands: switching only for a member of two or more orgs (#182). */
+export function orgCommands(orgCount: number): CommandEntry[] {
+  const create: CommandEntry = { kind: 'org', id: 'org:create', label: 'Create organization…', action: 'create', keywords: ['new organization'] };
+  if (orgCount < 2) return [create];
+  return [{ kind: 'org', id: 'org:switch', label: 'Switch organization…', action: 'switch', keywords: ['change organization'] }, create];
 }
 
 /** The value a choice field's select sends for null. */

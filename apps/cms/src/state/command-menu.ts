@@ -26,6 +26,8 @@ interface CommandMenuState {
   form: string | null;
   /** The screen or group whose actions are showing; null shows the list. */
   target: CommandTarget | null;
+  /** Showing the member's orgs, from "Switch organization…", instead of the commands. */
+  choosingOrg: boolean;
   /** A call is on its way: kept through closing and opening again, so it is not sent twice. */
   running: boolean;
   /** Counts the openings: a call's answer closes the menu only while it is the opening that sent it. */
@@ -46,10 +48,22 @@ export interface CommandMenuSlice {
   /** Shows a found screen's or group's actions. */
   chooseTarget: (target: CommandTarget) => void;
   runTargetAction: (action: TargetAction) => Promise<void>;
+  /** Closes the menu and switches to `org`, from its list of orgs. */
+  chooseOrg: (org: { id: string; name: string }) => Promise<void>;
   submitToolForm: (label: string, tool: ToolListing, form: FormData) => Promise<void>;
 }
 
-const CLOSED: CommandMenuState = { open: false, query: '', form: null, target: null, running: false, opening: 0, fieldError: null, pending: null };
+const CLOSED: CommandMenuState = {
+  open: false,
+  query: '',
+  form: null,
+  target: null,
+  choosingOrg: false,
+  running: false,
+  opening: 0,
+  fieldError: null,
+  pending: null,
+};
 
 /** The menu closed: what outlives an opening (a call on its way, the last one that failed, the count) stays. */
 const closed = (m: CommandMenuState): CommandMenuState => ({ ...CLOSED, running: m.running, opening: m.opening, pending: m.pending });
@@ -90,17 +104,26 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
       set((s) => ({ commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1 }, ui: { ...s.ui, drawerOpen: false } })),
     closeCommandMenu: () => set((s) => ({ commandMenu: closed(s.commandMenu) })),
     chooseCommand: async (entry) => {
-      if (entry.kind === 'go') {
-        set((s) => ({ commandMenu: closed(s.commandMenu) }));
-        await router.navigate({ to: entry.to });
-      } else if (needsInput(entry.tool)) {
-        set((s) => ({ commandMenu: { ...s.commandMenu, form: entry.tool.name, fieldError: null } }));
-      } else {
-        await run(entry.label, entry.tool, {});
+      switch (entry.kind) {
+        case 'go':
+          set((s) => ({ commandMenu: closed(s.commandMenu) }));
+          await router.navigate({ to: entry.to });
+          return;
+        case 'tool':
+          if (needsInput(entry.tool)) set((s) => ({ commandMenu: { ...s.commandMenu, form: entry.tool.name, fieldError: null } }));
+          else await run(entry.label, entry.tool, {});
+          return;
+        case 'org':
+          if (entry.action === 'switch') {
+            set((s) => ({ commandMenu: { ...s.commandMenu, choosingOrg: true } }));
+          } else {
+            set((s) => ({ commandMenu: closed(s.commandMenu) }));
+            get().openCreateOrg();
+          }
       }
     },
     // The search stays as typed, so Back returns to what it found.
-    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, target: null, fieldError: null } })),
+    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, target: null, choosingOrg: false, fieldError: null } })),
     searchCommands: (query) => set((s) => ({ commandMenu: { ...s.commandMenu, query } })),
     chooseTarget: (target) => set((s) => ({ commandMenu: { ...s.commandMenu, target } })),
     async runTargetAction(action) {
@@ -127,6 +150,10 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           }
         }
       }
+    },
+    chooseOrg: async (org) => {
+      set((s) => ({ commandMenu: closed(s.commandMenu) }));
+      await get().switchOrg(org, 'switcher');
     },
     submitToolForm: async (label, tool, form) => {
       if (get().commandMenu.running) return;

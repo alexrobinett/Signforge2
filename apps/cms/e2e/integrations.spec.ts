@@ -7,9 +7,9 @@ import { axe, createOrg, d1, hydrated, shots, signInAs, tool } from './helpers';
 import { CMS_URL } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
-const OWNER_ADDRESS = '192.0.2.41';
-const VIEWER_ADDRESS = '192.0.2.42';
-const STRANGER_ADDRESS = '192.0.2.43';
+const OWNER_ADDRESS = '192.0.2.134';
+const VIEWER_ADDRESS = '192.0.2.135';
+const STRANGER_ADDRESS = '192.0.2.136';
 
 const MINUTE = 60_000;
 
