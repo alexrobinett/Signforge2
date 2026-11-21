@@ -45,7 +45,7 @@ export type FetchResult<Body = string> = { status: 'not-modified' } | { status: 
 type Validators = { etag?: string | null; lastModified?: string | null };
 
 /** The most a story's photo may be. A larger one is refused by its `Content-Length` before any of it is read, or as it is read past this. */
-export const IMAGE_MAX_BYTES = 8_000_000;
+const IMAGE_MAX_BYTES = 8_000_000;
 
 /** Fetch `url` with the guards, asking conditionally with the validators the last answer gave. */
 export function guardedFetch(url: string, last: Validators, guards: FetchGuards): Promise<FetchResult> {

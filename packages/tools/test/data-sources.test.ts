@@ -87,10 +87,13 @@ describe('data sources', () => {
     const off = await call('update_data_source', { dataSourceId: 'headlines', photos: false });
     expect(off.dataSource).toMatchObject({ photos: false });
     expect(await owner.org.dataSources.get('headlines')).toMatchObject({ photos: false, etag: null, nextPollAt: 0 });
-    expect((await call('create_data_source', { name: 'Quiet', format: 'rss', feedUrl: 'https://news.example.com/q', photos: false })).dataSource).toMatchObject({
-      photos: false,
-    });
-    for (const id of ['headlines', (await owner.org.dataSources.list()).find((d) => d.name === 'Quiet')!.id]) await call('delete_data_source', { dataSourceId: id });
+    expect((await call('create_data_source', { name: 'Quiet', format: 'rss', feedUrl: 'https://news.example.com/q', photos: false })).dataSource).toMatchObject(
+      {
+        photos: false,
+      },
+    );
+    for (const id of ['headlines', (await owner.org.dataSources.list()).find((d) => d.name === 'Quiet')!.id])
+      await call('delete_data_source', { dataSourceId: id });
   });
 
   it('refuses the photos switch on anything but a news feed', async () => {
@@ -98,7 +101,10 @@ describe('data sources', () => {
       error: 'invalid_input',
     });
     await call('create_data_source', { id: 'cal', name: 'Cal', format: 'ical', feedUrl: 'https://a.example.com/c.ics' });
-    expect(await refusal('update_data_source', { dataSourceId: 'cal', photos: true })).toMatchObject({ error: 'invalid_input', message: 'photos is for rss sources only' });
+    expect(await refusal('update_data_source', { dataSourceId: 'cal', photos: true })).toMatchObject({
+      error: 'invalid_input',
+      message: 'photos is for rss sources only',
+    });
     await call('delete_data_source', { dataSourceId: 'cal' });
   });
 
