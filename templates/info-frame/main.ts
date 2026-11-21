@@ -171,8 +171,6 @@ defineTemplate({
     for (const el of document.querySelectorAll('.hh, .mm')) el.textContent = '00';
     for (const el of document.querySelectorAll<HTMLElement>('.rail-time, .now')) shrink(el);
     show(now);
-    // Night's seconds bar, at this second when it holds still (in portrait); play sets it running from here.
-    root.style.setProperty('--if-second', String((now.getTime() % 60_000) / 60_000));
 
     const caption = document.querySelector<HTMLElement>('.caption');
     const title = document.querySelector<HTMLElement>('.title');
@@ -180,11 +178,13 @@ defineTemplate({
     inkCards();
     if (look !== 'poster') photo.style.visibility = '';
   },
-  play() {
+  play({ root }) {
     document.querySelector<HTMLElement>('.photo')!.style.visibility = '';
     // The colon blinks with the seconds and Night's bar fills with the minute: each animation put at
-    // the screen's time once, then left to the compositor.
+    // the screen's time once, then left to the compositor. Held still (portrait), the bar shows the
+    // second the spot came on.
     const t = clockNow().getTime();
+    root.style.setProperty('--if-second', String((t % 60_000) / 60_000));
     for (const a of document.querySelector('.tick-bar')?.getAnimations() ?? []) a.currentTime = t % 60_000;
     for (const el of document.querySelectorAll('.colon')) for (const a of el.getAnimations()) a.currentTime = t % 1000;
     // Wake on each second boundary; text only changes when the minute does.
@@ -230,11 +230,15 @@ function shrink(el: HTMLElement): void {
   }
 }
 
-/** The caption's title at the largest step whose two lines hold it, so long copy ends in the clamp's ellipsis only at the smallest. */
+/**
+ * The caption's title at the largest step whose two lines hold it, so long copy ends in the clamp's
+ * ellipsis only at the smallest. A clamped line runs a whole line past the box; display type set
+ * solid only runs its glyphs' overhang past it.
+ */
 function fitTitle(caption: HTMLElement, title: HTMLElement): void {
   for (const step of TITLE_STEPS) {
     caption.style.setProperty('--if-title-fit', String(step));
-    if (title.scrollHeight <= title.clientHeight + 1) return;
+    if (title.scrollHeight <= title.clientHeight + Number.parseFloat(getComputedStyle(title).fontSize) / 2) return;
   }
 }
 

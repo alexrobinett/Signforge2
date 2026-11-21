@@ -531,6 +531,7 @@ h1 {
 }
 [data-look='poster'] .now {
   align-items: baseline;
+  flex-wrap: wrap;
 }
 [data-look='poster'] .now .temp-now {
   font-family: var(--lk-font-display);
@@ -611,7 +612,7 @@ h1 {
   --if-inset: 2.59vmin;
   --if-rail-w: 40.7vmin;
   --if-rail-gap: 2.22vmin;
-  --if-clock: 11.1vmin;
+  --if-clock: 10.1vmin;
   --if-temp: 8.89vmin;
   --if-icon: 8.15vmin;
   --if-title: 5.93vmin;
@@ -767,7 +768,7 @@ h1 {
   --if-rail-w: 42.6vmin;
   --if-rail-gap: 2.96vmin;
   --if-rail-pad: 4.44vmin 4.07vmin 3.7vmin;
-  --if-clock: 12.2vmin;
+  --if-clock: 12vmin;
   --if-temp: 8.89vmin;
   --if-icon: 7.4vmin;
   --if-title: 5.93vmin;
@@ -914,11 +915,12 @@ h1 {
 }
 
 /* ---------------------------------------------------------------- What is on
-   The clock grows when the weather is off, the weather when the forecast is: the canvas's sizes. */
+   The weather grows when the forecast is off, and the clock when the weather is: the canvas's
+   sizes where the widest time ("10:00") fits the rail. A landscape rail is too narrow for a
+   bigger clock on one line, so without the weather it sets the hours over the minutes. */
 :root[data-look='pop'][data-forecast='off'] {
-  --if-clock: 14.8vmin;
-  --if-temp: 12.96vmin;
-  --if-icon: 11.85vmin;
+  --if-temp: 10.8vmin;
+  --if-icon: 9.9vmin;
 }
 :root[data-look='pop'][data-weather='off'] {
   --if-clock: 17.6vmin;
@@ -931,19 +933,39 @@ h1 {
   --if-clock: 20.4vmin;
 }
 :root[data-look='night'][data-forecast='off'] {
-  --if-temp: 12.2vmin;
-  --if-icon: 11.1vmin;
+  --if-temp: 10.7vmin;
+  --if-icon: 9.75vmin;
 }
 :root[data-look='night'][data-weather='off'] {
   --if-clock: 14.8vmin;
 }
 :root[data-look='corporate'][data-forecast='off'] {
-  --if-clock: 13.9vmin;
   --if-temp: 12.2vmin;
   --if-icon: 10.4vmin;
 }
 :root[data-look='corporate'][data-weather='off'] {
   --if-clock: 16.7vmin;
+}
+:root:where([data-orientation='landscape'][data-weather='off']) .rail-time .time {
+  flex-direction: column;
+}
+:root:where([data-orientation='landscape'][data-weather='off']) .rail-time {
+  align-items: last baseline;
+}
+:root:where([data-orientation='landscape'][data-weather='off']) .rail-time .colon {
+  display: none;
+}
+:root:where([data-orientation='landscape'])[data-look='pop'][data-weather='off'] {
+  --if-clock: 28vmin;
+}
+:root:where([data-orientation='landscape'])[data-look='poster'][data-weather='off'] {
+  --if-clock: 30vmin;
+}
+:root:where([data-orientation='landscape'])[data-look='night'][data-weather='off'] {
+  --if-clock: 22vmin;
+}
+:root:where([data-orientation='landscape'])[data-look='corporate'][data-weather='off'] {
+  --if-clock: 24vmin;
 }
 /* Night's clock card fills the rail when it is alone. */
 :where([data-weather='off'])[data-look='night'] .clock {
@@ -962,7 +984,7 @@ h1 {
 :root:where([data-orientation='portrait']) .rail {
   width: auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   grid-template-rows: min-content 1fr;
   grid-template-areas: 'clock weather' 'logo weather';
   align-items: start;
