@@ -26,7 +26,7 @@ import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
 import { byWord, publishTitle } from '~/lib/publishes';
-import { isScreenSort, namesOf, sortScreens, type ScreenSort } from '~/lib/targets';
+import { isScreenSort, locationLine, sortScreens, type ScreenSort } from '~/lib/targets';
 import { publishQuery } from '~/queries/publishes';
 import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
@@ -300,7 +300,6 @@ function Locations({ groups, screens, onPick }: { groups: GroupView[]; screens: 
       {groups.map((g) => {
         const members = g.screenIds.map((id) => byId.get(id)).filter((s): s is ScreenView => !!s);
         const kind = rollup(members);
-        const needs = members.filter((s) => s.state.kind === 'needs_you');
         return (
           <li key={g.id} className="min-w-0 flex-[1_1_16rem]">
             {/* A filter, like the toolbar's: it waits for the page to hydrate (#140). */}
@@ -314,14 +313,7 @@ function Locations({ groups, screens, onPick }: { groups: GroupView[]; screens: 
                   <strong className="truncate text-[15px] font-semibold">{g.name}</strong>
                   {kind && <StatusWord tone={toneOf(kind)}>{KIND_WORD[kind]}</StatusWord>}
                 </span>
-                <span className="text-[13px] text-muted-foreground">
-                  {members.length} {members.length === 1 ? 'screen' : 'screens'}
-                  {needs.length > 0 &&
-                    ` · ${namesOf(
-                      needs.map((s) => s.id),
-                      members,
-                    ).join(', ')} ${needs.length === 1 ? 'needs' : 'need'} you`}
-                </span>
+                <span className="text-[13px] text-muted-foreground">{locationLine(members)}</span>
               </button>
             </EditorFields>
           </li>
