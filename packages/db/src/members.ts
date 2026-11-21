@@ -44,7 +44,6 @@ export async function startingOrg(d1: D1Database, userId: string): Promise<strin
   return rows.find((r) => r.orgId === r.last)?.orgId ?? null;
 }
 
-
 /** Whether an organization exists. The deploy-secret tree checks the org it is told to write to. */
 export async function organizationExists(d1: D1Database, orgId: string): Promise<boolean> {
   return (await drizzle(d1).select({ id: organization.id }).from(organization).where(eq(organization.id, orgId)).get()) !== undefined;

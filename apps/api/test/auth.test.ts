@@ -215,7 +215,9 @@ describe('the org a new session starts in (#182)', () => {
     // session's expiry, its org unchanged.
     vi.setSystemTime(t0 + 2 * 24 * 3_600_000);
     const laptopSession = () =>
-      env.DB.prepare('SELECT expiresAt FROM session s JOIN user u ON u.id = s.userId WHERE u.email = ? ORDER BY s.createdAt LIMIT 1').bind(addr).first('expiresAt');
+      env.DB.prepare('SELECT expiresAt FROM session s JOIN user u ON u.id = s.userId WHERE u.email = ? ORDER BY s.createdAt LIMIT 1')
+        .bind(addr)
+        .first('expiresAt');
     const before = await laptopSession();
     expect((await laptop.session()).body.organization).toEqual({ id: ids[0], role: 'owner' });
     expect(await laptopSession()).not.toBe(before);
@@ -240,7 +242,9 @@ describe('the org a new session starts in (#182)', () => {
     await racing.signIn(addr);
     expect(revoked).toBe(true);
 
-    const stored = await env.DB.prepare('SELECT s.activeOrganizationId AS org FROM session s JOIN user u ON u.id = s.userId WHERE u.email = ? ORDER BY s.createdAt DESC LIMIT 1')
+    const stored = await env.DB.prepare(
+      'SELECT s.activeOrganizationId AS org FROM session s JOIN user u ON u.id = s.userId WHERE u.email = ? ORDER BY s.createdAt DESC LIMIT 1',
+    )
       .bind(addr)
       .first('org');
     expect(stored).toBeNull();
@@ -276,4 +280,3 @@ function racingD1(after: (sql: string) => () => Promise<void>): D1Database {
     },
   });
 }
-
