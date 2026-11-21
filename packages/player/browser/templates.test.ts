@@ -138,10 +138,11 @@ interface Host {
   dom(frame: string): Promise<string>;
 }
 
-/** A page of frames, each the size of a 1080p screen at half scale in `orientation`. */
-async function host(orientation: Orientation = 'landscape'): Promise<Host> {
+/** A page of frames, each the size of a 1080p screen at half scale in `orientation`, or with `full`, at its own size. */
+async function host(orientation: Orientation = 'landscape', full = false): Promise<Host> {
   const page = await h.blankPage();
-  const size = orientation === 'landscape' ? { width: 960, height: 540 } : { width: 540, height: 960 };
+  const [long, short] = full ? [1920, 1080] : [960, 540];
+  const size = orientation === 'landscape' ? { width: long, height: short } : { width: short, height: long };
   await page.setViewportSize(size);
   await page.addScriptTag({ content: sampler });
   await page.evaluate(() => {
@@ -853,9 +854,13 @@ describe('the look kit (#190)', () => {
     t = await buildTemplate(resolve(import.meta.dirname, '../../template-looks/looks-test'));
   }, 60_000);
 
-  /** One frame of the test template; `play(data, theme)` inits it and waits for ready. */
+  /**
+   * One frame of the test template at a screen's own size; `play(data, theme)` inits it and waits
+   * for ready. The Pi shows 1080p at scale 1: at half that size, a 20 px label is 10 px, and Linux
+   * paints the cores of its strokes lighter (Corporate's meta line read 3.90:1 on CI's runner).
+   */
   async function kitFrame(orientation: Orientation = 'landscape') {
-    const hst = await host(orientation);
+    const hst = await host(orientation, true);
     await hst.open('fresh', t.html);
     let inits = 0;
     const frame = () => hst.page.mainFrame().childFrames()[0]!;
@@ -1022,15 +1027,15 @@ describe('the look kit (#190)', () => {
       });
       expect(c.copies, look).toEqual([true, 'true']);
       expect(c.shift, look).toBeCloseTo(-c.copyWidth, 0);
-      // The frame is 960x540: 1vmin is 5.4 px.
-      expect(c.copyWidth / c.seconds, look).toBeCloseTo(c.speed * 5.4, 1);
+      // The frame is 1920x1080: 1vmin is 10.8 px.
+      expect(c.copyWidth / c.seconds, look).toBeCloseTo(c.speed * 10.8, 1);
     }
   });
 
   it('new data after the first init leaves the same document as a fresh load', async () => {
     const a = spotData(t.manifest, { look: 'pop', showPhoto: false }),
       b = spotData(t.manifest, { look: 'night', showCrawl: false });
-    const hst = await host();
+    const hst = await host('landscape', true);
     await hst.open('fresh', t.html);
     await hst.init('fresh', b, photo);
     await hst.waitFor('fresh', 'ready', 1);
