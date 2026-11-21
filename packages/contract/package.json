@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./frame": "./src/frame.ts"
+    "./frame": "./src/frame.ts",
+    "./sample": "./src/sample.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",
