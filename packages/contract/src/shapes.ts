@@ -266,7 +266,6 @@ export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
       /(?<![.\w$])location\s*(?:[.[]|=(?!=))|\b(?:window|document|self|globalThis)\s*\.\s*location\b|\bwindow\.open\b|(?<![.\w$])(?:top|parent|opener)\s*\./,
     reason: 'templates may not navigate or reach outside their frame',
   },
-  { pattern: /@import\b/, reason: 'stylesheets must be bundled, not imported at run time' },
   { pattern: /["'(=]\s*(?:https?:)?\/\/[a-z0-9]/i, reason: 'a template may not refer to anything on the network' },
   // The player's policy runs only the bundle's own scripts (Template containment in docs/architecture.md).
   {
@@ -283,9 +282,14 @@ export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
  * parses a template's code (Template containment in docs/architecture.md).
  */
 export const TEMPLATE_SCRIPT_START = '"use strict";';
-/** CSS a template may not ship. Each entry was measured as too slow on the baseline device. */
+/**
+ * CSS a template may not ship, checked on the bundle. `backdrop-filter` was measured as too slow on
+ * the baseline device. An `@import` in the author's `style.css` is fine (the look kit's is one):
+ * the build inlines it, so one left in the bundle would be fetched at run time.
+ */
 export const FORBIDDEN_CSS: { pattern: RegExp; reason: string }[] = [
   { pattern: /backdrop-filter\s*:/i, reason: '`backdrop-filter` drops about a fifth of frames over moving content' },
+  { pattern: /@import\b/i, reason: 'stylesheets must be bundled, not imported at run time' },
 ];
 
 /** The checks a built template is put through, by `sf build` and again by the server. */

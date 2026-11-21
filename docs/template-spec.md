@@ -98,12 +98,79 @@ Write every brand value with a fallback, so the template still draws on a screen
 
 A colour field may default to a brand token, `"$brand.<colour>"` with one of the contract's `BRAND_COLORS` (`"$brand.accent"`). The server's compiler replaces it with the screen's brand colour at publish, so `data` only ever holds colours; a token naming no brand colour is a problem of the spot.
 
-**Colour lint.** `sf build` and the server warn on a colour literal in a template's CSS (`style.css`, and `<style>` in `index.html`) that is not the fallback inside a `var()`: a hex colour, `rgb()`/`hsl()` and the like anywhere, and named colours (`white`) in colour properties. It is a warning: the version still builds and registers, and the warnings are kept on its check report. The shipped templates have none (`packages/cli/test/templates.test.ts` keeps it so). How they get there:
+**Colour lint.** `sf build` and the server warn on a colour literal in a template's CSS (`style.css`, and `<style>` in `index.html`; `sf build` also reads the stylesheets `style.css` imports) that is not the fallback inside a `var()`: a hex colour, `rgb()`/`hsl()` and the like anywhere, and named colours (`white`) in colour properties. It is a warning: the version still builds and registers, and the warnings are kept on its check report. The shipped templates have none (`packages/cli/test/templates.test.ts` keeps it so). How they get there:
 
 - Give each brand role its token: text `--sf-text`, secondary text `--sf-muted`, page `--sf-bg`, cards `--sf-surface`, filled shapes `--sf-primary` with `--sf-on-primary` text, highlights `--sf-accent`. The brand tools derive an on-colour that reads, but a kit may set one by hand that does not (they only warn), and a colour field's fill is whatever the spot sets: pass such pairs through `readableOn` in `prepare`. With no kit, `$brand.accent` is the default palette's amber (`#f59e0b`), on which white reads at 2.14:1. The accent is not a text colour for every background either: amber on a light kit's white is 2.15:1, so accent-coloured text goes through `readableOn` too. **Large text** is WCAG's: at least 24 px, or 18.66 px (14 pt) bold (700 and up), on the screen, and the screen is 1080p: the Pi 4 is the baseline device and is held at 1080p, so `1vmin` is 10.8 px, in portrait too. So text of `2.23vmin` and up, or `1.73vmin` bold, is large and needs 3:1; smaller text needs 4.5:1. Every shipped accent-coloured text is large (agenda's bold day labels at `2.2vmin` are the smallest, 23.8 px), and all pass `{ large: true }`, so a mid-tone brand accent such as green on white (3.30:1) stays the accent instead of turning black. At 3:1 there is no margin, so the backdrop must be the one the text is painted on: photo-promo's eyebrow, measured on the kit's background and not on the photo under it, kept the demo kit's orange at 1.99:1 over a white photo (#124). Text on a fill keeps 4.5:1. Asking 3:1 is a claim about the text's size: shrink the text below the line and drop the option. `packages/player/browser/templates.test.ts` measures both kinds under no kit, the demo kit, a kit with poor on-colours, a light kit, an accent just over 4.5:1 on the demo kit's background, green on white, blue on dark and an accent just over 3:1 on its background and a mid-tone background, photo-promo over a white, a black, a mid-grey and a black-and-white striped photo, broad and 1 px wide at the screen's scale, in landscape and portrait, with the threshold from each text's size at 1080p, and checks that a kit's accent is kept wherever it reads.
 - Shades and shadows are the kit's background mixed with `transparent` (`color-mix(in srgb, var(--sf-bg, #000) 50%, transparent)`), and text over them the kit's text: the kit keeps that pair legible, so a light kit gets a light shade with dark text. A "light" theme option swaps the two (`templates/menu-board`).
 - A colour that is not a brand role, such as a weather sky, is a mix of tokens whose two fallbacks are the same literal, so with no kit it is exactly that colour: `color-mix(in srgb, var(--sf-primary, #2f80ed) 75%, var(--sf-bg, #2f80ed))`.
 - Canvas drawing is not linted; read a token with `getComputedStyle` to follow the kit (weather's rain and snow).
+
+## Looks
+
+A template that offers the four looks of the template set (#189), Pop, Poster, Night and Corporate, takes them from the look kit, `packages/template-looks`, instead of writing each one. One template per kind has a `look` field; the looks are not separate templates. A look sets type, shape, spacing and motion; the screen's brand kit sets the colours, and the look's palette from the concept canvas shows only on a screen with no kit. Its type and shape are the look's own: a brand kit's fonts (`--sf-font-*`) and `--sf-radius` are not used.
+
+**Using it.**
+
+1. Depend on `@signforge/template-looks` (`workspace:*`) and put `@import '@signforge/template-looks/looks.css';` first in `style.css`. `sf build` inlines it and its fonts like the rest of the template's CSS. An `@import` is refused only if one is left in the built bundle, where it would load at run time.
+2. Declare the field: `"look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" }` (`LOOKS`).
+3. In `prepare`, first `await applyLook(ctx)` (from `@signforge/template-looks`). It sets `data-look` on the root, the toggles (below), the text colours (below), and waits for the look's fonts, so text measured in `prepare` (a crawl, `fitWords`) is in the look's own type.
+
+`packages/template-looks/looks-test` is a template that uses every part of the kit, for the tests and the Pi. It is not in `templates/`, so it is never seeded.
+
+**Colours.** Each look maps its palette onto the brand tokens, the canvas colour as the fallback:
+
+| Role | Brand token | Pop | Poster | Night | Corporate |
+| --- | --- | --- | --- | --- | --- |
+| `--lk-bg` | `--sf-bg` | blush `#fbede7` | paper `#f1f1ec` | `#0e1512` | white |
+| `--lk-surface` | `--sf-surface` | `#f3ddd3` | `#e2e2da` | `#18231e` | `#f3f5f8` |
+| `--lk-text` | `--sf-text` | warm black `#1e1a17` | ink `#111111` | `#f2f5f0` | navy `#0b1f3a` |
+| `--lk-muted` | `--sf-muted` | `#6b5f58` | `#55554e` | `#cbd5cf` | slate `#4b5b70` |
+| `--lk-primary`, on it `--lk-on-primary` | `--sf-primary`, `--sf-on-primary` | tomato `#ff5a36`, ink | red `#e8401c`, ink | lime `#d4ff3a`, ground | navy, white |
+| `--lk-accent`, on it `--lk-on-accent` | `--sf-accent`, `--sf-on-accent` | cobalt `#2e44d9`, white | red `#e8401c`, ink | lilac `#c4b5fd`, ground | blue `#1f5eff`, white |
+
+Text in the primary or accent colour on the page uses `--lk-primary-ink` or `--lk-accent-ink` (4.5:1), or `--lk-primary-ink-large` or `--lk-accent-ink-large` for large text only (3:1). Text on a primary or accent fill uses `--lk-on-primary` or `--lk-on-accent`. `applyLook` passes each through `readableOn`, on `--lk-bg` or on its fill. So tomato, which is 2.71:1 on Pop's ground, never becomes text there. Poster's red is 3.58:1 on paper: its large text is red and its small text a darker red, `#c2330f` (4.91:1). Text on any other backdrop, such as a surface or a photo, goes through `readableOn` or `readableOver` in the template itself. A rule is `--lk-rule` thick in `--lk-rule-color`. Shades are mixes over `--lk-bg`, as under Brand.
+
+**Type and shape.** `--lk-font-display`, `--lk-font-body` and `--lk-font-label` (with `--lk-label-weight`, `--lk-label-case` and `--lk-label-tracking`); `--lk-display-weight`, `--lk-display-leading`, `--lk-display-tracking` and `--lk-figure-weight` (Corporate's numerals are light). Sizes: `--lk-size-display`, `--lk-size-title`, `--lk-size-body` and `--lk-size-label`, from the canvas boards' short copy. Spacing: `--lk-pad` and `--lk-gap`. Corners: `--lk-radius` (cards), `--lk-radius-small` and `--lk-radius-pill`.
+
+**Fonts.** Each look's faces are a family of their own. A face loads only once text uses its family, so a screen decodes only the chosen look's files. All of them are latin subsets from `@fontsource`, under the OFL, with no Reserved Font Name (`fonts/README.md`). IBM Plex Sans, the canvas's corporate face, reserves "Plex", so Corporate uses Inter Tight instead. Bytes as inlined in a bundle (base64):
+
+| Look | Families | Faces | Bytes |
+| --- | --- | --- | --- |
+| Pop | Bricolage Grotesque, Inter | variable, variable | 55,151 + 64,367 |
+| Poster | Instrument Serif, Inter | 400 and 400 italic, variable | 57,594 + 64,367 |
+| Night | Unbounded, Space Mono, Inter | variable, 400 and 700, variable | 67,895 + 44,374 + 64,367 |
+| Corporate | Inter Tight | variable | 59,855 |
+
+Inter is shared by three looks. The OFL asks that every copy carry each font's copyright notice and the licence: a `/*! … */` comment at the top of `looks.css` holds both, and the build keeps it in the bundle (5,357 bytes). A bundle with all four looks is 375,089 bytes, the test template included (`packages/template-looks/test/kit.test.ts`).
+
+On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other looks' faces costs more (`spike/pi-perf/RESULTS.md`, The look kit). The player reads every bundle before it frames it, about 30 ms more for this one than for a bundle with only Pop's faces. The first prepare after a page loads takes about 180 ms more. After that, prepares fall into a fast mode (about 300 ms in landscape for the test template) or a slow one (about 420 to 480 ms). The four-look bundle's runs land in the slow mode more often. A trace finds no thread doing more work for it, so the slow mode's cause is not known yet.
+
+**Toggles.** Each element that can be switched off has a boolean field `show<Name>`, such as `showPhoto` or `showNowLine`. `applyLook` marks the root `data-<name>="on|off"` (`data-photo`, `data-now-line`) and removes every element marked `data-show="<name>"` when it is off. So the layout reflows around what is left: write it in flex or grid, which close up over a removed element, and key anything else off the root's marks. A photo that is switched off is never decoded. Type steps up into space an element leaves: each look has a `--lk-step` (Pop 1.18, Poster 1.2, Night 1.6, Corporate 1.15), and a template sets `:root[data-photo='off'] { --lk-scale: var(--lk-step); }` and sizes text as `calc(var(--lk-size-display) * var(--lk-scale))`. No template needs layout code in `main.ts` for a toggle.
+
+**Motion.** Classes whose movement each look gives in its own language. Every one moves only `transform` and `opacity`:
+
+| Class | Pop | Poster | Night | Corporate |
+| --- | --- | --- | --- | --- |
+| `lk-text` | bouncy rise | slide-up out of a mask | slide-up out of a mask, expo-out | 1.5vmin eased rise |
+| `lk-fade` | fade | fade and rise | fade and rise | fade |
+| `lk-badge` | springy pop-in | stamp | slide in | fade |
+| `lk-photo` | slide in, tilted | none (see `lk-cover`) | zoom out of 1.06 | settle from 1.04 |
+| `lk-cover` | none | ink wipe: a block over a photo, scaled away | none | none |
+| `lk-draw` | a rule or bar drawn left to right | the same | the same | the same |
+| `lk-drift`, ambient, landscape only | slow drift | slow push-in | slow pan | slow push-in |
+| `lk-wobble`, ambient | sticker wobble | none | none | none |
+| `lk-pulse` / `lk-ping`, ambient | bounce / none | none | live pulse / ping | breathing / none |
+| `lk-crawl` | steady crawl, `--lk-crawl-speed` vmin a second | the same | the same | the same |
+
+- Each element with `lk-text`, `lk-fade`, `lk-badge`, `lk-photo`, `lk-cover` or `lk-draw` gets its look's intro, staggered by `lk-d1` to `lk-d8`. Its outro is the same motion reversed, ending as the spot ends (`calc(var(--sf-duration) - var(--lk-out))`).
+- Text that slides out of a mask sits in an `.lk-mask`.
+- An ambient class goes on an element inside one that has an intro, so the outer element's outro takes it away.
+- A crawl is a `.lk-crawl` strip filled in `prepare` and passed to `crawl(strip, ctx)`. It holds its content twice and slides by exactly one copy at the look's speed, however long the text is.
+- Under `prefers-reduced-motion` nothing animates: every element shows its final frame, and a crawl is one line cut with an ellipsis.
+- The Rules' cap holds: at most about 50 elements animating at once. Every element with a kit motion class also has `will-change: transform, opacity` for the whole spot, so each is a layer of its own, and a list with `lk-text` on each row reaches the cap quickly.
+- `lk-drift` holds still in portrait. A photo drifting across a portrait screen's width was the largest part of what took the test template over 1% of frames dropped there (RESULTS.md, The look kit): 1.67 to 1.94% with it, 0.67 to 0.72% without. The kit turns it off in portrait (`:root[data-orientation='portrait'] .lk-drift`) until a portrait template measures it under 1%. Landscape keeps it.
+
+**Bundles.** `sf build` also runs the colour lint over every stylesheet `style.css` imports, the kit's included, and names each file from the template's directory. The server lints only the files it receives, the template's own. A template's bundle holds the kit, so an edit to `looks.css` or to the kit's script changes the bundle of every template that imports it. Each such template then needs a new version, as under Budgets.
 
 ## Live data
 
@@ -194,7 +261,7 @@ Each rule comes from a measurement on the baseline device, a Raspberry Pi 4 at 1
 | Dropped frames over a play | 1% |
 | Longest single frame | 50 ms |
 
-`sf build` and `sf template push` enforce manifest validity, the forbidden-CSS list, bundle size, the no-network rule and the forbidden-code list (`checkTemplateBundle` in `packages/contract`; it refuses network calls, navigation, inline event handlers and `javascript:` URLs) and the script rule (read with an HTML parser: each classic script in HTML or SVG starts with exactly `"use strict";`; no external script, module or other script type, and no script markup in a `<select>`), and warn on colour literals (see Brand). The server repeats the same checks when a version is registered and stores the report on it: the first four on the uploaded bundle, the code list on the author's own `index.html`, `style.css` and `main.ts`, which are uploaded alongside it (the bundle holds the SDK, which itself calls `parent.postMessage`).
+`sf build` and `sf template push` enforce manifest validity, the forbidden-CSS list (on the bundle: `backdrop-filter`, and an `@import` the build did not inline), bundle size, the no-network rule and the forbidden-code list (`checkTemplateBundle` in `packages/contract`; it refuses network calls, navigation, inline event handlers and `javascript:` URLs) and the script rule (read with an HTML parser: each classic script in HTML or SVG starts with exactly `"use strict";`; no external script, module or other script type, and no script markup in a `<select>`), and warn on colour literals (see Brand). The server repeats the same checks when a version is registered and stores the report on it: the first four on the uploaded bundle, the code list on the author's own `index.html`, `style.css` and `main.ts`, which are uploaded alongside it (the bundle holds the SDK, which itself calls `parent.postMessage`).
 
 These checks are a lint, not a security boundary: string matching can be evaded. What keeps a screen safe is the sandbox the template runs in and its policy that blocks every request.
 
@@ -210,7 +277,7 @@ It runs in your org's own container, which no other org's template shares. A che
 
 A registered version is immutable: pushing the same version with different bytes is refused, and pushing identical bytes changes nothing. A version is a draft, approved or retired; only approved versions are offered for new spots. The time and frame budgets are measured on the device with `scripts/pi-measure.sh`; automated checks for them are part of Milestone 4. Of the timings, the runtime check refuses only a template that is not ready within 2 seconds or that draws no second of frames within 3 seconds of `play`. It watches only the first second after `play`: a template that stops drawing later is not seen.
 
-So a shipped template's bundle must not change under its version, or `sf template seed` refuses it on the next deploy. A bundle holds the template's own files, the SDK, and from the contract only `@signforge/contract/frame` (the protocol version and the brand variables) and, in a template that reads an image's sample, `@signforge/contract/sample`, so a change to the rest of the contract (the API's, the sync's or the screen's checks) leaves every bundle byte for byte. `packages/cli/test/templates.test.ts` builds every template in `templates/` and compares each bundle's sha256 with `packages/cli/test/golden/template-bundles.json`, by template key: it fails when a bundle changed, whatever changed it. Then bump the version in the template's `template.json` and `package.json`, put the new key and hash in that file (the failure shows both), and regenerate the goldens. A change to the SDK's index can change every bundle, even of templates that do not use the new code (an unused export changed six of seven, and two added to `@signforge/contract/frame` changed all seven; a comment-only edit changed none), because the minifier renames symbols across the whole bundle: SDK code only some templates use goes in its own entry point, as `readableOn` does. An esbuild or bundled-font upgrade turns the test red for every template the same way.
+So a shipped template's bundle must not change under its version, or `sf template seed` refuses it on the next deploy. A bundle holds the template's own files, the SDK, the look kit in a template that imports it (see Looks), and from the contract only `@signforge/contract/frame` (the protocol version and the brand variables) and, in a template that reads an image's sample, `@signforge/contract/sample`, so a change to the rest of the contract (the API's, the sync's or the screen's checks) leaves every bundle byte for byte. `packages/cli/test/templates.test.ts` builds every template in `templates/` and compares each bundle's sha256 with `packages/cli/test/golden/template-bundles.json`, by template key: it fails when a bundle changed, whatever changed it. Then bump the version in the template's `template.json` and `package.json`, put the new key and hash in that file (the failure shows both), and regenerate the goldens. A change to the SDK's index can change every bundle, even of templates that do not use the new code (an unused export changed six of seven, and two added to `@signforge/contract/frame` changed all seven; a comment-only edit changed none), because the minifier renames symbols across the whole bundle: SDK code only some templates use goes in its own entry point, as `readableOn` does. An esbuild or bundled-font upgrade turns the test red for every template the same way.
 
 ## Review checklist
 
