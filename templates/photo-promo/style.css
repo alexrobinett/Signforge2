@@ -22,6 +22,7 @@ body {
 :root {
   --bg: var(--sf-bg, #000);
   --text: var(--sf-text, #fff);
+  --accent: var(--sf-accent, #ffd84a);
 }
 body {
   font-family: var(--sf-font-body, 'Inter'), sans-serif;
@@ -35,6 +36,7 @@ body {
   overflow: hidden;
 }
 .photo {
+  --push: 1.12;
   position: absolute;
   inset: 0;
   will-change: transform;
@@ -46,10 +48,21 @@ body {
   object-fit: cover;
   display: block;
 }
+/* The shade's opacity from the bottom up: --shade-0 at the bottom, --shade-1 at --shade-1-at of
+   the height, none from --shade-2-at. main.ts reads these, and --push, to measure the eyebrow. */
 .shade {
+  --shade-0: 82%;
+  --shade-1: 55%;
+  --shade-1-at: 40%;
+  --shade-2-at: 72%;
   position: absolute;
   inset: 0;
-  background: linear-gradient(0deg, color-mix(in srgb, var(--bg) 82%, transparent) 0%, color-mix(in srgb, var(--bg) 55%, transparent) 40%, transparent 72%);
+  background: linear-gradient(
+    0deg,
+    color-mix(in srgb, var(--bg) var(--shade-0), transparent) 0%,
+    color-mix(in srgb, var(--bg) var(--shade-1), transparent) var(--shade-1-at),
+    transparent var(--shade-2-at)
+  );
 }
 .copy {
   position: absolute;
@@ -69,8 +82,17 @@ body {
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--accent-text, #ffd84a);
+  color: var(--accent-text, var(--accent));
   animation-delay: 0.3s, var(--out);
+}
+/* Where nothing reads over the photo under the eyebrow (main.ts), it gets a fill of the background.
+   The padding sits outside the text, so the text keeps its place on the copy's left edge. */
+.eyebrow.scrim {
+  width: fit-content;
+  padding: 0.2em 0.4em 0.2em 0.6em;
+  margin: 0 0 0.3em -0.6em;
+  border-radius: var(--sf-radius, 0.3em);
+  background: var(--bg);
 }
 .headline {
   font-family: var(--sf-font-display, 'Inter'), sans-serif;
@@ -108,7 +130,10 @@ body {
   animation-delay: 0.9s, var(--out);
 }
 [data-orientation='portrait'] .shade {
-  background: linear-gradient(0deg, color-mix(in srgb, var(--bg) 85%, transparent) 0%, color-mix(in srgb, var(--bg) 70%, transparent) 50%, transparent 78%);
+  --shade-0: 85%;
+  --shade-1: 70%;
+  --shade-1-at: 50%;
+  --shade-2-at: 78%;
 }
 [data-orientation='portrait'] .copy {
   right: calc(var(--u) * 8);
@@ -119,7 +144,7 @@ body {
     transform: scale(1);
   }
   to {
-    transform: scale(1.12);
+    transform: scale(var(--push));
   }
 }
 @keyframes rise-in {
