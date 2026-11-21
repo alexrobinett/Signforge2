@@ -307,12 +307,20 @@ function liveProblems(live: unknown, fields: Obj): string[] {
   if (!isObj(live.sources) || !Object.keys(live.sources).length) return ['sources must name at least one source'];
   const out: string[] = [];
   const fed = new Map<string, string>();
+  // Picking a source sets its place and units fields, so two sources naming one would overwrite each other.
+  const set = new Map<string, string>();
   for (const [name, def] of Object.entries(live.sources)) {
     if (!isText(own(def, 'label'))) out.push(`sources.${name}: label is required`);
     for (const field of fedBy(def)) {
       const other = fed.get(field);
       if (other === undefined) fed.set(field, name);
       else out.push(`field "${field}" is fed by both "${other}" and "${name}"`);
+    }
+    const units = own(def, 'units');
+    for (const field of new Set([own(def, 'place'), own(units, 'temperature'), own(units, 'wind')].filter(isStr))) {
+      const other = set.get(field);
+      if (other === undefined) set.set(field, name);
+      else out.push(`field "${field}" is the place or units of both "${other}" and "${name}"`);
     }
     if (!isIdValue(name)) out.push(`source name "${name}" must be letters, digits, dashes and underscores`);
   }

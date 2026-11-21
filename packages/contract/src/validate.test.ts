@@ -615,6 +615,21 @@ describe('validateTemplateManifest', () => {
     expect(validateTemplateManifest(m)).toEqual(['live: sources.weather: place "city" must be a text field the source does not fill']);
   });
 
+  it('lets two forecasts name a place or units field once only, as each sets it when it is picked', () => {
+    const m = twoSources();
+    m.fields.away = { type: 'number', label: 'Away', default: 60 };
+    m.live = {
+      sources: {
+        home: { label: 'Home', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'city', units: { temperature: 'unit' } },
+        away: { label: 'Away', source: 'open-meteo', fields: { away: 'current.temperature_2m' }, place: 'city', units: { temperature: 'unit', wind: 'windUnit' } },
+      },
+    };
+    expect(validateTemplateManifest(m)).toEqual([
+      'live: field "city" is the place or units of both "home" and "away"',
+      'live: field "unit" is the place or units of both "home" and "away"',
+    ]);
+  });
+
   it('takes one source or several, not both, and at least one', () => {
     expect(validateTemplateManifest({ ...weather(), live: { ...weather().live, sources: twoSources().live } })).toEqual([
       'live: takes one source or several sources, not both',
