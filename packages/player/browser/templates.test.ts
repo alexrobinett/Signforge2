@@ -98,6 +98,13 @@ const DEMO_KIT: BrandColors = {
   muted: '#a5b4cb',
 };
 
+/** No kit, the demo kit and `light`: the kits a template's painted contrast is measured under. */
+const noDemoAndLight = (light: BrandColors): [string, FrameTheme | undefined][] => [
+  ['no kit', undefined],
+  ['the demo kit', { colors: DEMO_KIT, shape: 'soft', fonts: {} }],
+  ['a light kit', { colors: light, shape: 'soft', fonts: {} }],
+];
+
 const built = new Map<string, { html: string; manifest: TemplateManifest }>();
 /** `imageSample` from @signforge/media, as a script for the host page: an image's sample, made as the CMS makes it. */
 let sampler = '';
@@ -475,11 +482,7 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
       text: '#0f172a',
       muted: '#475569',
     };
-    const kits: [string, FrameTheme | undefined][] = [
-      ['no kit', undefined],
-      ['the demo kit', { colors: DEMO_KIT, shape: 'soft', fonts: {} }],
-      ['a light kit', { colors: light, shape: 'soft', fonts: {} }],
-    ];
+    const kits = noDemoAndLight(light);
     const phases: [string, Data, string][] = [
       ['day', { isDay: 1 }, '2026-11-17T17:00:00Z'],
       ['night', { isDay: 0 }, '2026-11-17T17:00:00Z'],
@@ -520,6 +523,37 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
   });
 });
 
+/**
+ * `b` after `a`, with a `reset` between (the editor's path: play, `reset`, wait for `loaded`, init)
+ * and without one, must leave exactly the document a fresh load of `b` gives.
+ */
+async function expectSameAsFresh(hst: Host, html: string, a: Data, b: Data, assetsA?: Record<string, string>, assetsB?: Record<string, string>) {
+  await hst.open('fresh', html);
+  await hst.init('fresh', b, assetsB);
+  await hst.waitFor('fresh', 'ready', 1);
+  const fresh = await hst.dom('fresh');
+
+  await hst.open('reset', html);
+  await hst.init('reset', a, assetsA);
+  await hst.waitFor('reset', 'ready', 1);
+  await hst.post('reset', 'play');
+  await hst.page.waitForTimeout(200);
+  await hst.post('reset', 'reset');
+  await hst.waitFor('reset', 'loaded', 2);
+  await hst.init('reset', b, assetsB);
+  await hst.waitFor('reset', 'ready', 2);
+  expect(await hst.dom('reset')).toBe(fresh);
+
+  // A second init with no reset in between is treated the same way.
+  await hst.open('again', html);
+  await hst.init('again', a, assetsA);
+  await hst.waitFor('again', 'ready', 1);
+  await hst.post('again', 'play');
+  await hst.init('again', b, assetsB);
+  await hst.waitFor('again', 'ready', 2);
+  expect(await hst.dom('again')).toBe(fresh);
+}
+
 describe('template update lifecycle', () => {
   it('covers every shipped template', () => {
     expect(Object.keys(cases).sort()).toEqual(names);
@@ -529,35 +563,7 @@ describe('template update lifecycle', () => {
     it(`${name}: new data after the first init leaves the same document as a fresh load`, async () => {
       const t = built.get(name)!;
       const c = cases[name]!;
-      const a = spotData(t.manifest, c.a),
-        b = spotData(t.manifest, c.b);
-      const hst = await host();
-
-      await hst.open('fresh', t.html);
-      await hst.init('fresh', b, c.assetsB);
-      await hst.waitFor('fresh', 'ready', 1);
-      const fresh = await hst.dom('fresh');
-
-      // The editor's path: play, then `reset`, wait for `loaded`, then init with the new data.
-      await hst.open('reset', t.html);
-      await hst.init('reset', a, c.assetsA);
-      await hst.waitFor('reset', 'ready', 1);
-      await hst.post('reset', 'play');
-      await hst.page.waitForTimeout(200);
-      await hst.post('reset', 'reset');
-      await hst.waitFor('reset', 'loaded', 2);
-      await hst.init('reset', b, c.assetsB);
-      await hst.waitFor('reset', 'ready', 2);
-      expect(await hst.dom('reset')).toBe(fresh);
-
-      // A second init with no reset in between is treated the same way.
-      await hst.open('again', t.html);
-      await hst.init('again', a, c.assetsA);
-      await hst.waitFor('again', 'ready', 1);
-      await hst.post('again', 'play');
-      await hst.init('again', b, c.assetsB);
-      await hst.waitFor('again', 'ready', 2);
-      expect(await hst.dom('again')).toBe(fresh);
+      await expectSameAsFresh(await host(), t.html, spotData(t.manifest, c.a), spotData(t.manifest, c.b), c.assetsA, c.assetsB);
     });
   }
 });
@@ -843,11 +849,7 @@ describe('the look kit (#190)', () => {
     text: '#0f172a',
     muted: '#475569',
   };
-  const kits: [string, FrameTheme | undefined][] = [
-    ['no kit', undefined],
-    ['the demo kit', { colors: DEMO_KIT, shape: 'soft', fonts: {} }],
-    ['a light kit', { colors: light, shape: 'soft', fonts: {} }],
-  ];
+  const kits = noDemoAndLight(light);
   const photo = { photo: '#808080' };
   let t: { html: string; manifest: TemplateManifest };
   beforeAll(async () => {
@@ -1049,28 +1051,6 @@ describe('the look kit (#190)', () => {
   it('new data after the first init leaves the same document as a fresh load', async () => {
     const a = spotData(t.manifest, { look: 'pop', showPhoto: false }),
       b = spotData(t.manifest, { look: 'night', showCrawl: false });
-    const hst = await host('landscape', true);
-    await hst.open('fresh', t.html);
-    await hst.init('fresh', b, photo);
-    await hst.waitFor('fresh', 'ready', 1);
-    const fresh = await hst.dom('fresh');
-    // The editor's path: play, then `reset`, wait for `loaded`, then init with the new data.
-    await hst.open('reset', t.html);
-    await hst.init('reset', a, photo);
-    await hst.waitFor('reset', 'ready', 1);
-    await hst.post('reset', 'play');
-    await hst.post('reset', 'reset');
-    await hst.waitFor('reset', 'loaded', 2);
-    await hst.init('reset', b, photo);
-    await hst.waitFor('reset', 'ready', 2);
-    expect(await hst.dom('reset')).toBe(fresh);
-    // A second init with no reset in between is treated the same way.
-    await hst.open('again', t.html);
-    await hst.init('again', a, photo);
-    await hst.waitFor('again', 'ready', 1);
-    await hst.post('again', 'play');
-    await hst.init('again', b, photo);
-    await hst.waitFor('again', 'ready', 2);
-    expect(await hst.dom('again')).toBe(fresh);
+    await expectSameAsFresh(await host('landscape', true), t.html, a, b, photo, photo);
   });
 });
