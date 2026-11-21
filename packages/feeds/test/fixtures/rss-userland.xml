@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<rss version="2.0" xmlns="http://backend.userland.com/rss2" xmlns:media="https://search.yahoo.com/mrss/">
+  <channel>
+    <title>Scripting News</title>
+    <link>https://scripting.example/</link>
+    <language>en-us</language>
+    <item>
+      <title>A podcast with a photo</title>
+      <link>https://scripting.example/2026/11/20/photo</link>
+      <pubDate>Fri, 20 Nov 2026 15:00:00 GMT</pubDate>
+      <enclosure url="https://scripting.example/images/2026/photo.jpg" type="image/jpeg" length="20000"/>
+    </item>
+    <item>
+      <title>Media RSS under its https namespace</title>
+      <link>https://scripting.example/2026/11/19/media</link>
+      <pubDate>Thu, 19 Nov 2026 15:00:00 GMT</pubDate>
+      <media:content url="https://scripting.example/images/2026/media.jpg" medium="image" width="1200"/>
+    </item>
+  </channel>
+</rss>

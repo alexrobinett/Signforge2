@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type FeedImage, LIMITS, normaliseFeed, parseNews } from '../src/index';
+import atom03 from './fixtures/atom-03.xml?raw';
 import atom from './fixtures/atom.xml?raw';
 import atomEnclosures from './fixtures/atom-enclosures.xml?raw';
 import atomXhtml from './fixtures/atom-xhtml.xml?raw';
+import dcHttps from './fixtures/dc-https.xml?raw';
+import dcUndeclared from './fixtures/dc-undeclared.xml?raw';
 import enclosures from './fixtures/enclosures.xml?raw';
 import hostile from './fixtures/hostile.xml?raw';
 import mediaRss from './fixtures/media-rss.xml?raw';
 import npr from './fixtures/npr-news.xml?raw';
+import userland from './fixtures/rss-userland.xml?raw';
 import wordpress from './fixtures/wordpress.xml?raw';
 import { inLinearTime, linearMs } from './linear';
 
@@ -76,9 +80,22 @@ describe('XML safety', () => {
       rss('<item><title>x</title></item>', '<!DOCTYPE rss SYSTEM "https://example.com/rss.dtd">'),
       rss('<item><title>x</title></item>', '<!-- a <b>comment</b> --><!doctype rss>'),
       rss('<item><title><![CDATA[<!ENTITY x "y">]]></title></item>'),
+      // A processing instruction is skipped whole: what looks like a comment or a tag inside it is neither.
+      rss('<item><title>x</title></item>', '<?x <!-- ?><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">'),
+      rss('<item><title>x</title></item>', '<?x <!-- ?><!DOCTYPE rss [<!ATTLIST rss foo CDATA "bar">]>'),
+      rss('<item><title>x</title></item>', '<?x <a ?><!DOCTYPE rss>'),
     ]) {
       expect(() => parseNews(body)).toThrow(expect.objectContaining({ code: 'doctype' }));
     }
+  });
+
+  it('refuses a prolog whose processing instruction or comment is never closed', () => {
+    expect(() => parseNews('<?xml version="1.0"?><?x <!DOCTYPE rss><rss version="2.0"><channel><title>T</title></channel></rss>')).toThrow(
+      expect.objectContaining({ code: 'malformed' }),
+    );
+    expect(() => parseNews('<?xml version="1.0"?><!-- <!DOCTYPE rss><rss version="2.0"><channel><title>T</title></channel></rss>')).toThrow(
+      expect.objectContaining({ code: 'malformed' }),
+    );
   });
 
   it('allows the word DOCTYPE in content after the root element', () => {
@@ -155,6 +172,24 @@ describe('images in the story body', () => {
       url: 'https://npr.brightspotcdn.com/dims3/default/strip/false/crop/3000x2000+0+0/resize/3000x2000!/quality/85/format/webp/?url=https%3A%2F%2Fnpr-production-npr.s3.us-east-1.amazonaws.com%2Fbrightspot%2F73%2Ff4%2F13d6cbbc4841bdd4a3e5318cbb63%2Fgettyimages-460917708-1.jpg',
     });
     for (const image of found) if (image) expect(image.url).toMatch(/^https:\/\/npr\.brightspotcdn\.com\//);
+  });
+
+  it('drops tracking images by a whole path segment or file name, not a word inside one', () => {
+    const body = (html: string) => rss(`<item><title>x</title><link>https://example.com/p/</link><description><![CDATA[${html}]]></description></item>`);
+    expect(images(body('<img src="/2026/google-pixel-10-review.jpg"><img src="/b.jpg">'))).toEqual([
+      { url: 'https://example.com/2026/google-pixel-10-review.jpg' },
+    ]);
+    expect(images(body('<img src="/pixels/sunset.jpg">'))).toEqual([{ url: 'https://example.com/pixels/sunset.jpg' }]);
+    for (const tracker of [
+      '/pixel.gif',
+      '/t/pixel?id=1',
+      '/pixel/abc.png',
+      '/assets/spacer.png',
+      'https://pixel.wp.com/g.gif',
+      '/include/images/tracking/npr-rss-pixel.png',
+    ]) {
+      expect(images(body(`<img src="${tracker}"><img src="/real.jpg">`))).toEqual([{ url: 'https://example.com/real.jpg' }]);
+    }
   });
 
   it('reads srcsets whose URLs hold commas or no space after a comma, skips a 0-wide spacer and avatars and smileys by class, and unescapes &amp;', () => {
@@ -269,6 +304,22 @@ describe('the cost of finding images', () => {
     expect(urls).toHaveBeenCalled();
   });
 
+  it("gives each kept story its share of the search, so one story's huge srcset cannot cost the others their images", () => {
+    const srcset = Array.from({ length: 3_000 }, (_, i) => `c${i}.jpg ${i + 1}w`).join(', ');
+    const items = [
+      `<item><title>Huge</title><pubDate>Fri, 20 Nov 2026 12:00:00 GMT</pubDate><link>https://example.com/</link><description><![CDATA[<img srcset="${srcset}">]]></description></item>`,
+      ...Array.from(
+        { length: 19 },
+        (_, i) =>
+          `<item><title>Story ${i}</title><pubDate>Fri, 20 Nov 2026 11:${String(i).padStart(2, '0')}:00 GMT</pubDate><enclosure url="https://example.com/${i}.jpg" type="image/jpeg"/></item>`,
+      ),
+    ].join('');
+    const found = images(rss(items));
+    expect(found[0]?.url).toMatch(/^https:\/\/example\.com\/c\d+\.jpg$/);
+    expect(found.slice(1).every((image) => image !== undefined)).toBe(true);
+    expect(found).toHaveLength(20);
+  });
+
   it('resolves at most 2,000 URLs a parse, only for the items kept, and none longer than 2,048 characters', () => {
     const urls = vi.spyOn(globalThis, 'URL');
     const many = Array.from(
@@ -375,6 +426,35 @@ describe('image search cost', () => {
         Array.from({ length: 20 }, (_, i) => ({ url: `https://c.example/${i}/a.jpg` })),
       ),
     ).toBe(true);
+  });
+});
+
+describe('namespace variants real feeds use', () => {
+  it("reads RSS under UserLand's default namespace, with Media RSS under its https namespace", () => {
+    const feed = parseNews(userland);
+    expect(feed).toMatchObject({ title: 'Scripting News', language: 'en-us' });
+    expect(feed.items.map((i) => [i.title, i.published, i.image?.url])).toEqual([
+      ['A podcast with a photo', '2026-11-20T15:00:00+00:00', 'https://scripting.example/images/2026/photo.jpg'],
+      ['Media RSS under its https namespace', '2026-11-19T15:00:00+00:00', 'https://scripting.example/images/2026/media.jpg'],
+    ]);
+  });
+
+  it('keeps dc:date under an https dc namespace, or a dc prefix the feed never declares', () => {
+    for (const body of [dcHttps, dcUndeclared]) {
+      const times = parseNews(body).items.map((i) => i.published);
+      expect(times).toHaveLength(2);
+      for (const t of times) expect(t).toMatch(/^2026-11-\d\dT\d\d:00:00\+00:00$/);
+    }
+    expect(parseNews(dcHttps).items[0]?.title).toBe('Library hours change');
+    expect(parseNews(dcUndeclared).items[0]?.title).toBe('Snow day');
+  });
+
+  it('reads Atom 0.3 as before: titles, language, links and images, though not its own modified and issued dates', () => {
+    expect(parseNews(atom03)).toEqual({
+      title: 'Old Blog',
+      language: 'en',
+      items: [{ title: 'Still posting', published: '', source: 'Old Blog', image: { url: 'https://oldblog.example/img/still.jpg' } }],
+    });
   });
 });
 

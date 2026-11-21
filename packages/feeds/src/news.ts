@@ -47,12 +47,24 @@ const parser = new XMLParser({
   htmlEntities: true,
 });
 
-/** A namespace name as compared: feeds write Media RSS's with and without its final slash. */
-const nsName = (uri: string) => uri.trim().replace(/\/$/, '').toLowerCase();
+/**
+ * A namespace name as compared: without case, a final slash or the difference between http and
+ * https, all of which feeds vary for Media RSS and Dublin Core.
+ */
+const nsName = (uri: string) =>
+  uri
+    .trim()
+    .replace(/\/$/, '')
+    .toLowerCase()
+    .replace(/^https:/, 'http:');
 
 const NS = {
   none: '',
+  /** RSS 2.0 as UserLand published it, which some feeds still declare as their default namespace. */
+  userland: nsName('http://backend.userland.com/rss2'),
   atom: nsName('http://www.w3.org/2005/Atom'),
+  /** Atom 0.3, read as Atom: its titles, links and bodies match; its `modified` and `issued` dates are not read. */
+  atom03: nsName('http://purl.org/atom/ns#'),
   media: nsName('http://search.yahoo.com/mrss/'),
   content: nsName('http://purl.org/rss/1.0/modules/content/'),
   itunes: nsName('http://www.itunes.com/dtds/podcast-1.0.dtd'),
@@ -78,11 +90,13 @@ interface Search {
  * appear before the root element; `<!ENTITY` is refused anywhere.
  */
 function refuseDeclarations(text: string): void {
-  // The prolog, read forward once: a comment is skipped whole, and the first element ends it.
+  // The prolog, read forward once: a comment or processing instruction is skipped whole (what looks
+  // like a tag inside one is not), and the first element ends it.
   for (let i = text.indexOf('<'); i !== -1; i = text.indexOf('<', i + 1)) {
-    if (text.startsWith('<!--', i)) {
-      i = text.indexOf('-->', i + 4);
-      if (i === -1) break;
+    const end = text.startsWith('<!--', i) ? '-->' : text.startsWith('<?', i) ? '?>' : '';
+    if (end) {
+      i = text.indexOf(end, i + 2);
+      if (i === -1) throw new FeedError('malformed', 'a comment or processing instruction before the feed is never closed');
     } else if (text.slice(i, i + 9).toUpperCase() === '<!DOCTYPE') {
       throw new FeedError('doctype', 'feed declares a DOCTYPE or entities');
     } else if (/[A-Za-z_]/.test(text[i + 1] ?? '')) break;
@@ -135,6 +149,8 @@ class El {
       const uri = e.#declared?.get(prefix);
       if (uri !== undefined) return uri;
     }
+    // Feeds write `dc:date` without declaring the prefix; no other prefix is read undeclared.
+    if (prefix === 'dc') return NS.dc;
     return prefix === '' ? NS.none : undefined;
   }
 
@@ -230,10 +246,12 @@ function unescapeHtml(v: string): string {
 }
 
 /**
- * Pictures in a story's body that are not its photo: tracking pixels and spacers (by name, or
- * feedburner's), Gravatar avatars and WordPress emoji, by URL or by class.
+ * Pictures in a story's body that are not its photo: tracking pixels and spacers (a host, folder or
+ * file named so, a `tracking` folder, or feedburner's), Gravatar avatars and WordPress emoji, by URL
+ * or by class. A name is matched whole: `google-pixel-10-review.jpg` is a photo.
  */
-const NOT_A_PHOTO_URL = /(?:^|[/._-])(?:pixel|spacer)(?:[/._-]|$)|(?:^|\.)gravatar\.com\/|feedburner|^s\.w\.org\/images\/core\/emoji\//i;
+const NOT_A_PHOTO_URL =
+  /^pixel\.|\/(?:pixel|spacer|tracking)\/|\/(?:pixel|spacer)(?:\.[a-z0-9]+)?$|(?:^|\.)gravatar\.com\/|feedburner|^s\.w\.org\/images\/core\/emoji\//i;
 const NOT_A_PHOTO_CLASS = /(?:^|\s)(?:emoji|wp-smiley|avatar)(?:\s|$)/i;
 
 /** `raw` as the URL of a body picture that may be the story's photo. */
@@ -395,7 +413,7 @@ function xhtmlImage(content: El, search: Search): FeedImage | undefined {
  * `itunes:image`, and the first real picture in its `bodies` (RSS `content:encoded` then
  * `description`, Atom `content` then `summary`).
  */
-function itemImage(it: El, atom: string, bodies: El[], search: Search): FeedImage | undefined {
+function itemImage(it: El, ns: { rss: string; atom: string }, bodies: El[], search: Search): FeedImage | undefined {
   const groups = it.kids(NS.media, 'group');
   const media = [it, ...groups].flatMap((e) => e.kids(NS.media, 'content'));
   const image =
@@ -405,9 +423,9 @@ function itemImage(it: El, atom: string, bodies: El[], search: Search): FeedImag
       'url',
       search,
     ) ??
-    widest(it.kids(NS.none, 'enclosure').filter(imageType), 'url', search) ??
+    widest(it.kids(ns.rss, 'enclosure').filter(imageType), 'url', search) ??
     widest(
-      it.kids(atom, 'link').filter((e) => e.attr('rel') === 'enclosure' && imageType(e)),
+      it.kids(ns.atom, 'link').filter((e) => e.attr('rel') === 'enclosure' && imageType(e)),
       'href',
       search,
     ) ??
@@ -424,6 +442,15 @@ function itemImage(it: El, atom: string, bodies: El[], search: Search): FeedImag
 function published(raw: string): string {
   const ms = Date.parse(raw);
   return Number.isNaN(ms) ? raw : isoInstant(ms, 0);
+}
+
+/** The first of `namespaces` under which the document's root is `local`, with that root. */
+function root(doc: El, local: string, namespaces: string[]): { ns: string; el: El } | undefined {
+  for (const ns of namespaces) {
+    const el = doc.kids(ns, local)[0];
+    if (el) return { ns, el };
+  }
+  return undefined;
 }
 
 interface Story {
@@ -450,44 +477,47 @@ function readNews(body: string, options: NewsOptions): { title: string; language
   let language = '';
   let stories: Story[] = [];
   let logo: (search: Search) => string | undefined;
-  const channel = doc.kids(NS.none, 'rss')[0]?.kids(NS.none, 'channel')[0];
-  const atom = doc.kids(NS.atom, 'feed')[0];
-  if (channel) {
-    title = channel.text(NS.none, 'title');
-    language = channel.text(NS.none, 'language');
+  const rss = root(doc, 'rss', [NS.none, NS.userland]);
+  const channel = rss?.el.kids(rss.ns, 'channel')[0];
+  const atom = root(doc, 'feed', [NS.atom, NS.atom03]);
+  if (rss && channel) {
+    const r = rss.ns;
+    title = channel.text(r, 'title');
+    language = channel.text(r, 'language');
     logo = (search) => {
-      const url = channel.kids(NS.none, 'image')[0]?.kids(NS.none, 'url')[0];
+      const url = channel.kids(r, 'image')[0]?.kids(r, 'url')[0];
       return url && imageUrl(text(url.v), url.base(search), search)?.href;
     };
-    stories = channel.kids(NS.none, 'item').map((it) => ({
-      item: { title: it.text(NS.none, 'title'), published: published(it.text(NS.none, 'pubDate') || it.text(NS.dc, 'date')), source: title },
+    stories = channel.kids(r, 'item').map((it) => ({
+      item: { title: it.text(r, 'title'), published: published(it.text(r, 'pubDate') || it.text(NS.dc, 'date')), source: title },
       image: (search) => {
         const item = it.withLink(
           it
-            .kids(NS.none, 'link')
+            .kids(r, 'link')
             .map((l) => text(l.v))
             .find(Boolean) ?? '',
         );
-        return itemImage(item, NS.atom, [...item.kids(NS.content, 'encoded'), ...item.kids(NS.none, 'description')], search);
+        return itemImage(item, { rss: r, atom: NS.atom }, [...item.kids(NS.content, 'encoded'), ...item.kids(r, 'description')], search);
       },
     }));
   } else if (atom) {
-    title = atom.text(NS.atom, 'title');
-    language = atom.attr('xml:lang');
+    const { ns: a, el: feed } = atom;
+    title = feed.text(a, 'title');
+    language = feed.attr('xml:lang');
     logo = (search) => {
       for (const name of ['logo', 'icon']) {
-        const el = atom.kids(NS.atom, name)[0];
+        const el = feed.kids(a, name)[0];
         const url = el && imageUrl(text(el.v), el.base(search), search);
         if (url) return url.href;
       }
       return undefined;
     };
-    stories = atom.kids(NS.atom, 'entry').map((entry) => ({
-      item: { title: entry.text(NS.atom, 'title'), published: published(entry.text(NS.atom, 'updated') || entry.text(NS.atom, 'published')), source: title },
+    stories = feed.kids(a, 'entry').map((entry) => ({
+      item: { title: entry.text(a, 'title'), published: published(entry.text(a, 'updated') || entry.text(a, 'published')), source: title },
       image: (search) => {
-        const link = entry.kids(NS.atom, 'link').find((l) => ['', 'alternate'].includes(l.attr('rel')));
+        const link = entry.kids(a, 'link').find((l) => ['', 'alternate'].includes(l.attr('rel')));
         const item = entry.withLink(link?.attr('href') ?? '');
-        return itemImage(item, NS.atom, [...item.kids(NS.atom, 'content'), ...item.kids(NS.atom, 'summary')], search);
+        return itemImage(item, { rss: NS.none, atom: a }, [...item.kids(a, 'content'), ...item.kids(a, 'summary')], search);
       },
     }));
   } else {
@@ -514,10 +544,11 @@ function readNews(body: string, options: NewsOptions): { title: string; language
  */
 export function parseNews(body: string, options: NewsOptions = {}): ParsedNews {
   const { title, language, stories, logo: logoOf } = readNews(body, options);
-  const search = { left: SEARCH_BUDGET };
-  const logo = logoOf(search);
+  // An equal share each, the logo's included, so one bloated story cannot cost the rest their images.
+  const share = Math.floor(SEARCH_BUDGET / (stories.length + 1));
+  const logo = logoOf({ left: share });
   const items = stories.map((s) => {
-    const image = s.image(search);
+    const image = s.image({ left: share });
     return image ? { ...s.item, image } : s.item;
   });
   return { title, language, items, ...(logo ? { logo } : {}) };

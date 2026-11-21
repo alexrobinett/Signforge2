@@ -21,8 +21,12 @@ Failures throw `FeedError` with a `code` (`too-large`, `doctype`, `malformed`, `
 
 ## News
 
-- XML that declares a DOCTYPE, or contains `<!ENTITY` anywhere, is refused before parsing (by one forward read of the prolog).
-- Elements are known by their namespace, not their prefix: RSS's own elements have none, Atom's are in `http://www.w3.org/2005/Atom` (a `feed` without it is not Atom), and Media RSS, `content:encoded`, `dc:date` and iTunes are found whatever prefix the feed binds to their namespaces. A namespace is compared without case or a final slash, as feeds write Media RSS's both ways.
+- XML that declares a DOCTYPE, or contains `<!ENTITY` anywhere, is refused before parsing. The prolog is read forward once, each comment and processing instruction skipped whole (a `<!--` or `<a` inside `<?…?>` is neither), and one left open is refused as `malformed`.
+- Elements are known by their namespace, not their prefix, so Media RSS, `content:encoded`, `dc:date` and iTunes are found whatever prefix a feed binds. Namespace names are compared without case, a final slash, or the difference between `http:` and `https:`. What is read:
+  - RSS 2.0 with no namespace, or under UserLand's `http://backend.userland.com/rss2` as its default.
+  - Atom 1.0 (`http://www.w3.org/2005/Atom`), and Atom 0.3 (`http://purl.org/atom/ns#`) as before: its titles, language, links and bodies, but not its `modified` and `issued` dates, so its entries are undated.
+  - `dc:date` under Dublin Core's namespace, or under a `dc` prefix the feed never declares (the one prefix read undeclared).
+  - Not read: a `feed` in no namespace or another one, RSS under any other default namespace, RSS 1.0 (RDF). Each is `unknown-format`.
 - Item dates become UTC instants (`2026-11-17T12:20:57+00:00`); a date that does not parse is kept as written and sorted last. Items are newest first, untitled ones dropped, capped at 20.
 - Atom entries use `updated`, then `published`.
 
@@ -37,15 +41,15 @@ An item's image is the first of these that has one:
 3. An RSS `enclosure` with an `image/` type.
 4. An Atom `link rel="enclosure"` with an `image/` type.
 5. `itunes:image`.
-6. The first real `<img>` in the body: RSS `content:encoded`, then `description`; Atom `content`, then `summary`. Skipped: a width or height of 2 px or less; a tracking pixel or spacer by name, or feedburner's; Gravatar avatars and WordPress emoji, by URL or by the class `avatar`, `emoji` or `wp-smiley`; NPR's `src='undefined'`. An `srcset` gives its largest candidate (by `w`, else `x`) of those not skipped, and `src` when none is left.
-   - An HTML body is read by a small tokenizer that moves forward only, as a browser reads tags: a quoted attribute value may hold `>` or `<img`, comments and the insides of `script` and `style` are skipped, and a tag, quote or comment left open ends the body.
+6. The first real `<img>` in the body: RSS `content:encoded`, then `description`; Atom `content`, then `summary`. Skipped: a width or height of 2 px or less; a tracking pixel or spacer, by a whole host label, folder or file name (`pixel.wp.com`, `/pixel/`, `/tracking/`, `spacer.png`; not `google-pixel-10-review.jpg`), or feedburner's; Gravatar avatars and WordPress emoji, by URL or by the class `avatar`, `emoji` or `wp-smiley`; NPR's `src='undefined'`. An `srcset` gives its largest candidate (by `w`, else `x`) of those not skipped, and `src` when none is left.
+   - An HTML body is read by a small tokenizer that moves forward only, as a browser reads tags: a quoted attribute value may hold `>` or `<img`, comments and the insides of `script` and `style` are skipped, and a tag, quote or comment left open ends the body. Where it differs from a browser, knowingly: `<![CDATA[…]]>` in HTML is read as content (a browser ends it at the first `>`); `<!-->` runs to the next `-->` (a browser ends it at once); `<textarea>`'s contents are read as tags.
    - Atom `type="xhtml"` content is read from its parsed elements: the first XHTML `img`, depth first. The XML parser groups an element's children by name, so siblings of different names are read name by name.
 
 The logo is the RSS channel's `<image><url>`, or Atom's `logo`, then `icon`.
 
 Every URL resolves against the `xml:base` in scope where it is written (its own element's, then each one above it, a relative one against the next), else the item's link, else the feed's URL. Only `http:` and `https:` URLs are kept, after resolving: `data:`, `file:`, `javascript:` and the rest are dropped, and so is a relative URL with nothing to resolve against. The other checks (https, no private addresses, the size and type of what comes back) are the fetcher's, as for feed URLs.
 
-What it costs: the XML is parsed once, for the text and the images alike. Images are looked for only in the items kept (newest first, `maxItems`), each body is read in one pass, and one parse resolves URLs and visits XHTML elements 2,000 times at most between them (`SEARCH_BUDGET`; a real feed uses a few hundred), so a hostile feed loses images rather than time. A URL or `xml:base` longer than 2,048 characters, before or after resolving, is dropped.
+What it costs: the XML is parsed once, for the text and the images alike. Images are looked for only in the items kept (newest first, `maxItems`), each body is read in one pass, and one parse resolves URLs and visits XHTML elements 2,000 times at most between them (`SEARCH_BUDGET`; a real feed uses a few hundred), shared equally among the kept stories and the logo, so a hostile story loses its own image rather than time or the others' images. A URL or `xml:base` longer than 2,048 characters, before or after resolving, is dropped.
 
 ## Tables
 
@@ -60,4 +64,4 @@ What it costs: the XML is parsed once, for the text and the images alike. Images
 
 ## Tests
 
-`pnpm test` runs inside workerd through `@cloudflare/vitest-plugin`, against fixtures in `test/fixtures`: Google and Outlook exports and a weekly meeting with a cancelled and a moved instance (written for these tests), the public US holidays calendar and an NPR RSS feed (downloaded 2026-11-17), and an Atom feed. The image fixtures were written for these tests, after real feeds: Media RSS with a `media:group` and video first, a podcast's enclosures, Atom enclosures with `xml:base` and a logo, Atom `xhtml` content, a WordPress body (a pixel, emoji, an avatar, a relative `src`, an `srcset`), and hostile URLs. Tests that bound a parse's cost compare it with a linear pass measured in the same run (`test/linear.ts`), never with a fixed time, check what the parse found, and set a timeout from a CI run.
+`pnpm test` runs inside workerd through `@cloudflare/vitest-plugin`, against fixtures in `test/fixtures`: Google and Outlook exports and a weekly meeting with a cancelled and a moved instance (written for these tests), the public US holidays calendar and an NPR RSS feed (downloaded 2026-11-17), and an Atom feed. The image fixtures were written for these tests, after real feeds: Media RSS with a `media:group` and video first, a podcast's enclosures, Atom enclosures with `xml:base` and a logo, Atom `xhtml` content, Atom 0.3, RSS under UserLand's namespace with Media RSS under https, `dc:date` under an https or undeclared namespace, a WordPress body (a pixel, emoji, an avatar, a relative `src`, an `srcset`), and hostile URLs. Tests that bound a parse's cost compare it with a linear pass measured in the same run (`test/linear.ts`), never with a fixed time, check what the parse found, and set a timeout from a CI run.
