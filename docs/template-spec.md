@@ -2,7 +2,7 @@
 
 Version 1. This is what a template author, human or agent, builds against and what a reviewer checks. The types and limits here are defined in code in `packages/contract/src/shapes.ts`; if the two disagree, the code is right.
 
-Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl), `menu-board` (a list typed by people or filled from a CSV or JSON link) and `alert` (a takeover in fixed severity colours, with a QR code; see [Alert](#alert)).
+Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl), `menu-board` (a list typed by people or filled from a CSV or JSON link), `room-status` (a calendar feed read against `now()`: free or busy, until when and the rest of the day, in the four looks of the look kit, with toggles) and `alert` (a takeover in fixed severity colours, with a QR code; see [Alert](#alert)).
 
 ## What a template is
 
@@ -142,7 +142,7 @@ Text in the primary or accent colour on the page uses `--lk-primary-ink` or `--l
 | Night | Unbounded, Space Mono, Inter | variable, 400 and 700, variable | 67,895 + 44,374 + 64,367 |
 | Corporate | Inter Tight | variable | 59,855 |
 
-Inter is shared by three looks. The OFL asks that every copy carry each font's copyright notice and the licence: a `/*! … */` comment at the top of `looks.css` holds both, and the build keeps it in the bundle (5,357 bytes). A bundle with all four looks is 375,089 bytes, the test template included (`packages/template-looks/test/kit.test.ts`).
+Inter is shared by three looks. The OFL asks that every copy carry each font's copyright notice and the licence: a `/*! … */` comment at the top of `looks.css` holds both, and the build keeps it in the bundle (5,357 bytes). A bundle with all four looks is 375,089 bytes, the test template included (`packages/cli/test/looks.test.ts`).
 
 On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other looks' faces costs more (`spike/pi-perf/RESULTS.md`, The look kit). The player reads every bundle before it frames it, about 30 ms more for this one than for a bundle with only Pop's faces. The first prepare after a page loads takes about 180 ms more. After that, prepares fall into a fast mode (about 300 ms in landscape for the test template) or a slow one (about 420 to 480 ms). The four-look bundle's runs land in the slow mode more often. A trace finds no thread doing more work for it, so the slow mode's cause is not known yet.
 
@@ -198,12 +198,12 @@ Any non-image field can be bound to a data source instead of a fixed value. The 
 }
 ```
 
-- `source`: the kind of feed. `open-meteo` is an Open-Meteo forecast (a JSON source; the CMS asks for the `current=` and `daily=` variables the paths read, in the place's time zone, with `timeformat=unixtime`). `rss` is a news feed and `ical` a calendar, which the server converts to `NewsFeed` and `CalendarFeed`, so their paths are those shapes' (`items`, `language`, `events`). `table` is a CSV file or a JSON list at a link (below): its fields must be lists, at `rows`, and they stay typed until a spot binds them.
+- `source`: the kind of feed. `open-meteo` is an Open-Meteo forecast (a JSON source; the CMS asks for the `current=` and `daily=` variables the paths read, in the place's time zone, with `timeformat=unixtime`). `rss` is a news feed and `ical` a calendar, which the server converts to `NewsFeed` and `CalendarFeed`, so their paths are those shapes' (`items`, `language`, `events`). A calendar event names its organiser by display name (`organizer`, the ORGANIZER's CN, or `''`), never by address: a name holding an `@` is `''` too. The feed holds only events that had not ended when the server read it, so room-status shows "Free all day" once a day's last meeting is over and polled away. A template cannot yet tell that its bound fields are playing their fallback: until `init` says so, a room-status spot whose calendar is missing or stale (no data, or none confirmed for a day) shows its fallback, no bookings, and so reads "Free all day". `table` is a CSV file or a JSON list at a link (below): its fields must be lists, at `rows`, and they stay typed until a spot binds them.
 - `fields`: each live field's path in the snapshot, as a binding names it (`BINDING_PATH`). Not an image field.
 - `place` (Open-Meteo only): a text field that starts as the name of the place picked. People may still change it.
 - `units` (Open-Meteo only): the select fields that choose the units the forecast is fetched in, `temperature` with options from `°F`, `°C` and `wind` from `mph`, `km/h` (`WEATHER_UNITS`). The CMS sets them with the place, so the numbers and the unit shown always agree.
 
-`validateTemplateManifest` checks all of it. A template with no `live` is typed by people. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda (`ical`: `events`), menu-board (`table`: `items`).
+`validateTemplateManifest` checks all of it. A template with no `live` is typed by people. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda and room-status (`ical`: `events`), menu-board (`table`: `items`).
 
 **Table bindings.** A `csv` or `json-table` source's snapshot is a `TableFeed`: `columns` and `rows` of text and numbers (`@signforge/feeds`, Tables). A binding with a `table` mapping (`TableMapping`), at path `rows`, fills a list field from its rows:
 

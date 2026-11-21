@@ -32,7 +32,7 @@ const TITLE: Record<SourceKind, string> = {
 const ABOUT: Record<SourceKind, string> = {
   rss: 'Headlines for the News template. Screens get each new copy with their next sync.',
   json: 'Forecasts for the Weather template, one per place and units.',
-  ical: 'Events for the Agenda template, from any calendar that publishes an .ics link.',
+  ical: 'Events for the Agenda and Room status templates, from any calendar that publishes an .ics link.',
   table: 'Rows for a Menu Board’s items. Add a file from a Menu Board spot’s Source section, where its columns are matched to the items.',
   provider: 'Data read through an account the organization connected.',
 };

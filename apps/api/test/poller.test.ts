@@ -161,7 +161,7 @@ describe('pollDataSources', () => {
     await poll(feed.guards);
     const data = async (id: string) => JSON.parse((await o.scope.dataSources.snapshots([id]))[0]!.dataJson);
     expect(await data(near)).toEqual({ events: [] });
-    expect((await data(far)).events).toEqual([{ title: 'New Year', start: '2027-01-01', end: '2027-01-02', allDay: true, location: '' }]);
+    expect((await data(far)).events).toEqual([{ title: 'New Year', start: '2027-01-01', end: '2027-01-02', allDay: true, location: '', organizer: '' }]);
     expect(await data(news)).toEqual({ title: 'T', language: 'fr', items: [{ title: 'Bonjour', published: '2026-11-17T13:00:00+00:00', source: 'T' }] });
     // A calendar's events depend on the time as well as the feed, so it is always fetched whole.
     await poll(feed.guards, NOW + 5 * MIN);
