@@ -7,6 +7,12 @@ import { betterAuth } from 'better-auth';
 import { authOptions } from './src/auth/options';
 
 export const auth = betterAuth({
-  ...authOptions({ email: { send: async () => {} }, appUrl: 'http://localhost', audit: async () => {} }),
+  ...authOptions({
+    email: { send: async () => {} },
+    appUrl: 'http://localhost',
+    audit: async () => {},
+    startingOrg: async () => null,
+    rememberActiveOrg: async () => {},
+  }),
   database: new DatabaseSync(':memory:'),
 });

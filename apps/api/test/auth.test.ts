@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
+import { TAB_ORG_HEADER } from '../src/api/tab-org';
 import { Client, email, testApp } from './client';
 
 describe('sign-up and sign-in by email code', () => {
@@ -121,5 +122,69 @@ describe('organizations', () => {
     }
     expect((await c.session()).body.organization).toBeNull();
     expect((await c.get('/api/anything')).status).toBe(403);
+  });
+});
+
+describe('the org a new session starts in (#182)', () => {
+  /** A member of `orgs` new orgs, none of them made active by creating it. */
+  async function memberOf(t: ReturnType<typeof testApp>, addr: string, names: string[]) {
+    const c = new Client(t);
+    await c.signIn(addr);
+    const ids: string[] = [];
+    for (const name of names) {
+      const slug = `${name.toLowerCase()}-${Math.random().toString(36).slice(2, 8)}`;
+      ids.push((await c.ok<{ id: string }>('/api/auth/organization/create', { name, slug, keepCurrentActiveOrganization: true })).id);
+    }
+    expect((await c.session()).body.organization).toBeNull();
+    return { c, ids };
+  }
+
+  it("is a member's only org, from the cookie the sign-in sets", async () => {
+    const t = testApp();
+    const addr = email('one-org');
+    const { ids } = await memberOf(t, addr, ['Solo']);
+    const fresh = new Client(t);
+    await fresh.signIn(addr);
+    expect((await fresh.session()).body.organization).toEqual({ id: ids[0], role: 'owner' });
+    // The tab check reads the same session: a tab on that org acts, one on another is refused.
+    expect((await fresh.tool('list_screens', {}, { [TAB_ORG_HEADER]: ids[0]! })).status).toBe(200);
+    expect((await fresh.tool('list_screens', {}, { [TAB_ORG_HEADER]: 'org_elsewhere' })).status).toBe(409);
+  });
+
+  it('is the org last made active, in any session, after signing out', async () => {
+    const t = testApp();
+    const addr = email('two-orgs');
+    const { c, ids } = await memberOf(t, addr, ['North', 'South']);
+    expect((await c.setActive(ids[1]!)).status).toBe(200);
+    await c.ok('/api/auth/sign-out');
+
+    const fresh = new Client(t);
+    await fresh.signIn(addr);
+    expect((await fresh.session()).body.organization).toEqual({ id: ids[1], role: 'owner' });
+    expect((await fresh.setActive(ids[0]!)).status).toBe(200);
+    const later = new Client(t);
+    await later.signIn(addr);
+    expect((await later.session()).body.organization).toEqual({ id: ids[0], role: 'owner' });
+  });
+
+  it('is none for a member of several orgs who never chose one, so the CMS asks', async () => {
+    const t = testApp();
+    const addr = email('unchosen');
+    await memberOf(t, addr, ['East', 'West']);
+    const fresh = new Client(t);
+    await fresh.signIn(addr);
+    expect((await fresh.session()).body.organization).toBeNull();
+  });
+
+  it('is none when the org last made active is one the member has since left', async () => {
+    const t = testApp();
+    const addr = email('left');
+    const { c, ids } = await memberOf(t, addr, ['Stay', 'Also', 'Gone']);
+    expect((await c.setActive(ids[2]!)).status).toBe(200);
+    await env.DB.prepare('DELETE FROM member WHERE organizationId = ?').bind(ids[2]).run();
+
+    const fresh = new Client(t);
+    await fresh.signIn(addr);
+    expect((await fresh.session()).body.organization).toBeNull();
   });
 });
