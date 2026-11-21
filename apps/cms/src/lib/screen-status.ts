@@ -82,15 +82,6 @@ const NEEDS_YOU: Record<NonNullable<ScreenView['state']['reason']>, string> = {
  */
 export const isRetired = (s: { state: Pick<ScreenView['state'], 'kind' | 'reason'> }) => s.state.kind === 'needs_you' && s.state.reason === 'revoked';
 
-/** Most urgent first. Asleep is on purpose, so it is never a problem and ranks below online. */
-const URGENCY: StateKind[] = ['needs_you', 'unreachable', 'updating', 'online', 'asleep'];
-
-/** A location's (a group's) state: its most urgent screen's. */
-export function rollup(screens: readonly { state: { kind: StateKind } }[]): StateKind | null {
-  for (const kind of URGENCY) if (screens.some((s) => s.state.kind === kind)) return kind;
-  return null;
-}
-
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** The line under the Screens heading. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeScreen, rollup, summarise, type ScreenLike } from '../src/lib/screen-status';
+import { describeScreen, summarise, type ScreenLike } from '../src/lib/screen-status';
 
 const NOW = Date.parse('2026-11-18T15:00:00Z'); // Wed 10:00 in New York
 
@@ -57,17 +57,6 @@ describe('describeScreen', () => {
       word: 'Updating',
       line: 'Fetching the new version, 4 files to go · still playing the last one',
     });
-  });
-});
-
-describe('rollup', () => {
-  it('takes the most urgent state, and never counts asleep as a problem', () => {
-    const k = (kind: ScreenLike['state']['kind']) => ({ state: { kind } });
-    expect(rollup([k('online'), k('asleep'), k('needs_you'), k('unreachable')])).toBe('needs_you');
-    expect(rollup([k('online'), k('asleep'), k('updating')])).toBe('updating');
-    expect(rollup([k('asleep'), k('online')])).toBe('online');
-    expect(rollup([k('asleep')])).toBe('asleep');
-    expect(rollup([])).toBeNull();
   });
 });
 
