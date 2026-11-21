@@ -193,7 +193,8 @@ On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other loo
 - **Text on cards.** No text sits on the photo itself: the caption, the chip and the logo each have a fill, and `main.ts` measures each card's inks through `readableOn` (an ink that is a mix of tokens is resolved first). Long copy steps the caption's title down (0.86, 0.74, 0.64 of its size) before the clamp's ellipsis; the clock and the temperature shrink only to fit their box.
 - **Time.** The clock and the date are from `now()` in the screen's zone; the text is written only when it changes, from a timer that wakes on each second. The forecast's days are named from the screen's today (Open-Meteo's `daily.time` cannot be asked for as a variable), so a snapshot over a day old, which shows the fallback anyway, is the only way they could be wrong.
 - **Motion.** As the look kit's, with the rail sliding in from its own side. Looping motion (the colon's blink, Pop's sticker wobble and glyph bob, Night's live dot and seconds bar) holds still in portrait, as Countdown's does (#218); the crawl runs. Poster's photo stays unpainted until play, under its ink block (Announcement, #197). The crawl's speed is the look's times `crawlSpeed` (slow 0.7, normal 1, fast 1.4).
-- **Bundle**: 402,685 bytes with all four looks.
+- **Bundle**: 402,658 bytes with all four looks.
+- **On the Pi** (`spike/pi-perf/RESULTS.md`, Info frame), over a 4K photo with the crawl running: landscape cuts drop 0.44 to 0.72% of frames and prepare in about 400 to 460 ms after the first. Over budget: every portrait prepare (600 to 1,000 ms, the portrait photo being 6.6 megapixels), the first prepare after a cold load, the portrait fades (1.4 to 3.5% dropped) and the landscape fades of Pop and Night (1.7 and 1.4%).
 
 ## Live data
 
