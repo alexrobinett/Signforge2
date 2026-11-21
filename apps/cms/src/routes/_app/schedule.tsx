@@ -11,13 +11,10 @@ import { LoaderCircleIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { EditorFields } from '~/components/editor';
 import { EmptyState, PageHeader } from '~/components/page';
-import { EntryDialog } from '~/components/schedule/entry-dialog';
-import { TakeoverDialog } from '~/components/schedule/takeover-dialog';
 import { WeekView } from '~/components/schedule/week-view';
 import { Button } from '~/components/ui/button';
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
-import { describeWhen, type ScheduleEntryView } from '~/lib/schedule';
-import type { GroupView, ScreenView } from '~/lib/screen-types';
+import { aimedAt, describeWhen, runsAfter, stateWord, timeWord } from '~/lib/schedule';
 import { sectionFor } from '~/lib/sections';
 import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
@@ -35,20 +32,6 @@ export const Route = createFileRoute('/_app/schedule')({
   head: () => ({ meta: [{ title: `${section.label} · SignForge` }] }),
   component: SchedulePage,
 });
-
-/** "Every screen", "Group Front", or the screen's name. */
-function aimedAt(e: ScheduleEntryView, screens: ScreenView[], groups: GroupView[]): string {
-  if (e.target === 'group') return `Group ${groups.find((g) => g.id === e.groupId)?.name ?? 'removed'}`;
-  if (e.target === 'screen') return screens.find((s) => s.id === e.screenId)?.name ?? 'A removed screen';
-  return 'Every screen';
-}
-
-const stateWord = (e: ScheduleEntryView) =>
-  e.deleted ? 'Removed, not published' : !e.published ? 'Draft, not published' : e.draftChanged ? 'Changes not published' : 'Published';
-
-/** In the viewer's time zone, as the takeover dialog takes it, on the week view's 24-hour clock. */
-const timeWord = (iso: string) =>
-  new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
 
 function SchedulePage() {
   const orgId = useOrgId();
@@ -68,9 +51,8 @@ function SchedulePage() {
 
   const names = new Map(playlists.map((p) => [p.id, p.name]));
   const fallback = playlists.find((p) => p.isDefault);
-  const runsOn = (e: { endsAt: string | null } | null) => !!e?.endsAt && Date.parse(e.endsAt) > now;
   // Running or to come, as drafted or as screens have it.
-  const takeovers = entries.filter((e) => e.takeover && (runsOn(e) || runsOn(e.live)));
+  const takeovers = entries.filter((e) => e.takeover && (runsAfter(e, now) || runsAfter(e.live, now)));
   const scheduled = entries.filter((e) => !e.takeover);
 
   return (
@@ -117,7 +99,7 @@ function SchedulePage() {
               {takeovers.map((e) => {
                 // What screens have, else the draft: only a published takeover is playing.
                 const shown = e.live ?? e;
-                const playing = e.live !== null && Date.parse(e.live.startsAt ?? '') <= now && runsOn(e.live);
+                const playing = e.live !== null && Date.parse(e.live.startsAt ?? '') <= now && runsAfter(e.live, now);
                 return (
                   <li key={e.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                     <div className="min-w-0 flex-1">
@@ -189,9 +171,6 @@ function SchedulePage() {
             <WeekView screens={screens} groups={groups} entries={entries} playlists={playlists} defaultPlaylistId={fallback.id} now={now} />
           </Part>
         )}
-
-        <EntryDialog orgId={orgId} playlists={playlists} screens={screens} groups={groups} />
-        <TakeoverDialog orgId={orgId} playlists={playlists} screens={screens} groups={groups} now={now} />
       </div>
     </EditorFields>
   );
