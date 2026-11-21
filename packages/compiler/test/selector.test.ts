@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { format, matches, systemLabels, type Selector } from '../src/selector';
 
-const lobby = { region: 'North', type: 'Drive-Thru', store: '0142', ...systemLabels({ orientation: 'portrait', kind: 'device', timezone: 'Europe/London', locale: null }) };
+const lobby = {
+  region: 'North',
+  type: 'Drive-Thru',
+  store: '0142',
+  ...systemLabels({ orientation: 'portrait', kind: 'device', timezone: 'Europe/London', locale: null }),
+};
 const bare = systemLabels({ orientation: 'landscape', kind: 'browser', timezone: 'America/Chicago', locale: 'en-US' });
 
 const one = (key: string, op: Selector['all'][number]['op'], ...values: string[]): Selector => ({ all: [{ key, op, values }] });

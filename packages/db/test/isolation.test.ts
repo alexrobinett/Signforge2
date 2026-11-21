@@ -15,6 +15,7 @@ describe('seed', () => {
       expect(await r.screens.get(o.screen)).toMatchObject({ orgId: o.orgId, status: 'active' });
       expect(await r.screenGroups.members(o.group)).toEqual([o.screen]);
       expect(await r.screens.groupsOf(o.screen)).toEqual([o.group]);
+      expect(await r.screens.labels.list()).toEqual([{ screenId: o.screen, key: 'region', value: o.orgId }]);
       expect(await r.screens.credentials.forScreen(o.screen)).toHaveLength(1);
       expect(await r.assets.renditions.forAsset(o.asset)).toHaveLength(1);
       expect(await r.templates.versions.get(o.templateVersion)).toBeDefined();
@@ -38,6 +39,7 @@ describe("a call made for org B with org A's ids", () => {
       ['screens.get', () => b.screens.get(a.screen)],
       ['screens.getMany', () => b.screens.getMany([a.screen])],
       ['screens.groupsOf', () => b.screens.groupsOf(a.screen)],
+      ['screens.labels.list', () => b.screens.labels.list(a.screen)],
       ['screens.credentials.get', () => b.screens.credentials.get(a.credential)],
       ['screens.credentials.forScreen', () => b.screens.credentials.forScreen(a.screen)],
       ['screenGroups.get', () => b.screenGroups.get(a.group)],
@@ -183,6 +185,16 @@ describe("a call made for org B with org A's ids", () => {
     expect(await ra.spots.get(a.imageSpot)).toMatchObject({ name: 'Logo' });
     expect(await ra.screenGroups.members(a.group)).toEqual([a.screen]);
     expect(await ra.playlists.items(a.playlist)).toHaveLength(2);
+  });
+
+  it("lists only org B's labels, and changes none of org A's", async () => {
+    const { a } = s;
+    const b = s.b.scope;
+    expect((await b.screens.labels.list()).map((l) => l.screenId)).toEqual([s.b.screen]);
+    await expect(b.screens.labels.stage.update([a.screen], { set: { region: 'hijacked' }, remove: [] })).rejects.toThrow(NotInOrgError);
+    // Past the read's check too: the statements themselves reach only org B's screens and labels.
+    await b.commit((await b.screens.labels.stage.update([a.screen], { set: { region: 'hijacked' }, remove: ['region'] }, { newScreen: true })).writes);
+    expect(await s.a.scope.screens.labels.list(a.screen)).toEqual([{ screenId: a.screen, key: 'region', value: 'org-a' }]);
   });
 
   it('refuses to link to them', async () => {
