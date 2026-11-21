@@ -2,7 +2,7 @@
 
 Version 1. This is what a template author, human or agent, builds against and what a reviewer checks. The types and limits here are defined in code in `packages/contract/src/shapes.ts`; if the two disagree, the code is right.
 
-Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl) and `menu-board` (a list typed by people or filled from a CSV or JSON link).
+Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl), `menu-board` (a list typed by people or filled from a CSV or JSON link) and `room-status` (a calendar feed read against `now()`: free or busy, until when and the rest of the day, in the four looks of the look kit, with toggles).
 
 ## What a template is
 
@@ -187,12 +187,12 @@ Any non-image field can be bound to a data source instead of a fixed value. The 
 }
 ```
 
-- `source`: the kind of feed. `open-meteo` is an Open-Meteo forecast (a JSON source; the CMS asks for the `current=` and `daily=` variables the paths read, in the place's time zone, with `timeformat=unixtime`). `rss` is a news feed and `ical` a calendar, which the server converts to `NewsFeed` and `CalendarFeed`, so their paths are those shapes' (`items`, `language`, `events`). `table` is a CSV file or a JSON list at a link (below): its fields must be lists, at `rows`, and they stay typed until a spot binds them.
+- `source`: the kind of feed. `open-meteo` is an Open-Meteo forecast (a JSON source; the CMS asks for the `current=` and `daily=` variables the paths read, in the place's time zone, with `timeformat=unixtime`). `rss` is a news feed and `ical` a calendar, which the server converts to `NewsFeed` and `CalendarFeed`, so their paths are those shapes' (`items`, `language`, `events`). A calendar event names its organiser by display name (`organizer`, the ORGANIZER's CN, or `''`), never by address, and the feed holds only events that had not ended when the server read it: room-status shows "Free all day" once a day's last meeting is over and polled away. `table` is a CSV file or a JSON list at a link (below): its fields must be lists, at `rows`, and they stay typed until a spot binds them.
 - `fields`: each live field's path in the snapshot, as a binding names it (`BINDING_PATH`). Not an image field.
 - `place` (Open-Meteo only): a text field that starts as the name of the place picked. People may still change it.
 - `units` (Open-Meteo only): the select fields that choose the units the forecast is fetched in, `temperature` with options from `°F`, `°C` and `wind` from `mph`, `km/h` (`WEATHER_UNITS`). The CMS sets them with the place, so the numbers and the unit shown always agree.
 
-`validateTemplateManifest` checks all of it. A template with no `live` is typed by people. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda (`ical`: `events`), menu-board (`table`: `items`).
+`validateTemplateManifest` checks all of it. A template with no `live` is typed by people. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda and room-status (`ical`: `events`), menu-board (`table`: `items`).
 
 **Table bindings.** A `csv` or `json-table` source's snapshot is a `TableFeed`: `columns` and `rows` of text and numbers (`@signforge/feeds`, Tables). A binding with a `table` mapping (`TableMapping`), at path `rows`, fills a list field from its rows:
 

@@ -1,0 +1,7 @@
+{
+  "name": "Harbour Room status",
+  "kind": "template",
+  "template": "room-status",
+  "durationMs": 10000,
+  "data": { "room": "Harbour Room", "seats": 8, "floor": "3", "look": "pop" }
+}

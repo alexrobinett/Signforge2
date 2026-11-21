@@ -70,6 +70,10 @@
       "size": 582,
       "type": "image/svg+xml"
     },
+    "4c9706e02787f7e29f81e946671b76de1f4b2e506e0338f1b8be56d23d636c6d": {
+      "size": 401257,
+      "type": "text/html"
+    },
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
@@ -107,7 +111,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "6bece55b91675e9e37e2e16c9d8498c9af68c0ade00c239acf33ca09165b9615",
+  "id": "b9d1e412a03280777273b2d13003f65320cae12e09c6aadb3c26d659fae25833",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -117,6 +121,9 @@
         },
         {
           "spot": "energy"
+        },
+        {
+          "spot": "room-status"
         },
         {
           "spot": "coffee"
@@ -229,6 +236,28 @@
       "name": "Energy drinks 3 for $7",
       "template": "base/cstore-promo@1.2.4"
     },
+    "room-status": {
+      "assets": {},
+      "data": {
+        "events": [],
+        "floor": "3",
+        "hour24": false,
+        "look": "pop",
+        "room": "Harbour Room",
+        "seats": 8,
+        "showClock": true,
+        "showFacts": true,
+        "showNext": true,
+        "showNowLine": true,
+        "showOrganiser": true,
+        "showSchedule": true
+      },
+      "durationMs": 10000,
+      "id": "room-status",
+      "kind": "template",
+      "name": "Harbour Room status",
+      "template": "base/room-status@1.0.0"
+    },
     "sport-drinks": {
       "assets": {
         "imageCenter": "aefa03cfc1b729812a032e1e7236e08533384d69862673a20739bac70501e89f",
@@ -327,6 +356,132 @@
         "protocol": 2,
         "uses": [],
         "version": "1.2.4"
+      }
+    },
+    "base/room-status@1.0.0": {
+      "html": "4c9706e02787f7e29f81e946671b76de1f4b2e506e0338f1b8be56d23d636c6d",
+      "manifest": {
+        "background": "#000000",
+        "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
+        "duration": {
+          "defaultMs": 10000,
+          "maxMs": 60000,
+          "minMs": 5000
+        },
+        "fields": {
+          "events": {
+            "default": [],
+            "item": {
+              "allDay": {
+                "default": false,
+                "label": "All day",
+                "type": "boolean"
+              },
+              "end": {
+                "default": "",
+                "label": "End",
+                "type": "text"
+              },
+              "organizer": {
+                "default": "",
+                "label": "Organiser",
+                "type": "text"
+              },
+              "start": {
+                "label": "Start (YYYY-MM-DD or ISO time)",
+                "type": "text"
+              },
+              "title": {
+                "label": "Title",
+                "type": "text"
+              }
+            },
+            "label": "Bookings",
+            "maxItems": 25,
+            "type": "list"
+          },
+          "floor": {
+            "default": "",
+            "label": "Floor (optional)",
+            "maxLength": 16,
+            "type": "text"
+          },
+          "hour24": {
+            "default": false,
+            "label": "24-hour time",
+            "type": "boolean"
+          },
+          "look": {
+            "default": "pop",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "type": "select"
+          },
+          "room": {
+            "default": "Harbour Room",
+            "label": "Room name",
+            "maxLength": 32,
+            "type": "text"
+          },
+          "seats": {
+            "default": 8,
+            "label": "Seats",
+            "max": 999,
+            "min": 1,
+            "step": 1,
+            "type": "number"
+          },
+          "showClock": {
+            "default": true,
+            "label": "Show the clock",
+            "type": "boolean"
+          },
+          "showFacts": {
+            "default": true,
+            "label": "Show the seats and floor",
+            "type": "boolean"
+          },
+          "showNext": {
+            "default": true,
+            "label": "Show the next meeting",
+            "type": "boolean"
+          },
+          "showNowLine": {
+            "default": true,
+            "label": "Show the now line",
+            "type": "boolean"
+          },
+          "showOrganiser": {
+            "default": true,
+            "label": "Show who booked the meeting",
+            "type": "boolean"
+          },
+          "showSchedule": {
+            "default": true,
+            "label": "Show today's schedule",
+            "type": "boolean"
+          }
+        },
+        "id": "room-status",
+        "live": {
+          "fields": {
+            "events": "events"
+          },
+          "source": "ical"
+        },
+        "name": "Room status",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 2,
+        "uses": [],
+        "version": "1.0.0"
       }
     }
   }
