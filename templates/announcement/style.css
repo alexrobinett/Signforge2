@@ -201,10 +201,6 @@ body {
   overflow: hidden;
   background: var(--lk-surface);
 }
-.shot {
-  position: absolute;
-  inset: 0;
-}
 .frame img {
   display: block;
   width: 100%;
@@ -426,19 +422,6 @@ body {
 [data-look='poster'] .photo {
   flex-basis: 42.7vw;
   border-left: var(--lk-rule) solid var(--lk-text);
-}
-/* The look gives the photo no motion of its own: the ink block over it wipes away. Under the block,
-   the image itself (not the frame, which holds the block) is unpainted until play's first frames,
-   so the frames before play do not decode it for the screen while the SDK's decode waits (photo-promo,
-   #168: on the Pi, portrait prepares about 600 ms with it painted). It shows 50 ms into play, while
-   the block still covers it whole. */
-[data-look='poster'] .shot {
-  animation: ann-unveil 50ms steps(1, end) both;
-}
-@keyframes ann-unveil {
-  from {
-    opacity: 0;
-  }
 }
 :where([data-orientation='portrait'])[data-look='poster'] .photo {
   flex-basis: 33vh;

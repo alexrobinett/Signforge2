@@ -780,7 +780,7 @@ Measured at 9672eac.
 | landscape | 360 ms | 329 ms | 399 ms | 313 ms |
 | portrait | 662 ms (858 before) | 457 ms (611 before) | 424 ms | 412 ms |
 
-**Poster's photo fading in under the ink block is the reviewer's #168 effect.**
+**Poster's photo fading in under the ink block is the reviewer's #168 effect.** (That fade sat on the frame that holds the ink block, so it also hid the wipe; replaced below.)
 
 - Without the fade (the same build otherwise), Poster prepares in 591 to 611 ms in portrait: cut 600, 594, 591, 596; fade 583, 599, 595, 611.
 - With it, Poster prepares in 410 to 506 ms.
@@ -813,6 +813,23 @@ Measured at 9672eac.
 
 - The test monitor is 700 mm wide (`wlr-randr`: 700x390 mm, a 32-inch panel), so the tile is about 12 cm on it. On a 55-inch panel it is about 20 cm.
 - No phone has scanned it yet.
+
+### Second re-check: the ink wipe kept (2026-11-21, 11:11 to 11:26)
+
+The re-check of #222 found the fade above had taken Poster's ink wipe away: the fade sat on `.photo`, which holds the ink block, so the block faded in with the photo and no frame showed ink. Two ways to keep the photo unpainted with the block opaque over it, Poster in portrait, the defaults with a QR code:
+
+| Poster, portrait | Overall | Playing | Worst frame | Prepares after the first (ms) |
+| --- | --- | --- | --- | --- |
+| the image's own wrapper at opacity 0 until 50 ms into play, cut, 3 runs | 0.28, 0.44, 0.39% | 0.06, 0.12, 0.12% | 50 ms | 592–657 |
+| the same, fade, 3 runs | 0.22, 0.33, 0.39% | 0.00, 0.06, 0.00% | 50 ms | 591–620 |
+| the image `visibility: hidden` until the `play` hook, cut, 3 runs | 0.33, 0.33, 0.28% | 0.00, 0.00, 0.06% | 50 ms | 412–532 |
+| the same, fade, 3 runs | 0.33, 0.33, 0.33% | 0.00% | 50 ms | 410–432 |
+
+- **At opacity 0 it still costs the decode.** A wrapper at opacity 0 inside the frame (the image a layer of its own, the drift's `will-change`) is back at about 600 ms, as with the photo painted. So the fade on `.photo` saved the decode because it hid the whole layer, ink block and all.
+- **Hidden until play keeps both.** The template keeps the image `visibility: hidden` until `play`, the block opaque over it, and Poster prepares at a median of 429 ms (24 prepares) with no frame dropped while playing. The ink block covers the frame whole as play starts, and a browser test reads the frame's centre: ink at the start of play, the photo once the wipe is done.
+- **Pop's portrait fade, 3 runs:** 1.50, 1.44 and 1.61% overall (0.43 to 0.51% while playing, 11 to 13% of the transition's frames). Worst frames 83, 67 and 83 ms. Prepares 533 to 1,028 ms, median 564. Over 1% every time, so not noise. Its cut stays under 1% (0.78%, above).
+- **Pop with three facts and a QR code** (the issue's "date, time, place"), portrait, cut, one run: 0.78% overall, 0.36% playing, a 67 ms worst frame. Prepares 802–854 ms: the fit takes a step, about 280 ms more than the defaults.
+- So Pop in portrait misses the budget on prepare (median 564 to 662 ms) and on the fade (about 1.5%). That is left for the owner to waive, with a follow-up for its three ablations.
 
 ## The Alert template (issue #200, 2026-11-21)
 
