@@ -26,18 +26,23 @@ const promo: TemplateManifest = {
   protocol: 2,
 };
 
-async function setup(orgId: string) {
-  await seedOrganization(env.DB, orgId);
-  const org = testScope(env.DB, orgId);
-  const t = await org.templates.insert({ key: 'promo', name: 'Promo' });
-  const v = await org.templates.versions.insert({
+/** An approved version 1.0.0 of an org template with `manifest`, as registering one would leave it. */
+async function approvedVersion(org: ReturnType<typeof testScope>, manifest: TemplateManifest) {
+  const t = await org.templates.insert({ key: manifest.id, name: manifest.name });
+  return org.templates.versions.insert({
     templateId: t.id,
     version: '1.0.0',
-    manifestJson: JSON.stringify(promo),
+    manifestJson: JSON.stringify(manifest),
     bundleSha256: sha('a'),
     status: 'approved',
     checkReportJson: JSON.stringify({ ok: true, bundleBytes: 1234, checks: [], checkedAt: 0, sourcesSha256: sha('0') }),
   });
+}
+
+async function setup(orgId: string) {
+  await seedOrganization(env.DB, orgId);
+  const org = testScope(env.DB, orgId);
+  const v = await approvedVersion(org, promo);
   const asset = await org.assets.insert({
     kind: 'image',
     name: 'berries.png',
@@ -282,15 +287,7 @@ describe('spot bindings', () => {
         },
       },
     };
-    const t = await org.templates.insert({ key: 'frame', name: 'Frame' });
-    const v = await org.templates.versions.insert({
-      templateId: t.id,
-      version: '1.0.0',
-      manifestJson: JSON.stringify(frame),
-      bundleSha256: sha('a'),
-      status: 'approved',
-      checkReportJson: JSON.stringify({ ok: true, bundleBytes: 1234, checks: [], checkedAt: 0, sourcesSha256: sha('0') }),
-    });
+    const v = await approvedVersion(org, frame);
     const bindings = { temp: { dataSourceId: 'weather', path: 'current.temperature_2m' }, items: { dataSourceId: 'news', path: 'items' } };
     const { spot } = await ok(call('create_spot', { name: 'Frame', kind: 'template', templateVersionId: v.id, assets: {}, bindings }));
     const spotId = (spot as { id: string }).id;

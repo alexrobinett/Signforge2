@@ -1,8 +1,9 @@
 // The live values the spot editor shows read from snapshots as the poller stores them: the
 // normalised feed through canonicalJson, which sorts every object's keys.
-import { canonicalJson, readPath, type FieldDef, type TemplateManifest } from '@signforge/contract';
+import { canonicalJson, liveSources, parseTemplateManifest, readPath, type FieldDef, type TemplateManifest } from '@signforge/contract';
 import { parseCalendar, parseNews } from '@signforge/feeds';
 import { describe, expect, it } from 'vitest';
+import twoSources from '../e2e/fixtures/two-sources/template.json';
 import { bindAll, guessMapping, madeByEditor, rowTitles, tableRows, typedFields, weatherSource } from '../src/lib/live-data';
 
 /** What the poller writes as a snapshot's data (apps/api/src/data/poller.ts). */
@@ -124,33 +125,14 @@ describe('a table template (issue #84)', () => {
 });
 
 describe('a template with two sources (#193)', () => {
-  const live = {
-    sources: {
-      weather: { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'city', units: { temperature: 'unit' } },
-      headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items' } },
-    },
-  } as const;
-  const m: TemplateManifest = {
-    id: 'frame',
-    version: '1.0.0',
-    name: 'Frame',
-    fields: {
-      city: { type: 'text', label: 'City', default: 'Atlanta' },
-      temp: { type: 'number', label: 'Temperature', default: 72 },
-      unit: { type: 'select', label: 'Unit', options: ['°F', '°C'], default: '°F' },
-      items: { type: 'list', label: 'Headlines', default: [], item: { title: { type: 'text', label: 'Title' } } },
-      caption: { type: 'text', label: 'Caption', default: '' },
-    },
-    duration: { defaultMs: 1, minMs: 1, maxMs: 1 },
-    orientations: ['landscape'],
-    uses: [],
-    background: '#000',
-    live: structuredClone(live),
-  };
+  // The e2e's fixture: the temperature from a forecast (with its place and unit) and headlines from a feed.
+  const parsed = parseTemplateManifest(twoSources);
+  if (!parsed.ok) throw new Error(parsed.problems.join('; '));
+  const m = parsed.value;
 
   it("leaves every source's fields and settings out of the typed ones, and binds one source's fields without touching the other's", () => {
-    expect(Object.keys(typedFields(m, {}))).toEqual(['city', 'caption']);
+    expect(Object.keys(typedFields(m, {}))).toEqual(['city']);
     const weather = { temp: { dataSourceId: 'weather-1', path: 'current.temperature_2m' } };
-    expect(bindAll(m, live.sources.headlines, weather, 'news')).toEqual({ ...weather, items: { dataSourceId: 'news', path: 'items' } });
+    expect(bindAll(m, liveSources(m.live!).headlines!, weather, 'news')).toEqual({ ...weather, items: { dataSourceId: 'news', path: 'items' } });
   });
 });

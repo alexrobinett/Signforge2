@@ -341,47 +341,48 @@ describe('commands', () => {
     expect((await sync(s, oldProtocol)).commands).toEqual([{ type: 'reload' }]);
   });
 
-  it('tell a player from before #191, which refuses url fields, to reload for a template with one: a player that knows them is not', async () => {
-    const s = await setUp('sync-url-field');
-    const manifest = { fields: { qrUrl: { type: 'url', label: 'QR link', default: '' } }, protocol: 2 };
-    await publish(s, 'm-url', { schema: MANIFEST_SCHEMA, templates: { 'base/announcement@1.0.0': { html: 'a'.repeat(64), manifest } } });
-    // What master's player reports before #191: schemas 3 and 4. Its validator refuses the url field in any manifest.
-    const before = body({ player: { version: '1.0.0', manifestSchemas: [3, 4], protocols: [1, 2] } });
-    expect((await sync(s, before)).commands).toEqual([{ type: 'reload' }]);
-    expect((await sync(s, body())).commands).toEqual([]);
-  });
-
-  it('tell a player from before #192, which refuses date and datetime fields, to reload for a template with one: a player that knows them is not', async () => {
-    const s = await setUp('sync-date-fields');
-    const fields = { day: { type: 'date', label: 'Day', default: '2026-11-27' }, target: { type: 'datetime', label: 'Target', default: '2026-11-27T18:00' } };
-    await publish(s, 'm-date', { schema: MANIFEST_SCHEMA, templates: { 'base/countdown@1.0.0': { html: 'a'.repeat(64), manifest: { fields, protocol: 2 } } } });
-    // What master's player reports before #192: schemas 4 and 5. Its validator refuses both field types in any manifest.
-    const before = body({ player: { version: '1.0.0', manifestSchemas: [4, 5], protocols: [1, 2] } });
-    expect((await sync(s, before)).commands).toEqual([{ type: 'reload' }]);
-    expect((await sync(s, body())).commands).toEqual([]);
-  });
-
-  it('tell a player from before #193, which refuses several live sources, to reload for a template that names them: a player that knows them is not', async () => {
-    const s = await setUp('sync-live-sources');
-    const fields = {
-      temp: { type: 'number', label: 'Temperature', default: 72 },
-      items: { type: 'list', label: 'Headlines', item: { title: { type: 'text', label: 'Title' } } },
-    };
-    const live = {
-      sources: {
-        weather: { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' } },
-        headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items' } },
+  // Each schema bump: a template only the new schema allows, and the schemas the player before it reports.
+  // Its validator refuses such a template in any manifest, so it must reload; a current player must not.
+  const bumps: [issue: string, what: string, key: string, manifest: Record<string, unknown>, before: number[]][] = [
+    ['#191', 'a url field', 'base/announcement@1.0.0', { fields: { qrUrl: { type: 'url', label: 'QR link', default: '' } } }, [3, 4]],
+    [
+      '#192',
+      'date and datetime fields',
+      'base/countdown@1.0.0',
+      { fields: { day: { type: 'date', label: 'Day', default: '2026-11-27' }, target: { type: 'datetime', label: 'Target', default: '2026-11-27T18:00' } } },
+      [4, 5],
+    ],
+    [
+      '#193',
+      'several live sources',
+      'base/frame@1.0.0',
+      {
+        fields: {
+          temp: { type: 'number', label: 'Temperature', default: 72 },
+          items: { type: 'list', label: 'Headlines', item: { title: { type: 'text', label: 'Title' } } },
+        },
+        live: {
+          sources: {
+            weather: { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' } },
+            headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items' } },
+          },
+        },
       },
-    };
-    await publish(s, 'm-sources', {
-      schema: MANIFEST_SCHEMA,
-      templates: { 'base/frame@1.0.0': { html: 'a'.repeat(64), manifest: { fields, live, protocol: 2 } } },
-    });
-    // What master's player reports before #193: schemas 5 and 6. Its validator refuses live.sources in any manifest.
-    const before = body({ player: { version: '1.0.0', manifestSchemas: [5, 6], protocols: [1, 2] } });
-    expect((await sync(s, before)).commands).toEqual([{ type: 'reload' }]);
-    expect((await sync(s, body())).commands).toEqual([]);
-  });
+      [5, 6],
+    ],
+  ];
+  it.each(bumps)(
+    'tell a player from before %s, which refuses %s, to reload for a template with them: a player that knows them is not',
+    async (issue, _, key, manifest, before) => {
+      const s = await setUp(`sync-bump-${issue.slice(1)}`);
+      await publish(s, `m-${issue.slice(1)}`, {
+        schema: MANIFEST_SCHEMA,
+        templates: { [key]: { html: 'a'.repeat(64), manifest: { ...manifest, protocol: 2 } } },
+      });
+      expect((await sync(s, body({ player: { version: '1.0.0', manifestSchemas: before, protocols: [1, 2] } }))).commands).toEqual([{ type: 'reload' }]);
+      expect((await sync(s, body())).commands).toEqual([]);
+    },
+  );
 
   it("carry the screen's display override while the screen reports another, and its clearing", async () => {
     const s = await setUp('sync-override');
