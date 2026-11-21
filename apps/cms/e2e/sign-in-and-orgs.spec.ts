@@ -98,8 +98,9 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await page.keyboard.press('Enter');
   // The other orgs only: the one the tab is on is not offered, as in the switcher.
   const orgs = menu.getByRole('list', { name: 'Switch organization' });
-  await expect(orgs.getByRole('button')).toHaveText(['Blue Harbour Cinemas']);
-  await expect(orgs.getByRole('button', { name: 'Blue Harbour Cinemas' })).toBeFocused();
+  await expect(orgs.getByRole('button')).toHaveCount(1);
+  await expect(orgs.getByRole('button')).toHaveAccessibleName('Blue Harbour Cinemas');
+  await expect(orgs.getByRole('button')).toBeFocused();
   await axe(page);
   await screenshot(page, '05b-command-switch-org');
   await page.keyboard.press('Enter');
