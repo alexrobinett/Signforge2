@@ -226,10 +226,14 @@ describe('edge cases', () => {
     const cal = ics(
       ['UID:a@test', 'DTSTART:20261118T120000Z', 'SUMMARY:Named', 'ORGANIZER;CN="Shah, Priya":mailto:priya@example.com'],
       ['UID:b@test', 'DTSTART:20261118T130000Z', 'SUMMARY:Address only', 'ORGANIZER:mailto:priya@example.com'],
+      // A name that is an address: Google's export with no display name, a resource calendar, and a client's "Name <address>".
+      ['UID:c@test', 'DTSTART:20261118T140000Z', 'SUMMARY:Gmail', 'ORGANIZER;CN=jane.doe@gmail.com:mailto:jane.doe@gmail.com'],
+      ['UID:d@test', 'DTSTART:20261118T150000Z', 'SUMMARY:Resource', 'ORGANIZER;CN=c_1888a1b2@resource.calendar.google.com:mailto:c_1888a1b2@resource.calendar.google.com'],
+      ['UID:e@test', 'DTSTART:20261118T160000Z', 'SUMMARY:Bracketed', 'ORGANIZER;CN="Jane Doe <jane@x.com>":mailto:jane@x.com'],
     );
     const events = parseCalendar(cal, { now }).events;
-    expect(events.map((e) => e.organizer)).toEqual(['Shah, Priya', '']);
-    expect(JSON.stringify(events)).not.toContain('example.com');
+    expect(events.map((e) => e.organizer)).toEqual(['Shah, Priya', '', '', '', '']);
+    expect(JSON.stringify(events.map((e) => e.organizer))).not.toContain('@');
   });
 
   it('is reachable through normaliseFeed', () => {
