@@ -598,6 +598,7 @@ export function scoped(d1: D1Database, orgId: string) {
     ).map((part) => db.insert(pi).values(part));
   const ps = s.publishScreens;
   const snap = s.dataSnapshots;
+  const fi = s.feedImages;
   const pc = s.playCounts;
   const pcodes = s.pairingCodes;
 
@@ -1541,6 +1542,45 @@ export function scoped(d1: D1Database, orgId: string) {
           );
         } else if (poll.checkedAt !== undefined) writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(mineSnap)).writes);
         await commit(db, writes);
+      },
+    },
+
+    /** The photos the org's news sources name, by URL (`feed_images` in ./schema.ts). Written by the poller, not by tools. */
+    feedImages: {
+      get: async (urls: readonly string[]) =>
+        urls.length
+          ? (
+              await Promise.all(
+                chunk([...urls], 1).map((part) =>
+                  db
+                    .select()
+                    .from(fi)
+                    .where(and(eq(fi.orgId, orgId), inArray(fi.url, part)))
+                    .all(),
+                ),
+              )
+            ).flat()
+          : [],
+      /** Held until `until`: queued to be fetched, so a poll before then does not queue them again. A URL new to the org gets its row, with no image yet. */
+      hold: async (urls: readonly string[], until: number) => {
+        const values = urls.map((url) => ({ orgId, url, nextCheckAt: until }));
+        if (values.length)
+          await db.batch(
+            chunk(values, 5).map((part) =>
+              db
+                .insert(fi)
+                .values(part)
+                .onConflictDoUpdate({ target: [fi.orgId, fi.url], set: updateSet(fi, { nextCheckAt: until }) }),
+            ) as [never, ...never[]],
+          );
+      },
+      /** What fetching `url` found: on success its hashes and validators, on a failure its category, the hashes kept. */
+      save: async (url: string, found: RowPatch<typeof s.feedImages> & { nextCheckAt: number }) => {
+        await db
+          .update(fi)
+          .set(updateSet(fi, strip(found)))
+          .where(and(eq(fi.orgId, orgId), eq(fi.url, url)))
+          .run();
       },
     },
 

@@ -834,6 +834,8 @@ export const dataSources = sqliteTable(
     horizonDays: integer('horizon_days'),
     /** `json-table`: the dot path to the list of objects. Null: the document is the list. */
     rowsPath: text('rows_path'),
+    /** `rss`: whether the poller fetches and stores its stories' photos (apps/api src/data/images.ts). On unless a person turns it off. */
+    photos: integer('photos', { mode: 'boolean' }).notNull().default(true),
     nextPollAt: integer('next_poll_at').notNull().default(0),
     etag: text('etag'),
     lastModified: text('last_modified'),
@@ -865,6 +867,34 @@ export const dataSnapshots = sqliteTable(
     primaryKey({ columns: [t.orgId, t.dataSourceId] }),
     foreignKey({ columns: [t.orgId, t.dataSourceId], foreignColumns: [dataSources.orgId, dataSources.id] }).onDelete('cascade'),
   ],
+);
+
+/**
+ * The photos the org's news sources name, by the URL a feed gives (apps/api src/data/images.ts):
+ * the stored copy's hashes once one was fetched and checked, the validators it came with, and when
+ * to look at the URL again. One row per URL however many of the org's sources name it. A failed
+ * fetch keeps the last good hashes. The files are the org's blobs in R2, by hash.
+ */
+export const feedImages = sqliteTable(
+  'feed_images',
+  {
+    orgId: orgId(),
+    /** As the feed names it, http or https: what a poll looks it up by. */
+    url: text('url').notNull(),
+    /** `NewsImage.file`, `.sample` and `.thumb`; null until a fetch succeeds. */
+    fileSha256: text('file_sha256'),
+    sampleSha256: text('sample_sha256'),
+    thumbSha256: text('thumb_sha256'),
+    etag: text('etag'),
+    lastModified: text('last_modified'),
+    /** When a poll that finds this URL queues it to be fetched again; moved on when it is queued, so the next poll does not queue it twice. */
+    nextCheckAt: integer('next_check_at').notNull(),
+    /** Why the last fetch failed, as a category; null once one succeeds. */
+    lastError: text('last_error'),
+    createdAt: created(),
+    updatedAt: updated(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.url] })],
 );
 
 // --------------------------------------------------------------- connections

@@ -33,6 +33,7 @@ export type ScheduleEntryRow = typeof s.scheduleEntries.$inferSelect;
 export type Publish = typeof s.publishes.$inferSelect;
 export type DataSourceRow = typeof s.dataSources.$inferSelect;
 export type DataSnapshotRow = typeof s.dataSnapshots.$inferSelect;
+export type FeedImageRow = typeof s.feedImages.$inferSelect;
 export type AuditEntry = typeof s.auditLog.$inferSelect;
 export type PlatformAuditEntry = typeof s.platformAuditLog.$inferSelect;
 export type PlayCountRow = typeof s.playCounts.$inferSelect;

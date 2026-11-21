@@ -465,3 +465,36 @@ describe('the audit log', () => {
     expect((await platform(env.DB).auditLog.list({ limit: 10 })).map((a) => a.action)).toEqual(newestFirst);
   });
 });
+
+describe('feed images', () => {
+  it("keep each org's copy of a URL both name apart", async () => {
+    const url = 'https://news.example/photo.jpg';
+    const a = s.a.scope.feedImages;
+    const b = s.b.scope.feedImages;
+    await a.hold([url], 10);
+    await a.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64), etag: '"a"', nextCheckAt: 20, lastError: null });
+    expect(await b.get([url])).toEqual([]);
+    // Org B's own fetch of it, and its failures, touch only its own row.
+    await b.save(url, { fileSha256: 'c'.repeat(64), nextCheckAt: 30 });
+    await b.hold([url], 40);
+    await b.save(url, { lastError: 'timeout', nextCheckAt: 50 });
+    expect(await a.get([url])).toEqual([
+      expect.objectContaining({ orgId: 'org-a', fileSha256: 'a'.repeat(64), etag: '"a"', nextCheckAt: 20, lastError: null }),
+    ]);
+    expect(await b.get([url])).toEqual([expect.objectContaining({ orgId: 'org-b', fileSha256: null, nextCheckAt: 50, lastError: 'timeout' })]);
+  });
+
+  it('holds a URL it already has without losing its image', async () => {
+    const url = 'https://news.example/kept.jpg';
+    const a = s.a.scope.feedImages;
+    await a.hold([url], 10);
+    await a.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64), nextCheckAt: 20 });
+    await a.hold([url, 'https://news.example/new.jpg'], 30);
+    expect((await a.get([url, 'https://news.example/new.jpg'])).map((r) => [r.url, r.fileSha256, r.nextCheckAt])).toEqual(
+      expect.arrayContaining([
+        [url, 'a'.repeat(64), 30],
+        ['https://news.example/new.jpg', null, 30],
+      ]),
+    );
+  });
+});
