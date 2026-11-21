@@ -287,7 +287,15 @@ describe('entryPreview', () => {
 describe('entryPreview after Save and publish, over what screens have (#181 review)', () => {
   /** The preview over the published schedule plus this entry, which publishes alone and last. */
   const live = (entries: ScheduleEntryView[], over: Partial<typeof draft> = {}) =>
-    entryPreview({ screen: utcLobby, groups: driveThru, entries: publishedEntries(entries), draft: { ...draft, ...over }, defaultPlaylistId: 'main', names, at });
+    entryPreview({
+      screen: utcLobby,
+      groups: driveThru,
+      entries: publishedEntries(entries),
+      draft: { ...draft, ...over },
+      defaultPlaylistId: 'main',
+      names,
+      at,
+    });
   const published = { ...breakfast, live: { ...breakfast } };
 
   it('keeps an outranking entry removed but not published: screens still have it', () => {
