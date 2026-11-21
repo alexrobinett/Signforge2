@@ -1,0 +1,13 @@
+{
+  "name": "@signforge/template-announcement",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@signforge/template-looks": "workspace:*",
+    "@signforge/template-sdk": "workspace:*"
+  }
+}

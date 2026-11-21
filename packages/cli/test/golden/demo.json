@@ -70,6 +70,10 @@
       "size": 582,
       "type": "image/svg+xml"
     },
+    "44b18bb0524b41f1334b4106b46ddfb4a21959f8d37135ec403180772cc293b3": {
+      "size": 1042,
+      "type": "image/svg+xml"
+    },
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
@@ -93,6 +97,10 @@
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "9c0d59d32ce322a23c554c82143522c60b574b82b834789b0411cfc3393f0f88": {
+      "size": 398098,
+      "type": "text/html"
     },
     "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d": {
       "size": 24400,
@@ -119,7 +127,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "26078e956afbbb61258f8d9f54b50b030cbb29b55c87a0591ac7f6aabb61e8da",
+  "id": "d8d48f2765c4cd22afdfec3ff568e5ab0eceb4036320e65f732c1918340610ba",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -129,6 +137,9 @@
         },
         {
           "spot": "energy"
+        },
+        {
+          "spot": "announcement"
         },
         {
           "spot": "room-status"
@@ -221,6 +232,33 @@
     "timezone": "America/New_York"
   },
   "spots": {
+    "announcement": {
+      "assets": {
+        "photo": "44b18bb0524b41f1334b4106b46ddfb4a21959f8d37135ec403180772cc293b3"
+      },
+      "data": {
+        "body": "Come for coffee, a tour and the first look at the roof terrace.",
+        "eyebrow": "Company news",
+        "facts": [],
+        "headline": "Pier 9 opens on Monday",
+        "look": "pop",
+        "meta": "From the People Team · 20 November",
+        "qrLabel": "Scan for the floor plan",
+        "qrUrl": "https://example.com/pier-9",
+        "showBody": true,
+        "showEyebrow": true,
+        "showFacts": true,
+        "showLogo": true,
+        "showMeta": true,
+        "showPhoto": true,
+        "showQr": true
+      },
+      "durationMs": 10000,
+      "id": "announcement",
+      "kind": "template",
+      "name": "Announcement",
+      "template": "base/announcement@1.0.0"
+    },
     "coffee": {
       "durationMs": 5000,
       "file": "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb",
@@ -419,6 +457,133 @@
         },
         "id": "alert",
         "name": "Alert",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 2,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
+    "base/announcement@1.0.0": {
+      "html": "9c0d59d32ce322a23c554c82143522c60b574b82b834789b0411cfc3393f0f88",
+      "manifest": {
+        "background": "#000000",
+        "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
+        "duration": {
+          "defaultMs": 10000,
+          "maxMs": 60000,
+          "minMs": 5000
+        },
+        "fields": {
+          "body": {
+            "default": "Come for coffee, a tour and the first look at the roof terrace.",
+            "label": "Body",
+            "maxLength": 280,
+            "type": "text"
+          },
+          "eyebrow": {
+            "default": "Company news",
+            "label": "Eyebrow",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "facts": {
+            "default": [],
+            "item": {
+              "label": {
+                "label": "Label",
+                "maxLength": 16,
+                "type": "text"
+              },
+              "value": {
+                "label": "Value",
+                "maxLength": 32,
+                "type": "text"
+              }
+            },
+            "label": "Facts",
+            "maxItems": 3,
+            "type": "list"
+          },
+          "headline": {
+            "default": "Pier 9 opens on Monday",
+            "label": "Headline",
+            "maxLength": 80,
+            "type": "text"
+          },
+          "look": {
+            "default": "pop",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "type": "select"
+          },
+          "meta": {
+            "default": "From the People Team · 20 November",
+            "label": "Posted by",
+            "maxLength": 48,
+            "type": "text"
+          },
+          "photo": {
+            "label": "Photo",
+            "type": "image"
+          },
+          "qrLabel": {
+            "default": "Scan for the floor plan",
+            "label": "QR code label",
+            "maxLength": 40,
+            "type": "text"
+          },
+          "qrUrl": {
+            "default": "",
+            "label": "QR code link",
+            "maxLength": 100,
+            "type": "url"
+          },
+          "showBody": {
+            "default": true,
+            "label": "Show the body",
+            "type": "boolean"
+          },
+          "showEyebrow": {
+            "default": true,
+            "label": "Show the eyebrow",
+            "type": "boolean"
+          },
+          "showFacts": {
+            "default": true,
+            "label": "Show the facts",
+            "type": "boolean"
+          },
+          "showLogo": {
+            "default": true,
+            "label": "Show the logo",
+            "type": "boolean"
+          },
+          "showMeta": {
+            "default": true,
+            "label": "Show who posted it",
+            "type": "boolean"
+          },
+          "showPhoto": {
+            "default": true,
+            "label": "Show the photo",
+            "type": "boolean"
+          },
+          "showQr": {
+            "default": true,
+            "label": "Show the QR code",
+            "type": "boolean"
+          }
+        },
+        "id": "announcement",
+        "name": "Announcement",
         "orientations": [
           "landscape",
           "portrait"
