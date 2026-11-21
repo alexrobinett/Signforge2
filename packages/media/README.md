@@ -27,7 +27,6 @@ Images and videos for screens, prepared in the browser before upload. The CMS's 
   4. It PUTs each part to its presigned URL and keeps each response's `ETag`.
   5. It calls `finalize_video_upload`, which checks the file again on the server.
 - **`imageSample(rgba, width, height)`** (also `@signforge/media/sample`) makes a sample's pixels from an image's: each cell's darkest and lightest pixel by WCAG luminance, or undefined when a pixel is not opaque. It is pure, so `sf build` makes the same sample with sharp (libvips decodes a JPEG a level apart from Chromium on some pixels).
-- **`encodePng(rgba, width, height)`** (`@signforge/media/png`) writes RGBA pixels as a PNG with `CompressionStream`, so a Worker can write a sample with no canvas or sharp: the API's feed photos (apps/api `src/data/images.ts`).
 - **`readImageInfo(bytes)`** (also `@signforge/media/image-info`) returns the type and displayed size of a JPEG, PNG, WebP or SVG from its header, without decoding. For a JPEG, EXIF orientations 5 to 8 swap width and height, as a browser displays them. It is pure byte parsing and runs in a Worker; `finalize_asset` uses it.
 
 The server does not trust any of this. It re-hashes the uploads and checks their type, size and box (see `packages/tools/README.md`).
@@ -42,6 +41,5 @@ The browser is Playwright's Chromium, or the one at `SF_CHROMIUM`.
   - A transparent PNG is encoded as WebP with its alpha.
   - Each rendition of the photo has its sample, within one level of the sample sharp makes of the same bytes (the two JPEG decoders differ by a level on some pixels); the transparent PNG and the SVG have none.
   - A small image and an SVG ship unchanged.
-- `test/png.test.ts` reads `encodePng`'s output back with sharp, pixel for pixel.
 - `test/sample.test.ts` runs `imageSample` on pixels: each cell's darkest and lightest by luminance, not by channel, cells cut by the edge, and none for an image with a pixel not opaque.
 - The whole upload, images and video, is tested in `packages/tools/test/e2e/upload.test.ts`. It runs this library in Chromium, with presigned PUTs to Miniflare's S3 API and the tools checking what landed. It lives there because `tools` depends on this package.

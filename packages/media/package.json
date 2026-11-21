@@ -7,8 +7,7 @@
     ".": "./src/index.ts",
     "./image-info": "./src/image-info.ts",
     "./sample": "./src/sample.ts",
-    "./testing": "./test/fixtures.ts",
-    "./png": "./src/png.ts"
+    "./testing": "./test/fixtures.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",
