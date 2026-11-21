@@ -111,14 +111,15 @@ async function refresh(base: string, id: string, manifest: ScreenManifest): Prom
 }
 
 /**
- * Snapshots from a sync's response, checked against `manifest`, the one playing when the answer
- * came: a new manifest it names is adopted later, by the content worker, which then marks that
- * manifest's sources loaded too. Then every source of `manifest` counts as loaded: a spot waiting
+ * Snapshots from a sync's response, each checked against the manifest `playing` gives as it comes
+ * to it: a new manifest the answer names is adopted later, by the content worker, which then marks
+ * that manifest's sources loaded too, and one it adopts while these are written is the one the rest
+ * are checked against. Then every source of the manifest playing counts as loaded: a spot waiting
  * for its feed starts with what there is.
  */
-export async function offerSnapshots(list: readonly DataSnapshot[], manifest: ScreenManifest | undefined, desired: string | undefined): Promise<void> {
-  for (const snap of list) await offer(snap.id, snap, manifest, desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
-  settleSources(manifest);
+export async function offerSnapshots(list: readonly DataSnapshot[], playing: () => ScreenManifest | undefined, desired: string | undefined): Promise<void> {
+  for (const snap of list) await offer(snap.id, snap, playing(), desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+  settleSources(playing());
 }
 
 /** Offer `manifest`, just adopted, the snapshots refused for the one before it while the sync named another. */

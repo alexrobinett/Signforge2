@@ -275,54 +275,128 @@ describe('snapshots', () => {
     // Nothing polls the source itself.
     expect(p.server.requestsTo(/^\/content\/data\//)).toEqual([]);
   });
+});
 
-  it('refused for the manifest playing, while the sync names a newer one, are taken once the screen adopts it (review of #155)', async () => {
-    // The title shows the table's second column; the items list the rows by a mapped column.
-    const menu = (column: string) =>
-      h.content(
-        [
-          {
-            id: 'menu',
-            durationMs: 500,
-            label: 'Fallback',
-            items: [{ title: 'Fallback item' }],
-            bindings: { label: { source: 'menu', path: 'columns.1' }, items: { source: 'menu', path: 'rows', table: { columns: { title: column } } } },
-          },
-        ],
-        { variant: column },
-      );
-    const table = (columns: string[], dish: string, version: number) => ({
-      id: 'menu',
-      version,
-      fetchedAt: new Date(version).toISOString(),
-      checkedAt: new Date().toISOString(),
-      data: { columns, rows: [[dish, 4]] },
-    });
-    const before = menu('Item');
-    const after = menu('Dish');
+/**
+ * A screen behind on its manifest (review of #155): M1 maps the menu's `Item` column; a sync names
+ * a manifest that maps the renamed `Dish` while the screen cannot fetch it, and carries the renamed
+ * table, which the screen refuses for M1. The refused snapshot waits for the next manifest adopted.
+ */
+describe('a snapshot refused while the screen is behind on its manifest', () => {
+  // The title shows the table's second column; the items list its rows by a mapped column.
+  const menu = (column: string, variant = column) =>
+    h.content(
+      [
+        {
+          id: 'menu',
+          durationMs: 500,
+          label: 'Fallback',
+          items: [{ title: 'Fallback item' }],
+          bindings: { label: { source: 'menu', path: 'columns.1' }, items: { source: 'menu', path: 'rows', table: { columns: { title: column } } } },
+        },
+      ],
+      { variant },
+    );
+  const table = (columns: string[], dish: string, version: number, checkedAt = new Date().toISOString()) => ({
+    id: 'menu',
+    version,
+    fetchedAt: new Date(version).toISOString(),
+    checkedAt,
+    data: { columns, rows: [[dish, 4]] },
+  });
+  const renamed = (dish: string, version: number, checkedAt?: string) => table(['Dish', 'Price'], dish, version, checkedAt);
+
+  /** A screen playing M1 with its table, its manifest fetch then cut; `restore` puts the fetch back. */
+  async function behind() {
+    const m1 = menu('Item');
     const p = await h.openPlayer((s) => {
-      s.publish(before);
+      s.publish(m1);
       s.setData('menu', table(['Item', 'Price'], 'Soup', 1000));
     }, api);
     await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Price', items: 'Soup' });
     await p.until((s) => s.socket);
+    const restore = p.server.intercept(/^\/content\/manifest\.json$/, { status: 503 });
+    let latest = m1;
+    /** Publish `content` with the menu's latest `snapshot`, and sync: the screen cannot fetch the manifest it names. */
+    const publish = async (content: Content, snapshot?: ReturnType<typeof table>) => {
+      const refused = (await p.state()).dataRejected.menu ?? 0;
+      p.server.publish(content);
+      latest = content;
+      if (snapshot) p.server.setData('menu', snapshot);
+      const syncs = p.server.syncs.length;
+      p.server.push({ type: 'manifest', id: content.manifest.id });
+      await p.until((s) => p.server.syncs.length > syncs && (!snapshot || (s.dataRejected.menu ?? 0) > refused));
+    };
+    /** Put the fetch back and sync: the screen adopts the manifest last published. */
+    const adopt = async () => {
+      restore();
+      p.server.push({ type: 'manifest', id: latest.manifest.id });
+      await p.until((s) => s.manifestId === latest.manifest.id);
+    };
+    return { p, m1, publish, adopt };
+  }
 
-    // The column is renamed and the spot remapped while the screen cannot fetch the new manifest:
-    // the sync names it and carries the renamed table, which lacks the column the playing one maps.
-    const cut = p.server.intercept(/^\/content\/manifest\.json$/, { status: 503 });
-    p.server.publish(after);
-    p.server.setData('menu', table(['Dish', 'Price'], 'Stew', 2000));
-    p.server.push({ type: 'manifest', id: after.manifest.id });
-    await p.until((s) => (s.dataRejected.menu ?? 0) >= 1);
+  it('is taken once the screen adopts the manifest the sync named', async () => {
+    const { p, publish, adopt } = await behind();
+    await publish(menu('Dish'), renamed('Stew', 2000));
     expect(p.console.join('\n')).toContain('snapshot lacks a column a table maps');
     const syncs = p.server.syncs.length;
-
-    // Back, it adopts the new manifest and plays the renamed table, with no other sync and no change in the feed.
-    cut();
-    p.server.push({ type: 'manifest', id: after.manifest.id });
-    await p.until((s) => s.manifestId === after.manifest.id);
+    // Back, it plays the renamed table, with no other sync and no change in the feed.
+    await adopt();
     await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Price', items: 'Stew' });
     expect(p.server.syncs.length).toBe(syncs + 1);
+  });
+
+  it('is taken by a third manifest named before the second was fetched', async () => {
+    const { p, publish, adopt } = await behind();
+    await publish(menu('Dish'), renamed('Stew', 2000));
+    await publish(menu('Dish', 'third'));
+    await adopt();
+    await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Price', items: 'Stew' });
+  });
+
+  it('is the newest of those refused for one source', async () => {
+    const { p, publish, adopt } = await behind();
+    const m2 = menu('Dish');
+    await publish(m2, renamed('Stew', 2000));
+    await publish(m2, renamed('Chowder', 3000));
+    await adopt();
+    await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Price', items: 'Chowder' });
+  });
+
+  it('is kept when it is stale by the time it is adopted, and fresh after the next sync confirms it', async () => {
+    const { p, publish, adopt } = await behind();
+    const twoDaysAgo = new Date(Date.now() - 48 * 3_600_000).toISOString();
+    await publish(menu('Dish'), renamed('Stew', 2000, twoDaysAgo));
+    await adopt();
+    // Kept as the latest, but past the day a snapshot plays without a check: the fallback shows.
+    await p.until((s) => s.data.menu === new Date(2000).toISOString());
+    await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Fallback', items: 'Fallback item' });
+    // The poller found the feed unchanged: the same version, checked now.
+    p.server.setData('menu', renamed('Stew', 2000));
+    p.server.push({ type: 'manifest', id: 'nudge' });
+    await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Price', items: 'Stew' });
+  });
+
+  it('survives a restart while it waits: the last good copy plays, then the renamed table once adopted', async () => {
+    const { p, publish, adopt } = await behind();
+    await publish(menu('Dish'), renamed('Stew', 2000));
+    // Still behind after the restart: M1 and its stored table play, and the sync sends the renamed one again.
+    await p.page.reload();
+    await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Price', items: 'Soup' });
+    await p.until((s) => s.socket && (s.dataRejected.menu ?? 0) >= 1);
+    await adopt();
+    await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Price', items: 'Stew' });
+  });
+
+  it('is taken after an undo while behind, by the next manifest that maps it', async () => {
+    const { p, m1, publish, adopt } = await behind();
+    await publish(menu('Dish'), renamed('Stew', 2000));
+    // Undone: the sync names M1 again, which the screen plays; then a third publish maps the renamed column.
+    await publish(m1);
+    await publish(menu('Dish', 'third'));
+    await adopt();
+    await expect.poll(() => p.onScreen(), { timeout: 10_000 }).toMatchObject({ label: 'Price', items: 'Stew' });
   });
 });
 

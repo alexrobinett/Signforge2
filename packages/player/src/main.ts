@@ -758,7 +758,7 @@ async function apiSync(): Promise<void> {
   if (!wasTrusted) display.wake();
   playback.clockMoved();
 
-  await offerSnapshots(r.snapshots, playback.manifest, r.desiredManifest);
+  await offerSnapshots(r.snapshots, () => playback.manifest, r.desiredManifest);
   await offerChecked(r.checked ?? {});
   // After the snapshots are kept, so a manifest the content worker adopts has its data.
   const current = state.fallback || playback.manifest?.id;
