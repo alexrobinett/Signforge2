@@ -882,7 +882,10 @@ describe('the look kit (#190)', () => {
       const status = await f.evaluate(() => [...document.fonts].map((ff) => [ff.family.replaceAll('"', ''), ff.status] as const));
       const loaded = [...new Set(status.filter(([, s]) => s !== 'unloaded').map(([family]) => family))].sort();
       expect(loaded, look).toEqual([...faces[look]].sort());
-      expect(status.filter(([family, s]) => faces[look].includes(family) && s === 'loading'), look).toEqual([]);
+      expect(
+        status.filter(([family, s]) => faces[look].includes(family) && s === 'loading'),
+        look,
+      ).toEqual([]);
     }
   });
 

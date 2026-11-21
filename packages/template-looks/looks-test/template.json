@@ -12,7 +12,12 @@
     "figureLabel": { "type": "text", "label": "Figure label", "default": "Desks on floor two", "maxLength": 32 },
     "meta": { "type": "text", "label": "Meta", "default": "From the People Team", "maxLength": 48 },
     "tag": { "type": "text", "label": "Photo tag", "default": "Mon 7 Dec", "maxLength": 16 },
-    "crawl": { "type": "text", "label": "Crawl", "default": "Tours from 9 to 11 in the lobby · The roof terrace opens at noon · Bring your badge", "maxLength": 200 },
+    "crawl": {
+      "type": "text",
+      "label": "Crawl",
+      "default": "Tours from 9 to 11 in the lobby · The roof terrace opens at noon · Bring your badge",
+      "maxLength": 200
+    },
     "photo": { "type": "image", "label": "Photo" },
     "showEyebrow": { "type": "boolean", "label": "Show the eyebrow", "default": true },
     "showBody": { "type": "boolean", "label": "Show the body", "default": true },
