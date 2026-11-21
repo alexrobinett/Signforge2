@@ -9,7 +9,7 @@ interface Fact {
 
 /** The headline's size at each step, from the look's own down to where 80 characters fit its lines. */
 const HEADLINE_STEPS = [1, 0.86, 0.74, 0.64, 0.56, 0.49, 0.43];
-/** The body's and the facts' (and Poster's signature's), which have less room to give. */
+/** The body's and the facts' (and Poster's signature's), alongside: they have less room to give. */
 const BODY_STEPS = [1, 0.9, 0.8, 0.72, 0.64];
 
 defineTemplate({
@@ -51,37 +51,44 @@ defineTemplate({
       });
     document.getElementById('qr')?.replaceChildren(qrSvg(url, String(data.qrLabel) || url));
 
-    fit(ctx.root);
+    fit();
     if (img) img.style.visibility = '';
   },
 });
 
 /**
- * Step the headline, then the body, down from the look's sizes until each fits its lines and the
- * copy fits the screen. Long copy at a field's `maxLength` then ends in its clamp's ellipsis at the
- * smallest step, never past its box. A layout per step tried; short copy takes one.
+ * The largest step at which the headline fits its lines and nothing falls below the copy: the
+ * headline's size and the body's and facts' step down together, so long copy at a field's
+ * `maxLength` ends in its clamp's ellipsis at the smallest step, never past its box. Each step
+ * tried is a style and layout pass, which on a Pi costs tens of milliseconds: short copy takes one,
+ * anything else a binary search of the rest.
  */
-function fit(root: HTMLElement): void {
+function fit(): void {
+  const copy = document.querySelector<HTMLElement>('.copy')!;
   const headline = document.querySelector<HTMLElement>('.headline')!;
-  const body = document.querySelector<HTMLElement>('.body');
   // Glyphs overhang a tight leading by a few pixels; clamped text hides at least a line.
-  const clamped = (el: HTMLElement | null) => !!el && el.scrollHeight - el.clientHeight > Number.parseFloat(getComputedStyle(el).fontSize) / 2;
+  const clamped = (el: HTMLElement) => el.scrollHeight - el.clientHeight > Number.parseFloat(getComputedStyle(el).fontSize) / 2;
   // By layout, not by painted boxes: the intros' transforms are not where the copy rests.
   const overflows = () =>
-    [...document.querySelectorAll<HTMLElement>('.copy > *')].some((el) => {
+    [...copy.children].some((el) => {
+      if (!(el instanceof HTMLElement) || !(el.offsetParent instanceof HTMLElement)) return false;
       const box = el.offsetParent;
-      if (!(box instanceof HTMLElement)) return false;
       // The margin box: a mask's padding for descenders is taken back by its negative margin.
       const bottom = el.offsetTop + el.offsetHeight + Number.parseFloat(getComputedStyle(el).marginBottom);
       return bottom > box.clientHeight - Number.parseFloat(getComputedStyle(box).paddingBottom) + 1;
     });
-  const set = (name: string, steps: number[], i: number) => root.style.setProperty(name, String(steps[i]));
-  let h = 0;
-  let b = 0;
-  while (h < HEADLINE_STEPS.length - 1 && clamped(headline)) set('--fit-headline', HEADLINE_STEPS, ++h);
-  while (b < BODY_STEPS.length - 1 && clamped(body)) set('--fit-body', BODY_STEPS, ++b);
-  while (overflows() && (h < HEADLINE_STEPS.length - 1 || b < BODY_STEPS.length - 1)) {
-    if (h < HEADLINE_STEPS.length - 1) set('--fit-headline', HEADLINE_STEPS, ++h);
-    if (b < BODY_STEPS.length - 1) set('--fit-body', BODY_STEPS, ++b);
+  // On the copy, not the root: a custom property set on the root restyles the whole document.
+  const set = (k: number) => {
+    copy.style.setProperty('--fit-headline', String(HEADLINE_STEPS[k]));
+    copy.style.setProperty('--fit-body', String(BODY_STEPS[Math.min(k, BODY_STEPS.length - 1)]));
+  };
+  const fits = (k: number) => (set(k), !clamped(headline) && !overflows());
+  if (fits(0)) return;
+  let [lo, hi] = [1, HEADLINE_STEPS.length - 1];
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (fits(mid)) hi = mid;
+    else lo = mid + 1;
   }
+  set(lo);
 }

@@ -205,10 +205,11 @@ body {
   object-fit: cover;
 }
 
-/* Pop: the copy and a tilted photo on a tomato card inside a padded page; the eyebrow a wobbling
-   sticker, the QR code on a cobalt card. */
+/* Pop: the copy and the photo on a tilted tomato card inside a padded page; the eyebrow a wobbling
+   sticker, the QR code on a cobalt card. The canvas tilts the photo too: a drifting photo clipped
+   by a rotated rounded frame dropped 0.77% of frames while playing on the Pi, so it stands straight. */
 [data-look='pop'] .stage {
-  padding: 8.1vmin 8.9vmin;
+  padding: 6.7vmin 8.9vmin;
   gap: 8.9vmin;
 }
 [data-look='pop'] .copy {
@@ -250,7 +251,7 @@ body {
 [data-look='pop'] .fact dd {
   font-family: var(--lk-font-display);
   font-weight: 800;
-  font-size: calc(3.3vmin * var(--fit-body));
+  font-size: calc(3vmin * var(--fit-body));
 }
 [data-look='pop'] .qr,
 [data-look='pop'] .meta {
@@ -296,7 +297,6 @@ body {
 }
 [data-look='pop'] .frame {
   border-radius: var(--lk-radius);
-  transform: rotate(2deg);
 }
 :where([data-orientation='portrait'])[data-look='pop'] .copy {
   grid-template-rows: min-content min-content min-content min-content minmax(0, 1fr) min-content min-content;
