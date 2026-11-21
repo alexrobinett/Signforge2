@@ -26,7 +26,8 @@ env:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # A master run with cold caches spends about 16 min on typecheck, test and lint and 20 min on the CMS e2e (runs 44896506918, 44908695033 timed out at 30).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
