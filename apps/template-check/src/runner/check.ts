@@ -80,6 +80,12 @@ function fallback(def: ScalarFieldDef): unknown {
     case 'url':
       // The first sample within the field's limit, else empty: a value a spot could hold, never one the contract refuses.
       return URL_SAMPLES.find((u) => !def.maxLength || u.length <= def.maxLength) ?? '';
+    case 'date':
+    case 'datetime': {
+      // A fixed sample, never the day the check runs, so every run renders the same data; moved into the field's range.
+      const sample = def.type === 'date' ? '2027-01-15' : '2027-01-15T18:00';
+      return def.min !== undefined && sample < def.min ? def.min : def.max !== undefined && sample > def.max ? def.max : sample;
+    }
   }
 }
 

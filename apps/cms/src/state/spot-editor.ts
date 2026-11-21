@@ -20,6 +20,7 @@
  * would; a new snapshot in the Query cache redraws it. With `fallback` (the stage's Data switch)
  * the draft is compiled without its bindings, so the stage shows the fallback values.
  */
+import { draftCheck } from '@signforge/compiler/draft';
 import { type DataSnapshot, PREVIEW_PROTOCOL, safeUrl, type ScreenManifest } from '@signforge/contract';
 import { playerMessage } from '~/lib/preview';
 import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuery, spotQuery, templatesQuery } from '~/queries/spots';
@@ -173,7 +174,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     await queryClient.invalidateQueries({ queryKey: dataSourceKeys.all(orgId), exact: true });
   }
 
-  /** Whether the server would refuse the draft (packages/tools `update_spot`): an empty image field is allowed. */
+  /** Whether the server would refuse the draft (packages/tools `update_spot`), which checks it as `draftCheck` says. */
   const unsaveable = (spot: SpotView, d: SpotDraft, orgId: string) => {
     if (!d.name.trim()) return true;
     if (spot.kind === 'url') return !safeUrl(d.url);
@@ -182,7 +183,8 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     if (!v) return false;
     const { minMs, maxMs } = v.manifest.duration;
     if (d.durationMs < minMs || d.durationMs > maxMs) return true;
-    return [...fieldProblems(v.manifest.fields, d).keys()].some((name) => v.manifest.fields[name]?.type !== 'image' || name in d.assets);
+    const checked = draftCheck(v.manifest.fields, d);
+    return fieldProblems(checked.fields, { data: checked.data, assets: d.assets }).size > 0;
   };
 
   /** The spot target's draft, compiled; undefined while what it needs is not loaded. */

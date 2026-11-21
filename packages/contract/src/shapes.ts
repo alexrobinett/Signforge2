@@ -13,8 +13,10 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  *      the server tells it to reload into a player that plays 4.
  *   5  a template may declare a `url` field (#191). A player that knows only 3 and 4 refuses such a
  *      template, so the server tells it to reload, as for 4.
+ *   6  a template may declare `date` and `datetime` fields (#192). A player that knows only 4 and 5
+ *      refuses such a template, so the server tells it to reload, as for 4.
  */
-export const MANIFEST_SCHEMA = 5;
+export const MANIFEST_SCHEMA = 6;
 /** Manifest schemas this player can play: the current one and the one before it. */
 export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
@@ -59,7 +61,16 @@ export type ScalarFieldDef =
   | { type: 'color'; label: string; default?: string }
   | { type: 'select'; label: string; options: string[]; default?: string }
   /** A web address people type, such as a QR code's: `https:` only, at most `MAX_URL_BYTES`, or empty for none. */
-  | { type: 'url'; label: string; default?: string; maxLength?: number };
+  | { type: 'url'; label: string; default?: string; maxLength?: number }
+  /** A calendar day, `YYYY-MM-DD`; `min` and `max` are days too. */
+  | { type: 'date'; label: string; default?: string; min?: string; max?: string }
+  /**
+   * A wall time, `YYYY-MM-DDTHH:mm`, with no zone or offset; `min` and `max` are wall times too.
+   * The template reads it in the screen's time zone (the SDK's `wallTime`), so "Friday 18:00"
+   * means 18:00 where each screen is, as a person means it, whichever zone the editor is in. An
+   * instant would tie the spot to one zone, and every screen elsewhere would count to another hour.
+   */
+  | { type: 'datetime'; label: string; default?: string; min?: string; max?: string };
 
 /**
  * The most a `url` field holds, in bytes of UTF-8 (the form a QR code carries it in), whatever its

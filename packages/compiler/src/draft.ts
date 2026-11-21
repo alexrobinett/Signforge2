@@ -7,7 +7,19 @@
  * What it reads is the seam (`DraftReads`): the tools read the org's rows, the CMS its asset and
  * template views.
  */
-import type { Binding, DataSource, Orientation, Playlist, ScreenManifest, Sha256, Spot, TableMapping, TemplateManifest } from '@signforge/contract';
+import type {
+  Binding,
+  DataSource,
+  FieldDef,
+  Orientation,
+  ScalarFieldDef,
+  Playlist,
+  ScreenManifest,
+  Sha256,
+  Spot,
+  TableMapping,
+  TemplateManifest,
+} from '@signforge/contract';
 import { compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from './index';
 
 type Fit = 'cover' | 'contain';
@@ -20,6 +32,48 @@ export interface DraftBinding {
   dataSourceId: string;
   path: string;
   table?: TableMapping;
+}
+
+type DateDef = Extract<ScalarFieldDef, { type: 'date' | 'datetime' }>;
+const isDate = (def: FieldDef): def is DateDef => def.type === 'date' || def.type === 'datetime';
+/** A date or datetime with no value yet: `''` (what a picker holds), or left out with no default. */
+const unpicked = (def: DateDef, v: unknown) => v === '' || (v ?? def.default) === undefined;
+
+/**
+ * What a template draft's save is checked against: the template's fields and the draft's data,
+ * less what a draft may leave without a value for now. No start value fits every spot for those (a
+ * photo, a countdown's target), so a new spot or row is saved without one, and the publish holds
+ * the spot back in the contract's words ("has no asset", "has no date yet") until it has one:
+ *  - an image with no asset (nor binding) yet;
+ *  - a date or datetime not picked yet, unless it is bound: a bound field needs its fallback;
+ *  - the same in a list row, checked with a value its field takes in that cell's place, so the
+ *    rest of the row is still checked.
+ * Every other value must be one a screen takes.
+ */
+export function draftCheck(
+  fields: Record<string, FieldDef>,
+  draft: { data: Record<string, unknown>; assets: Record<string, string>; bindings: Record<string, unknown> },
+): { fields: Record<string, FieldDef>; data: Record<string, unknown> } {
+  const checked: Record<string, FieldDef> = {};
+  // Data for no field stays, so the check names it.
+  const data: Record<string, unknown> = Object.fromEntries(Object.entries(draft.data).filter(([name]) => !Object.hasOwn(fields, name)));
+  for (const [name, def] of Object.entries(fields)) {
+    const v = draft.data[name];
+    const bound = name in draft.bindings;
+    if (def.type === 'image' ? !(name in draft.assets || bound) : isDate(def) && !bound && unpicked(def, v)) continue;
+    checked[name] = def;
+    if (v !== undefined) data[name] = def.type === 'list' && Array.isArray(v) ? v.map((row: unknown) => rowChecked(def.item, row)) : v;
+  }
+  return { fields: checked, data };
+}
+
+/** A list row with each unpicked date or datetime in it replaced by a value its field takes (its min, else its max, else 1900). */
+function rowChecked(item: Record<string, ScalarFieldDef>, row: unknown): unknown {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const cells: Record<string, unknown> = { ...row };
+  for (const [k, d] of Object.entries(item))
+    if (isDate(d) && unpicked(d, cells[k])) cells[k] = d.min ?? d.max ?? (d.type === 'date' ? '1900-01-01' : '1900-01-01T00:00');
+  return cells;
 }
 
 /** A spot's draft (or published version), as `get_spot` gives it. */
