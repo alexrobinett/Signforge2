@@ -7,14 +7,16 @@
  * the list the Screens pages read (`putGroup`).
  *
  * Each dialog opened has an id. A request belongs to the dialog that sent it: its pending state and
- * refusal are that dialog's, and an answer that comes once it is closed changes nothing.
+ * refusal are that dialog's, and an answer that comes once it is closed changes nothing. While
+ * Members saves, its checklist takes no change; closed before its writes are sent, it sends none.
  */
 import { orgOnScreen } from '~/lib/live';
 import { isRetired } from '~/lib/screen-status';
 import type { GroupView } from '~/lib/screen-types';
 import { callTool, isConflict, Refusal, toolMessage } from '~/lib/tools';
 import { scheduleKey } from '~/queries/schedule';
-import { putGroup, screensQuery, screenStatusQuery } from '~/queries/screens';
+import { putGroup, screensQuery } from '~/queries/screens';
+import { getScreenStatus } from '~/server/screens.functions';
 import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
 
@@ -125,11 +127,12 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
       if (saved?.status === 'saved' && get().groups.renames[DIALOG]?.id === saved.id) get().closeGroupDialog();
     },
     async reloadGroupRename(orgId) {
-      const groupId = dialog()?.groupId;
-      get().closeGroupDialog();
+      const d = dialog();
+      if (d?.kind !== 'rename' || d.orgId !== orgId) return;
       await queryClient.invalidateQueries({ queryKey: screensQuery(orgId).queryKey, exact: true });
-      const now = queryClient.getQueryData(screensQuery(orgId).queryKey)?.groups.find((g) => g.id === groupId);
-      if (now && dialog() === null && orgOnScreen(router) === orgId) get().openGroupRename(orgId, now);
+      // Dismissed or replaced meanwhile: that was the person's answer.
+      const now = queryClient.getQueryData(screensQuery(orgId).queryKey)?.groups.find((g) => g.id === d.groupId);
+      if (now && dialog()?.id === d.id) get().openGroupRename(orgId, now);
     },
 
     askToDeleteGroup: (orgId, groupId) => open(orgId, groupId, { kind: 'delete', blockedBy: [] }),
@@ -154,21 +157,27 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
     openGroupMembers: (orgId, group) => open(orgId, group.id, { kind: 'members', edits: {}, query: '' }),
     searchGroupMembers: (query) => patch((s) => (s.dialog?.kind === 'members' ? { ...s, dialog: { ...s.dialog, query } } : s)),
     chooseGroupMember: (screenId, member) =>
-      patch((s) => (s.dialog?.kind === 'members' ? { ...s, dialog: { ...s.dialog, edits: { ...s.dialog.edits, [screenId]: member } } } : s)),
+      patch((s) =>
+        s.dialog?.kind === 'members' && !s.dialog.pending ? { ...s, dialog: { ...s.dialog, edits: { ...s.dialog.edits, [screenId]: member } } } : s,
+      ),
     async saveGroupMembers(orgId, group) {
       const d = dialog();
       if (d?.kind !== 'members' || d.orgId !== orgId) return;
       const edits = Object.entries(d.edits).filter(([id, member]) => member !== group.screenIds.includes(id));
       if (!edits.length) return get().closeGroupDialog();
       await run(d, async () => {
-        // Revoked since the page read it? Then it is retired: left as it is, never taken out of the group.
-        const now = await queryClient.query({ ...screenStatusQuery(orgId), staleTime: 0 });
+        // Revoked since the page read it? Then it is retired: left as it is, never taken out of the
+        // group. Read now, not from the poll's cache, which can join a poll from before the revoke.
+        const now = await getScreenStatus();
         const retired = new Set(now.screens.filter(isRetired).map((s) => s.id));
         const of = (member: boolean) => edits.filter(([id, m]) => m === member && !retired.has(id)).map(([id]) => id);
         const add = of(true);
         const remove = of(false);
-        if (add.length) putGroup(queryClient, orgId, (await callTool('add_group_members', { groupId: group.id, screenIds: add })).group);
+        // Closed meanwhile (Cancel): nothing is sent. The removal goes first, closest to that read.
+        if (dialog()?.id !== d.id) return;
         if (remove.length) putGroup(queryClient, orgId, (await callTool('remove_group_members', { groupId: group.id, screenIds: remove })).group);
+        if (add.length && dialog()?.id === d.id)
+          putGroup(queryClient, orgId, (await callTool('add_group_members', { groupId: group.id, screenIds: add })).group);
       });
     },
 

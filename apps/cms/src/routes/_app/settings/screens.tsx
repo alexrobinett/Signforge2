@@ -23,8 +23,9 @@ import { isRetired } from '~/lib/screen-status';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
-import { screensQuery, screenStatusQuery } from '~/queries/screens';
+import { screenRosterQuery, screensQuery } from '~/queries/screens';
 import { brandKitsQuery } from '~/queries/spots';
+import { cn } from '~/lib/utils';
 import { getOrgSettings } from '~/server/settings.functions';
 import { memberChecked } from '~/state/groups';
 import { useAppStore } from '~/state/provider';
@@ -161,9 +162,9 @@ function Groups() {
   const openGroupRename = useAppStore((s) => s.openGroupRename);
   const askToDeleteGroup = useAppStore((s) => s.askToDeleteGroup);
   const openGroupMembers = useAppStore((s) => s.openGroupMembers);
-  // What each screen is doing, polled as the Screens page polls it: a screen revoked while this
-  // page is open leaves the counts and the picker within a poll.
-  const { data: live } = useQuery(screenStatusQuery(orgId));
+  // Each screen's state, polled: a screen revoked while this page is open leaves the counts and the
+  // picker within a poll. The full list is read again only when a screen comes or goes.
+  const { data: live } = useQuery(screenRosterQuery(orgId));
   const active = withStatus(screens, at, live).filter((s) => !isRetired(s));
   const pickable = active.map((s) => s.id);
   const group = open && open.orgId === orgId ? groups.find((g) => g.id === open.groupId) : undefined;
@@ -425,7 +426,7 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
           <p id={`${id}-count`} className="text-[13px] text-muted-foreground" aria-live="polite">
             {screens.filter((s) => memberChecked(dialog, group, s.id)).length} of {plural(screens.length, 'screen')} chosen{q && ` · ${listed.length} shown`}
           </p>
-          <fieldset className="max-h-[50dvh] overflow-y-auto rounded-lg border">
+          <fieldset className={cn('max-h-[50dvh] overflow-y-auto rounded-lg border', pending && 'opacity-60')}>
             <legend className="sr-only">Screens</legend>
             {listed.length === 0 ? (
               <p className="p-3 text-sm text-muted-foreground">No screen matches.</p>
@@ -437,6 +438,8 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
                     className="size-4 accent-primary"
                     checked={memberChecked(dialog, group, s.id)}
                     onChange={(e) => choose(s.id, e.target.checked)}
+                    // While Save runs the store takes no change; the boxes say so.
+                    aria-disabled={pending || undefined}
                   />
                   {s.name}
                 </label>

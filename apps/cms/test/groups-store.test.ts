@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { GroupView } from '../src/lib/screen-types';
 import { Refusal } from '../src/lib/tools';
-import { screensQuery } from '../src/queries/screens';
+import { screensQuery, screenStatusQuery } from '../src/queries/screens';
 import { getScreenStatus } from '../src/server/screens.functions';
 import { createGroupsSlice, memberChecked, type GroupsSlice } from '../src/state/groups';
 
@@ -28,11 +28,15 @@ function groupsStore() {
   queryClient.setQueryData(screensQuery(ORG).queryKey, { screens: [], groups: [front], at: 0 });
   const store = createStore<GroupsSlice>()((set, get) => createGroupsSlice(set as never, get as never, { router, queryClient } as never));
   const groups = () => queryClient.getQueryData(screensQuery(ORG).queryKey)?.groups;
-  return { store, groups };
+  return { store, groups, queryClient };
 }
 
 /** What `list_screen_status` says of each screen: active, unless named revoked. */
 function status(...revoked: string[]) {
+  vi.mocked(getScreenStatus).mockResolvedValue(statusOf(...revoked));
+}
+
+function statusOf(...revoked: string[]) {
   const state = (id: string) => ({
     kind: revoked.includes(id) ? 'needs_you' : 'online',
     reason: revoked.includes(id) ? 'revoked' : null,
@@ -40,10 +44,17 @@ function status(...revoked: string[]) {
     filesMissing: null,
   });
   const ids = ['scr_1', 'scr_2', 'scr_3', 'scr_9', 'scr_old'];
-  vi.mocked(getScreenStatus).mockResolvedValue({
+  return {
     screens: ids.map((id) => ({ id, state: state(id), lastSeenAt: null, desiredManifestId: null, reportedManifestId: null })),
     at: 1,
-  } as never);
+  } as never;
+}
+
+/** A status read the test answers later. */
+function heldStatus() {
+  let release: () => void = () => {};
+  vi.mocked(getScreenStatus).mockReturnValueOnce(new Promise((resolve) => (release = () => resolve(statusOf('scr_old')))));
+  return () => release();
 }
 
 /** A tool call the test answers later. */
@@ -51,6 +62,31 @@ function held() {
   let settle: { answer: (out: unknown) => void; refuse: (err: Refusal) => void } = { answer: () => {}, refuse: () => {} };
   callTool.mockReturnValueOnce(new Promise((answer, refuse) => (settle = { answer, refuse })));
   return settle;
+}
+
+type Store = ReturnType<typeof groupsStore>['store'];
+
+/** A rename refused as stale, then Reload started: what is done meanwhile, then where it leaves the dialog. */
+async function reloadAround(store: Store, meanwhile: () => void) {
+  store.getState().openGroupRename(ORG, front);
+  refuse('conflict', 'stale', { version: 5 });
+  await store.getState().renameGroup(ORG);
+  const reloading = store.getState().reloadGroupRename(ORG);
+  meanwhile();
+  await reloading;
+  return store.getState().groups.dialog;
+}
+
+/** Members with scr_2 ticked, saved while its status read waits: what is done meanwhile, then the calls made. */
+async function saveAround(store: Store, meanwhile: () => void) {
+  store.getState().openGroupMembers(ORG, front);
+  store.getState().chooseGroupMember('scr_2', true);
+  const release = heldStatus();
+  const saving = store.getState().saveGroupMembers(ORG, front);
+  meanwhile();
+  release();
+  await saving;
+  return calls();
 }
 
 beforeEach(() => {
@@ -83,13 +119,17 @@ describe('rename', () => {
 
   it('Reload after a conflict leaves alone a dialog opened while it read the groups again (review of #205)', async () => {
     const { store } = groupsStore();
-    store.getState().openGroupRename(ORG, front);
-    refuse('conflict', 'stale', { version: 5 });
-    await store.getState().renameGroup(ORG);
-    const reloading = store.getState().reloadGroupRename(ORG);
-    store.getState().askToDeleteGroup(ORG, front.id);
-    await reloading;
-    expect(store.getState().groups.dialog).toMatchObject({ kind: 'delete' });
+    expect(await reloadAround(store, () => store.getState().askToDeleteGroup(ORG, front.id))).toMatchObject({ kind: 'delete' });
+  });
+
+  it('Reload does not reopen a rename dismissed while it read the groups again, even with no dialog open since (re-check of #205)', async () => {
+    const { store } = groupsStore();
+    const dialog = await reloadAround(store, () => {
+      store.getState().closeGroupDialog();
+      store.getState().openGroupMembers(ORG, front);
+      store.getState().closeGroupDialog();
+    });
+    expect(dialog).toBeNull();
   });
 });
 
@@ -153,12 +193,13 @@ describe('members', () => {
     store.getState().chooseGroupMember('scr_1', false);
     store.getState().chooseGroupMember('scr_2', true);
     store.getState().chooseGroupMember('scr_3', true);
-    answer({ group: { ...front, screenIds: ['scr_1', 'scr_2', 'scr_3', 'scr_old'], version: 5 } });
+    answer({ group: { ...front, screenIds: ['scr_old'], version: 5 } });
     answer({ group: { ...front, screenIds: ['scr_2', 'scr_3', 'scr_old'], version: 6 } });
     await store.getState().saveGroupMembers(ORG, front);
+    // The removal first, straight after the status read that cleared it.
     expect(calls()).toEqual([
-      { name: 'add_group_members', input: { groupId: front.id, screenIds: ['scr_2', 'scr_3'] } },
       { name: 'remove_group_members', input: { groupId: front.id, screenIds: ['scr_1'] } },
+      { name: 'add_group_members', input: { groupId: front.id, screenIds: ['scr_2', 'scr_3'] } },
     ]);
     expect(groups()?.[0]).toMatchObject({ screenIds: ['scr_2', 'scr_3', 'scr_old'], version: 6 });
     expect(store.getState().groups.dialog).toBeNull();
@@ -191,6 +232,35 @@ describe('members', () => {
     answer({ group: { ...front, screenIds: ['scr_1', 'scr_2', 'scr_old'], version: 5 } });
     await store.getState().saveGroupMembers(ORG, front);
     expect(calls()).toEqual([{ name: 'add_group_members', input: { groupId: front.id, screenIds: ['scr_2'] } }]);
+  });
+
+  it('Save reads status afresh: a poll already on its way, from before a revoke, is not what it goes by (re-check of #205)', async () => {
+    const { store, queryClient } = groupsStore();
+    store.getState().openGroupMembers(ORG, front);
+    store.getState().chooseGroupMember('scr_1', false);
+    // A poll started before the revoke, still on its way when Save is pressed.
+    const release = heldStatus();
+    const polling = queryClient.query({ ...screenStatusQuery(ORG), staleTime: 0 });
+    status('scr_old', 'scr_1');
+    const saving = store.getState().saveGroupMembers(ORG, front);
+    release();
+    await Promise.all([polling, saving]);
+    expect(calls()).toEqual([]);
+  });
+
+  it('a box changed while Save runs is not taken: the checklist waits for the answer (re-check of #205)', async () => {
+    const { store } = groupsStore();
+    answer({ group: { ...front, screenIds: ['scr_1', 'scr_2', 'scr_old'], version: 5 } });
+    const sent = await saveAround(store, () => {
+      store.getState().chooseGroupMember('scr_3', true);
+      expect(memberChecked(store.getState().groups.dialog, front, 'scr_3')).toBe(false);
+    });
+    expect(sent).toEqual([{ name: 'add_group_members', input: { groupId: front.id, screenIds: ['scr_2'] } }]);
+  });
+
+  it('Cancel while Save reads status sends nothing (re-check of #205)', async () => {
+    const { store } = groupsStore();
+    expect(await saveAround(store, () => store.getState().closeGroupDialog())).toEqual([]);
   });
 
   it('with nothing changed, sends nothing and closes', async () => {
