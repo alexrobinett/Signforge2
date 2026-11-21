@@ -43,11 +43,11 @@ async function claim(bytes: Uint8Array, type: string, width: number | null, heig
   return { sha256: await sha256(bytes), type, size: bytes.length, width, height };
 }
 
-/** Start an upload and PUT each file as a client would (straight into the bucket). */
-async function upload(name: string, files: { landscape: [Uint8Array, unknown]; portrait: [Uint8Array, unknown] }, put = true) {
+/** Start an upload and PUT each file as a client would (straight into the bucket), and the renditions' `samples`. */
+async function upload(name: string, files: { landscape: [Uint8Array, unknown]; portrait: [Uint8Array, unknown] }, put = true, samples: Uint8Array[] = []) {
   const created = await call('create_asset_upload', { name, renditions: { landscape: files.landscape[1], portrait: files.portrait[1] } });
   if (put) {
-    for (const [bytes] of [files.landscape, files.portrait]) {
+    for (const bytes of [files.landscape[0], files.portrait[0], ...samples]) {
       const sha = await sha256(bytes);
       if (created.uploads.some((u: { sha256: string }) => u.sha256 === sha)) await env.BLOBS.put(uploadKey(o.orgId, created.asset.id, sha), bytes);
     }
@@ -107,6 +107,18 @@ describe('create_asset_upload', () => {
     });
   });
 
+  it('refuses a sample of an SVG', async () => {
+    const c = { ...(await claim(svg, 'image/svg+xml', null, null)), sample: { sha256: '4'.repeat(64), size: 100 } };
+    expect(await run('create_asset_upload', { name: 'x', renditions: { landscape: c, portrait: c } })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [
+        { path: 'renditions.landscape', message: 'an SVG has no sample' },
+        { path: 'renditions.portrait', message: 'an SVG has no sample' },
+      ],
+    });
+  });
+
   it('refuses an image whose decoded size is over the pixel cap, though one side fits the box', async () => {
     const strip = { sha256: '3'.repeat(64), type: 'image/png', size: 1000, width: 65_535, height: 1080 };
     const ok = { sha256: '2'.repeat(64), type: 'image/jpeg', size: 1000, width: 1080, height: 1920 };
@@ -147,6 +159,75 @@ describe('finalize_asset', () => {
     });
     expect(again.uploads).toEqual([]);
     expect((await call('finalize_asset', { assetId: again.asset.id })).asset.status).toBe('verified');
+  });
+
+  it("verifies each rendition's sample, a PNG of its rendition's sample size, and stores it beside the renditions", async () => {
+    const l = jpeg(1920, 1080, 1),
+      p = jpeg(1080, 1920, 1),
+      ls = png(120, 136),
+      ps = png(68, 240);
+    const created = await upload(
+      'Sampled',
+      {
+        landscape: [l, { ...(await claim(l, 'image/jpeg', 1920, 1080)), sample: { sha256: await sha256(ls), size: ls.length } }],
+        portrait: [p, { ...(await claim(p, 'image/jpeg', 1080, 1920)), sample: { sha256: await sha256(ps), size: ps.length } }],
+      },
+      true,
+      [ls, ps],
+    );
+    // The landscape JPEG is an earlier test's, which the server holds already.
+    expect(created.uploads.map((u: { sha256: string }) => u.sha256).sort()).toEqual([await sha256(p), await sha256(ls), await sha256(ps)].sort());
+    expect(created.uploads.find((u: { sha256: string }) => u.sha256 === created.asset.renditions[0].sample.sha256)).toMatchObject({
+      headers: { 'content-type': 'image/png' },
+    });
+    const { asset } = await call('finalize_asset', { assetId: created.asset.id });
+    expect(asset.renditions.map((r: { sample: unknown }) => r.sample)).toEqual([
+      { sha256: await sha256(ls), size: ls.length },
+      { sha256: await sha256(ps), size: ps.length },
+    ]);
+    for (const bytes of [ls, ps]) {
+      const stored = await env.BLOBS.get(orgBlobKey(o.orgId, await sha256(bytes)));
+      expect(stored?.httpMetadata?.contentType).toBe('image/png');
+      expect(new Uint8Array(await stored!.arrayBuffer())).toEqual(bytes);
+    }
+
+    // Deleting a pending asset deletes its samples' uploads too.
+    const pending = await upload(
+      'Sampled, abandoned',
+      {
+        landscape: [l, { ...(await claim(l, 'image/jpeg', 1920, 1080)), sample: { sha256: await sha256(png(120, 136, 1)), size: 34 } }],
+        portrait: [p, await claim(p, 'image/jpeg', 1080, 1920)],
+      },
+      true,
+      [png(120, 136, 1)],
+    );
+    expect((await env.BLOBS.list({ prefix: `up/${o.orgId}/${pending.asset.id}/` })).objects).toHaveLength(1);
+    await call('delete_asset', { assetId: pending.asset.id });
+    expect(await env.BLOBS.list({ prefix: `up/${o.orgId}/${pending.asset.id}/` })).toMatchObject({ objects: [] });
+  });
+
+  it("refuses a sample that is not a PNG of its rendition's sample size", async () => {
+    const cases: [Uint8Array, RegExp][] = [
+      [png(120, 137, 2), /landscape sample: the image is 120x137, not the claimed 120x136/],
+      [jpeg(120, 136, 1), /landscape sample: the file is image\/jpeg, not the claimed image\/png/],
+    ];
+    for (const [bytes, message] of cases) {
+      const l = jpeg(1920, 1080, 1),
+        p = jpeg(1080, 1920, 1);
+      const created = await upload(
+        'Bad sample',
+        {
+          landscape: [l, { ...(await claim(l, 'image/jpeg', 1920, 1080)), sample: { sha256: await sha256(bytes), size: bytes.length } }],
+          portrait: [p, await claim(p, 'image/jpeg', 1080, 1920)],
+        },
+        true,
+        [bytes],
+      );
+      const r = await run('finalize_asset', { assetId: created.asset.id });
+      expect(r, String(message)).toMatchObject({ ok: false, error: 'invalid_input' });
+      expect((r as { message: string }).message).toMatch(message);
+      expect((await call('get_asset', { assetId: created.asset.id })).asset.status).toBe('rejected');
+    }
   });
 
   it('passes an SVG through for both orientations, uploaded once', async () => {

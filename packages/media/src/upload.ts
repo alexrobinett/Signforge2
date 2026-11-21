@@ -33,7 +33,14 @@ export interface UploadOptions extends RenditionOptions {
 
 /** The input `create_asset_upload` takes for these renditions. */
 export function assetUploadInput(name: string, r: Renditions) {
-  const one = (x: Renditions['landscape']) => ({ sha256: x.sha256, type: x.type, size: x.size, width: x.width, height: x.height });
+  const one = (x: Renditions['landscape']) => ({
+    sha256: x.sha256,
+    type: x.type,
+    size: x.size,
+    width: x.width,
+    height: x.height,
+    ...(x.sample ? { sample: { sha256: x.sample.sha256, size: x.sample.size } } : {}),
+  });
   return { name, renditions: { landscape: one(r.landscape), portrait: one(r.portrait) } };
 }
 
@@ -51,7 +58,9 @@ export async function uploadImage(file: Blob, options: UploadOptions): Promise<{
   if (targets.some((t) => t.expiresAt - RENEW_BEFORE_MS <= Date.now())) {
     targets = ((await options.callTool('renew_asset_upload', { assetId: created.asset.id })) as { uploads: UploadTarget[] }).uploads;
   }
-  const blobs = new Map([renditions.landscape, renditions.portrait].map((r) => [r.sha256, r.blob]));
+  const blobs = new Map(
+    [renditions.landscape, renditions.portrait].flatMap((r) => [[r.sha256, r.blob] as const, ...(r.sample ? [[r.sample.sha256, r.sample.blob] as const] : [])]),
+  );
   for (const target of targets) {
     const blob = blobs.get(target.sha256);
     if (!blob) throw new MediaError(`the server asked for a file this upload does not have (${target.sha256})`);

@@ -7,12 +7,15 @@
  *   - the bytes are a JPEG, PNG, WebP or SVG of the claimed type (read from the bytes);
  *   - a raster rendition has the claimed size in pixels, as displayed, and is no larger than its
  *     screen box allows under the cover rule, and within the decoded-pixel cap
- *     (`imageSizeProblem` in the contract; the cover rule is the one `sf build` follows).
+ *     (`imageSizeProblem` in the contract; the cover rule is the one `sf build` follows);
+ *   - a rendition's sample, when it has one, is a PNG of the size its rendition's sample has
+ *     (`imageSampleSize`). Its pixels are not checked: that needs the rendition decoded, which a
+ *     Worker cannot do. A wrong one misjudges only the uploading org's own text over its photo.
  *
  * A file that passes moves to `o/<org>/b/<sha256>`, where manifests reference it. One that fails
  * is deleted, and the asset is marked rejected. Video is in ./videos.ts.
  */
-import { imageSizeProblem, SCREEN_BOX } from '@signforge/contract';
+import { imageSampleSize, imageSizeProblem, SCREEN_BOX } from '@signforge/contract';
 import type { Asset, AssetRendition, OrgScope } from '@signforge/db';
 import { readImageInfo, RENDITION_TYPES } from '@signforge/media/image-info';
 import { z } from 'zod';
@@ -29,13 +32,14 @@ export const MAX_RENDITION_BYTES = 20 * 1024 * 1024;
 export const UPLOAD_URL_SECONDS = 15 * 60;
 
 // SVG renditions have no pixel size; the column is NOT NULL, so they store 0.
-const renditionView = (r: AssetRendition): RenditionView => ({
+export const renditionView = (r: AssetRendition): RenditionView => ({
   orientation: r.orientation,
   sha256: r.sha256,
   type: r.type,
   size: r.size,
   width: r.width || null,
   height: r.height || null,
+  sample: r.sampleSha256 && r.sampleSize !== null ? { sha256: r.sampleSha256, size: r.sampleSize } : null,
 });
 
 export const assetView = (a: Asset, renditions: AssetRendition[]): AssetView => ({
@@ -62,16 +66,22 @@ export async function requireAsset(org: OrgScope, assetId: string) {
 
 export const SHA256 = /^[0-9a-f]{64}$/;
 const pixels = z.number().int().positive().max(65_535);
+const sha256 = z.string().regex(SHA256, 'not a SHA-256 (64 lowercase hex characters)');
+const bytes = z
+  .number()
+  .int()
+  .positive()
+  .max(MAX_RENDITION_BYTES, `a rendition may be at most ${MAX_RENDITION_BYTES / 1024 / 1024} MB`);
 const renditionInput = z.object({
-  sha256: z.string().regex(SHA256, 'not a SHA-256 (64 lowercase hex characters)'),
+  sha256,
   type: z.enum(RENDITION_TYPES),
-  size: z
-    .number()
-    .int()
-    .positive()
-    .max(MAX_RENDITION_BYTES, `a rendition may be at most ${MAX_RENDITION_BYTES / 1024 / 1024} MB`),
+  size: bytes,
   width: pixels.nullable().describe('Pixels, as displayed; null for SVG'),
   height: pixels.nullable().describe('Pixels, as displayed; null for SVG'),
+  sample: z
+    .object({ sha256, size: bytes })
+    .optional()
+    .describe("The rendition's sample, a PNG (@signforge/media makes it); none for SVG or an image with transparent pixels"),
 });
 
 const listAssets = defineTool({
@@ -123,7 +133,7 @@ const getAsset = defineTool({
 const createAssetUpload = defineTool({
   name: 'create_asset_upload',
   description:
-    "Start uploading an image. Scale it first (the CMS uses @signforge/media): a landscape and a portrait rendition, each the smallest size that covers its screen box (1920x1080, 1080x1920), JPEG, PNG or WebP; an SVG is sent as it is for both. Pass each rendition's SHA-256, type, byte size and pixel size. Returns { asset, uploads }: the new asset, pending, and for each file the server does not already hold, a URL to PUT it to with the given headers before expiresAt. Then call finalize_asset. Pass an idempotencyKey so a retry cannot create the asset twice; a retry returns the first call's upload URLs, which still expire at their expiresAt.",
+    "Start uploading an image. Scale it first (the CMS uses @signforge/media): a landscape and a portrait rendition, each the smallest size that covers its screen box (1920x1080, 1080x1920), JPEG, PNG or WebP; an SVG is sent as it is for both. Pass each rendition's SHA-256, type, byte size and pixel size, and of a raster one with no transparent pixel its sample (@signforge/media makes it), which a template reads to measure text over the photo without decoding it again. Returns { asset, uploads }: the new asset, pending, and for each file the server does not already hold, a URL to PUT it to with the given headers before expiresAt. Then call finalize_asset. Pass an idempotencyKey so a retry cannot create the asset twice; a retry returns the first call's upload URLs, which still expire at their expiresAt.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -141,6 +151,7 @@ const createAssetUpload = defineTool({
         const path = ['renditions', o];
         if (r.type === 'image/svg+xml') {
           if (r.width !== null || r.height !== null) ctx.addIssue({ code: 'custom', path, message: 'an SVG has no pixel size: send width and height as null' });
+          if (r.sample) ctx.addIssue({ code: 'custom', path, message: 'an SVG has no sample' });
         } else if (r.width === null || r.height === null) {
           ctx.addIssue({ code: 'custom', path, message: 'a raster rendition needs its width and height' });
         } else {
@@ -164,7 +175,7 @@ const createAssetUpload = defineTool({
   },
   target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
   handler: async ({ org, blobs, input, write, services: { uploads } }) => {
-    const { landscape, portrait } = input.renditions;
+    const { landscape } = input.renditions;
     // The asset and both renditions are written in one batch: never an asset without its renditions.
     const asset = write(
       org.assets.stage.insert({
@@ -189,12 +200,29 @@ const createAssetUpload = defineTool({
           size: r.size,
           width: r.width ?? 0,
           height: r.height ?? 0,
+          sampleSha256: r.sample?.sha256 ?? null,
+          sampleSize: r.sample?.size ?? null,
         }),
       );
     });
-    return { asset: assetView(asset, renditions), uploads: await uploadTargets(org.orgId, asset.id, [landscape, portrait], blobs, uploads, false) };
+    return { asset: assetView(asset, renditions), uploads: await uploadTargets(org.orgId, asset.id, renditions, blobs, uploads, false) };
   },
 });
+
+/**
+ * Every file an image asset is uploaded as, once each, for what is claimed of it: each rendition,
+ * and the sample of each that has one. `path` names it in a problem; `box` is the screen box a
+ * rendition fits, which a sample has none of.
+ */
+function claimedFiles(renditions: readonly AssetRendition[]) {
+  const claims = renditions.flatMap((r) => [
+    { sha: r.sha256, path: r.orientation, type: r.type, size: r.size, width: r.width, height: r.height, box: SCREEN_BOX[r.orientation] },
+    ...(r.sampleSha256 && r.sampleSize !== null
+      ? [{ sha: r.sampleSha256, path: `${r.orientation} sample`, type: 'image/png', size: r.sampleSize, ...imageSampleSize(r.width, r.height), box: undefined }]
+      : []),
+  ]);
+  return Map.groupBy(claims, (c) => c.sha);
+}
 
 /**
  * A presigned PUT for each distinct file the server does not hold: not stored and checked (an
@@ -204,12 +232,12 @@ const createAssetUpload = defineTool({
 async function uploadTargets(
   orgId: string,
   assetId: string,
-  renditions: readonly { sha256: string; type: string; size: number }[],
+  renditions: readonly AssetRendition[],
   blobs: R2Bucket,
   uploads: UploadSigner,
   skipUploaded: boolean,
 ) {
-  const files = new Map(renditions.map((r) => [r.sha256, r]));
+  const files = new Map([...claimedFiles(renditions)].map(([sha, [first]]) => [sha, { sha256: sha, type: first!.type, size: first!.size }]));
   const targets = [];
   for (const r of files.values()) {
     if (await blobs.head(orgBlobKey(orgId, r.sha256))) continue;
@@ -253,7 +281,7 @@ interface Problem {
 const finalizeAsset = defineTool({
   name: 'finalize_asset',
   description:
-    'Finish an upload started with create_asset_upload, once every file is PUT. The server re-hashes each file in storage and checks its type, size and pixel size against what was claimed and against the screen box. If all pass, the asset becomes verified and usable. If any fails, its files are deleted, the asset is marked rejected, and the call is refused with each problem; upload it again as a new asset. An asset without both renditions, or a file not uploaded yet, is refused without changing anything. Finalizing a verified asset changes nothing. Returns { asset, changed }.',
+    'Finish an upload started with create_asset_upload, once every file is PUT. The server re-hashes each file in storage and checks its type, size and pixel size against what was claimed and against the screen box (a sample: a PNG of the sample size for its rendition). If all pass, the asset becomes verified and usable. If any fails, its files are deleted, the asset is marked rejected, and the call is refused with each problem; upload it again as a new asset. An asset without both renditions, or a file not uploaded yet, is refused without changing anything. Finalizing a verified asset changes nothing. Returns { asset, changed }.',
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
@@ -277,7 +305,7 @@ const finalizeAsset = defineTool({
       );
     }
 
-    const bySha = Map.groupBy(renditions, (r) => r.sha256);
+    const bySha = claimedFiles(renditions);
     const staged = [...bySha.keys()].map((sha) => uploadKey(org.orgId, asset.id, sha));
     const checked: { sha: string; bytes: ArrayBuffer | null; type: string }[] = [];
     const problems: Problem[] = [];
@@ -285,7 +313,7 @@ const finalizeAsset = defineTool({
 
     for (const [sha, rows] of bySha) {
       const first = rows[0]!;
-      const where = rows.map((r) => r.orientation).join('+');
+      const where = rows.map((r) => r.path).join('+');
       const obj = (await blobs.get(uploadKey(org.orgId, asset.id, sha))) ?? undefined;
       const stored = obj ? undefined : await blobs.get(orgBlobKey(org.orgId, sha));
       const body = obj ?? stored;
@@ -309,10 +337,10 @@ const finalizeAsset = defineTool({
       else if (info.width !== null && info.height !== null) {
         for (const r of rows) {
           if (info.width !== r.width || info.height !== r.height)
-            problems.push({ path: r.orientation, message: `the image is ${info.width}x${info.height}, not the claimed ${r.width}x${r.height}` });
+            problems.push({ path: r.path, message: `the image is ${info.width}x${info.height}, not the claimed ${r.width}x${r.height}` });
           else {
-            const message = imageSizeProblem(info.width, info.height, SCREEN_BOX[r.orientation]);
-            if (message) problems.push({ path: r.orientation, message });
+            const message = r.box && imageSizeProblem(info.width, info.height, r.box);
+            if (message) problems.push({ path: r.path, message });
           }
         }
       }
@@ -367,7 +395,7 @@ const deleteAsset = defineTool({
     // Uploads never finalized. Stored files stay: other assets and published manifests may name the same bytes.
     const renditions = await org.assets.renditions.forAsset(asset.id);
     // A video has no renditions: its one file is the asset's own.
-    const files = asset.kind === 'video' ? [asset.sha256] : renditions.map((r) => r.sha256);
+    const files = asset.kind === 'video' ? [asset.sha256] : [...claimedFiles(renditions).keys()];
     const staged = [...new Set(files.map((sha) => uploadKey(org.orgId, asset.id, sha)))];
     if (staged.length) await blobs.delete(staged);
     // Its renditions go with it (the foreign key cascades).
