@@ -73,3 +73,34 @@ for (const [theme, selector] of [
     });
   });
 }
+
+/** `hsl(h s% l%)` as hex, for the contrast check of org avatars. */
+function hslHex(h: number, s: number, l: number): string {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    return Math.round((l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255);
+  };
+  return `#${[f(0), f(8), f(4)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+// An org's avatar is its hue (orgHues in src/lib/paths.ts) at the theme's saturation and lightness,
+// so every hue on the wheel must hold its initials at 4.5:1 (review of #208, 6).
+for (const [theme, selector] of [
+  ['light', ':root'],
+  ['dark', '.dark'],
+] as const) {
+  it(`${theme}: org avatars hold their initials at 4.5:1 at every hue`, () => {
+    const t = tokens(selector);
+    const pct = (name: string) => {
+      const m = /^(\d+(?:\.\d+)?)%$/.exec(t[name] ?? '');
+      if (!m) throw new Error(`--${name} is ${t[name] ?? 'missing'}, not a percentage`);
+      return Number(m[1]) / 100;
+    };
+    const fg = t['org-foreground'] ?? '';
+    for (let hue = 0; hue < 360; hue++) {
+      const bg = hslHex(hue, pct('org-saturation'), pct('org-lightness'));
+      expect(contrastRatio(fg, bg), `hue ${hue}: ${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+}
