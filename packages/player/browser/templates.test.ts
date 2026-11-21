@@ -12,7 +12,7 @@ import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Frame, Page } from 'playwright';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { PROTOCOL_VERSION, type BrandColors, type FieldDef, type FrameTheme, type TemplateManifest } from '@signforge/contract';
+import { PROTOCOL_VERSION, type BrandColors, type FieldDef, type FrameTheme, type Orientation, type TemplateManifest } from '@signforge/contract';
 import { buildTemplate } from '@signforge/cli/template';
 import { useHarness } from './harness';
 
@@ -30,7 +30,8 @@ const at = (hours: number) => new Date(NOW + hours * 3_600_000).toISOString();
 type Data = Record<string, unknown>;
 /**
  * Two different sets of data per template; `assets` name the colour each image field is drawn in,
- * or colours separated by spaces for vertical stripes of them.
+ * or colours separated by spaces for vertical stripes of them, 1 px wide on an 8x8 image, or on an
+ * image of the size before a colon (`960x540: #000 #fff`: detail at the screen's own scale).
  */
 const cases: Record<string, { a: Data; b: Data; assetsA?: Record<string, string>; assetsB?: Record<string, string> }> = {
   agenda: {
@@ -108,8 +109,11 @@ interface Host {
   dom(frame: string): Promise<string>;
 }
 
-async function host(): Promise<Host> {
+/** A page of frames, each the size of a 1080p screen at half scale in `orientation`. */
+async function host(orientation: Orientation = 'landscape'): Promise<Host> {
   const page = await h.blankPage();
+  const size = orientation === 'landscape' ? { width: 960, height: 540 } : { width: 540, height: 960 };
+  await page.setViewportSize(size);
   await page.evaluate(() => {
     const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]> };
     w.frames_ = {};
@@ -135,34 +139,36 @@ async function host(): Promise<Host> {
     page,
     async open(frame, html) {
       await page.evaluate(
-        ({ frame, html }) => {
+        ({ frame, html, size }) => {
           const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]> };
           const f = document.createElement('iframe');
           f.setAttribute('sandbox', 'allow-scripts');
           // Every frame on screen: Chromium throttles animation frames in an off-screen frame.
-          f.style.cssText = 'position:absolute;left:0;top:0;width:960px;height:540px;border:0';
+          f.style.cssText = `position:absolute;left:0;top:0;width:${size.width}px;height:${size.height}px;border:0`;
           w.frames_[frame] = f;
           w.msgs[frame] = [];
           f.srcdoc = html;
           document.body.appendChild(f);
         },
-        { frame, html },
+        { frame, html, size },
       );
       await waitFor(frame, 'loaded', 1);
     },
     async init(frame, data, assets = {}, now = NOW, theme) {
       await page.evaluate(
-        async ({ frame, data, assets, sf, now, theme }) => {
+        async ({ frame, data, assets, sf, now, theme, orientation, size }) => {
           const w = window as unknown as { frames_: Record<string, HTMLIFrameElement> };
           const blobs: Record<string, Blob> = {};
-          for (const [field, colours] of Object.entries(assets)) {
+          for (const [field, spec] of Object.entries(assets)) {
+            const [, width = '8', height = '8', colours = spec] = /^(\d+)x(\d+): (.*)$/.exec(spec) ?? [];
             const c = document.createElement('canvas');
-            c.width = c.height = 8;
+            c.width = Number(width);
+            c.height = Number(height);
             const g = c.getContext('2d')!;
             const stripes = colours.split(' ');
-            for (let x = 0; x < 8; x++) {
+            for (let x = 0; x < c.width; x++) {
               g.fillStyle = stripes[x % stripes.length]!;
-              g.fillRect(x, 0, 1, 8);
+              g.fillRect(x, 0, 1, c.height);
             }
             blobs[field] = await new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
           }
@@ -172,8 +178,8 @@ async function host(): Promise<Host> {
             data,
             assets: blobs,
             durationMs: 8000,
-            orientation: 'landscape',
-            viewport: { width: 960, height: 540 },
+            orientation,
+            viewport: size,
             timezone: 'UTC',
             locale: 'en-US',
             clock: { now, offsetMs: now - Date.now() },
@@ -181,7 +187,7 @@ async function host(): Promise<Host> {
           };
           w.frames_[frame]!.contentWindow!.postMessage(init, '*');
         },
-        { frame, data, assets, sf, now, theme },
+        { frame, data, assets, sf, now, theme, orientation, size },
       );
     },
     post: (frame, type) =>
@@ -565,11 +571,14 @@ describe('text on a brand colour (#57, #69, #92)', () => {
     ['clock', { accent }],
     ['cstore-promo', {}],
     // The copy sits on a shade of the kit's background over the photo, whatever the photo is: light,
-    // dark, mid-tone, or light and dark under the same text.
+    // dark, mid-tone, or light and dark under the same text, in broad stripes and in stripes 1 px
+    // wide at the screen's scale, which a photo measured at less than its painted detail averages
+    // to grey.
     ['photo-promo', {}, '#ffffff'],
     ['photo-promo', {}, '#000000'],
     ['photo-promo', {}, '#808080'],
     ['photo-promo', {}, '#000000 #ffffff'],
+    ['photo-promo', {}, '960x540: #000000 #ffffff'],
     ['menu-board', { accent, ...menu }],
     ['menu-board', { accent, ...menu, theme: 'light' }],
   ];
@@ -594,8 +603,13 @@ describe('text on a brand colour (#57, #69, #92)', () => {
   ];
 
   /** Run `check` on each spot of `spots(accent)` under `theme`, in a frame of its own, ready and on top. */
-  async function eachSpot(theme: FrameTheme | undefined, accent: string, check: (name: string, f: Frame, page: Page) => Promise<void>) {
-    const hst = await host();
+  async function eachSpot(
+    orientation: Orientation,
+    theme: FrameTheme | undefined,
+    accent: string,
+    check: (name: string, f: Frame, page: Page) => Promise<void>,
+  ) {
+    const hst = await host(orientation);
     for (const [i, [name, data, photo]] of spots(accent).entries()) {
       const t = built.get(name)!;
       const frame = `f${i}`;
@@ -649,39 +663,40 @@ describe('text on a brand colour (#57, #69, #92)', () => {
   const worst = (color: string, pixels: string[]) => Math.min(...pixels.map((p) => contrast(color, p)));
   const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 
-  for (const [label, theme, accent] of kits) {
-    it(`text on a fill reads under ${label}`, async () => {
-      const found: string[] = [];
-      await eachSpot(theme, accent, async (name, f) => {
-        for (const [, text, fill, min] of onFill.filter(([n]) => name.startsWith(n))) {
-          const [fg, bg] = await f.evaluate(
-            ({ text, fill }) => [getComputedStyle(document.querySelector(text)!).color, getComputedStyle(document.querySelector(fill)!).backgroundColor],
-            { text, fill },
-          );
-          const ratio = contrast(fg!, bg!);
-          if (ratio < min) found.push(`${name} ${text}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, below ${min}:1`);
-        }
+  for (const orientation of ['landscape', 'portrait'] as const)
+    for (const [label, theme, accent] of kits) {
+      it(`text on a fill reads under ${label}, ${orientation}`, async () => {
+        const found: string[] = [];
+        await eachSpot(orientation, theme, accent, async (name, f) => {
+          for (const [, text, fill, min] of onFill.filter(([n]) => name.startsWith(n))) {
+            const [fg, bg] = await f.evaluate(
+              ({ text, fill }) => [getComputedStyle(document.querySelector(text)!).color, getComputedStyle(document.querySelector(fill)!).backgroundColor],
+              { text, fill },
+            );
+            const ratio = contrast(fg!, bg!);
+            if (ratio < min) found.push(`${name} ${text}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1, below ${min}:1`);
+          }
+        });
+        expect(found).toEqual([]);
       });
-      expect(found).toEqual([]);
-    });
 
-    // A kit's accent is kept wherever it reads (4.5:1, or 3:1 on large text), and gives way to black or white where it does not. With no kit, cstore-promo's and
-    // photo-promo's text is their own. 0.1 to spare: a template measures the ends of a gradient,
-    // this test the pixels in the box.
-    it(`accent text reads on its backdrop under ${label}, in the accent where that reads`, async () => {
-      const found: string[] = [];
-      await eachSpot(theme, accent, async (name, f, page) => {
-        for (const [, text] of onBackdrop.filter(([n]) => name.startsWith(n))) {
-          const { color, pixels, large } = await textOnBackdrop(f, page, text);
-          const min = large ? 3 : 4.5;
-          const ratio = worst(color, pixels);
-          if (ratio < min) found.push(`${name} ${text}: ${color} is ${ratio.toFixed(2)}:1 on its backdrop, below ${min}:1`);
-          const reads = worst(rgb(accent), pixels);
-          if (theme && color !== rgb(accent) && reads >= min + 0.1)
-            found.push(`${name} ${text}: ${color}, not the accent, which reads at ${reads.toFixed(2)}:1`);
-        }
+      // A kit's accent is kept wherever it reads (4.5:1, or 3:1 on large text), and gives way to black or white where it does not. With no kit, cstore-promo's and
+      // photo-promo's text is their own. 0.1 to spare: a template measures the ends of a gradient,
+      // this test the pixels in the box.
+      it(`accent text reads on its backdrop under ${label}, ${orientation}, in the accent where that reads`, async () => {
+        const found: string[] = [];
+        await eachSpot(orientation, theme, accent, async (name, f, page) => {
+          for (const [, text] of onBackdrop.filter(([n]) => name.startsWith(n))) {
+            const { color, pixels, large } = await textOnBackdrop(f, page, text);
+            const min = large ? 3 : 4.5;
+            const ratio = worst(color, pixels);
+            if (ratio < min) found.push(`${name} ${text}: ${color} is ${ratio.toFixed(2)}:1 on its backdrop, below ${min}:1`);
+            const reads = worst(rgb(accent), pixels);
+            if (theme && color !== rgb(accent) && reads >= min + 0.1)
+              found.push(`${name} ${text}: ${color}, not the accent, which reads at ${reads.toFixed(2)}:1`);
+          }
+        });
+        expect(found).toEqual([]);
       });
-      expect(found).toEqual([]);
-    });
-  }
+    }
 });
