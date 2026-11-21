@@ -5,6 +5,7 @@ import { CommandMenu } from '~/components/command-menu';
 import { CreateOrgDialog } from '~/components/create-org-form';
 import { Logo } from '~/components/logo';
 import { OrgSwitcher } from '~/components/org-switcher';
+import { ScheduleDialogs } from '~/components/schedule/schedule-dialogs';
 import { Button } from '~/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '~/components/ui/sheet';
 import { Toaster } from '~/components/ui/sonner';
@@ -98,6 +99,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
       </div>
       <CommandMenu shell={shell} hues={hues} />
       <CreateOrgDialog />
+      <ScheduleDialogs />
       <p role="status" className="sr-only">
         {status}
       </p>

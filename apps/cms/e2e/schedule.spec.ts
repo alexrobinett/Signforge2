@@ -283,3 +283,89 @@ test('pick one screen by typing part of its name, keyboard only; the picker fill
   await expect(toastSays('Scheduled, as a draft')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Entries' }).getByRole('listitem').filter({ hasText: 'Front window · Always' })).toHaveCount(1);
 });
+
+test('play a new playlist on this screen from its page, see what it will play, raise its priority, save and publish it alone; Where it plays (#181)', async () => {
+  test.setTimeout(150_000);
+  // The tests before leave drafts: an entry never published is gone once deleted.
+  for (const e of (await tool(page, 'list_schedule_entries', {})).entries as { id: string; published: boolean; takeover: boolean }[])
+    if (!e.published && !e.takeover) await tool(page, 'delete_schedule_entry', { scheduleEntryId: e.id });
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
+  // A playlist and spot never published: Save and publish takes them along with the entry.
+  const { spot } = await tool(page, 'create_spot', {
+    name: 'Holiday',
+    kind: 'template',
+    templateVersionId: clock,
+    durationMs: 10_000,
+    data: { greeting: 'Holiday' },
+  });
+  const {
+    playlist: { id: holiday },
+  } = await tool(page, 'create_playlist', { name: 'Holiday promo', transition: { type: 'cut' }, spotIds: [spot.id] });
+  // Someone else's draft for the screen's group, every morning at priority 10: it outranks a new entry, and stays a draft.
+  const { groups } = await tool(page, 'list_groups', {});
+  const front = groups.find((g: { name: string }) => g.name === 'Front').id;
+  const { entry: breakfast } = await tool(page, 'create_schedule_entry', {
+    playlistId: playlist.Breakfast,
+    target: 'group',
+    groupId: front,
+    priority: 10,
+    from: '06:00',
+    to: '10:30',
+  });
+
+  await page.goto(`/screens/${screenId}`);
+  await hydrated(page);
+  // Take over this screen opens the takeover dialog aimed at it.
+  await page.getByRole('button', { name: 'Take over this screen…' }).click();
+  const takeover = page.getByRole('dialog', { name: 'Take over screens' });
+  await expect(takeover.getByRole('combobox', { name: 'Plays on' })).toHaveText('Front window');
+  await takeover.getByRole('button', { name: 'Cancel' }).click();
+
+  await page.getByRole('button', { name: 'Play on this screen…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Schedule a playlist' });
+  await expect(dialog.getByRole('combobox', { name: 'Plays on' })).toHaveText('Front window');
+  await dialog.getByLabel('Playlist').selectOption({ label: 'Holiday promo' });
+  const will = dialog.getByRole('region', { name: 'What this screen will play' });
+  await expect(will.getByRole('status')).toHaveText(
+    'This week, Front window: Plays Holiday promo all day, except 06:00–10:30 when Breakfast on Front wins (priority 10).',
+  );
+  await expect(dialog.getByText('Save and publish sends Holiday promo and this entry: the playlist has never been published.')).toBeVisible();
+  await axe(page);
+  await shots(page, '57-play-on-this-screen');
+  await will.getByRole('button', { name: 'Raise priority above Breakfast' }).click();
+  await expect(dialog.getByLabel('Priority')).toHaveValue('11');
+  await expect(will.getByRole('status')).toHaveText('This week, Front window: Plays Holiday promo all day.');
+  await dialog.getByRole('button', { name: 'Save and publish' }).click();
+  await expect(toastSays(/Published v\d+ to 1 screen/)).toBeVisible();
+  await expect(dialog).toBeHidden();
+
+  // Pinned: the entry, its playlist and its spot were published; the other draft was not.
+  const { entries } = await tool(page, 'list_schedule_entries', {});
+  const mine = entries.find((e: { playlistId: string }) => e.playlistId === holiday);
+  expect(mine).toMatchObject({ target: 'screen', screenId, priority: 11, published: true, draftChanged: false });
+  expect(entries.find((e: { id: string }) => e.id === breakfast.id)).toMatchObject({ published: false });
+  // The screen's manifest has it: the test screen plays it, once the spot on screen ends.
+  await expect.poll(playlistOn, { timeout: 90_000 }).toBe(holiday);
+
+  // Scheduled here, on the screen's page.
+  await page.reload();
+  await hydrated(page);
+  const here = page.getByRole('region', { name: 'Scheduled here' });
+  await expect(here.getByRole('listitem').filter({ hasText: 'Holiday promo' })).toContainText('This screen · Always');
+  await expect(here.getByRole('listitem').filter({ hasText: 'Holiday promo' })).toContainText('Published');
+  await expect(here.getByRole('listitem').filter({ hasText: 'Breakfast' })).toContainText('Via group Front · Every day, 06:00–10:30');
+  await axe(page);
+  await shots(page, '58-scheduled-here');
+
+  // Where it plays, on the playlist's page: the screen, the entry, and Schedule on screens with the playlist chosen.
+  await page.goto(`/playlists/${holiday}`);
+  await hydrated(page);
+  await expect(page.getByText('On 1 screen now')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Entries that play it' }).getByRole('listitem')).toHaveText([/^Front window · Always\s*Published$/]);
+  await page.getByRole('button', { name: 'Schedule on screens…' }).click();
+  await expect(page.getByRole('dialog', { name: 'Schedule a playlist' }).getByLabel('Playlist')).toHaveValue(holiday);
+  await axe(page);
+  await shots(page, '59-where-it-plays');
+  await page.getByRole('dialog', { name: 'Schedule a playlist' }).getByRole('button', { name: 'Cancel' }).click();
+});
