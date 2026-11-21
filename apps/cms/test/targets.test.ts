@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byName, sortScreens } from '../src/lib/targets';
+import { byName, findTargets, groupReach, sortScreens } from '../src/lib/targets';
 
 const STATE = { reason: null, wakesAt: null, filesMissing: null };
 type Kind = 'online' | 'updating' | 'asleep' | 'unreachable' | 'needs_you';
@@ -9,6 +9,16 @@ const screen = (id: string, name: string, kind: Kind = 'online', lastSeenAt: num
   lastSeenAt,
   state: { ...STATE, kind },
 });
+const group = (id: string, name: string, screenIds: string[]) => ({ id, name, screenIds });
+
+const SCREENS = [
+  screen('scr_a', '0203 Drive-thru L'),
+  screen('scr_b', '0157 Lobby promo'),
+  screen('scr_c', '0142 Drive-thru L'),
+  screen('scr_d', '0157 Drive-thru R'),
+];
+const GROUPS = [group('grp_s', 'South region', ['scr_a']), group('grp_n', 'North region', ['scr_b', 'scr_c', 'scr_d'])];
+
 describe('byName', () => {
   it('orders by name as people read it: case aside, and numbers by value', () => {
     const names = ['Screen 10', 'screen 2', 'Lobby', 'Screen 1'];
@@ -22,6 +32,49 @@ describe('byName', () => {
 
   it('breaks a tie of names by id, so the order is the same on every read', () => {
     expect([screen('scr_2', 'Lobby'), screen('scr_1', 'Lobby')].sort(byName).map((s) => s.id)).toEqual(['scr_1', 'scr_2']);
+  });
+});
+
+describe('findTargets', () => {
+  it('with no query, lists every group and screen by name', () => {
+    const found = findTargets('', SCREENS, GROUPS);
+    expect(found.org).toBe(true);
+    expect(found.groups.map((g) => g.name)).toEqual(['North region', 'South region']);
+    expect(found.screens.map((s) => s.name)).toEqual(['0142 Drive-thru L', '0157 Drive-thru R', '0157 Lobby promo', '0203 Drive-thru L']);
+  });
+
+  it('finds screens by part of their name: "0157" lists the 0157 screens', () => {
+    const found = findTargets('0157', SCREENS, GROUPS);
+    expect(found.screens.map((s) => s.name)).toEqual(['0157 Drive-thru R', '0157 Lobby promo']);
+    expect(found.groups).toEqual([]);
+    expect(found.org).toBe(false);
+  });
+
+  it("finds a screen by its group's name, and the group itself", () => {
+    const found = findTargets('south', SCREENS, GROUPS);
+    expect(found.groups.map((g) => g.name)).toEqual(['South region']);
+    expect(found.screens.map((s) => s.name)).toEqual(['0203 Drive-thru L']);
+  });
+
+  it('needs every word, in any order and case, each in the name or a group name', () => {
+    expect(findTargets('DRIVE north', SCREENS, GROUPS).screens.map((s) => s.name)).toEqual(['0142 Drive-thru L', '0157 Drive-thru R']);
+    expect(findTargets('drive lobby', SCREENS, GROUPS).screens).toEqual([]);
+  });
+
+  it('finds every screen as "every" or "all"', () => {
+    expect(findTargets('every', SCREENS, GROUPS).org).toBe(true);
+    expect(findTargets('all', SCREENS, GROUPS).org).toBe(true);
+  });
+});
+
+describe('groupReach', () => {
+  it('says how many screens a group reaches, and names the first by name', () => {
+    expect(groupReach(GROUPS[1]!, SCREENS)).toBe('3 screens: 0142 Drive-thru L, 0157 Drive-thru R, 0157 Lobby promo');
+    expect(groupReach(group('g', 'Big', ['scr_a', 'scr_b', 'scr_c', 'scr_d']), SCREENS)).toBe(
+      '4 screens: 0142 Drive-thru L, 0157 Drive-thru R, 0157 Lobby promo and 1 more',
+    );
+    expect(groupReach(GROUPS[0]!, SCREENS)).toBe('1 screen: 0203 Drive-thru L');
+    expect(groupReach(group('g', 'Empty', []), SCREENS)).toBe('No screens in it yet');
   });
 });
 

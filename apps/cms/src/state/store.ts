@@ -23,6 +23,7 @@ import { createSettingsSlice, type SettingsSlice } from './settings';
 import { createSignInSlice, type SignInSlice } from './sign-in';
 import { createSpotEditorSlice, type SpotEditorSlice } from './spot-editor';
 import { createSpotSourceSlice, type SpotSourceSlice } from './spot-source';
+import { createTargetPickerSlice, type TargetPickerSlice } from './target-picker';
 
 export type AppState = UiSlice &
   SignInSlice &
@@ -38,7 +39,8 @@ export type AppState = UiSlice &
   AuditSlice &
   BrandKitsSlice &
   PublishingSlice &
-  ScheduleSlice;
+  ScheduleSlice &
+  TargetPickerSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -68,6 +70,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createAuditSlice(set, get, deps),
     ...createPublishingSlice(set, get, deps),
     ...createScheduleSlice(set, get, deps),
+    ...createTargetPickerSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);
