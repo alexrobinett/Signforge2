@@ -96,4 +96,31 @@ describe('format', () => {
   it('writes no terms as nothing', () => {
     expect(format({ all: [] })).toBe('');
   });
+
+  it('quotes and escapes values that would collide with selector syntax', () => {
+    const literalComma: Selector = { all: [{ key: 'region', op: 'eq', values: ['north, !legacy'] }] };
+    const twoTerms: Selector = {
+      all: [
+        { key: 'region', op: 'eq', values: ['north'] },
+        { key: 'legacy', op: 'missing', values: [] },
+      ],
+    };
+    expect(format(literalComma)).toBe('region="north, !legacy"');
+    expect(format(twoTerms)).toBe('region=north, !legacy');
+    expect(format(literalComma)).not.toBe(format(twoTerms));
+
+    const oneListValue: Selector = { all: [{ key: 'type', op: 'in', values: ['drive-thru, kiosk'] }] };
+    const twoListValues: Selector = { all: [{ key: 'type', op: 'in', values: ['drive-thru', 'kiosk'] }] };
+    expect(format(oneListValue)).toBe('type in ("drive-thru, kiosk")');
+    expect(format(twoListValues)).toBe('type in (drive-thru, kiosk)');
+
+    const injectedParens: Selector = { all: [{ key: 'type', op: 'notin', values: ['x), !legacy, type in (y'] }] };
+    expect(format(injectedParens)).toBe('type notin ("x), !legacy, type in (y")');
+
+    // Values with quotes, backslashes, parens or edge spaces are quoted and escaped; ordinary spaces stay plain.
+    expect(format(one('region', 'eq', 'North Side'))).toBe('region=North Side');
+    expect(format(one('region', 'eq', '"north"'))).toBe('region="\\"north\\""');
+    expect(format(one('region', 'neq', 'a\\b'))).toBe('region!="a\\\\b"');
+    expect(format(one('region', 'in', 'say "hi"', '(east)', ' padded ', ''))).toBe('region in ("say \\"hi\\"", "(east)", " padded ", "")');
+  });
 });

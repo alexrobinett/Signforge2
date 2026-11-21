@@ -48,18 +48,21 @@ export function matches(selector: Selector, facts: Facts): boolean {
   });
 }
 
+/** Quote a value when it could collide with selector syntax (separators, parens, quotes, escapes, or edge spaces). */
+const formatValue = (v: string) => (v.length === 0 || /^\s|\s$|[,()"\\\p{Cc}\p{Zl}\p{Zp}]/u.test(v) ? JSON.stringify(v) : v);
+
 /** A selector as people read it: `region=north, type in (drive-thru, kiosk), !legacy`. */
 export function format(selector: Selector): string {
   return selector.all
     .map(({ key, op, values }) => {
       switch (op) {
         case 'eq':
-          return `${key}=${values[0]}`;
+          return `${key}=${formatValue(values[0] ?? '')}`;
         case 'neq':
-          return `${key}!=${values[0]}`;
+          return `${key}!=${formatValue(values[0] ?? '')}`;
         case 'in':
         case 'notin':
-          return `${key} ${op} (${values.join(', ')})`;
+          return `${key} ${op} (${values.map(formatValue).join(', ')})`;
         case 'exists':
           return key;
         case 'missing':
