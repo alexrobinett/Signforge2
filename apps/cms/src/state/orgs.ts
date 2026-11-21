@@ -28,7 +28,7 @@ export interface OrgsState {
 export interface OrgsSlice {
   orgs: OrgsState;
   /**
-   * Makes `org` active, unless a switch is already on its way. From the switcher or ⌘K it
+   * Makes `org` active, unless a switch or a create is already on its way. From the switcher or ⌘K it
    * announces progress; from the picker it shows an error only.
    */
   switchOrg: (org: { id: string; name: string }, from: 'switcher' | 'picker') => Promise<void>;
@@ -37,11 +37,18 @@ export interface OrgsSlice {
   /** Closes the create dialog and drops its draft, as cancelling should. */
   closeCreateOrg: () => void;
   editOrgName: (form: CreateOrgFormId, name: string) => void;
-  /** Creates the org from that form's draft; it becomes the active org. */
+  /** Creates the org from that form's draft, unless a switch or a create is on its way; it becomes the active org. */
   createOrg: (form: CreateOrgFormId) => Promise<void>;
 }
 
 const emptyDraft: CreateOrgDraft = { name: '', pending: false, error: null };
+
+/**
+ * Whether a switch or a create is on its way. Each ends in the tab's reload as the new org
+ * (`reloadAs`), so only one runs at a time, from any menu or form: a second's reload would be
+ * refused as a tab on the old org.
+ */
+const busy = (orgs: OrgsState) => orgs.switchingTo !== null || Object.values(orgs.drafts).some((d) => d.pending);
 
 export const initialOrgs: OrgsState = {
   switchingTo: null,
@@ -59,9 +66,7 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     orgs: initialOrgs,
 
     async switchOrg(org, from) {
-      // One switch at a time, from any menu: two would share the tab's reload (`reloadAs`), and
-      // the second's would be refused as a tab on the old org.
-      if (get().orgs.switchingTo !== null) return;
+      if (busy(get().orgs)) return;
       const announce = from === 'switcher';
       set((s) => ({
         orgs: {
@@ -89,6 +94,7 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     editOrgName: (form, name) => draft(form, { name }),
 
     async createOrg(form) {
+      if (busy(get().orgs)) return;
       const name = get().orgs.drafts[form].name.trim();
       if (!name) return draft(form, { error: 'Enter a name.' });
       draft(form, { pending: true, error: null });
