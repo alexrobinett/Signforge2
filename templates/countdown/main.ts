@@ -190,6 +190,7 @@ defineTemplate({
 
     // The figures that follow the time, written now and again by the timer whenever they change.
     const two = (n: number) => String(n).padStart(2, '0');
+    const ringPct = el('.ring') ? [pct] : [];
     show = (t: Date) => {
       const { values } = count(t);
       const set = (e: Element, text: string) => {
@@ -207,7 +208,7 @@ defineTemplate({
         );
       for (const e of document.querySelectorAll('.unit')) set(e, unit);
       const sub = [values[0] === 1 ? 'day' : 'days', ...values.slice(1).map((v, i) => `${two(v)}${i ? 'm' : 'h'}`)];
-      for (const e of document.querySelectorAll('.sub')) set(e, [...sub, ...(el('.ring') ? [pct] : [])].join(' · '));
+      for (const e of document.querySelectorAll('.sub')) set(e, [...sub, ...ringPct].join(' · '));
       document.querySelectorAll('.tile .v').forEach((e, i) => set(e, i ? two(values[i]!) : values[0]!.toLocaleString(ctx.locale)));
     };
     show(now);
@@ -266,6 +267,7 @@ function progress(look: Look, share: number, { label, dots: n, from, to }: { lab
     ring.style.setProperty('--t', `${angle ? SWEEP_S : 0}s`);
     ring.style.setProperty('--t1', `${t1}s`);
     ring.style.setProperty('--t2', `${angle ? SWEEP_S - t1 : 0}s`);
+    ring.toggleAttribute('data-past-half', angle > 180);
   } else if (look === 'corporate') {
     const scale = document.querySelector<HTMLElement>('.scale')!;
     scale.style.setProperty('--share', String(share));

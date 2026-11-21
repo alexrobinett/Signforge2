@@ -385,6 +385,21 @@ h1 {
   transform: rotate(var(--a2, 0deg));
   animation: cd-sweep var(--t2, 0s) linear calc(0.5s + var(--t1, 0s)) both;
 }
+/* Where the halves meet at 6 o'clock their edges are each smoothed on a fraction of a pixel, and
+   the track showed through as a hairline on the Pi: past half, a strip of the fill covers it, from
+   the moment the left half starts. 12 o'clock is under the start cap. */
+[data-look='night'] .seam {
+  position: absolute;
+  left: calc(50% - 0.2vmin);
+  bottom: 0;
+  width: 0.4vmin;
+  height: 8vmin;
+  background: var(--lk-primary);
+  animation: cd-show 0s linear calc(0.5s + var(--t1, 0s)) both;
+}
+[data-look='night'] .ring:not([data-past-half]) .seam {
+  display: none;
+}
 [data-look='night'] .hole {
   position: absolute;
   inset: 5.2vmin;
@@ -681,6 +696,11 @@ h1 {
   white-space: nowrap;
 }
 
+@keyframes cd-show {
+  from {
+    opacity: 0;
+  }
+}
 @keyframes cd-sweep {
   from {
     transform: rotate(0deg);
