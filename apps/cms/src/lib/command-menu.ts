@@ -256,10 +256,11 @@ export interface Selection {
 
 /**
  * The item ⌘K shows selected. cmdk moves its selection only when the search changes, so a list read
- * that lands after typing would leave a tool selected over the screens it found: a selection made
- * among other found items gives way to the first found. Empty lets cmdk select its first item.
+ * that lands after typing would leave a tool selected over the screens it found: cmdk's own pick,
+ * made among other found items, gives way to the first found. One the member `moved` to stays.
+ * Empty lets cmdk select its first item.
  */
-export function selectedItem(selection: Selection | null, found: readonly string[]): string {
-  if (selection?.among === JSON.stringify(found)) return selection.value;
+export function selectedItem(selection: Selection | null, found: readonly string[], moved: boolean): string {
+  if (selection && (moved || selection.among === JSON.stringify(found))) return selection.value;
   return found[0] ?? selection?.value ?? '';
 }

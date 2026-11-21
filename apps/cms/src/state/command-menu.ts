@@ -27,6 +27,10 @@ interface CommandMenuState {
   form: string | null;
   /** The list's selected item, as cmdk reports it (`selectedItem` in src/lib/command-menu.ts); null until it has. */
   selection: Selection | null;
+  /** The member moved the selection (keys, pointer) since they last typed: a list that lands then keeps their choice. */
+  moved: boolean;
+  /** The list is back from another view, so its search takes focus itself; on opening, Radix's focus trap gives it focus. */
+  backed: boolean;
   /** The screen or group whose actions are showing; null shows the list. */
   target: CommandTarget | null;
   /** Showing the member's orgs, from "Switch organization…", instead of the commands. */
@@ -50,6 +54,8 @@ export interface CommandMenuSlice {
   searchCommands: (query: string) => void;
   /** cmdk moved the list's selection, to `value`, among the screens and groups found then (`foundValues`, as JSON). */
   selectCommand: (value: string, among: string) => void;
+  /** The member moved the list's selection themselves, by key or pointer. */
+  moveCommandSelection: () => void;
   /** Shows a found screen's or group's actions. */
   chooseTarget: (target: CommandTarget) => void;
   runTargetAction: (action: TargetAction) => Promise<void>;
@@ -62,6 +68,8 @@ const CLOSED: CommandMenuState = {
   open: false,
   query: '',
   selection: null,
+  moved: false,
+  backed: false,
   form: null,
   target: null,
   choosingOrg: false,
@@ -129,9 +137,10 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
       }
     },
     // The search stays as typed, so Back returns to what it found.
-    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, target: null, choosingOrg: false, fieldError: null } })),
-    searchCommands: (query) => set((s) => ({ commandMenu: { ...s.commandMenu, query } })),
+    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, target: null, choosingOrg: false, fieldError: null, backed: true } })),
+    searchCommands: (query) => set((s) => ({ commandMenu: { ...s.commandMenu, query, moved: false } })),
     selectCommand: (value, among) => set((s) => ({ commandMenu: { ...s.commandMenu, selection: { value, among } } })),
+    moveCommandSelection: () => set((s) => (s.commandMenu.moved ? s : { commandMenu: { ...s.commandMenu, moved: true } })),
     chooseTarget: (target) => set((s) => ({ commandMenu: { ...s.commandMenu, target } })),
     async runTargetAction(action) {
       const close = () => set((s) => ({ commandMenu: closed(s.commandMenu) }));

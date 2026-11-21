@@ -44,7 +44,12 @@ const focusFirstButton = (list: HTMLUListElement | null) => list?.querySelector(
 
 /** The form's first field takes focus when the form appears. Stable, so it runs once per form. */
 const focusFirstField = (form: HTMLFormElement | null) => form?.querySelector<HTMLElement>('input, select, textarea')?.focus();
-/** A search takes focus when its view appears, after Back too. Stable, so it runs once per view. */
+/** A key cmdk moves its selection with, its vim bindings (Ctrl+N, J, P, K) included: the member's own move. */
+const MOVES = new Set(['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
+const isMove = (e: { key: string; ctrlKey: boolean; altKey: boolean }) =>
+  !e.altKey && (MOVES.has(e.key) || (e.ctrlKey && ['n', 'j', 'p', 'k'].includes(e.key)));
+
+/** A search takes focus when its view appears within an open menu (Back). Stable, so it runs once per view. */
 const focusSearch = (input: HTMLInputElement | null) => input?.focus();
 
 /** A found screen's or group's item value: cmdk matches it with `matchesQuery` (lib/targets.ts), the target picker's search. */
@@ -283,8 +288,9 @@ function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
 }
 
 /**
- * ⌘K: go to any section, or run any tool the member's role allows, from every signed-in page.
- * The entries are the tool registry agents call (src/lib/command-menu.ts). It opens with no motion.
+ * ⌘K: go to any section, run any tool the member's role allows, switch or create an org, or find a
+ * screen or group by name and act on it, from every signed-in page. The tools are the registry
+ * agents call (src/lib/command-menu.ts). It opens with no motion.
  */
 export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const open = useAppStore((s) => s.commandMenu.open);
@@ -318,7 +324,10 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const choose = useAppStore((s) => s.chooseCommand);
   const search = useAppStore((s) => s.searchCommands);
   const selection = useAppStore((s) => s.commandMenu.selection);
+  const moved = useAppStore((s) => s.commandMenu.moved);
+  const backed = useAppStore((s) => s.commandMenu.backed);
   const select = useAppStore((s) => s.selectCommand);
+  const move = useAppStore((s) => s.moveCommandSelection);
   const chooseTarget = useAppStore((s) => s.chooseTarget);
   // The org's screens and groups (`list_screens`, `list_groups`): the Screens page's list, shown from its cache and read again
   // on each opening (this body mounts on each), so a screen or group someone else made since is found.
@@ -376,10 +385,13 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
       label="Search pages, screens and actions"
       loop
       filter={filter}
-      value={selectedItem(selection, found)}
+      value={selectedItem(selection, found, moved)}
       onValueChange={(value) => select(value, JSON.stringify(found))}
+      onKeyDown={(e) => isMove(e) && move()}
+      onPointerMove={move}
     >
-      <CommandInput ref={focusSearch} value={query} onValueChange={search} placeholder="Go to a page, find a screen, or type an action">
+      {/* On opening, Radix's focus trap focuses the search, once it holds focus: a focus before that is lost to a menu still closing. */}
+      <CommandInput ref={backed ? focusSearch : undefined} value={query} onValueChange={search} placeholder="Go to a page, find a screen, or type an action">
         <kbd className="rounded-md border px-1.5 py-0.5 font-mono text-xs text-muted-foreground">esc</kbd>
       </CommandInput>
       <p role="status" className="border-b px-4 py-2 text-[13px] text-muted-foreground empty:sr-only">

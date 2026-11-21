@@ -108,6 +108,25 @@ describe('a call on its way across closing and opening again', () => {
   });
 });
 
+describe("⌘K's selection and focus (#180)", () => {
+  it('counts a move the member made until they type again, and opens with neither a move nor a way back', () => {
+    const { store } = menuStore();
+    store.getState().openCommandMenu();
+    store.getState().searchCommands('deli');
+    store.getState().moveCommandSelection();
+    expect(store.getState().commandMenu.moved).toBe(true);
+    store.getState().searchCommands('delic');
+    expect(store.getState().commandMenu.moved).toBe(false);
+    store.getState().chooseTarget({ kind: 'screen', id: 'scr_1' });
+    store.getState().backToCommands();
+    expect(store.getState().commandMenu.backed).toBe(true);
+    store.getState().moveCommandSelection();
+    store.getState().closeCommandMenu();
+    store.getState().openCommandMenu();
+    expect(store.getState().commandMenu).toMatchObject({ moved: false, backed: false });
+  });
+});
+
 describe('⌘K on a found screen or group', () => {
   it('keeps what is typed through a target and Back, and starts empty when opened again', () => {
     const { store } = menuStore();

@@ -163,13 +163,18 @@ describe("⌘K's selection when the screens arrive after typing (#180)", () => {
 
   it('selects the first screen found once the list lands, over the tool selected while it was on its way', () => {
     const typed = { value: 'tool:test_alert_channel', among: JSON.stringify([]) };
-    expect(selectedItem(typed, [])).toBe('tool:test_alert_channel');
-    expect(selectedItem(typed, foundValues('deli', [deli], []))).toBe('screen:scr_1');
+    expect(selectedItem(typed, [], false)).toBe('tool:test_alert_channel');
+    expect(selectedItem(typed, foundValues('deli', [deli], []), false)).toBe('screen:scr_1');
+  });
+
+  it('keeps a selection the member moved to, though the list lands after: their choice, not cmdk’s pick', () => {
+    const arrowed = { value: 'tool:retry_alert_delivery', among: JSON.stringify([]) };
+    expect(selectedItem(arrowed, foundValues('deli', [deli], []), true)).toBe('tool:retry_alert_delivery');
   });
 
   it('keeps a selection made among the same found items, and lets cmdk choose before it has reported one', () => {
     const found = foundValues('front', [deli], [front]);
-    expect(selectedItem({ value: 'group:grp_1', among: JSON.stringify(found) }, found)).toBe('group:grp_1');
-    expect(selectedItem(null, [])).toBe('');
+    expect(selectedItem({ value: 'group:grp_1', among: JSON.stringify(found) }, found, false)).toBe('group:grp_1');
+    expect(selectedItem(null, [], false)).toBe('');
   });
 });
