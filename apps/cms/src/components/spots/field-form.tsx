@@ -1,9 +1,9 @@
 /**
  * `FieldForm` (docs/proposals/cms-ui.md): a template's fields as a form, in the order the template
  * lists them: text, number, boolean, colour (a brand colour or a custom one), select, url (an https
- * address), image (the asset picker) and list (repeating rows, up to `maxItems`). The contract's
- * message for a field (`validateSpotData`) sits under it. Values a spot leaves out show the
- * template's default.
+ * address), date and datetime (the browser's pickers, held to `min` and `max`), image (the asset
+ * picker) and list (repeating rows, up to `maxItems`). The contract's message for a field
+ * (`validateSpotData`) sits under it. Values a spot leaves out show the template's default.
  */
 import { BRAND_COLORS, type FieldDef, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
@@ -70,6 +70,22 @@ function ScalarInput({
           value={typeof value === 'string' ? value : ''}
           // The contract refuses space around an address; the input drops it, as a url input's value does.
           onChange={(e) => onChange(e.target.value.trim())}
+          {...aria}
+        />
+      );
+    case 'date':
+    case 'datetime':
+      return (
+        <Input
+          id={id}
+          // datetime-local gives the wall time the contract holds, YYYY-MM-DDTHH:mm, with no zone.
+          type={def.type === 'date' ? 'date' : 'datetime-local'}
+          min={def.min}
+          max={def.max}
+          value={typeof value === 'string' ? value : ''}
+          // An unfinished entry is '', which the contract asks to be finished.
+          onChange={(e) => onChange(e.target.value)}
+          className="max-w-60 font-mono"
           {...aria}
         />
       );
