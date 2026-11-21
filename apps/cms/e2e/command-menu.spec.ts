@@ -161,6 +161,8 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
     await expect(menu).toBeHidden();
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();
+    // ⌘K closed as it opened: focus goes to the page's main region, not nowhere.
+    await expect(page.locator('#main')).toBeFocused();
   }
 
   // Enter on Back goes back, to what was found, and does not run the selected action; Open goes to the screen's page.

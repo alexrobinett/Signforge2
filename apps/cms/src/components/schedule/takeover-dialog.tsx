@@ -34,6 +34,7 @@ export function TakeoverDialog({
   screens,
   groups,
   now,
+  onCloseAutoFocus,
 }: {
   orgId: string;
   playlists: PlaylistView[];
@@ -41,6 +42,8 @@ export function TakeoverDialog({
   groups: GroupView[];
   /** The page's clock: a render may not read the time itself. */
   now: number;
+  /** Where focus goes when it closes (ScheduleDialogs: what opened it). */
+  onCloseAutoFocus: (e: Event) => void;
 }) {
   const draft = useAppStore((s) => s.schedule.takeovers[DIALOG]);
   const edit = useAppStore((s) => s.editTakeover);
@@ -59,7 +62,7 @@ export function TakeoverDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && close()}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-xl" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>Take over screens</DialogTitle>
           <DialogDescription>

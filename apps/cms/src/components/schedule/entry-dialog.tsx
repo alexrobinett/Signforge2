@@ -14,7 +14,8 @@ import { NativeSelect } from '~/components/ui/select';
 import { DAYS } from '~/lib/days';
 import { useCanPublish } from '~/lib/live';
 import type { PlaylistView } from '~/lib/playlists';
-import { entryPreview, type ScheduleEntryView } from '~/lib/schedule';
+import { entryPreview, publishedEntries, type ScheduleEntryView } from '~/lib/schedule';
+import type { SpotView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
@@ -27,7 +28,9 @@ export function EntryDialog({
   screens,
   groups,
   entries,
+  spots,
   now,
+  onCloseAutoFocus,
 }: {
   orgId: string;
   playlists: PlaylistView[];
@@ -35,8 +38,12 @@ export function EntryDialog({
   groups: GroupView[];
   /** The schedule as drafted, for what a screen will play. */
   entries: ScheduleEntryView[];
+  /** The org's spots: Save and publish names those it sends. */
+  spots: SpotView[];
   /** The page's clock: a render may not read the time itself. */
   now: number;
+  /** Where focus goes when it closes (ScheduleDialogs: what opened it). */
+  onCloseAutoFocus: (e: Event) => void;
 }) {
   const draft = useAppStore((s) => s.schedule.entries[DIALOG]);
   const edit = useAppStore((s) => s.editEntry);
@@ -53,18 +60,25 @@ export function EntryDialog({
   const screen = d.target === 'screen' ? screens.find((s) => s.id === d.screenId) : undefined;
   const names = new Map(playlists.map((p) => [p.id, p.name]));
   const playlist = playlists.find((p) => p.id === d.playlistId);
-  const preview =
+  const week = (over: ScheduleEntryView[]) =>
     screen && playlist
       ? entryPreview({
           screen,
           groups,
-          entries,
+          entries: over,
           draft: { ...entryWhen(d), playlistId: d.playlistId, replaces: draft.record },
           defaultPlaylistId: playlists.find((p) => p.isDefault)?.id ?? '',
           names: (id) => names.get(id) ?? 'a removed playlist',
           at: new Date(now),
         })
       : null;
+  // As drafted, as Save draft and then Publish give it; and, where Save and publish is offered, over
+  // what screens have, as that pinned publish gives it: other drafts stay off screens.
+  const preview = week(entries);
+  const afterPublish = canPublish ? week(publishedEntries(entries)) : null;
+  const raise = (afterPublish ?? preview)?.raise;
+  // The playlist's spots that go with it when it has never been published.
+  const firstSpots = playlist && !playlist.published ? spots.filter((s) => playlist.spotIds.includes(s.id) && !s.published) : [];
 
   function submit(e: SubmitEvent) {
     e.preventDefault();
@@ -73,7 +87,7 @@ export function EntryDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && close()}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{draft.record ? 'Change schedule entry' : 'Schedule a playlist'}</DialogTitle>
           <DialogDescription>Days and times are each screen's own, in its time zone. Saved as a draft: Publish sends it.</DialogDescription>
@@ -100,9 +114,14 @@ export function EntryDialog({
               <p role="status">
                 <span className="font-medium">This week, {screen?.name}:</span> {preview.text}
               </p>
-              {preview.raise && (
-                <Button type="button" variant="outline" size="sm" className="justify-self-start" onClick={() => edit({ priority: preview.raise!.priority })}>
-                  Raise priority above {preview.raise.above}
+              {afterPublish && afterPublish.text !== preview.text && (
+                <p role="status">
+                  <span className="font-medium">After Save and publish</span>, as screens have the rest (other drafts stay drafts): {afterPublish.text}
+                </p>
+              )}
+              {raise && (
+                <Button type="button" variant="outline" size="sm" className="justify-self-start" onClick={() => edit({ priority: raise.priority })}>
+                  Raise priority above {raise.above}
                 </Button>
               )}
             </section>
@@ -178,7 +197,11 @@ export function EntryDialog({
           {canPublish && playlist && (
             <p className="text-xs text-muted-foreground">
               Save and publish sends{' '}
-              {playlist.published ? 'this entry alone: other drafts stay drafts.' : `${playlist.name} and this entry: the playlist has never been published.`}
+              {playlist.published
+                ? 'this entry alone: other drafts stay drafts.'
+                : firstSpots.length
+                  ? `${playlist.name}, ${firstSpots.length === 1 ? `its spot ${firstSpots[0]!.name}` : `its ${firstSpots.length} spots never published`} and this entry: none has been published.`
+                  : `${playlist.name} and this entry: the playlist has never been published.`}
             </p>
           )}
           <DialogFooter>
