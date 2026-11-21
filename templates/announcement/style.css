@@ -248,10 +248,13 @@ body {
   border: var(--lk-rule) solid var(--lk-rule-color);
   border-radius: var(--lk-radius-small);
 }
+[data-look='pop'] .fact dt {
+  font-size: 2.2vmin;
+}
 [data-look='pop'] .fact dd {
   font-family: var(--lk-font-display);
   font-weight: 800;
-  font-size: calc(3vmin * var(--fit-body));
+  font-size: calc(3.3vmin * var(--fit-body));
 }
 [data-look='pop'] .qr,
 [data-look='pop'] .meta {
@@ -468,11 +471,15 @@ body {
   font-family: var(--lk-font-label);
   line-height: 1.15;
 }
+[data-look='night'] .foot-rule {
+  display: none;
+}
 [data-look='night'] .rule {
   margin: 1.7vmin 0 3.7vmin;
 }
 [data-look='night'] .photo {
   grid-area: photo;
+  align-self: stretch;
   margin-bottom: 3.7vmin;
 }
 [data-look='night'] .frame {

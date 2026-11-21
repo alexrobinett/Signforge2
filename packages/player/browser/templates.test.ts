@@ -1111,7 +1111,7 @@ describe('announcement (#197)', () => {
   ];
 
   /**
-   * What is wrong with the layout at rest: a block off the screen, two blocks overlapping, text cut
+   * What is wrong with the layout at rest: a block with no size or off the screen, two blocks overlapping, text cut
    * sideways without an ellipsis, or clamped text showing more lines than its clamp.
    */
   const layoutProblems = (f: Frame) =>
@@ -1122,8 +1122,10 @@ describe('announcement (#197)', () => {
         const el = document.querySelector(sel);
         return el ? [[sel, el.getBoundingClientRect()] as const] : [];
       });
-      for (const [sel, r] of blocks)
+      for (const [sel, r] of blocks) {
+        if (r.width < 1 || r.height < 1) out.push(`${sel} has no size`);
         if (r.left < -1 || r.top < -1 || r.right > innerWidth + 1 || r.bottom > innerHeight + 1) out.push(`${sel} leaves the screen`);
+      }
       for (const [i, [a, ra]] of blocks.entries())
         for (const [b, rb] of blocks.slice(i + 1)) {
           const w = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
