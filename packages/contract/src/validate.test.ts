@@ -150,12 +150,27 @@ describe('date and datetime fields', () => {
   it('holds a date to a real calendar day, YYYY-MM-DD, within min and max', () => {
     expect(check({})).toEqual([]);
     for (const day of ['2026-01-01', '2026-12-31', '2026-02-28']) expect(check({ day })).toEqual([]);
-    for (const bad of ['2026-02-29', '2026-04-31', '2026-13-01', '2026-00-10', '2026-6-15', '15/06/2026', '2026-06-15T09:00', '', 20260615])
+    for (const bad of ['2026-02-29', '2026-04-31', '2026-13-01', '2026-00-10', '2026-6-15', '15/06/2026', '2026-06-15T09:00', 20260615])
       expect(check({ day: bad })).toEqual(['field "day" must be a date (YYYY-MM-DD)']);
     expect(check({ day: '2025-12-31' })).toEqual(['field "day" must be on or after 2026-01-01']);
     expect(check({ day: '2027-01-01' })).toEqual(['field "day" must be on or before 2026-12-31']);
     // A leap day where there is one.
     expect(validateSpotData({ day: { type: 'date', label: 'Day' } }, { day: '2028-02-29' }, {})).toEqual([]);
+  });
+
+  it('names an empty date or datetime as one not picked yet: a draft may hold it, a screen may not', () => {
+    expect(check({ day: '', at: '' })).toEqual(['field "day" has no date yet', 'field "at" has no date and time yet']);
+  });
+
+  it('refuses a year before 1900, as typing "26" into a picker\'s year gives 0026', () => {
+    const open: Record<string, FieldDef> = { day: { type: 'date', label: 'Day' }, at: { type: 'datetime', label: 'At' } };
+    const year = (day: string, at: string) => validateSpotData(open, { day, at }, {});
+    expect(year('0026-11-27', '0026-11-27T18:00')).toEqual(['field "day" must be in 1900 or later', 'field "at" must be in 1900 or later']);
+    expect(year('1899-12-31', '0000-01-01T00:00')).toEqual(['field "day" must be in 1900 or later', 'field "at" must be in 1900 or later']);
+    expect(year('1900-01-01', '1900-01-01T00:00')).toEqual([]);
+    expect(validateTemplateManifest({ ...structuredClone(template), fields: { day: { type: 'date', label: 'Day', min: '0026-01-01' } } })).toEqual([
+      'field "day": min must be in 1900 or later',
+    ]);
   });
 
   it('holds a datetime to a wall time, YYYY-MM-DDTHH:mm with no zone, within min and max', () => {
@@ -670,7 +685,7 @@ describe('table bindings', () => {
     });
   });
 
-  it("fills date and datetime properties from a cell's ISO text, a spreadsheet's space or zero seconds too, leaving out a row that is not one", () => {
+  it("fills date and datetime properties from a cell's ISO text, with zero seconds too, leaving out a row that is not one", () => {
     const events: Extract<FieldDef, { type: 'list' }> = {
       type: 'list',
       label: 'Events',
@@ -680,12 +695,14 @@ describe('table bindings', () => {
       columns: ['Day', 'At'],
       rows: [
         [' 2026-11-27 ', '2026-11-27T18:00'],
-        ['2026-11-28', '2026-11-28 18:30'],
+        ['2026-11-28', '2026-11-28T18:30:00'],
         ['2026-11-29', '2026-11-29T07:15:00'],
         ['2026-11-30', ''],
         ['27/11/2026', '2026-11-27T18:00'],
         ['2026-12-01', '2026-12-01T18:00Z'],
         [46_000, '2026-12-02T18:00:30'],
+        // The feed parser writes a spreadsheet's space as the T (packages/feeds, Tables); a table that still has one is not ISO.
+        ['2026-12-03', '2026-12-03 18:00'],
       ],
     };
     expect(tableItems(events, { columns: { day: 'Day', at: 'At' } }, table, 'en-US')).toEqual({
@@ -695,7 +712,12 @@ describe('table bindings', () => {
         { day: '2026-11-29', at: '2026-11-29T07:15' },
         { day: '2026-11-30', at: '2026-11-27T09:00' },
       ],
-      problems: ['row 5: day must be a date (YYYY-MM-DD)', 'row 6: at must be a date and time (YYYY-MM-DDTHH:mm)', 'row 7: day must be a date (YYYY-MM-DD)'],
+      problems: [
+        'row 5: day must be a date (YYYY-MM-DD)',
+        'row 6: at must be a date and time (YYYY-MM-DDTHH:mm)',
+        'row 7: day must be a date (YYYY-MM-DD)',
+        'row 8: at must be a date and time (YYYY-MM-DDTHH:mm)',
+      ],
     });
   });
 

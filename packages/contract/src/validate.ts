@@ -126,12 +126,17 @@ const CALENDAR = {
   datetime: { form: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, what: 'a date and time (YYYY-MM-DDTHH:mm)' },
 } as const;
 
-/** Whether `v` is a `date` or `datetime` value that exists on the calendar: no 30 February, no 24:00. */
-function onCalendar(type: keyof typeof CALENDAR, v: unknown): v is string {
-  if (!isStr(v) || !CALENDAR[type].form.test(v)) return false;
+/**
+ * What a `date` or `datetime` value must be, when `v` is not one; undefined when it is. It exists
+ * on the calendar (no 30 February, no 24:00) and falls in 1900 or later: typing "26" into a
+ * picker's year gives 0026, which no spot means.
+ */
+function calendarProblem(type: keyof typeof CALENDAR, v: string): string | undefined {
+  if (!CALENDAR[type].form.test(v)) return CALENDAR[type].what;
   // Read as UTC only to check the fields: a date that rolls over (31 April is 1 May) comes back different.
   const t = new Date(`${type === 'date' ? `${v}T00:00` : v}Z`);
-  return !Number.isNaN(t.getTime()) && t.toISOString().startsWith(v);
+  if (Number.isNaN(t.getTime()) || !t.toISOString().startsWith(v)) return CALENDAR[type].what;
+  return v < '1900' ? 'in 1900 or later' : undefined;
 }
 
 /** Whether `v` sits on the step grid, counted from `min` (or 0), allowing for float rounding. */
@@ -172,7 +177,11 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       return undefined;
     case 'date':
     case 'datetime': {
-      if (!onCalendar(def.type, v)) return `field "${name}" must be ${CALENDAR[def.type].what}`;
+      if (!isStr(v)) return `field "${name}" must be ${CALENDAR[def.type].what}`;
+      // What a picker holds until a day is picked: a draft may keep it, a screen never gets it.
+      if (v === '') return `field "${name}" has no ${def.type === 'date' ? 'date' : 'date and time'} yet`;
+      const e = calendarProblem(def.type, v);
+      if (e) return `field "${name}" must be ${e}`;
       // Both forms are fixed-width, so text order is time order.
       const [on, shown] = def.type === 'date' ? ['on', (s: string) => s] : ['at', (s: string) => s.replace('T', ' ')];
       if (def.min !== undefined && v < def.min) return `field "${name}" must be ${on} or after ${shown(def.min)}`;
@@ -209,9 +218,12 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
     case 'date':
     case 'datetime': {
       const type = def.type;
-      optional('min', (v) => onCalendar(type, v), CALENDAR[type].what);
-      optional('max', (v) => onCalendar(type, v), CALENDAR[type].what);
-      if (onCalendar(type, def.min) && onCalendar(type, def.max) && def.min > def.max) out.push(`${where}: min must not be after max`);
+      const problem = (v: unknown) => (isStr(v) ? calendarProblem(type, v) : CALENDAR[type].what);
+      for (const k of ['min', 'max']) {
+        const e = has(k) ? problem(def[k]) : undefined;
+        if (e) out.push(`${where}: ${k} must be ${e}`);
+      }
+      if (isStr(def.min) && isStr(def.max) && !problem(def.min) && !problem(def.max) && def.min > def.max) out.push(`${where}: min must not be after max`);
       break;
     }
     case 'select':
@@ -464,8 +476,8 @@ function cellValue(def: ScalarFieldDef, cell: string | number, locale: string): 
     case 'date':
       return isStr(cell) ? text : undefined;
     case 'datetime':
-      // A spreadsheet writes the same wall time with a space, or with seconds.
-      return isStr(cell) ? text.replace(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::00)?$/, '$1T$2') : undefined;
+      // A spreadsheet may write zero seconds; the feed parser has already made its space a T.
+      return isStr(cell) ? text.replace(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}):00$/, '$1') : undefined;
     case 'number':
       return isStr(cell) ? (text === '' ? undefined : Number(text)) : cell;
     case 'boolean': {
