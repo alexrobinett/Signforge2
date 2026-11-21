@@ -4,6 +4,7 @@
  */
 import {
   boundValue,
+  isBaseTemplateKey,
   brandFiles,
   SNAPSHOT_STALE_MS,
   requiredFiles,
@@ -144,20 +145,25 @@ export function nextDisplayChange(hours: DisplayHours | undefined, timezone: str
 
 const LEVEL: Record<TargetLevel, number> = { org: 0, group: 1, screen: 2 };
 
-/** A base `alert` spot (the key's form is `templateKey`'s). An org's template of that name is not one. */
-const isAlert = (s: Spot | undefined) => s?.kind === 'template' && s.template.startsWith('base/alert@');
+/** A base template's `alert` spot. An org's own template of that name is not one. */
+const isAlert = (s: Spot | undefined) =>
+  s?.kind === 'template' && isBaseTemplateKey(s.template) && s.template.slice(s.template.indexOf('/') + 1).startsWith('alert@');
 
 /**
  * Whether `now` is inside an entry's absolute bounds. On a clock the screen does not trust, an entry
  * with either bound never applies, better a takeover missed than one that never ends, except a
- * takeover that plays an alert (owner, #200): it applies until it has surely ended, at `notBefore`,
- * and ends on time once a sync makes the clock trusted.
+ * takeover whose playlist plays only alerts (owner, #200): an alert that is live is not held back.
+ * It applies while `notBefore`, the earliest the real time can be, says it has surely started and
+ * not yet surely ended. An alert published to start at once was started before the sync that
+ * brought it, so it plays; one scheduled for later waits until it has surely started.
  */
 function withinBounds(manifest: ScreenManifest, e: ScheduleEntry, now: Date, trust: ClockTrust): boolean {
   if (e.startsAt === undefined && e.endsAt === undefined) return true;
   if (trust.clockTrusted === false) {
-    const alert = manifest.playlists[e.playlist]?.items.some((i) => isAlert(manifest.spots[i.spot])) === true;
-    return alert && e.endsAt !== undefined && trust.notBefore < Date.parse(e.endsAt);
+    const items = manifest.playlists[e.playlist]?.items ?? [];
+    const alert = items.length > 0 && items.every((i) => isAlert(manifest.spots[i.spot]));
+    const started = e.startsAt === undefined || Date.parse(e.startsAt) <= trust.notBefore;
+    return alert && started && e.endsAt !== undefined && trust.notBefore < Date.parse(e.endsAt);
   }
   const ms = now.getTime();
   return !(e.startsAt !== undefined && ms < Date.parse(e.startsAt)) && !(e.endsAt !== undefined && ms >= Date.parse(e.endsAt));

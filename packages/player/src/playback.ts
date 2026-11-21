@@ -327,12 +327,16 @@ export class Playback {
     const m = this.#manifest;
     if (!m) return;
     const at = new Date(this.o.clock.now());
-    if (activeTakeover(m, at, this.o.clock.trust()) !== this.#chosenTakeover) {
+    const trust = this.o.clock.trust();
+    if (activeTakeover(m, at, trust) !== this.#chosenTakeover) {
       this.#cutIn = true;
       this.#tookOver.raise();
     }
-    const edge = nextTakeoverEdge(m, at);
-    if (edge) this.#cancelTakeoverTimer = this.o.clock.after(Math.min(edge.getTime() - at.getTime(), MAX_TIMER_MS), () => this.watchTakeover());
+    // On a clock it does not trust, an alert takeover starts and ends by the earliest the real time
+    // can be, which runs on with the monotonic clock: count the next edge from there.
+    const from = trust.clockTrusted === false ? new Date(trust.notBefore) : at;
+    const edge = nextTakeoverEdge(m, from);
+    if (edge) this.#cancelTakeoverTimer = this.o.clock.after(Math.min(edge.getTime() - from.getTime(), MAX_TIMER_MS), () => this.watchTakeover());
   }
 
   /** Nothing on screen: both slots cleared, their pins released, `text` in the status overlay. */
