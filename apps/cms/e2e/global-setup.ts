@@ -150,6 +150,17 @@ export default async function globalSetup() {
     encoding: 'utf8',
   });
   if (seed.status !== 0) throw new Error(`template seed failed:\n${seed.stdout}\n${seed.stderr}`);
+  // A template with two named sources (#193), as no base template has yet.
+  const fixture = spawnSync(
+    'pnpm',
+    ['exec', 'tsx', 'packages/cli/src/sf.ts', 'template', 'push', 'apps/cms/e2e/fixtures/two-sources', '--api', `http://127.0.0.1:${API_PORT}`, '--approve'],
+    {
+      cwd: rootDir,
+      env: { ...env, SF_ADMIN_TOKEN: ADMIN_TOKEN },
+      encoding: 'utf8',
+    },
+  );
+  if (fixture.status !== 0) throw new Error(`fixture template push failed:\n${fixture.stdout}\n${fixture.stderr}`);
   await waitFor(`${CMS_URL}/sign-in`);
   // The CMS reaches the API through the registry; wait until the binding answers.
   await waitFor(`${CMS_URL}/api/sign-in-options`);

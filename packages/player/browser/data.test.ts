@@ -84,3 +84,58 @@ describe('live data', () => {
     await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Live headline', items: 'Live 1, Live 2' });
   });
 });
+
+describe('a template with two sources (#193)', () => {
+  /** The label from a forecast and the rows from a feed: each field bound to its own source. */
+  const frame: FixtureSpot = {
+    id: 'frame',
+    label: 'Fallback weather',
+    items: [{ title: 'Fallback item' }],
+    bindings: { label: { source: 'weather', path: 'current.summary' }, items: { source: 'news', path: 'stories' } },
+  };
+  const at = (id: string, data: unknown, checkedAt = new Date().toISOString()) => ({ ...snapshot(data), id, checkedAt });
+  /** A day and an hour unconfirmed: stale, whatever the time. */
+  const stale = () => new Date(Date.now() - 25 * 3_600_000).toISOString();
+
+  async function playWith(data: { weather?: string; news?: string }) {
+    const p = await h.openPlayer((s) => {
+      s.publish(
+        h.content([frame], {
+          edit: (m) => {
+            for (const t of Object.values(m.templates))
+              t.manifest = {
+                ...t.manifest,
+                live: {
+                  sources: {
+                    weather: { label: 'Weather', source: 'open-meteo', fields: { label: 'current.summary' } },
+                    headlines: { label: 'Headlines', source: 'rss', fields: { items: 'stories' } },
+                  },
+                },
+              };
+          },
+        }),
+      );
+      if (data.weather) s.setData('weather', at('weather', { current: { summary: 'Sunny, 21°' } }, data.weather));
+      if (data.news) s.setData('news', at('news', live, data.news));
+    });
+    await p.until((s) => s.log.length >= 1);
+    return p;
+  }
+
+  it('plays both sources when both are fresh', async () => {
+    const now = new Date().toISOString();
+    const p = await playWith({ weather: now, news: now });
+    await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Sunny, 21°', items: 'Live 1, Live 2' });
+    expect((await p.state()).dataRejected).toEqual({});
+  });
+
+  it('plays the fallback of a stale source only, and the other source live', async () => {
+    const p = await playWith({ weather: stale(), news: new Date().toISOString() });
+    await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Fallback weather', items: 'Live 1, Live 2' });
+  });
+
+  it('plays every fallback with neither source', async () => {
+    const p = await playWith({});
+    await expect.poll(() => p.onScreen()).toMatchObject({ label: 'Fallback weather', items: 'Fallback item' });
+  });
+});

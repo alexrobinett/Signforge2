@@ -184,7 +184,7 @@ function TableValues({
   canManage: boolean;
   onChange: Edit;
 }) {
-  const { orgId, spot, manifest, live } = target;
+  const { orgId, manifest, live } = target;
   const { data: read, dataUpdatedAt } = useSuspenseQuery(dataSourceQuery(orgId, boundId));
   const justRead = useAppStore((s) => s.readTables[boundId]);
   const changeSource = useAppStore((s) => s.changeSource);
@@ -194,7 +194,7 @@ function TableValues({
       <p className="text-sm font-medium text-destructive">
         This spot's table is gone. Choose another, or type the items: until then screens show the typed items.
         {canManage && (
-          <Button type="button" variant="outline" size="sm" className="ml-2" onClick={() => changeSource(spot.id, true)}>
+          <Button type="button" variant="outline" size="sm" className="ml-2" onClick={() => changeSource(target, true)}>
             Choose a table
           </Button>
         )}
@@ -261,7 +261,7 @@ function TableValues({
       </p>
       {canManage && (
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" className="border-primary/30 text-primary" onClick={() => changeSource(spot.id, true)}>
+          <Button type="button" variant="outline" size="sm" className="border-primary/30 text-primary" onClick={() => changeSource(target, true)}>
             Change source
           </Button>
           <Button type="button" variant="ghost" size="sm" onClick={unbind}>
@@ -274,9 +274,8 @@ function TableValues({
 }
 
 /** Picks one of the org's tables, or reads a CSV or JSON link and adds it. */
-function TablePicker({ target, sources, boundId }: { target: SourceTarget; sources: DataSourceView[]; boundId: string | undefined }) {
-  const { spot } = target;
-  const st = useAppStore((s) => sourceStateOf(s.spotSource, spot.id));
+function TablePicker({ target, ids, sources, boundId }: { target: SourceTarget; ids: string; sources: DataSourceView[]; boundId: string | undefined }) {
+  const st = useAppStore((s) => sourceStateOf(s.spotSource, target));
   const openForm = useAppStore((s) => s.openFeedForm);
   const editTable = useAppStore((s) => s.editTable);
   const readTable = useAppStore((s) => s.readTable);
@@ -284,38 +283,38 @@ function TablePicker({ target, sources, boundId }: { target: SourceTarget; sourc
   const tables = sources.filter((d) => isTableFormat(d.format));
   return (
     <div className="flex flex-col gap-3">
-      {tables.length > 0 && <SourceChoice target={target} sources={tables} boundId={boundId} id="source-table" label="Table" word="table" />}
+      {tables.length > 0 && <SourceChoice target={target} sources={tables} boundId={boundId} id={`${ids}.table`} label="Table" word="table" />}
       {st.adding ? (
         <fieldset className="rounded-[10px] border p-3">
           {/* Floated, so it sits inside the frame instead of cutting its border. */}
           <legend className="float-left mb-3 font-medium">From a CSV or JSON link</legend>
           <div className="clear-left flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="table-url" className="text-sm font-medium">
+              <label htmlFor={`${ids}.table-url`} className="text-sm font-medium">
                 Address
               </label>
               <Input
-                id="table-url"
+                id={`${ids}.table-url`}
                 type="url"
                 inputMode="url"
                 value={st.tableUrl}
-                onChange={(e) => editTable(spot.id, { tableUrl: e.target.value })}
-                aria-describedby="table-url-help"
+                onChange={(e) => editTable(target, { tableUrl: e.target.value })}
+                aria-describedby={`${ids}.table-url-help`}
               />
-              <p id="table-url-help" className="text-sm text-muted-foreground">
+              <p id={`${ids}.table-url-help`} className="text-sm text-muted-foreground">
                 An https link to a CSV file with a header row, or to JSON: a published spreadsheet, a file on your site. It is stored encrypted and never shown
                 again.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="table-format" className="text-sm font-medium">
+                <label htmlFor={`${ids}.table-format`} className="text-sm font-medium">
                   The file is
                 </label>
                 <NativeSelect
-                  id="table-format"
+                  id={`${ids}.table-format`}
                   value={st.tableFormat}
-                  onChange={(e) => editTable(spot.id, { tableFormat: e.target.value === 'json-table' ? 'json-table' : 'csv' })}
+                  onChange={(e) => editTable(target, { tableFormat: e.target.value === 'json-table' ? 'json-table' : 'csv' })}
                 >
                   <option value="csv">CSV</option>
                   <option value="json-table">JSON</option>
@@ -323,24 +322,24 @@ function TablePicker({ target, sources, boundId }: { target: SourceTarget; sourc
               </div>
               {st.tableFormat === 'json-table' && (
                 <div className="flex min-w-40 flex-1 flex-col gap-1.5">
-                  <label htmlFor="table-rows" className="text-sm font-medium">
+                  <label htmlFor={`${ids}.table-rows`} className="text-sm font-medium">
                     Where the list is
                   </label>
                   <Input
-                    id="table-rows"
+                    id={`${ids}.table-rows`}
                     value={st.rowsPath}
                     placeholder="data.items"
                     maxLength={200}
-                    onChange={(e) => editTable(spot.id, { rowsPath: e.target.value })}
-                    aria-describedby="table-rows-help"
+                    onChange={(e) => editTable(target, { rowsPath: e.target.value })}
+                    aria-describedby={`${ids}.table-rows-help`}
                   />
-                  <p id="table-rows-help" className="text-sm text-muted-foreground">
+                  <p id={`${ids}.table-rows-help`} className="text-sm text-muted-foreground">
                     Empty when the file is the list.
                   </p>
                 </div>
               )}
             </div>
-            <Button type="button" variant="outline" className="self-start" disabled={st.reading || !st.tableUrl.trim()} onClick={() => void readTable(spot.id)}>
+            <Button type="button" variant="outline" className="self-start" disabled={st.reading || !st.tableUrl.trim()} onClick={() => void readTable(target)}>
               {st.reading ? 'Reading…' : 'Read the file'}
             </Button>
             {/* Kept in the accessibility tree while empty, so the read's result is announced. */}
@@ -350,16 +349,16 @@ function TablePicker({ target, sources, boundId }: { target: SourceTarget; sourc
             {st.table && (
               <>
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor="table-name" className="text-sm font-medium">
+                  <label htmlFor={`${ids}.table-name`} className="text-sm font-medium">
                     Name
                   </label>
-                  <Input id="table-name" value={st.tableName} maxLength={100} onChange={(e) => editTable(spot.id, { tableName: e.target.value })} />
+                  <Input id={`${ids}.table-name`} value={st.tableName} maxLength={100} onChange={(e) => editTable(target, { tableName: e.target.value })} />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" disabled={st.pending || !st.table.columns.length} onClick={() => void addTable(target)}>
                     {st.pending ? 'Adding…' : 'Use this file'}
                   </Button>
-                  <Button type="button" variant="ghost" onClick={() => openForm(spot.id, false)}>
+                  <Button type="button" variant="ghost" onClick={() => openForm(target, false)}>
                     Cancel
                   </Button>
                 </div>
@@ -368,17 +367,18 @@ function TablePicker({ target, sources, boundId }: { target: SourceTarget; sourc
           </div>
         </fieldset>
       ) : (
-        <Button type="button" variant="outline" className="self-start" onClick={() => openForm(spot.id, true)}>
+        <Button type="button" variant="outline" className="self-start" onClick={() => openForm(target, true)}>
           From a CSV or JSON link
         </Button>
       )}
-      {boundId && <KeepSource spotId={spot.id} />}
+      {boundId && <KeepSource at={target} />}
     </div>
   );
 }
 
 export function TableSource({
   target,
+  ids,
   draft,
   sources,
   boundId,
@@ -386,17 +386,18 @@ export function TableSource({
   onChange,
 }: {
   target: SourceTarget;
+  ids: string;
   draft: SpotDraft;
   sources: DataSourceView[];
   boundId: string | undefined;
   canManage: boolean;
   onChange: Edit;
 }) {
-  const changing = useAppStore((s) => sourceStateOf(s.spotSource, target.spot.id).changing);
+  const changing = useAppStore((s) => sourceStateOf(s.spotSource, target).changing);
   return (
     <>
       {boundId && <TableValues target={target} draft={draft} boundId={boundId} canManage={canManage} onChange={onChange} />}
-      {canManage && (!boundId || changing) && <TablePicker target={target} sources={sources} boundId={boundId} />}
+      {canManage && (!boundId || changing) && <TablePicker target={target} ids={ids} sources={sources} boundId={boundId} />}
     </>
   );
 }

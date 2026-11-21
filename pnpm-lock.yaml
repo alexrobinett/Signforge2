@@ -399,6 +399,9 @@ importers:
       '@signforge/template-room-status':
         specifier: workspace:*
         version: link:../../templates/room-status
+      '@signforge/template-sdk':
+        specifier: workspace:*
+        version: link:../../packages/template-sdk
       '@signforge/template-weather':
         specifier: workspace:*
         version: link:../../templates/weather
