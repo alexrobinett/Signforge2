@@ -14,5 +14,11 @@ _Avoid_: preview conversion, toSpot.
 **Rollout outcome**: where a screen a publish switched stands on the manifest it gave it (playing, replaced, revoked, or open: waiting, downloading, asleep, offline, fell back), and whether the rollout is over (no screen open). One module (`packages/tools/src/rollout.ts`) decides it for `get_publish`, `list_publishes` and the five-minute check that marks a publish finished and sends its alert; `packages/db` reads only the facts it is decided from.
 _Avoid_: rollout status, applied.
 
+**Label**: a `key=value` fact about a screen (`region=north`, `store=0142`, `type=drive-thru`) set with `update_screen_labels`, at most one value per key. The value is stored as typed and matched case-insensitively. A location is just a label key; there is no built-in location. Only `org.screens.labels` in `packages/db` touches the `screen_labels` table. Screens never see labels.
+
+**System label**: a label every screen has from its settings, read-only and never stored: `orientation`, `kind` (device or browser), `timezone`, and `locale` when it has one. A selector reads them as labels, so `orientation=portrait` needs no one to type it. Their keys cannot be set as labels.
+
+**Selector**: which screens to pick by their labels and system labels: every term holds (`{ all: [{ key, op, values }] }`, at most 10 terms; `eq`, `neq`, `in`, `notin`, `exists`, `missing`), written for people as `region=north, type in (drive-thru, kiosk), !legacy`. A key a screen lacks equals nothing, so `region!=north` skips a screen with no region. One pure module (`@signforge/compiler/selector`: `matches`, `format`) decides it for `list_screens`, the CMS's preview and the publish, so they never disagree. A selector cannot name a screen's name, id or status.
+
 **Bound fields**: the fields a data source feeds (each spot's bindings to it, with its template's field definitions, in a locale a screen plays in), and whether a snapshot of it may replace the last good one. One module (`packages/player-core/src/bound.ts`) answers it for the player, the sync and the poller; the screen's locale, or for the poller every locale the org's screens play in.
 _Avoid_: fit, fitting fields.
