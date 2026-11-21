@@ -621,10 +621,16 @@ export interface NewsFeed {
 export interface NewsImage {
   /** The photo scaled to cover a landscape screen (`coverSize` with `SCREEN_BOX.landscape`), never larger than the feed's: a JPEG, or a WebP for any other type. */
   file: Sha256;
-  /** Its sample (`ManifestFile.sample`); none when any pixel is not opaque. */
-  sample?: Sha256;
   /** A small copy for a list row, scaled to cover `NEWS_THUMB_BOX`, of the same type. */
   thumb: Sha256;
+  /**
+   * The thumbnail's sample, made as `ManifestFile.sample` is (`imageSampleSize` of the thumbnail's
+   * size), and none when any of its pixels is not opaque. It stands for the photo as well: its
+   * aspect is the photo's, each cell covering as much more of the photo as the photo is wider.
+   * Made from the thumbnail, so the server's sample costs a sixteenth of the CPU of the photo's
+   * (a Worker has 10 ms on the Free plan); a scaled copy's extremes are a little softer.
+   */
+  sample?: Sha256;
 }
 
 /** The box a story's thumbnail (`NewsImage.thumb`) covers: a list row's picture, a quarter of a landscape screen's width. */
