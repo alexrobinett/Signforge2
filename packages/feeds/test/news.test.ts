@@ -98,7 +98,9 @@ describe('XML safety', () => {
     }
   });
 
-  it('refuses a DOCTYPE exactly when fast-xml-parser would read one, over generated prologs', () => {
+  // fast-xml-parser is pinned (package.json): an upgrade must rerun this test, which is what notices
+  // if the parser's loop has moved away from refuseDeclarations' walk.
+  it('refuses a DOCTYPE exactly when fast-xml-parser would read one, over generated documents', () => {
     // The parser's own reading: an entity the DOCTYPE declares is expanded only if the parser read it.
     const oracle = new XMLParser({ processEntities: true });
     const pieces = [
@@ -115,29 +117,46 @@ describe('XML safety', () => {
       '<!DOCTYPE rss>',
       '<a>',
       '</a>',
+      '</a "',
       '<a',
       '>',
       '"',
       "'",
+      '""',
+      "''",
+      '<a b="',
+      "<a b='",
+      '"/>',
+      "'/>",
+      '" ?>',
+      "' ?>",
       ' ',
       'x',
     ];
+    // A 31-bit LCG in exact integer arithmetic, so the sequence does not repeat within the run.
     let seed = 0x5eed194;
     const random = () => {
-      seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31;
+      seed = (Math.imul(seed, 1_103_515_245) + 12_345) & 0x7fffffff;
       return seed / 2 ** 31;
     };
-    const tally = { read: 0, notRead: 0, parserRefused: 0 };
-    // The parser's validator refuses most random prologs, so many are made for a few hundred of each other outcome.
+    const seen = new Set<string>();
+    const distinct = { read: 0, notRead: 0 };
     for (let n = 0; n < 40_000; n++) {
-      const prolog = Array.from({ length: 1 + Math.floor(random() * 7) }, () => pieces[Math.floor(random() * pieces.length)]).join('');
-      const doc = (doctype: string) =>
-        `<?xml version="1.0"?>${prolog.replaceAll('<!DOCTYPE rss>', doctype)}<rss version="2.0"><channel><title>&seen;</title></channel></rss>`;
+      const markup = Array.from({ length: 1 + Math.floor(random() * 9) }, () => pieces[Math.floor(random() * pieces.length)]).join('');
+      // In the prolog, or inside the feed: the walk has no idea of a root, and neither has the parser's DOCTYPE branch.
+      const where = random() < 0.5 ? 'prolog' : 'channel';
+      if (seen.has(`${where} ${markup}`)) continue;
+      seen.add(`${where} ${markup}`);
+      const doc = (doctype: string) => {
+        const m = markup.replaceAll('<!DOCTYPE rss>', doctype);
+        return where === 'prolog'
+          ? `<?xml version="1.0"?>${m}<rss version="2.0"><channel><title>&seen;</title></channel></rss>`
+          : `<?xml version="1.0"?><rss version="2.0"><channel>${m}<title>&seen;</title></channel></rss>`;
+      };
       let read: boolean;
       try {
         read = JSON.stringify(oracle.parse(doc('<!DOCTYPE rss [<!ENTITY seen "yes">]>'), true)).includes('"yes"');
       } catch {
-        tally.parserRefused++;
         continue;
       }
       let code: unknown = 'accepted';
@@ -146,13 +165,19 @@ describe('XML safety', () => {
       } catch (e) {
         code = e instanceof FeedError ? e.code : e;
       }
-      if (read) tally.read++;
-      else tally.notRead++;
+      if (read) distinct.read++;
+      else distinct.notRead++;
       // Where the parser reads a DOCTYPE the feed is refused, and where it does not, no DOCTYPE is claimed.
-      expect({ prolog, doctype: code === 'doctype' }).toEqual({ prolog, doctype: read });
+      expect({ where, markup, doctype: code === 'doctype' }).toEqual({ where, markup, doctype: read });
     }
-    // Every outcome is exercised, so the agreement means something.
-    expect(Math.min(tally.read, tally.notRead)).toBeGreaterThan(500);
+    // Distinct documents the parser accepts, of each kind, so the agreement means something: with this
+    // seed, 32,283 distinct documents, of which the parser accepts 426 that it reads a DOCTYPE in and
+    // 2,422 that it reads none in. A walk changed to end a tag, comment or CDATA a character off, to
+    // skip no quotes in a tag or one too many in a PI, or to read CDATA as a tag, fails here; a closing
+    // tag that skips quotes cannot be told apart, as the parser's validator refuses any quote there.
+    expect(seen.size).toBeGreaterThan(32_000);
+    expect(distinct.read).toBeGreaterThanOrEqual(400);
+    expect(distinct.notRead).toBeGreaterThanOrEqual(2_400);
   });
 
   it('refuses a prolog whose processing instruction or comment is never closed', () => {
@@ -247,6 +272,10 @@ describe('images in the story body', () => {
     ]);
     expect(images(body('<img src="/pixels/sunset.jpg">'))).toEqual([{ url: 'https://example.com/pixels/sunset.jpg' }]);
     expect(images(body('<img src="/2026/11/pixel-art-show.jpg">'))).toEqual([{ url: 'https://example.com/2026/11/pixel-art-show.jpg' }]);
+    // A publisher's image host that happens to be named pixel.
+    expect(images(body('<img src="https://pixel.nymag.com/imgs/daily/vulture/2026/11/20/lead.jpg">'))).toEqual([
+      { url: 'https://pixel.nymag.com/imgs/daily/vulture/2026/11/20/lead.jpg' },
+    ]);
     for (const tracker of [
       '/pixel.gif',
       '/t/pixel?id=1',

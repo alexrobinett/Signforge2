@@ -279,20 +279,23 @@ const NOT_A_PHOTO_URL = /(?:^|\.)gravatar\.com\/|feedburner|^s\.w\.org\/images\/
 /** Names a tracking pixel or spacer goes by, as a host label or a folder. */
 const TRACKER = new Set(['pixel', 'spacer', 'tracking']);
 
+/** Image hosts that publishers serve article photos from, though a label names them `pixel`. */
+const PHOTO_HOSTS = new Set(['pixel.nymag.com']);
+
 /** Words a tracking pixel's or spacer's file name is made of, and nothing else: `tracking-pixel.gif`, `spacer_1x1.gif`. */
 const TRACKER_FILE = new Set([...TRACKER, '1x1', 'blank', 'transparent']);
 
 /**
  * Whether a body picture is a tracking pixel or spacer by its URL: a host label or folder named
- * `pixel`, `spacer` or `tracking`, or a file named only with tracker words. Names match whole, so
- * `google-pixel-10-review.jpg` and `/pixels/` are photos.
+ * `pixel`, `spacer` or `tracking` (but not one of `PHOTO_HOSTS`), or a file named only with tracker
+ * words. Names match whole, so `google-pixel-10-review.jpg` and `/pixels/` are photos.
  */
 function trackerUrl(u: URL): boolean {
   const folders = u.pathname.toLowerCase().split('/');
   const file = folders.pop() ?? '';
   const stem = file.includes('.') ? file.slice(0, file.lastIndexOf('.')) : file;
   return (
-    u.hostname.split('.').some((label) => TRACKER.has(label)) ||
+    (!PHOTO_HOSTS.has(u.hostname) && u.hostname.split('.').some((label) => TRACKER.has(label))) ||
     folders.some((folder) => TRACKER.has(folder)) ||
     (stem !== '' && stem.split(/[-_.]/).every((word) => TRACKER_FILE.has(word)))
   );
