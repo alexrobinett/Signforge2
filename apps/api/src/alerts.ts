@@ -10,8 +10,8 @@
  * finished the same way, with a `publish.finished` event and an email to whom the org's
  * `publish_finished` rule names (`finishRollouts`).
  */
-import { findAlertWork, findFinishedRollouts, orgMembers, scoped } from '@signforge/db';
-import { ALERT_RETRY_MS, type AlertEvent, orgSettings, UNREACHABLE_AFTER_MS, type Audience } from '@signforge/tools';
+import { findAlertWork, findUnfinishedRollouts, orgMembers, scoped } from '@signforge/db';
+import { ALERT_RETRY_MS, type AlertEvent, orgSettings, tally, UNREACHABLE_AFTER_MS, type Audience } from '@signforge/tools';
 import type { EmailMessage, EmailSender } from './email';
 
 const AUDIENCE_ROLES: Record<Audience, readonly string[]> = {
@@ -148,18 +148,21 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, ema
 }
 
 /**
- * Mark finished every publish whose rollout is over: each screen it switched plays it, or a later
- * publish moved it on. The mark and its `publish.finished` event are written in one batch, by the
- * check that made the mark, so the alert goes once; the email follows. A publish this check sees
- * no screen playing (none switched, or replaced before any check saw a screen report it, which
- * includes one played and replaced between two checks) is marked with no alert.
+ * Mark finished every publish whose rollout is over (`tally` in @signforge/tools: every screen it
+ * switched plays it, moved on, or is revoked). The mark and its `publish.finished` event are
+ * written in one batch, by the check that made the mark, so the alert goes once; the email
+ * follows. A publish this check sees no screen playing (none switched, or replaced before any
+ * check saw a screen report it, which includes one played and replaced between two checks) is
+ * marked with no alert.
  */
 export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email: EmailSender, now: number): Promise<void> {
   const contextFor = contexts(env.DB, 'publish_finished');
-  for (const p of await findFinishedRollouts(env.DB)) {
+  for (const p of await findUnfinishedRollouts(env.DB)) {
+    const { screens, playing, replaced, revoked, open } = tally(p.rollout);
+    if (open) continue;
     const org = scoped(env.DB, p.orgId);
-    if (!p.playing) {
-      await org.publishes.finish(p.id, now, p.playing);
+    if (!playing) {
+      await org.publishes.finish(p.id, now, playing);
       continue;
     }
     const { recipients, channels, time } = await contextFor(p.orgId);
@@ -170,24 +173,21 @@ export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email:
       org: { id: p.orgId, name: p.orgName },
       data: {
         publish: { id: p.id, revision: p.revision, url: env.CMS_ORIGIN ? `${env.CMS_ORIGIN}/publishes?id=${p.id}` : null, publishedAt: iso(p.createdAt) },
-        screens: p.screens,
-        playing: p.playing,
-        replaced: p.replaced,
+        screens,
+        playing,
+        replaced,
       },
     });
     const marked = await orAlone(
-      () => org.publishes.finish(p.id, now, p.playing, finished),
-      () => org.publishes.finish(p.id, now, p.playing),
+      () => org.publishes.finish(p.id, now, playing, finished),
+      () => org.publishes.finish(p.id, now, playing),
     );
     if (!marked) continue;
-    const every = p.playing === p.screens;
-    const where = every ? (p.screens === 1 ? 'its screen' : `all ${p.screens} screens it changed`) : `${p.playing} of the ${p.screens} screens it changed`;
-    const others = [
-      p.replaced && `a later publish reached ${p.replaced} first`,
-      p.screens - p.playing - p.replaced && `${p.screens - p.playing - p.replaced} revoked`,
-    ].filter(Boolean);
+    const every = playing === screens;
+    const where = every ? (screens === 1 ? 'its screen' : `all ${screens} screens it changed`) : `${playing} of the ${screens} screens it changed`;
+    const others = [replaced && `a later publish reached ${replaced} first`, revoked && `${revoked} revoked`].filter(Boolean);
     await sendAll(email, recipients, {
-      subject: every ? `v${p.revision} reached every screen` : `v${p.revision} finished, playing on ${p.playing} of ${p.screens} screens`,
+      subject: every ? `v${p.revision} reached every screen` : `v${p.revision} finished, playing on ${playing} of ${screens} screens`,
       text:
         `v${p.revision} in ${p.orgName}, published ${time(p.createdAt)}, is now playing on ${where}${others.length ? ` (${others.join('; ')})` : ''}.\n\n` +
         `Who gets these is in Settings, Notifications.`,

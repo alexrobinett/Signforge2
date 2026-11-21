@@ -48,7 +48,18 @@ import { BrowserCredential } from './browser-credential';
 import { DeviceCredential, type ScreenCredential } from './credential';
 import { identify } from './identify';
 import { pair } from './pairing';
-import { dataRejections, dataSettled, dataStatus, heldVersions, offerChecked, offerSnapshots, restoreSources, settleSources, startDataLoop } from './data';
+import {
+  dataRejections,
+  dataSettled,
+  dataStatus,
+  heldVersions,
+  offerChecked,
+  offerPending,
+  offerSnapshots,
+  restoreSources,
+  settleSources,
+  startDataLoop,
+} from './data';
 import { activeOverride, savedOverride, setOverride, wakeable } from './override';
 import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
 import { Playback } from './playback';
@@ -380,7 +391,7 @@ const playback = new Playback({
     progress: () => (lastProgress = performance.now()),
     adopted(next) {
       wakeData();
-      if (API) void restoreSources(next);
+      if (API) void offerPending(next).then(() => restoreSources(next));
       socket?.reportApplied(next.id);
     },
     // Its files may have been evicted while another manifest played: the next sync checks them.
@@ -747,7 +758,7 @@ async function apiSync(): Promise<void> {
   if (!wasTrusted) display.wake();
   playback.clockMoved();
 
-  await offerSnapshots(r.snapshots, playback.manifest);
+  await offerSnapshots(r.snapshots, () => playback.manifest, r.desiredManifest);
   await offerChecked(r.checked ?? {});
   // After the snapshots are kept, so a manifest the content worker adopts has its data.
   const current = state.fallback || playback.manifest?.id;

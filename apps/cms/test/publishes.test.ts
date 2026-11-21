@@ -1,6 +1,6 @@
 // A rollout in words: the parts of the bar, in order, each with why its screens wait.
 import { describe, expect, it } from 'vitest';
-import { rolloutLabel, segments, standing, type RolloutScreen } from '../src/lib/publishes';
+import { rolloutComplete, rolloutLabel, segments, standing, type RolloutScreen } from '../src/lib/publishes';
 
 const NOW = Date.parse('2026-11-19T12:00:00Z');
 const screen = (name: string, outcome: RolloutScreen['outcome'], more: Partial<RolloutScreen> = {}): RolloutScreen => ({
@@ -49,15 +49,31 @@ describe('a rollout', () => {
     );
   });
 
+  it('calls a rollout complete once no screen is open: one playing and one revoked is, one still switching is not (#155)', () => {
+    // As get_publish counts them: playing, replaced and revoked screens are settled, any other is open.
+    expect(rolloutComplete({ screens: 2, open: 0 })).toBe(true);
+    expect(rolloutComplete({ screens: 2, open: 1 })).toBe(false);
+    expect(rolloutComplete({ screens: 0, open: 0 })).toBe(false);
+  });
+
   it('tells a finished publish its screens played from one replaced before any did', () => {
-    const p = { id: 'pub_1', revision: 2, restoresId: null, restoresRevision: null, by: { kind: 'user', id: 'u', name: 'Maria' }, createdAt: 0, screens: 2 };
+    const p = {
+      id: 'pub_1',
+      revision: 2,
+      restoresId: null,
+      restoresRevision: null,
+      by: { kind: 'user', id: 'u', name: 'Maria' },
+      createdAt: 0,
+      screens: 2,
+      open: 0,
+    };
     // Played by both, then a later publish switched them: complete, though none plays it now.
     expect(standing({ ...p, finishedAt: 10, reached: 2, playing: 0, replaced: 2 })).toBe('complete');
     expect(standing({ ...p, finishedAt: 10, reached: 1, playing: 0, replaced: 2 })).toBe('played on 1 of 2');
     // Undone before any screen played it.
     expect(standing({ ...p, finishedAt: 10, reached: 0, playing: 0, replaced: 2 })).toBe('moved on');
     expect(standing({ ...p, finishedAt: null, reached: null, playing: 0, replaced: 2 })).toBe('moved on');
-    expect(standing({ ...p, finishedAt: null, reached: null, playing: 1, replaced: 0 })).toBe('1 of 2');
+    expect(standing({ ...p, finishedAt: null, reached: null, playing: 1, replaced: 0, open: 1 })).toBe('1 of 2');
     expect(standing({ ...p, screens: 0, finishedAt: 10, reached: 0, playing: 0, replaced: 0 })).toBe('reached no screen');
   });
 });

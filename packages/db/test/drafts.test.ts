@@ -2,7 +2,7 @@
 // published version. See docs/backend-plan.md#publishing.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { draftChanged, findFinishedRollouts, NotInOrgError, published, type scoped, StaleVersionError } from '../src/index';
+import { draftChanged, findUnfinishedRollouts, NotInOrgError, published, type scoped, StaleVersionError } from '../src/index';
 import { seedOrg, type SeededOrg, testScope } from '../src/testing';
 
 let o: SeededOrg;
@@ -281,6 +281,9 @@ describe('publish history', () => {
     return publish.row;
   };
   const m = (c: string) => c.repeat(64);
+  /** A rollout's counts as [reports, current, revoked, screens], in a fixed order. */
+  const facts = (rollout: readonly { reports: boolean; current: boolean; revoked: boolean; screens: number }[]) =>
+    rollout.map((c) => [c.reports, c.current, c.revoked, c.screens]).sort((a, b) => String(a).localeCompare(String(b)));
 
   it('lists publishes newest first with how each rollout stands, and pages by revision', async () => {
     const p = await seedOrg(env.DB, 'history-list');
@@ -291,15 +294,23 @@ describe('publish history', () => {
       { screenId: two.id, manifestId: m('2') },
     ]);
     await org.screens.reportManifest(p.screen, m('1'), { arrivedAt: Date.now() });
-    expect(await org.publishes.history({ limit: 1 })).toEqual([
-      expect.objectContaining({ id: v2.id, revision: 2, restoresId: null, actorName: null, screens: 2, applied: 1, replaced: 0 }),
+    expect(await org.publishes.history({ limit: 1 })).toEqual([expect.objectContaining({ id: v2.id, revision: 2, restoresId: null, actorName: null })]);
+    expect(facts((await org.publishes.history({ limit: 1 }))[0]!.rollout)).toEqual([
+      [false, true, false, 1],
+      [true, true, false, 1],
     ]);
     const v3 = await publishAt(org, 3, [{ screenId: two.id, manifestId: m('3') }]);
     const all = await org.publishes.history({ limit: 10 });
-    expect(all.map((h) => [h.id, h.screens, h.applied, h.replaced])).toEqual([
-      [v3.id, 1, 0, 0],
-      [v2.id, 2, 1, 1],
-      [p.publish, 1, 0, 1],
+    expect(all.map((h) => [h.id, facts(h.rollout)])).toEqual([
+      [v3.id, [[false, true, false, 1]]],
+      [
+        v2.id,
+        [
+          [false, false, false, 1],
+          [true, true, false, 1],
+        ],
+      ],
+      [p.publish, [[false, false, false, 1]]],
     ]);
     expect((await org.publishes.history({ beforeRevision: 3, limit: 10 })).map((h) => h.id)).toEqual([v2.id, p.publish]);
     expect(await testScope(env.DB, 'drafts-org').publishes.history({ limit: 10 })).not.toContainEqual(expect.objectContaining({ id: v2.id }));
@@ -313,7 +324,16 @@ describe('publish history', () => {
     await publishAt(org, 3, [{ screenId: late.id, manifestId: m('2') }]);
     await publishAt(org, 4, [{ screenId: p.screen, manifestId: m('3') }]);
     expect(await org.publishes.rollout(v2.id)).toEqual([
-      expect.objectContaining({ id: p.screen, manifestId: m('1'), desiredManifestId: m('3'), reportedManifestId: null, credentialsRevoked: false }),
+      expect.objectContaining({
+        id: p.screen,
+        manifestId: m('1'),
+        desiredManifestId: m('3'),
+        reportedManifestId: null,
+        credentialsRevoked: false,
+        reports: false,
+        current: false,
+        revoked: false,
+      }),
     ]);
     // Seeded at revision 0 with manifest d…d.
     expect(await org.publishes.asOf(1)).toEqual([{ screenId: p.screen, manifestId: m('d') }]);
@@ -327,23 +347,22 @@ describe('publish history', () => {
     expect(await org.publishes.asOf(4)).toContainEqual({ screenId: p.screen, manifestId: m('3') });
   });
 
-  it('finds a rollout once every screen it switched plays its manifest or moved on, and marks it finished with its alert once', async () => {
+  it('finds every unfinished rollout with its facts, and marks one finished with its alert once', async () => {
     const p = await seedOrg(env.DB, 'history-finish');
     const org = testScope(env.DB, p.orgId);
     const two = await org.screens.insert({ name: 'Two', timezone: 'UTC', orientation: 'landscape' });
-    // The seeded publish's screen never reported its manifest.
     await org.screens.reportManifest(p.screen, m('d'), { arrivedAt: 1 });
     const v2 = await publishAt(org, 2, [
       { screenId: p.screen, manifestId: m('1') },
       { screenId: two.id, manifestId: m('2') },
     ]);
-    const due = async () => (await findFinishedRollouts(env.DB)).filter((f) => f.orgId === p.orgId).map((f) => [f.id, f.revision, f.screens]);
-    expect(await due()).toEqual([[p.publish, 0, 1]]);
-    expect(await org.publishes.finish(p.publish, 10, 0)).toBe(true);
-    await org.screens.reportManifest(p.screen, m('1'), { arrivedAt: 2 });
-    expect(await due()).toEqual([]);
-    const v3 = await publishAt(org, 3, [{ screenId: two.id, manifestId: m('3') }]);
-    expect(await due()).toEqual([[v2.id, 2, 2]]);
+    const found = async () => (await findUnfinishedRollouts(env.DB)).filter((f) => f.orgId === p.orgId).map((f) => [f.id, f.revision, facts(f.rollout)]);
+    // The seeded publish's screen reported its manifest, then v2 moved it on.
+    expect(await found()).toEqual([
+      [p.publish, 0, [[true, false, false, 1]]],
+      [v2.id, 2, [[false, true, false, 2]]],
+    ]);
+    expect(await org.publishes.finish(p.publish, 10, 1)).toBe(true);
 
     const alert = { event: { id: `evt_${v2.id}_finished`, type: 'publish.finished', json: '{}' }, channels: ['webhook' as const], giveUpAt: 99 };
     expect(await org.publishes.finish(v2.id, 30, 2, alert)).toBe(true);
@@ -351,23 +370,27 @@ describe('publish history', () => {
     expect(await org.publishes.finish(v2.id, 40, 2, alert)).toBe(false);
     expect(await org.publishes.get(v2.id)).toMatchObject({ finishedAt: 30, reached: 2 });
     expect((await org.alertDeliveries.list({ take: 50 })).filter((d) => d.eventId === alert.event.id)).toHaveLength(1);
-    expect(await due()).toEqual([]);
+    expect(await found()).toEqual([]);
     // Another org's publish is not theirs to mark.
     expect(await testScope(env.DB, 'drafts-org').publishes.finish(v2.id, 50, 0)).toBe(false);
 
-    // A screen whose credentials are all revoked never reports again: it does not hold a rollout open.
+    // Revoked, as the screen's state reads it: every credential it had, or the screen itself.
     const cred = await org.screens.credentials.insert({ screenId: two.id, secretHash: '9'.repeat(64) });
-    const v4 = await publishAt(org, 4, [{ screenId: two.id, manifestId: m('4') }]);
-    // v3 is moved on by v4; v4 waits for its screen.
-    expect(await due()).toEqual([[v3.id, 3, 1]]);
-    await org.publishes.finish(v3.id, 55, 0);
+    const v3 = await publishAt(org, 3, [
+      { screenId: p.screen, manifestId: m('3') },
+      { screenId: two.id, manifestId: m('4') },
+    ]);
+    expect(await found()).toEqual([[v3.id, 3, [[false, true, false, 2]]]]);
     await org.screens.credentials.update(cred.id, { revokedAt: 60 });
-    const [found] = (await findFinishedRollouts(env.DB)).filter((f) => f.orgId === p.orgId);
-    expect(found).toMatchObject({ id: v4.id, screens: 1, playing: 0, replaced: 0 });
+    await org.screens.update(p.screen, { status: 'revoked' });
+    expect(await found()).toEqual([[v3.id, 3, [[false, true, true, 2]]]]);
+    // A publish that switched no screen has no counts.
+    const none = await publishAt(org, 4, []);
+    expect((await found()).find(([id]) => id === none.id)).toEqual([none.id, 4, []]);
   });
 
   it('reads the unfinished rollouts through their partial index', async () => {
-    // The statement findFinishedRollouts sends, with its values, captured on its way to D1.
+    // The statements findUnfinishedRollouts sends, with their values, captured on their way to D1.
     const sent: { sql: string; values: unknown[] }[] = [];
     const watching = new Proxy(env.DB, {
       get: (target, key) =>
@@ -380,12 +403,14 @@ describe('publish history', () => {
             }
           : Reflect.get(target, key, target),
     });
-    await findFinishedRollouts(watching);
-    expect(sent).toHaveLength(1);
-    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${sent[0]!.sql}`)
-      .bind(...sent[0]!.values)
-      .all();
-    expect(JSON.stringify(plan.results)).toContain('USING INDEX publishes_unfinished_idx');
+    await findUnfinishedRollouts(watching);
+    expect(sent).toHaveLength(2);
+    for (const { sql, values } of sent) {
+      const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .bind(...values)
+        .all();
+      expect(JSON.stringify(plan.results)).toContain('USING INDEX publishes_unfinished_idx');
+    }
   });
 });
 

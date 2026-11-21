@@ -208,6 +208,9 @@ importers:
       '@signforge/feeds':
         specifier: workspace:*
         version: link:../../packages/feeds
+      '@signforge/player-core':
+        specifier: workspace:*
+        version: link:../../packages/player-core
       '@signforge/tools':
         specifier: workspace:*
         version: link:../../packages/tools
@@ -224,9 +227,6 @@ importers:
       '@signforge/cli':
         specifier: workspace:*
         version: link:../../packages/cli
-      '@signforge/player-core':
-        specifier: workspace:*
-        version: link:../../packages/player-core
       '@signforge/template-agenda':
         specifier: workspace:*
         version: link:../../templates/agenda

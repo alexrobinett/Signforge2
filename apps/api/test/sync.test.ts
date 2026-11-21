@@ -27,13 +27,24 @@ async function setUp(orgId: string): Promise<Screen> {
   return { seed, credential };
 }
 
-/** Put a manifest in R2 and make it the screen's desired one. */
+/** Put a manifest in R2, with what every manifest has, and make it the screen's desired one. */
 async function publish(
   s: Screen,
   id: string,
   manifest: { schema: number; dataSources?: Record<string, unknown>; templates?: Record<string, unknown>; spots?: Record<string, unknown> },
 ) {
-  await env.BLOBS.put(manifestKey(s.seed.orgId, s.seed.screen, id), JSON.stringify({ id, files: {}, templates: {}, dataSources: {}, ...manifest }));
+  await env.BLOBS.put(
+    manifestKey(s.seed.orgId, s.seed.screen, id),
+    JSON.stringify({
+      id,
+      files: {},
+      templates: {},
+      dataSources: {},
+      spots: {},
+      screen: { id: s.seed.screen, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' },
+      ...manifest,
+    }),
+  );
   await s.seed.scope.screens.setDesiredManifest(s.seed.screen, id);
 }
 

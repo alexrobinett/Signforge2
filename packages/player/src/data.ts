@@ -5,13 +5,14 @@
  * source in the manifest (`startDataLoop`). Either way the latest is kept in memory for spots to
  * read and stored on disk, so the last good value survives a restart with no network.
  *
- * Live data is checked twice. A snapshot is kept only if it is well formed and fills at least one
- * field bound to it in the current manifest; and each bound value is checked against its field
- * again when a spot plays (`resolveSpotData`), so a value that does not fit leaves the spot's
- * fallback on screen. Every refusal is counted against its source in `dataRejections`.
+ * Live data is checked twice. A snapshot is kept only if it is well formed and fits the fields
+ * bound to it in the current manifest (player-core's `snapshotFit`, which the server runs too);
+ * and each bound value is checked against its field again when a spot plays (`resolveSpotData`),
+ * so a value that does not fit leaves the spot's fallback on screen. Every refusal is counted
+ * against its source in `dataRejections`.
  */
 import { MIN_REFRESH_S, parseDataSnapshot, type DataSnapshot, type ScreenManifest, type SyncResponse } from '@signforge/contract';
-import { snapshotFit, type Rejected } from '@signforge/player-core';
+import { manifestBoundFields, snapshotFit, type Rejected } from '@signforge/player-core';
 
 const STATE = 'sf-state-v1';
 const key = (id: string) => `/_sf/data/${id}`;
@@ -28,6 +29,14 @@ const markSettled = (id: string) => {
   settled.add(id);
   waiters.forEach((w) => w());
 };
+
+/**
+ * Snapshots refused for the manifest playing while the sync already named another, by source,
+ * with that one's id. The server does not send a version again once the screen reports it, so
+ * each is offered again when a manifest is adopted: a table whose column was renamed and remapped
+ * while the screen was behind fits the manifest that maps it.
+ */
+const pending = new Map<string, { snapshot: DataSnapshot; desired: string }>();
 
 const rejections = new Map<string, number>();
 const warned = new Set<string>();
@@ -66,8 +75,11 @@ async function restore(id: string): Promise<void> {
 const store = async (id: string, snap: DataSnapshot) =>
   (await caches.open(STATE)).put(key(id), new Response(JSON.stringify(snap), { headers: { 'content-type': 'application/json' } }));
 
-/** Keep `input` as the source's latest if it is a well-formed snapshot, newer, and fits a bound field. */
-async function offer(id: string, input: unknown, manifest: ScreenManifest | undefined): Promise<void> {
+/**
+ * Keep `input` as the source's latest if it is a well-formed snapshot, newer, and fits the fields
+ * bound to it in `manifest`. `desired` is the manifest the sync named, when it names one.
+ */
+async function offer(id: string, input: unknown, manifest: ScreenManifest | undefined, desired?: string): Promise<void> {
   // A malformed snapshot never replaces the last good one, which is also what survives offline.
   const parsed = parseDataSnapshot(input);
   if (!parsed.ok || parsed.value.id !== id) {
@@ -79,12 +91,15 @@ async function offer(id: string, input: unknown, manifest: ScreenManifest | unde
   // Keep the newest: an older snapshot can arrive after a newer one. (A copy stored before
   // snapshots had versions has none, and any versioned one replaces it.)
   if (next.version <= (snapshots.get(id)?.version ?? -1)) return;
-  // Nor does one that fits none of the fields bound to it: the last good one stays the latest.
-  const fit = manifest ? snapshotFit(manifest, next) : { fits: true, problems: [] };
-  if (fit.problems.length && !fit.fits) {
-    reportRejected([{ source: id, problem: `snapshot fits no bound field: ${fit.problems[0]}` }]);
+  // Nor does one that fits none of the fields bound to it, or lacks a column a table maps: the last good one stays the latest.
+  const fit = manifest ? snapshotFit(manifestBoundFields(manifest).get(id) ?? [], next.data) : undefined;
+  if (fit?.refused) {
+    const why = fit.refused === 'unfit' ? 'fits no bound field' : 'lacks a column a table maps';
+    reportRejected([{ source: id, problem: `snapshot ${why}: ${fit.problems[0]}` }]);
+    if (desired && desired !== manifest?.id) pending.set(id, { snapshot: next, desired });
     return;
   }
+  pending.delete(id);
   snapshots.set(id, next);
   await store(id, next);
 }
@@ -96,14 +111,22 @@ async function refresh(base: string, id: string, manifest: ScreenManifest): Prom
 }
 
 /**
- * Snapshots from a sync's response, checked against `manifest`, the one playing when the answer
- * came: a new manifest it names is adopted later, by the content worker, which then marks that
- * manifest's sources loaded too. Then every source of `manifest` counts as loaded: a spot waiting
+ * Snapshots from a sync's response, each checked against the manifest `playing` gives as it comes
+ * to it: a new manifest the answer names is adopted later, by the content worker, which then marks
+ * that manifest's sources loaded too, and one it adopts while these are written is the one the rest
+ * are checked against. Then every source of the manifest playing counts as loaded: a spot waiting
  * for its feed starts with what there is.
  */
-export async function offerSnapshots(list: readonly DataSnapshot[], manifest: ScreenManifest | undefined): Promise<void> {
-  for (const snap of list) await offer(snap.id, snap, manifest).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
-  settleSources(manifest);
+export async function offerSnapshots(list: readonly DataSnapshot[], playing: () => ScreenManifest | undefined, desired: string | undefined): Promise<void> {
+  for (const snap of list) await offer(snap.id, snap, playing(), desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+  settleSources(playing());
+}
+
+/** Offer `manifest`, just adopted, the snapshots refused for the one before it while the sync named another. */
+export async function offerPending(manifest: ScreenManifest): Promise<void> {
+  const waiting = [...pending];
+  pending.clear();
+  for (const [id, p] of waiting) await offer(id, p.snapshot, manifest, p.desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
 }
 
 /**

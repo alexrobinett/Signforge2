@@ -6,7 +6,7 @@
  */
 import type * as s from './schema';
 
-export { scoped, NotInOrgError, type OrgScope, type NewRow, type RowPatch } from './scoped';
+export { scoped, NotInOrgError, type OrgScope, type NewRow, type RowPatch, type RolloutCount } from './scoped';
 export { platform, type PlatformScope } from './platform';
 export { newId } from './ids';
 export { StaleVersionError, type Staged, type Write } from './writes';
@@ -15,7 +15,7 @@ export { findDeviceScreen, type DeviceScreen } from './device';
 export { claimDueDataSources } from './poller';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
 export { findMembership, memberOrgNames, organizationExists, orgMembers } from './members';
-export { findAlertWork, findFinishedRollouts, type AlertWork } from './alerts';
+export { findAlertWork, findUnfinishedRollouts, type AlertWork } from './alerts';
 export { AUDIT_ROWS_PER_RUN, DEFAULT_AUDIT_RETENTION_DAYS, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from './retention';
 export { alertChannelsOf, claimDueAlertDeliveries, settleAlertDeliveries, type AttemptResult } from './deliveries';
 

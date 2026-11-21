@@ -20,10 +20,10 @@ import {
   type SyncResponse,
 } from '@signforge/contract';
 import { scoped, type DeviceScreen } from '@signforge/db';
+import { snapshotFit } from '@signforge/player-core';
 import { liveOverride, type ScreenHeartbeat } from '@signforge/tools';
 import type { Context } from 'hono';
 import type { DeviceEnv } from './auth';
-import { fitsBoundFields } from '../data/fit';
 import { screenManifests, type ManifestSummary } from './manifests';
 import { issueTicket } from './ticket';
 
@@ -61,7 +61,7 @@ async function snapshotsFor(
     if (r.fetchedAt <= (held[r.dataSourceId] ?? -1)) continue;
     const data: unknown = JSON.parse(r.dataJson);
     // Stored only if it fit the spots published then; this screen's manifest may bind it differently.
-    if (fitsBoundFields(desired.bound.get(r.dataSourceId) ?? [], data))
+    if (!snapshotFit(desired.bound.get(r.dataSourceId) ?? [], data).refused)
       snapshots.push({ id: r.dataSourceId, version: r.fetchedAt, fetchedAt: new Date(r.fetchedAt).toISOString(), checkedAt, data });
   }
   return { snapshots, checked };
