@@ -1,0 +1,18 @@
+{
+  "name": "Announcement",
+  "kind": "template",
+  "template": "announcement",
+  "durationMs": 10000,
+  "data": {
+    "look": "pop",
+    "eyebrow": "Company news",
+    "headline": "Pier 9 opens on Monday",
+    "body": "Come for coffee, a tour and the first look at the roof terrace.",
+    "meta": "From the People Team · 20 November",
+    "qrUrl": "https://example.com/pier-9",
+    "qrLabel": "Scan for the floor plan"
+  },
+  "assets": {
+    "photo": "pier-9.svg"
+  }
+}

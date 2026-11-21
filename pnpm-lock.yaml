@@ -233,6 +233,9 @@ importers:
       '@signforge/template-alert':
         specifier: workspace:*
         version: link:../../templates/alert
+      '@signforge/template-announcement':
+        specifier: workspace:*
+        version: link:../../templates/announcement
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -381,6 +384,9 @@ importers:
       '@signforge/template-alert':
         specifier: workspace:*
         version: link:../../templates/alert
+      '@signforge/template-announcement':
+        specifier: workspace:*
+        version: link:../../templates/announcement
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -484,6 +490,9 @@ importers:
       '@signforge/template-alert':
         specifier: workspace:*
         version: link:../../templates/alert
+      '@signforge/template-announcement':
+        specifier: workspace:*
+        version: link:../../templates/announcement
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -557,6 +566,9 @@ importers:
       '@signforge/template-alert':
         specifier: workspace:*
         version: link:../../templates/alert
+      '@signforge/template-announcement':
+        specifier: workspace:*
+        version: link:../../templates/announcement
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -729,6 +741,9 @@ importers:
       '@signforge/template-alert':
         specifier: workspace:*
         version: link:../../templates/alert
+      '@signforge/template-announcement':
+        specifier: workspace:*
+        version: link:../../templates/announcement
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -768,6 +783,9 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      jsqr:
+        specifier: ^1.4.0
+        version: 1.4.0
       playwright:
         specifier: 1.65.1
         version: 1.65.1
@@ -940,6 +958,15 @@ importers:
       '@fontsource-variable/space-grotesk':
         specifier: 5.3.0
         version: 5.3.0
+
+  templates/announcement:
+    dependencies:
+      '@signforge/template-looks':
+        specifier: workspace:*
+        version: link:../../packages/template-looks
+      '@signforge/template-sdk':
+        specifier: workspace:*
+        version: link:../../packages/template-sdk
 
   templates/clock:
     dependencies:
