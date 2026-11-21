@@ -140,32 +140,38 @@ describe('dates and times in cells', () => {
   const events: Extract<FieldDef, { type: 'list' }> = {
     type: 'list',
     label: 'Events',
-    item: { name: { type: 'text', label: 'Name' }, at: { type: 'datetime', label: 'Starts' } },
+    item: {
+      name: { type: 'text', label: 'Name' },
+      when: { type: 'text', label: 'When' },
+      at: { type: 'datetime', label: 'Starts' },
+      code: { type: 'text', label: 'Code' },
+    },
   };
+  const columns = { name: 'Event', when: 'When', at: 'When', code: 'Code' };
+  const csv = 'Event,When,Code\nA,2026-11-27 18:30,1234-56-78 90:12\nB," 2026-11-27 18:30",x\nC,2026-11-27T09:00,y\n';
 
-  it("writes a spreadsheet's date and time with the ISO T, so a datetime takes it and a sort by the column orders by time, not by separator", () => {
-    const csv = 'Event,Starts\nLate,2026-11-27 18:30\nEarly,2026-11-27T09:00\nNoon,2026-11-27 12:00:00\nNote,see 2026-11-27 18:30\n';
+  it('keeps every cell as the file has it, a date and time or a code that looks like one', () => {
+    expect(parseCsv(csv).rows).toEqual([
+      ['A', '2026-11-27 18:30', '1234-56-78 90:12'],
+      ['B', ' 2026-11-27 18:30', 'x'],
+      ['C', '2026-11-27T09:00', 'y'],
+    ]);
+    expect(parseJsonTable(JSON.stringify([{ When: '2026-11-27 18:30' }])).rows).toEqual([['2026-11-27 18:30']]);
+  });
+
+  it('shows a text property as the sheet does, takes a padded or spaced datetime, filters on what people typed, and sorts by time', () => {
     const table = parseCsv(csv);
-    expect(table.rows).toEqual([
-      ['Late', '2026-11-27T18:30'],
-      ['Early', '2026-11-27T09:00'],
-      ['Noon', '2026-11-27T12:00:00'],
-      ['Note', 'see 2026-11-27 18:30'],
-    ]);
-    const json = JSON.stringify([
-      { Event: 'Late', Starts: '2026-11-27 18:30' },
-      { Event: 'Early', Starts: '2026-11-27T09:00' },
-    ]);
-    expect(parseJsonTable(json).rows).toEqual([
-      ['Late', '2026-11-27T18:30'],
-      ['Early', '2026-11-27T09:00'],
-    ]);
-    const sorted = tableItems(events, { columns: { name: 'Event', at: 'Starts' }, sort: { column: 'Starts' } }, table, 'en-US');
-    expect(sorted.items).toEqual([
-      { name: 'Early', at: '2026-11-27T09:00' },
-      { name: 'Noon', at: '2026-11-27T12:00' },
-      { name: 'Late', at: '2026-11-27T18:30' },
-    ]);
+    expect(tableItems(events, { columns }, table, 'en-US')).toEqual({
+      items: [
+        { name: 'A', when: '2026-11-27 18:30', at: '2026-11-27T18:30', code: '1234-56-78 90:12' },
+        { name: 'B', when: '2026-11-27 18:30', at: '2026-11-27T18:30', code: 'x' },
+        { name: 'C', when: '2026-11-27T09:00', at: '2026-11-27T09:00', code: 'y' },
+      ],
+      problems: [],
+    });
+    const names = (t: Parameters<typeof tableItems>[1]) => tableItems(events, t, table, 'en-US').items?.map((i) => i.name);
+    expect(names({ columns, filter: { column: 'When', equals: '2026-11-27 18:30' } })).toEqual(['A', 'B']);
+    expect(names({ columns, sort: { column: 'When' } })).toEqual(['C', 'A', 'B']);
   });
 });
 
