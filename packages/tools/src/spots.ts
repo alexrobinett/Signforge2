@@ -55,7 +55,7 @@ const binding = z.object({
 const bindings = z
   .record(z.string(), binding)
   .describe(
-    "Template fields that take their value from one of the organization's data sources, by field name: the whole set, replacing the draft's ({} unbinds every field). The field's value in data stays as the fallback a screen shows without fresh data. A template's manifest says which fields are live (live.fields) and their usual paths",
+    "Template fields that take their value from one of the organization's data sources, by field name: the whole set, replacing the draft's ({} unbinds every field). The field's value in data stays as the fallback a screen shows without fresh data. A template's manifest says which fields are live and their usual paths: live.fields for one source, or each named source's fields under live.sources, each source's fields bound to a data source of its kind",
   );
 
 /** The fields that belong to one kind of spot (KIND_FIELDS), as create_spot and update_spot both take them. */
@@ -147,7 +147,7 @@ function checkTemplateDraft(
 const TABLE_SHAPE = { what: 'a table', shape: { columns: [''], rows: [['']] } };
 const FEED_SHAPES = {
   rss: { what: 'a news feed', shape: { title: '', language: '', items: [{ title: '', published: '', source: '' }] } },
-  ical: { what: 'a calendar feed', shape: { events: [{ title: '', start: '', end: '', allDay: false, location: '' }] } },
+  ical: { what: 'a calendar feed', shape: { events: [{ title: '', start: '', end: '', allDay: false, location: '', organizer: '' }] } },
   csv: TABLE_SHAPE,
   'json-table': TABLE_SHAPE,
 } as const;

@@ -10,7 +10,7 @@ import { NativeSelect } from '~/components/ui/select';
 import type { DataSourceView } from '~/lib/live-data';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
-import { sourceStateOf, type SourceTarget } from '~/state/spot-source';
+import { type PickerRef, sourceStateOf, type SourceTarget } from '~/state/spot-source';
 
 /** A bound source's data: marked live while screens show it, otherwise with what they show instead. */
 export function LiveCard({ fresh, instead, className, children }: { fresh: boolean; instead: string; className?: string; children: ReactNode }) {
@@ -54,8 +54,7 @@ export function SourceChoice({
   label: string;
   word: string;
 }) {
-  const { spot } = target;
-  const st = useAppStore((s) => sourceStateOf(s.spotSource, spot.id));
+  const st = useAppStore((s) => sourceStateOf(s.spotSource, target));
   const chooseFeed = useAppStore((s) => s.chooseFeed);
   const connect = useAppStore((s) => s.connectSource);
   const choice = st.feedChoice ?? boundId;
@@ -64,7 +63,7 @@ export function SourceChoice({
       <label htmlFor={id} className="font-medium">
         {label}
       </label>
-      <NativeSelect id={id} value={choice ?? ''} disabled={st.pending} onChange={(e) => chooseFeed(spot.id, e.target.value)}>
+      <NativeSelect id={id} value={choice ?? ''} disabled={st.pending} onChange={(e) => chooseFeed(target, e.target.value)}>
         <option value="" disabled>
           Choose a {word}
         </option>
@@ -88,10 +87,10 @@ export function SourceChoice({
 }
 
 /** Closes the picker over a bound source. */
-export function KeepSource({ spotId }: { spotId: string }) {
+export function KeepSource({ at }: { at: PickerRef }) {
   const changeSource = useAppStore((s) => s.changeSource);
   return (
-    <Button type="button" variant="ghost" className="self-start" onClick={() => changeSource(spotId, false)}>
+    <Button type="button" variant="ghost" className="self-start" onClick={() => changeSource(at, false)}>
       Keep the current source
     </Button>
   );

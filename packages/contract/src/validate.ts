@@ -295,9 +295,43 @@ export function validateTemplateManifest(m: unknown): string[] {
   return errors;
 }
 
-/** What is wrong with a template's `live` declaration, given its fields. */
+/** What is wrong with a template's `live` declaration, given its fields: one source, or several by name. */
 function liveProblems(live: unknown, fields: Obj): string[] {
   if (!isObj(live)) return ['must be an object'];
+  const fedBy = (def: unknown) => {
+    const f = own(def, 'fields');
+    return isObj(f) ? Object.keys(f) : [];
+  };
+  if (live.sources === undefined) return sourceProblems(live, fields, new Set(fedBy(live)));
+  if (live.source !== undefined) return ['takes one source or several sources, not both'];
+  if (!isObj(live.sources) || !Object.keys(live.sources).length) return ['sources must name at least one source'];
+  const out: string[] = [];
+  const fed = new Map<string, string>();
+  // Picking a source sets its place and units fields, so two sources naming one would overwrite each other.
+  const set = new Map<string, string>();
+  for (const [name, def] of Object.entries(live.sources)) {
+    if (!isText(own(def, 'label'))) out.push(`sources.${name}: label is required`);
+    for (const field of fedBy(def)) {
+      const other = fed.get(field);
+      if (other === undefined) fed.set(field, name);
+      else out.push(`field "${field}" is fed by both "${other}" and "${name}"`);
+    }
+    const units = own(def, 'units');
+    for (const field of new Set([own(def, 'place'), own(units, 'temperature'), own(units, 'wind')].filter(isStr))) {
+      const other = set.get(field);
+      if (other === undefined) set.set(field, name);
+      else out.push(`field "${field}" is the place or units of both "${other}" and "${name}"`);
+    }
+    if (!isIdValue(name)) out.push(`source name "${name}" must be letters, digits, dashes and underscores`);
+  }
+  const all = new Set(fed.keys());
+  for (const [name, def] of Object.entries(live.sources))
+    out.push(...prefix(`sources.${name}`, isObj(def) ? sourceProblems(def, fields, all) : ['must be an object']));
+  return out;
+}
+
+/** What is wrong with one live source (`LiveSourceDef`), given the template's fields and every field a source feeds. */
+function sourceProblems(live: Obj, fields: Obj, fed: ReadonlySet<string>): string[] {
   const out: string[] = [];
   if (!LIVE_SOURCES.some((s) => s === live.source)) out.push(`source must be one of ${LIVE_SOURCES.join(', ')}`);
   const bound = isObj(live.fields) ? live.fields : {};
@@ -313,7 +347,7 @@ function liveProblems(live: unknown, fields: Obj): string[] {
   if (live.place === undefined && live.units === undefined) return out;
   if (live.source !== 'open-meteo') return [...out, 'place and units are for open-meteo sources only'];
   // A field the declaration names must be one the source leaves to people, of the kind it says.
-  const free = (name: unknown) => isStr(name) && !Object.hasOwn(bound, name);
+  const free = (name: unknown) => isStr(name) && !fed.has(name);
   if (live.place !== undefined && !(free(live.place) && own(own(fields, live.place), 'type') === 'text'))
     out.push(`place "${show(live.place)}" must be a text field the source does not fill`);
   if (live.units === undefined) return out;

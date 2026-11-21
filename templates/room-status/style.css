@@ -1,0 +1,1124 @@
+/* Room status, in the four looks of the look kit. One document, laid out by each look on a grid of
+   its own (canvas boards Room status A to D): Pop and Corporate draw the day as a list, Poster and
+   Night as a timeline. An element switched off is removed, and its grid tracks close up; with the
+   schedule off the status takes the screen and its type steps up. Sizes are the boards' pixels at
+   1080p in vmin (10.8 px). */
+@import '@signforge/template-looks/looks.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+ol {
+  list-style: none;
+}
+:root[data-schedule='off'] {
+  --lk-scale: var(--lk-step);
+}
+/* Free is the look's accent (Night: its lime), busy the text colour (Night: its lilac). */
+.stage {
+  --tone: var(--lk-accent-ink-large);
+  --tone-fill: var(--lk-accent);
+}
+.stage[data-state='busy'] {
+  --tone: var(--lk-text);
+  --tone-fill: var(--lk-text);
+}
+
+.stage {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  overflow: hidden;
+}
+.stage > *,
+.status > *,
+.ident > *,
+.facts > * {
+  min-width: 0;
+}
+.room {
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.word {
+  white-space: nowrap;
+  color: var(--tone);
+}
+.time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.colon {
+  animation: rs-blink 1s steps(1, end) infinite;
+}
+.line,
+.room {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-wrap: balance;
+}
+.next,
+.org,
+.allday,
+.what {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rule {
+  height: var(--lk-rule);
+  background: var(--lk-rule-color);
+}
+.schedule {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2.2vmin;
+}
+.head {
+  display: flex;
+  gap: 1.5vmin;
+  min-width: 0;
+}
+.body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.items {
+  display: flex;
+  min-height: 0;
+}
+.item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--card-text, var(--lk-text));
+}
+.item .sub {
+  color: var(--card-muted, var(--lk-muted));
+}
+.bar {
+  display: block;
+  height: 0.9vmin;
+  border-radius: var(--lk-radius-pill);
+  background: linear-gradient(
+    to right,
+    var(--card-text, var(--lk-text)) 0 calc(var(--progress) * 100%),
+    color-mix(in srgb, var(--card-text, var(--lk-text)) 30%, var(--lk-bg)) 0
+  );
+}
+.track {
+  position: absolute;
+  inset: 0;
+}
+.hours {
+  position: absolute;
+  inset: 0;
+}
+.hours > span {
+  position: absolute;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.block {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+  color: var(--card-text, var(--lk-text));
+}
+.block.under {
+  z-index: 0;
+}
+.nowline {
+  position: absolute;
+  display: block;
+  background: var(--lk-accent);
+}
+.glow,
+.nowline .dot {
+  display: none;
+}
+.free-day {
+  font-family: var(--lk-font-display);
+  font-weight: var(--lk-display-weight);
+}
+.facts .k {
+  white-space: pre;
+}
+@keyframes rs-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+@keyframes rs-glow {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* Pop (A): a pill of the room, the word huge, a line, and the day as cards with a pin at now. Busy
+   turns the page the primary colour. */
+[data-look='pop'] .stage {
+  padding: 7.4vmin 8.9vmin;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr);
+  grid-template-areas: 'id clock' 'word word' 'line line' 'note note' 'org org' 'next next' 'sched sched';
+  column-gap: 3vmin;
+}
+[data-look='pop'] .ident {
+  grid-area: id;
+  justify-self: start;
+  max-width: 100%;
+  display: flex;
+  padding: 1.3vmin 3vmin;
+  border-radius: var(--lk-radius-pill);
+  background: var(--lk-text);
+  --ink: var(--lk-bg);
+  color: var(--card-text, var(--lk-bg));
+  font-family: var(--lk-font-display);
+  font-weight: 800;
+  font-size: 3.7vmin;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+[data-look='pop'] .facts,
+[data-look='night'] .facts {
+  flex: none;
+}
+[data-look='pop'] .room-mask,
+[data-look='night'] .room-mask {
+  flex: 0 1 auto;
+}
+[data-look='pop'] .room,
+[data-look='night'] .room {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-wrap: nowrap;
+}
+[data-look='pop'] .room,
+[data-look='pop'] .facts > * {
+  --lk-motion: none;
+}
+[data-look='pop'] .facts > *::before,
+[data-look='night'] .facts > *::before {
+  content: ' · ';
+  white-space: pre;
+}
+[data-look='pop'] .clock {
+  grid-area: clock;
+  align-self: center;
+  font-family: var(--lk-font-display);
+  font-weight: 700;
+  font-size: 4.26vmin;
+}
+[data-look='pop'] .status {
+  grid-area: word;
+  margin-top: 3vmin;
+}
+[data-look='pop'] .word {
+  --lk-motion: var(--lk-badge-motion);
+  transform-origin: left bottom;
+  font-family: var(--lk-font-display);
+  font-weight: 800;
+  font-size: calc(30.5vmin * var(--lk-scale));
+  line-height: 0.85;
+  letter-spacing: -0.045em;
+}
+[data-look='pop'] .line {
+  grid-area: line;
+  margin-top: 3vmin;
+  max-width: 140vmin;
+  font-family: var(--lk-font-display);
+  font-weight: 700;
+  font-size: calc(5.9vmin * var(--lk-scale));
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+[data-look='pop'] .org {
+  grid-area: org;
+  margin-top: 1.5vmin;
+  font-family: var(--lk-font-display);
+  font-weight: 700;
+  font-size: 3.33vmin;
+}
+[data-look='pop'] .allday {
+  grid-area: note;
+  margin-top: 1.5vmin;
+  font-family: var(--lk-font-display);
+  font-weight: 700;
+  font-size: 3.33vmin;
+}
+[data-look='pop'] .next {
+  grid-area: next;
+  margin-top: 1.5vmin;
+  font-family: var(--lk-font-display);
+  font-weight: 700;
+  font-size: 3.33vmin;
+}
+[data-look='pop'] .schedule {
+  grid-area: sched;
+  align-self: end;
+  margin-top: 3vmin;
+  gap: 1.5vmin;
+}
+[data-look='pop'] .body {
+  padding-top: 7.8vmin;
+}
+[data-look='pop'] .items {
+  gap: 1.85vmin;
+}
+[data-look='pop'] .item {
+  flex: 1 1 0;
+  min-width: 30vmin;
+  padding: 2.2vmin 2.6vmin;
+  gap: 0.56vmin;
+  border-radius: 2.6vmin;
+  background: var(--lk-surface);
+  --ink: var(--lk-text);
+}
+[data-look='pop'] .item.past {
+  --ink: var(--lk-muted);
+}
+[data-look='pop'] .item.current {
+  background: var(--lk-text);
+  --ink: var(--lk-bg);
+}
+[data-look='pop'] .item .when {
+  font-size: 2.6vmin;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+[data-look='pop'] .item .what {
+  font-family: var(--lk-font-display);
+  font-weight: 800;
+  font-size: 3.33vmin;
+  line-height: 1.15;
+}
+[data-look='pop'] .item .sub {
+  display: none;
+}
+[data-look='pop'] .item .bar {
+  margin-top: 0.9vmin;
+}
+[data-look='pop'] .pin {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: var(--pin, 0);
+  translate: -50% 0;
+}
+[data-look='pop'] .pin-pill {
+  position: relative;
+  display: block;
+  padding: 0.74vmin 2vmin;
+  border-radius: var(--lk-radius-pill);
+  background: var(--lk-accent);
+  --ink: var(--lk-on-accent);
+  color: var(--card-text, var(--lk-on-accent));
+  font-family: var(--lk-font-display);
+  font-weight: 800;
+  font-size: 2.8vmin;
+  line-height: 1.1;
+}
+/* The pin's point, under it (in portrait, at its right). */
+[data-look='pop'] .pin-pill::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 2.6vmin;
+  height: 1.5vmin;
+  translate: -50% 0;
+  background: inherit;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+[data-look='pop'] .free-day,
+[data-look='night'] .free-day {
+  padding: 3vmin 3.7vmin;
+  border-radius: var(--lk-radius);
+  background: var(--lk-surface);
+  font-size: 5.9vmin;
+}
+
+/* Poster (B): the room in display serif, a stamp of the status, and the day as a column of hours. */
+[data-look='poster'] .stage {
+  grid-template-columns: 8.9vmin minmax(0, 1fr) auto 8.1vmin 33.3vw;
+  grid-template-rows: 6.7vmin auto auto auto auto minmax(0, 1fr) auto auto auto auto auto 6.7vmin;
+  grid-template-areas:
+    '. . . . s'
+    '. facts clock . s'
+    '. r1 r1 . s'
+    '. room room . s'
+    '. word word . s'
+    '. . . . s'
+    '. r2 r2 . s'
+    '. line line . s'
+    '. note note . s'
+    '. org org . s'
+    '. next next . s'
+    '. . . . s';
+}
+[data-look='poster'] .ident,
+[data-look='poster'] .status,
+[data-look='corporate'] .ident,
+[data-look='corporate'] .status,
+[data-look='corporate'] .facts {
+  display: contents;
+}
+[data-look='poster'] .facts,
+[data-look='poster'] .clock,
+[data-look='poster'] .kick,
+[data-look='poster'] .next,
+[data-look='poster'] .org,
+[data-look='poster'] .allday,
+[data-look='poster'] .head,
+[data-look='poster'] .hours {
+  font-family: var(--lk-font-label);
+  font-weight: var(--lk-label-weight);
+  font-size: var(--lk-size-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: var(--lk-label-case);
+}
+[data-look='poster'] .facts {
+  grid-area: facts;
+  margin-bottom: 1.7vmin;
+}
+[data-look='poster'] .floor::before {
+  content: ' · ';
+  white-space: pre;
+}
+[data-look='poster'] .clock {
+  grid-area: clock;
+  margin-left: 3vmin;
+}
+[data-look='poster'] .date,
+[data-look='corporate'] .date {
+  display: inline;
+}
+[data-look='poster'] .date::after {
+  content: ' · ';
+  white-space: pre;
+}
+[data-look='poster'] .r1 {
+  display: block;
+  grid-area: r1;
+  height: 0.28vmin;
+  background: var(--lk-text);
+  margin-bottom: 3.3vmin;
+}
+[data-look='poster'] .room-mask {
+  grid-area: room;
+  margin-bottom: 3.3vmin;
+}
+[data-look='poster'] .room {
+  font-family: var(--lk-font-display);
+  font-size: 20vmin;
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+}
+[data-look='poster'] .word-mask {
+  grid-area: word;
+  justify-self: start;
+  max-width: 100%;
+  overflow: visible;
+  margin: 1vmin 0 0 0.6vmin;
+}
+[data-look='poster'] .word {
+  --lk-motion: var(--lk-badge-motion);
+  rotate: -2deg;
+  padding: 1.6vmin 3.4vmin;
+  border: 0.56vmin solid currentColor;
+  font-family: var(--lk-font-label);
+  font-weight: 800;
+  font-size: calc(6.67vmin * var(--lk-scale));
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+[data-look='poster'] .r2 {
+  display: block;
+  grid-area: r2;
+  margin: 3vmin 0 1.3vmin;
+}
+[data-look='poster'] .line {
+  grid-area: line;
+  display: flex;
+  flex-direction: column;
+  gap: 1.3vmin;
+}
+[data-look='poster'] .line .title {
+  font-family: var(--lk-font-display);
+  font-size: calc(5.9vmin * var(--lk-scale));
+  line-height: 1;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  padding-bottom: 0.1em;
+}
+[data-look='poster'] .org {
+  grid-area: org;
+  margin-top: 1.3vmin;
+}
+[data-look='poster'] .allday {
+  grid-area: note;
+  margin-top: 1.3vmin;
+}
+[data-look='poster'] .next {
+  grid-area: next;
+  margin-top: 1.3vmin;
+}
+[data-look='poster'] .schedule {
+  grid-area: s;
+  padding: 6.7vmin 6.7vmin 6.7vmin 5.2vmin;
+  border-left: 0.28vmin solid var(--lk-text);
+}
+[data-look='poster'] .today,
+[data-look='corporate'] .today {
+  display: inline;
+}
+[data-look='poster'] .body {
+  margin: 1.2vmin 0;
+}
+[data-look='poster'] .hours > span {
+  left: 0;
+  right: 0;
+  top: calc(var(--t) * 100%);
+  translate: 0 -50%;
+  display: flex;
+  align-items: center;
+  gap: 1.5vmin;
+}
+[data-look='poster'] .hours > span::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--lk-rule-color);
+}
+[data-look='poster'] .block {
+  left: 7.4vmin;
+  right: 0;
+  top: calc(var(--a) * 100%);
+  height: calc((var(--b) - var(--a)) * 100% - 0.37vmin);
+  display: flex;
+  gap: 1vmin;
+  padding: 0.6vmin 1.5vmin;
+  background: var(--lk-surface);
+  --ink: var(--lk-text);
+  font-weight: 700;
+  font-size: var(--lk-size-label);
+  line-height: 1.3;
+}
+[data-look='poster'] .block .when {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+[data-look='poster'] .block.past {
+  --ink: var(--lk-muted);
+}
+[data-look='poster'] .block.current {
+  background: var(--lk-text);
+  --ink: var(--lk-bg);
+}
+[data-look='poster'] .nowline {
+  left: 5.6vmin;
+  right: -1.5vmin;
+  top: calc(var(--now) * 100%);
+  height: 0.37vmin;
+  translate: 0 -50%;
+  z-index: 2;
+}
+[data-look='poster'] .nowline .dot {
+  display: block;
+  position: absolute;
+  left: -0.7vmin;
+  top: 50%;
+  width: 1.85vmin;
+  height: 1.85vmin;
+  translate: 0 -50%;
+  border-radius: 50%;
+  background: var(--lk-accent);
+}
+[data-look='poster'] .free-day {
+  font-size: calc(var(--lk-size-display) * 0.5);
+  line-height: 1;
+}
+
+/* Night (C): mono labels in the accent, the status in its tone, and the day as a lit track. */
+[data-look='night'] .stage {
+  --tone: var(--lk-primary-ink-large);
+  --tone-fill: var(--lk-primary);
+}
+[data-look='night'] .stage {
+  padding: 6.7vmin 10.4vmin;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas: 'id clock' 'status status' 'line line' 'note note' 'org org' 'next next' '. .' 'sched sched';
+  column-gap: 3vmin;
+}
+[data-look='night'] .ident,
+[data-look='night'] .clock {
+  font-family: var(--lk-font-label);
+  font-size: 2.6vmin;
+  color: var(--lk-accent-ink-large);
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+[data-look='night'] .ident {
+  grid-area: id;
+  display: flex;
+  --lk-motion: none;
+}
+[data-look='night'] .clock {
+  grid-area: clock;
+  display: flex;
+  align-items: center;
+  gap: 1.5vmin;
+}
+[data-look='night'] .live {
+  display: block;
+  position: relative;
+  width: 1.3vmin;
+  height: 1.3vmin;
+}
+[data-look='night'] .live i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--tone-fill);
+}
+[data-look='night'] .status {
+  grid-area: status;
+  margin-top: 3.7vmin;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(max-content, 1fr);
+  grid-template-rows: 1fr auto auto;
+  column-gap: 5.9vmin;
+  align-items: end;
+}
+[data-look='night'] .word-mask {
+  grid-row: 1 / 4;
+}
+[data-look='night'] .word {
+  font-family: var(--lk-font-display);
+  font-weight: 800;
+  font-size: calc(25.9vmin * var(--lk-scale));
+  line-height: 0.92;
+  letter-spacing: -0.04em;
+}
+[data-look='night'] .for {
+  display: block;
+  grid-row: 2;
+  font-family: var(--lk-font-display);
+  font-weight: 700;
+  font-size: calc(6.67vmin * var(--lk-scale));
+  line-height: 1.04;
+  white-space: nowrap;
+}
+[data-look='night'] .until {
+  display: block;
+  grid-row: 3;
+  margin: 0.74vmin 0 3.3vmin;
+  font-family: var(--lk-font-label);
+  font-size: 2.6vmin;
+  color: var(--lk-muted);
+  white-space: nowrap;
+}
+[data-look='night'] .line {
+  grid-area: line;
+  margin-top: 3.7vmin;
+  font-size: calc(4.07vmin * var(--lk-scale));
+  line-height: 1.2;
+  color: var(--lk-muted);
+}
+[data-look='night'] .org {
+  grid-area: org;
+  margin-top: 1.5vmin;
+  font-family: var(--lk-font-label);
+  font-size: 2.6vmin;
+  color: var(--lk-muted);
+}
+[data-look='night'] .allday {
+  grid-area: note;
+  margin-top: 1.5vmin;
+  font-family: var(--lk-font-label);
+  font-size: 2.6vmin;
+  color: var(--lk-muted);
+}
+[data-look='night'] .next {
+  grid-area: next;
+  margin-top: 1.5vmin;
+  font-family: var(--lk-font-label);
+  font-size: 2.6vmin;
+  color: var(--lk-muted);
+}
+[data-look='night'] .schedule {
+  grid-area: sched;
+  gap: 1.5vmin;
+}
+[data-look='night'] .body {
+  height: 17vmin;
+  flex: none;
+}
+[data-look='night'] .track::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 4vmin;
+  border-radius: 2.6vmin;
+  background: var(--lk-surface);
+}
+[data-look='night'] .hours > span {
+  bottom: 0;
+  left: calc(var(--t) * 100%);
+  translate: -50% 0;
+  font-family: var(--lk-font-label);
+  font-size: 2vmin;
+  color: var(--lk-muted);
+}
+[data-look='night'] .hours > span:first-child {
+  translate: 0 0;
+}
+[data-look='night'] .hours > span:last-child {
+  translate: -100% 0;
+}
+[data-look='night'] .nowline {
+  top: 0;
+  bottom: 4vmin;
+  left: calc(var(--now) * 100%);
+  width: 0.56vmin;
+  translate: -50% 0;
+  background: var(--lk-primary);
+}
+[data-look='night'] .glow {
+  display: block;
+  position: absolute;
+  inset: 0 -1.1vmin;
+  background: var(--lk-primary);
+  opacity: 0.25;
+  animation: rs-glow 2.4s ease-in-out 2.2s infinite;
+}
+[data-look='night'] .block {
+  top: 1.5vmin;
+  bottom: 5.5vmin;
+  left: calc(var(--a) * 100% + 0.37vmin);
+  width: calc((var(--b) - var(--a)) * 100% - 0.74vmin);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3vmin;
+  padding: 1.3vmin 1.7vmin;
+  border-radius: 1.7vmin;
+  background: color-mix(in srgb, var(--lk-surface) 82%, var(--lk-text));
+  --ink: var(--lk-text);
+}
+[data-look='night'] .block.past {
+  --ink: var(--lk-muted);
+}
+[data-look='night'] .block.current {
+  background: var(--lk-accent);
+  --ink: var(--lk-on-accent);
+}
+[data-look='night'] .block .when {
+  font-family: var(--lk-font-label);
+  font-size: 1.85vmin;
+  white-space: nowrap;
+}
+[data-look='night'] .block .what {
+  font-size: 2.4vmin;
+  font-weight: 500;
+}
+[data-look='night'] .free-day {
+  font-size: 4vmin;
+}
+
+/* Corporate (D): the room and the status on white, a row of facts, and the day as a list on a panel. */
+[data-look='corporate'] .stage {
+  --tone: var(--lk-accent-ink-large);
+}
+[data-look='corporate'] .stage {
+  grid-template-columns: 7.4vmin repeat(3, minmax(0, 1fr)) 7.4vmin 33.3vw;
+  grid-template-rows: 6.7vmin auto auto auto minmax(0, 1fr) auto auto auto auto auto auto auto auto 7.4vmin;
+  grid-template-areas:
+    '. . . . . s'
+    '. clock clock clock . s'
+    '. r1 r1 r1 . s'
+    '. room room room . s'
+    '. . . . . s'
+    '. kick kick kick . s'
+    '. word word word . s'
+    '. line line line . s'
+    '. note note note . s'
+    '. org org org . s'
+    '. next next next . s'
+    '. r2 r2 r2 . s'
+    '. f1 f2 f3 . s'
+    '. . . . . s';
+}
+[data-look='corporate'] .room,
+[data-look='corporate'] .seats,
+[data-look='corporate'] .floor {
+  --lk-motion: var(--lk-text-motion);
+}
+[data-look='corporate'] .clock,
+[data-look='corporate'] .kicker,
+[data-look='corporate'] .k,
+[data-look='corporate'] .head {
+  font-weight: var(--lk-label-weight);
+  font-size: var(--lk-size-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: var(--lk-label-case);
+  color: var(--lk-muted);
+}
+[data-look='corporate'] .clock {
+  grid-area: clock;
+  justify-self: end;
+  display: flex;
+  gap: 3vmin;
+  margin-bottom: 2.2vmin;
+}
+[data-look='corporate'] .time {
+  color: var(--lk-text);
+}
+[data-look='corporate'] .r1 {
+  display: block;
+  grid-area: r1;
+  margin-bottom: 3vmin;
+}
+[data-look='corporate'] .room-mask {
+  grid-area: room;
+}
+[data-look='corporate'] .room {
+  font-weight: 500;
+  font-size: calc(10.4vmin * var(--lk-scale));
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+}
+[data-look='corporate'] .kicker {
+  grid-area: kick;
+  display: flex;
+  align-items: center;
+  gap: 1.3vmin;
+  margin: 3vmin 0 1.5vmin;
+}
+[data-look='corporate'] .kicker .dot {
+  width: 1.1vmin;
+  height: 1.1vmin;
+  border-radius: 50%;
+  background: var(--tone-fill);
+}
+[data-look='corporate'] .word-mask {
+  grid-area: word;
+}
+[data-look='corporate'] .word {
+  font-weight: var(--lk-figure-weight);
+  font-size: calc(18.5vmin * var(--lk-scale));
+  line-height: 0.95;
+  letter-spacing: -0.045em;
+}
+[data-look='corporate'] .line {
+  grid-area: line;
+  margin-top: 1.5vmin;
+  max-width: 102vmin;
+  font-size: calc(3.7vmin * var(--lk-scale));
+  line-height: 1.3;
+}
+[data-look='corporate'] .org {
+  grid-area: org;
+  margin-top: 1vmin;
+  font-size: 2.4vmin;
+  color: var(--lk-muted);
+}
+[data-look='corporate'] .allday {
+  grid-area: note;
+  margin-top: 1vmin;
+  font-size: 2.4vmin;
+  color: var(--lk-muted);
+}
+[data-look='corporate'] .next {
+  grid-area: next;
+  margin-top: 1vmin;
+  font-size: 2.4vmin;
+  color: var(--lk-muted);
+}
+[data-look='corporate'] .r2 {
+  display: block;
+  grid-area: r2;
+  margin: 3vmin 0 2.2vmin;
+}
+[data-look='corporate'] .seats,
+[data-look='corporate'] .floor,
+[data-look='corporate'] .for {
+  display: flex;
+  flex-direction: column;
+  gap: 0.74vmin;
+}
+[data-look='corporate'] .seats {
+  grid-area: f1;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+}
+[data-look='corporate'] .floor {
+  grid-area: f2;
+}
+[data-look='corporate'] .for {
+  grid-area: f3;
+}
+[data-look='corporate'] .floor,
+[data-look='corporate'] .for {
+  padding-left: 2.2vmin;
+  border-left: var(--lk-rule) solid var(--lk-rule-color);
+}
+[data-look='corporate'] .seats .k::first-letter {
+  text-transform: uppercase;
+}
+[data-look='corporate'] .k {
+  white-space: nowrap;
+}
+[data-look='corporate'] .v {
+  font-weight: 500;
+  font-size: 3vmin;
+}
+[data-look='corporate'] .schedule {
+  grid-area: s;
+  padding: 6.7vmin 5.9vmin 7.4vmin;
+  background: var(--lk-surface);
+  --ink: var(--lk-text);
+  --ink-muted: var(--lk-muted);
+  --ink-accent: var(--lk-accent);
+}
+[data-look='corporate'] .head {
+  align-items: center;
+  color: var(--card-muted, var(--lk-muted));
+}
+[data-look='corporate'] .today::before {
+  content: '';
+  display: inline-block;
+  width: 0.74vmin;
+  height: 0.74vmin;
+  margin-right: 1.1vmin;
+  vertical-align: middle;
+  background: var(--lk-accent);
+}
+[data-look='corporate'] .items {
+  flex-direction: column;
+  height: 100%;
+  border-top: var(--lk-rule) solid var(--lk-rule-color);
+}
+[data-look='corporate'] .item,
+[data-look='corporate'] .now-row {
+  flex: none;
+  display: grid;
+  grid-template-columns: 10.2vmin minmax(0, 1fr);
+  column-gap: 1.5vmin;
+}
+[data-look='corporate'] .item {
+  padding: 2vmin 1.85vmin;
+  margin: 0 -1.85vmin;
+  row-gap: 0.9vmin;
+  border-bottom: var(--lk-rule) solid var(--lk-rule-color);
+}
+[data-look='corporate'] .item .when {
+  grid-row: 1 / 3;
+  font-weight: 500;
+  font-size: 2.4vmin;
+  font-variant-numeric: tabular-nums;
+}
+[data-look='corporate'] .item .what {
+  font-weight: 500;
+  font-size: 2.6vmin;
+  line-height: 1.25;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+[data-look='corporate'] .item .sub {
+  font-size: 2vmin;
+}
+[data-look='corporate'] .item .bar {
+  grid-column: 2;
+  height: 0.37vmin;
+  border-radius: 0;
+}
+[data-look='corporate'] .item.past {
+  color: var(--card-muted, var(--lk-muted));
+}
+[data-look='corporate'] .item.current {
+  background: var(--lk-primary);
+  --ink: var(--lk-on-primary);
+  --ink-muted: var(--lk-on-primary);
+}
+[data-look='corporate'] .now-row {
+  align-items: center;
+  padding: 1.3vmin 0;
+  font-weight: var(--lk-label-weight);
+  font-size: var(--lk-size-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: var(--lk-label-case);
+  color: var(--card-accent, var(--lk-accent));
+}
+[data-look='corporate'] .now-row i {
+  position: relative;
+  height: 0.19vmin;
+  background: var(--lk-accent);
+}
+[data-look='corporate'] .now-row i::before {
+  content: '';
+  position: absolute;
+  left: -0.55vmin;
+  top: 50%;
+  width: 1.1vmin;
+  height: 1.1vmin;
+  translate: 0 -50%;
+  border-radius: 50%;
+  background: var(--lk-accent);
+}
+[data-look='corporate'] .free-day {
+  padding-top: 3vmin;
+  border-top: var(--lk-rule) solid var(--lk-rule-color);
+  font-weight: 300;
+  font-size: 5.6vmin;
+  color: var(--card-text, var(--lk-text));
+}
+
+/* Busy, then portrait: after every look's own rules, which they override. */
+[data-look='pop'] .stage[data-state='busy'] {
+  background: var(--lk-primary);
+  color: var(--lk-on-primary);
+  --tone: var(--lk-on-primary);
+}
+[data-look='pop'] .stage[data-state='busy'] .item:not(.current) {
+  background: var(--lk-bg);
+}
+[data-look='pop'] .stage[data-state='busy'] .pin-pill {
+  background: var(--lk-text);
+  --ink: var(--lk-bg);
+}
+[data-look='pop'] .stage[data-state='busy'] .free-day {
+  background: var(--lk-bg);
+}
+/* Over a meeting, the line stays in the gutter beside it: it never crosses the meeting's text. */
+[data-look='poster'] .stage[data-state='busy'] .nowline {
+  right: auto;
+  width: 1.8vmin;
+}
+[data-look='night'] .stage[data-state='busy'] {
+  --tone: var(--lk-accent-ink-large);
+  --tone-fill: var(--lk-accent);
+}
+/* Over a meeting, the line stays in the track's edge above it: it never crosses the meeting's text. */
+[data-look='night'] .stage[data-state='busy'] .nowline {
+  bottom: auto;
+  height: 1.5vmin;
+}
+[data-look='corporate'] .stage[data-state='busy'] {
+  --tone: var(--lk-text);
+}
+[data-look='pop'][data-orientation='portrait'] .stage {
+  padding: 7.4vmin 6.5vmin;
+}
+[data-look='pop'][data-orientation='portrait'] .schedule {
+  align-self: stretch;
+}
+[data-look='pop'][data-orientation='portrait'] .body {
+  padding-top: 0;
+  padding-left: 13vmin;
+}
+[data-look='pop'][data-orientation='portrait'] .items {
+  flex-direction: column;
+  height: 100%;
+}
+[data-look='pop'][data-orientation='portrait'] .item {
+  flex: none;
+  min-width: 0;
+}
+[data-look='pop'][data-orientation='portrait'] .pin {
+  top: var(--pin, 0);
+  left: 0;
+  translate: 0 -50%;
+}
+[data-look='pop'][data-orientation='portrait'] .pin-pill::after {
+  left: 100%;
+  top: 50%;
+  width: 1.5vmin;
+  height: 2.6vmin;
+  translate: 0 -50%;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+[data-look='poster'][data-orientation='portrait'] .stage {
+  grid-template-columns: 7vmin minmax(0, 1fr) auto 7vmin;
+  grid-template-rows: 6.7vmin auto auto auto auto minmax(0, 1fr) auto auto auto auto auto 46vh;
+  grid-template-areas:
+    '. . . .'
+    '. facts clock .'
+    '. r1 r1 .'
+    '. room room .'
+    '. word word .'
+    '. . . .'
+    '. r2 r2 .'
+    '. line line .'
+    '. note note .'
+    '. org org .'
+    '. next next .'
+    's s s s';
+}
+[data-look='poster'][data-orientation='portrait'] .room {
+  font-size: 16vmin;
+}
+[data-look='poster'][data-orientation='portrait'] .schedule {
+  margin-top: 3.3vmin;
+  padding: 4.5vmin 7vmin 6.7vmin;
+  border-left: 0;
+  border-top: 0.28vmin solid var(--lk-text);
+}
+[data-look='night'][data-orientation='portrait'] .stage {
+  padding: 6.7vmin 5.2vmin;
+}
+[data-look='night'][data-orientation='portrait'] .status {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+}
+[data-look='night'][data-orientation='portrait'] .word-mask {
+  grid-row: auto;
+  margin-bottom: 2.2vmin;
+}
+[data-look='night'][data-orientation='portrait'] .for,
+[data-look='night'][data-orientation='portrait'] .until {
+  grid-row: auto;
+}
+[data-look='corporate'][data-orientation='portrait'] .stage {
+  grid-template-columns: 6.5vmin repeat(3, minmax(0, 1fr)) 6.5vmin;
+  grid-template-rows: 6.7vmin auto auto auto minmax(0, 1fr) auto auto auto auto auto auto auto auto 5vmin 48vh;
+  grid-template-areas:
+    '. . . . .'
+    '. clock clock clock .'
+    '. r1 r1 r1 .'
+    '. room room room .'
+    '. . . . .'
+    '. kick kick kick .'
+    '. word word word .'
+    '. line line line .'
+    '. note note note .'
+    '. org org org .'
+    '. next next next .'
+    '. r2 r2 r2 .'
+    '. f1 f2 f3 .'
+    '. . . . .'
+    's s s s s';
+}
+[data-look='corporate'][data-orientation='portrait'] .schedule {
+  padding: 5.2vmin 6.5vmin 6.5vmin;
+}

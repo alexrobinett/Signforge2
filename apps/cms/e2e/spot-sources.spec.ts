@@ -238,3 +238,64 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
   await axe(page);
   await shots(page, '38-spot-source-phone');
 });
+
+test('a template with two sources: a place for the weather and a feed for the news, each bound, fresh or stale, on its own', async () => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1920, height: 1200 });
+  const first = (await tool(page, 'list_spots', {})).spots.find((s: { name: string }) => s.name === 'Lobby weather').id;
+  const spotId = await newSpot(page, 'Weather and headlines (test)', 'Lobby frame');
+  const form = page.getByRole('form', { name: 'Spot fields' });
+  const stage = page.getByRole('region', { name: 'Live preview' });
+  // One picker for each source, under its label.
+  const weather = form.getByRole('group', { name: 'Weather', exact: true });
+  const news = form.getByRole('group', { name: 'News', exact: true });
+
+  await weather.getByLabel('Place').fill('Atl');
+  await weather.getByRole('list', { name: 'Places found' }).getByRole('button', { name: 'Atlanta, Georgia, United States' }).click();
+  await expect(weather.getByText('Weather, Atlanta, Georgia, United States (°F, mph)')).toBeVisible();
+  // Binding the weather leaves the news picker as it was. The org has feeds already: this one is added by its address.
+  await news.getByRole('button', { name: 'Add a feed by its address' }).click();
+  await news.getByLabel('Address').fill('https://feeds.example.com/frame.rss');
+  await news.getByLabel('Name', { exact: true }).fill('Frame desk');
+  await news.getByRole('button', { name: 'Add feed' }).click();
+  await expect(news.getByText('Frame desk')).toBeVisible();
+  await expect(weather.getByText('Weather, Atlanta, Georgia, United States (°F, mph)')).toBeVisible();
+  await expect(page.getByText(/Saved \d/)).toBeVisible();
+  const feed = (await tool(page, 'list_data_sources', {})).dataSources.find((d: { name: string }) => d.name === 'Frame desk');
+  const { spot } = await tool(page, 'get_spot', { spotId });
+  // The forecast reads only the temperature, so it is a source of its own, not the weather spots' one.
+  const weatherId: string = spot.bindings.temp.dataSourceId;
+  expect(weatherId).toMatch(/^weather-4180439-f-mph-/);
+  expect(weatherId).not.toBe((await tool(page, 'get_spot', { spotId: first })).spot.bindings.temp.dataSourceId);
+  expect(spot.bindings).toEqual({ temp: { dataSourceId: weatherId, path: 'current.temperature_2m' }, items: { dataSourceId: feed.id, path: 'items' } });
+
+  // Both polls land: each block shows its own source's values, and the stage plays both.
+  pollFound(spotId, weatherId, ATLANTA);
+  const rss = `<?xml version="1.0"?><rss version="2.0"><channel><title>Frame desk</title><language>en</language>
+    <item><title>Night market opens on the square</title></item>
+  </channel></rss>`;
+  pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/frame.rss' }));
+  await page.reload();
+  await hydrated(page);
+  await expect(weather.getByText('88°F, overcast')).toBeVisible();
+  await expect(news.getByRole('listitem').filter({ hasText: 'Night market opens on the square' })).toBeVisible();
+  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => stageShows(page, 'Atlanta 88°F'), { timeout: 10_000 }).toBe(true);
+  await expect.poll(() => stageShows(page, 'Night market opens on the square'), { timeout: 10_000 }).toBe(true);
+  await axe(page);
+  await shots(page, '94-spot-source-two');
+
+  // The forecast goes unconfirmed for a day: the weather falls back, the news stays live.
+  d1(`UPDATE data_snapshots SET checked_at = ${Date.now() - 25 * 3_600_000} WHERE org_id = ${orgOf(spotId)} AND data_source_id = '${weatherId}'`);
+  await page.reload();
+  await hydrated(page);
+  await expect(weather.getByText(/Not confirmed for .*: screens show the fallback values\./)).toBeVisible();
+  await expect(news.getByRole('listitem').filter({ hasText: 'Night market opens on the square' })).toBeVisible();
+  await expect.poll(() => stageShows(page, 'Atlanta 72°F'), { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => stageShows(page, 'Night market opens on the square'), { timeout: 10_000 }).toBe(true);
+
+  // With neither, the stage plays both fallbacks.
+  await stage.getByRole('button', { name: 'Fallback' }).click();
+  await expect.poll(() => stageShows(page, 'Fallback headline'), { timeout: 10_000 }).toBe(true);
+  await expect.poll(() => stageShows(page, 'Atlanta 72°F'), { timeout: 10_000 }).toBe(true);
+});

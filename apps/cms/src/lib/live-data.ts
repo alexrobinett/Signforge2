@@ -2,7 +2,8 @@
  * Where a spot's live fields come from (issue #79): the data sources the spot editor picks or
  * makes, as `list_data_sources`, `get_data_source` and `find_places` return them, and the
  * Open-Meteo forecast a place and its units make. A template says which of its fields are live in
- * its manifest's `live` (packages/contract `LiveData`); the editor binds those to one source. A
+ * its manifest's `live` (packages/contract `LiveData`): one source, or several by name (#193); the
+ * editor binds each source's fields to one data source. A
  * `table` template's list fields may also be typed: they are live only once bound to a CSV or
  * JSON link (issue #84), with a mapping from the table's columns to their items' properties.
  */
@@ -13,7 +14,8 @@ import {
   SNAPSHOT_STALE_MS,
   TABLE_ROWS_PATH,
   type FieldDef,
-  type LiveData,
+  liveSources,
+  type LiveSourceDef,
   type TableMapping,
   type TemplateManifest,
   type WEATHER_UNITS,
@@ -33,7 +35,7 @@ export type PlaceView = ToolOutput<'find_places'>['places'][number];
 /** A spot's binding as the spot tools take it. */
 export type BindingInput = DraftBinding;
 
-/** The formats a table template reads (`LiveData` source `table`): a forecast is plain `json`, news `rss`, a calendar `ical`. */
+/** The formats a table template reads (`LiveSourceDef` source `table`): a forecast is plain `json`, news `rss`, a calendar `ical`. */
 const TABLE_FORMATS = ['csv', 'json-table'] as const;
 export type TableFormat = (typeof TABLE_FORMATS)[number];
 export const isTableFormat = (format: string): format is TableFormat => TABLE_FORMATS.some((f) => f === format);
@@ -43,35 +45,40 @@ type ListDef = Extract<FieldDef, { type: 'list' }>;
 export const placeName = (p: Pick<PlaceView, 'name' | 'region' | 'country'>) => [p.name, p.region, p.country].filter(Boolean).join(', ');
 
 /**
- * The fields a person types: neither live nor one of the source's settings (an Open-Meteo
- * template's units). A table template's live fields are typed until they are bound.
+ * The fields a person types: neither live nor one of a source's settings (an Open-Meteo
+ * source's units). A table source's live fields are typed until they are bound.
  */
 export function typedFields(m: TemplateManifest, bindings: Record<string, BindingInput>): TemplateManifest['fields'] {
-  const live = m.live;
-  if (!live) return m.fields;
-  const fields = live.source === 'table' ? Object.keys(live.fields).filter((f) => bindings[f]) : Object.keys(live.fields);
-  const skip = new Set([...fields, live.units?.temperature, live.units?.wind]);
+  if (!m.live) return m.fields;
+  const skip = new Set(
+    Object.values(liveSources(m.live)).flatMap((live) => [
+      ...(live.source === 'table' ? Object.keys(live.fields).filter((f) => bindings[f]) : Object.keys(live.fields)),
+      live.units?.temperature,
+      live.units?.wind,
+    ]),
+  );
   return Object.fromEntries(Object.entries(m.fields).filter(([name]) => !skip.has(name)));
 }
 
-/** The live fields, for the fallback section. */
-export const liveFields = (m: TemplateManifest, live: LiveData): TemplateManifest['fields'] =>
+/** One source's live fields, for its fallback section. */
+export const liveFields = (m: TemplateManifest, live: LiveSourceDef): TemplateManifest['fields'] =>
   Object.fromEntries(Object.entries(m.fields).filter(([name]) => name in live.fields));
 
-/** The source the spot's live fields are bound to, if any is. */
-export function boundSource(live: LiveData, bindings: Record<string, BindingInput>): string | undefined {
+/** The data source a template source's fields are bound to, if any is. */
+export function boundSource(live: LiveSourceDef, bindings: Record<string, BindingInput>): string | undefined {
   return Object.keys(live.fields)
     .map((f) => bindings[f]?.dataSourceId)
     .find(Boolean);
 }
 
 /**
- * Every live field bound to `dataSourceId` at the template's own path; the spot's other bindings
- * stay. A table template's list fields each get a mapping guessed from the table's `columns`.
+ * Every field of one template source bound to `dataSourceId` at the template's own path; the
+ * spot's other bindings stay. A table source's list fields each get a mapping guessed from the
+ * table's `columns`.
  */
 export const bindAll = (
   m: TemplateManifest,
-  live: LiveData,
+  live: LiveSourceDef,
   bindings: Record<string, BindingInput>,
   dataSourceId: string,
   columns: readonly string[] = [],
@@ -132,15 +139,15 @@ const WIND_PARAM = { mph: 'mph', 'km/h': 'kmh' } as const;
 const isTemperature = (v: unknown): v is WeatherUnits['temperature'] => v === '°F' || v === '°C';
 const isWind = (v: unknown): v is WeatherUnits['wind'] => v === 'mph' || v === 'km/h';
 
-/** The units the spot's data says, else the template's defaults, else °F and mph. */
-export function unitsOf(m: TemplateManifest, data: Record<string, unknown>): WeatherUnits {
+/** The units the spot's data says for an Open-Meteo source, else the template's defaults, else °F and mph. */
+export function unitsOf(m: TemplateManifest, live: LiveSourceDef, data: Record<string, unknown>): WeatherUnits {
   const value = (field: string | undefined) => {
     if (!field) return undefined;
     const def = m.fields[field];
     return data[field] ?? (def && 'default' in def ? def.default : undefined);
   };
-  const t = value(m.live?.units?.temperature);
-  const w = value(m.live?.units?.wind);
+  const t = value(live.units?.temperature);
+  const w = value(live.units?.wind);
   return { temperature: isTemperature(t) ? t : '°F', wind: isWind(w) ? w : 'mph' };
 }
 
@@ -171,7 +178,7 @@ async function shortHash(text: string): Promise<string> {
  * variables, so a second spot for the same place reuses the source, and a template that reads
  * other variables gets its own. `timeformat=unixtime` makes times numbers, which number fields take.
  */
-export async function weatherSource(live: LiveData, place: PlaceView, units: WeatherUnits) {
+export async function weatherSource(live: LiveSourceDef, place: PlaceView, units: WeatherUnits) {
   const current = new Set<string>();
   const daily = new Set<string>();
   let days = 1;

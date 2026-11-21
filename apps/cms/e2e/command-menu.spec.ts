@@ -133,7 +133,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await screenshot(page, '32-command-menu-screen');
   await page.keyboard.press('Enter');
   await expect(actionsSearch).toBeFocused();
-  await expect(actions).toHaveText(['Open', 'Identify (10 s)', 'Restart player']);
+  await expect(actions).toHaveText(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)', 'Restart player']);
   await axe(page);
   await screenshot(page, '33-command-menu-screen-actions');
   await page.keyboard.type('identify');
@@ -141,6 +141,29 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.keyboard.press('Enter');
   await expect(toast('Identify (10 s): Deli counter')).toBeVisible();
   await expect(menu).toBeHidden();
+
+  // Play a playlist here… and Take over… open the schedule's dialogs aimed at the screen (#181).
+  for (const [action, title] of [
+    ['Play a playlist here…', 'Schedule a playlist'],
+    ['Take over…', 'Take over screens'],
+  ] as const) {
+    await page.keyboard.press('ControlOrMeta+k');
+    await expect(search).toBeFocused();
+    await page.keyboard.type('deli');
+    await expect(selected).toContainText('Deli counter');
+    await page.keyboard.press('Enter');
+    await expect(actionsSearch).toBeFocused();
+    await page.keyboard.type(action.slice(0, 6));
+    await expect(selected).toHaveText(action);
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: title });
+    await expect(dialog.getByRole('combobox', { name: 'Plays on' })).toHaveText('Deli counter');
+    await expect(menu).toBeHidden();
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden();
+    // ⌘K closed as it opened: focus goes to the page's main region, not nowhere.
+    await expect(page.locator('#main')).toBeFocused();
+  }
 
   // Enter on Back goes back, to what was found, and does not run the selected action; Open goes to the screen's page.
   await page.keyboard.press('ControlOrMeta+k');
@@ -193,7 +216,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.keyboard.press('Enter');
   await expect(actionsSearch).toBeFocused();
   await expect(listStatus).toHaveText('Couldn’t check Deli counter, so Identify and Restart are off. Close ⌘K and open it again to retry.');
-  await expect(actions).toHaveText(['Open']);
+  await expect(actions).toHaveText(['Open', 'Play a playlist here…', 'Take over…']);
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await page.unroute(listRead);
@@ -229,7 +252,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.keyboard.press('Enter');
   await expect(actionsSearch).toBeFocused();
   await expect(listStatus).toHaveText('Checking Deli counter before Identify and Restart…');
-  await expect(actions).toHaveText(['Open']);
+  await expect(actions).toHaveText(['Open', 'Play a playlist here…', 'Take over…']);
   release();
   await expect(listStatus).toHaveText('');
   await expect(menu.getByRole('heading', { name: 'Deli counter' })).toBeVisible();

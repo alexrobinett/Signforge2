@@ -912,3 +912,42 @@ python3 ~/spike/run.py <label> compositor compositor:nosandbox filter layout
 
 Switch modes with `wlr-randr --output HDMI-A-1 --mode 1920x1080@60` (set `XDG_RUNTIME_DIR=/run/user/1000` and `WAYLAND_DISPLAY=wayland-0` first).
 
+
+## Room status (issue #199, 2026-11-21)
+
+`templates/room-status` at `94081df`, each look a 10 s spot played on its own: a day with four bookings, busy (a meeting in progress, with its organiser and the next one) and free (the next meeting in 90 minutes), the schedule and every toggle on. No photo. The bookings were placed around the session's start, so each state held throughout. The branch's player was at `http://localhost:8090/cp199/<orientation>/` with content built per orientation; portrait was set with `wlr-randr --transform 90` and restored afterwards. Method as for the look kit: `device/pi/isolate.py`'s measurement pointed at that player, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed before each spec, the supervisor stopped (the soak logger was already off), `__sf.prepares` read after each spec. The first of a spec's five prepares follows a cold load.
+
+| Orientation | Transition | Spot | Overall | Playing | Loading next | Worst frame | Prepares (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | Pop, busy | 0.39% | 0.00% | 12.5% | 67 ms | 632, 285, 300, 282, 360 |
+| | | Poster, busy | 0.33% | 0.00% | 12.2% | 50 ms | 714, 267, 266, 266, 277 |
+| | | Night, busy | 0.44% | 0.00% | 14.6% | 67 ms | 724, 321, 303, 291, 307 |
+| | | Corporate, busy | 0.44% | 0.00% | 13.6% | 67 ms | 611, 269, 410, 281, 273 |
+| | | Pop, free | 0.44% | 0.00% | 14.3% | 67 ms | 569, 265, 262, 264, 385 |
+| | | Poster, free | 0.28% | 0.00% | 9.4% | 50 ms | 662, 257, 256, 256, 341 |
+| | | Night, free | 0.33% | 0.00% | 11.8% | 50 ms | 644, 286, 300, 284, 280 |
+| | | Corporate, free | 0.44% | 0.00% | 15.7% | 67 ms | 588, 359, 337, 268, 251 |
+| | fade | Pop, busy | 0.56% | 0.00% | 14.1% | 67 ms | 579, 316, 339, 366, 364 |
+| | | Poster, busy | 0.33% | 0.00% | 12.0% | 50 ms | 594, 255, 254, 253, 326 |
+| | | Night, busy | 0.44% | 0.00% | 14.8% | 67 ms | 605, 293, 283, 292, 306 |
+| | | Corporate, busy | 0.44% | 0.06% | 13.7% | 67 ms | 582, 268, 280, 280, 282 |
+| portrait | cut | Pop, busy | 0.61% | 0.06% | 14.3% | 67 ms | 681, 463, 388, 384, 401 |
+| | | Poster, busy | 0.33% | 0.06% | 9.6% | 50 ms | 748, 290, 278, 286, 291 |
+| | | Night, busy | 0.61% | 0.00% | 13.8% | 67 ms | 609, 414, 414, 429, 473 |
+| | | Corporate, busy | 0.50% | 0.00% | 13.2% | 67 ms | 540, 367, 365, 364, 395 |
+| | | Pop, free | 0.50% | 0.00% | 13.2% | 67 ms | 623, 406, 388, 368, 377 |
+| | | Poster, free | 0.28% | 0.00% | 10.4% | 50 ms | 600, 273, 269, 268, 260 |
+| | | Night, free | 0.56% | 0.06% | 12.3% | 67 ms | 678, 521, 399, 413, 389 |
+| | | Corporate, free | 0.44% | 0.00% | 12.9% | 67 ms | 564, 349, 353, 348, 331 |
+| | fade | Pop, busy | 0.67% | 0.00% | 11.6% | 67 ms | 608, 415, 411, 409, 586 |
+| | | Poster, busy | 0.56% | 0.00% | 9.4% | 50 ms | 624, 272, 286, 284, 283 |
+| | | Night, busy | 0.83% | 0.00% | 16.1% | 67 ms | 700, 582, 435, 417, 505 |
+| | | Corporate, busy | 1.00% | 0.00% | 13.4% | 67 ms | 600, 382, 365, 519, 477 |
+
+- Dropped frames: 0.28 to 0.67% overall in landscape and 0.28 to 1.00% in portrait, at most 0.06% while playing, nothing skipped. The one spec at 1.00% is Corporate busy, portrait fade, which dropped 7.7% while fading. The worst frames, 50 to 67 ms, came while the next spot loaded, as with the kit's test template.
+- Prepares after the first (12 per look and orientation, cut and fade, busy and free):
+  - Landscape medians: Pop 308, Poster 262, Night 293, Corporate 280 ms, all from 251 to 410 ms.
+  - Portrait medians: Pop 404, Poster 281, Night 423, Corporate 365 ms.
+  - 5 of 48 portrait prepares came in over the 500 ms budget: Night 505, 521 and 582, Corporate 519 and Pop 586 ms. Each was a single slow prepare in a spec whose others were 260 to 473 ms.
+- First prepares, which follow a cold load of the page, were 540 to 748 ms in every spec, over the 500 ms budget. That is the four-look bundle's cold start (The look kit: 520 to 661 ms for its test template), not this layout.
+- Poster is the quickest look in both orientations, and Night and Pop the slowest in portrait. Why was not measured.

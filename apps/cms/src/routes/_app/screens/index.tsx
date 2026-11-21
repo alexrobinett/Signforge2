@@ -14,6 +14,7 @@ import {
   ChevronDownIcon,
   CloudOffIcon,
   LayoutGridIcon,
+  MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
   TableIcon,
@@ -37,7 +38,7 @@ import { describeHours } from '~/components/screens/display-hours-editor';
 import { needingAttention } from '~/lib/groups';
 import { ago, describeScreen, isRetired, summarise } from '~/lib/screen-status';
 import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
-import { useCanManage, useNow, useOrgId } from '~/lib/live';
+import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
 import { byWord, publishTitle } from '~/lib/publishes';
@@ -482,6 +483,27 @@ function SortHeader({
   );
 }
 
+/** A row's actions (#181): the schedule's dialogs, aimed at the screen. */
+function RowMenu({ orgId, screen }: { orgId: string; screen: ScreenView }) {
+  const canPublish = useCanPublish();
+  const openNewEntry = useAppStore((s) => s.openNewEntry);
+  const openTakeover = useAppStore((s) => s.openTakeover);
+  const preset = { target: 'screen', screenId: screen.id } as const;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="ml-1 size-8" aria-label={`Actions for ${screen.name}`}>
+          <MoreHorizontalIcon aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => openNewEntry(orgId, preset)}>Play on this screen…</DropdownMenuItem>
+        {canPublish && <DropdownMenuItem onSelect={() => openTakeover(orgId, preset)}>Take over this screen…</DropdownMenuItem>}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function ScreenTable({
   screens,
   groups,
@@ -603,7 +625,7 @@ function ScreenTable({
                     >
                       {s.lastSeenAt ? `${ago(now - s.lastSeenAt)} ago` : 'never'}
                     </td>
-                    <td className="px-3 py-1.5 pr-4 text-right">
+                    <td className="px-3 py-1.5 pr-4 text-right whitespace-nowrap">
                       {s.state.kind === 'needs_you' && (
                         <Button asChild variant="outline" size="sm">
                           <Link to="/screens/$screenId" params={{ screenId: s.id }} aria-label={`Troubleshoot ${s.name}`}>
@@ -611,6 +633,7 @@ function ScreenTable({
                           </Link>
                         </Button>
                       )}
+                      {canManage && !isRetired(s) && <RowMenu orgId={orgId} screen={s} />}
                     </td>
                   </tr>
                 );

@@ -2,7 +2,7 @@
 
 Version 1. This is what a template author, human or agent, builds against and what a reviewer checks. The types and limits here are defined in code in `packages/contract/src/shapes.ts`; if the two disagree, the code is right.
 
-Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl), `menu-board` (a list typed by people or filled from a CSV or JSON link), `alert` (a takeover in fixed severity colours, with a QR code; see [Alert](#alert)) and `announcement` (company news in the look kit's four looks, with toggles, facts and a QR code).
+Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl), `menu-board` (a list typed by people or filled from a CSV or JSON link), `room-status` (a calendar feed read against `now()`: free or busy, until when and the rest of the day, in the four looks of the look kit, with toggles), `alert` (a takeover in fixed severity colours, with a QR code; see [Alert](#alert)) and `announcement` (company news in the look kit's four looks, with toggles, facts and a QR code).
 
 ## What a template is
 
@@ -42,7 +42,7 @@ The build (`sf build`) bundles these into one self-contained HTML file with the 
 - `orientations`: `landscape`, `portrait` or both.
 - `uses`: list `canvas`, `webgl` or `audio` if the template needs them.
 - `background`: the colour shown around the template when it is letterboxed on an orientation it does not support.
-- `live` (optional): the fields a data source fills. See [Live data](#live-data).
+- `live` (optional): the fields a data source fills, or several data sources by name. See [Live data](#live-data).
 - `protocol` is added by the build: the frame protocol of the SDK it bundled. A rebuilt template speaks the current protocol (2), so it needs a new version; published bundles keep the protocol they were built with, and the player speaks every protocol in `SUPPORTED_PROTOCOLS` (1 and 2).
 
 ## Lifecycle
@@ -203,12 +203,28 @@ Any non-image field can be bound to a data source instead of a fixed value. The 
 }
 ```
 
-- `source`: the kind of feed. `open-meteo` is an Open-Meteo forecast (a JSON source; the CMS asks for the `current=` and `daily=` variables the paths read, in the place's time zone, with `timeformat=unixtime`). `rss` is a news feed and `ical` a calendar, which the server converts to `NewsFeed` and `CalendarFeed`, so their paths are those shapes' (`items`, `language`, `events`). `table` is a CSV file or a JSON list at a link (below): its fields must be lists, at `rows`, and they stay typed until a spot binds them.
+- `source`: the kind of feed. `open-meteo` is an Open-Meteo forecast (a JSON source; the CMS asks for the `current=` and `daily=` variables the paths read, in the place's time zone, with `timeformat=unixtime`). `rss` is a news feed and `ical` a calendar, which the server converts to `NewsFeed` and `CalendarFeed`, so their paths are those shapes' (`items`, `language`, `events`). A calendar event names its organiser by display name (`organizer`, the ORGANIZER's CN, or `''`), never by address: a name holding an `@` is `''` too. The feed holds only events that had not ended when the server read it, so room-status shows "Free all day" once a day's last meeting is over and polled away. A template cannot yet tell that its bound fields are playing their fallback: until `init` says so, a room-status spot whose calendar is missing or stale (no data, or none confirmed for a day) shows its fallback, no bookings, and so reads "Free all day". `table` is a CSV file or a JSON list at a link (below): its fields must be lists, at `rows`, and they stay typed until a spot binds them.
 - `fields`: each live field's path in the snapshot, as a binding names it (`BINDING_PATH`). Not an image field.
 - `place` (Open-Meteo only): a text field that starts as the name of the place picked. People may still change it.
 - `units` (Open-Meteo only): the select fields that choose the units the forecast is fetched in, `temperature` with options from `°F`, `°C` and `wind` from `mph`, `km/h` (`WEATHER_UNITS`). The CMS sets them with the place, so the numbers and the unit shown always agree.
 
-`validateTemplateManifest` checks all of it. A template with no `live` is typed by people. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda (`ical`: `events`), menu-board (`table`: `items`).
+**Several sources.** A template whose fields come from more than one feed, such as the weather from Open-Meteo and the headlines from a news feed in one frame, names each source under `sources` (#193). Each named source takes the keys above, and a `label`, which the CMS shows over that source's picker; the Source section has one picker for each.
+
+```json
+"live": {
+  "sources": {
+    "weather": { "label": "Weather", "source": "open-meteo", "fields": { "temp": "current.temperature_2m" }, "place": "city", "units": { "temperature": "unit" } },
+    "headlines": { "label": "Headlines", "source": "rss", "fields": { "items": "items" } }
+  }
+}
+```
+
+- A name is an id (`ID_PATTERN`). A field is fed by one source at most, and a field a source names as its `place` or `units` is one no source fills and no other source names: picking a source sets those fields, so two sources sharing one would overwrite each other.
+- A spot binds each field to a data source of its own, so each source goes stale, fails or falls back on its own: the weather can show its fallback while the headlines stay live.
+- `liveSources` in `packages/contract` reads either form by name; the one source of a template that declares one is named `source`.
+- A template that declares `sources` needs manifest schema 7 (`MANIFEST_SCHEMA`). A player before #193 refuses it in any manifest, so the server tells it to reload (`canPlay`), as for schema 4. Templates that declare one source are unchanged.
+
+`validateTemplateManifest` checks all of it. A template with no `live` is typed by people. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda and room-status (`ical`: `events`), menu-board (`table`: `items`).
 
 **Table bindings.** A `csv` or `json-table` source's snapshot is a `TableFeed`: `columns` and `rows` of text and numbers (`@signforge/feeds`, Tables). A binding with a `table` mapping (`TableMapping`), at path `rows`, fills a list field from its rows:
 
