@@ -103,7 +103,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "c62ca5ae2485975f650d3c38679bafe47f031bfa4222384ccba4ab70a531d2a5",
+  "id": "886df800fb34cba1522c7ef3be804338716619c613257f5c4ce616e95fd96505",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -165,7 +165,7 @@
     }
   },
   "schedule": [],
-  "schema": 4,
+  "schema": 5,
   "screen": {
     "id": "stress-screen",
     "name": "Stress test screen",
