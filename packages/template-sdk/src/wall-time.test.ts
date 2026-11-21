@@ -1,6 +1,6 @@
 // A date or datetime field's value as the instant it falls on in the screen's zone (#192). Every
 // instant is fixed: none comes from the clock this test runs on.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { wallTime } from './wall-time';
 
 const at = (timezone: string, value: string) => wallTime({ timezone }, value).toISOString();
@@ -39,5 +39,23 @@ describe('wallTime', () => {
     expect(at('America/New_York', '2026-11-01T02:00')).toBe('2026-11-01T07:00:00.000Z');
     // London goes back from 02:00 BST to 01:00 GMT on 25 October 2026.
     expect(at('Europe/London', '2026-10-25T01:30')).toBe('2026-10-25T00:30:00.000Z');
+  });
+
+  it('reads years 1 to 99 as themselves, not as 1901 to 1999 as Date.UTC does: right without the contract, which refuses them', () => {
+    expect(at('UTC', '0050-06-15T12:00')).toBe('0050-06-15T12:00:00.000Z');
+    expect(at('UTC', '0001-01-01T00:00')).toBe('0001-01-01T00:00:00.000Z');
+    expect(at('America/New_York', '1900-01-01')).toBe('1900-01-01T05:00:00.000Z');
+  });
+
+  it('makes one clock per time zone, so a list of dates in prepare does not build one a row on the Pi', () => {
+    const made = vi.spyOn(Intl, 'DateTimeFormat');
+    try {
+      for (const day of ['2026-11-27', '2026-11-28', '2026-11-29']) wallTime({ timezone: 'Pacific/Auckland' }, day);
+      wallTime({ timezone: 'Pacific/Chatham' }, '2026-11-27');
+      wallTime({ timezone: 'Pacific/Auckland' }, '2026-11-30T09:00');
+      expect(made).toHaveBeenCalledTimes(2);
+    } finally {
+      made.mockRestore();
+    }
   });
 });
