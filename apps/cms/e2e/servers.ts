@@ -47,10 +47,8 @@ export function codeFor(email: string, log = API_LOG): Promise<string> {
       resolve(code);
     }
     check();
-    // On macOS the watch is armed (kqueue) at the event loop's next poll, and a write before then
-    // sends no event: read once more after a poll has surely run. An immediate set from inside an
-    // immediate runs after the next poll, whichever phase this is called in. On Linux (inotify) the
-    // watch is armed at once. Ordering, not a wait.
+    // macOS arms the watch (kqueue) at the loop's next poll; a write before that sends no event.
+    // A nested immediate runs after that poll from any phase, so read once more then.
     setImmediate(() => setImmediate(check));
   });
 }
