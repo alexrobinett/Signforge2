@@ -333,7 +333,7 @@ const playback = new Playback({
   clock: {
     mono: () => performance.now(),
     now,
-    trusted: () => clock.trusted,
+    trust: () => clock.trust(),
     after: (ms, fn) => {
       const t = setTimeout(fn, ms);
       return () => clearTimeout(t);

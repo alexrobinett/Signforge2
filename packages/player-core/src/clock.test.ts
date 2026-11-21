@@ -56,4 +56,13 @@ describe('Clock', () => {
     e.synced(T, BUILD - 1, BUILD - 1);
     expect(e.trusted).toBe(true);
   });
+
+  it('untrusted, says the real time is at least its last sync or its build, for the schedule (#200)', () => {
+    const back = device(T - 86_400_000);
+    const c = new Clock({ ...back.opts, persisted: { offsetMs: 0, syncedAt: T } });
+    expect(c.trust()).toEqual({ clockTrusted: false, notBefore: T });
+    expect(new Clock(device(BUILD - 1).opts).trust()).toEqual({ clockTrusted: false, notBefore: BUILD });
+    c.synced(T + 1000, T - 86_400_000, T - 86_400_000);
+    expect(c.trust()).toEqual({});
+  });
 });

@@ -28,6 +28,12 @@ export interface ClockOptions {
   persisted?: PersistedClock;
 }
 
+/**
+ * How far the screen trusts `now`. Untrusted, the clock is behind by an unknown amount, and
+ * `notBefore` is the earliest the real time can be: when the player was built, or its last sync.
+ */
+export type ClockTrust = { clockTrusted?: true } | { clockTrusted: false; notBefore: number };
+
 /** A device clock jump bigger than this is a step, not drift. */
 export const CLOCK_JUMP_MS = 2000;
 
@@ -43,6 +49,11 @@ export class Clock {
     this.markMono = o.monoNow();
     const corrected = this.markWall + this.offsetMs;
     this.trusted = corrected >= o.buildTime && (o.persisted === undefined || corrected >= o.persisted.syncedAt);
+  }
+
+  /** Whether the schedule may trust `now()`, and if not, the earliest the real time can be. */
+  trust(): ClockTrust {
+    return this.trusted ? {} : { clockTrusted: false, notBefore: Math.max(this.o.buildTime, this.o.persisted?.syncedAt ?? this.o.buildTime) };
   }
 
   /** Corrected time, in ms since the epoch. */

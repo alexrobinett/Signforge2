@@ -9,7 +9,7 @@
  * clock and fake slots, because the order of its calls between awaits is where bugs were (#123, M3-19).
  */
 import { requiredFiles, type ScreenManifest, type Spot, type Transition } from '@signforge/contract';
-import { Sequencer, activeTakeover, nextTakeoverEdge, spotFiles, type Step } from '@signforge/player-core';
+import { Sequencer, activeTakeover, nextTakeoverEdge, spotFiles, type ClockTrust, type Step } from '@signforge/player-core';
 
 /** How long before the end of a spot the next one starts loading. */
 const PREPARE_LEAD_MS = 3000;
@@ -22,8 +22,8 @@ export interface PlaybackClock {
   mono(): number;
   /** Corrected ms since the epoch (src/clock.ts): the schedule, takeovers and the play log. */
   now(): number;
-  /** Whether the screen trusts `now()`. Untrusted, bounded schedule entries (takeovers) do not count. */
-  trusted(): boolean;
+  /** Whether the screen trusts `now()` (src/clock.ts). Untrusted, bounded schedule entries (takeovers) do not count, but for an alert's. */
+  trust(): ClockTrust;
   /** Call `fn` after `ms` of monotonic time. Returns what cancels it. */
   after(ms: number, fn: () => void): () => void;
 }
@@ -233,8 +233,8 @@ export class Playback {
     const chosenAt = new Date(clock.now());
     this.#drafted.reset();
     const drafted = this.#drafted.promise;
-    const step = this.#sequencer.next(chosenAt, { clockTrusted: clock.trusted() });
-    this.#chosenTakeover = activeTakeover(m, chosenAt, { clockTrusted: clock.trusted() });
+    const step = this.#sequencer.next(chosenAt, clock.trust());
+    this.#chosenTakeover = activeTakeover(m, chosenAt, clock.trust());
     this.#tookOver.reset();
     this.watchTakeover();
     if (!step) {
@@ -274,7 +274,7 @@ export class Playback {
       return;
     }
     // The takeover changed while this spot was chosen and loaded: choose again, so the old schedule never shows.
-    if (activeTakeover(this.#manifest, new Date(clock.now()), { clockTrusted: clock.trusted() }) !== this.#chosenTakeover) {
+    if (activeTakeover(this.#manifest, new Date(clock.now()), clock.trust()) !== this.#chosenTakeover) {
       slots.clear(slot);
       pins.release('preparing');
       this.#cutIn = true;
@@ -327,7 +327,7 @@ export class Playback {
     const m = this.#manifest;
     if (!m) return;
     const at = new Date(this.o.clock.now());
-    if (activeTakeover(m, at, { clockTrusted: this.o.clock.trusted() }) !== this.#chosenTakeover) {
+    if (activeTakeover(m, at, this.o.clock.trust()) !== this.#chosenTakeover) {
       this.#cutIn = true;
       this.#tookOver.raise();
     }

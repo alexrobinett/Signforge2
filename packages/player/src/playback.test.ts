@@ -26,7 +26,7 @@ class FakeClock implements PlaybackClock {
   private seq = 0;
   mono = () => this.t;
   now = () => T0 + this.t;
-  trusted = () => true;
+  trust = () => ({});
   after(ms: number, fn: () => void): () => void {
     const timer = { at: this.t + ms, seq: this.seq++, fn };
     this.timers.push(timer);
