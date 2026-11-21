@@ -685,7 +685,7 @@ describe('table bindings', () => {
     });
   });
 
-  it("fills date and datetime properties from a cell's ISO text, with zero seconds too, leaving out a row that is not one", () => {
+  it("fills date and datetime properties from a cell's ISO text, a spreadsheet's space or zero seconds too, leaving out a row that is not one", () => {
     const events: Extract<FieldDef, { type: 'list' }> = {
       type: 'list',
       label: 'Events',
@@ -701,8 +701,9 @@ describe('table bindings', () => {
         ['27/11/2026', '2026-11-27T18:00'],
         ['2026-12-01', '2026-12-01T18:00Z'],
         [46_000, '2026-12-02T18:00:30'],
-        // The feed parser writes a spreadsheet's space as the T (packages/feeds, Tables); a table that still has one is not ISO.
+        // As a spreadsheet exports it, padded or not.
         ['2026-12-03', '2026-12-03 18:00'],
+        ['2026-12-04', ' 2026-12-04 18:30:00 '],
       ],
     };
     expect(tableItems(events, { columns: { day: 'Day', at: 'At' } }, table, 'en-US')).toEqual({
@@ -711,14 +712,35 @@ describe('table bindings', () => {
         { day: '2026-11-28', at: '2026-11-28T18:30' },
         { day: '2026-11-29', at: '2026-11-29T07:15' },
         { day: '2026-11-30', at: '2026-11-27T09:00' },
+        { day: '2026-12-03', at: '2026-12-03T18:00' },
+        { day: '2026-12-04', at: '2026-12-04T18:30' },
       ],
-      problems: [
-        'row 5: day must be a date (YYYY-MM-DD)',
-        'row 6: at must be a date and time (YYYY-MM-DDTHH:mm)',
-        'row 7: day must be a date (YYYY-MM-DD)',
-        'row 8: at must be a date and time (YYYY-MM-DDTHH:mm)',
-      ],
+      problems: ['row 5: day must be a date (YYYY-MM-DD)', 'row 6: at must be a date and time (YYYY-MM-DDTHH:mm)', 'row 7: day must be a date (YYYY-MM-DD)'],
     });
+  });
+
+  it("sorts a column of dates and times by time, whichever separator each row's cell has, and leaves the cells as the file has them", () => {
+    const events: Extract<FieldDef, { type: 'list' }> = {
+      type: 'list',
+      label: 'Events',
+      item: { name: { type: 'text', label: 'Name' }, when: { type: 'text', label: 'When' } },
+    };
+    const table = {
+      columns: ['Event', 'Starts'],
+      rows: [
+        ['Late', '2026-11-27 18:30'],
+        ['Early', '2026-11-27T09:00'],
+        ['Noon', ' 2026-11-27 12:00:00'],
+        ['Next day', '2026-11-28T08:00'],
+      ],
+    };
+    const sorted = tableItems(events, { columns: { name: 'Event', when: 'Starts' }, sort: { column: 'Starts' } }, table, 'en-US');
+    expect(sorted.items).toEqual([
+      { name: 'Early', when: '2026-11-27T09:00' },
+      { name: 'Noon', when: '2026-11-27 12:00:00' },
+      { name: 'Late', when: '2026-11-27 18:30' },
+      { name: 'Next day', when: '2026-11-28T08:00' },
+    ]);
   });
 
   it('filters, sorts, then keeps maxItems rows', () => {

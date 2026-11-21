@@ -476,8 +476,8 @@ function cellValue(def: ScalarFieldDef, cell: string | number, locale: string): 
     case 'date':
       return isStr(cell) ? text : undefined;
     case 'datetime':
-      // A spreadsheet may write zero seconds; the feed parser has already made its space a T.
-      return isStr(cell) ? text.replace(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}):00$/, '$1') : undefined;
+      // A spreadsheet writes the same wall time with a space, or with seconds.
+      return isStr(cell) ? text.replace(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::00)?$/, '$1T$2') : undefined;
     case 'number':
       return isStr(cell) ? (text === '' ? undefined : Number(text)) : cell;
     case 'boolean': {
@@ -518,8 +518,16 @@ export function tableItems(
     const sign = t.sort.descending ? -1 : 1;
     const collator = new Intl.Collator(locale, { numeric: true, sensitivity: 'base' });
     // Numbers, and text that is one number, come first by value; other text after, by the collator.
+    // A date and time compares in its ISO form, so a sheet's "2026-11-27 18:30" sorts by time among
+    // "2026-11-27T09:00"s, not by its separator; the cells themselves stay as the file has them.
     const key = (cell: string | number | undefined) =>
-      isNum(cell) ? cell : isStr(cell) && cell.trim() !== '' && isNum(Number(cell)) ? Number(cell) : String(cell);
+      isNum(cell)
+        ? cell
+        : isStr(cell) && cell.trim() !== '' && isNum(Number(cell))
+          ? Number(cell)
+          : String(cell)
+              .trim()
+              .replace(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})/, '$1T$2');
     kept.sort(({ cells: a }, { cells: b }) => {
       const x = key(a[col]);
       const y = key(b[col]);
