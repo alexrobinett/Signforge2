@@ -24,11 +24,14 @@ defineTemplate({
 });
 
 /**
- * The pixels behind the eyebrow's text, at about one per 4 px: the photo under the text's box,
- * wherever the push-in moves it during the spot, under the shade as it is at the box's top and at
- * its bottom (a text over a gradient is measured at both ends). One small canvas read.
+ * The pixels behind the eyebrow's text, one per pixel the screen paints the photo at: the photo
+ * under the text's box, wherever the push-in moves it during the spot, under the shade as it is at
+ * the box's top and at its bottom (a text over a gradient is measured at both ends). Fewer samples
+ * average away a photo's darkest and lightest detail, which the screen shows. One canvas read.
  */
 async function backdrop(ctx: TemplateContext, eyebrow: HTMLElement, bg: string): Promise<Uint8ClampedArray> {
+  // The box is the text's, so it is measured in the template's font, not a fallback.
+  await document.fonts.ready;
   // The rise-in moves the eyebrow only up and down, so the text's left and width are where it
   // rests; its top and height come from the layout, which no animation moves.
   const text = document.createRange();
@@ -36,11 +39,6 @@ async function backdrop(ctx: TemplateContext, eyebrow: HTMLElement, bg: string):
   const { left, width } = text.getBoundingClientRect();
   const top = document.querySelector('.copy')!.getBoundingClientRect().top + eyebrow.offsetTop;
   const height = eyebrow.offsetHeight;
-  const w = Math.max(1, Math.ceil(width / 4));
-  const h = Math.max(1, Math.ceil(height / 4));
-  const g = new OffscreenCanvas(w, 2 * h).getContext('2d')!;
-  g.fillStyle = bg;
-  g.fillRect(0, 0, w, 2 * h);
 
   const img = document.querySelector<HTMLImageElement>('.photo img')!;
   // drawImage decodes the photo for the canvas itself: awaiting img.decode() first decoded it twice
@@ -51,19 +49,30 @@ async function backdrop(ctx: TemplateContext, eyebrow: HTMLElement, bg: string):
       img.addEventListener('load', loaded, { once: true });
       img.addEventListener('error', loaded, { once: true });
     });
+  let photo: { x: number; y: number; w: number; h: number; scale: number } | undefined;
   if (img.naturalWidth && width) {
     const { width: vw, height: vh } = ctx.viewport;
     const push = Number(getComputedStyle(img.parentElement!).getPropertyValue('--push'));
     // object-fit: cover, then scaled about the centre from 1 to `push`: the photo's pixel under a
     // point on screen, along one axis, at scale `s`.
-    const k = Math.max(vw / img.naturalWidth, vh / img.naturalHeight);
-    const at = (p: number, size: number, natural: number, s: number) => (size / 2 + (p - size / 2) / s - (size - natural * k) / 2) / k;
-    const x0 = Math.min(at(left, vw, img.naturalWidth, 1), at(left, vw, img.naturalWidth, push));
+    const scale = Math.max(vw / img.naturalWidth, vh / img.naturalHeight);
+    const at = (p: number, size: number, natural: number, s: number) => (size / 2 + (p - size / 2) / s - (size - natural * scale) / 2) / scale;
+    const x = Math.min(at(left, vw, img.naturalWidth, 1), at(left, vw, img.naturalWidth, push));
+    const y = Math.min(at(top, vh, img.naturalHeight, 1), at(top, vh, img.naturalHeight, push));
     const x1 = Math.max(at(left + width, vw, img.naturalWidth, 1), at(left + width, vw, img.naturalWidth, push));
-    const y0 = Math.min(at(top, vh, img.naturalHeight, 1), at(top, vh, img.naturalHeight, push));
     const y1 = Math.max(at(top + height, vh, img.naturalHeight, 1), at(top + height, vh, img.naturalHeight, push));
-    g.drawImage(img, x0, y0, x1 - x0, y1 - y0, 0, 0, w, h);
-    g.drawImage(img, x0, y0, x1 - x0, y1 - y0, 0, h, w, h);
+    photo = { x, y, w: x1 - x, h: y1 - y, scale };
+  }
+  // At the push-in's start the screen paints the photo at `scale`, and larger after: so many samples.
+  const w = photo ? Math.ceil(photo.w * photo.scale) : 1;
+  const h = photo ? Math.ceil(photo.h * photo.scale) : 1;
+  // Read back and never shown: `willReadFrequently` keeps it in memory, with no GPU readback.
+  const g = new OffscreenCanvas(w, 2 * h).getContext('2d', { willReadFrequently: true })!;
+  g.fillStyle = bg;
+  g.fillRect(0, 0, w, 2 * h);
+  if (photo) {
+    g.drawImage(img, photo.x, photo.y, photo.w, photo.h, 0, 0, w, h);
+    g.drawImage(img, photo.x, photo.y, photo.w, photo.h, 0, h, w, h);
   }
 
   const shade = getComputedStyle(document.querySelector('.shade')!);
