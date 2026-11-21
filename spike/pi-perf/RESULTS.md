@@ -711,6 +711,43 @@ The same player and method, the bundles rebuilt with the fonts' licence notice (
 - The photo is also most of the prepare: with it off, prepares fall from about 480 to about 330 ms, as photo-promo's decode cost (Photo samples, above).
 - Dropping `will-change` does not help.
 
+## Countdown (issue #198, 2026-11-21)
+
+`templates/countdown` at `6524776`, each look a 10 s spot played on its own, in the screen's zone (New York): a countdown 12 days, 3 hours and minutes away, in days, hours and minutes (its minutes tick), with two facts and every toggle on, and a count-up 210 days since its target with a record of 301 (Poster's record panel, Night's record cards, Corporate's scale). The branch's player was at `http://localhost:8090/cp198/<orientation>/` with content built per orientation; portrait was set with `wlr-randr --transform 90` and restored afterwards. Method as for Room status: `device/pi/isolate.py`'s measurement pointed at that player, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed before each spec, the supervisor and the soak logger stopped, `__sf.prepares` read after each spec. The first of a spec's five prepares follows a cold load.
+
+| Orientation | Transition | Spot | Overall | Playing | Loading next | Worst frame | Prepares (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | Pop, down | 0.50% | 0.00% | 17.3% | 67 ms | 623, 365, 326, 261, 259 |
+| | | Poster, down | 0.39% | 0.00% | 13.7% | 67 ms | 564, 232, 250, 331, 257 |
+| | | Night, down | 0.33% | 0.00% | 14.0% | 50 ms | 573, 245, 229, 232, 243 |
+| | | Corporate, down | 0.44% | 0.00% | 20.0% | 50 ms | 668, 243, 213, 211, 226 |
+| | | Pop, up | 0.50% | 0.11% | 12.7% | 67 ms | 584, 282, 378, 258, 259 |
+| | | Poster, up | 0.39% | 0.00% | 14.6% | 67 ms | 579, 228, 228, 281, 276 |
+| | | Night, up | 0.28% | 0.00% | 11.9% | 50 ms | 589, 248, 218, 230, 243 |
+| | | Corporate, up | 0.28% | 0.00% | 11.6% | 50 ms | 659, 277, 212, 244, 242 |
+| | fade | Pop, down | 0.39% | 0.06% | 12.5% | 50 ms | 656, 311, 262, 245, 276 |
+| | | Poster, down | 0.39% | 0.00% | 12.5% | 67 ms | 604, 300, 301, 329, 296 |
+| | | Night, down | 0.44% | 0.00% | 17.8% | 50 ms | 566, 230, 229, 280, 230 |
+| | | Corporate, down | 0.28% | 0.00% | 11.6% | 50 ms | 559, 247, 247, 229, 229 |
+| portrait | cut | Pop, down | 0.33% | 0.11% | 8.5% | 50 ms | 616, 225, 222, 302, 218 |
+| | | Poster, down | 0.39% | 0.00% | 13.2% | 67 ms | 593, 287, 282, 296, 298 |
+| | | Night, down | 0.22% | 0.00% | 9.5% | 50 ms | 585, 209, 210, 209, 260 |
+| | | Corporate, down | 0.17% | 0.00% | 7.7% | 33 ms | 679, 208, 206, 206, 207 |
+| | | Pop, up | 0.17% | 0.00% | 7.1% | 33 ms | 723, 244, 225, 222, 220 |
+| | | Poster, up | 0.44% | 0.00% | 14.8% | 67 ms | 596, 298, 295, 295, 294 |
+| | | Night, up | 0.17% | 0.00% | 7.7% | 33 ms | 716, 212, 211, 210, 209 |
+| | | Corporate, up | 0.28% | 0.06% | 9.5% | 50 ms | 573, 231, 261, 208, 207 |
+| | fade | Pop, down | 0.17% | 0.00% | 7.1% | 33 ms | 727, 272, 221, 224, 220 |
+| | | Poster, down | 0.61% | 0.06% | 17.0% | 67 ms | 583, 287, 297, 277, 297 |
+| | | Night, down | 0.72% | 0.06% | 9.1% | 50 ms | 587, 214, 215, 296, 207 |
+| | | Corporate, down | 0.39% | 0.18% | 10.3% | 50 ms | 558, 209, 209, 208, 206 |
+
+- Dropped frames: 0.17 to 0.72% overall, at most 0.18% while playing, nothing skipped.
+- **The worst frame is over the 50 ms rule in 8 of 24 specs**: 67 ms in all six Poster specs and in Pop's two landscape cuts. In 6 of the 8 nothing was dropped while playing, and each long frame came while the next spot loaded, as with the kit's test template (67 to 117 ms) and Room status (67 ms in 17 of 24). Not accepted here: for the owner to accept, or to look at in the batch run (#203), Poster first, which has it in every spec and the slowest prepares.
+- Prepares after the first (12 per look and orientation): landscape medians Pop 269, Poster 279, Night 231, Corporate 236 ms (211 to 378); portrait Pop 223, Poster 295, Night 211, Corporate 208 ms (206 to 302). None over 500 ms.
+- First prepares, after a cold load of the page, were 558 to 727 ms: over the 500 ms budget, as for every template carrying the four looks (The look kit; Room status).
+- **Portrait holds the ambient motion still.** An earlier build kept Pop's tile and stickers wobbling, its last dot and Night's live dot pulsing and pinging, and Night's ring sweeping in, in portrait too. Portrait cuts were under 1% (0.39 to 0.89%), but fades into a portrait countdown were not: Pop 1.11, 1.28, 1.78 and 1.61, 1.11% (the third with a 250 ms stall while playing), Night 0.94, 1.28 and 1.17, 1.33%, dropping 4 to 11% of frames while fading. The same build with the ambient motion held still in portrait: Pop 0.39, 0.22%; Night 0.67, 0.94%, and with the ring's sweep held too 0.61, 0.22%. Prepares fell with it, about 350 to about 230 ms in portrait (two runs each, interleaved, one session). The template now holds both still in portrait, as the kit holds `.lk-drift` (The look kit). Landscape keeps them: 0.28 to 0.56% in both builds.
+- **Night's ring** is two half-discs, each rotated inside its own clipping half, with the end cap on a rotating arm: transforms only, no `stroke-dashoffset`. On the Pi the halves' meeting edge at 6 o'clock showed the track through as a 1 px hairline once the ring was past half: the ring is 70.4vmin, 760.32 px, so the centre line falls on a fraction of a pixel and both edges are smoothed there. A 0.4vmin strip of the fill over the join, shown as the left half starts, removes it; 12 o'clock is under the start cap. Screenshots on the Pi of a full ring and one at 52% after the fix show no seam at either.
 ## The Alert template (issue #200, 2026-11-21)
 
 `templates/alert` at `99832a4`, each severity a 10 s spot with its defaults and a QR code, played on its own. The branch's player was at `http://localhost:8090/cp200/<orientation>/` with content built per orientation; portrait was set with `wlr-randr --transform 90` and restored afterwards. Method as for the look kit: `device/pi/isolate.py`'s measurement pointed at that player, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed before each spec, the supervisor stopped (the soak logger was already off), `__sf.prepares` read after each spec. The first of a spec's five prepares follows a cold load.

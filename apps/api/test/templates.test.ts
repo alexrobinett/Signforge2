@@ -73,6 +73,7 @@ describe('sf template seed', () => {
       'agenda',
       'alert',
       'clock',
+      'countdown',
       'cstore-promo',
       'info-frame',
       'menu-board',

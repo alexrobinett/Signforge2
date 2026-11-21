@@ -78,6 +78,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "86db477d83c1112ac2dbc301a5f073252e0d4f0d8e110b002785e3cd6a3adb59": {
+      "size": 396142,
+      "type": "text/html"
+    },
     "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
       "size": 23664,
       "type": "font/woff2"
@@ -119,7 +123,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "b1d30d11bea5ec8595f8bcd1fc4fdfb348c8ee801a02e08f48aff0025d3617ec",
+  "id": "7ab370b1c68a54f2f2eca3155447f3384357756067e4aa74147592e3cbbfa35b",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -132,6 +136,9 @@
         },
         {
           "spot": "room-status"
+        },
+        {
+          "spot": "countdown"
         },
         {
           "spot": "coffee"
@@ -228,6 +235,34 @@
       "id": "coffee",
       "kind": "image",
       "name": "Coffee still"
+    },
+    "countdown": {
+      "assets": {},
+      "data": {
+        "doneText": "It's here!",
+        "facts": [
+          {
+            "label": "Site",
+            "value": "Riverside warehouse"
+          }
+        ],
+        "look": "poster",
+        "mode": "up",
+        "progressDays": 14,
+        "recordDays": 301,
+        "showDetail": true,
+        "showFacts": true,
+        "showProgress": true,
+        "showRecord": true,
+        "target": "2026-04-21T09:00",
+        "title": "Days without a lost-time accident",
+        "units": "days"
+      },
+      "durationMs": 10000,
+      "id": "countdown",
+      "kind": "template",
+      "name": "Days without an accident",
+      "template": "base/countdown@1.0.0"
     },
     "energy": {
       "assets": {
@@ -450,6 +485,134 @@
         },
         "id": "alert",
         "name": "Alert",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 2,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
+    "base/countdown@1.0.0": {
+      "html": "86db477d83c1112ac2dbc301a5f073252e0d4f0d8e110b002785e3cd6a3adb59",
+      "manifest": {
+        "background": "#000000",
+        "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
+        "duration": {
+          "defaultMs": 10000,
+          "maxMs": 60000,
+          "minMs": 5000
+        },
+        "fields": {
+          "doneText": {
+            "default": "It's here!",
+            "label": "Once it is here",
+            "maxLength": 40,
+            "type": "text"
+          },
+          "facts": {
+            "default": [
+              {
+                "label": "Where",
+                "value": "Pier 9 roof terrace"
+              }
+            ],
+            "item": {
+              "label": {
+                "label": "Label",
+                "maxLength": 16,
+                "type": "text"
+              },
+              "value": {
+                "label": "Value",
+                "maxLength": 32,
+                "type": "text"
+              }
+            },
+            "label": "Facts",
+            "maxItems": 3,
+            "type": "list"
+          },
+          "look": {
+            "default": "pop",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "type": "select"
+          },
+          "mode": {
+            "default": "down",
+            "label": "Count",
+            "options": [
+              "down",
+              "up"
+            ],
+            "type": "select"
+          },
+          "progressDays": {
+            "default": 14,
+            "label": "Show the progress over the last days, counting down",
+            "max": 999,
+            "min": 1,
+            "step": 1,
+            "type": "number"
+          },
+          "recordDays": {
+            "default": 0,
+            "label": "Record in days, counting up (0 for none)",
+            "max": 99999,
+            "min": 0,
+            "step": 1,
+            "type": "number"
+          },
+          "showDetail": {
+            "default": true,
+            "label": "Show the date line",
+            "type": "boolean"
+          },
+          "showFacts": {
+            "default": true,
+            "label": "Show the facts",
+            "type": "boolean"
+          },
+          "showProgress": {
+            "default": true,
+            "label": "Show the progress",
+            "type": "boolean"
+          },
+          "showRecord": {
+            "default": true,
+            "label": "Show the record",
+            "type": "boolean"
+          },
+          "target": {
+            "label": "Counts down to, or up from",
+            "type": "datetime"
+          },
+          "title": {
+            "default": "The winter party",
+            "label": "What it counts to",
+            "maxLength": 60,
+            "type": "text"
+          },
+          "units": {
+            "default": "days",
+            "label": "Units",
+            "options": [
+              "days",
+              "days and hours",
+              "days, hours and minutes"
+            ],
+            "type": "select"
+          }
+        },
+        "id": "countdown",
+        "name": "Countdown",
         "orientations": [
           "landscape",
           "portrait"

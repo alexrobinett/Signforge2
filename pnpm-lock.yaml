@@ -236,6 +236,9 @@ importers:
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
+      '@signforge/template-countdown':
+        specifier: workspace:*
+        version: link:../../templates/countdown
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
@@ -381,6 +384,9 @@ importers:
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
+      '@signforge/template-countdown':
+        specifier: workspace:*
+        version: link:../../templates/countdown
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
@@ -481,6 +487,9 @@ importers:
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
+      '@signforge/template-countdown':
+        specifier: workspace:*
+        version: link:../../templates/countdown
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
@@ -551,6 +560,9 @@ importers:
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
+      '@signforge/template-countdown':
+        specifier: workspace:*
+        version: link:../../templates/countdown
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
@@ -720,6 +732,9 @@ importers:
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
+      '@signforge/template-countdown':
+        specifier: workspace:*
+        version: link:../../templates/countdown
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
@@ -935,6 +950,15 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.3.0
+
+  templates/countdown:
+    dependencies:
+      '@signforge/template-looks':
+        specifier: workspace:*
+        version: link:../../packages/template-looks
+      '@signforge/template-sdk':
+        specifier: workspace:*
+        version: link:../../packages/template-sdk
 
   templates/cstore-promo:
     dependencies:
