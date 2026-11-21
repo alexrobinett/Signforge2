@@ -45,12 +45,11 @@ export async function createOrgFromAccountMenu(page: Page, name: string) {
   await expect(dialog).toBeHidden();
 }
 
-/** With `E2E_SCREENSHOTS=<dir>`, save a screenshot once menus and drawers have finished animating. */
+/** With `E2E_SCREENSHOTS=<dir>`, save a screenshot: Playwright finishes menus' and drawers' animations first, with no wait on a clock. */
 export async function screenshot(page: Page, name: string) {
   const dir = process.env.E2E_SCREENSHOTS;
   if (!dir) return;
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: `${dir}/${name}.png` });
+  await page.screenshot({ path: `${dir}/${name}.png`, animations: 'disabled' });
 }
 
 /**

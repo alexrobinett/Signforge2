@@ -173,7 +173,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await expect(selected).toHaveText('Show its screens');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`/screens\\?group=${group.id}$`));
-  await expect(page.getByRole('button', { name: 'Front of house 1', pressed: true })).toBeVisible();
+  await expect(page.getByLabel('Group', { exact: true })).toHaveValue(group.id);
   await expect(menu).toBeHidden();
 
   // The list's read failing, with no retry left: a cached screen's commands are off, and the list and the screen

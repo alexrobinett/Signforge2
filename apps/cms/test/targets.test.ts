@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byName, findTargets, groupReach, locationLine, namesOf, sortScreens } from '../src/lib/targets';
+import { byName, findTargets, groupReach, namesOf, sortScreens } from '../src/lib/targets';
 
 const STATE = { reason: null, wakesAt: null, filesMissing: null };
 type Kind = 'online' | 'updating' | 'asleep' | 'unreachable' | 'needs_you';
@@ -116,14 +116,5 @@ describe('namesOf', () => {
 
   it('names an id no screen has by itself', () => {
     expect(namesOf(['scr_gone', 'scr_c'], SCREENS)).toEqual(['0142 Drive-thru L', 'scr_gone']);
-  });
-});
-
-describe('locationLine', () => {
-  it('names the screens that need you by name, not in the id order a group lists its members', () => {
-    const members = [screen('scr_1', 'Window', 'needs_you'), screen('scr_2', 'Counter'), screen('scr_3', 'Annex', 'needs_you')];
-    expect(locationLine(members)).toBe('3 screens · Annex, Window need you');
-    expect(locationLine([screen('scr_1', 'Window', 'needs_you')])).toBe('1 screen · Window needs you');
-    expect(locationLine([screen('scr_2', 'Counter')])).toBe('1 screen');
   });
 });

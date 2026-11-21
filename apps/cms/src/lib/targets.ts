@@ -66,16 +66,6 @@ export const namesOf = (ids: readonly string[], screens: readonly Named[]) =>
     .sort(byName)
     .map((s) => s.name);
 
-/** A location's (a group's) line: how many screens it has, and those that need you, by name. */
-export function locationLine(members: readonly ScreenLike[]): string {
-  const needs = namesOf(
-    members.filter((s) => s.state.kind === 'needs_you').map((s) => s.id),
-    members,
-  );
-  const count = `${members.length} ${members.length === 1 ? 'screen' : 'screens'}`;
-  return needs.length ? `${count} · ${needs.join(', ')} ${needs.length === 1 ? 'needs' : 'need'} you` : count;
-}
-
 type Compare = (a: ScreenLike, b: ScreenLike) => number;
 const NAME: Compare = () => 0;
 // Most urgent first, as the rollup ranks them; asleep is on purpose, so it is last.

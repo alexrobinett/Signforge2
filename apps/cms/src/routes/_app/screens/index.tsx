@@ -2,11 +2,24 @@
  * Screens: the live tile wall by default (canvas board Screens A), or the dense table (board B, on
  * the light kit). Each screen says what it should be showing and what it is doing, as a fact, and
  * what it is doing stays current while the page is open (src/queries/screens.ts).
- * Groups are locations: each rolls up to its most urgent screen.
+ * Needs attention lists the groups with a screen that needs a person. A retired (revoked) screen
+ * is off the list and its counts unless the Retired filter asks for it. The table's rows can be
+ * ticked, and the selection added to a group or removed from one.
  */
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { ArrowDownIcon, ArrowUpIcon, CloudOffIcon, LayoutGridIcon, PlusIcon, SearchIcon, TableIcon } from 'lucide-react';
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ChevronDownIcon,
+  CloudOffIcon,
+  LayoutGridIcon,
+  PlusIcon,
+  SearchIcon,
+  TableIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from 'lucide-react';
 import { useMemo } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
@@ -14,39 +27,47 @@ import { EmptyFleet } from '~/components/screens/empty-fleet';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { PairScreenForm } from '~/components/screens/pair-screen-form';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
-import { KIND_WORD, ScreenStatus, StatusWord, toneOf } from '~/components/screens/status';
+import { KIND_WORD, ScreenStatus } from '~/components/screens/status';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '~/components/ui/dropdown-menu';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import { describeHours } from '~/components/screens/display-hours-editor';
-import { ago, describeScreen, rollup, summarise } from '~/lib/screen-status';
+import { needingAttention } from '~/lib/groups';
+import { ago, describeScreen, isRetired, summarise } from '~/lib/screen-status';
 import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
 import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
 import { byWord, publishTitle } from '~/lib/publishes';
-import { isScreenSort, locationLine, sortScreens, type ScreenSort } from '~/lib/targets';
+import { byName, isScreenSort, sortScreens, type ScreenSort } from '~/lib/targets';
 import { publishQuery } from '~/queries/publishes';
 import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
+import { useAppStore } from '~/state/provider';
+import { selectedIn } from '~/state/screens';
 
 type View = 'tiles' | 'table';
+/** A state, or `retired`: the revoked screens, which no other filter shows. */
+type StatusFilter = StateKind | 'retired';
 interface Search {
   view?: View;
   q?: string;
   group?: string;
-  status?: StateKind;
+  status?: StatusFilter;
   /** Absent: by name. */
   sort?: ScreenSort;
 }
+
+const isStatusFilter = (v: unknown): v is StatusFilter => v === 'retired' || isStateKind(v);
 
 export const Route = createFileRoute('/_app/screens/')({
   validateSearch: (s: Record<string, unknown>): Search => ({
     ...(s.view === 'table' ? { view: 'table' as const } : {}),
     ...(typeof s.q === 'string' && s.q ? { q: s.q } : {}),
     ...(typeof s.group === 'string' && s.group ? { group: s.group } : {}),
-    ...(isStateKind(s.status) ? { status: s.status } : {}),
+    ...(isStatusFilter(s.status) ? { status: s.status } : {}),
     ...(isScreenSort(s.sort) && s.sort !== 'name' ? { sort: s.sort } : {}),
   }),
   // The org's settings give the pairing form its defaults for new screens. The list is read again
@@ -81,10 +102,13 @@ function ScreensPage() {
     return m;
   }, [groups]);
 
+  const active = screens.filter((s) => !isRetired(s));
+  const activeIds = new Set(active.map((s) => s.id));
+  const retired = search.status === 'retired';
   const sort = search.sort ?? 'name';
-  const matching = screens.filter((s) => {
+  const matching = (retired ? screens.filter(isRetired) : active).filter((s) => {
     if (search.group && !groupsOf.get(s.id)?.some((g) => g.id === search.group)) return false;
-    if (search.status && s.state.kind !== search.status) return false;
+    if (search.status && !retired && s.state.kind !== search.status) return false;
     if (search.q) {
       const q = search.q.toLowerCase();
       if (!s.name.toLowerCase().includes(q) && !s.showing?.spot?.name.toLowerCase().includes(q)) return false;
@@ -107,11 +131,11 @@ function ScreensPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Screens">{canManage && <PairDialog groups={groups} />}</PageHeader>
-      <Summary screens={screens} />
+      <Summary screens={active} />
       <NotCurrent failing={pollFailing} heardAt={heardAt} now={now} />
       <LatestPublish orgId={orgId} now={now} />
 
-      {groups.length > 0 && <Locations groups={groups} screens={screens} onPick={(group) => set({ group })} />}
+      <NeedsAttention groups={groups} screens={screens} onPick={(group) => set({ group })} />
 
       {/* The search and filters navigate, so they wait for the page to hydrate (#140). */}
       <div className="flex flex-wrap items-center gap-3">
@@ -130,25 +154,26 @@ function ScreensPage() {
               className="pl-9"
             />
           </div>
-          {groups.length > 0 && (
-            <fieldset className="flex flex-wrap gap-1.5">
-              <legend className="sr-only">Filter by group</legend>
-              <Chip pressed={!search.group} onClick={() => set({ group: undefined })}>
-                All {screens.length}
-              </Chip>
-              {groups.map((g) => (
-                <Chip key={g.id} pressed={search.group === g.id} onClick={() => set({ group: search.group === g.id ? undefined : g.id })}>
-                  {g.name} {g.screenIds.length}
-                </Chip>
-              ))}
-            </fieldset>
-          )}
           <div className="flex items-center gap-2 text-sm text-muted-foreground sm:ml-auto">
+            <label htmlFor="screen-group">Group</label>
+            <NativeSelect id="screen-group" value={search.group ?? ''} onChange={(e) => set({ group: e.target.value || undefined })}>
+              <option value="">All groups</option>
+              {[...groups].sort(byName).map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name} ({g.screenIds.filter((id) => activeIds.has(id)).length})
+                </option>
+              ))}
+            </NativeSelect>
+            <Link to="/settings/screens" hash="groups" className="flex min-h-10 items-center text-primary underline-offset-4 hover:underline">
+              Manage groups
+            </Link>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <label htmlFor="screen-status">Status</label>
             <NativeSelect
               id="screen-status"
               value={search.status ?? ''}
-              onChange={(e) => set({ status: isStateKind(e.target.value) ? e.target.value : undefined })}
+              onChange={(e) => set({ status: isStatusFilter(e.target.value) ? e.target.value : undefined })}
             >
               <option value="">Any</option>
               {STATE_KINDS.map((k) => (
@@ -156,6 +181,7 @@ function ScreensPage() {
                   {KIND_WORD[k]}
                 </option>
               ))}
+              <option value="retired">Retired</option>
             </NativeSelect>
           </div>
           <fieldset className="flex rounded-lg border border-border-strong bg-card p-0.5">
@@ -188,7 +214,7 @@ function ScreensPage() {
       ) : view === 'tiles' ? (
         <Tiles screens={shown} groupsOf={groupsOf} now={now} />
       ) : (
-        <ScreenTable screens={shown} groupsOf={groupsOf} now={now} sort={sort} />
+        <ScreenTable screens={shown} groups={groups} groupsOf={groupsOf} now={now} canManage={canManage} sort={sort} />
       )}
     </div>
   );
@@ -257,22 +283,6 @@ function NotCurrent({ failing, heardAt, now }: { failing: boolean; heardAt: numb
   );
 }
 
-function Chip({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onClick}
-      className={cn(
-        'h-10 rounded-full border px-3.5 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-        pressed ? 'border-foreground bg-foreground font-medium text-background' : 'border-border-strong bg-card hover:bg-accent',
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
 function PairDialog({ groups }: { groups: GroupView[] }) {
   return (
     <Dialog>
@@ -292,34 +302,41 @@ function PairDialog({ groups }: { groups: GroupView[] }) {
   );
 }
 
-/** Each group as a location, rolled up to its most urgent screen. */
-function Locations({ groups, screens, onPick }: { groups: GroupView[]; screens: ScreenView[]; onPick: (id: string) => void }) {
-  const byId = new Map(screens.map((s) => [s.id, s]));
+/**
+ * The groups with a screen that needs you, each naming those screens; groups that are fine take no
+ * room. On a phone each is one line, side by side, so the screens stay in the first view.
+ */
+function NeedsAttention({ groups, screens, onPick }: { groups: GroupView[]; screens: ScreenView[]; onPick: (id: string) => void }) {
+  const needing = needingAttention(groups, screens);
+  if (!needing.length) return null;
   return (
-    <ul aria-label="By location" className="flex flex-wrap gap-3">
-      {groups.map((g) => {
-        const members = g.screenIds.map((id) => byId.get(id)).filter((s): s is ScreenView => !!s);
-        const kind = rollup(members);
-        return (
-          <li key={g.id} className="min-w-0 flex-[1_1_16rem]">
+    <section aria-labelledby="needs-attention" className="space-y-2">
+      <h2 id="needs-attention" className="flex items-center gap-1.5 text-sm font-semibold">
+        <TriangleAlertIcon className="size-4 text-status-needs-you-foreground" aria-hidden /> Needs attention
+      </h2>
+      <ul className="flex gap-2 overflow-x-auto sm:flex-wrap sm:gap-3 sm:overflow-visible">
+        {needing.map(({ group: g, needs }) => (
+          <li key={g.id} className="shrink-0 sm:min-w-0 sm:flex-[1_1_16rem]">
             {/* A filter, like the toolbar's: it waits for the page to hydrate (#140). */}
             <EditorFields>
               <button
                 type="button"
                 onClick={() => onPick(g.id)}
-                className="flex w-full flex-col gap-1.5 rounded-xl border bg-card px-4 py-3.5 text-left outline-none hover:border-border-strong focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="flex min-h-10 w-full flex-col gap-1 rounded-xl border bg-card px-3.5 py-2 text-left outline-none hover:border-border-strong focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:px-4 sm:py-3"
               >
-                <span className="flex items-center justify-between gap-2">
-                  <strong className="truncate text-[15px] font-semibold">{g.name}</strong>
-                  {kind && <StatusWord tone={toneOf(kind)}>{KIND_WORD[kind]}</StatusWord>}
+                <span className="flex items-baseline gap-2 text-[15px] whitespace-nowrap">
+                  <strong className="font-semibold">{g.name}</strong>
+                  <span className="font-medium text-status-needs-you-foreground">
+                    {needs.length} {needs.length === 1 ? 'needs' : 'need'} you
+                  </span>
                 </span>
-                <span className="text-[13px] text-muted-foreground">{locationLine(members)}</span>
+                <span className="hidden truncate text-[13px] text-muted-foreground sm:block">{needs.map((s) => s.name).join(', ')}</span>
               </button>
             </EditorFields>
           </li>
-        );
-      })}
-    </ul>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -378,6 +395,59 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
   );
 }
 
+/**
+ * What to do with the rows ticked: add them to a group or take them out of one, one call each.
+ * Only the ticked rows the table shows count, so a filter changed since never acts on hidden ones.
+ * The actions wrap, so more fit beside them.
+ */
+function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: string[]; groups: GroupView[] }) {
+  const busy = useAppStore((s) => s.screens.bulkPending);
+  const add = useAppStore((s) => s.addScreensToGroup);
+  const remove = useAppStore((s) => s.removeScreensFromGroup);
+  const clear = useAppStore((s) => s.clearScreenSelection);
+  const byNameGroups = [...groups].sort(byName);
+  const holding = byNameGroups.filter((g) => g.screenIds.some((id) => selected.includes(id)));
+  const menu = (label: string, choices: GroupView[], act: (g: GroupView) => void) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" disabled={!choices.length} aria-disabled={busy || undefined} className={cn(busy && 'opacity-60')}>
+          {label} <ChevronDownIcon aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {choices.map((g) => (
+          <DropdownMenuItem key={g.id} onSelect={() => act(g)}>
+            {g.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+  return (
+    <section aria-label="Selected screens" className="flex flex-wrap items-center gap-2 rounded-xl border border-border-strong bg-card px-4 py-2.5">
+      <p role="status" className="mr-2 text-sm font-medium">
+        {selected.length} selected
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {menu('Add to group', byNameGroups, (g) => void add(orgId, g, selected))}
+        {menu(
+          'Remove from group',
+          holding,
+          (g) =>
+            void remove(
+              orgId,
+              g,
+              selected.filter((id) => g.screenIds.includes(id)),
+            ),
+        )}
+      </div>
+      <Button variant="ghost" size="sm" onClick={clear} className="ml-auto">
+        <XIcon aria-hidden /> Clear selection
+      </Button>
+    </section>
+  );
+}
+
 /** A column the table sorts by: a link to the sort, the other way when it is the sort already. */
 function SortHeader({
   column,
@@ -412,92 +482,143 @@ function SortHeader({
   );
 }
 
-function ScreenTable({ screens, groupsOf, now, sort }: { screens: ScreenView[]; groupsOf: Map<string, GroupView[]>; now: number; sort: ScreenSort }) {
+function ScreenTable({
+  screens,
+  groups,
+  groupsOf,
+  now,
+  canManage,
+  sort,
+}: {
+  screens: ScreenView[];
+  groups: GroupView[];
+  groupsOf: Map<string, GroupView[]>;
+  now: number;
+  canManage: boolean;
+  sort: ScreenSort;
+}) {
+  const orgId = useOrgId();
+  const ticked = useAppStore((s) => selectedIn(s.screens, orgId));
+  const select = useAppStore((s) => s.selectScreens);
+  const ids = screens.map((s) => s.id);
+  const selected = ids.filter((id) => ticked.includes(id));
+  const all = selected.length === ids.length;
   return (
-    <div className="relative overflow-x-auto rounded-xl border bg-card">
-      <table className="w-full min-w-[56rem] border-collapse text-sm">
-        <thead className="bg-muted text-xs tracking-wide text-muted-foreground uppercase">
-          <tr>
-            <th scope="col" className="px-3 py-2.5 pl-4 text-left font-semibold">
-              Should be showing
-            </th>
-            <SortHeader column="name" sort={sort}>
-              Screen
-            </SortHeader>
-            <SortHeader column="status" sort={sort}>
-              Status
-            </SortHeader>
-            <th scope="col" className="px-3 py-2.5 text-left font-semibold">
-              What it is doing
-            </th>
-            <th scope="col" className="px-3 py-2.5 text-left font-semibold">
-              Display hours
-            </th>
-            <th scope="col" className="px-3 py-2.5 text-right font-semibold">
-              Version
-            </th>
-            <SortHeader column="heard" sort={sort} align="right">
-              Last heard
-            </SortHeader>
-            <th scope="col" className="px-3 py-2.5 pr-4">
-              <span className="sr-only">Action</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {screens.map((s) => {
-            const d = describeScreen(s, now);
-            const v = versionText(s);
-            return (
-              <tr key={s.id} className="h-9 border-t hover:bg-muted/50">
-                <td className="py-1.5 pr-3 pl-4">
-                  <ScreenThumb screen={s} size="row" className="w-24 rounded" />
-                </td>
-                <th scope="row" className="px-3 py-1.5 text-left font-semibold whitespace-nowrap">
-                  <Link to="/screens/$screenId" params={{ screenId: s.id }} className="hover:underline">
-                    {s.name}
-                  </Link>
-                  <div className="text-[13px] font-normal text-muted-foreground">
-                    {s.kind === 'browser' && 'Test screen · '}
-                    {groupsOf
-                      .get(s.id)
-                      ?.map((g) => g.name)
-                      .join(', ') || 'No group'}
-                  </div>
+    // The checkboxes change the store, so they wait for the page to hydrate (#140).
+    <EditorFields>
+      <div className="space-y-3">
+        {canManage && selected.length > 0 && <SelectionBar orgId={orgId} selected={selected} groups={groups} />}
+        <div className="relative overflow-x-auto rounded-xl border bg-card">
+          <table className="w-full min-w-[56rem] border-collapse text-sm">
+            <thead className="bg-muted text-xs tracking-wide text-muted-foreground uppercase">
+              <tr>
+                {canManage && (
+                  <th scope="col" className="w-10 py-2.5 pl-4">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      aria-label="Select every screen shown"
+                      checked={all}
+                      ref={(el) => {
+                        if (el) el.indeterminate = selected.length > 0 && !all;
+                      }}
+                      onChange={(e) => select(orgId, ids, e.target.checked)}
+                    />
+                  </th>
+                )}
+                <th scope="col" className="px-3 py-2.5 pl-4 text-left font-semibold">
+                  Should be showing
                 </th>
-                <td className="px-3 py-1.5">
-                  <ScreenStatus screen={s} now={now} />
-                </td>
-                <td className="max-w-[28rem] px-3 py-1.5 leading-snug text-foreground/85">{d.line}</td>
-                <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{describeHours(s.displayHours)}</td>
-                <td
-                  className={cn(
-                    'px-3 py-1.5 text-right font-mono text-[13px] whitespace-nowrap tabular-nums',
-                    v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground',
-                  )}
-                >
-                  {v.text}
-                </td>
-                <td
-                  className="px-3 py-1.5 text-right font-mono text-[13px] whitespace-nowrap text-muted-foreground tabular-nums"
-                  title={s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : undefined}
-                >
-                  {s.lastSeenAt ? `${ago(now - s.lastSeenAt)} ago` : 'never'}
-                </td>
-                <td className="px-3 py-1.5 pr-4 text-right">
-                  {s.state.kind === 'needs_you' && (
-                    <Button asChild variant="outline" size="sm">
-                      <Link to="/screens/$screenId" params={{ screenId: s.id }} aria-label={`Troubleshoot ${s.name}`}>
-                        Troubleshoot
-                      </Link>
-                    </Button>
-                  )}
-                </td>
+                <SortHeader column="name" sort={sort}>
+                  Screen
+                </SortHeader>
+                <SortHeader column="status" sort={sort}>
+                  Status
+                </SortHeader>
+                <th scope="col" className="px-3 py-2.5 text-left font-semibold">
+                  What it is doing
+                </th>
+                <th scope="col" className="px-3 py-2.5 text-left font-semibold">
+                  Display hours
+                </th>
+                <th scope="col" className="px-3 py-2.5 text-right font-semibold">
+                  Version
+                </th>
+                <SortHeader column="heard" sort={sort} align="right">
+                  Last heard
+                </SortHeader>
+                <th scope="col" className="px-3 py-2.5 pr-4">
+                  <span className="sr-only">Action</span>
+                </th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+            </thead>
+            <tbody>
+              {screens.map((s) => {
+                const d = describeScreen(s, now);
+                const v = versionText(s);
+                return (
+                  <tr key={s.id} className="h-9 border-t hover:bg-muted/50">
+                    {canManage && (
+                      <td className="py-1.5 pl-4">
+                        <input
+                          type="checkbox"
+                          className="size-4 accent-primary"
+                          aria-label={`Select ${s.name}`}
+                          checked={selected.includes(s.id)}
+                          onChange={(e) => select(orgId, [s.id], e.target.checked)}
+                        />
+                      </td>
+                    )}
+                    <td className="py-1.5 pr-3 pl-4">
+                      <ScreenThumb screen={s} size="row" className="w-24 rounded" />
+                    </td>
+                    <th scope="row" className="px-3 py-1.5 text-left font-semibold whitespace-nowrap">
+                      <Link to="/screens/$screenId" params={{ screenId: s.id }} className="hover:underline">
+                        {s.name}
+                      </Link>
+                      <div className="text-[13px] font-normal text-muted-foreground">
+                        {s.kind === 'browser' && 'Test screen · '}
+                        {groupsOf
+                          .get(s.id)
+                          ?.map((g) => g.name)
+                          .join(', ') || 'No group'}
+                      </div>
+                    </th>
+                    <td className="px-3 py-1.5">
+                      <ScreenStatus screen={s} now={now} />
+                    </td>
+                    <td className="max-w-[28rem] px-3 py-1.5 leading-snug text-foreground/85">{d.line}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{describeHours(s.displayHours)}</td>
+                    <td
+                      className={cn(
+                        'px-3 py-1.5 text-right font-mono text-[13px] whitespace-nowrap tabular-nums',
+                        v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground',
+                      )}
+                    >
+                      {v.text}
+                    </td>
+                    <td
+                      className="px-3 py-1.5 text-right font-mono text-[13px] whitespace-nowrap text-muted-foreground tabular-nums"
+                      title={s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : undefined}
+                    >
+                      {s.lastSeenAt ? `${ago(now - s.lastSeenAt)} ago` : 'never'}
+                    </td>
+                    <td className="px-3 py-1.5 pr-4 text-right">
+                      {s.state.kind === 'needs_you' && (
+                        <Button asChild variant="outline" size="sm">
+                          <Link to="/screens/$screenId" params={{ screenId: s.id }} aria-label={`Troubleshoot ${s.name}`}>
+                            Troubleshoot
+                          </Link>
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </EditorFields>
   );
 }
