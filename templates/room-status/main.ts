@@ -36,9 +36,9 @@ const DATES: Partial<Record<Look, Intl.DateTimeFormatOptions>> = {
 };
 
 const UNUSED: Record<Look, string> = {
-  pop: '.kicker, .live, .date, .for, .until, .rule, .today',
+  pop: '.kicker, .live, .date, .for, .until, .rule, .head',
   poster: '.kicker, .live, .for, .until, .pin',
-  night: '.kicker, .date, .rule, .today, .pin, .for .k',
+  night: '.kicker, .date, .rule, .head, .pin, .for .k',
   corporate: '.live, .until, .pin',
 };
 
@@ -107,7 +107,15 @@ defineTemplate({
     const current = remaining.find((m) => m.start <= now);
     const next = remaining.find((m) => m.start > now);
     el('.stage')!.dataset.state = current ? 'busy' : 'free';
-    target = current?.end ?? next?.start;
+    // Busy until the last of the meetings that follow on (or overlap) without a gap.
+    let freeAt = current?.end;
+    while (freeAt) {
+      const end = freeAt;
+      const follows = remaining.find((m) => m.start <= end && m.end > end);
+      if (!follows) break;
+      freeAt = follows.end;
+    }
+    target = freeAt ?? next?.start;
 
     el('.word')!.textContent = WORDS[look][current ? 1 : 0];
     put('.seats .v', String(data.seats));
@@ -126,7 +134,7 @@ defineTemplate({
       const until = at(current.end);
       say(look === 'poster' ? `Now, until ${until}` : look === 'night' ? '' : `Until ${until} · `, current.title);
       put('.for .k', 'Time left');
-      put('.until', `left, until ${until}`);
+      put('.until', `left, until ${at(freeAt!)}`);
     } else if (next) {
       const until = at(next.start);
       const then = data.showNext ? next.title : '';
@@ -259,6 +267,7 @@ function timeline(ctx: TemplateContext, day: Meeting[], now: Date, at: (d: Date)
   }
   track.style.setProperty('--now', frac(nowH));
   const tpl = document.querySelector<HTMLTemplateElement>('#block')!;
+  let reached = 0;
   day.forEach((m, i) => {
     const block = tpl.content.firstElementChild!.cloneNode(true);
     if (!(block instanceof HTMLElement)) return;
@@ -269,10 +278,19 @@ function timeline(ctx: TemplateContext, day: Meeting[], now: Date, at: (d: Date)
     block.classList.toggle('current', m.start <= now && m.end > now);
     block.querySelector('.when')!.textContent = at(m.start);
     block.querySelector('.what')!.textContent = m.title;
+    // A double booking: a block that overlaps an earlier one shows only its colour, under the earlier
+    // one's label, so no label lands on another or under another block.
+    if (m.start.getTime() < reached) {
+      block.replaceChildren();
+      block.classList.add('under');
+    }
+    reached = Math.max(reached, m.end.getTime());
     track.append(block);
   });
   for (const block of track.querySelectorAll<HTMLElement>('.block')) {
-    const what = block.querySelector<HTMLElement>('.what')!;
+    const what = block.querySelector<HTMLElement>('.what');
+    // A block over an earlier one has no label left to fit.
+    if (!what) continue;
     const em = Number.parseFloat(getComputedStyle(what).fontSize);
     if (block.scrollHeight > block.clientHeight + 1 || block.scrollWidth > block.clientWidth + 1 || what.clientWidth < 2.5 * em) block.replaceChildren();
   }

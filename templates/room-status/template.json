@@ -27,7 +27,7 @@
     "showClock": { "type": "boolean", "label": "Show the clock", "default": true },
     "showFacts": { "type": "boolean", "label": "Show the seats and floor", "default": true },
     "showNowLine": { "type": "boolean", "label": "Show the now line", "default": true },
-    "showOrganiser": { "type": "boolean", "label": "Show who booked the meeting", "default": true }
+    "showOrganiser": { "type": "boolean", "label": "Show who booked the meeting", "default": false }
   },
   "duration": { "defaultMs": 10000, "minMs": 5000, "maxMs": 60000 },
   "orientations": ["landscape", "portrait"],

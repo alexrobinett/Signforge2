@@ -135,11 +135,12 @@ ol {
 }
 .block {
   position: absolute;
+  z-index: 1;
   overflow: hidden;
   color: var(--card-text, var(--lk-text));
 }
-.block.tight > * {
-  display: none;
+.block.under {
+  z-index: 0;
 }
 .nowline {
   position: absolute;
@@ -173,8 +174,8 @@ ol {
 [data-look='pop'] .stage {
   padding: 7.4vmin 8.9vmin;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
-  grid-template-areas: 'id clock' 'word word' 'line line' 'org org' 'next next' 'sched sched';
+  grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr);
+  grid-template-areas: 'id clock' 'word word' 'line line' 'note note' 'org org' 'next next' 'sched sched';
   column-gap: 3vmin;
 }
 [data-look='pop'] .ident {
@@ -254,6 +255,13 @@ ol {
   font-weight: 700;
   font-size: 3.33vmin;
 }
+[data-look='pop'] .allday {
+  grid-area: note;
+  margin-top: 1.5vmin;
+  font-family: var(--lk-font-display);
+  font-weight: 700;
+  font-size: 3.33vmin;
+}
 [data-look='pop'] .next {
   grid-area: next;
   margin-top: 1.5vmin;
@@ -266,12 +274,6 @@ ol {
   align-self: end;
   margin-top: 3vmin;
   gap: 1.5vmin;
-}
-[data-look='pop'] .head,
-[data-look='night'] .head {
-  font-family: var(--lk-font-label);
-  font-weight: var(--lk-label-weight);
-  font-size: 2.6vmin;
 }
 [data-look='pop'] .body {
   padding-top: 7.8vmin;
@@ -355,7 +357,7 @@ ol {
 /* Poster (B): the room in display serif, a stamp of the status, and the day as a column of hours. */
 [data-look='poster'] .stage {
   grid-template-columns: 8.9vmin minmax(0, 1fr) auto 8.1vmin 33.3vw;
-  grid-template-rows: 6.7vmin auto auto auto auto minmax(0, 1fr) auto auto auto auto 6.7vmin;
+  grid-template-rows: 6.7vmin auto auto auto auto minmax(0, 1fr) auto auto auto auto auto 6.7vmin;
   grid-template-areas:
     '. . . . s'
     '. facts clock . s'
@@ -365,6 +367,7 @@ ol {
     '. . . . s'
     '. r2 r2 . s'
     '. line line . s'
+    '. note note . s'
     '. org org . s'
     '. next next . s'
     '. . . . s';
@@ -381,6 +384,7 @@ ol {
 [data-look='poster'] .kick,
 [data-look='poster'] .next,
 [data-look='poster'] .org,
+[data-look='poster'] .allday,
 [data-look='poster'] .head,
 [data-look='poster'] .hours {
   font-family: var(--lk-font-label);
@@ -470,6 +474,10 @@ ol {
   grid-area: org;
   margin-top: 1.3vmin;
 }
+[data-look='poster'] .allday {
+  grid-area: note;
+  margin-top: 1.3vmin;
+}
 [data-look='poster'] .next {
   grid-area: next;
   margin-top: 1.3vmin;
@@ -482,9 +490,6 @@ ol {
 [data-look='poster'] .today,
 [data-look='corporate'] .today {
   display: inline;
-}
-[data-look='poster'] .allday::before {
-  content: '· ';
 }
 [data-look='poster'] .body {
   margin: 1.2vmin 0;
@@ -535,7 +540,7 @@ ol {
   top: calc(var(--now) * 100%);
   height: 0.37vmin;
   translate: 0 -50%;
-  z-index: 1;
+  z-index: 2;
 }
 [data-look='poster'] .nowline .dot {
   display: block;
@@ -561,8 +566,8 @@ ol {
 [data-look='night'] .stage {
   padding: 6.7vmin 10.4vmin;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto;
-  grid-template-areas: 'id clock' 'status status' 'line line' 'org org' 'next next' '. .' 'sched sched';
+  grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas: 'id clock' 'status status' 'line line' 'note note' 'org org' 'next next' '. .' 'sched sched';
   column-gap: 3vmin;
 }
 [data-look='night'] .ident,
@@ -647,6 +652,13 @@ ol {
   font-size: 2.6vmin;
   color: var(--lk-muted);
 }
+[data-look='night'] .allday {
+  grid-area: note;
+  margin-top: 1.5vmin;
+  font-family: var(--lk-font-label);
+  font-size: 2.6vmin;
+  color: var(--lk-muted);
+}
 [data-look='night'] .next {
   grid-area: next;
   margin-top: 1.5vmin;
@@ -657,9 +669,6 @@ ol {
 [data-look='night'] .schedule {
   grid-area: sched;
   gap: 1.5vmin;
-}
-[data-look='night'] .head {
-  color: var(--lk-muted);
 }
 [data-look='night'] .body {
   height: 17vmin;
@@ -741,7 +750,7 @@ ol {
 }
 [data-look='corporate'] .stage {
   grid-template-columns: 7.4vmin repeat(3, minmax(0, 1fr)) 7.4vmin 33.3vw;
-  grid-template-rows: 6.7vmin auto auto auto minmax(0, 1fr) auto auto auto auto auto auto auto 7.4vmin;
+  grid-template-rows: 6.7vmin auto auto auto minmax(0, 1fr) auto auto auto auto auto auto auto auto 7.4vmin;
   grid-template-areas:
     '. . . . . s'
     '. clock clock clock . s'
@@ -751,6 +760,7 @@ ol {
     '. kick kick kick . s'
     '. word word word . s'
     '. line line line . s'
+    '. note note note . s'
     '. org org org . s'
     '. next next next . s'
     '. r2 r2 r2 . s'
@@ -831,6 +841,12 @@ ol {
   font-size: 2.4vmin;
   color: var(--lk-muted);
 }
+[data-look='corporate'] .allday {
+  grid-area: note;
+  margin-top: 1vmin;
+  font-size: 2.4vmin;
+  color: var(--lk-muted);
+}
 [data-look='corporate'] .next {
   grid-area: next;
   margin-top: 1vmin;
@@ -895,9 +911,6 @@ ol {
   margin-right: 1.1vmin;
   vertical-align: middle;
   background: var(--lk-accent);
-}
-[data-look='corporate'] .allday {
-  color: var(--card-text, var(--lk-text));
 }
 [data-look='corporate'] .items {
   flex-direction: column;
@@ -1047,7 +1060,7 @@ ol {
 }
 [data-look='poster'][data-orientation='portrait'] .stage {
   grid-template-columns: 7vmin minmax(0, 1fr) auto 7vmin;
-  grid-template-rows: 6.7vmin auto auto auto auto minmax(0, 1fr) auto auto auto auto 46vh;
+  grid-template-rows: 6.7vmin auto auto auto auto minmax(0, 1fr) auto auto auto auto auto 46vh;
   grid-template-areas:
     '. . . .'
     '. facts clock .'
@@ -1057,6 +1070,7 @@ ol {
     '. . . .'
     '. r2 r2 .'
     '. line line .'
+    '. note note .'
     '. org org .'
     '. next next .'
     's s s s';
@@ -1087,7 +1101,7 @@ ol {
 }
 [data-look='corporate'][data-orientation='portrait'] .stage {
   grid-template-columns: 6.5vmin repeat(3, minmax(0, 1fr)) 6.5vmin;
-  grid-template-rows: 6.7vmin auto auto auto minmax(0, 1fr) auto auto auto auto auto auto auto 5vmin 48vh;
+  grid-template-rows: 6.7vmin auto auto auto minmax(0, 1fr) auto auto auto auto auto auto auto auto 5vmin 48vh;
   grid-template-areas:
     '. . . . .'
     '. clock clock clock .'
@@ -1097,6 +1111,7 @@ ol {
     '. kick kick kick .'
     '. word word word .'
     '. line line line .'
+    '. note note note .'
     '. org org org .'
     '. next next next .'
     '. r2 r2 r2 .'

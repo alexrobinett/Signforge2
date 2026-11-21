@@ -36,10 +36,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "4c9706e02787f7e29f81e946671b76de1f4b2e506e0338f1b8be56d23d636c6d": {
-      "size": 401257,
-      "type": "text/html"
-    },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
@@ -101,13 +97,17 @@
       "size": 46747,
       "type": "image/png"
     },
+    "e1021a10781a10f4203677fe6874729cc576853eeee366d16ff2cce8a20c0c35": {
+      "size": 401761,
+      "type": "text/html"
+    },
     "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688": {
       "sample": "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f",
       "size": 421529,
       "type": "image/jpeg"
     }
   },
-  "id": "19f7bc19ace5191f63f06c3837aa57905e15608f0dde0662d199cb5dc82cc2bf",
+  "id": "706643339290f39960b2f843d49b19229b5667f4bbf4f68b793b463b9147f572",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -448,7 +448,7 @@
         "showFacts": true,
         "showNext": true,
         "showNowLine": true,
-        "showOrganiser": true,
+        "showOrganiser": false,
         "showSchedule": true
       },
       "durationMs": 10000,
@@ -1058,7 +1058,7 @@
       }
     },
     "base/room-status@1.0.0": {
-      "html": "4c9706e02787f7e29f81e946671b76de1f4b2e506e0338f1b8be56d23d636c6d",
+      "html": "e1021a10781a10f4203677fe6874729cc576853eeee366d16ff2cce8a20c0c35",
       "manifest": {
         "background": "#000000",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
@@ -1156,7 +1156,7 @@
             "type": "boolean"
           },
           "showOrganiser": {
-            "default": true,
+            "default": false,
             "label": "Show who booked the meeting",
             "type": "boolean"
           },

@@ -141,6 +141,7 @@ interface Host {
     theme?: FrameTheme,
     sampled?: boolean | 'broken',
     durationMs?: number,
+    timezone?: string,
   ): Promise<void>;
   post(frame: string, type: 'play' | 'reset'): Promise<void>;
   /** Wait until the frame has sent `type` `count` times in all. */
@@ -196,11 +197,11 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
       );
       await waitFor(frame, 'loaded', 1);
     },
-    async init(frame, data, assets = {}, now = NOW, theme, sampled = false, durationMs = 8000) {
+    async init(frame, data, assets = {}, now = NOW, theme, sampled = false, durationMs = 8000, timezone = 'UTC') {
       const samples = sampled ? Object.fromEntries(Object.keys(assets).map((field) => [field, sampleAsset(field)])) : {};
       const broken = sampled === 'broken';
       await page.evaluate(
-        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs }) => {
+        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone }) => {
           const w = window as unknown as {
             frames_: Record<string, HTMLIFrameElement>;
             SFSample: typeof import('@signforge/media/sample');
@@ -247,14 +248,14 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
             durationMs,
             orientation,
             viewport: size,
-            timezone: 'UTC',
+            timezone,
             locale: 'en-US',
             clock: { now, offsetMs: now - Date.now() },
             theme,
           };
           w.frames_[frame]!.contentWindow!.postMessage(init, '*');
         },
-        { frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs },
+        { frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, timezone },
       );
     },
     post: (frame, type) =>
@@ -1073,8 +1074,8 @@ describe('room status (#199)', () => {
     let inits = 0;
     return {
       hst,
-      async show(data: Data, theme?: FrameTheme, now = NOW) {
-        await hst.init('fresh', spotData(t().manifest, data), {}, now, theme);
+      async show(data: Data, theme?: FrameTheme, now = NOW, timezone = 'UTC') {
+        await hst.init('fresh', spotData(t().manifest, data), {}, now, theme, false, 8000, timezone);
         await hst.waitFor('fresh', 'ready', ++inits);
         return hst.page.mainFrame().childFrames()[0]!;
       },
@@ -1102,13 +1103,22 @@ describe('room status (#199)', () => {
     const seen: Record<string, unknown> = {};
     const cases: [string, Data][] = [
       ['between meetings', { events: today }],
-      ['in a meeting', { events: [booking('Design review', -0.25, 0.75, 'Priya Shah'), booking('Hiring sync', 2, 2.5)] }],
+      ['in a meeting', { events: [booking('Design review', -0.25, 0.75, 'Priya Shah'), booking('Hiring sync', 2, 2.5)], showOrganiser: true }],
+      // A corridor screen names no one unless the spot asks.
+      ['in a meeting, the organiser left off', { events: [booking('Design review', -0.25, 0.75, 'Priya Shah')] }],
+      // Busy until the last of meetings that follow straight on.
+      ['in back-to-back meetings', { events: [booking('Design review', -0.25, 0.75), booking('Hiring sync', 0.75, 1.5), booking('Retro', 3, 3.5)] }],
       ['after the last meeting', { events: [booking('Stand-up', -5, -4.5)] }],
       ['with no events', { events: [] }],
       ['with only tomorrow booked', { events: [booking('Retro', 20, 21)] }],
       [
         'on a day with an all-day event',
         { events: [{ title: 'Offsite', start: '2026-11-17', end: '2026-11-18', allDay: true, organizer: '' }, booking('Hiring sync', 2, 2.5)] },
+      ],
+      // The note stays when the schedule is off: "Available" alone would hide it.
+      [
+        'with the schedule off on a day with an all-day event',
+        { events: [{ title: 'Closed for cleaning', start: '2026-11-17', end: '2026-11-18', allDay: true, organizer: '' }], showSchedule: false },
       ],
     ];
     for (const [name, data] of cases) seen[name] = await says(await r.show({ look: 'corporate', ...data }));
@@ -1130,6 +1140,26 @@ describe('room status (#199)', () => {
         line: 'Until 3:45 PM · Design review',
         org: 'Booked by Priya Shah',
         next: 'Next at 5:00 PM: Hiring sync',
+        freeDay: null,
+        allDay: null,
+      },
+      'in a meeting, the organiser left off': {
+        state: 'busy',
+        word: 'In use',
+        for: 'Time left 45 min',
+        line: 'Until 3:45 PM · Design review',
+        org: null,
+        next: null,
+        freeDay: null,
+        allDay: null,
+      },
+      'in back-to-back meetings': {
+        state: 'busy',
+        word: 'In use',
+        for: 'Time left 1 hr 30 min',
+        line: 'Until 3:45 PM · Design review',
+        org: null,
+        next: 'Next at 3:45 PM: Hiring sync',
         freeDay: null,
         allDay: null,
       },
@@ -1173,6 +1203,45 @@ describe('room status (#199)', () => {
         freeDay: null,
         allDay: 'All day: Offsite',
       },
+      'with the schedule off on a day with an all-day event': {
+        state: 'free',
+        word: 'Available',
+        for: null,
+        line: 'Nothing booked today',
+        org: null,
+        next: null,
+        freeDay: null,
+        allDay: 'All day: Closed for cleaning',
+      },
+    });
+  });
+
+  /** A booking between two instants, as the feed writes it. */
+  const between = (title: string, start: string, end: string) => ({ title, start, end, allDay: false, organizer: '' });
+  /** Days in New York across a change of clocks and across midnight, each at the time it is told. */
+  const zoned: [name: string, now: string, events: Data[]][] = [
+    // 1:30 EDT on the day the clocks go back, a meeting at 1:15 EST: 45 minutes away, not 15 before.
+    ['the clocks going back', '2026-11-01T05:30:00Z', [between('Night shift', '2026-11-01T06:15:00Z', '2026-11-01T07:00:00Z')]],
+    // 1:50 EST on the day they go forward, a meeting at 3:10 EDT: 20 minutes away.
+    ['the clocks going forward', '2026-03-08T06:50:00Z', [between('Early start', '2026-03-08T07:10:00Z', '2026-03-08T08:00:00Z')]],
+    // 23:30, in a meeting from 22:30 to 1:00 tomorrow.
+    ['a meeting into tomorrow', '2026-11-18T04:30:00Z', [between('Late shift', '2026-11-18T03:30:00Z', '2026-11-18T06:00:00Z')]],
+    // 0:30, in a meeting from 23:00 yesterday to 1:30.
+    ['a meeting from yesterday', '2026-11-18T05:30:00Z', [between('Late shift', '2026-11-18T04:00:00Z', '2026-11-18T06:30:00Z')]],
+  ];
+
+  it('counts across a change of clocks and across midnight in the screen zone', async () => {
+    const r = await room();
+    const seen: Record<string, unknown> = {};
+    for (const [name, now, events] of zoned) {
+      const { line, for: left } = await says(await r.show({ look: 'corporate', events }, undefined, Date.parse(now), 'America/New_York'));
+      seen[name] = { line, left };
+    }
+    expect(seen).toEqual({
+      'the clocks going back': { line: 'Free until 1:15 AM, then Night shift', left: 'Free for 45 min' },
+      'the clocks going forward': { line: 'Free until 3:10 AM, then Early start', left: 'Free for 20 min' },
+      'a meeting into tomorrow': { line: 'Until 1:00 AM · Late shift', left: 'Time left 1 hr 30 min' },
+      'a meeting from yesterday': { line: 'Until 1:30 AM · Late shift', left: 'Time left 1 hr' },
     });
   });
 
@@ -1193,11 +1262,21 @@ describe('room status (#199)', () => {
         ],
       },
     ],
+    // A double-booked room: a meeting inside the one on now, and two later that overlap.
+    [
+      'overlapping',
+      {
+        ...longest,
+        events: [booking(long, -0.5, 1, 'Priya Shah'), booking('Interview', 0, 0.5), booking('Hiring sync', 1, 2), booking('Vendor demo', 1.25, 2.5)],
+      },
+    ],
     ['empty', { ...longest, events: [] }],
   ];
   const toggles = ['showSchedule', 'showNext', 'showClock', 'showFacts', 'showNowLine', 'showOrganiser'];
+  const allOn: Data = Object.fromEntries(toggles.map((t) => [t, true]));
+  const allOff: Data = Object.fromEntries(toggles.map((t) => [t, false]));
   /** Every toggle on, each one off on its own, and all of them off. */
-  const toggleSets: Data[] = [{}, ...toggles.map((t) => ({ [t]: false })), Object.fromEntries(toggles.map((t) => [t, false]))];
+  const toggleSets: Data[] = [allOn, ...toggles.map((t) => ({ ...allOn, [t]: false })), allOff];
 
   /**
    * What is wrong with the layout at rest: text past the screen, past its clamp or cut by a box
@@ -1247,6 +1326,13 @@ describe('room status (#199)', () => {
           if (b.r - b.l < 1 || b.b - b.t < 1) continue;
           const on = cut(b, screen);
           if (on.r - on.l < b.r - b.l - 1 || on.b - on.t < b.b - b.t - 1) found.push(`${name(el)} runs off the screen`);
+          // Nothing painted over it: what is on top at the middle of the line is the text's own box. A hit
+          // on a glyph's font box that reaches past its element's box (display type set solid) is no cover.
+          const [x, y] = [(b.l + b.r) / 2, (b.t + b.b) / 2];
+          const top = document.elementFromPoint(x, y);
+          const over = top?.getBoundingClientRect();
+          if (top && over && !el.contains(top) && !top.contains(el) && x >= over.left && x <= over.right && y >= over.top && y <= over.bottom)
+            found.push(`${name(el)} is covered by ${name(top)}`);
           boxes.push(b);
         }
         texts.push({ el, boxes });
@@ -1272,9 +1358,17 @@ describe('room status (#199)', () => {
       for (const look of looks)
         for (const [day, data] of days)
           for (const set of toggleSets) {
-            const off = Object.keys(set).join(', ') || 'all on';
+            const off =
+              Object.keys(set)
+                .filter((k) => !set[k])
+                .join(', ') || 'all on';
             for (const fault of await faults(await r.show({ look, ...data, ...set }))) found.push(`${look}, ${day}, ${off}: ${fault}`);
           }
+      // The timeline's hours across a change of clocks and from midnight.
+      for (const look of looks)
+        for (const [day, now, events] of zoned)
+          for (const fault of await faults(await r.show({ look, ...allOn, events }, undefined, Date.parse(now), 'America/New_York')))
+            found.push(`${look}, ${day}: ${fault}`);
       expect(found).toEqual([]);
     }, 300_000);
 
@@ -1292,11 +1386,10 @@ describe('room status (#199)', () => {
     it(`every text reads as painted in every look, with no kit, the demo kit and a light kit, ${orientation}`, async () => {
       const r = await room(orientation);
       const found: string[] = [];
-      const allOff = toggleSets.at(-1)!;
       for (const [kit, theme] of noDemoAndLight(lightKit))
         for (const look of looks)
           for (const [day, data] of days)
-            for (const set of day === 'empty' ? [{}] : [{}, allOff]) {
+            for (const set of day === 'empty' ? [allOn] : [allOn, allOff]) {
               const f = await r.show({ look, ...data, ...set }, theme);
               for (const l of await paintedContrast(r.hst.page, f, '.stage')) found.push(`${look}, ${kit}, ${day}${set === allOff ? ', all off' : ''}: ${l}`);
             }
@@ -1313,8 +1406,8 @@ describe('room status (#199)', () => {
       }));
     const busy = { events: [booking('Design review', -0.25, 0.75, 'Priya Shah'), booking('Hiring sync', 2, 2.5)] };
     for (const look of looks) {
-      const on = await read(await r.show({ look, ...busy }));
-      const off = await read(await r.show({ look, ...busy, ...toggleSets.at(-1)! }));
+      const on = await read(await r.show({ look, ...busy, ...allOn }));
+      const off = await read(await r.show({ look, ...busy, ...allOff }));
       expect(on.marks, look).toEqual(['schedule=on', 'next=on', 'clock=on', 'facts=on', 'now-line=on', 'organiser=on']);
       expect(on.present, look).toEqual(['.schedule', '.next', '.clock', '.facts', '.nowline, .pin, .bar', '.org']);
       expect(off.marks, look).toEqual(['schedule=off', 'next=off', 'clock=off', 'facts=off', 'now-line=off', 'organiser=off']);
