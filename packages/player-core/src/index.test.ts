@@ -360,9 +360,10 @@ describe('files', () => {
     expect(planSync(manifest(), ['sha-a', 'sha-old'])).toEqual({ missing: ['sha-b', 'sha-c'], stale: ['sha-old'] });
   });
 
-  it('names the files one spot needs: a template spot its bundle and assets, a media spot its file', () => {
+  it('names the files one spot needs: a template spot its bundle and assets with their samples, a media spot its file', () => {
     const m = manifest();
     m.templates['base/t@1.0.0'] = { manifest: {} as never, html: 'sha-html' };
+    m.files['sha-pic'] = { size: 1, type: 'image/jpeg', sample: 'sha-pic-sample' };
     const t: Spot = {
       id: 't',
       name: 't',
@@ -372,7 +373,7 @@ describe('files', () => {
       data: {},
       assets: { pic: 'sha-pic', logo: 'sha-logo' },
     };
-    expect([...spotFiles(t, m)].sort()).toEqual(['sha-html', 'sha-logo', 'sha-pic']);
+    expect([...spotFiles(t, m)].sort()).toEqual(['sha-html', 'sha-logo', 'sha-pic', 'sha-pic-sample']);
     expect([...spotFiles(m.spots.a!, m)]).toEqual(['sha-a']);
     expect([...spotFiles({ id: 'u', name: 'u', kind: 'url', url: 'https://example.com', durationMs: 1000 } as Spot, m)]).toEqual([]);
   });

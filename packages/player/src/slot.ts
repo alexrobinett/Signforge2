@@ -4,6 +4,7 @@
  */
 import {
   SUPPORTED_PROTOCOLS,
+  sampleAsset,
   type FrameClock,
   type FrameFont,
   type FrameTheme,
@@ -52,10 +53,17 @@ interface LiveFrame {
   waiter?: { resolve: () => void; reject: (err: Error) => void };
 }
 
-/** A template spot's image fields, as Blobs: the frame has no network and an opaque origin. */
-async function spotAssets(spot: TemplateSpot): Promise<Record<string, Blob>> {
+/**
+ * A template spot's image fields, as Blobs: the frame has no network and an opaque origin. An
+ * image with a sample has it beside it, under `sampleAsset(field)`.
+ */
+async function spotAssets(spot: TemplateSpot, manifest: ScreenManifest): Promise<Record<string, Blob>> {
+  const files = Object.entries(spot.assets).flatMap(([field, sha]) => {
+    const sample = manifest.files[sha]?.sample;
+    return [[field, sha] as const, ...(sample ? [[sampleAsset(field), sample] as const] : [])];
+  });
   const assets: Record<string, Blob> = {};
-  await Promise.all(Object.entries(spot.assets).map(async ([field, sha]) => (assets[field] = await getFile(sha))));
+  await Promise.all(files.map(async ([key, sha]) => (assets[key] = await getFile(sha))));
   return assets;
 }
 
@@ -215,7 +223,7 @@ export class Slot {
     const protocol = t.manifest.protocol ?? 1;
     if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
     const { wrapper: wrapperHtml, template: templateHtml } = await framesFor(manifest, t.html);
-    const assets = await spotAssets(spot);
+    const assets = await spotAssets(spot, manifest);
     // Protocol 1 bundles predate the theme.
     const theme = protocol >= 2 ? await brandTheme(manifest) : undefined;
     alive(signal);
@@ -339,7 +347,7 @@ export class Slot {
       return;
     }
     const signal = this.abort.signal;
-    const assets = await spotAssets(spot);
+    const assets = await spotAssets(spot, manifest);
     const theme = await brandTheme(manifest);
     alive(signal);
     Object.assign(live, { spot, manifest, assets, theme });

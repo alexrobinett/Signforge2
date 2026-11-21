@@ -49,7 +49,8 @@ export interface Player {
   /** Wait until `predicate(state)` holds. The predicate runs in Node, polled every 100 ms. */
   until(predicate: (s: PlayerState) => boolean, timeoutMs?: number): Promise<PlayerState>;
   /** The label, the listed item titles and the play flag of the template on screen, or undefined if none is. */
-  onScreen(): Promise<{ label: string; items: string; playing: boolean } | undefined>;
+  /** `sample`: the size of the sample the template got beside its asset `file`, or ''. */
+  onScreen(): Promise<{ label: string; items: string; playing: boolean; sample: string } | undefined>;
 }
 
 export interface Harness {
@@ -207,6 +208,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
             label: document.getElementById('label')?.textContent ?? '',
             items: document.getElementById('box')?.textContent ?? '',
             playing: document.body.dataset.playing === '1',
+            sample: document.body.dataset.sample ?? '',
           }));
         }
         return undefined;

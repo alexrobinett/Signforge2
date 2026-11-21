@@ -9,10 +9,12 @@
  * clock, agenda and news draw the same thing in every frame.
  */
 import { readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { build } from 'esbuild';
 import type { Frame, Page } from 'playwright';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { PROTOCOL_VERSION, type BrandColors, type FieldDef, type FrameTheme, type Orientation, type TemplateManifest } from '@signforge/contract';
+import { PROTOCOL_VERSION, sampleAsset, type BrandColors, type FieldDef, type FrameTheme, type Orientation, type TemplateManifest } from '@signforge/contract';
 import { buildTemplate } from '@signforge/cli/template';
 import { useHarness } from './harness';
 
@@ -87,8 +89,13 @@ const DEMO_KIT: BrandColors = {
 };
 
 const built = new Map<string, { html: string; manifest: TemplateManifest }>();
+/** `imageSample` from @signforge/media, as a script for the host page: an image's sample, made as the CMS makes it. */
+let sampler = '';
 beforeAll(async () => {
   for (const name of names) built.set(name, await buildTemplate(join(templatesDir, name)));
+  const entry = createRequire(import.meta.url).resolve('@signforge/media/sample');
+  sampler = (await build({ entryPoints: [entry], bundle: true, write: false, format: 'iife', globalName: 'SFSample', logLevel: 'silent' })).outputFiles[0]!
+    .text;
 }, 60_000);
 
 /** The template's defaults with `over` on top, as the compiler hands a spot to the player. */
@@ -101,7 +108,8 @@ function spotData(manifest: TemplateManifest, over: Data): Data {
 interface Host {
   page: Page;
   open(frame: string, html: string): Promise<void>;
-  init(frame: string, data: Data, assets?: Record<string, string>, now?: number, theme?: FrameTheme): Promise<void>;
+  /** With `sampled`, each image goes with its sample (`sampleAsset`), as a screen sends an image uploaded with one. */
+  init(frame: string, data: Data, assets?: Record<string, string>, now?: number, theme?: FrameTheme, sampled?: boolean): Promise<void>;
   post(frame: string, type: 'play' | 'reset'): Promise<void>;
   /** Wait until the frame has sent `type` `count` times in all. */
   waitFor(frame: string, type: string, count: number): Promise<void>;
@@ -114,6 +122,7 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
   const page = await h.blankPage();
   const size = orientation === 'landscape' ? { width: 960, height: 540 } : { width: 540, height: 960 };
   await page.setViewportSize(size);
+  await page.addScriptTag({ content: sampler });
   await page.evaluate(() => {
     const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]> };
     w.frames_ = {};
@@ -154,10 +163,15 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
       );
       await waitFor(frame, 'loaded', 1);
     },
-    async init(frame, data, assets = {}, now = NOW, theme) {
+    async init(frame, data, assets = {}, now = NOW, theme, sampled = false) {
+      const samples = sampled ? Object.fromEntries(Object.keys(assets).map((field) => [field, sampleAsset(field)])) : {};
       await page.evaluate(
-        async ({ frame, data, assets, sf, now, theme, orientation, size }) => {
-          const w = window as unknown as { frames_: Record<string, HTMLIFrameElement> };
+        async ({ frame, data, assets, samples, sf, now, theme, orientation, size }) => {
+          const w = window as unknown as {
+            frames_: Record<string, HTMLIFrameElement>;
+            SFSample: typeof import('@signforge/media/sample');
+          };
+          const png = (c: HTMLCanvasElement) => new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
           const blobs: Record<string, Blob> = {};
           for (const [field, spec] of Object.entries(assets)) {
             const [, width = '8', height = '8', colours = spec] = /^(\d+)x(\d+): (.*)$/.exec(spec) ?? [];
@@ -170,7 +184,15 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
               g.fillStyle = stripes[x % stripes.length]!;
               g.fillRect(x, 0, 1, c.height);
             }
-            blobs[field] = await new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
+            blobs[field] = await png(c);
+            const key = samples[field];
+            if (!key) continue;
+            const sample = w.SFSample.imageSample(g.getImageData(0, 0, c.width, c.height).data, c.width, c.height)!;
+            const sc = document.createElement('canvas');
+            sc.width = sample.width;
+            sc.height = sample.height;
+            sc.getContext('2d')!.putImageData(new ImageData(sample.data, sample.width, sample.height), 0, 0);
+            blobs[key] = await png(sc);
           }
           const init = {
             sf,
@@ -187,7 +209,7 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
           };
           w.frames_[frame]!.contentWindow!.postMessage(init, '*');
         },
-        { frame, data, assets, sf, now, theme, orientation, size },
+        { frame, data, assets, samples, sf, now, theme, orientation, size },
       );
     },
     post: (frame, type) =>
@@ -565,7 +587,7 @@ describe('text on a brand colour (#57, #69, #92)', () => {
   ];
   const menu = { items: [{ name: 'Soup', description: 'Hot', price: '$4', tag: 'New' }] };
   /** Each template's spot, given the accent `$brand.accent` resolves to. */
-  const spots = (accent: string): [template: string, data: Data, photo?: string][] => [
+  const spots = (accent: string): [template: string, data: Data, photo?: string, sampled?: boolean][] => [
     ['news', { accent, items: [{ title: 'Story', published: at(-1), source: 'Wire' }] }],
     ['agenda', { accent, events: [...(cases.agenda!.b.events as unknown[]), ...(cases.agenda!.a.events as unknown[])] }],
     ['clock', { accent }],
@@ -573,12 +595,12 @@ describe('text on a brand colour (#57, #69, #92)', () => {
     // The copy sits on a shade of the kit's background over the photo, whatever the photo is: light,
     // dark, mid-tone, or light and dark under the same text, in broad stripes and in stripes 1 px
     // wide at the screen's scale, which a photo measured at less than its painted detail averages
-    // to grey.
-    ['photo-promo', {}, '#ffffff'],
-    ['photo-promo', {}, '#000000'],
-    ['photo-promo', {}, '#808080'],
-    ['photo-promo', {}, '#000000 #ffffff'],
-    ['photo-promo', {}, '960x540: #000000 #ffffff'],
+    // to grey. Each with the photo's sample, which photo-promo reads in place of the photo, and
+    // without one, as a photo uploaded before samples is.
+    ...['#ffffff', '#000000', '#808080', '#000000 #ffffff', '960x540: #000000 #ffffff'].flatMap((photo): [string, Data, string, boolean][] => [
+      ['photo-promo', {}, photo, true],
+      ['photo-promo', {}, photo, false],
+    ]),
     ['menu-board', { accent, ...menu }],
     ['menu-board', { accent, ...menu, theme: 'light' }],
   ];
@@ -610,13 +632,14 @@ describe('text on a brand colour (#57, #69, #92)', () => {
     check: (name: string, f: Frame, page: Page) => Promise<void>,
   ) {
     const hst = await host(orientation);
-    for (const [i, [name, data, photo]] of spots(accent).entries()) {
+    for (const [i, [name, data, photo, sampled]] of spots(accent).entries()) {
       const t = built.get(name)!;
       const frame = `f${i}`;
       await hst.open(frame, t.html);
-      await hst.init(frame, spotData(t.manifest, data), photo ? { photo } : {}, NOW, theme);
+      await hst.init(frame, spotData(t.manifest, data), photo ? { photo } : {}, NOW, theme, sampled);
       await hst.waitFor(frame, 'ready', 1);
-      await check(`${name}${data.theme ? ` (${data.theme})` : ''}${photo ? ` (photo ${photo})` : ''}`, hst.page.mainFrame().childFrames()[i]!, hst.page);
+      const label = `${name}${data.theme ? ` (${data.theme})` : ''}${photo ? ` (photo ${photo}${sampled ? ', sampled' : ''})` : ''}`;
+      await check(label, hst.page.mainFrame().childFrames()[i]!, hst.page);
       // The frames overlap: the next one is measured on top.
       await hst.page.evaluate((frame) => {
         (window as unknown as { frames_: Record<string, HTMLIFrameElement> }).frames_[frame]!.style.visibility = 'hidden';
@@ -685,7 +708,17 @@ describe('text on a brand colour (#57, #69, #92)', () => {
       // this test the pixels in the box.
       it(`accent text reads on its backdrop under ${label}, ${orientation}, in the accent where that reads`, async () => {
         const found: string[] = [];
+        /** photo-promo's eyebrow over each photo, with the photo's sample and without. */
+        const eyebrows = new Map<string, string[]>();
         await eachSpot(orientation, theme, accent, async (name, f, page) => {
+          if (name.startsWith('photo-promo')) {
+            const eyebrow = await f.evaluate(() => {
+              const el = document.querySelector('.eyebrow')!;
+              return `${getComputedStyle(el).color}${el.classList.contains('scrim') ? ' on the scrim' : ''}`;
+            });
+            const photo = name.replace(', sampled', '');
+            eyebrows.set(photo, [...(eyebrows.get(photo) ?? []), eyebrow]);
+          }
           for (const [, text] of onBackdrop.filter(([n]) => name.startsWith(n))) {
             const { color, pixels, large } = await textOnBackdrop(f, page, text);
             const min = large ? 3 : 4.5;
@@ -696,6 +729,8 @@ describe('text on a brand colour (#57, #69, #92)', () => {
               found.push(`${name} ${text}: ${color}, not the accent, which reads at ${reads.toFixed(2)}:1`);
           }
         });
+        // The sample stands in for the photo: the same eyebrow either way.
+        for (const [photo, [sampled, full]] of eyebrows) if (sampled !== full) found.push(`${photo} .eyebrow: ${sampled} with its sample, ${full} without`);
         expect(found).toEqual([]);
       });
     }

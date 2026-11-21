@@ -62,6 +62,8 @@ export interface FixtureSpot {
   bindings?: Record<string, Binding>;
   /** A file of the spot's own, passed to the template as asset `file`. */
   asset?: Buffer;
+  /** A PNG, the sample of `asset` (`ManifestFile.sample`). */
+  sample?: Buffer;
   /** Makes this a video spot playing this file instead of a template spot (`fixtures/clip.webm`). */
   video?: Buffer;
   /** Makes this a URL spot showing this page instead. */
@@ -156,6 +158,12 @@ export function buildContent(
       blobs.set(sha, s.asset);
       files[sha] = { size: s.asset.byteLength, type: 'application/octet-stream' };
       (spotMap[s.id] as Extract<Spot, { kind: 'template' }>).assets.file = sha;
+      if (s.sample) {
+        const sample = sha256(s.sample);
+        blobs.set(sample, s.sample);
+        files[sample] = { size: s.sample.byteLength, type: 'image/png' };
+        files[sha]!.sample = sample;
+      }
     }
   }
   const addFile = (data: Buffer, type: string) => {

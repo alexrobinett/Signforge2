@@ -27,4 +27,29 @@ describe('readableOver', () => {
   it('does not keep text it cannot measure', () => {
     expect(readableOver(pixels('#ffffff'), 'rebeccapurple')).toBe('#000000');
   });
+
+  describe("over an image's sample, each cell its darkest and lightest pixel", () => {
+    it("keeps text that reads on every colour between a cell's two", () => {
+      // White over a cell from black to the demo kit's blue: 6.70:1 on the blue, more on everything darker.
+      expect(readableOver(pixels('#000000'), '#ffffff', { lightest: pixels('#1d4ed8') })).toBe('#ffffff');
+    });
+
+    it("does not keep text whose luminance lies between a cell's two, though it reads on both", () => {
+      // Blue (#2563eb) is 5.17:1 to white and 4.06:1 to black, so it reads on a pixel of each; not on
+      // the greys a cell between them may hold (1.31:1 on #808080).
+      expect(readableOver(pixels('#000000', '#ffffff'), '#2563eb', { large: true })).toBe('#2563eb');
+      expect(readableOver(pixels('#000000'), '#2563eb', { large: true, lightest: pixels('#ffffff') })).toBeUndefined();
+    });
+
+    it('takes black or white from the darkest and the lightest of the cells', () => {
+      expect(readableOver(pixels('#ffffff', '#f59e0b'), '#16a34a', { lightest: pixels('#ffffff', '#ffffff') })).toBe('#000000');
+      expect(readableOver(pixels('#000000'), '#16a34a', { lightest: pixels('#1d4ed8') })).toBe('#ffffff');
+      // Light and dark in one cell leave neither.
+      expect(readableOver(pixels('#000000'), '#ffffff', { large: true, lightest: pixels('#ffffff') })).toBeUndefined();
+    });
+
+    it('measures a cell whose two the shade has swapped as the range between them', () => {
+      expect(readableOver(pixels('#ffffff'), '#2563eb', { large: true, lightest: pixels('#000000') })).toBeUndefined();
+    });
+  });
 });
