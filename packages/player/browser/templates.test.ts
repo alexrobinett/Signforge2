@@ -288,6 +288,80 @@ describe('template time', () => {
   });
 });
 
+/**
+ * Each text in `scope` (weather's forecast card, the whole of the look kit's test template) that
+ * reads below AA (4.5:1, 3:1 for large text), measured from what is painted: the box screenshotted
+ * with its text and again with the text hidden, at rest. Each
+ * glyph pixel is compared with the pixel under it, so opacity on the text or a parent, and anything
+ * drawn over the card, count. A text's ratio is its 90th-percentile pixel: the cores of its strokes,
+ * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1.
+ */
+async function paintedContrast(page: Page, f: Frame, scope = '.info'): Promise<string[]> {
+  const { card, texts } = await f.evaluate((scope) => {
+    for (const a of document.getAnimations()) a.currentTime = 2000;
+    const box = document.querySelector(scope)!.getBoundingClientRect();
+    const texts = [];
+    for (const el of document.querySelectorAll<HTMLElement>(`${scope}, ${scope} *`)) {
+      const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
+      if (!own.length) continue;
+      const range = document.createRange();
+      range.selectNode(own[0]!);
+      range.setEndAfter(own.at(-1)!);
+      const r = range.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      const size = Number.parseFloat(s.fontSize);
+      texts.push({
+        name: el.id || el.className || el.tagName,
+        rect: { x: Math.round(r.x - box.x), y: Math.round(r.y - box.y), w: Math.round(r.width), h: Math.round(r.height) },
+        min: size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700) ? 3 : 4.5,
+      });
+    }
+    return { card: { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) }, texts };
+  }, scope);
+  const withText = (await page.screenshot({ clip: card })).toString('base64');
+  await f.evaluate((scope) => {
+    const hide = document.createElement('style');
+    hide.id = 'sf-test-hide';
+    hide.textContent = `${scope}, ${scope} * { color: transparent !important; text-shadow: none !important; }`;
+    document.head.append(hide);
+  }, scope);
+  const without = (await page.screenshot({ clip: card })).toString('base64');
+  await f.evaluate(() => document.getElementById('sf-test-hide')!.remove());
+  return page.evaluate(
+    async ({ withText, without, texts }) => {
+      const read = async (png: string) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${png}`;
+        await img.decode();
+        const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
+        g.drawImage(img, 0, 0);
+        return { w: img.width, d: g.getImageData(0, 0, img.width, img.height).data };
+      };
+      const [a, b] = [await read(withText), await read(without)];
+      const lum = (d: Uint8ClampedArray, i: number) => {
+        const [r, g, bl] = [d[i]!, d[i + 1]!, d[i + 2]!].map((v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+        return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
+      };
+      const out: string[] = [];
+      for (const t of texts) {
+        const ratios: number[] = [];
+        for (let y = t.rect.y; y < t.rect.y + t.rect.h; y++)
+          for (let x = t.rect.x; x < t.rect.x + t.rect.w; x++) {
+            const i = (y * a.w + x) * 4;
+            if (a.d[i] === b.d[i] && a.d[i + 1] === b.d[i + 1] && a.d[i + 2] === b.d[i + 2]) continue;
+            const [hi, lo] = [lum(a.d, i), lum(b.d, i)].sort((p, q) => q - p);
+            ratios.push((hi! + 0.05) / (lo! + 0.05));
+          }
+        ratios.sort((p, q) => p - q);
+        const ratio = ratios.length ? ratios[Math.floor(ratios.length * 0.9)]! : 1;
+        if (ratio < t.min) out.push(`${t.name}: ${ratio.toFixed(2)}:1, below ${t.min}:1`);
+      }
+      return out;
+    },
+    { withText, without, texts },
+  );
+}
+
 describe('weather: the sun and moon follow sunrise, sunset and the screen clock (#70)', () => {
   // Sunrise 12:00 UTC, sunset 22:00 UTC (Unix seconds, as Open-Meteo sends them with timeformat=unixtime).
   const sunrise = Date.parse('2026-11-17T12:00:00Z') / 1000;
@@ -377,79 +451,6 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
       seen.push((await scene(data, clock(at))).classes);
     expect(seen).toEqual([['day'], ['day', 'dusk'], ['dusk', 'night'], ['night']]);
   });
-
-  /**
-   * Each text in the forecast card that reads below AA (4.5:1, 3:1 for large text), measured from what
-   * is painted: the card screenshotted with its text and again with the text hidden, at rest. Each
-   * glyph pixel is compared with the pixel under it, so opacity on the text or a parent, and anything
-   * drawn over the card, count. A text's ratio is its 90th-percentile pixel: the cores of its strokes,
-   * not their anti-aliased edges. Text that leaves no pixel of its own reads at 1:1.
-   */
-  async function paintedContrast(page: Page, f: Frame): Promise<string[]> {
-    const { card, texts } = await f.evaluate(() => {
-      for (const a of document.getAnimations()) a.currentTime = 2000;
-      const box = document.querySelector('.info')!.getBoundingClientRect();
-      const texts = [];
-      for (const el of document.querySelectorAll<HTMLElement>('.info, .info *')) {
-        const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
-        if (!own.length) continue;
-        const range = document.createRange();
-        range.selectNode(own[0]!);
-        range.setEndAfter(own.at(-1)!);
-        const r = range.getBoundingClientRect();
-        const s = getComputedStyle(el);
-        const size = Number.parseFloat(s.fontSize);
-        texts.push({
-          name: el.id || el.className || el.tagName,
-          rect: { x: Math.round(r.x - box.x), y: Math.round(r.y - box.y), w: Math.round(r.width), h: Math.round(r.height) },
-          min: size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700) ? 3 : 4.5,
-        });
-      }
-      return { card: { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) }, texts };
-    });
-    const withText = (await page.screenshot({ clip: card })).toString('base64');
-    await f.evaluate(() => {
-      const hide = document.createElement('style');
-      hide.id = 'sf-test-hide';
-      hide.textContent = '.info, .info * { color: transparent !important; text-shadow: none !important; }';
-      document.head.append(hide);
-    });
-    const without = (await page.screenshot({ clip: card })).toString('base64');
-    await f.evaluate(() => document.getElementById('sf-test-hide')!.remove());
-    return page.evaluate(
-      async ({ withText, without, texts }) => {
-        const read = async (png: string) => {
-          const img = new Image();
-          img.src = `data:image/png;base64,${png}`;
-          await img.decode();
-          const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
-          g.drawImage(img, 0, 0);
-          return { w: img.width, d: g.getImageData(0, 0, img.width, img.height).data };
-        };
-        const [a, b] = [await read(withText), await read(without)];
-        const lum = (d: Uint8ClampedArray, i: number) => {
-          const [r, g, bl] = [d[i]!, d[i + 1]!, d[i + 2]!].map((v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-          return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
-        };
-        const out: string[] = [];
-        for (const t of texts) {
-          const ratios: number[] = [];
-          for (let y = t.rect.y; y < t.rect.y + t.rect.h; y++)
-            for (let x = t.rect.x; x < t.rect.x + t.rect.w; x++) {
-              const i = (y * a.w + x) * 4;
-              if (a.d[i] === b.d[i] && a.d[i + 1] === b.d[i + 1] && a.d[i + 2] === b.d[i + 2]) continue;
-              const [hi, lo] = [lum(a.d, i), lum(b.d, i)].sort((p, q) => q - p);
-              ratios.push((hi! + 0.05) / (lo! + 0.05));
-            }
-          ratios.sort((p, q) => p - q);
-          const ratio = ratios.length ? ratios[Math.floor(ratios.length * 0.9)]! : 1;
-          if (ratio < t.min) out.push(`${t.name}: ${ratio.toFixed(2)}:1, below ${t.min}:1`);
-        }
-        return out;
-      },
-      { withText, without, texts },
-    );
-  }
 
   it('every text in the forecast card reads (AA) as painted, at every time of day, in every condition, with and without a kit', async () => {
     const t = built.get('weather')!;
@@ -812,4 +813,220 @@ describe('text on a brand colour (#57, #69, #92)', () => {
         expect(found).toEqual([]);
       });
     }
+});
+
+describe('the look kit (#190)', () => {
+  const looks = ['pop', 'poster', 'night', 'corporate'] as const;
+  /** Each look's font families, as looks.css names them. */
+  const faces: Record<(typeof looks)[number], string[]> = {
+    pop: ['lk-pop', 'lk-body'],
+    poster: ['lk-poster', 'lk-body'],
+    night: ['lk-night', 'lk-night-mono', 'lk-body'],
+    corporate: ['lk-corporate'],
+  };
+  const light: BrandColors = {
+    primary: '#1d4ed8',
+    onPrimary: '#ffffff',
+    accent: '#f59e0b',
+    onAccent: '#000000',
+    background: '#ffffff',
+    surface: '#f1f5f9',
+    text: '#0f172a',
+    muted: '#475569',
+  };
+  const kits: [string, FrameTheme | undefined][] = [
+    ['no kit', undefined],
+    ['the demo kit', { colors: DEMO_KIT, shape: 'soft', fonts: {} }],
+    ['a light kit', { colors: light, shape: 'soft', fonts: {} }],
+  ];
+  const photo = { photo: '#808080' };
+  let t: { html: string; manifest: TemplateManifest };
+  beforeAll(async () => {
+    t = await buildTemplate(resolve(import.meta.dirname, '../../template-looks/looks-test'));
+  }, 60_000);
+
+  /** One frame of the test template; `play(data, theme)` inits it and waits for ready. */
+  async function kitFrame(orientation: Orientation = 'landscape') {
+    const hst = await host(orientation);
+    await hst.open('fresh', t.html);
+    let inits = 0;
+    const frame = () => hst.page.mainFrame().childFrames()[0]!;
+    return {
+      hst,
+      frame,
+      async play(data: Data, theme?: FrameTheme) {
+        await hst.init('fresh', spotData(t.manifest, data), photo, NOW, theme);
+        await hst.waitFor('fresh', 'ready', ++inits);
+        return frame();
+      },
+    };
+  }
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`every text reads as painted in every look, with no kit, the demo kit and a light kit, ${orientation}`, async () => {
+      const k = await kitFrame(orientation);
+      const found: string[] = [];
+      for (const [kit, theme] of kits)
+        for (const look of looks)
+          for (const shown of [true, false]) {
+            const f = await k.play({ look, showPhoto: shown, showBody: shown }, theme);
+            for (const l of await paintedContrast(k.hst.page, f, '.stage')) found.push(`${look}, ${kit}${shown ? '' : ', photo and body off'}: ${l}`);
+          }
+      expect(found).toEqual([]);
+    }, 120_000);
+
+  it('a look decodes only its own faces, and they are loaded by ready', async () => {
+    for (const look of looks) {
+      // A frame of its own: a screen loads every spot in a new frame, and a face stays loaded in its document.
+      const f = await (await kitFrame()).play({ look });
+      const status = await f.evaluate(() => [...document.fonts].map((ff) => [ff.family.replaceAll('"', ''), ff.status] as const));
+      const loaded = [...new Set(status.filter(([, s]) => s !== 'unloaded').map(([family]) => family))].sort();
+      expect(loaded, look).toEqual([...faces[look]].sort());
+      expect(status.filter(([family, s]) => faces[look].includes(family) && s === 'loading'), look).toEqual([]);
+    }
+  });
+
+  it('the accent keeps its colour where it reads and gives way to black or white where it does not', async () => {
+    const k = await kitFrame();
+    const seen: Record<string, string[]> = {};
+    for (const [kit, theme] of kits) {
+      const f = await k.play({ look: 'poster' }, theme);
+      seen[kit] = await f.evaluate(() => ['.figure', '.figure-label', '.eyebrow'].map((s) => getComputedStyle(document.querySelector(s)!).color));
+    }
+    expect(seen).toEqual({
+      // Poster's red as large text, its darker red as small text, ink on the red fill.
+      'no kit': ['rgb(232, 64, 28)', 'rgb(194, 51, 15)', 'rgb(17, 17, 17)'],
+      // The demo kit's orange reads on its dark background (6.71:1).
+      'the demo kit': ['rgb(249, 115, 22)', 'rgb(249, 115, 22)', 'rgb(255, 255, 255)'],
+      // Amber on white is 2.15:1: black, large and small.
+      'a light kit': ['rgb(0, 0, 0)', 'rgb(0, 0, 0)', 'rgb(255, 255, 255)'],
+    });
+  });
+
+  it('marks each toggle on the root, removes what is off, and the layout reflows with the type stepped up', async () => {
+    const k = await kitFrame();
+    const measure = (f: Frame) =>
+      f.evaluate(() => {
+        for (const a of document.getAnimations()) a.currentTime = 2000;
+        const root = document.documentElement;
+        const copy = document.querySelector('.copy')!;
+        // Glyphs overhang a tight leading by a few pixels; text cut by a clamp overflows by a whole line (news's ellipsize).
+        const clamped = [...document.querySelectorAll<HTMLElement>('.headline, .body, .figure-label')].filter(
+          (el) => el.scrollHeight > el.clientHeight + Number.parseFloat(getComputedStyle(el).fontSize) / 2,
+        );
+        return {
+          marks: ['eyebrow', 'body', 'meta', 'photo', 'crawl'].map((m) => `${m}=${root.getAttribute(`data-${m}`)}`),
+          present: ['.eyebrow', '.body', '.meta', '.photo', '.ticker'].filter((s) => document.querySelector(s)),
+          headline: Number.parseFloat(getComputedStyle(document.querySelector('.headline')!).fontSize),
+          copyWidth: copy.getBoundingClientRect().width,
+          overflow: [...(copy.scrollHeight > copy.clientHeight + 1 ? ['.copy'] : []), ...clamped.map((el) => el.className)],
+        };
+      });
+    for (const look of looks) {
+      const on = await measure(await k.play({ look }));
+      const off = await measure(await k.play({ look, showEyebrow: false, showBody: false, showMeta: false, showPhoto: false, showCrawl: false }));
+      expect(on.marks, look).toEqual(['eyebrow=on', 'body=on', 'meta=on', 'photo=on', 'crawl=on']);
+      expect(on.present, look).toEqual(['.eyebrow', '.body', '.meta', '.photo', '.ticker']);
+      expect(off.marks, look).toEqual(['eyebrow=off', 'body=off', 'meta=off', 'photo=off', 'crawl=off']);
+      expect(off.present, look).toEqual([]);
+      expect(off.copyWidth, look).toBeGreaterThan(on.copyWidth * 1.5);
+      const step = Number(await (await k.play({ look })).evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--lk-step')));
+      expect(off.headline / on.headline, look).toBeCloseTo(step, 2);
+      expect([...on.overflow, ...off.overflow], look).toEqual([]);
+    }
+  });
+
+  it('every element has an intro and, timed from --sf-duration, an outro, moving only transform and opacity', async () => {
+    const k = await kitFrame();
+    for (const look of looks) {
+      const f = await k.play({ look });
+      const { props, ends } = await f.evaluate(() => {
+        const props = new Set<string>();
+        for (const a of document.getAnimations())
+          for (const k of (a.effect as KeyframeEffect).getKeyframes())
+            for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
+        // The photo's own intro and outro, or in Poster the ink block's, which uncovers it and covers it again.
+        const moving = ['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker', '.photo', '.cover'];
+        const ends = moving.map((sel) => {
+          const timed = document
+            .querySelector(sel)!
+            .getAnimations()
+            .map((a) => a.effect!.getComputedTiming().endTime as number)
+            .filter(Number.isFinite);
+          return `${sel} ${timed
+            .map(Math.round)
+            .sort((a, b) => a - b)
+            .map((ms) => (ms === 8000 ? 'outro at the end' : ms <= 2000 ? 'intro' : `${ms} ms`))
+            .join(', ')}`;
+        });
+        return { props: [...props].sort(), ends };
+      });
+      expect(props, look).toEqual(['opacity', 'transform']);
+      const both = (sel: string) => `${sel} intro, outro at the end`;
+      const photo = look === 'poster' ? ['.photo ', both('.cover')] : [both('.photo'), '.cover '];
+      expect(ends, look).toEqual([...['.badge', '.live', '.rule', '.headline', '.body', '.facts', '.meta', '.tag', '.ticker'].map(both), ...photo]);
+    }
+  });
+
+  it('with reduced motion, shows the final frame with nothing animating and the crawl cut to one line', async () => {
+    const k = await kitFrame();
+    await k.hst.page.emulateMedia({ reducedMotion: 'reduce' });
+    const long = 'Tours from 9 to 11 in the lobby · The roof terrace opens at noon · Bring your badge · Coffee and pastries all morning on the ground floor';
+    for (const look of looks) {
+      const f = await k.play({ look, crawl: long });
+      await k.hst.post('fresh', 'play');
+      const still = await f.evaluate(() => ({
+        animations: document.getAnimations().length,
+        moved: [...document.querySelectorAll<HTMLElement>('.stage *')]
+          .filter((el) => !el.classList.contains('lk-cover'))
+          .filter((el) => getComputedStyle(el).opacity !== '1' || getComputedStyle(el).transform !== 'none')
+          .map((el) => el.className),
+        crawl: [...document.querySelectorAll('#crawl > *')].map((el) => getComputedStyle(el).display),
+        cut: (() => {
+          const strip = document.getElementById('crawl')!;
+          return getComputedStyle(strip).textOverflow === 'ellipsis' && strip.scrollWidth > strip.clientWidth;
+        })(),
+      }));
+      expect(still, look).toEqual({ animations: 0, moved: [], crawl: ['inline', 'none'], cut: true });
+    }
+  });
+
+  it("the crawl holds its text twice and slides by exactly one copy at the look's speed", async () => {
+    const k = await kitFrame();
+    for (const look of looks) {
+      const f = await k.play({ look });
+      const c = await f.evaluate(() => {
+        const strip = document.getElementById('crawl')!;
+        const [a, b] = [...strip.children] as HTMLElement[];
+        const s = getComputedStyle(strip);
+        return {
+          copies: [a!.textContent === b!.textContent, b!.getAttribute('aria-hidden')],
+          shift: Number.parseFloat(s.getPropertyValue('--lk-crawl-shift')),
+          copyWidth: b!.getBoundingClientRect().left - a!.getBoundingClientRect().left,
+          seconds: Number.parseFloat(s.getPropertyValue('--lk-crawl-s')),
+          speed: Number.parseFloat(s.getPropertyValue('--lk-crawl-speed')),
+        };
+      });
+      expect(c.copies, look).toEqual([true, 'true']);
+      expect(c.shift, look).toBeCloseTo(-c.copyWidth, 0);
+      // The frame is 960x540: 1vmin is 5.4 px.
+      expect(c.copyWidth / c.seconds, look).toBeCloseTo(c.speed * 5.4, 1);
+    }
+  });
+
+  it('new data after the first init leaves the same document as a fresh load', async () => {
+    const a = spotData(t.manifest, { look: 'pop', showPhoto: false }),
+      b = spotData(t.manifest, { look: 'night', showCrawl: false });
+    const hst = await host();
+    await hst.open('fresh', t.html);
+    await hst.init('fresh', b, photo);
+    await hst.waitFor('fresh', 'ready', 1);
+    await hst.open('reset', t.html);
+    await hst.init('reset', a, photo);
+    await hst.waitFor('reset', 'ready', 1);
+    await hst.post('reset', 'play');
+    await hst.init('reset', b, photo);
+    await hst.waitFor('reset', 'ready', 2);
+    expect(await hst.dom('reset')).toBe(await hst.dom('fresh'));
+  });
 });

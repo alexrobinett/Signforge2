@@ -1,0 +1,27 @@
+{
+  "id": "looks-test",
+  "version": "1.0.0",
+  "name": "Look kit test",
+  "description": "Every part of the look kit, for its tests and Pi measurements. Not a shipped template.",
+  "fields": {
+    "look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" },
+    "eyebrow": { "type": "text", "label": "Eyebrow", "default": "Company news", "maxLength": 24 },
+    "headline": { "type": "text", "label": "Headline", "default": "Pier 9 opens on Monday", "maxLength": 80 },
+    "body": { "type": "text", "label": "Body", "default": "Come for coffee, a tour and the first look at the roof terrace.", "maxLength": 200 },
+    "figure": { "type": "text", "label": "Figure", "default": "48", "maxLength": 4 },
+    "figureLabel": { "type": "text", "label": "Figure label", "default": "Desks on floor two", "maxLength": 32 },
+    "meta": { "type": "text", "label": "Meta", "default": "From the People Team", "maxLength": 48 },
+    "tag": { "type": "text", "label": "Photo tag", "default": "Mon 7 Dec", "maxLength": 16 },
+    "crawl": { "type": "text", "label": "Crawl", "default": "Tours from 9 to 11 in the lobby · The roof terrace opens at noon · Bring your badge", "maxLength": 200 },
+    "photo": { "type": "image", "label": "Photo" },
+    "showEyebrow": { "type": "boolean", "label": "Show the eyebrow", "default": true },
+    "showBody": { "type": "boolean", "label": "Show the body", "default": true },
+    "showMeta": { "type": "boolean", "label": "Show the meta line", "default": true },
+    "showPhoto": { "type": "boolean", "label": "Show the photo", "default": true },
+    "showCrawl": { "type": "boolean", "label": "Show the crawl", "default": true }
+  },
+  "duration": { "defaultMs": 8000, "minMs": 4000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#000000"
+}

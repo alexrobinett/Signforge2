@@ -36,6 +36,8 @@
     // Bundled into a Worker by the upload e2e test.
     "packages/tools": { "entry": ["test/harness-worker.ts"] },
     // Read by url() in each template's style.css; the template build inlines it as a data URL.
-    "templates/*": { "ignoreDependencies": ["@fontsource-variable/inter"] }
+    "templates/*": { "ignoreDependencies": ["@fontsource-variable/inter"] },
+    // The look kit's test template is built by the player's browser tests and the kit's own, not imported.
+    "packages/template-looks": { "entry": ["looks-test/main.ts"] }
   }
 }
