@@ -3,7 +3,7 @@ import { png } from '@signforge/media/testing';
 import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
-const ADDRESS = '192.0.2.31';
+const ADDRESS = '192.0.2.130';
 
 test.describe.configure({ mode: 'serial' });
 
