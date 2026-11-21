@@ -1,106 +1,97 @@
 /**
- * Calling a tool from the browser: `POST /api/tools/:name` on this origin, as the signed-in member
- * (the API checks the session, the role and the input). A refusal throws `ToolCallError` with the
- * tool's own message, written to be shown as it is.
+ * Calling a tool (`POST /api/tools/:name`) as the signed-in member: from the browser (`callTool`)
+ * or from a server function (`tool` in src/server/tools.server.ts), both reading the answer here
+ * (`answer`). An output is typed by the tool's own output schema (`@signforge/tools/outputs`, a
+ * types-only import, so no tool code reaches the browser) and trusted: the tools' tests check
+ * every output against that schema. A refusal is a `Refusal` with the code it was refused with on
+ * either side, and a server function's reaches the browser as one (`refusalAdapter`).
  */
-import type { AuditPage } from './audit';
+import { createSerializationAdapter } from '@tanstack/react-router';
 import { ORG_CHANGED } from '@signforge/api/tab-org';
-import { OrgChanged } from './org-changed';
+import type { ToolErrorCode, ToolName, ToolOutput } from '@signforge/tools/outputs';
 import { tabOrgHeaders } from './tab-org';
-import type { PlaylistView } from './playlists';
-import type { SpotView } from './spots';
 
-/** A tool's refusal, or a call that got no answer (`code` network). */
-export class ToolCallError extends Error {
+/** The API's own refusals, made before any tool runs (apps/api/src/api/index.ts). */
+type ApiRefusalCode = typeof ORG_CHANGED | 'unauthenticated' | 'no_active_organization' | 'not_a_member';
+
+/** Why a call failed: a tool's code, the API's, `network` when no answer came, or `error` for an answer that holds no refusal. */
+type RefusalCode = ToolErrorCode | ApiRefusalCode | 'network' | 'error';
+
+/** A refused call, with its code, the sentence it was refused with (written to be shown as it is), and the tool's details. */
+export class Refusal extends Error {
+  override name = 'Refusal';
   constructor(
-    readonly code: string,
+    readonly code: RefusalCode,
     message: string,
     readonly details?: unknown,
     options?: ErrorOptions,
   ) {
     super(message, options);
-    this.name = 'ToolCallError';
   }
 }
 
-/** A tool's answer: its output, or on a refusal `{ error, message, details }`. Read with the guards below. */
-export async function callTool(name: string, input: unknown): Promise<unknown> {
+/** The refusal a failed answer holds; `unread` is its sentence when the answer has none (a gateway's error page). */
+export async function refusalOf(res: Response, unread: string): Promise<Refusal> {
+  // The API's refusal: { error, message, details? } (packages/tools README).
+  const body: { error?: RefusalCode; message?: string; details?: unknown } | null = await res.json().catch(() => null);
+  return new Refusal(body?.error ?? 'error', body?.message ?? unread, body?.details);
+}
+
+/** A tool's answer: its output, or its refusal thrown. */
+export async function answer<T>(res: Response, unread: string): Promise<T> {
+  if (!res.ok) throw await refusalOf(res, unread);
+  const output: T = await res.json();
+  return output;
+}
+
+async function post(name: string, input: unknown): Promise<Response> {
   const headers = { 'content-type': 'application/json', ...(await tabOrgHeaders()) };
-  let res: Response;
   try {
-    res = await fetch(`/api/tools/${name}`, { method: 'POST', headers, body: JSON.stringify(input) });
+    return await fetch(`/api/tools/${name}`, { method: 'POST', headers, body: JSON.stringify(input) });
   } catch (cause) {
     // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
-    throw new ToolCallError('network', 'Could not reach SignForge. Check your connection and try again.', undefined, { cause });
+    throw new Refusal('network', 'Could not reach SignForge. Check your connection and try again.', undefined, { cause });
   }
-  const body: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const text = (key: string) => (isRecord(body) && typeof body[key] === 'string' ? body[key] : undefined);
-    if (text('error') === ORG_CHANGED) throw new OrgChanged(text('message'));
-    throw new ToolCallError(text('error') ?? 'error', text('message') ?? `Something went wrong (${res.status}).`, isRecord(body) ? body.details : undefined);
-  }
-  return body;
 }
+
+/** Calls a tool from the browser, naming the tab's org. */
+export async function callTool<N extends ToolName>(name: N, input: unknown): Promise<ToolOutput<N>> {
+  const res = await post(name, input);
+  return answer(res, `Something went wrong (${res.status}).`);
+}
+
+/** Calls a tool by a name known only as a string: the command menu's, from `GET /api/tools`, and @signforge/media's uploads, which read their own outputs. */
+export async function callToolByName(name: string, input: unknown): Promise<unknown> {
+  const res = await post(name, input);
+  return answer(res, `Something went wrong (${res.status}).`);
+}
+
+/** So a server function's refusal reaches the browser as a `Refusal`, its code and details kept. */
+export const refusalAdapter = createSerializationAdapter({
+  key: 'signforge-refusal',
+  test: (value): value is Refusal => value instanceof Refusal,
+  toSerializable: ({ code, message, details }) => ({ code, message, details: details === undefined ? null : JSON.stringify(details) }),
+  fromSerializable: ({ code, message, details }: { code: RefusalCode; message: string; details: string | null }) =>
+    new Refusal(code, message, details === null ? undefined : JSON.parse(details)),
+});
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** The id of the screen in a `{ screen }` output, such as `claim_screen`'s. */
-export function screenIdOf(output: unknown): string {
-  if (isRecord(output) && isRecord(output.screen) && typeof output.screen.id === 'string') return output.screen.id;
-  throw new ToolCallError('error', 'SignForge answered without the screen. Reload the page to see it.');
-}
-
-/** The schedule entry's id in an `{ entry }` output, such as `start_takeover`'s. */
-export function entryIdOf(output: unknown): string {
-  if (isRecord(output) && isRecord(output.entry) && typeof output.entry.id === 'string') return output.entry.id;
-  throw new ToolCallError('error', 'SignForge answered without the schedule entry. Reload the page to see it.');
-}
-
-/** The id of the kit in a `{ brandKit }` output, such as `create_brand_kit`'s. */
-export function brandKitIdOf(output: unknown): string {
-  if (isRecord(output) && isRecord(output.brandKit) && typeof output.brandKit.id === 'string') return output.brandKit.id;
-  throw new ToolCallError('error', 'SignForge answered without the brand kit. Reload the page to see it.');
-}
-
-/** The version of the row in a `{ [of]: { version } }` output, such as `update_org_settings`' (`settings`): what the next save sends as `ifVersion`. */
-export function versionOf(output: unknown, of: string): number {
-  const row = isRecord(output) ? output[of] : undefined;
-  if (isRecord(row) && typeof row.version === 'number') return row.version;
-  throw new ToolCallError('error', 'SignForge answered without what it saved. Reload the page to see it.');
-}
-
 /** Whether a refusal is an `ifVersion` conflict: someone changed the thing since the page read it. */
-export const isStale = (err: unknown) =>
-  err instanceof ToolCallError && err.code === 'conflict' && isRecord(err.details) && typeof err.details.version === 'number';
+export const isStale = (err: unknown) => err instanceof Refusal && err.code === 'conflict' && isRecord(err.details) && typeof err.details.version === 'number';
 
 /** Whether a refusal is a conflict of any kind, such as a publish made since an Undo's. */
-export const isConflict = (err: unknown) => err instanceof ToolCallError && err.code === 'conflict';
-
-/** A tool's refusal as a sentence for the page. */
-export const toolMessage = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');
+export const isConflict = (err: unknown) => err instanceof Refusal && err.code === 'conflict';
 
 /** Whether a refusal says the row is gone: deleted, by someone else or in another tab. */
-export const isGone = (err: unknown) => err instanceof ToolCallError && err.code === 'not_found';
+export const isGone = (err: unknown) => err instanceof Refusal && err.code === 'not_found';
 
-/** The spot in a `{ spot }` output, such as `update_spot`'s, for the Query cache. */
-export function spotOf(output: unknown): SpotView {
-  if (isRecord(output) && isSpot(output.spot)) return output.spot;
-  throw new ToolCallError('error', 'SignForge answered without the spot. Reload the page to see it.');
-}
+/**
+ * Whether the API refused a call from a tab whose org is no longer the session's (#129): the
+ * member switched org in another tab. It holds until the tab reloads, so it is never retried, and
+ * the router's error page (src/components/route-error.tsx) offers Reload.
+ */
+export const isOrgChanged = (err: unknown): err is Refusal & { code: typeof ORG_CHANGED } => err instanceof Refusal && err.code === ORG_CHANGED;
 
-const isSpot = (v: unknown): v is SpotView => isRecord(v) && typeof v.id === 'string' && typeof v.version === 'number' && typeof v.kind === 'string';
-
-/** A `list_audit_log` page, as the CSV export reads it from the browser. */
-export function auditPageOf(output: unknown): AuditPage {
-  if (isRecord(output) && Array.isArray(output.entries) && (output.next === null || typeof output.next === 'string'))
-    return { entries: output.entries, next: output.next };
-  throw new ToolCallError('error', 'SignForge answered without the audit log. Try the export again.');
-}
-
-/** The playlist in a `{ playlist }` output, such as `update_playlist`'s, for the Query cache. */
-export function playlistOf(output: unknown): PlaylistView {
-  if (isRecord(output) && isPlaylist(output.playlist)) return output.playlist;
-  throw new ToolCallError('error', 'SignForge answered without the playlist. Reload the page to see it.');
-}
-
-const isPlaylist = (v: unknown): v is PlaylistView => isRecord(v) && typeof v.id === 'string' && typeof v.version === 'number' && Array.isArray(v.spotIds);
+/** A refusal as a sentence for the page. */
+export const toolMessage = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong.');

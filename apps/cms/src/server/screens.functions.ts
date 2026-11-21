@@ -4,7 +4,6 @@
  * the browser to `/api/tools/:name` (src/lib/tools.ts).
  */
 import { createServerFn } from '@tanstack/react-start';
-import type { ScreenDetail, ScreenStatus } from '~/lib/screen-types';
 import { all, inOrg, tool } from './tools.server';
 
 export const getScreens = createServerFn({ method: 'GET' }).handler(async () => {
@@ -14,17 +13,33 @@ export const getScreens = createServerFn({ method: 'GET' }).handler(async () => 
 
 /** What each screen is doing, for the Screens page's poll: no settings or manifests, about three D1 rows a screen (packages/tools README, `list_screen_status`). */
 export const getScreenStatus = createServerFn({ method: 'GET' }).handler(async () => {
-  const screens = await inOrg(() => all('list_screen_status', (p: { screens: ScreenStatus[]; next: string | null }) => p.screens), []);
+  const screens = await inOrg(() => all('list_screen_status', (p) => p.screens), []);
   return { screens, at: Date.now() };
 });
+
+/** A JSON value: what Start's type check can prove a server function's answer serializes. */
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+/**
+ * A value read from the API's JSON, typed as JSON: an event's input is typed `unknown` by its
+ * tool (whatever the tool was given), which Start's check cannot prove serializes.
+ */
+function json(v: unknown): Json {
+  if (v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  if (Array.isArray(v)) return v.map(json);
+  if (typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, json(x)]));
+  // Nothing else comes out of JSON.parse; the return is for the type.
+  return null;
+}
 
 export const getScreen = createServerFn({ method: 'GET' })
   .validator((screenId: string) => screenId)
   .handler(async ({ data: screenId }) => {
     const [detail, groups] = await inOrg(
-      () => Promise.all([tool<ScreenDetail>('get_screen', { screenId }, { missing: 'null' }), all('list_groups', (p) => p.groups)]),
+      () => Promise.all([tool('get_screen', { screenId }, { missing: 'null' }), all('list_groups', (p) => p.groups)]),
       [null, []],
     );
     if (!detail) return null;
-    return { ...detail, groups, at: Date.now() };
+    const events = detail.events.map((e) => ({ ...e, input: Object.fromEntries(Object.entries(e.input).map(([k, x]) => [k, json(x)])) }));
+    return { ...detail, events, groups, at: Date.now() };
   });

@@ -5,8 +5,9 @@
  */
 import { z } from 'zod';
 import { displayHours, idempotencyKey, locale, name, orientation, timezone } from './fields';
-import { screenOutput, screenView } from './screens';
+import { screenView } from './screens';
 import { defineTool, ToolError } from './tool';
+import { outputs } from './outputs';
 
 /** Codes are 6 of these 32 letters (about a billion codes): no 0/O, 1/I, so a code read off a screen types cleanly. */
 export const PAIRING_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -39,7 +40,7 @@ const claimScreen = defineTool({
     displayHours: displayHours.optional().describe('Omit for always on'),
     idempotencyKey,
   }),
-  output: z.object({ screen: screenOutput }),
+  output: outputs.claim_screen,
   example: { code: 'ABC234', name: 'Lobby', timezone: 'Europe/London', orientation: 'landscape' },
   target: (_input, output) => ({ kind: 'screen', id: output.screen.id }),
   handler: async ({ org, input, write, blobs, services: { rateLimit } }) => {

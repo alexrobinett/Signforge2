@@ -20,13 +20,14 @@ import { madeBySpotEditor } from './data-sources';
 import { sha256Hex } from './dispatch';
 import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
-import { keysetPage, nextOutput, pageInput } from './paging';
-import { publishOrg, type DraftKind, type DraftPin } from './publishing';
+import { keysetPage, pageInput } from './paging';
+import { publishOrg, type DraftPin } from './publishing';
 import { manifestKey } from './r2';
 import { screenState, type ScreenState } from './screen-state';
 import { stateInput } from './screens';
 import { unreachableAfterMs } from './settings';
 import { defineTool, notFound, ToolError, type ToolContext } from './tool';
+import { draftRef, type OUTCOMES, outputs, type publishOutput, type ToolOutput } from './outputs';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -41,7 +42,7 @@ const publishManifestToScreen = defineTool({
     screenId: id('screen'),
     manifestId: z.string().regex(SHA256, 'not a manifest id (64 lowercase hex characters)').describe("The manifest's id, the SHA-256 in its `id` field"),
   }),
-  output: z.object({ screenId: z.string(), manifestId: z.string(), changed: z.boolean().describe('False if it was already the desired manifest') }),
+  output: outputs.publish_manifest_to_screen,
   example: { screenId: 'scr_example', manifestId: '0'.repeat(64) },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, blobs, input, write, notify }) => {
@@ -73,19 +74,6 @@ function sourcesIn(json: string | null | undefined): string[] {
   return Object.values(bindings).map((b) => b.source);
 }
 
-const DRAFT_KINDS = ['spot', 'playlist', 'schedule_entry'] as const satisfies readonly DraftKind[];
-const draftRef = z.object({ kind: z.enum(DRAFT_KINDS), id: z.string() });
-
-const madeOutput = z
-  .object({
-    id: z.string(),
-    revision: z.number().int().describe('The publish number people see, v1, v2, …: the org has one sequence'),
-    screens: z.number().int().describe('Screens it switched'),
-    previousId: z.string().nullable().describe('The publish before it: roll back to it (roll_back_publish) to undo this one; null for the first'),
-  })
-  .nullable()
-  .describe('The publish made, or null when nothing changed: then nothing was written and no screen was touched');
-
 /**
  * Stage a publish's record and its screens' switches, and queue telling the screens: the part of
  * a publish and a roll back that is the same. The caller has staged the move of the revision.
@@ -105,32 +93,11 @@ async function switchScreens(
   return { id: made.id, revision, screens: rows.length, previousId: previous?.id ?? null };
 }
 
-const publishResult = z.object({
-  publish: madeOutput,
-  promoted: z.array(draftRef).describe('Drafts this publish made live'),
-  held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Drafts that failed their checks and keep their published version'),
-  removed: z.array(draftRef).describe('Schedule entries deleted with this publish: deletions it applied, and takeovers that have ended'),
-  removedDataSources: z
-    .array(z.string())
-    .describe('Weather sources the spot editor made that no spot binds any more, deleted with the publish (one a spot was bound to meanwhile stays)'),
-  screens: z.array(
-    z.object({
-      screenId: z.string(),
-      outcome: z.enum(['updated', 'unchanged', 'failed']).describe('failed: it could not be compiled and keeps what it plays'),
-      problems: z.array(z.string()),
-    }),
-  ),
-});
-
 /**
  * A publish: promote the chosen drafts (all with `drafts` undefined), delete the `end` entries,
  * compile every screen, store and switch the changed ones. `publish` and `end_takeover`.
  */
-async function runPublish(
-  ctx: ToolContext<unknown>,
-  drafts: readonly DraftPin[] | undefined,
-  end: readonly string[] = [],
-): Promise<z.infer<typeof publishResult>> {
+async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[] | undefined, end: readonly string[] = []): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
   const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end);
   const screens = result.screens.map((s) => ({
@@ -184,7 +151,7 @@ const publish = defineTool({
         'The drafts to publish, each at the version you chose it at; omit to publish every changed draft. An empty list publishes no draft and compiles every screen again: for a deleted schedule entry or a new default playlist',
       ),
   }),
-  output: publishResult,
+  output: outputs.publish,
   example: {},
   target: (_input, output) => (output.publish ? { kind: 'publish', id: output.publish.id } : undefined),
   handler: (ctx) => runPublish(ctx, ctx.input.drafts),
@@ -199,7 +166,7 @@ const endTakeover = defineTool({
   mutates: true,
   publishes: true,
   input: z.object({ scheduleEntryId: id('schedule entry').describe('The takeover') }),
-  output: publishResult,
+  output: outputs.end_takeover,
   example: { scheduleEntryId: 'sch_example' },
   target: (input) => ({ kind: 'schedule_entry', id: input.scheduleEntryId }),
   handler: async (ctx) => {
@@ -221,7 +188,7 @@ const rollBackPublish = defineTool({
     publishId: id('publish').describe('The publish to go back to'),
     ifLatest: id('publish').optional().describe('For an undo: the publish being undone. Refused with a conflict unless it is still the latest'),
   }),
-  output: z.object({ publish: madeOutput }),
+  output: outputs.roll_back_publish,
   example: { publishId: 'pub_example' },
   target: (input) => ({ kind: 'publish', id: input.publishId }),
   handler: async (ctx) => {
@@ -247,25 +214,6 @@ const rollBackPublish = defineTool({
   },
 });
 
-const publishOutput = z.object({
-  id: z.string(),
-  revision: z.number().int(),
-  restoresId: z.string().nullable().describe('For a roll back: the publish whose screens it put back'),
-  restoresRevision: z.number().int().nullable().describe("For a roll back: that publish's revision"),
-  by: z.object({ kind: z.string(), id: z.string(), name: z.string().nullable().describe("A member's name; null for an agent or the system") }),
-  createdAt: z.number(),
-  finishedAt: z.number().nullable().describe('When every screen it switched played it, moved on to a later publish, or was revoked'),
-  reached: z
-    .number()
-    .int()
-    .nullable()
-    .describe(
-      'Once finished: how many of its screens the five-minute check saw playing it; 0 when it was replaced before any check saw a screen report it (a screen may have played it in between); null until then',
-    ),
-  screens: z.number().int().describe('Screens it switched'),
-  playing: z.number().int().describe('Of those, how many say they are playing it'),
-  replaced: z.number().int().describe('Of those, how many a later publish has switched, and do not say they play this one'),
-});
 type PublishView = z.output<typeof publishOutput>;
 
 const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[number]): PublishView => ({
@@ -290,7 +238,7 @@ const listPublishes = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ publishes: z.array(publishOutput), next: nextOutput }),
+  output: outputs.list_publishes,
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = await keysetPage(
@@ -302,7 +250,6 @@ const listPublishes = defineTool({
   },
 });
 
-const OUTCOMES = ['playing', 'downloading', 'asleep', 'offline', 'waiting', 'fell_back', 'revoked', 'replaced'] as const;
 type Outcome = (typeof OUTCOMES)[number];
 
 /** Where a screen stands on the manifest a publish gave it, from what it reports and its state. */
@@ -325,20 +272,7 @@ const getPublish = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ publishId: id('publish').optional().describe('Omit for the latest publish') }),
-  output: z.object({
-    publish: publishOutput.nullable(),
-    screens: z.array(
-      z.object({
-        screenId: z.string(),
-        name: z.string(),
-        manifestId: z.string().describe('The manifest this publish gave it'),
-        outcome: z.enum(OUTCOMES),
-        filesMissing: z.number().nullable().describe('downloading: files it has still to fetch'),
-        wakesAt: z.string().nullable().describe('asleep: when it wakes'),
-        lastSeenAt: z.number().nullable(),
-      }),
-    ),
-  }),
+  output: outputs.get_publish,
   example: {},
   handler: async ({ org, input }) => {
     let beforeRevision: number | undefined;

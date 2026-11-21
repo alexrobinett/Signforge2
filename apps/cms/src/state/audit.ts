@@ -3,8 +3,8 @@
  * a time from the browser (`list_audit_log`) into the file, up to EXPORT_LIMIT entries. The rows
  * are the page's own words, and inputs as recorded, so what was redacted stays redacted.
  */
-import { csvLine, CSV_HEADER, type AuditEntry } from '~/lib/audit';
-import { auditPageOf, callTool, toolMessage } from '~/lib/tools';
+import { csvLine, CSV_HEADER, type AuditEntry, type AuditPage } from '~/lib/audit';
+import { callTool, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 
 /** At most this many entries in one file (50 calls of 200): a bigger log is exported a filter at a time. */
@@ -44,7 +44,7 @@ export const createAuditSlice: SliceCreator<AuditSlice> = (set) => {
       let cursor: string | null = null;
       try {
         do {
-          const page = auditPageOf(await callTool('list_audit_log', { ...input, limit: EXPORT_PAGE, ...(cursor ? { cursor } : {}) }));
+          const page: AuditPage = await callTool('list_audit_log', { ...input, limit: EXPORT_PAGE, ...(cursor ? { cursor } : {}) });
           parts.push(
             page.entries
               .slice(0, EXPORT_LIMIT - count)

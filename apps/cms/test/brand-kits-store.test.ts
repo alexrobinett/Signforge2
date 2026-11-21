@@ -24,7 +24,18 @@ vi.mock('~/server/assets.functions', () => ({ getAssets: vi.fn() }));
 const ORG = 'org_1';
 const manifest = clock as unknown as TemplateManifest;
 const HTML = 'c'.repeat(64);
-const version = { id: 'tpv_clock', key: templateKey(manifest), version: manifest.version, status: 'approved' as const, manifest };
+const version = {
+  id: 'tpv_clock',
+  templateId: 'tpl_clock',
+  key: templateKey(manifest),
+  version: manifest.version,
+  status: 'approved' as const,
+  manifest,
+  bundleSha256: HTML,
+  checkReport: null,
+  createdAt: 0,
+  updatedAt: 0,
+};
 const templates: TemplateView[] = [{ id: 'tpl_clock', owner: 'base', key: manifest.id, name: manifest.name, versions: [version] }];
 const spot: SpotView = {
   id: 'spt_clock',
@@ -164,6 +175,7 @@ describe("the kit page's previews (review of #103)", () => {
       size: 900,
       width: 400,
       height: 100,
+      durationMs: null,
       renditions: [{ orientation: 'landscape', sha256: 'e'.repeat(64), type: 'image/png', size: 900, width: 400, height: 100 }],
       createdAt: 0,
       updatedAt: 0,

@@ -13,6 +13,8 @@ const noUseState =
   'useState is banned. Put app and flow state in the app store (useAppStore, src/state/). useReducer only for state that belongs to one component and never leaves it.';
 const noEffects =
   'Effects are banned. Derive the value during render, do the work in an event handler, a ref callback or a store action, or read outside state with useSyncExternalStore.';
+const toolsTypesOnly =
+  "Import only types from @signforge/tools (import type): a value import puts the tools' schemas, or their handlers, in the browser bundle. src/lib/tools.ts says how a call is typed.";
 const noGlobalStore =
   "zustand's create() makes one store for the whole server, shared between requests. Add a slice to src/state/ and read it with useAppStore.";
 
@@ -52,6 +54,10 @@ export default defineConfig(
             { name: 'zustand', importNames: ['create'], message: noGlobalStore },
           ],
         },
+      ],
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: [{ group: ['@signforge/tools', '@signforge/tools/*'], allowTypeImports: true, message: toolsTypesOnly }] },
       ],
       'no-restricted-syntax': [
         'error',

@@ -13,8 +13,9 @@
  * publish of anything; End now is the way back.
  */
 import { toast } from 'sonner';
-import { publishResultOf, madeOf, versionName, type PublishResult } from '~/lib/publishes';
-import { callTool, isConflict, isStale, playlistOf, toolMessage } from '~/lib/tools';
+import type { ToolOutput } from '@signforge/tools/outputs';
+import { versionName } from '~/lib/publishes';
+import { callTool, isConflict, isStale, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
 import { spotQuery, spotsQuery } from '~/queries/spots';
@@ -61,7 +62,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   const viewRollout = (id: string) => ({ label: 'View rollout', onClick: () => void router.navigate({ to: '/publishes', search: { id } }) });
 
   /** The toast for a publish's answer: what reached screens, else why nothing did; with Undo unless `undo` is false. */
-  function told(orgId: string, r: PublishResult, undo = true) {
+  function told(orgId: string, r: ToolOutput<'publish'>, undo = true) {
     const held = r.held.flatMap((h) => h.problems)[0];
     const noDefault = r.screens.some((s) => s.problems.includes('the organization has no default playlist'));
     // Every screen refused it: say the screens' own reason, not a guess.
@@ -106,7 +107,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
   async function publish(orgId: string, pins: Pin[], undo = true) {
     pending(true);
     try {
-      told(orgId, publishResultOf(await callTool('publish', { drafts: pins })), undo);
+      told(orgId, await callTool('publish', { drafts: pins }), undo);
       await refresh(orgId);
     } catch (err) {
       toast.error('Not published', {
@@ -149,7 +150,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     async rollBackTo(orgId, target, undoing) {
       pending(true);
       try {
-        const made = madeOf(await callTool('roll_back_publish', { publishId: target.id, ...(undoing ? { ifLatest: undoing } : {}) }));
+        const made = (await callTool('roll_back_publish', { publishId: target.id, ...(undoing ? { ifLatest: undoing } : {}) })).publish;
         const v = versionName(target);
         // A new toast, not the publish toast updated: that one's Undo would go along with it.
         toast.dismiss(TOAST_ID);
@@ -198,7 +199,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     async endTakeover(orgId, entryId) {
       pending(true);
       try {
-        told(orgId, publishResultOf(await callTool('end_takeover', { scheduleEntryId: entryId })), false);
+        told(orgId, await callTool('end_takeover', { scheduleEntryId: entryId }), false);
         await refresh(orgId);
       } catch (err) {
         toast.error('Not ended', { description: toolMessage(err) });
@@ -210,7 +211,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     async makeDefaultPlaylist(orgId, playlistId) {
       pending(true);
       try {
-        const playlist = playlistOf(await callTool('set_default_playlist', { playlistId }));
+        const playlist = (await callTool('set_default_playlist', { playlistId })).playlist;
         queryClient.setQueryData(playlistKeys.one(orgId, playlistId), playlist);
         await queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
         toast.success(`${playlist.name} plays on every screen`, { description: 'From the next publish, wherever no schedule says otherwise.' });

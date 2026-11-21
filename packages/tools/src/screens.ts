@@ -1,95 +1,21 @@
 /** Screen tools: read screens, rename them, change their settings, wake or sleep them, identify, restart, revoke a credential. */
-import { SCREEN_KINDS, type DisplayHours, type DisplayOverride, type ScreenManifest } from '@signforge/contract';
+import type { DisplayHours, DisplayOverride, ScreenManifest } from '@signforge/contract';
 import type { OrgScope, Screen, ScreenCredential } from '@signforge/db';
 import { nextDisplayChange } from '@signforge/player-core';
 import { z } from 'zod';
-import { displayHours, id, ifVersion, locale, name, orientation, timezone, version } from './fields';
+import { displayHours, id, ifVersion, locale, name, orientation, timezone } from './fields';
 import { parseHeartbeat } from './heartbeat';
-import { keysetPage, nextOutput, page, pageInput } from './paging';
+import { keysetPage, page, pageInput } from './paging';
 import { manifestKey } from './r2';
-import { NEEDS_YOU_REASONS, screenState, shouldBeShowing, STATE_KINDS, type StateInput } from './screen-state';
+import { screenState, shouldBeShowing, type StateInput } from './screen-state';
 import { unreachableAfterMs } from './settings';
 import { defineTool, notFound } from './tool';
+import { outputs, type CredentialView, type ScreenView } from './outputs';
 
 /** How long a display override lasts at most: on a screen without display hours, and over a closed weekend. */
 export const OVERRIDE_LIMIT_MS = 12 * 3_600_000;
 /** How long `identify_screen` shows the screen's name. */
 export const IDENTIFY_SECONDS = 10;
-
-const displayOverrideOutput = z.object({ state: z.enum(['on', 'off']), until: z.string().describe('ISO 8601; the override ends by itself then') });
-
-/** A screen as tools return it. Times are milliseconds since the epoch. */
-export const screenOutput = z.object({
-  id: z.string(),
-  name: z.string(),
-  timezone: z.string(),
-  locale: z.string().nullable(),
-  orientation,
-  kind: z.enum(SCREEN_KINDS).describe('device, or browser: a test screen in a browser tab, which has no panel to power'),
-  displayHours: displayHours.nullable().describe('Null means always on'),
-  status: z.enum(['active', 'revoked']).describe('Revoked once every credential the screen had is revoked'),
-  desiredManifestId: z.string().nullable().describe('The manifest the screen should play'),
-  previousManifestId: z.string().nullable().describe('The one before it, kept while the screen switches'),
-  reportedManifestId: z.string().nullable().describe('The manifest the screen last said it is playing'),
-  lastSeenAt: z.number().nullable(),
-  playerVersion: z.string().nullable(),
-  displayOverride: displayOverrideOutput.nullable().describe('A wake now or sleep now in force, set with set_display_override'),
-  state: z
-    .object({
-      kind: z.enum(STATE_KINDS),
-      reason: z
-        .enum(NEEDS_YOU_REASONS)
-        .nullable()
-        .describe('Why it needs a person: behind on a publish, revoked, nothing published, or fallen back from a manifest that played nothing'),
-      wakesAt: z.string().nullable().describe('Asleep: when it wakes'),
-      filesMissing: z.number().nullable().describe('Updating: files still to fetch'),
-    })
-    .describe('What the screen is doing, as a fact. Unreachable while on the latest version is calm: the screen keeps playing it from its cache'),
-  heartbeat: z
-    .object({
-      at: z.number(),
-      playerVersion: z.string(),
-      activeManifestId: z.string().nullable(),
-      filesMissing: z.number(),
-      fallbackFrom: z.string().nullable().describe('A newer manifest that played nothing, so the screen went back to its last good one'),
-      displayOn: z.boolean(),
-      clockTrusted: z.boolean(),
-      driftMs: z.number(),
-    })
-    .nullable()
-    .describe("The screen's last sync; null until it first syncs"),
-  showing: z
-    .object({
-      asleep: z.boolean(),
-      wakesAt: z.string().nullable(),
-      playlist: z.object({ id: z.string(), name: z.string() }).nullable(),
-      takeover: z.boolean().describe('Whether a takeover plays that playlist'),
-      spot: z
-        .object({
-          id: z.string(),
-          name: z.string(),
-          kind: z.enum(['template', 'image', 'video', 'url']),
-          template: z.string().nullable(),
-          image: z.string().nullable().describe('SHA-256 of an image the spot shows, for a thumbnail (GET /api/blobs/v2/:sha256)'),
-        })
-        .nullable()
-        .describe("The playlist's first spot"),
-      spots: z.number(),
-    })
-    .nullable()
-    .describe('What the screen should be showing now, worked out from its desired manifest as the player does; null when nothing is published'),
-  version: version.describe('Moves on when its name or settings change (not with heartbeats or publishes); pass it as ifVersion to update only what you read'),
-  createdAt: z.number(),
-  updatedAt: z.number(),
-});
-export type ScreenView = z.infer<typeof screenOutput>;
-
-/** What the fleet poll returns of a screen: what it is doing, without its settings or what it should be showing. */
-const screenStatusOutput = screenOutput.pick({ id: true, state: true, lastSeenAt: true, desiredManifestId: true, reportedManifestId: true });
-
-/** A credential, without its hash. */
-const credentialOutput = z.object({ id: z.string(), createdAt: z.number(), lastUsedAt: z.number().nullable(), revokedAt: z.number().nullable() });
-export type CredentialView = z.infer<typeof credentialOutput>;
 
 /** Manifests are immutable (their id is their hash), so a parsed one is kept for the life of the isolate. */
 const MAX_CACHED_MANIFESTS = 64;
@@ -221,7 +147,7 @@ const listScreens = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ screens: z.array(screenOutput), next: nextOutput }),
+  output: outputs.list_screens,
   example: {},
   handler: async ({ org, input, blobs }) => {
     const [all, credentials, afterMs] = await Promise.all([org.screens.list(), org.screens.credentials.list(), unreachableAfterMs(org)]);
@@ -240,7 +166,7 @@ const listScreenStatus = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ screens: z.array(screenStatusOutput), next: nextOutput }),
+  output: outputs.list_screen_status,
   example: {},
   handler: async ({ org, input }) => {
     const [{ rows, next }, afterMs] = await Promise.all([
@@ -271,19 +197,7 @@ const getScreen = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ screenId: id('screen') }),
-  output: z.object({
-    screen: screenOutput,
-    groupIds: z.array(z.string()),
-    credentials: z.array(credentialOutput),
-    events: z.array(
-      z.object({
-        at: z.number(),
-        action: z.string().describe('The tool that made the change'),
-        actor: z.object({ kind: z.string(), id: z.string() }),
-        input: z.record(z.string(), z.unknown()).describe('What the tool was given, secrets redacted'),
-      }),
-    ),
-  }),
+  output: outputs.get_screen,
   example: { screenId: 'scr_example' },
   handler: async ({ org, input, blobs }) => {
     const screen = await requireScreen(org, input.screenId);
@@ -306,7 +220,7 @@ const renameScreen = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ screenId: id('screen'), name: name('screen'), ifVersion }),
-  output: z.object({ screen: screenOutput }),
+  output: outputs.rename_screen,
   example: { screenId: 'scr_example', name: 'Lobby' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, write, blobs }) => {
@@ -335,7 +249,7 @@ const updateScreenSettings = defineTool({
       (v) => v.timezone !== undefined || v.locale !== undefined || v.orientation !== undefined || v.displayHours !== undefined,
       'give at least one setting to change',
     ),
-  output: z.object({ screen: screenOutput }),
+  output: outputs.update_screen_settings,
   example: { screenId: 'scr_example', timezone: 'Europe/London', displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '07:00', to: '22:00' }] } },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, write, blobs }) => {
@@ -363,7 +277,7 @@ const setDisplayOverride = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ screenId: id('screen'), state: z.enum(['on', 'off']).nullable().describe('on, off, or null to follow the display hours again') }),
-  output: z.object({ screen: screenOutput }),
+  output: outputs.set_display_override,
   example: { screenId: 'scr_example', state: 'on' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, write, notify, blobs }) => {
@@ -389,7 +303,7 @@ const identifyScreen = defineTool({
   mutates: true,
   alwaysAudited: true,
   input: z.object({ screenId: id('screen') }),
-  output: z.object({ screenId: z.string(), seconds: z.number() }),
+  output: outputs.identify_screen,
   example: { screenId: 'scr_example' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, notify }) => {
@@ -408,7 +322,7 @@ const restartScreen = defineTool({
   mutates: true,
   alwaysAudited: true,
   input: z.object({ screenId: id('screen') }),
-  output: z.object({ screenId: z.string() }),
+  output: outputs.restart_screen,
   example: { screenId: 'scr_example' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, notify }) => {
@@ -428,7 +342,7 @@ const revokeScreenCredential = defineTool({
   // A repeat stages nothing but still closes the socket, in case the first notice never arrived.
   alwaysAudited: true,
   input: z.object({ screenId: id('screen'), credentialId: id('credential') }),
-  output: z.object({ credential: credentialOutput }),
+  output: outputs.revoke_screen_credential,
   example: { screenId: 'scr_example', credentialId: 'crd_example' },
   target: (input) => ({ kind: 'credential', id: input.credentialId }),
   handler: async ({ org, input, write, notify }) => {

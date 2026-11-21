@@ -111,8 +111,13 @@ function views(graph: OrgGraph, draft: SpotDraft, orientation: Orientation) {
     id: draft.templateVersionId ?? '',
     key: v.key,
     version: v.manifest.version,
+    templateId: `tpl_${v.manifest.id}`,
     status: v.status,
     manifest: v.manifest,
+    bundleSha256: v.html,
+    checkReport: null,
+    createdAt: 0,
+    updatedAt: 0,
   };
   const { input, brandKitId, problems } = previewInput(graph, orientation, {
     ...(draft.templateVersionId ? { templateVersionId: draft.templateVersionId } : {}),

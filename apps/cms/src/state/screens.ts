@@ -4,9 +4,10 @@
  * (./versioned-draft.ts). The view and filters of the list are in the URL (`/screens?view=table`),
  * and screens themselves come from the route loaders.
  */
+import type { ToolName } from '@signforge/tools/outputs';
 import { orgOnScreen } from '~/lib/live';
 import type { DisplayHours, GroupView, ScreenView } from '~/lib/screen-types';
-import { callTool, screenIdOf, toolMessage, versionOf } from '~/lib/tools';
+import { callTool, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
 
@@ -64,9 +65,9 @@ interface ScreensState {
 }
 
 /** A command or change sent from a screen's page, with what to say when it worked. */
-interface ScreenAction {
+export interface ScreenAction {
   label: string;
-  tool: string;
+  tool: ToolName;
   input: Record<string, unknown>;
   done: string;
 }
@@ -159,7 +160,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
     async save({ draft: { edit, version, idempotencyKey }, context: { screen, groups }, moved }) {
       const screenId = screen.id;
       if (edit.kind === 'hours') {
-        const saved = versionOf(await callTool('update_screen_settings', { screenId, displayHours: edit.hours, ifVersion: version }), 'screen');
+        const saved = (await callTool('update_screen_settings', { screenId, displayHours: edit.hours, ifVersion: version })).screen.version;
         await router.invalidate();
         return { version: saved };
       }
@@ -168,11 +169,11 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
       // a retry after a later step failed starts from there.
       let ifVersion = version;
       if (d.name.trim() !== screen.name) {
-        ifVersion = versionOf(await callTool('rename_screen', { screenId, name: d.name.trim(), ifVersion }), 'screen');
+        ifVersion = (await callTool('rename_screen', { screenId, name: d.name.trim(), ifVersion })).screen.version;
         moved(ifVersion);
       }
       if (d.timezone !== screen.timezone || d.orientation !== screen.orientation)
-        moved(versionOf(await callTool('update_screen_settings', { screenId, timezone: d.timezone, orientation: d.orientation, ifVersion }), 'screen'));
+        moved((await callTool('update_screen_settings', { screenId, timezone: d.timezone, orientation: d.orientation, ifVersion })).screen.version);
       // Membership is added or removed, never replaced, so a screen someone else put in a group stays.
       for (const g of groups) {
         const was = g.screenIds.includes(screenId);
@@ -212,7 +213,7 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
       const d = get().screens.pairing;
       const hours = d.hours === undefined ? defaults.hours : d.hours;
       try {
-        const screenId = screenIdOf(
+        const screenId = (
           await callTool('claim_screen', {
             code: d.code,
             name: d.name.trim(),
@@ -221,8 +222,8 @@ export const createScreensSlice: SliceCreator<ScreensSlice> = (set, get, { route
             ...(defaults.locale ? { locale: defaults.locale } : {}),
             ...(hours ? { displayHours: hours } : {}),
             idempotencyKey: key,
-          }),
-        );
+          })
+        ).screen.id;
         for (const groupId of d.groupIds) await callTool('add_group_members', { groupId, screenIds: [screenId] });
         await router.invalidate();
         await router.navigate({ to: '/screens/$screenId', params: { screenId } });

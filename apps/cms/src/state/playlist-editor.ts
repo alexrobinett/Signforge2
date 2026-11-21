@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 import { playlistDraftOf, rowKeys, type PlaylistDraft, type PlaylistView } from '~/lib/playlists';
 import { compilePlaylistPreview, versionsById, type SpotPreview } from '~/lib/spots';
 import { orgOnScreen } from '~/lib/live';
-import { callTool, isGone, playlistOf, toolMessage } from '~/lib/tools';
+import { callTool, isGone, toolMessage } from '~/lib/tools';
 import { playlistKeys, playlistQuery } from '~/queries/playlists';
 import { assetsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { StageTarget } from './spot-editor';
@@ -122,9 +122,9 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
   const drafts = createVersionedDrafts<PlaylistDraft>({
     state: { read: () => get().playlistEditor.drafts, write: (change) => editor((e) => ({ ...e, drafts: change(e.drafts) })) },
     async save({ key: playlistId, draft: { orgId, edit, version } }) {
-      const saved = playlistOf(
-        await callTool('update_playlist', { playlistId, name: edit.name.trim(), transition: edit.transition, spotIds: edit.spotIds, ifVersion: version }),
-      );
+      const saved = (
+        await callTool('update_playlist', { playlistId, name: edit.name.trim(), transition: edit.transition, spotIds: edit.spotIds, ifVersion: version })
+      ).playlist;
       const key = playlistKeys.one(orgId, playlistId);
       // A playlist deleted meanwhile has left the cache: it is not written back.
       if (queryClient.getQueryData(key)) queryClient.setQueryData(key, saved);
@@ -133,7 +133,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     },
     invalid: ({ edit }) => unsaveable(edit),
     // Only a refusal about the playlist itself: one about a spot in it is shown, and the next save goes.
-    gone: (err, playlistId) => isGone(err) && toolMessage(err) === `playlist ${playlistId} not found`,
+    gone: (refusal, playlistId) => isGone(refusal) && refusal.message === `playlist ${playlistId} not found`,
     makeId: () => crypto.randomUUID(),
     currentOrg: () => orgOnScreen(router),
     clock: realClock,
@@ -253,7 +253,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
       const key = get().playlistEditor.newPlaylist.key ?? crypto.randomUUID();
       editor((e) => ({ ...e, newPlaylist: { ...e.newPlaylist, key, pending: true, error: null } }));
       try {
-        const made = playlistOf(await callTool('create_playlist', { name: get().playlistEditor.newPlaylist.name.trim(), idempotencyKey: key }));
+        const made = (await callTool('create_playlist', { name: get().playlistEditor.newPlaylist.name.trim(), idempotencyKey: key })).playlist;
         queryClient.setQueryData(playlistKeys.one(orgId, made.id), made);
         void queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
         await router.navigate({ to: '/playlists/$playlistId', params: { playlistId: made.id } });

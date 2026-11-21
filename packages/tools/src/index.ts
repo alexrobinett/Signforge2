@@ -34,7 +34,6 @@ export {
   type ServiceName,
   type Tool,
   type ToolContext,
-  type ToolErrorCode,
   type ToolServices,
 } from './tool';
 export { dispatch, describeTools, effectiveScopes, grantOf, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
@@ -44,13 +43,24 @@ export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
 export { platformRegistry, PLATFORM_TOOLS, registry, TOOLS } from './registry';
 export { baseBlobKey, manifestKey, orgBlobKey, uploadKey } from './r2';
 export { r2Presigner, type R2PresignConfig, type UploadSigner } from './upload';
-export { MAX_RENDITION_BYTES, UPLOAD_URL_SECONDS, type AssetView, type RenditionView } from './assets';
-export { IDENTIFY_SECONDS, liveOverride, OVERRIDE_LIMIT_MS, type ScreenView, type CredentialView } from './screens';
+export { MAX_RENDITION_BYTES, UPLOAD_URL_SECONDS } from './assets';
+export { IDENTIFY_SECONDS, liveOverride, OVERRIDE_LIMIT_MS } from './screens';
 export { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from './pairing';
-export type { GroupView } from './groups';
-export type { SpotView } from './spots';
-export { kitColors, type BrandKitView, type StoredColors } from './brand';
-export type { StoredCheckReport, TemplateVersionView, TemplateView } from './templates';
+export { kitColors, type StoredColors } from './brand';
+export type { StoredCheckReport } from './templates';
+export type {
+  AssetView,
+  Audience,
+  BrandKitView,
+  CredentialView,
+  GroupView,
+  RenditionView,
+  ScreenView,
+  SpotView,
+  TemplateVersionView,
+  TemplateView,
+  ToolErrorCode,
+} from './outputs';
 export {
   compileInputFor,
   loadCompileInput,
@@ -79,5 +89,5 @@ export {
   type StateInput,
   type StateKind,
 } from './screen-state';
-export { orgSettings, type Audience } from './settings';
+export { orgSettings } from './settings';
 export { madeBySpotEditor } from './data-sources';

@@ -7,6 +7,7 @@
 import type { DeviceCommand, TableFeed, TemplateManifest, TemplateRuntimeReport } from '@signforge/contract';
 import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
+import type { ToolErrorCode } from './outputs';
 import type { UploadSigner } from './upload';
 
 /** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
@@ -232,8 +233,6 @@ export interface ToolContext<I, D extends DataScope = OrgScope, N extends Servic
    */
   onDiscard: (undo: () => Promise<void>) => void;
 }
-
-export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable';
 
 /**
  * What the adapter counts against a rate limit, keyed by what it knows of the caller (the API: the

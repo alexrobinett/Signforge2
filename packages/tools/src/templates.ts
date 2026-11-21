@@ -19,7 +19,6 @@ import {
   canonicalJson,
   checkTemplateBundle,
   parseTemplateManifest,
-  TEMPLATE_CHECKS,
   templateKey,
   type TemplateCheckReport,
   type TemplateManifest,
@@ -28,81 +27,15 @@ import {
 import type { Template, TemplateVersion } from '@signforge/db';
 import { z } from 'zod';
 import { id } from './fields';
-import { nextOutput, page, pageInput, type SortKey } from './paging';
+import { page, pageInput, type SortKey } from './paging';
 import { baseBlobKey, orgBlobKey } from './r2';
 import { defineSharedTool, defineTool, notFound, ToolError, type DataScope } from './tool';
+import { outputs, TEMPLATE_STATUSES, type TemplateVersionView, type TemplateView } from './outputs';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const sha = (what: string) => z.string().regex(SHA256, `not a ${what} hash (64 lowercase hex characters)`);
 
-const STATUSES = ['draft', 'approved', 'retired'] as const;
-
-/**
- * A built `template.json`. Checked loosely: the contract has no runtime schema for it yet (M3-31);
- * `checkTemplateBundle` checked it in full when the version was registered.
- */
-const manifestOutput = z
-  .custom<TemplateManifest>(
-    (v) =>
-      z
-        .looseObject({ id: z.string(), version: z.string(), name: z.string(), fields: z.record(z.string(), z.unknown()), orientations: z.array(z.string()) })
-        .safeParse(v).success,
-    'not a template manifest',
-  )
-  .describe("The template's template.json, as built: id, version, name, fields, duration, orientations, uses, background");
-
-/** What is stored on a version: the contract's report, plus when it ran and on which sources. */
-const checkReportOutput = z.object({
-  ok: z.boolean(),
-  bundleBytes: z.number(),
-  checks: z.array(z.object({ check: z.enum(TEMPLATE_CHECKS), ok: z.boolean(), problems: z.array(z.string()) })),
-  warnings: z.array(z.string()).optional().describe('Findings that do not stop the version: colour literals outside a var(--sf-*) fallback'),
-  runtime: z
-    .object({
-      ok: z.boolean(),
-      problems: z.array(z.string()),
-      runner: z.object({ image: z.string(), browser: z.string() }),
-      renders: z.array(
-        z.object({
-          orientation: z.enum(['landscape', 'portrait']),
-          viewport: z.object({ width: z.number(), height: z.number() }),
-          readyMs: z.number().nullable(),
-          frames: z.object({ count: z.number(), longestMs: z.number() }).nullable(),
-        }),
-      ),
-      cost: z.object({ startMs: z.number(), checkMs: z.number() }),
-    })
-    .optional()
-    .describe(
-      "The runtime check: the bundle rendered headless in the player's sandbox, with no network, in each orientation; ms to ready and the first second's frames per render. Org versions only",
-    ),
-  checkedAt: z.number(),
-  sourcesSha256: z.string(),
-});
 export type StoredCheckReport = TemplateCheckReport & { checkedAt: number; sourcesSha256: string };
-
-const versionOutput = z.object({
-  id: z.string(),
-  templateId: z.string(),
-  key: z.string().describe('How manifests and spots name it: <owner>/<id>@<version>'),
-  version: z.string(),
-  status: z.enum(STATUSES),
-  manifest: manifestOutput,
-  bundleSha256: z.string(),
-  checkReport: checkReportOutput.nullable(),
-  createdAt: z.number(),
-  updatedAt: z.number(),
-});
-export type TemplateVersionView = z.infer<typeof versionOutput>;
-
-const templateOutput = z.object({
-  id: z.string(),
-  owner: z.enum(['base', 'org']).describe("base for the platform's templates, every org's to use; org for the org's own"),
-  key: z.string().describe('The id in its template.json, such as menu-board'),
-  name: z.string(),
-  versions: z.array(versionOutput).describe('Oldest first'),
-});
-export type TemplateView = z.infer<typeof templateOutput>;
 
 const versionView = (v: TemplateVersion): TemplateVersionView => {
   const manifest = JSON.parse(v.manifestJson) as TemplateManifest;
@@ -142,8 +75,8 @@ const listTemplates = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ status: z.enum(STATUSES).optional().describe('Only versions with this status'), ...pageInput }),
-  output: z.object({ templates: z.array(templateOutput), next: nextOutput }),
+  input: z.object({ status: z.enum(TEMPLATE_STATUSES).optional().describe('Only versions with this status'), ...pageInput }),
+  output: outputs.list_templates,
   example: {},
   handler: async ({ org, input }) => {
     const templates = await org.templates.list();
@@ -166,7 +99,7 @@ const getTemplate = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ templateId: id('template') }),
-  output: z.object({ template: templateOutput }),
+  output: outputs.get_template,
   example: { templateId: 'tpl_example' },
   handler: async ({ org, input }) => {
     const t = await org.templates.get(input.templateId);
@@ -192,7 +125,7 @@ const registerTemplateVersion = defineSharedTool({
     bundleId: sha('bundle').describe("SHA-256 of the built HTML file, uploaded to the owner's prefix"),
     sourcesId: sha('sources').describe("SHA-256 of the author's sources, uploaded as a JSON object of file name to text"),
   }),
-  output: z.object({ template: templateOutput, version: versionOutput, changed: z.boolean() }),
+  output: outputs.register_template_version,
   example: {
     manifest: {
       id: 'promo',
@@ -303,7 +236,7 @@ const setTemplateVersionStatus = defineSharedTool({
     templateVersionId: id('template version'),
     status: z.enum(['approved', 'retired']),
   }),
-  output: z.object({ version: versionOutput, changed: z.boolean() }),
+  output: outputs.set_template_version_status,
   example: { templateVersionId: 'tpv_example', status: 'approved' },
   target: (input) => ({ kind: 'template_version', id: input.templateVersionId }),
   handler: async ({ org, input, write }) => {

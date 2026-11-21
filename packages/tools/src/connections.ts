@@ -11,30 +11,12 @@ import type { OrgScope, Staged } from '@signforge/db';
 import { z } from 'zod';
 import { sha256Hex } from './dispatch';
 import { id } from './fields';
-import { nextOutput, page, pageInput } from './paging';
+import { page, pageInput } from './paging';
 import { type Connectors, defineTool, notFound, ToolError } from './tool';
+import { type connectionOutput, outputs } from './outputs';
 
 /** How long an authorization waits for its callback. */
 const AUTHORIZATION_MS = 10 * 60_000;
-
-const status = z
-  .enum(['active', 'needs_reconnect', 'disconnected'])
-  .describe(
-    'needs_reconnect: the provider refused the grant (revoked or expired), so its sources fail until a person reconnects it; disconnected: its credentials are deleted',
-  );
-
-const connectionOutput = z.object({
-  id: z.string(),
-  provider: z.string(),
-  account: z.string().describe('The account, as the provider names it'),
-  scopes: z.array(z.string()).describe('What the provider granted'),
-  status,
-  expiresAt: z.number().nullable().describe('When the current access token runs out (the poller refreshes it before); null for one that does not'),
-  lastError: z.string().nullable().describe('Why the provider last refused, as a category (invalid_grant, ...)'),
-  createdBy: z.string().describe('The user who first connected it'),
-  createdAt: z.number(),
-  updatedAt: z.number(),
-});
 
 type ConnectionRow = NonNullable<Awaited<ReturnType<OrgScope['connections']['get']>>>;
 
@@ -77,11 +59,7 @@ const listConnections = defineTool({
   mutates: false,
   needs: ['connectors'],
   input: z.object({ ...pageInput }),
-  output: z.object({
-    connections: z.array(connectionOutput),
-    providers: z.array(z.string()).describe('The providers start_connection takes here'),
-    next: nextOutput,
-  }),
+  output: outputs.list_connections,
   example: {},
   handler: async ({ org, input, services: { connectors } }) => {
     const { rows, next } = page(await org.connections.list(), (c) => [c.id], input);
@@ -104,11 +82,7 @@ const startConnection = defineTool({
       .describe('The provider, such as google'),
     connectionId: id('connection').optional().describe('A connection to authorize again in place, keeping its id and its data sources'),
   }),
-  output: z.object({
-    authorizationId: z.string(),
-    authorizeUrl: z.string().describe("The provider's sign-in and consent page, for this authorization only"),
-    expiresAt: z.number(),
-  }),
+  output: outputs.start_connection,
   example: { provider: 'google' },
   target: (input, output) =>
     input.connectionId ? { kind: 'connection', id: input.connectionId } : { kind: 'connection_authorization', id: output.authorizationId },
@@ -160,7 +134,7 @@ const finishConnection = defineTool({
     oauthState: z.string().min(16).max(256).describe('The state the provider sent back'),
     code: z.string().min(1).max(2048).describe("The provider's authorization code"),
   }),
-  output: z.object({ connection: connectionOutput }),
+  output: outputs.finish_connection,
   example: { oauthState: 'example-state-from-the-callback', code: 'example-code' },
   // No output when the provider refused the code: the authorization was used up, with nothing to name.
   target: (_input, output: { connection: { id: string } } | undefined) => (output ? { kind: 'connection', id: output.connection.id } : undefined),
@@ -216,10 +190,7 @@ const disconnect = defineTool({
   mutates: true,
   needs: ['connectors'],
   input: z.object({ connectionId: id('connection') }),
-  output: z.object({
-    deleted: z.boolean().describe('Whether the connection is gone; false while data sources read through it'),
-    dataSourceIds: z.array(z.string()).describe('The data sources that read through it, which now fail as disconnected'),
-  }),
+  output: outputs.disconnect,
   example: { connectionId: 'con_example' },
   target: (input) => ({ kind: 'connection', id: input.connectionId }),
   handler: async ({ org, input, write, services: { connectors } }) => {

@@ -5,22 +5,15 @@
  * the same phrases (`eventText`).
  */
 
-type ActorKind = 'user' | 'agent' | 'device' | 'system';
+import type { ToolOutput } from '@signforge/tools/outputs';
 
-/** One entry of `list_audit_log`. */
-export interface AuditEntry {
-  at: number;
-  actor: { kind: ActorKind; id: string; clientId: string | null };
-  action: string;
-  target: { kind: string; id: string } | null;
-  /** As recorded: `{ input }` for a tool (secrets already redacted), the fields kept for a membership change, `{ tool, refused }` for an agent's limit. */
-  detail: Record<string, unknown>;
-}
+/** A `list_audit_log` page. */
+export type AuditPage = ToolOutput<'list_audit_log'>;
 
-export interface AuditPage {
-  entries: AuditEntry[];
-  next: string | null;
-}
+/** One entry of `list_audit_log`. Its detail is as recorded: `{ input }` for a tool (secrets already redacted), the fields kept for a membership change, `{ tool, refused }` for an agent's limit. */
+export type AuditEntry = AuditPage['entries'][number];
+
+type ActorKind = AuditEntry['actor']['kind'];
 
 const WHEN = { day: 86_400_000, week: 7 * 86_400_000, month: 30 * 86_400_000 } as const;
 export type When = keyof typeof WHEN;

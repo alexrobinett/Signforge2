@@ -1,11 +1,12 @@
 // A rollout in words: the parts of the bar, in order, each with why its screens wait.
 import { describe, expect, it } from 'vitest';
-import { publishResultOf, rolloutLabel, segments, standing, type RolloutScreen } from '../src/lib/publishes';
+import { rolloutLabel, segments, standing, type RolloutScreen } from '../src/lib/publishes';
 
 const NOW = Date.parse('2026-11-19T12:00:00Z');
 const screen = (name: string, outcome: RolloutScreen['outcome'], more: Partial<RolloutScreen> = {}): RolloutScreen => ({
   screenId: `scr_${name}`,
   name,
+  manifestId: 'm'.repeat(64),
   outcome,
   filesMissing: null,
   wakesAt: null,
@@ -46,23 +47,6 @@ describe('a rollout', () => {
     expect(rolloutLabel({ revision: 15, restoresRevision: null }, segs, 6)).toMatch(
       /^Rollout of v15: 2 playing v15, 2 downloading, 1 asleep, update at .+, 1 offline, update when back, of 6 screens$/,
     );
-  });
-
-  it("reads a publish's answer, and refuses one without the publish", () => {
-    expect(
-      publishResultOf({
-        publish: { id: 'pub_1', revision: 3, screens: 2, previousId: 'pub_0' },
-        promoted: [],
-        held: [{ kind: 'spot', id: 'spt_1', problems: ['no asset'] }],
-        screens: [{ screenId: 'scr_1', outcome: 'failed', problems: ['the organization has no default playlist'] }],
-      }),
-    ).toEqual({
-      publish: { id: 'pub_1', revision: 3, screens: 2, previousId: 'pub_0' },
-      held: [{ kind: 'spot', id: 'spt_1', problems: ['no asset'] }],
-      screens: [{ screenId: 'scr_1', outcome: 'failed', problems: ['the organization has no default playlist'] }],
-    });
-    expect(publishResultOf({ publish: null, held: [], screens: [] }).publish).toBeNull();
-    expect(() => publishResultOf({ screens: [] })).toThrow();
   });
 
   it('tells a finished publish its screens played from one replaced before any did', () => {
