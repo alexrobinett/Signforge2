@@ -6,7 +6,7 @@
  */
 import type { CalendarFeed, NewsFeed, TableFeed } from '@signforge/contract';
 import { parseCalendar, type CalendarOptions } from './ical';
-import { type FeedImage, type NewsOptions, type ParsedNews, parseNews } from './news';
+import { type FeedImage, type NewsOptions, type ParsedNews, parseNews, parseNewsFeed } from './news';
 import { parseCsv, parseJsonTable, type TableOptions } from './table';
 
 export { FeedError, LIMITS, type FeedErrorCode } from './errors';
@@ -23,11 +23,9 @@ export function normaliseFeed(format: FeedFormat, body: string, options: Calenda
   switch (format) {
     case 'ical':
       return parseCalendar(body, options as CalendarOptions);
-    case 'rss': {
-      // Image and logo URLs are a third party's: what a snapshot carries holds none.
-      const { title, language, items } = parseNews(body, options);
-      return { title, language, items: items.map(({ title, published, source }) => ({ title, published, source })) };
-    }
+    case 'rss':
+      // Image and logo URLs are a third party's: what a snapshot carries holds none, and none is looked for.
+      return parseNewsFeed(body, options);
     case 'csv':
       return parseCsv(body, options);
     case 'json-table':

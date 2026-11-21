@@ -35,7 +35,8 @@ const LANGUAGE_TAG = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/;
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@',
-  removeNSPrefix: true,
+  // Prefixes are kept, so an element is known by its namespace (`El.kids`), not by what a feed calls it.
+  removeNSPrefix: false,
   parseTagValue: false,
   parseAttributeValue: false,
   // Untrimmed, so text either side of a CDATA section keeps its spaces; text() collapses them.
@@ -44,20 +45,49 @@ const parser = new XMLParser({
   // HTML's named ones, which RSS writers use without declaring.
   processEntities: true,
   htmlEntities: true,
-  isArray: (name) => name === 'item' || name === 'entry' || name === 'link',
 });
+
+/** A namespace name as compared: feeds write Media RSS's with and without its final slash. */
+const nsName = (uri: string) => uri.trim().replace(/\/$/, '').toLowerCase();
+
+const NS = {
+  none: '',
+  atom: nsName('http://www.w3.org/2005/Atom'),
+  media: nsName('http://search.yahoo.com/mrss/'),
+  content: nsName('http://purl.org/rss/1.0/modules/content/'),
+  itunes: nsName('http://www.itunes.com/dtds/podcast-1.0.dtd'),
+  dc: nsName('http://purl.org/dc/elements/1.1/'),
+  xhtml: nsName('http://www.w3.org/1999/xhtml'),
+};
+
+/** The longest image URL or `xml:base` used, in characters, before or after resolving. */
+const MAX_URL = 2048;
+
+/**
+ * URLs resolved and XHTML elements visited in one parse's image search. A real feed uses a few
+ * hundred; the bound keeps a hostile one from making a poll parse a million URLs.
+ */
+const SEARCH_BUDGET = 2000;
+
+interface Search {
+  left: number;
+}
 
 /**
  * Entity declarations are how XML bombs work, and no real feed needs them. A DOCTYPE can only
  * appear before the root element; `<!ENTITY` is refused anywhere.
  */
 function refuseDeclarations(text: string): void {
-  const bare = text.replace(/<!--[\s\S]*?-->/g, '');
-  const root = bare.search(/<[A-Za-z_]/);
-  const prolog = root === -1 ? bare : bare.slice(0, root);
-  if (/<!DOCTYPE/i.test(prolog) || /<!ENTITY/i.test(text)) {
-    throw new FeedError('doctype', 'feed declares a DOCTYPE or entities');
+  // The prolog, read forward once: a comment is skipped whole, and the first element ends it.
+  for (let i = text.indexOf('<'); i !== -1; i = text.indexOf('<', i + 1)) {
+    if (text.startsWith('<!--', i)) {
+      i = text.indexOf('-->', i + 4);
+      if (i === -1) break;
+    } else if (text.slice(i, i + 9).toUpperCase() === '<!DOCTYPE') {
+      throw new FeedError('doctype', 'feed declares a DOCTYPE or entities');
+    } else if (/[A-Za-z_]/.test(text[i + 1] ?? '')) break;
   }
+  if (/<!ENTITY/i.test(text)) throw new FeedError('doctype', 'feed declares a DOCTYPE or entities');
 }
 
 /** The text of an element, whether it parsed as a string or as an object with attributes. */
@@ -73,58 +103,121 @@ const isNode = (v: unknown): v is Node => typeof v === 'object' && v !== null &&
 /** An element that may appear once or many times, as a list. */
 const each = (v: unknown): unknown[] => (Array.isArray(v) ? v : v === undefined ? [] : [v]);
 
-const nodes = (v: unknown): Node[] => each(v).filter(isNode);
+/**
+ * A parsed element with what it inherits: the namespace prefixes declared on it and above it, and
+ * its base URL, its `xml:base` against its parent's, worked out when first asked for. An item can
+ * carry its link, which is its base when no `xml:base` is in scope.
+ */
+class El {
+  readonly #declared: Map<string, string> | undefined;
+  #base: { url: string | undefined } | undefined;
 
-const attr = (n: Node, name: string): string => {
-  const v = n[`@${name}`];
-  return typeof v === 'string' ? v.trim() : '';
-};
+  constructor(
+    readonly v: unknown,
+    readonly parent: El | undefined,
+    private readonly from: { root?: string; link?: string } = {},
+  ) {
+    if (!isNode(v)) return;
+    for (const key of Object.keys(v)) {
+      const uri = v[key];
+      if ((key === '@xmlns' || key.startsWith('@xmlns:')) && typeof uri === 'string') (this.#declared ??= new Map()).set(key.slice(7), nsName(uri));
+    }
+  }
 
-/** A width or height attribute as a whole number of pixels, or nothing. */
-const pixels = (v: string): number | undefined => (/^\d{1,6}$/.test(v) && Number(v) > 0 ? Number(v) : undefined);
+  attr(name: string): string {
+    const v = isNode(this.v) ? this.v[`@${name}`] : undefined;
+    return typeof v === 'string' ? v.trim() : '';
+  }
 
-/** `rel` against `base`; `base` itself when `rel` is empty or does not resolve. */
-function resolve(rel: string, base: string | undefined): string | undefined {
-  try {
-    return new URL(rel, base).href;
-  } catch {
-    return base;
+  /** The namespace a prefix (`''` for none) names here. */
+  namespace(prefix: string): string | undefined {
+    for (let e: El | undefined = this; e; e = e.parent) {
+      const uri = e.#declared?.get(prefix);
+      if (uri !== undefined) return uri;
+    }
+    return prefix === '' ? NS.none : undefined;
+  }
+
+  /** The child elements with this namespace and local name, in order. */
+  kids(ns: string, local: string): El[] {
+    const out: El[] = [];
+    if (!isNode(this.v)) return out;
+    for (const [key, value] of Object.entries(this.v)) {
+      if (key[0] === '@' || key[0] === '#' || key[0] === '?') continue;
+      const colon = key.indexOf(':');
+      if (key.slice(colon + 1) !== local) continue;
+      for (const v of each(value)) {
+        const child = new El(v, this);
+        if (child.namespace(colon === -1 ? '' : key.slice(0, colon)) === ns) out.push(child);
+      }
+    }
+    return out;
+  }
+
+  /** The text of the first child with this name. */
+  text(ns: string, local: string): string {
+    return text(this.kids(ns, local)[0]?.v);
+  }
+
+  /** The same element as an item whose link is its base when no `xml:base` is in scope. */
+  withLink(link: string): El {
+    return new El(this.v, this.parent, { link });
+  }
+
+  base(search: Search): string | undefined {
+    if (!this.#base) {
+      const parent = this.parent ? this.parent.base(search) : this.from.root;
+      const own = this.attr('xml:base');
+      const inScope = (e: El | undefined): boolean => !!e && (!!e.attr('xml:base') || inScope(e.parent));
+      const rel = own || (this.from.link !== undefined && !inScope(this.parent) ? this.from.link : '');
+      this.#base = { url: rel ? resolveUrl(rel, parent, search)?.href : parent };
+    }
+    return this.#base.url;
   }
 }
 
-/** `raw` as an absolute http or https URL, or nothing: `data:`, `file:`, `javascript:` and the rest are dropped. */
-function imageUrl(raw: string, base: string | undefined): string | undefined {
-  if (!raw) return undefined;
+/** `raw` against `base`, within the search's budget and `MAX_URL`. */
+function resolveUrl(raw: string, base: string | undefined, search: Search): URL | undefined {
+  if (!raw || raw.length > MAX_URL || search.left <= 0) return undefined;
+  search.left--;
   try {
     const u = new URL(raw, base);
-    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : undefined;
+    return u.href.length <= MAX_URL ? u : undefined;
   } catch {
     return undefined;
   }
 }
+
+/** `raw` as an absolute http or https URL, or nothing: `data:`, `file:`, `javascript:` and the rest are dropped. */
+function imageUrl(raw: string, base: string | undefined, search: Search): URL | undefined {
+  const u = resolveUrl(raw, base, search);
+  return u && (u.protocol === 'https:' || u.protocol === 'http:') ? u : undefined;
+}
+
+/** A width or height attribute as a whole number of pixels, or nothing. */
+const pixels = (v: string): number | undefined => (/^\d{1,6}$/.test(v) && Number(v) > 0 ? Number(v) : undefined);
 
 function sized(url: string, width: number | undefined, height: number | undefined): FeedImage {
   return { url, ...(width ? { width } : {}), ...(height ? { height } : {}) };
 }
 
 /** The widest of `candidates` whose `key` attribute is an image URL; the first, when none gives a width. */
-function widest(candidates: Node[], key: 'url' | 'href', base: string | undefined): FeedImage | undefined {
+function widest(candidates: El[], key: 'url' | 'href', search: Search): FeedImage | undefined {
   let best: FeedImage | undefined;
-  for (const n of candidates) {
-    const url = imageUrl(attr(n, key), base);
-    const width = pixels(attr(n, 'width'));
-    if (url && (!best || (width ?? 0) > (best.width ?? 0))) best = sized(url, width, pixels(attr(n, 'height')));
+  for (const e of candidates) {
+    const url = imageUrl(e.attr(key), e.base(search), search);
+    const width = pixels(e.attr('width'));
+    if (url && (!best || (width ?? 0) > (best.width ?? 0))) best = sized(url.href, width, pixels(e.attr('height')));
   }
   return best;
 }
 
-const imageType = (n: Node) => attr(n, 'type').toLowerCase().startsWith('image/');
+const imageType = (e: El) => e.attr('type').toLowerCase().startsWith('image/');
 
 /** A Media RSS entry that is not video or audio. Many feeds give neither `medium` nor `type`. */
-function mediaImage(n: Node): boolean {
-  const medium = attr(n, 'medium').toLowerCase();
-  const type = attr(n, 'type');
-  return (!medium || medium === 'image') && (!type || imageType(n));
+function mediaImage(e: El): boolean {
+  const medium = e.attr('medium').toLowerCase();
+  return (!medium || medium === 'image') && (!e.attr('type') || imageType(e));
 }
 
 /** The character references HTML attributes use; a named one other than XML's five stays as written. */
@@ -136,32 +229,6 @@ function unescapeHtml(v: string): string {
   });
 }
 
-/** One tag's attributes by lower-case name, the first of a repeated name winning. */
-function attributes(tag: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const [, name = '', dq, sq, bare] of tag.matchAll(/([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) {
-    const key = name.toLowerCase();
-    if (!out.has(key)) out.set(key, unescapeHtml(dq ?? sq ?? bare ?? '').trim());
-  }
-  return out;
-}
-
-/**
- * An `srcset`'s largest candidate that is an image URL: the widest by `w`, else the densest by `x`.
- * Candidates end at a comma followed by a space or after a descriptor, since CDN URLs hold commas.
- */
-function largestCandidate(srcset: string, base: string | undefined): FeedImage | undefined {
-  let best: { url: string; w: number; x: number } | undefined;
-  for (const candidate of srcset.split(/,\s+|(?<=\s[\d.]+[wx]),/)) {
-    const [raw = '', descriptor = ''] = candidate.trim().replace(/,+$/, '').split(/\s+/);
-    const url = imageUrl(raw, base);
-    const w = Number(/^(\d+)w$/.exec(descriptor)?.[1] ?? 0);
-    const x = Number(/^([\d.]+)x$/.exec(descriptor)?.[1] ?? 1) || 1;
-    if (url && (!best || w > best.w || (w === best.w && x > best.x))) best = { url, w, x };
-  }
-  return best && sized(best.url, best.w || undefined, undefined);
-}
-
 /**
  * Pictures in a story's body that are not its photo: tracking pixels and spacers (by name, or
  * feedburner's), Gravatar avatars and WordPress emoji, by URL or by class.
@@ -169,29 +236,155 @@ function largestCandidate(srcset: string, base: string | undefined): FeedImage |
 const NOT_A_PHOTO_URL = /(?:^|[/._-])(?:pixel|spacer)(?:[/._-]|$)|(?:^|\.)gravatar\.com\/|feedburner|^s\.w\.org\/images\/core\/emoji\//i;
 const NOT_A_PHOTO_CLASS = /(?:^|\s)(?:emoji|wp-smiley|avatar)(?:\s|$)/i;
 
+/** `raw` as the URL of a body picture that may be the story's photo. */
+function photoUrl(raw: string, base: string | undefined, search: Search): string | undefined {
+  const u = imageUrl(raw, base, search);
+  return u && !NOT_A_PHOTO_URL.test(u.host + u.pathname) ? u.href : undefined;
+}
+
+const isSpace = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f';
+
 /**
- * The first real picture in a story's HTML body. Only `<img>` tags are read, by a scan that moves
- * forward only, so a hostile body costs one pass. NPR writes `src='undefined'` for a story without
- * a photo.
+ * An `srcset`'s largest candidate that may be the photo: the widest by `w`, else the densest by
+ * `x`. Read forward once, as HTML does: a candidate's URL runs to whitespace (so a CDN URL keeps
+ * its commas), and a comma ends its descriptors.
  */
-function bodyImage(html: string, base: string | undefined): FeedImage | undefined {
-  const img = /<img[\s/>]/gi;
-  for (let m = img.exec(html); m; m = img.exec(html)) {
-    const end = html.indexOf('>', m.index + 4);
-    if (end === -1) return undefined;
-    img.lastIndex = end + 1;
-    const a = attributes(html.slice(m.index + 4, end));
-    const width = a.get('width') ?? '';
-    const height = a.get('height') ?? '';
-    if (/^\d+$/.test(width) && Number(width) <= 2) continue;
-    if (/^\d+$/.test(height) && Number(height) <= 2) continue;
-    if (NOT_A_PHOTO_CLASS.test(a.get('class') ?? '')) continue;
-    const src = a.get('src') ?? '';
-    const url = src === 'undefined' ? undefined : imageUrl(src, base);
-    const found = largestCandidate(a.get('srcset') ?? '', base) ?? (url ? sized(url, pixels(width), pixels(height)) : undefined);
-    if (!found) continue;
-    const u = new URL(found.url);
-    if (!NOT_A_PHOTO_URL.test(u.host + u.pathname)) return found;
+function largestCandidate(srcset: string, base: string | undefined, search: Search): FeedImage | undefined {
+  let best: { url: string; w: number; x: number } | undefined;
+  let i = 0;
+  while (i < srcset.length) {
+    while (i < srcset.length && (isSpace(srcset[i]) || srcset[i] === ',')) i++;
+    const start = i;
+    while (i < srcset.length && !isSpace(srcset[i])) i++;
+    let end = i;
+    let descriptor = '';
+    if (srcset[end - 1] === ',') {
+      while (end > start && srcset[end - 1] === ',') end--;
+    } else {
+      const comma = srcset.indexOf(',', i);
+      const stop = comma === -1 ? srcset.length : comma;
+      descriptor = srcset.slice(i, stop).trim();
+      i = stop + 1;
+    }
+    if (end === start) continue;
+    const url = photoUrl(srcset.slice(start, end), base, search);
+    const w = Number(/^(\d+)w$/.exec(descriptor)?.[1] ?? 0);
+    const x = Number(/^([\d.]+)x$/.exec(descriptor)?.[1] ?? 1) || 1;
+    if (url && (!best || w > best.w || (w === best.w && x > best.x))) best = { url, w, x };
+  }
+  return best && sized(best.url, best.w || undefined, undefined);
+}
+
+/** A body `<img>` as the story's photo, from its attributes, or nothing. NPR writes `src='undefined'` for none. */
+function imgImage(get: (name: string) => string, base: string | undefined, search: Search): FeedImage | undefined {
+  const width = get('width');
+  const height = get('height');
+  const tiny = (v: string) => /^\d+$/.test(v) && Number(v) <= 2;
+  if (tiny(width) || tiny(height) || NOT_A_PHOTO_CLASS.test(get('class'))) return undefined;
+  const fromSrcset = largestCandidate(get('srcset'), base, search);
+  if (fromSrcset) return fromSrcset;
+  const src = get('src');
+  const url = src === 'undefined' ? undefined : photoUrl(src, base, search);
+  return url ? sized(url, pixels(width), pixels(height)) : undefined;
+}
+
+const isNameChar = (c: string | undefined) => !!c && /[A-Za-z0-9-]/.test(c);
+
+/**
+ * The first real picture in an HTML body. A tokenizer that only moves forward, as a browser reads
+ * tags: quoted attribute values may hold `>`, comments and the insides of `script` and `style` are
+ * skipped, and a tag or comment left open ends the body. So a hostile body costs one pass.
+ */
+function bodyImage(html: string, base: string | undefined, search: Search): FeedImage | undefined {
+  let i = 0;
+  while (search.left > 0) {
+    const lt = html.indexOf('<', i);
+    if (lt === -1) return undefined;
+    if (html.startsWith('!--', lt + 1)) {
+      const end = html.indexOf('-->', lt + 4);
+      if (end === -1) return undefined;
+      i = end + 3;
+      continue;
+    }
+    let j = lt + 1;
+    const closing = html[j] === '/';
+    if (closing) j++;
+    const nameStart = j;
+    while (isNameChar(html[j])) j++;
+    if (j === nameStart) {
+      i = lt + 1;
+      continue;
+    }
+    const name = html.slice(nameStart, j).toLowerCase();
+    const attrs = new Map<string, string>();
+    for (;;) {
+      while (isSpace(html[j]) || html[j] === '/') j++;
+      if (j >= html.length) return undefined;
+      if (html[j] === '>') break;
+      const attrStart = j++;
+      while (j < html.length && !isSpace(html[j]) && html[j] !== '/' && html[j] !== '>' && html[j] !== '=') j++;
+      const attr = html.slice(attrStart, j).toLowerCase();
+      while (isSpace(html[j])) j++;
+      let value = '';
+      if (html[j] === '=') {
+        j++;
+        while (isSpace(html[j])) j++;
+        const quote = html[j];
+        if (quote === '"' || quote === "'") {
+          const close = html.indexOf(quote, j + 1);
+          if (close === -1) return undefined;
+          value = html.slice(j + 1, close);
+          j = close + 1;
+        } else {
+          const valueStart = j;
+          while (j < html.length && !isSpace(html[j]) && html[j] !== '>') j++;
+          value = html.slice(valueStart, j);
+        }
+      }
+      if (name === 'img' && !attrs.has(attr)) attrs.set(attr, unescapeHtml(value).trim());
+    }
+    i = j + 1;
+    if (closing) continue;
+    if (name === 'img') {
+      const found = imgImage((n) => attrs.get(n) ?? '', base, search);
+      if (found) return found;
+    } else if (name === 'script' || name === 'style') {
+      const end = new RegExp(`</${name}`, 'gi');
+      end.lastIndex = i;
+      const m = end.exec(html);
+      if (!m) return undefined;
+      i = m.index;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The first real picture in Atom `xhtml` content, from its parsed elements: XHTML `img`s, depth
+ * first. The parser groups an element's children by name, so siblings of different names are read
+ * name by name.
+ */
+function xhtmlImage(content: El, search: Search): FeedImage | undefined {
+  const stack: { e: El; img: boolean }[] = [{ e: content, img: false }];
+  for (let next = stack.pop(); next && search.left > 0; next = stack.pop()) {
+    search.left--;
+    const { e, img } = next;
+    if (img) {
+      const found = imgImage((n) => e.attr(n), e.base(search), search);
+      if (found) return found;
+      continue;
+    }
+    if (!isNode(e.v)) continue;
+    const children: { e: El; img: boolean }[] = [];
+    for (const [key, value] of Object.entries(e.v)) {
+      if (key[0] === '@' || key[0] === '#') continue;
+      const colon = key.indexOf(':');
+      for (const v of each(value)) {
+        const child = new El(v, e);
+        children.push({ e: child, img: key.slice(colon + 1) === 'img' && child.namespace(colon === -1 ? '' : key.slice(0, colon)) === NS.xhtml });
+      }
+    }
+    for (const child of children.reverse()) stack.push(child);
   }
   return undefined;
 }
@@ -199,41 +392,32 @@ function bodyImage(html: string, base: string | undefined): FeedImage | undefine
 /**
  * An item's image, from the first of these that has one: Media RSS content (the widest image),
  * Media RSS thumbnails (the widest), an RSS enclosure or an Atom enclosure link of an image type,
- * `itunes:image`, and the first real picture in its HTML `bodies` (RSS `content:encoded` then
- * `description`, Atom `content` then `summary`). Namespace prefixes are dropped when parsing, so
- * `media:content` shares its name with Atom's `content` and is told by its `url`.
+ * `itunes:image`, and the first real picture in its `bodies` (RSS `content:encoded` then
+ * `description`, Atom `content` then `summary`).
  */
-function itemImage(it: Node, bodies: unknown[], base: string | undefined): FeedImage | undefined {
-  const groups = nodes(it.group);
-  const media = [it, ...groups].flatMap((n) => nodes(n.content)).filter((n) => attr(n, 'url'));
-  return (
-    widest(media.filter(mediaImage), 'url', base) ??
+function itemImage(it: El, atom: string, bodies: El[], search: Search): FeedImage | undefined {
+  const groups = it.kids(NS.media, 'group');
+  const media = [it, ...groups].flatMap((e) => e.kids(NS.media, 'content'));
+  const image =
+    widest(media.filter(mediaImage), 'url', search) ??
     widest(
-      [it, ...groups, ...media].flatMap((n) => nodes(n.thumbnail)),
+      [it, ...groups, ...media].flatMap((e) => e.kids(NS.media, 'thumbnail')),
       'url',
-      base,
+      search,
     ) ??
-    widest(nodes(it.enclosure).filter(imageType), 'url', base) ??
+    widest(it.kids(NS.none, 'enclosure').filter(imageType), 'url', search) ??
     widest(
-      nodes(it.link).filter((n) => attr(n, 'rel') === 'enclosure' && imageType(n)),
+      it.kids(atom, 'link').filter((e) => e.attr('rel') === 'enclosure' && imageType(e)),
       'href',
-      base,
+      search,
     ) ??
-    widest(nodes(it.image), 'href', base) ??
-    bodies
-      .filter((b) => !(isNode(b) && attr(b, 'url')))
-      .map((b) => bodyImage(text(b), isNode(b) ? resolve(attr(b, 'base'), base) : base))
-      .find(Boolean)
-  );
-}
-
-/**
- * What an item's relative links resolve against: the `xml:base` in scope (the item's, then the
- * feed's), else the item's own link, else the feed's URL.
- */
-function itemBase(item: Node, feed: Node, link: string, feedBase: string | undefined): string | undefined {
-  if (attr(item, 'base')) return resolve(attr(item, 'base'), feedBase);
-  return attr(feed, 'base') ? feedBase : resolve(link, feedBase);
+    widest(it.kids(NS.itunes, 'image'), 'href', search);
+  if (image) return image;
+  for (const b of bodies) {
+    const found = b.attr('type').toLowerCase() === 'xhtml' ? xhtmlImage(b, search) : bodyImage(text(b.v), b.base(search), search);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /** A feed date as an ISO 8601 instant in UTC, or the original text if it does not parse. */
@@ -242,75 +426,105 @@ function published(raw: string): string {
   return Number.isNaN(ms) ? raw : isoInstant(ms, 0);
 }
 
-/**
- * An RSS 2.0 or Atom feed as a NewsFeed: the channel title and the items that have titles,
- * newest first.
- */
-export function parseNews(body: string, options: NewsOptions = {}): ParsedNews {
+interface Story {
+  item: NewsFeed['items'][number];
+  image: (search: Search) => FeedImage | undefined;
+}
+
+/** A feed's text, its kept stories newest first, and how to find their images and its logo. */
+function readNews(body: string, options: NewsOptions): { title: string; language: string; stories: Story[]; logo: (search: Search) => string | undefined } {
   const o = { ...LIMITS, ...options };
   checkSize(body, o.maxBytes);
   refuseDeclarations(body);
 
-  let doc: Node;
+  let parsed: unknown;
   try {
-    doc = parser.parse(body, true) as Node;
+    parsed = parser.parse(body, true);
   } catch (e) {
     // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument; the rule reads only the second argument.
     throw new FeedError('malformed', `not an XML feed: ${(e as Error).message.slice(0, 80)}`, { cause: e });
   }
+  const doc = new El(parsed, undefined, o.url === undefined ? {} : { root: o.url });
 
   let title = '';
   let language = '';
-  let logo: string | undefined;
-  // An item's image is looked for only once the item is among those kept.
-  let stories: { item: NewsFeed['items'][number]; image: () => FeedImage | undefined }[] = [];
-  const rss = doc.rss as Node | undefined;
-  const atom = doc.feed as Node | undefined;
-  if (rss && typeof rss === 'object' && rss.channel && typeof rss.channel === 'object') {
-    const channel = rss.channel as Node;
-    const feedBase = resolve(attr(channel, 'base'), o.url);
-    title = text(channel.title);
-    language = text(channel.language);
-    logo = nodes(channel.image)
-      .map((n) => imageUrl(text(n.url), feedBase))
-      .find(Boolean);
-    stories = ((channel.item as Node[] | undefined) ?? []).map((it) => {
-      const base = itemBase(it, channel, each(it.link).map(text).find(Boolean) ?? '', feedBase);
-      return {
-        item: { title: text(it.title), published: published(text(it.pubDate) || text(it.date)), source: title },
-        image: () => itemImage(it, [...each(it.encoded), ...each(it.description)], base),
-      };
-    });
-  } else if (atom && typeof atom === 'object') {
-    const feedBase = resolve(attr(atom, 'base'), o.url);
-    title = text(atom.title);
-    language = text(atom['@lang']);
-    logo = imageUrl(text(atom.logo), feedBase) ?? imageUrl(text(atom.icon), feedBase);
-    stories = ((atom.entry as Node[] | undefined) ?? []).map((entry) => {
-      const link = nodes(entry.link).find((n) => ['', 'alternate'].includes(attr(n, 'rel')));
-      const base = itemBase(entry, atom, link ? attr(link, 'href') : '', feedBase);
-      return {
-        item: { title: text(entry.title), published: published(text(entry.updated) || text(entry.published)), source: title },
-        image: () => itemImage(entry, [...each(entry.content), ...each(entry.summary)], base),
-      };
-    });
+  let stories: Story[] = [];
+  let logo: (search: Search) => string | undefined;
+  const channel = doc.kids(NS.none, 'rss')[0]?.kids(NS.none, 'channel')[0];
+  const atom = doc.kids(NS.atom, 'feed')[0];
+  if (channel) {
+    title = channel.text(NS.none, 'title');
+    language = channel.text(NS.none, 'language');
+    logo = (search) => {
+      const url = channel.kids(NS.none, 'image')[0]?.kids(NS.none, 'url')[0];
+      return url && imageUrl(text(url.v), url.base(search), search)?.href;
+    };
+    stories = channel.kids(NS.none, 'item').map((it) => ({
+      item: { title: it.text(NS.none, 'title'), published: published(it.text(NS.none, 'pubDate') || it.text(NS.dc, 'date')), source: title },
+      image: (search) => {
+        const item = it.withLink(
+          it
+            .kids(NS.none, 'link')
+            .map((l) => text(l.v))
+            .find(Boolean) ?? '',
+        );
+        return itemImage(item, NS.atom, [...item.kids(NS.content, 'encoded'), ...item.kids(NS.none, 'description')], search);
+      },
+    }));
+  } else if (atom) {
+    title = atom.text(NS.atom, 'title');
+    language = atom.attr('xml:lang');
+    logo = (search) => {
+      for (const name of ['logo', 'icon']) {
+        const el = atom.kids(NS.atom, name)[0];
+        const url = el && imageUrl(text(el.v), el.base(search), search);
+        if (url) return url.href;
+      }
+      return undefined;
+    };
+    stories = atom.kids(NS.atom, 'entry').map((entry) => ({
+      item: { title: entry.text(NS.atom, 'title'), published: published(entry.text(NS.atom, 'updated') || entry.text(NS.atom, 'published')), source: title },
+      image: (search) => {
+        const link = entry.kids(NS.atom, 'link').find((l) => ['', 'alternate'].includes(l.attr('rel')));
+        const item = entry.withLink(link?.attr('href') ?? '');
+        return itemImage(item, NS.atom, [...item.kids(NS.atom, 'content'), ...item.kids(NS.atom, 'summary')], search);
+      },
+    }));
   } else {
     throw new FeedError('unknown-format', 'not an RSS 2.0 or Atom feed');
   }
 
   // Newest first, as the contract promises; items without a readable date keep their order last.
-  const when = (i: NewsFeed['items'][number]) => {
-    const ms = Date.parse(i.published);
+  const when = (s: Story) => {
+    const ms = Date.parse(s.item.published);
     return Number.isNaN(ms) ? -Infinity : ms;
   };
-  const items = stories
+  stories = stories
     .filter((s) => s.item.title)
-    .map((story, index) => ({ story, index, ms: when(story.item) }))
+    .map((story, index) => ({ story, index, ms: when(story) }))
     .sort((a, b) => b.ms - a.ms || a.index - b.index)
     .slice(0, o.maxItems)
-    .map(({ story }) => {
-      const image = story.image();
-      return image ? { ...story.item, image } : story.item;
-    });
-  return { title, language: LANGUAGE_TAG.test(language) ? language : '', items, ...(logo ? { logo } : {}) };
+    .map(({ story }) => story);
+  return { title, language: LANGUAGE_TAG.test(language) ? language : '', stories, logo };
+}
+
+/**
+ * An RSS 2.0 or Atom feed as a NewsFeed (the channel title and the items that have titles, newest
+ * first), with each kept item's image and the feed's logo, within `SEARCH_BUDGET`.
+ */
+export function parseNews(body: string, options: NewsOptions = {}): ParsedNews {
+  const { title, language, stories, logo: logoOf } = readNews(body, options);
+  const search = { left: SEARCH_BUDGET };
+  const logo = logoOf(search);
+  const items = stories.map((s) => {
+    const image = s.image(search);
+    return image ? { ...s.item, image } : s.item;
+  });
+  return { title, language, items, ...(logo ? { logo } : {}) };
+}
+
+/** The NewsFeed alone, as a snapshot carries it: no image is looked for. */
+export function parseNewsFeed(body: string, options: NewsOptions = {}): NewsFeed {
+  const { title, language, stories } = readNews(body, options);
+  return { title, language, items: stories.map((s) => s.item) };
 }
