@@ -4,6 +4,7 @@
  */
 import {
   boundValue,
+  isBaseTemplateKey,
   brandFiles,
   SNAPSHOT_STALE_MS,
   requiredFiles,
@@ -15,6 +16,7 @@ import {
   type Spot,
   type TargetLevel,
 } from '@signforge/contract';
+import type { ClockTrust } from './clock';
 
 /**
  * Validation lives in the contract, which the server imports too. Re-exported here while callers
@@ -143,13 +145,26 @@ export function nextDisplayChange(hours: DisplayHours | undefined, timezone: str
 
 const LEVEL: Record<TargetLevel, number> = { org: 0, group: 1, screen: 2 };
 
+/** A base template's `alert` spot. An org's own template of that name is not one. */
+const isAlert = (s: Spot | undefined) =>
+  s?.kind === 'template' && isBaseTemplateKey(s.template) && s.template.slice(s.template.indexOf('/') + 1).startsWith('alert@');
+
 /**
  * Whether `now` is inside an entry's absolute bounds. On a clock the screen does not trust, an entry
- * with either bound never applies: better a takeover missed than one that never ends.
+ * with either bound never applies, better a takeover missed than one that never ends, except a
+ * takeover whose playlist plays only alerts (owner, #200): an alert that is live is not held back.
+ * It applies while `notBefore`, the earliest the real time can be, says it has surely started and
+ * not yet surely ended. An alert published to start at once was started before the sync that
+ * brought it, so it plays; one scheduled for later waits until it has surely started.
  */
-export function withinBounds(e: ScheduleEntry, now: Date, clockTrusted = true): boolean {
+function withinBounds(manifest: ScreenManifest, e: ScheduleEntry, now: Date, trust: ClockTrust): boolean {
   if (e.startsAt === undefined && e.endsAt === undefined) return true;
-  if (!clockTrusted) return false;
+  if (trust.clockTrusted === false) {
+    const items = manifest.playlists[e.playlist]?.items ?? [];
+    const alert = items.length > 0 && items.every((i) => isAlert(manifest.spots[i.spot]));
+    const started = e.startsAt === undefined || Date.parse(e.startsAt) <= trust.notBefore;
+    return alert && started && e.endsAt !== undefined && trust.notBefore < Date.parse(e.endsAt);
+  }
   const ms = now.getTime();
   return !(e.startsAt !== undefined && ms < Date.parse(e.startsAt)) && !(e.endsAt !== undefined && ms >= Date.parse(e.endsAt));
 }
@@ -162,11 +177,11 @@ const startOf = (e: ScheduleEntry) => (e.startsAt === undefined ? Number.NEGATIV
  * target, then the later `startsAt`, then the later in `schedule` (publish order), so of two
  * takeovers the newest wins. Undefined: the default playlist.
  */
-function winningEntry(manifest: ScreenManifest, now: Date, clockTrusted: boolean): ScheduleEntry | undefined {
+function winningEntry(manifest: ScreenManifest, now: Date, trust: ClockTrust): ScheduleEntry | undefined {
   const t = localTime(now, manifest.screen.timezone);
   let best: { e: ScheduleEntry; at: number } | undefined;
   for (const e of manifest.schedule) {
-    if (!withinBounds(e, now, clockTrusted) || !entryApplies(e, t) || !manifest.playlists[e.playlist]) continue;
+    if (!withinBounds(manifest, e, now, trust) || !entryApplies(e, t) || !manifest.playlists[e.playlist]) continue;
     const at = startOf(e);
     // At least as good: an entry later in the list wins a full tie.
     if (
@@ -180,8 +195,8 @@ function winningEntry(manifest: ScreenManifest, now: Date, clockTrusted: boolean
 }
 
 /** Highest priority wins; on a tie the more specific target wins; otherwise the default playlist. */
-export function resolvePlaylist(manifest: ScreenManifest, now: Date, { clockTrusted = true } = {}): Playlist {
-  const id = winningEntry(manifest, now, clockTrusted)?.playlist ?? manifest.defaultPlaylist;
+export function resolvePlaylist(manifest: ScreenManifest, now: Date, trust: ClockTrust = {}): Playlist {
+  const id = winningEntry(manifest, now, trust)?.playlist ?? manifest.defaultPlaylist;
   const playlist = manifest.playlists[id];
   if (!playlist) throw new Error(`manifest ${manifest.id} has no playlist "${id}"`);
   return playlist;
@@ -191,8 +206,8 @@ export function resolvePlaylist(manifest: ScreenManifest, now: Date, { clockTrus
  * The takeover playing at `now` (the winning entry, when it has an `endsAt`), or undefined. When it
  * changes, the player ends the spot on screen at once instead of at its end (M3-19).
  */
-export function activeTakeover(manifest: ScreenManifest, now: Date, { clockTrusted = true } = {}): string | undefined {
-  const e = winningEntry(manifest, now, clockTrusted);
+export function activeTakeover(manifest: ScreenManifest, now: Date, trust: ClockTrust = {}): string | undefined {
+  const e = winningEntry(manifest, now, trust);
   return e?.endsAt !== undefined ? e.id : undefined;
 }
 
@@ -233,9 +248,9 @@ export class Sequencer {
     return this.manifest.id;
   }
 
-  /** The next spot at `now`. On a clock the screen does not trust, bounded entries are skipped (`resolvePlaylist`). */
-  next(now: Date, opts: { clockTrusted?: boolean } = {}): Step | undefined {
-    const playlist = resolvePlaylist(this.manifest, now, opts);
+  /** The next spot at `now`. On a clock the screen does not trust, bounded entries are skipped but for an alert (`resolvePlaylist`). */
+  next(now: Date, trust: ClockTrust = {}): Step | undefined {
+    const playlist = resolvePlaylist(this.manifest, now, trust);
     if (playlist.id !== this.playlistId) {
       this.playlistId = playlist.id;
       this.index = -1;
@@ -255,9 +270,9 @@ export class Sequencer {
   }
 
   /** What `next` would return, without moving. Used to prepare the following spot early. */
-  peek(now: Date, opts: { clockTrusted?: boolean } = {}): Step | undefined {
+  peek(now: Date, trust: ClockTrust = {}): Step | undefined {
     const saved = { playlistId: this.playlistId, index: this.index };
-    const step = this.next(now, opts);
+    const step = this.next(now, trust);
     this.playlistId = saved.playlistId;
     this.index = saved.index;
     return step;
@@ -331,7 +346,7 @@ export function planSync(next: ScreenManifest, have: Iterable<string>): { missin
   };
 }
 
-export { Clock, CLOCK_JUMP_MS, type ClockOptions, type PersistedClock } from './clock';
+export { Clock, CLOCK_JUMP_MS, type ClockOptions, type ClockTrust, type PersistedClock } from './clock';
 export { PlayLedger, hourOf, type PlayBatch } from './plays';
 export { containedFrames, READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from './frame';
 export { boundFields, manifestBoundFields, PLAYER_LOCALE, screenLocale, snapshotFit, type BindingSpot, type BoundField } from './bound';

@@ -4,7 +4,7 @@
  * test advances the fake clock; between timers every pending promise settles (`settle`).
  */
 import { MANIFEST_SCHEMA, type ScheduleEntry, type ScreenManifest, type Spot, type Transition } from '@signforge/contract';
-import type { Step } from '@signforge/player-core';
+import { Clock, type Step } from '@signforge/player-core';
 import { describe, expect, it } from 'vitest';
 import { Playback, type PlaybackClock, type PlaybackSlots, type SlotIndex } from './playback';
 
@@ -26,7 +26,7 @@ class FakeClock implements PlaybackClock {
   private seq = 0;
   mono = () => this.t;
   now = () => T0 + this.t;
-  trusted = () => true;
+  trust = () => ({});
   after(ms: number, fn: () => void): () => void {
     const timer = { at: this.t + ms, seq: this.seq++, fn };
     this.timers.push(timer);
@@ -296,6 +296,47 @@ describe('playback', () => {
       open();
       await clock.until(start + 2 * SECOND);
       expect(shown()).toEqual(['a@m1 200', `t@m1 ${start + SECOND + PREPARE_MS}`]);
+    });
+  });
+
+  // Owner decision (#200): an alert takeover plays on a clock the screen does not trust, until it is surely over.
+  describe('an alert takeover on a clock the screen does not trust (#200)', () => {
+    const alert: Spot = { id: 't', name: 'Evacuate', kind: 'template', template: 'base/alert@1.0.0', data: {}, assets: {}, durationMs: HOUR };
+    /**
+     * The takeover runs 12:00 to 12:30 (T0 to T0 + 30 min) and the last sync was at 12:10. The
+     * screen's device clock reads 1970, as a Pi's does after a power cut, and runs on from there.
+     */
+    function untrusted() {
+      const t = setup();
+      const screen = new Clock({
+        deviceNow: () => t.clock.t,
+        monoNow: () => t.clock.t,
+        buildTime: T0 - HOUR,
+        persisted: { offsetMs: 0, syncedAt: T0 + 10 * MINUTE },
+      });
+      t.clock.now = () => screen.now();
+      t.clock.trust = () => screen.trust();
+      t.playback.adopt(manifest('m1', [spot('a', HOUR), alert], { takeover: { from: 0, to: 30 * MINUTE } }));
+      t.run();
+      return { ...t, screen };
+    }
+
+    it('ends it mid-spot as soon as the screen has run long enough that it is surely over', async () => {
+      const { clock, shown } = untrusted();
+      await clock.until(21 * MINUTE);
+      // 20 minutes run since a sync at 12:10: it is at least 12:30.
+      expect(shown()).toEqual(['t@m1 200', `a@m1 ${20 * MINUTE + PREPARE_MS}`]);
+    });
+
+    it('the first good sync ends it when the server says it is over', async () => {
+      const { clock, playback, screen, shown } = untrusted();
+      await clock.until(MINUTE);
+      expect(shown()).toEqual(['t@m1 200']);
+      // The screen was off from 12:10 to 12:40: the sync's answer says 12:41, as main.ts's sync does.
+      screen.synced(T0 + 41 * MINUTE, clock.t, clock.t);
+      playback.clockMoved();
+      await clock.until(2 * MINUTE);
+      expect(shown()).toEqual(['t@m1 200', `a@m1 ${MINUTE + PREPARE_MS}`]);
     });
   });
 

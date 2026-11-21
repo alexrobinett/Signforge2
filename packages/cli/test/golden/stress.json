@@ -60,6 +60,10 @@
       "size": 73465,
       "type": "text/html"
     },
+    "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402": {
+      "size": 122679,
+      "type": "text/html"
+    },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
@@ -103,7 +107,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "f33c1c4d6e50daa80c5811de6f906e53d985c8eb55b4c106140ea6be864735c5",
+  "id": "eca71d2d1af3b9a1b06ab7632be216b57223c5f4c19ba207cc9f9fc902b8f90f",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -145,6 +149,9 @@
           "spot": "meeting-room"
         },
         {
+          "spot": "alert"
+        },
+        {
           "spot": "energy"
         },
         {
@@ -173,6 +180,26 @@
     "timezone": "America/New_York"
   },
   "spots": {
+    "alert": {
+      "assets": {},
+      "data": {
+        "endsAt": "4:00 PM",
+        "headline": "Evacuate the building now",
+        "instructions": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
+        "issuedBy": "Issued by Building Safety",
+        "qrLabel": "Scan for updates",
+        "qrUrl": "https://example.com/updates",
+        "severity": "emergency",
+        "showEndsAt": true,
+        "showIssuedBy": true,
+        "showQr": true
+      },
+      "durationMs": 10000,
+      "id": "alert",
+      "kind": "template",
+      "name": "Evacuation alert",
+      "template": "base/alert@1.0.0"
+    },
     "clock": {
       "assets": {},
       "data": {
@@ -662,6 +689,91 @@
         "protocol": 2,
         "uses": [],
         "version": "1.3.1"
+      }
+    },
+    "base/alert@1.0.0": {
+      "html": "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402",
+      "manifest": {
+        "background": "#111827",
+        "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
+        "duration": {
+          "defaultMs": 60000,
+          "maxMs": 3600000,
+          "minMs": 10000
+        },
+        "fields": {
+          "endsAt": {
+            "default": "4:00 PM",
+            "label": "Ends at",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "headline": {
+            "default": "Evacuate the building now",
+            "label": "Headline",
+            "maxLength": 60,
+            "type": "text"
+          },
+          "instructions": {
+            "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
+            "label": "Instructions",
+            "maxLength": 240,
+            "type": "text"
+          },
+          "issuedBy": {
+            "default": "Issued by Building Safety",
+            "label": "Issued by",
+            "maxLength": 48,
+            "type": "text"
+          },
+          "qrLabel": {
+            "default": "Scan for updates",
+            "label": "QR code label",
+            "maxLength": 32,
+            "type": "text"
+          },
+          "qrUrl": {
+            "default": "",
+            "label": "QR code address",
+            "maxLength": 200,
+            "type": "url"
+          },
+          "severity": {
+            "default": "emergency",
+            "label": "Severity",
+            "options": [
+              "emergency",
+              "warning",
+              "advisory",
+              "notice"
+            ],
+            "type": "select"
+          },
+          "showEndsAt": {
+            "default": true,
+            "label": "Show when it ends",
+            "type": "boolean"
+          },
+          "showIssuedBy": {
+            "default": true,
+            "label": "Show who issued it",
+            "type": "boolean"
+          },
+          "showQr": {
+            "default": true,
+            "label": "Show the QR code",
+            "type": "boolean"
+          }
+        },
+        "id": "alert",
+        "name": "Alert",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 2,
+        "uses": [],
+        "version": "1.0.0"
       }
     },
     "base/clock@1.2.3": {

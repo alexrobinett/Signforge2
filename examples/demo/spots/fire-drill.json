@@ -1,0 +1,15 @@
+{
+  "name": "Fire drill notice",
+  "kind": "template",
+  "template": "alert",
+  "durationMs": 10000,
+  "data": {
+    "severity": "notice",
+    "headline": "Fire drill at 2 PM today",
+    "instructions": "When the alarm sounds, leave by your usual route and gather at the north car park. It lasts about 15 minutes.",
+    "issuedBy": "Issued by Building Safety",
+    "endsAt": "2:15 PM",
+    "qrUrl": "https://example.com/fire-drill",
+    "qrLabel": "Scan for the route"
+  }
+}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DataSnapshot, FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
 import { MANIFEST_SCHEMA, SNAPSHOT_STALE_MS } from '@signforge/contract';
 import {
+  Clock,
   Sequencer,
   activeTakeover,
   displayOn,
@@ -44,6 +45,8 @@ function manifest(over: Partial<ScreenManifest> = {}): ScreenManifest {
 
 // 2026-11-16 is a Monday. New York is UTC-5 in November.
 const at = (hhmm: string) => new Date(`2026-11-16T${hhmm}:00-05:00`);
+/** A clock the screen does not trust, last synced long before any test's instant. */
+const untrusted = { clockTrusted: false, notBefore: 0 } as const;
 
 describe('localTime', () => {
   it('reads the wall clock in the screen time zone, not the host one', () => {
@@ -89,10 +92,78 @@ describe('schedule', () => {
 
   it('skips bounded entries on a clock it does not trust, so a takeover cannot run forever', () => {
     const m = manifest({ schedule: [{ id: 't', playlist: 'takeover', priority: 99, target: 'screen', endsAt: '2026-11-16T17:30:00Z' }] });
-    expect(resolvePlaylist(m, at('12:00'), { clockTrusted: false }).id).toBe('all');
-    expect(resolvePlaylist(manifest(), at('07:30'), { clockTrusted: false }).id).toBe('breakfast');
-    expect(new Sequencer(m).next(at('12:00'), { clockTrusted: false })?.playlist.id).toBe('all');
+    expect(resolvePlaylist(m, at('12:00'), untrusted).id).toBe('all');
+    expect(resolvePlaylist(manifest(), at('07:30'), untrusted).id).toBe('breakfast');
+    expect(new Sequencer(m).next(at('12:00'), untrusted)?.playlist.id).toBe('all');
     expect(new Sequencer(m).next(at('12:00'))?.playlist.id).toBe('takeover');
+  });
+
+  // Owner decision (#200): an alert that is live is better shown on a doubtful clock than missed.
+  describe('an alert takeover on a clock the screen does not trust (#200)', () => {
+    const alert: Spot = { id: 'x', name: 'Evacuate', kind: 'template', template: 'base/alert@1.0.0', data: {}, assets: {}, durationMs: 60_000 };
+    const orgAlert: Spot = { ...alert, id: 'p', template: 'org-a/alert@1.0.0' };
+    /** A takeover of spot x from `from` to `to`, New York time. */
+    const alertManifest = (from: string, to: string) => {
+      const m = manifest({
+        spots: { ...manifest().spots, x: alert, p: orgAlert },
+        schedule: [{ id: 't', playlist: 'takeover', priority: 100, target: 'org', startsAt: at(from).toISOString(), endsAt: at(to).toISOString() }],
+      });
+      m.playlists.takeover!.items = [{ spot: 'x' }];
+      return m;
+    };
+    // The device clock reads 1970, as a Pi's does after a power cut, and never moves: only the
+    // monotonic clock does. The real time is at least the last sync plus the time run since.
+    const early = new Date(0);
+    function screen(lastSync: string) {
+      const run = { ms: 0 };
+      const clock = new Clock({
+        deviceNow: () => 0,
+        monoNow: () => run.ms,
+        buildTime: at('09:00').getTime(),
+        persisted: { offsetMs: 0, syncedAt: at(lastSync).getTime() },
+      });
+      return { run, clock };
+    }
+
+    it('plays an alert the last sync saw running, and stops once the screen has run long enough that it is surely over', () => {
+      const m = alertManifest('12:00', '12:30');
+      const { run, clock } = screen('12:10');
+      expect(clock.trusted).toBe(false);
+      expect(resolvePlaylist(m, early, clock.trust()).id).toBe('takeover');
+      expect(activeTakeover(m, early, clock.trust())).toBe('t');
+      run.ms = 20 * 60_000 - 1;
+      expect(activeTakeover(m, early, clock.trust())).toBe('t');
+      // 20 minutes run since a sync at 12:10: it is at least 12:30.
+      run.ms = 20 * 60_000;
+      expect(resolvePlaylist(m, early, clock.trust()).id).toBe('all');
+      expect(activeTakeover(m, early, clock.trust())).toBeUndefined();
+    });
+
+    it('never plays one that ended before the last sync', () => {
+      expect(resolvePlaylist(alertManifest('12:00', '12:30'), early, screen('12:30').clock.trust()).id).toBe('all');
+    });
+
+    it('holds back one scheduled for later until it has surely started', () => {
+      // A fire drill at 13:55 published and synced in the morning.
+      const m = alertManifest('13:55', '14:15');
+      const { run, clock } = screen('10:00');
+      expect(resolvePlaylist(m, early, clock.trust()).id).toBe('all');
+      run.ms = (3 * 60 + 55) * 60_000 - 1;
+      expect(resolvePlaylist(m, early, clock.trust()).id).toBe('all');
+      run.ms = (3 * 60 + 55) * 60_000;
+      expect(resolvePlaylist(m, early, clock.trust()).id).toBe('takeover');
+    });
+
+    it('counts only a playlist of base alert spots, not one that mixes in others or an org template called alert', () => {
+      const m = alertManifest('12:00', '12:30');
+      const trust = screen('12:10').clock.trust();
+      for (const items of [['x', 'a'], ['p'], ['a']]) {
+        m.playlists.takeover!.items = items.map((spot) => ({ spot }));
+        expect(resolvePlaylist(m, early, trust).id, items.join()).toBe('all');
+      }
+      m.playlists.takeover!.items = [{ spot: 'x' }, { spot: 'x' }];
+      expect(resolvePlaylist(m, early, trust).id).toBe('takeover');
+    });
   });
 
   it('handles a window that crosses midnight and belongs to the day it started', () => {
@@ -130,7 +201,7 @@ describe('takeovers (M3-19)', () => {
     expect(resolvePlaylist(m, at('12:20')).id).toBe('breakfast');
     expect(activeTakeover(m, at('12:30'))).toBe('t2');
     expect(activeTakeover(m, at('13:00'))).toBeUndefined();
-    expect(activeTakeover(m, at('12:00'), { clockTrusted: false })).toBeUndefined();
+    expect(activeTakeover(m, at('12:00'), untrusted)).toBeUndefined();
   });
 
   it('of two takeovers on one target, the newer wins: the later start, then the later published, never the id', () => {
