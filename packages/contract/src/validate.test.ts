@@ -563,7 +563,14 @@ describe('table bindings', () => {
       label: 'Links',
       item: { name: { type: 'text', label: 'Name' }, href: { type: 'url', label: 'Link', default: '' } },
     };
-    const table = { columns: ['Name', 'Link'], rows: [['Plan', ' https://example.com/plan '], ['Menu', 'http://example.com/menu'], ['Desk', '']] };
+    const table = {
+      columns: ['Name', 'Link'],
+      rows: [
+        ['Plan', ' https://example.com/plan '],
+        ['Menu', 'http://example.com/menu'],
+        ['Desk', ''],
+      ],
+    };
     expect(tableItems(links, { columns: { name: 'Name', href: 'Link' } }, table, 'en-US')).toEqual({
       items: [
         { name: 'Plan', href: 'https://example.com/plan' },
