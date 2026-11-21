@@ -222,7 +222,7 @@ describe('edge cases', () => {
     expect(parseCalendar(cal, { now }).events.map((e) => e.title)).toEqual(['Untitled', 'Fine']);
   });
 
-  it("names the organiser by their display name and never by their address (#199)", () => {
+  it('names the organiser by their display name and never by their address (#199)', () => {
     const cal = ics(
       ['UID:a@test', 'DTSTART:20261118T120000Z', 'SUMMARY:Named', 'ORGANIZER;CN="Shah, Priya":mailto:priya@example.com'],
       ['UID:b@test', 'DTSTART:20261118T130000Z', 'SUMMARY:Address only', 'ORGANIZER:mailto:priya@example.com'],
