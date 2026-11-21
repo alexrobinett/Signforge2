@@ -175,4 +175,13 @@ describe('a revoked screen', () => {
     const listed = (await call('list_screens', {})).screens.find((s: { id: string }) => s.id === o.screen);
     expect(listed.state).toMatchObject({ kind: 'needs_you', reason: 'revoked' });
   });
+
+  it('gets no identify or restart: refused, and nothing sent (#180)', async () => {
+    sent.length = 0;
+    for (const name of ['identify_screen', 'restart_screen']) {
+      const r = await dispatch(registry, name, { screenId: o.screen }, owner);
+      expect(r).toMatchObject({ ok: false, error: 'conflict', message: expect.stringContaining('revoked') });
+    }
+    expect(sent).toEqual([]);
+  });
 });
