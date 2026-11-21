@@ -26,7 +26,10 @@ interface CommandMenuState {
   form: string | null;
   /** The screen or group whose actions are showing; null shows the list. */
   target: CommandTarget | null;
+  /** A call is on its way: kept through closing and opening again, so it is not sent twice. */
   running: boolean;
+  /** Counts the openings: a call's answer closes the menu only while it is the opening that sent it. */
+  opening: number;
   /** A form field the menu could not read, before anything was sent. */
   fieldError: { field: string; message: string } | null;
   /** The last call that did not succeed: sent again with the same input, it keeps its idempotency key, closed or not. */
@@ -46,19 +49,36 @@ export interface CommandMenuSlice {
   submitToolForm: (label: string, tool: ToolListing, form: FormData) => Promise<void>;
 }
 
-const CLOSED: CommandMenuState = { open: false, query: '', form: null, target: null, running: false, fieldError: null, pending: null };
+const CLOSED: CommandMenuState = { open: false, query: '', form: null, target: null, running: false, opening: 0, fieldError: null, pending: null };
+
+/** The menu closed: what outlives an opening (a call on its way, the last one that failed, the count) stays. */
+const closed = (m: CommandMenuState): CommandMenuState => ({ ...CLOSED, running: m.running, opening: m.opening, pending: m.pending });
 
 export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router }) => {
+  /** Starts a call from this opening, unless one is on its way; the opening it was sent from, or null. */
+  const start = (change: (m: CommandMenuState) => Partial<CommandMenuState> = () => ({})) => {
+    if (get().commandMenu.running) return null;
+    set((s) => ({ commandMenu: { ...s.commandMenu, running: true, ...change(s.commandMenu) } }));
+    return get().commandMenu.opening;
+  };
+  /** A call answered: the menu it was sent from closes when it worked, and a later opening is left as it is. A tool's call also settles its `pending`. */
+  const finish = (from: number, ok: boolean, pending?: PendingCall | null) =>
+    set((s) => {
+      const m = { ...s.commandMenu, running: false, ...(pending === undefined ? {} : { pending }) };
+      return { commandMenu: ok && m.open && m.opening === from ? closed(m) : m };
+    });
+
   const run = async (label: string, tool: ToolListing, read: Record<string, unknown>) => {
     const { input, pending } = withKey(tool, read, get().commandMenu.pending);
-    set((s) => ({ commandMenu: { ...s.commandMenu, running: true, fieldError: null, pending } }));
+    const from = start(() => ({ fieldError: null, pending }));
+    if (from === null) return;
     try {
       const output = await callToolByName(tool.name, input);
-      set({ commandMenu: CLOSED });
+      finish(from, true, null);
       toast.success(label, { description: resultText(output) });
       if (tool.mutates) await router.invalidate();
     } catch (err) {
-      set((s) => ({ commandMenu: { ...s.commandMenu, running: false } }));
+      finish(from, false, pending);
       toast.error(label, { description: toolMessage(err) });
     }
   };
@@ -66,11 +86,12 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
   return {
     commandMenu: CLOSED,
     // The phone drawer has the menu's button: the menu takes its place.
-    openCommandMenu: () => set((s) => ({ commandMenu: { ...CLOSED, open: true, pending: s.commandMenu.pending }, ui: { ...s.ui, drawerOpen: false } })),
-    closeCommandMenu: () => set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } })),
+    openCommandMenu: () =>
+      set((s) => ({ commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1 }, ui: { ...s.ui, drawerOpen: false } })),
+    closeCommandMenu: () => set((s) => ({ commandMenu: closed(s.commandMenu) })),
     chooseCommand: async (entry) => {
       if (entry.kind === 'go') {
-        set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
+        set((s) => ({ commandMenu: closed(s.commandMenu) }));
         await router.navigate({ to: entry.to });
       } else if (needsInput(entry.tool)) {
         set((s) => ({ commandMenu: { ...s.commandMenu, form: entry.tool.name, fieldError: null } }));
@@ -83,7 +104,7 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
     searchCommands: (query) => set((s) => ({ commandMenu: { ...s.commandMenu, query } })),
     chooseTarget: (target) => set((s) => ({ commandMenu: { ...s.commandMenu, target } })),
     async runTargetAction(action) {
-      const close = () => set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
+      const close = () => set((s) => ({ commandMenu: closed(s.commandMenu) }));
       switch (action.kind) {
         case 'open-screen':
           close();
@@ -93,17 +114,18 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           close();
           await router.navigate({ to: '/screens', search: { group: action.groupId } });
           return;
-        case 'tool':
-          if (get().commandMenu.running) return;
-          set((s) => ({ commandMenu: { ...s.commandMenu, running: true } }));
+        case 'tool': {
+          const from = start();
+          if (from === null) return;
           try {
             await callTool(action.tool, { screenId: action.screenId });
-            close();
+            finish(from, true);
             toast.success(`${action.label}: ${action.screenName}`, { description: action.done });
           } catch (err) {
-            set((s) => ({ commandMenu: { ...s.commandMenu, running: false } }));
+            finish(from, false);
             toast.error(`${action.label}: ${action.screenName}`, { description: toolMessage(err) });
           }
+        }
       }
     },
     submitToolForm: async (label, tool, form) => {

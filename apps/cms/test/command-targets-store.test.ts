@@ -41,6 +41,73 @@ const identify: TargetAction = {
   done: 'Sent.',
 };
 
+/** Holds the next tool call: resolves once it is sent, and answers it when told to. */
+function holdNextCall() {
+  let answer!: (status: number) => void;
+  const sent = new Promise<void>((resolve) => {
+    vi.stubGlobal('fetch', (url: string, init: { body: string }) => {
+      calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+      resolve();
+      return new Promise<Response>((r) => {
+        answer = (status) => r(new Response('{}', { status }));
+      });
+    });
+  });
+  return { sent, answer: (status: number) => answer(status) };
+}
+
+describe('a call on its way across closing and opening again', () => {
+  const restart: TargetAction = { kind: 'tool', label: 'Restart player', tool: 'restart_screen', screenId: 'scr_1', screenName: 'Lobby', done: 'Sent.' };
+
+  it('is not sent again from a later opening, and its answer leaves that opening open', async () => {
+    const { store } = menuStore();
+    const held = holdNextCall();
+    store.getState().openCommandMenu();
+    store.getState().chooseTarget({ kind: 'screen', id: 'scr_1' });
+    const first = store.getState().runTargetAction(restart);
+    await held.sent;
+    store.getState().closeCommandMenu();
+    store.getState().openCommandMenu();
+    store.getState().chooseTarget({ kind: 'screen', id: 'scr_1' });
+    expect(store.getState().commandMenu.running).toBe(true);
+    await store.getState().runTargetAction(restart);
+    expect(calls.map((c) => c.name)).toEqual(['restart_screen']);
+
+    held.answer(200);
+    await first;
+    expect(store.getState().commandMenu).toMatchObject({ open: true, target: { kind: 'screen', id: 'scr_1' }, running: false });
+    expect(toast.success).toHaveBeenCalledWith('Restart player: Lobby', { description: 'Sent.' });
+  });
+
+  it('closes the opening that sent it, once it works', async () => {
+    const { store } = menuStore();
+    const held = holdNextCall();
+    store.getState().openCommandMenu();
+    const call = store.getState().runTargetAction(restart);
+    await held.sent;
+    held.answer(200);
+    await call;
+    expect(store.getState().commandMenu).toMatchObject({ open: false, running: false });
+  });
+
+  it('holds a tool run from the list too: no second call while the first is on its way', async () => {
+    const { store } = menuStore();
+    const held = holdNextCall();
+    const list = { name: 'list_screens', description: 'List the screens.', mutates: false, fields: [] };
+    const entry = { kind: 'tool', id: 'tool:list_screens', label: 'List the screens', tool: list, keywords: [] } as const;
+    store.getState().openCommandMenu();
+    const first = store.getState().chooseCommand(entry);
+    await held.sent;
+    store.getState().closeCommandMenu();
+    store.getState().openCommandMenu();
+    await store.getState().chooseCommand(entry);
+    expect(calls.map((c) => c.name)).toEqual(['list_screens']);
+    held.answer(200);
+    await first;
+    expect(store.getState().commandMenu).toMatchObject({ open: true, running: false });
+  });
+});
+
 describe('⌘K on a found screen or group', () => {
   it('keeps what is typed through a target and Back, and starts empty when opened again', () => {
     const { store } = menuStore();
