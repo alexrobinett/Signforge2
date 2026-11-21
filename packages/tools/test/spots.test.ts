@@ -58,7 +58,67 @@ async function setup(orgId: string) {
   return { org, version: v.id, asset: asset.id, call: editorCalls(org) };
 }
 
+/** A countdown: a target no default or min fits, which a new spot leaves for the editor to pick. */
+const countdown: TemplateManifest = {
+  id: 'countdown',
+  version: '1.0.0',
+  name: 'Countdown',
+  fields: {
+    target: { type: 'datetime', label: 'Target' },
+    title: { type: 'text', label: 'Title', default: 'Launch' },
+    events: {
+      type: 'list',
+      label: 'Events',
+      item: { name: { type: 'text', label: 'Name', maxLength: 10 }, at: { type: 'datetime', label: 'At' } },
+      default: [],
+    },
+  },
+  duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 },
+  orientations: ['landscape'],
+  uses: [],
+  background: '#000',
+  protocol: 2,
+};
+
+async function addCountdown(org: Awaited<ReturnType<typeof setup>>['org']) {
+  const t = await org.templates.insert({ key: 'countdown', name: 'Countdown' });
+  const v = await org.templates.versions.insert({
+    templateId: t.id,
+    version: '1.0.0',
+    manifestJson: JSON.stringify(countdown),
+    bundleSha256: sha('f'),
+    status: 'approved',
+    checkReportJson: JSON.stringify({ ok: true, bundleBytes: 1234, checks: [], checkedAt: 0, sourcesSha256: sha('0') }),
+  });
+  return v.id;
+}
+
 describe('spot drafts', () => {
+  it('creates a spot whose datetime is not picked yet, as one whose photo is not, and holds a picked one to the contract', async () => {
+    const { org, call } = await setup('spots-date');
+    const version = await addCountdown(org);
+    // What the New spot dialog sends for a field with no default or min (apps/cms startData), and what an agent may leave out.
+    const { spot } = await ok(call('create_spot', { name: 'Launch', kind: 'template', templateVersionId: version, data: { target: '' } }));
+    expect(spot).toMatchObject({ data: { target: '' }, version: 1 });
+    await ok(call('create_spot', { name: 'Launch too', kind: 'template', templateVersionId: version }));
+    const spotId = (spot as { id: string }).id;
+    expect(await ok(call('update_spot', { spotId, data: { target: '2026-12-24T18:00' } }))).toMatchObject({ spot: { data: { target: '2026-12-24T18:00' } } });
+    expect(await call('update_spot', { spotId, data: { target: '0026-12-24T18:00' } })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [{ path: 'data', message: 'field "target" must be in 1900 or later' }],
+    });
+    expect(await call('update_spot', { spotId, data: { target: '2026-12-24', title: 'x' } })).toMatchObject({
+      ok: false,
+      details: [{ path: 'data', message: 'field "target" must be a date and time (YYYY-MM-DDTHH:mm)' }],
+    });
+    // Unpicked again, the rest of the data is still checked.
+    expect(await call('update_spot', { spotId, data: { target: '', nope: 1 } })).toMatchObject({
+      ok: false,
+      details: [{ path: 'data', message: 'unknown field "nope"' }],
+    });
+  });
+
   it('creates a template spot with the template duration, and reads it back', async () => {
     const { call, version } = await setup('spots-create');
     const { spot } = await ok(call('create_spot', { name: 'Fresh picked', kind: 'template', templateVersionId: version, idempotencyKey: 'key-create-1' }));
@@ -147,6 +207,47 @@ async function refusesBindings(call: ReturnType<typeof editorCalls>, spotId: str
       details: [{ path: 'bindings', message }],
     });
 }
+
+describe('spot drafts with dates not picked yet (re-check of #217)', () => {
+  it('refuses a bound datetime with no fallback as one with no date, not as a binding for an unknown field, and takes it with one', async () => {
+    const { org, call } = await setup('spots-date-bound');
+    const version = await addCountdown(org);
+    const { spot } = await ok(call('create_spot', { name: 'Launch', kind: 'template', templateVersionId: version, data: { target: '' } }));
+    const spotId = (spot as { id: string }).id;
+    const bindings = { target: { dataSourceId: 'weather', path: 'next.start' } };
+    expect(await call('update_spot', { spotId, bindings })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [{ path: 'data', message: 'field "target" has no date and time yet' }],
+    });
+    expect(await ok(call('update_spot', { spotId, data: { target: '2026-12-24T18:00' }, bindings }))).toMatchObject({
+      spot: { data: { target: '2026-12-24T18:00' }, bindings: { target: { dataSourceId: 'weather', path: 'next.start' } } },
+    });
+  });
+
+  it("saves a list row whose datetime is not picked yet, as the field's own, and still checks the rest of the row", async () => {
+    const { org, call } = await setup('spots-date-rows');
+    const version = await addCountdown(org);
+    const { spot } = await ok(
+      call('create_spot', {
+        name: 'Launch',
+        kind: 'template',
+        templateVersionId: version,
+        data: { target: '', events: [{ name: 'Doors', at: '' }, { name: 'Talk' }] },
+      }),
+    );
+    expect(spot).toMatchObject({ data: { events: [{ name: 'Doors', at: '' }, { name: 'Talk' }] } });
+    const spotId = (spot as { id: string }).id;
+    expect(await call('update_spot', { spotId, data: { target: '', events: [{ name: 'Far too long', at: '' }] } })).toMatchObject({
+      ok: false,
+      details: [{ path: 'data', message: 'field "events[1].name" is longer than 10' }],
+    });
+    expect(await call('update_spot', { spotId, data: { target: '', events: [{ name: 'Doors', at: '0026-11-27T18:00' }] } })).toMatchObject({
+      ok: false,
+      details: [{ path: 'data', message: 'field "events[1].at" must be in 1900 or later' }],
+    });
+  });
+});
 
 describe('spot bindings', () => {
   it("binds fields to the org's data sources, keeping the data as the fallback, and reads them back", async () => {

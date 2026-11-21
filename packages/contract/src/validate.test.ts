@@ -141,6 +141,65 @@ describe('validateSpotData', () => {
   });
 });
 
+describe('date and datetime fields', () => {
+  const when: Record<string, FieldDef> = {
+    day: { type: 'date', label: 'Day', min: '2026-01-01', max: '2026-12-31' },
+    at: { type: 'datetime', label: 'Starts', min: '2026-11-01T00:00', max: '2026-11-30T23:59' },
+  };
+  const check = (data: Record<string, unknown>) => validateSpotData(when, { day: '2026-06-15', at: '2026-11-27T18:00', ...data }, {});
+
+  it('holds a date to a real calendar day, YYYY-MM-DD, within min and max', () => {
+    expect(check({})).toEqual([]);
+    for (const day of ['2026-01-01', '2026-12-31', '2026-02-28']) expect(check({ day })).toEqual([]);
+    for (const bad of ['2026-02-29', '2026-04-31', '2026-13-01', '2026-00-10', '2026-6-15', '15/06/2026', '2026-06-15T09:00', 20260615])
+      expect(check({ day: bad })).toEqual(['field "day" must be a date (YYYY-MM-DD)']);
+    expect(check({ day: '2025-12-31' })).toEqual(['field "day" must be on or after 2026-01-01']);
+    expect(check({ day: '2027-01-01' })).toEqual(['field "day" must be on or before 2026-12-31']);
+    // A leap day where there is one.
+    expect(validateSpotData({ day: { type: 'date', label: 'Day' } }, { day: '2028-02-29' }, {})).toEqual([]);
+  });
+
+  it('names an empty date or datetime as one not picked yet: a draft may hold it, a screen may not', () => {
+    expect(check({ day: '', at: '' })).toEqual(['field "day" has no date yet', 'field "at" has no date and time yet']);
+  });
+
+  it('refuses a year before 1900, as typing "26" into a picker\'s year gives 0026', () => {
+    const open: Record<string, FieldDef> = { day: { type: 'date', label: 'Day' }, at: { type: 'datetime', label: 'At' } };
+    const year = (day: string, at: string) => validateSpotData(open, { day, at }, {});
+    expect(year('0026-11-27', '0026-11-27T18:00')).toEqual(['field "day" must be in 1900 or later', 'field "at" must be in 1900 or later']);
+    expect(year('1899-12-31', '0000-01-01T00:00')).toEqual(['field "day" must be in 1900 or later', 'field "at" must be in 1900 or later']);
+    expect(year('1900-01-01', '1900-01-01T00:00')).toEqual([]);
+    expect(validateTemplateManifest({ ...structuredClone(template), fields: { day: { type: 'date', label: 'Day', min: '0026-01-01' } } })).toEqual([
+      'field "day": min must be in 1900 or later',
+    ]);
+  });
+
+  it('holds a datetime to a wall time, YYYY-MM-DDTHH:mm with no zone, within min and max', () => {
+    for (const at of ['2026-11-01T00:00', '2026-11-30T23:59', '2026-11-27T18:00']) expect(check({ at })).toEqual([]);
+    // An instant or an offset is a different value: the screen's zone, not the editor's, places a wall time.
+    for (const bad of [
+      '2026-11-27T18:00Z',
+      '2026-11-27T18:00+01:00',
+      '2026-11-27T18:00:00',
+      '2026-11-27 18:00',
+      '2026-11-27',
+      '2026-11-27T24:00',
+      '2026-11-27T18:60',
+      '2026-11-31T09:00',
+    ])
+      expect(check({ at: bad })).toEqual(['field "at" must be a date and time (YYYY-MM-DDTHH:mm)']);
+    expect(check({ at: '2026-10-31T23:59' })).toEqual(['field "at" must be at or after 2026-11-01 00:00']);
+    expect(check({ at: '2026-12-01T00:00' })).toEqual(['field "at" must be at or before 2026-11-30 23:59']);
+  });
+
+  it('takes wall times at DST edges, which have no instant or two in some zones: the zone settles them, not the contract', () => {
+    const at: Record<string, FieldDef> = { at: { type: 'datetime', label: 'At' } };
+    // 02:30 on 8 March 2026 never happens in New York; 01:30 on 1 November 2026 happens twice there.
+    for (const edge of ['2026-03-08T02:30', '2026-11-01T01:30', '2026-03-29T01:30', '2026-10-25T02:30'])
+      expect(validateSpotData(at, { at: edge }, {})).toEqual([]);
+  });
+});
+
 describe('image size', () => {
   it('refuses an image whose decoded pixels would exceed the budget, even with one side in the box', () => {
     expect(imageSizeProblem(1920, 1080, SCREEN_BOX.landscape)).toBeUndefined();
@@ -413,8 +472,25 @@ describe('validateTemplateManifest', () => {
       'field "price": min must not be above max',
       'field "items.pic": a list row cannot hold an image',
       'field "size": options must be a list of text',
-      'field "odd": type must be one of text, number, boolean, color, select, url, image, list',
+      'field "odd": type must be one of text, number, boolean, color, select, url, date, datetime, image, list',
       'field "link": maxLength must be a whole number above 0',
+    ]);
+  });
+
+  it('takes date and datetime fields, in list rows too, with min and max of their own kind and a default between them', () => {
+    const m = structuredClone(template);
+    m.fields.target = { type: 'datetime', label: 'Target', min: '2026-01-01T00:00', max: '2027-01-01T00:00', default: '2026-12-31T18:00' };
+    m.fields.events = { type: 'list', label: 'Events', item: { day: { type: 'date', label: 'Day', default: '2026-11-27' } } };
+    expect(validateTemplateManifest(m)).toEqual([]);
+    const bad = structuredClone(template) as unknown as { fields: Record<string, unknown> };
+    bad.fields.day = { type: 'date', label: 'Day', min: '2026-12-31', max: '2026-01-01' };
+    bad.fields.at = { type: 'datetime', label: 'At', min: '2026-01-01', max: 7 };
+    bad.fields.from = { type: 'date', label: 'From', min: '2026-01-01', default: '2025-06-01' };
+    expect(validateTemplateManifest(bad)).toEqual([
+      'field "day": min must not be after max',
+      'field "at": min must be a date and time (YYYY-MM-DDTHH:mm)',
+      'field "at": max must be a date and time (YYYY-MM-DDTHH:mm)',
+      'field "from" default: field "from" must be on or after 2026-01-01',
     ]);
   });
 
@@ -669,6 +745,64 @@ describe('table bindings', () => {
     });
   });
 
+  it("fills date and datetime properties from a cell's ISO text, a spreadsheet's space or zero seconds too, leaving out a row that is not one", () => {
+    const events: Extract<FieldDef, { type: 'list' }> = {
+      type: 'list',
+      label: 'Events',
+      item: { day: { type: 'date', label: 'Day' }, at: { type: 'datetime', label: 'At', default: '2026-11-27T09:00' } },
+    };
+    const table = {
+      columns: ['Day', 'At'],
+      rows: [
+        [' 2026-11-27 ', '2026-11-27T18:00'],
+        ['2026-11-28', '2026-11-28T18:30:00'],
+        ['2026-11-29', '2026-11-29T07:15:00'],
+        ['2026-11-30', ''],
+        ['27/11/2026', '2026-11-27T18:00'],
+        ['2026-12-01', '2026-12-01T18:00Z'],
+        [46_000, '2026-12-02T18:00:30'],
+        // As a spreadsheet exports it, padded or not.
+        ['2026-12-03', '2026-12-03 18:00'],
+        ['2026-12-04', ' 2026-12-04 18:30:00 '],
+      ],
+    };
+    expect(tableItems(events, { columns: { day: 'Day', at: 'At' } }, table, 'en-US')).toEqual({
+      items: [
+        { day: '2026-11-27', at: '2026-11-27T18:00' },
+        { day: '2026-11-28', at: '2026-11-28T18:30' },
+        { day: '2026-11-29', at: '2026-11-29T07:15' },
+        { day: '2026-11-30', at: '2026-11-27T09:00' },
+        { day: '2026-12-03', at: '2026-12-03T18:00' },
+        { day: '2026-12-04', at: '2026-12-04T18:30' },
+      ],
+      problems: ['row 5: day must be a date (YYYY-MM-DD)', 'row 6: at must be a date and time (YYYY-MM-DDTHH:mm)', 'row 7: day must be a date (YYYY-MM-DD)'],
+    });
+  });
+
+  it("sorts a column of dates and times by time, whichever separator each row's cell has, and leaves the cells as the file has them", () => {
+    const events: Extract<FieldDef, { type: 'list' }> = {
+      type: 'list',
+      label: 'Events',
+      item: { name: { type: 'text', label: 'Name' }, when: { type: 'text', label: 'When' } },
+    };
+    const table = {
+      columns: ['Event', 'Starts'],
+      rows: [
+        ['Late', '2026-11-27 18:30'],
+        ['Early', '2026-11-27T09:00'],
+        ['Noon', ' 2026-11-27 12:00:00'],
+        ['Next day', '2026-11-28T08:00'],
+      ],
+    };
+    const sorted = tableItems(events, { columns: { name: 'Event', when: 'Starts' }, sort: { column: 'Starts' } }, table, 'en-US');
+    expect(sorted.items).toEqual([
+      { name: 'Early', when: '2026-11-27T09:00' },
+      { name: 'Noon', when: '2026-11-27 12:00:00' },
+      { name: 'Late', when: '2026-11-27 18:30' },
+      { name: 'Next day', when: '2026-11-28T08:00' },
+    ]);
+  });
+
   it('filters, sorts, then keeps maxItems rows', () => {
     const columns = { name: 'Item', price: 'Price' };
     const names = (t: Parameters<typeof tableItems>[1]) => tableItems(menuItems, t, menuTable, 'en-US').items?.map((i) => i.name);
@@ -794,12 +928,12 @@ describe('validateManifest', () => {
 
 describe('versions', () => {
   it('plays the current manifest schema and the one before it', () => {
-    expect(MANIFEST_SCHEMA).toBe(5);
-    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([4, 5]);
-    expect(validateManifest({ ...validManifest(), schema: 4 })).toEqual([]);
+    expect(MANIFEST_SCHEMA).toBe(6);
+    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([5, 6]);
     expect(validateManifest({ ...validManifest(), schema: 5 })).toEqual([]);
-    // A player that knows only schemas 3 and 4 refuses a template with a url field (#191): the server tells it to reload (apps/api sync's canPlay).
-    expect(validateManifest({ ...validManifest(), schema: 3 })).toEqual(['manifest schema 3 is not one this player can play (4, 5)']);
+    expect(validateManifest({ ...validManifest(), schema: 6 })).toEqual([]);
+    // A player that knows only schemas 4 and 5 refuses a template with a date or datetime field (#192): the server tells it to reload (apps/api sync's canPlay).
+    expect(validateManifest({ ...validManifest(), schema: 4 })).toEqual(['manifest schema 4 is not one this player can play (5, 6)']);
   });
 
   it('drives protocol 1 and 2 bundles, and refuses a newer one', () => {

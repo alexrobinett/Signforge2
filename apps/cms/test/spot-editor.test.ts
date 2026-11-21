@@ -13,7 +13,7 @@ import { assetsQuery, spotKeys, spotPreviewQuery, templatesQuery } from '../src/
 import { getDataSource } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
 import { createSpotSourceSlice, sourceStateOf, type SpotSourceSlice } from '../src/state/spot-source';
-import { draftOf } from '../src/lib/spots';
+import { draftOf, fieldProblems } from '../src/lib/spots';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
 
 // The tab's org comes from the page's router, which a store test has none of.
@@ -200,6 +200,74 @@ describe('the stage (review of #97)', () => {
     await held;
     expect(store.getState().spotEditor.refusals).toEqual(['asset ast_new is still being checked']);
     expect(posted).toEqual([]);
+  });
+});
+
+describe('a date not picked yet (review of #192)', () => {
+  const countdown: TemplateManifest = {
+    id: 'countdown',
+    version: '1.0.0',
+    name: 'Countdown',
+    fields: {
+      target: { type: 'datetime', label: 'Target' },
+      title: { type: 'text', label: 'Title', default: 'Launch', maxLength: 20 },
+      events: { type: 'list', label: 'Events', item: { name: { type: 'text', label: 'Name' }, at: { type: 'datetime', label: 'At' } }, default: [] },
+    },
+    duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 },
+    orientations: ['landscape'],
+    uses: [],
+    background: '#000',
+  };
+
+  /** The editor on a countdown spot holding `data` and `bindings`, as get_spot gave it at version 1. */
+  function editing(data: Record<string, unknown>, bindings: SpotView['bindings'] = {}) {
+    const queryClient = new QueryClient();
+    const store = createStore<SpotEditorSlice>()((set, get) => createSpotEditorSlice(set as never, get as never, { router, queryClient } as never));
+    const launch: SpotView = { ...spot('spt_launch', 1), kind: 'template', url: null, templateVersionId: 'tv_countdown', data, assets: {}, bindings };
+    queryClient.setQueryData(spotKeys.one(ORG, launch.id), launch);
+    queryClient.setQueryData(templatesQuery(ORG).queryKey, {
+      templates: [{ versions: [{ id: 'tv_countdown', status: 'approved', manifest: countdown }] }],
+    } as never);
+    return { store, launch };
+  }
+
+  it('saves an edit to a spot whose datetime is not picked, as the server takes it, and says under the field that it needs one', async () => {
+    const { store, launch } = editing({ target: '' });
+    store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, title: 'Doors open' } }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toMatchObject([{ name: 'update_spot', input: { spotId: launch.id, data: { target: '', title: 'Doors open' }, ifVersion: 1 } }]);
+    expect(fieldProblems(countdown.fields, { data: { target: '', title: 'Doors open' }, assets: {} })).toEqual(
+      new Map([['target', ['field "target" has no date and time yet']]]),
+    );
+
+    // A title over its limit is still held back, as the server would refuse it.
+    answers[0]!({ spot: { ...launch, data: { target: '', title: 'Doors open' }, version: 2 } });
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, title: 'x'.repeat(21) } }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('holds back a bound datetime with no fallback, as the server refuses it, rather than send a save it will refuse', async () => {
+    const { store, launch } = editing({ target: '' }, { target: { dataSourceId: 'src_events', path: 'next.start' } });
+    store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, title: 'Doors open' } }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toEqual([]);
+    store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, target: '2026-12-24T18:00' } }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toMatchObject([{ name: 'update_spot', input: { data: { target: '2026-12-24T18:00', title: 'Doors open' } } }]);
+  });
+
+  it('saves a new list row whose datetime is not picked yet, and still holds back a row the server would refuse for another reason', async () => {
+    const { store, launch } = editing({ target: '', events: [] });
+    store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, events: [{ name: '', at: '' }] } }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toMatchObject([{ name: 'update_spot', input: { data: { target: '', events: [{ name: '', at: '' }] } } }]);
+    answers[0]!({ spot: { ...launch, data: { target: '', events: [{ name: '', at: '' }] }, version: 2 } });
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, events: [{ name: 7, at: '' }] } }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(1);
   });
 });
 
