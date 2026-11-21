@@ -78,7 +78,7 @@ src/components/schedule/  the schedule entry and takeover dialogs, whom one play
 src/components/publishes/ RolloutBar and RolloutLegend: where a publish's screens stand, and why (the Screens page's latest publish, and Publishes)
 src/lib/publishes.ts      the publish tools' outputs, and a rollout in words
 src/state/publishing.ts   Publish from the editors (the draft saved first, then published pinned at that version), Undo, roll back, the default playlist, the schedule's entries with the playlists and spots they need
-src/state/groups.ts       the Groups list's dialogs: rename (a versioned draft), delete (a refusal names the schedule entries that block it), members (added and removed, never replaced)
+src/state/groups.ts       the Groups list's dialogs: rename (a versioned draft), delete (a refusal names the schedule entries that block it), members (added and removed, never replaced); Cancel waits while a delete or save runs, so a save is all or nothing
 src/state/schedule.ts     the Schedule page's dialogs, removing an entry, starting and ending a takeover (each published at once), the week view's screen
 src/components/brand/     a brand kit's fields (colours, contrast, fonts, corners, logos) and its previews (the real player, one per spot)
 src/lib/brand-kits.ts     the brand tools' kit view, the editor's draft, and the contrast verdicts and fixes
