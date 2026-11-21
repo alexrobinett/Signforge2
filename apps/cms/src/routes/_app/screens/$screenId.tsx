@@ -318,8 +318,8 @@ function ScreenPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Revoke {screen.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              The screen loses its credential at once: it wipes its content, stops playing and shows a new pairing code. This cannot be undone; to use the
-              screen again, pair it again.
+              The screen loses its credential at once: it wipes its content, stops playing and shows a new pairing code. It leaves the Screens list, its counts
+              and the group pickers; the Retired filter still shows it. This cannot be undone; to use the screen again, pair it again.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
