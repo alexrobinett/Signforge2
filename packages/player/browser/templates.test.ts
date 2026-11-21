@@ -1262,7 +1262,13 @@ describe('alert (#200)', () => {
 const layoutFaults = (f: Frame, also = '', crosses = '') =>
   f.evaluate(
     ({ also, crosses }) => {
-      for (const a of document.getAnimations()) a.currentTime = 2000;
+      // At rest: where the longest intro ends. An outro runs in reverse, and ambient motion never ends.
+      const intros = document
+        .getAnimations()
+        .map((a) => a.effect!.getComputedTiming())
+        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)));
+      const rest = Math.max(0, ...intros.map((t) => Number(t.endTime)));
+      for (const a of document.getAnimations()) a.currentTime = rest;
       type Box = { l: number; t: number; r: number; b: number };
       const cut = (a: Box, b: Box): Box => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
       const box = (r: DOMRect): Box => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
@@ -1329,8 +1335,8 @@ const layoutFaults = (f: Frame, also = '', crosses = '') =>
       for (let i = 0; i < texts.length; i++)
         for (let j = i + 1; j < texts.length; j++) {
           const [a, b] = [texts[i]!, texts[j]!];
-          // One element inside the other, or two runs of one sentence.
-          if (a.el.contains(b.el) || b.el.contains(a.el) || a.el.parentElement === b.el.parentElement) continue;
+          // One element inside the other.
+          if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
           const meet = a.boxes.some((p) => b.boxes.some((q) => Math.min(p.r, q.r) - Math.max(p.l, q.l) > 1 && Math.min(p.b, q.b) - Math.max(p.t, q.t) > 1));
           if (meet) found.push(`${name(a.el)} meets ${name(b.el)}`);
         }
@@ -1342,25 +1348,29 @@ const layoutFaults = (f: Frame, also = '', crosses = '') =>
 /**
  * How a template moves in a play of `durationMs`: the properties its animations change, whether
  * at most about 50 elements animate (the Rules' cap), and the kit-animated elements with no outro
- * ending as the spot ends.
+ * ending as the spot ends: among those that animate at all, or with `every`, among all of them.
  */
-const motion = (f: Frame, durationMs: number) =>
-  f.evaluate((durationMs) => {
-    const props = new Set<string>();
-    const moving = new Set<Element>();
-    const unended: string[] = [];
-    for (const a of document.getAnimations()) {
-      const effect = a.effect as KeyframeEffect;
-      for (const k of effect.getKeyframes()) for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
-      moving.add(effect.target!);
-    }
-    // Each element with a kit intro ends with an outro at the spot's end.
-    for (const el of document.querySelectorAll('.lk-text, .lk-fade, .lk-badge, .lk-draw')) {
-      const ends = el.getAnimations().map((a) => Math.round(a.effect!.getComputedTiming().endTime as number));
-      if (ends.length && !ends.includes(durationMs)) unended.push(el.className);
-    }
-    return { props: [...props].sort(), withinCap: moving.size <= 50, unended };
-  }, durationMs);
+const motion = (f: Frame, durationMs: number, every = false) =>
+  f.evaluate(
+    ({ durationMs, every }) => {
+      const props = new Set<string>();
+      const moving = new Set<Element>();
+      const unended: string[] = [];
+      for (const a of document.getAnimations()) {
+        const effect = a.effect as KeyframeEffect;
+        for (const k of effect.getKeyframes())
+          for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
+        moving.add(effect.target!);
+      }
+      // Each element with a kit intro ends with an outro at the spot's end.
+      for (const el of document.querySelectorAll('.lk-text, .lk-fade, .lk-badge, .lk-draw')) {
+        const ends = el.getAnimations().map((a) => Math.round(a.effect!.getComputedTiming().endTime as number));
+        if ((every || ends.length) && !ends.includes(durationMs)) unended.push(el.className);
+      }
+      return { props: [...props].sort(), withinCap: moving.size <= 50, unended };
+    },
+    { durationMs, every },
+  );
 
 describe('room status (#199)', () => {
   const looks = ['pop', 'poster', 'night', 'corporate'] as const;
@@ -2049,7 +2059,8 @@ describe('countdown (#198)', () => {
     for (const look of looks)
       for (const [, data] of states) {
         const f = await s.show({ look, ...data }, NOW, undefined, durationMs);
-        expect(await motion(f, durationMs), look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [] });
+        // Every element with a kit class has its intro and outro here.
+        expect(await motion(f, durationMs, true), look).toEqual({ props: ['opacity', 'transform'], withinCap: true, unended: [] });
       }
   });
 
