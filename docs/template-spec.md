@@ -2,7 +2,7 @@
 
 Version 1. This is what a template author, human or agent, builds against and what a reviewer checks. The types and limits here are defined in code in `packages/contract/src/shapes.ts`; if the two disagree, the code is right.
 
-Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl) and `menu-board` (a list typed by people or filled from a CSV or JSON link).
+Working examples are in `templates/`: `cstore-promo` (price promotion), `photo-promo` (full-screen photo), `weather` (live data, canvas-drawn rain and snow, and the sun and moon placed from the feed's sunrise and sunset by `now()`), `clock` (live time), `agenda` (calendar feed, list field), `news` (RSS feed, scrolling crawl), `menu-board` (a list typed by people or filled from a CSV or JSON link) and `alert` (a takeover in fixed severity colours, with a QR code; see [Alert](#alert)).
 
 ## What a template is
 
@@ -171,6 +171,16 @@ On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other loo
 - `lk-drift` holds still in portrait. A photo drifting across a portrait screen's width was the largest part of what took the test template over 1% of frames dropped there (RESULTS.md, The look kit): 1.67 to 1.94% with it, 0.67 to 0.72% without. The kit turns it off in portrait (`:root[data-orientation='portrait'] .lk-drift`) until a portrait template measures it under 1%. Landscape keeps it.
 
 **Bundles.** `sf build` also runs the colour lint over every stylesheet `style.css` imports, the kit's included, and names each file from the template's directory. The server lints only the files it receives, the template's own. A template's bundle holds the kit, so an edit to `looks.css` or to the kit's script changes the bundle of every template that imports it. Each such template then needs a new version, as under Budgets.
+
+## Alert
+
+`templates/alert` is the takeover for emergencies and notices (#200): the severity in a band across the top, a headline, what to do, who issued it, when it ends, and a QR code for updates. It has one look of its own, not the four.
+
+- **Its colours are the severity's, never the brand kit's.** Emergency is white on `#991b1b`, warning `#111827` on `#f59e0b`, advisory `#111827` on `#fde047`, notice white on `#1e3a8a`, each pair 7:1 or better, and the band is the pair the other way round. A kit's colours, fonts and radius are not used: a kit must not decide whether an evacuation notice reads, so a change to "use the brand colours" here is refused. `main.ts` sets them from one table, so the colour lint has nothing to warn on. The browser tests measure every severity as painted under no kit, the demo kit and a light kit, and check a kit changes nothing.
+- **Its own type**: Space Grotesk for the band and headline, Inter for the rest, latin subsets with their OFL notice at the top of `style.css` (no Reserved Font Name).
+- **The look kit's conventions, not the kit.** It does not import `looks.css`: the other looks' faces would add about 250 kB to the bundle and, on the Pi, about 100 ms to a prepare (Looks, Fonts), and an alert must start at once. It keeps the kit's toggle convention (`showQr`, `showIssuedBy` and `showEndsAt` as `data-qr`, `data-issued-by` and `data-ends-at` on the root, and what is off removed), and a QR code with no address is off too. The grid closes up over what is gone, and with no QR code the type steps up 1.12. Long copy steps the type down (0.88, 0.77, 0.68 of its size) until it fits: every field at its `maxLength` fits, in both orientations.
+- **Motion**: emergency and warning drop in hard (the band from above, the copy rising after it); advisory and notice fade in. Each element's outro is its intro reversed, ending at `--sf-duration`. Only an emergency pulses: the band's glow and its icon, once every 2 s (0.5 Hz), well under WCAG 2.3.1's three flashes a second. The browser tests read the duration of every animation that repeats. Under `prefers-reduced-motion` nothing moves.
+- **As a takeover**: it plays through `start_takeover` like any spot, cutting in at once and ending on time offline. On a screen that does not trust its clock, a takeover that plays an Alert spot still plays, unless it ended before the player's build or its last sync (owner decision; `docs/architecture.md`, Clock).
 
 ## Live data
 

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Alert</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="stage">
+  <header class="band">
+    <div class="glow"></div>
+    <div class="icon">
+      <svg class="beat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"></path><path d="M12 10v5"></path><path d="M12 18h.01"></path></svg>
+    </div>
+    <p class="label" id="label"></p>
+  </header>
+  <main class="body">
+    <h1 class="headline" data-sf="headline">Evacuate the building now</h1>
+    <p class="instructions" data-sf="instructions"></p>
+    <p class="meta">
+      <span class="issued" data-show="issued-by" data-sf="issuedBy"></span>
+      <span class="ends" data-show="ends-at" id="ends"></span>
+    </p>
+    <figure class="qr" data-show="qr">
+      <div class="tile" id="qr"></div>
+      <figcaption data-sf="qrLabel"></figcaption>
+    </figure>
+  </main>
+</div>
+<script type="module" src="main.ts"></script>
+</body>
+</html>

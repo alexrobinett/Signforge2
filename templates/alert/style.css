@@ -1,0 +1,437 @@
+/*! The fonts below (latin subsets from @fontsource 5.3.0) are each licensed under the SIL Open Font License,
+   Version 1.1, which asks that every copy carry their copyright notices and the licence:
+
+   Space Grotesk: Copyright 2020 The Space Grotesk Project Authors (https://github.com/floriankarsten/space-grotesk)
+   Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+   This Font Software is licensed under the SIL Open Font License, Version 1.1.
+   This license is copied below, and is also available with a FAQ at:
+   http://scripts.sil.org/OFL
+
+
+   -----------------------------------------------------------
+   SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+   -----------------------------------------------------------
+
+   PREAMBLE
+   The goals of the Open Font License (OFL) are to stimulate worldwide
+   development of collaborative font projects, to support the font creation
+   efforts of academic and linguistic communities, and to provide a free and
+   open framework in which fonts may be shared and improved in partnership
+   with others.
+
+   The OFL allows the licensed fonts to be used, studied, modified and
+   redistributed freely as long as they are not sold by themselves. The
+   fonts, including any derivative works, can be bundled, embedded,
+   redistributed and/or sold with any software provided that any reserved
+   names are not used by derivative works. The fonts and derivatives,
+   however, cannot be released under any other type of license. The
+   requirement for fonts to remain under this license does not apply
+   to any document created using the fonts or their derivatives.
+
+   DEFINITIONS
+   "Font Software" refers to the set of files released by the Copyright
+   Holder(s) under this license and clearly marked as such. This may
+   include source files, build scripts and documentation.
+
+   "Reserved Font Name" refers to any names specified as such after the
+   copyright statement(s).
+
+   "Original Version" refers to the collection of Font Software components as
+   distributed by the Copyright Holder(s).
+
+   "Modified Version" refers to any derivative made by adding to, deleting,
+   or substituting -- in part or in whole -- any of the components of the
+   Original Version, by changing formats or by porting the Font Software to a
+   new environment.
+
+   "Author" refers to any designer, engineer, programmer, technical
+   writer or other person who contributed to the Font Software.
+
+   PERMISSION & CONDITIONS
+   Permission is hereby granted, free of charge, to any person obtaining
+   a copy of the Font Software, to use, study, copy, merge, embed, modify,
+   redistribute, and sell modified and unmodified copies of the Font
+   Software, subject to the following conditions:
+
+   1) Neither the Font Software nor any of its individual components,
+   in Original or Modified Versions, may be sold by itself.
+
+   2) Original or Modified Versions of the Font Software may be bundled,
+   redistributed and/or sold with any software, provided that each copy
+   contains the above copyright notice and this license. These can be
+   included either as stand-alone text files, human-readable headers or
+   in the appropriate machine-readable metadata fields within text or
+   binary files as long as those fields can be easily viewed by the user.
+
+   3) No Modified Version of the Font Software may use the Reserved Font
+   Name(s) unless explicit written permission is granted by the corresponding
+   Copyright Holder. This restriction only applies to the primary font name as
+   presented to the users.
+
+   4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+   Software shall not be used to promote, endorse or advertise any
+   Modified Version, except to acknowledge the contribution(s) of the
+   Copyright Holder(s) and the Author(s) or with their explicit written
+   permission.
+
+   5) The Font Software, modified or unmodified, in part or in whole,
+   must be distributed entirely under this license, and must not be
+   distributed under any other license. The requirement for fonts to
+   remain under this license does not apply to any document created
+   using the Font Software.
+
+   TERMINATION
+   This license becomes null and void if any of the above conditions are
+   not met.
+
+   DISCLAIMER
+   THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+   OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+   DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+   OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+/* Alert: a takeover in one look of its own (docs/template-spec.md, Alert). The colours are the
+   severity's, set by main.ts, never the brand kit's. Sizes are the canvas boards' (AlertLandscape,
+   AlertPortrait) at 1080p, in vmin. Toggles follow the look kit's convention: main.ts marks the
+   root `data-<name>="on|off"` and removes what is off, and the grid closes up over it. */
+@font-face {
+  font-family: 'alert-display';
+  src: url('./node_modules/@fontsource-variable/space-grotesk/files/space-grotesk-latin-wght-normal.woff2') format('woff2');
+  font-weight: 300 700;
+}
+@font-face {
+  font-family: 'alert-body';
+  src: url('./node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+}
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+/* `--scale` steps type up into the room a QR code leaves; `--fit` (main.ts) steps it down until
+   long copy fits. */
+:root {
+  --scale: 1;
+  --fit: 1;
+  --ease: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --out: 0.5s;
+}
+:root[data-qr='off'] {
+  --scale: 1.12;
+}
+.stage {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: 'alert-body', sans-serif;
+}
+.band {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 3vmin;
+  height: 13.9vmin;
+  padding: 0 8.9vmin;
+  background: var(--ink);
+  color: var(--ground);
+}
+.glow {
+  position: absolute;
+  inset: 0;
+  background: var(--ground);
+  opacity: 0;
+}
+.icon {
+  position: relative;
+  display: flex;
+}
+.beat {
+  width: 7.4vmin;
+  height: 7.4vmin;
+}
+.label {
+  position: relative;
+  font-family: 'alert-display', sans-serif;
+  font-weight: 700;
+  font-size: 6.67vmin;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas:
+    'headline qr'
+    'instructions qr'
+    'meta qr';
+  gap: 3.7vmin 7.4vmin;
+  padding: 7.4vmin 8.9vmin 6.67vmin;
+}
+.headline {
+  grid-area: headline;
+  font-family: 'alert-display', sans-serif;
+  font-weight: 700;
+  font-size: calc(11.1vmin * var(--scale) * var(--fit));
+  line-height: 1.02;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.instructions {
+  grid-area: instructions;
+  max-width: 111vmin;
+  font-size: calc(4.26vmin * var(--scale) * var(--fit));
+  line-height: 1.4;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.meta {
+  grid-area: meta;
+  align-self: end;
+  font-size: 2.96vmin;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.issued + .ends::before {
+  content: '·';
+  margin-inline: 0.5em;
+}
+.qr {
+  grid-area: qr;
+  align-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.48vmin;
+}
+/* The code draws its own white tile and quiet zone (`qrSvg`). */
+.tile {
+  width: 23vmin;
+  height: 23vmin;
+  border-radius: 1.48vmin;
+  overflow: hidden;
+}
+.tile svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.qr figcaption {
+  font-size: 2.6vmin;
+}
+:root[data-qr='off'] .body {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'headline' 'instructions' 'meta';
+}
+
+/* Portrait: the band taller, the copy full width, and who issued it and when it ends beside the
+   code at the foot, on lines of their own. */
+:root[data-orientation='portrait'] .band {
+  height: 18.5vmin;
+  padding: 0 6.67vmin;
+  gap: 2.6vmin;
+}
+:root[data-orientation='portrait'] .beat {
+  width: 7.8vmin;
+  height: 7.8vmin;
+}
+:root[data-orientation='portrait'] .body {
+  grid-template-areas:
+    'headline headline'
+    'instructions instructions'
+    'meta qr';
+  gap: 4.44vmin 3.7vmin;
+  padding: 8.15vmin 6.67vmin 7.4vmin;
+}
+:root[data-orientation='portrait'][data-qr='off'] .body {
+  grid-template-areas: 'headline' 'instructions' 'meta';
+}
+:root[data-orientation='portrait'] .headline {
+  font-size: calc(11.5vmin * var(--scale) * var(--fit));
+}
+:root[data-orientation='portrait'] .instructions {
+  max-width: none;
+  font-size: calc(4.44vmin * var(--scale) * var(--fit));
+}
+:root[data-orientation='portrait'] .meta span {
+  display: block;
+}
+:root[data-orientation='portrait'] .issued + .ends::before {
+  content: none;
+}
+
+/* Motion. Emergency and warning arrive hard: the band drops in and the copy rises after it.
+   Advisory and notice fade in. Each element's outro is its intro reversed, ending as the play does
+   (`--sf-duration`). Only transform and opacity move. */
+.band,
+.icon,
+.label,
+.headline,
+.instructions,
+.meta,
+.qr {
+  will-change: transform, opacity;
+  animation:
+    var(--m) var(--len) var(--ease) var(--d) both,
+    var(--m) var(--out) var(--ease) calc(var(--sf-duration, 60s) - var(--out)) reverse forwards;
+}
+.band {
+  --m: alert-drop;
+  --len: 0.45s;
+  --d: 0s;
+}
+.icon {
+  --m: alert-pop;
+  --len: 0.5s;
+  --d: 0.3s;
+}
+.label {
+  --m: alert-slide;
+  --len: 0.5s;
+  --d: 0.35s;
+}
+.headline {
+  --m: alert-rise;
+  --len: 0.55s;
+  --d: 0.45s;
+}
+.instructions {
+  --m: alert-rise;
+  --len: 0.55s;
+  --d: 0.6s;
+}
+.meta,
+.qr {
+  --m: alert-fade;
+  --len: 0.6s;
+  --d: 0.8s;
+}
+:root:is([data-severity='advisory'], [data-severity='notice']) {
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+:root:is([data-severity='advisory'], [data-severity='notice']) .band {
+  --m: alert-fade;
+  --len: 0.9s;
+}
+:root:is([data-severity='advisory'], [data-severity='notice']) .icon,
+:root:is([data-severity='advisory'], [data-severity='notice']) .label {
+  --m: alert-fade;
+  --len: 0.9s;
+  --d: 0.2s;
+}
+:root:is([data-severity='advisory'], [data-severity='notice']) .headline {
+  --m: alert-soft;
+  --len: 0.9s;
+  --d: 0.35s;
+}
+:root:is([data-severity='advisory'], [data-severity='notice']) .instructions {
+  --m: alert-soft;
+  --len: 0.9s;
+  --d: 0.5s;
+}
+:root:is([data-severity='advisory'], [data-severity='notice']) .meta,
+:root:is([data-severity='advisory'], [data-severity='notice']) .qr {
+  --len: 0.9s;
+  --d: 0.7s;
+}
+/* Only an emergency pulses its band: once every 2 s, 0.5 Hz, well under the 3 flashes a second
+   WCAG 2.3.1 allows. */
+:root[data-severity='emergency'] .glow {
+  will-change: opacity;
+  animation: alert-glow 2s ease-in-out 1.2s infinite both;
+}
+:root[data-severity='emergency'] .beat {
+  will-change: transform;
+  animation: alert-beat 2s ease-in-out 1.2s infinite both;
+}
+/* The final frame, still. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore-start lint/complexity/noImportantStyles: the still frame must override every animation. */
+    animation: none !important;
+    /* biome-ignore-end lint/complexity/noImportantStyles: the still frame */
+  }
+}
+@keyframes alert-drop {
+  from {
+    transform: translateY(-100%);
+  }
+}
+@keyframes alert-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes alert-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-3.7vmin);
+  }
+}
+@keyframes alert-rise {
+  from {
+    opacity: 0;
+    transform: translateY(3.7vmin);
+  }
+}
+@keyframes alert-soft {
+  from {
+    opacity: 0;
+    transform: translateY(1.3vmin);
+  }
+}
+@keyframes alert-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes alert-glow {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.22;
+  }
+}
+@keyframes alert-beat {
+  0%,
+  100% {
+    transform: none;
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
