@@ -7,7 +7,8 @@ import { createStore } from 'zustand/vanilla';
 import type { GroupView } from '../src/lib/screen-types';
 import { Refusal } from '../src/lib/tools';
 import { screensQuery } from '../src/queries/screens';
-import { createGroupsSlice, type GroupsSlice } from '../src/state/groups';
+import { getScreenStatus } from '../src/server/screens.functions';
+import { createGroupsSlice, memberChecked, type GroupsSlice } from '../src/state/groups';
 
 /** The tool calls the store makes, answered in turn by the test. */
 const callTool = vi.fn();
@@ -30,7 +31,32 @@ function groupsStore() {
   return { store, groups };
 }
 
-beforeEach(() => callTool.mockReset());
+/** What `list_screen_status` says of each screen: active, unless named revoked. */
+function status(...revoked: string[]) {
+  const state = (id: string) => ({
+    kind: revoked.includes(id) ? 'needs_you' : 'online',
+    reason: revoked.includes(id) ? 'revoked' : null,
+    wakesAt: null,
+    filesMissing: null,
+  });
+  const ids = ['scr_1', 'scr_2', 'scr_3', 'scr_9', 'scr_old'];
+  vi.mocked(getScreenStatus).mockResolvedValue({
+    screens: ids.map((id) => ({ id, state: state(id), lastSeenAt: null, desiredManifestId: null, reportedManifestId: null })),
+    at: 1,
+  } as never);
+}
+
+/** A tool call the test answers later. */
+function held() {
+  let settle: { answer: (out: unknown) => void; refuse: (err: Refusal) => void } = { answer: () => {}, refuse: () => {} };
+  callTool.mockReturnValueOnce(new Promise((answer, refuse) => (settle = { answer, refuse })));
+  return settle;
+}
+
+beforeEach(() => {
+  callTool.mockReset();
+  status('scr_old');
+});
 
 describe('rename', () => {
   it('sends the version the list read, puts the answer in the list and closes', async () => {
@@ -54,6 +80,17 @@ describe('rename', () => {
     await store.getState().renameGroup(ORG);
     expect(calls()).toHaveLength(1);
   });
+
+  it('Reload after a conflict leaves alone a dialog opened while it read the groups again (review of #205)', async () => {
+    const { store } = groupsStore();
+    store.getState().openGroupRename(ORG, front);
+    refuse('conflict', 'stale', { version: 5 });
+    await store.getState().renameGroup(ORG);
+    const reloading = store.getState().reloadGroupRename(ORG);
+    store.getState().askToDeleteGroup(ORG, front.id);
+    await reloading;
+    expect(store.getState().groups.dialog).toMatchObject({ kind: 'delete' });
+  });
 });
 
 describe('delete', () => {
@@ -62,8 +99,13 @@ describe('delete', () => {
     store.getState().askToDeleteGroup(ORG, front.id);
     refuse('conflict', 'group grp_front is targeted by 1 schedule entries', { scheduleEntryIds: ['sch_1'] });
     await store.getState().deleteGroup(ORG);
-    expect(store.getState().groups.dialog).toEqual({ kind: 'delete', orgId: ORG, groupId: front.id, blockedBy: ['sch_1'] });
-    expect(store.getState().groups.error).toBe('group grp_front is targeted by 1 schedule entries');
+    expect(store.getState().groups.dialog).toMatchObject({
+      kind: 'delete',
+      groupId: front.id,
+      blockedBy: ['sch_1'],
+      pending: false,
+      error: 'group grp_front is targeted by 1 schedule entries',
+    });
     expect(groups()).toHaveLength(1);
   });
 
@@ -76,22 +118,44 @@ describe('delete', () => {
     expect(groups()).toEqual([]);
     expect(store.getState().groups.dialog).toBeNull();
   });
+
+  it('a late answer to a delete whose dialog was closed leaves the dialog opened since, and its typed name, alone (review of #205)', async () => {
+    const { store } = groupsStore();
+    store.getState().askToDeleteGroup(ORG, front.id);
+    const call = held();
+    const deleting = store.getState().deleteGroup(ORG);
+    store.getState().closeGroupDialog();
+    store.getState().openGroupRename(ORG, { ...front, id: 'grp_back', name: 'Back' });
+    store.getState().nameGroup('Back of house');
+    call.answer({ deleted: front.id });
+    await deleting;
+    expect(store.getState().groups.dialog).toMatchObject({ kind: 'rename', groupId: 'grp_back', pending: false });
+    expect(store.getState().groups.renames.dialog?.edit.name).toBe('Back of house');
+  });
+
+  it('a late refusal of a delete does not bring its dialog back over the one opened since (review of #205)', async () => {
+    const { store } = groupsStore();
+    store.getState().askToDeleteGroup(ORG, front.id);
+    const call = held();
+    const deleting = store.getState().deleteGroup(ORG);
+    store.getState().closeGroupDialog();
+    store.getState().openGroupMembers(ORG, front);
+    call.refuse(new Refusal('conflict', 'targeted', { scheduleEntryIds: ['sch_1'] }));
+    await deleting;
+    expect(store.getState().groups.dialog).toMatchObject({ kind: 'members', error: null, pending: false });
+  });
 });
 
 describe('members', () => {
-  // scr_old is retired: the picker does not offer it, so it is neither shown nor removed.
-  const pickable = ['scr_1', 'scr_2', 'scr_3'];
-
-  it('adds the screens ticked and removes the ones unticked, one call each, and leaves a screen the picker does not offer', async () => {
+  it('sends only the boxes changed: one add, one remove', async () => {
     const { store, groups } = groupsStore();
-    store.getState().openGroupMembers(ORG, front, pickable);
-    expect(store.getState().groups.dialog).toMatchObject({ chosen: ['scr_1'] });
+    store.getState().openGroupMembers(ORG, front);
     store.getState().chooseGroupMember('scr_1', false);
     store.getState().chooseGroupMember('scr_2', true);
     store.getState().chooseGroupMember('scr_3', true);
     answer({ group: { ...front, screenIds: ['scr_1', 'scr_2', 'scr_3', 'scr_old'], version: 5 } });
     answer({ group: { ...front, screenIds: ['scr_2', 'scr_3', 'scr_old'], version: 6 } });
-    await store.getState().saveGroupMembers(ORG, front, pickable);
+    await store.getState().saveGroupMembers(ORG, front);
     expect(calls()).toEqual([
       { name: 'add_group_members', input: { groupId: front.id, screenIds: ['scr_2', 'scr_3'] } },
       { name: 'remove_group_members', input: { groupId: front.id, screenIds: ['scr_1'] } },
@@ -100,24 +164,53 @@ describe('members', () => {
     expect(store.getState().groups.dialog).toBeNull();
   });
 
+  it('saved untouched after the list was read again, removes nothing another editor added (review of #205)', async () => {
+    const { store } = groupsStore();
+    store.getState().openGroupMembers(ORG, front);
+    // Someone else added scr_9; the page read the group again.
+    const now = { ...front, screenIds: ['scr_1', 'scr_9', 'scr_old'], version: 5 };
+    const dialog = store.getState().groups.dialog;
+    expect(memberChecked(dialog, now, 'scr_9')).toBe(true);
+    await store.getState().saveGroupMembers(ORG, now);
+    expect(calls()).toEqual([]);
+
+    // An edit of one box sends that box only.
+    store.getState().openGroupMembers(ORG, front);
+    store.getState().chooseGroupMember('scr_1', false);
+    answer({ group: { ...now, screenIds: ['scr_9', 'scr_old'], version: 6 } });
+    await store.getState().saveGroupMembers(ORG, now);
+    expect(calls()).toEqual([{ name: 'remove_group_members', input: { groupId: front.id, screenIds: ['scr_1'] } }]);
+  });
+
+  it('never removes a screen revoked while the dialog was open: its status is read again before the call (review of #205)', async () => {
+    const { store } = groupsStore();
+    store.getState().openGroupMembers(ORG, front);
+    store.getState().chooseGroupMember('scr_1', false);
+    store.getState().chooseGroupMember('scr_2', true);
+    status('scr_old', 'scr_1');
+    answer({ group: { ...front, screenIds: ['scr_1', 'scr_2', 'scr_old'], version: 5 } });
+    await store.getState().saveGroupMembers(ORG, front);
+    expect(calls()).toEqual([{ name: 'add_group_members', input: { groupId: front.id, screenIds: ['scr_2'] } }]);
+  });
+
   it('with nothing changed, sends nothing and closes', async () => {
     const { store } = groupsStore();
-    store.getState().openGroupMembers(ORG, front, pickable);
+    store.getState().openGroupMembers(ORG, front);
     store.getState().searchGroupMembers('lobby');
     expect(store.getState().groups.dialog).toMatchObject({ query: 'lobby' });
-    await store.getState().saveGroupMembers(ORG, front, pickable);
+    await store.getState().saveGroupMembers(ORG, front);
     expect(calls()).toEqual([]);
     expect(store.getState().groups.dialog).toBeNull();
   });
 
   it('a refusal keeps the dialog open with what was ticked, and says why', async () => {
     const { store } = groupsStore();
-    store.getState().openGroupMembers(ORG, front, pickable);
+    store.getState().openGroupMembers(ORG, front);
     store.getState().chooseGroupMember('scr_2', true);
     refuse('not_found', 'screen scr_2 not found');
-    await store.getState().saveGroupMembers(ORG, front, pickable);
-    expect(store.getState().groups.dialog).toMatchObject({ kind: 'members', chosen: ['scr_1', 'scr_2'] });
-    expect(store.getState().groups.error).toBe('screen scr_2 not found');
-    expect(store.getState().groups.pending).toBe(false);
+    await store.getState().saveGroupMembers(ORG, front);
+    const dialog = store.getState().groups.dialog;
+    expect(dialog).toMatchObject({ kind: 'members', error: 'screen scr_2 not found', pending: false });
+    expect(['scr_1', 'scr_2', 'scr_3'].map((id) => memberChecked(dialog, front, id))).toEqual([true, true, false]);
   });
 });

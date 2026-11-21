@@ -3,7 +3,7 @@
  * screen may go without a heartbeat before it alerts, and the groups: each with its screens and
  * what targets it (schedule entries, brand kits), renamed, deleted or given its screens here.
  */
-import { useSuspenseQuery } from '@tanstack/react-query';
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { EllipsisIcon, LoaderCircleIcon, RotateCwIcon, SearchIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '~/components/ui/dropdown-menu';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
+import { withStatus } from '~/lib/fleet-status';
 import { targetsOf } from '~/lib/groups';
 import { useCanManage, useNow, useOrgId, useRole } from '~/lib/live';
 import { describeWhen, type ScheduleEntryView } from '~/lib/schedule';
@@ -22,9 +23,10 @@ import { isRetired } from '~/lib/screen-status';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
-import { screensQuery } from '~/queries/screens';
+import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { brandKitsQuery } from '~/queries/spots';
 import { getOrgSettings } from '~/server/settings.functions';
+import { memberChecked } from '~/state/groups';
 import { useAppStore } from '~/state/provider';
 import { editsIn, type SettingsEdits } from '~/state/settings';
 
@@ -159,7 +161,10 @@ function Groups() {
   const openGroupRename = useAppStore((s) => s.openGroupRename);
   const askToDeleteGroup = useAppStore((s) => s.askToDeleteGroup);
   const openGroupMembers = useAppStore((s) => s.openGroupMembers);
-  const active = screens.filter((s) => !isRetired(s));
+  // What each screen is doing, polled as the Screens page polls it: a screen revoked while this
+  // page is open leaves the counts and the picker within a poll.
+  const { data: live } = useQuery(screenStatusQuery(orgId));
+  const active = withStatus(screens, at, live).filter((s) => !isRetired(s));
   const pickable = active.map((s) => s.id);
   const group = open && open.orgId === orgId ? groups.find((g) => g.id === open.groupId) : undefined;
 
@@ -238,7 +243,7 @@ function Groups() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onSelect={() => openGroupMembers(orgId, g, pickable)}>Members…</DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => openGroupMembers(orgId, g)}>Members…</DropdownMenuItem>
                               <DropdownMenuItem onSelect={() => openGroupRename(orgId, g)}>Rename…</DropdownMenuItem>
                               <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => askToDeleteGroup(orgId, g.id)}>
                                 Delete…
@@ -264,7 +269,7 @@ function Groups() {
 
 /** Why the dialog's last action was refused. */
 function Refused() {
-  const error = useAppStore((s) => s.groups.error);
+  const error = useAppStore((s) => s.groups.dialog?.error);
   return (
     <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
       {error}
@@ -326,7 +331,7 @@ function entryText(e: ScheduleEntryView, names: Map<string, string>) {
 }
 
 function DeleteDialog({ orgId, group, blockedBy, entries }: { orgId: string; group: GroupView; blockedBy: string[]; entries: ScheduleEntryView[] }) {
-  const pending = useAppStore((s) => s.groups.pending);
+  const pending = useAppStore((s) => s.groups.dialog?.pending ?? false);
   const deleteGroup = useAppStore((s) => s.deleteGroup);
   const close = useAppStore((s) => s.closeGroupDialog);
   const { playlists } = useSuspenseQuery(playlistsQuery(orgId)).data;
@@ -362,7 +367,10 @@ function DeleteDialog({ orgId, group, blockedBy, entries }: { orgId: string; gro
           </Button>
           {blocked ? (
             <Button asChild>
-              <Link to="/schedule">Open the schedule</Link>
+              {/* The refusal goes with the dialog: back here, a delete asks again what blocks it. */}
+              <Link to="/schedule" onClick={close}>
+                Open the schedule
+              </Link>
             </Button>
           ) : (
             <Button type="button" variant="destructive" onClick={() => void deleteGroup(orgId)} aria-disabled={pending || undefined}>
@@ -379,7 +387,7 @@ function DeleteDialog({ orgId, group, blockedBy, entries }: { orgId: string; gro
 function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupView; screens: ScreenView[] }) {
   const id = useId();
   const dialog = useAppStore((s) => s.groups.dialog);
-  const pending = useAppStore((s) => s.groups.pending);
+  const pending = useAppStore((s) => s.groups.dialog?.pending ?? false);
   const search = useAppStore((s) => s.searchGroupMembers);
   const choose = useAppStore((s) => s.chooseGroupMember);
   const save = useAppStore((s) => s.saveGroupMembers);
@@ -387,10 +395,9 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
   if (dialog?.kind !== 'members') return null;
   const q = dialog.query.trim().toLowerCase();
   const listed = screens.filter((s) => s.name.toLowerCase().includes(q)).toSorted((a, b) => a.name.localeCompare(b.name));
-  const pickable = screens.map((s) => s.id);
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
-    void save(orgId, group, pickable);
+    void save(orgId, group);
   };
   return (
     <Dialog open onOpenChange={(o) => !o && close()}>
@@ -416,7 +423,7 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
             />
           </div>
           <p id={`${id}-count`} className="text-[13px] text-muted-foreground" aria-live="polite">
-            {dialog.chosen.length} of {plural(screens.length, 'screen')} chosen{q && ` · ${listed.length} shown`}
+            {screens.filter((s) => memberChecked(dialog, group, s.id)).length} of {plural(screens.length, 'screen')} chosen{q && ` · ${listed.length} shown`}
           </p>
           <fieldset className="max-h-[50dvh] overflow-y-auto rounded-lg border">
             <legend className="sr-only">Screens</legend>
@@ -428,7 +435,7 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
                   <input
                     type="checkbox"
                     className="size-4 accent-primary"
-                    checked={dialog.chosen.includes(s.id)}
+                    checked={memberChecked(dialog, group, s.id)}
                     onChange={(e) => choose(s.id, e.target.checked)}
                   />
                   {s.name}

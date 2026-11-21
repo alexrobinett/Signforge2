@@ -107,8 +107,12 @@ test('add three selected screens to a group at once, rename a group, refuse to d
   await expect(del.getByRole('link', { name: 'Open the schedule' })).toBeVisible();
   await axe(page);
   await shots(page, '91-group-delete-refused');
-  await del.getByRole('button', { name: 'Cancel' }).click();
+  // Following it closes the dialog: Back brings the list, not the old refusal.
+  await del.getByRole('link', { name: 'Open the schedule' }).click();
+  await expect(page).toHaveURL(/\/schedule$/);
+  await page.goBack();
   await expect(groups.getByRole('rowheader', { name: 'North' })).toBeVisible();
+  await expect(page.getByRole('dialog')).toBeHidden();
 
   // Members: a searchable checklist; Drive-thru R ticked into North.
   await groups.getByRole('button', { name: 'Change North' }).click();
