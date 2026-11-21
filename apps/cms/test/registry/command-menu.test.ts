@@ -1,6 +1,21 @@
 import { describeTools, registry, TOOLS, type Role } from '@signforge/tools';
 import { describe, expect, it } from 'vitest';
-import { commandEntries, needsInput, NULL_CHOICE, parseToolList, resultText, toolInput, withKey } from '../../src/lib/command-menu';
+import {
+  commandEntries,
+  foundValues,
+  movesSelection,
+  needsInput,
+  NULL_CHOICE,
+  parseToolList,
+  pointerMovesSelection,
+  resultText,
+  selectedItem,
+  targetActions,
+  targetItemKey,
+  toolInput,
+  withKey,
+} from '../../src/lib/command-menu';
+import type { GroupView, ScreenView } from '../../src/lib/screen-types';
 import { SECTIONS } from '../../src/lib/sections';
 
 // What `GET /api/tools` sends: `describeTools` for the member's role, in an org where editors publish (the default).
@@ -104,5 +119,85 @@ describe('a result toast', () => {
     expect(resultText({ screen: { id: 's', name: 'Lobby' } })).toBe('Lobby');
     expect(resultText({ screenId: 's', seconds: 10 })).toBe('Done');
     expect(resultText({ screenId: 's', manifestId: 'm', changed: false })).toBe('Nothing changed: it was already so');
+  });
+});
+
+describe("a found screen's and group's actions (#180)", () => {
+  const screen = { id: 'scr_1', name: '0157 Drive-thru L', status: 'active' } as ScreenView;
+  const labels = (role: Role, s: ScreenView = screen, checked = true) =>
+    targetActions({ kind: 'screen', screen: s }, listed(role), checked).map((a) => a.label);
+
+  it('opens, identifies and restarts a screen for an editor, Open first', () => {
+    expect(labels('editor')).toEqual(['Open', 'Identify (10 s)', 'Restart player']);
+    expect(targetActions({ kind: 'screen', screen }, listed('owner'), true)).toContainEqual(
+      expect.objectContaining({ kind: 'tool', tool: 'identify_screen', screenId: 'scr_1', screenName: '0157 Drive-thru L' }),
+    );
+  });
+
+  it('only opens a screen for a viewer, whose role has neither tool, and a revoked screen for anyone', () => {
+    expect(labels('viewer')).toEqual(['Open']);
+    expect(labels('owner', { ...screen, status: 'revoked' })).toEqual(['Open']);
+  });
+
+  it('only opens a screen read from the cache before this opening: it may be revoked since, so commands wait for a fresh read', () => {
+    expect(labels('owner', screen, false)).toEqual(['Open']);
+  });
+
+  it('keys an item by its keywords, so a name with a comma is not two names', () => {
+    expect(targetItemKey('screen:scr_1', ['Lobby', 'North,East'])).not.toBe(targetItemKey('screen:scr_1', ['Lobby', 'North', 'East']));
+    expect(targetItemKey('screen:scr_1', ['Lobby'])).toBe(targetItemKey('screen:scr_1', ['Lobby']));
+  });
+
+  it("shows a group's screens on the Screens page", () => {
+    const group = { id: 'grp_1', name: 'North', screenIds: [], version: 1, createdAt: 0, updatedAt: 0 };
+    expect(targetActions({ kind: 'group', group }, listed('viewer'), false)).toEqual([{ kind: 'open-group', label: 'Show its screens', groupId: 'grp_1' }]);
+  });
+});
+
+describe("⌘K's selection when the screens arrive after typing (#180)", () => {
+  const deli = { id: 'scr_1', name: 'Deli counter' } as ScreenView;
+  const front = { id: 'grp_1', name: 'Front of house', screenIds: ['scr_1'] } as GroupView;
+
+  it('lists what a search found as item values: screens, then groups, each by name, and nothing for no search', () => {
+    expect(foundValues('front', [deli], [front])).toEqual(['screen:scr_1', 'group:grp_1']);
+    expect(foundValues('  ', [deli], [front])).toEqual([]);
+  });
+
+  it('selects the first screen found once the list lands, over the tool selected while it was on its way', () => {
+    const typed = { value: 'tool:test_alert_channel', among: JSON.stringify([]) };
+    expect(selectedItem(typed, [], false)).toBe('tool:test_alert_channel');
+    expect(selectedItem(typed, foundValues('deli', [deli], []), false)).toBe('screen:scr_1');
+  });
+
+  it('keeps a selection the member moved to, though the list lands after: their choice, not cmdk’s pick', () => {
+    const arrowed = { value: 'tool:retry_alert_delivery', among: JSON.stringify([]) };
+    expect(selectedItem(arrowed, foundValues('deli', [deli], []), true)).toBe('tool:retry_alert_delivery');
+  });
+
+  it('keeps a selection made among the same found items, and lets cmdk choose before it has reported one', () => {
+    const found = foundValues('front', [deli], [front]);
+    expect(selectedItem({ value: 'group:grp_1', among: JSON.stringify(found) }, found, false)).toBe('group:grp_1');
+    expect(selectedItem(null, [], false)).toBe('');
+  });
+});
+
+describe("what counts as the member moving ⌘K's selection (#180)", () => {
+  const key = (k: string, mods: { ctrlKey?: boolean; altKey?: boolean } = {}) => ({ key: k, ctrlKey: false, altKey: false, ...mods });
+
+  it('counts the keys cmdk moves with: arrows, Home and End, and Ctrl with N, J, P or K', () => {
+    for (const k of ['ArrowUp', 'ArrowDown', 'Home', 'End']) expect(movesSelection(key(k))).toBe(true);
+    for (const k of ['n', 'j', 'p', 'k']) expect(movesSelection(key(k, { ctrlKey: true }))).toBe(true);
+  });
+
+  it('does not count PageUp or PageDown, which cmdk ignores, a letter typed, or Alt with an arrow', () => {
+    for (const k of ['PageUp', 'PageDown', 'n', 'Enter']) expect(movesSelection(key(k))).toBe(false);
+    expect(movesSelection(key('ArrowDown', { altKey: true }))).toBe(false);
+  });
+
+  it('counts a pointer move only onto an enabled item other than the one selected', () => {
+    expect(pointerMovesSelection({ value: 'tool:list_screens', disabled: false }, 'tool:test_alert_channel')).toBe(true);
+    expect(pointerMovesSelection(null, 'tool:test_alert_channel')).toBe(false);
+    expect(pointerMovesSelection({ value: 'tool:test_alert_channel', disabled: false }, 'tool:test_alert_channel')).toBe(false);
+    expect(pointerMovesSelection({ value: 'tool:list_screens', disabled: true }, 'tool:test_alert_channel')).toBe(false);
   });
 });

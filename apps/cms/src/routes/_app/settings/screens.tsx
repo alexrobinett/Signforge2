@@ -17,6 +17,7 @@ import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { withStatus } from '~/lib/fleet-status';
 import { targetsOf } from '~/lib/groups';
+import { byName } from '~/lib/targets';
 import { useCanManage, useNow, useOrgId, useRole } from '~/lib/live';
 import { describeWhen, type ScheduleEntryView } from '~/lib/schedule';
 import { isRetired } from '~/lib/screen-status';
@@ -212,7 +213,7 @@ function Groups() {
                 </tr>
               </thead>
               <tbody>
-                {groups.map((g) => {
+                {groups.toSorted(byName).map((g) => {
                   const targets = targetsOf(g.id, entries, brandKits, now);
                   const members = g.screenIds.filter((id) => pickable.includes(id)).length;
                   return (
@@ -406,7 +407,7 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
   const close = useAppStore((s) => s.cancelGroupDialog);
   if (dialog?.kind !== 'members') return null;
   const q = dialog.query.trim().toLowerCase();
-  const listed = screens.filter((s) => s.name.toLowerCase().includes(q)).toSorted((a, b) => a.name.localeCompare(b.name));
+  const listed = screens.filter((s) => s.name.toLowerCase().includes(q)).toSorted(byName);
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     void save(orgId, group);

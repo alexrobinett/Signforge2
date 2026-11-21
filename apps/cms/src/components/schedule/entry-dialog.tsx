@@ -15,7 +15,7 @@ import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 import { DIALOG, entryProblems } from '~/state/schedule';
-import { TargetFields } from './target-fields';
+import { TargetPicker } from './target-picker';
 
 export function EntryDialog({ orgId, playlists, screens, groups }: { orgId: string; playlists: PlaylistView[]; screens: ScreenView[]; groups: GroupView[] }) {
   const draft = useAppStore((s) => s.schedule.entries[DIALOG]);
@@ -57,7 +57,7 @@ export function EntryDialog({ orgId, playlists, screens, groups }: { orgId: stri
               ))}
             </NativeSelect>
           </div>
-          <TargetFields value={d} screens={screens} groups={groups} onChange={edit} />
+          <TargetPicker label="Plays on" value={d} screens={screens} groups={groups} onPick={edit} />
           <fieldset className="grid gap-1.5">
             <legend className="mb-1.5 text-sm font-medium">Days</legend>
             <div className="flex flex-wrap gap-1">

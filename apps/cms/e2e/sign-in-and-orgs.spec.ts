@@ -93,6 +93,8 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   // ⌘K switches too: "Switch organization…" lists the orgs.
   const menu = page.getByRole('dialog', { name: 'Command menu' });
   await page.keyboard.press('ControlOrMeta+k');
+  // The menu opens from a keydown listener and renders a moment later: keys typed before its search has focus are lost.
+  await expect(menu.getByRole('combobox', { name: 'Search pages, screens and actions' })).toBeFocused();
   await page.keyboard.type('switch organization');
   await expect(menu.getByRole('option', { selected: true })).toHaveText('Switch organization…');
   await page.keyboard.press('Enter');

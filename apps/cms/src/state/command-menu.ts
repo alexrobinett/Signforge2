@@ -1,19 +1,44 @@
 /**
- * The command menu (⌘K): open or closed, the tool whose form is showing, and running a tool. The
- * entries come from the shell's loader (src/lib/command-menu.ts); results and refusals are toasts.
+ * The command menu (⌘K): open or closed, what is typed, the tool whose form or the screen or group
+ * whose actions are showing, and running a tool or an action. The entries come from the shell's
+ * loader and the screens list (src/lib/command-menu.ts); results and refusals are toasts.
  */
 import { toast } from 'sonner';
-import { needsInput, resultText, toolInput, withKey, type CommandEntry, type PendingCall, type ToolListing } from '~/lib/command-menu';
-import { callToolByName, toolMessage } from '~/lib/tools';
+import {
+  needsInput,
+  resultText,
+  toolInput,
+  withKey,
+  type CommandEntry,
+  type CommandTarget,
+  type PendingCall,
+  type Selection,
+  type TargetAction,
+  type ToolListing,
+} from '~/lib/command-menu';
+import { callTool, callToolByName, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 interface CommandMenuState {
   open: boolean;
+  /** What is typed in the list's search: past the sections and tools, it finds screens and groups. */
+  query: string;
   /** The tool whose form is showing, by name; null shows the list. */
   form: string | null;
+  /** The list's selected item, as cmdk reports it (`selectedItem` in src/lib/command-menu.ts); null until it has. */
+  selection: Selection | null;
+  /** The member moved the selection (keys, pointer) since they last typed: a list that lands then keeps their choice. */
+  moved: boolean;
+  /** The list is back from another view, so its search takes focus itself; on opening, Radix's focus trap gives it focus. */
+  backed: boolean;
+  /** The screen or group whose actions are showing; null shows the list. */
+  target: CommandTarget | null;
   /** Showing the member's orgs, from "Switch organization…", instead of the commands. */
   choosingOrg: boolean;
+  /** A call is on its way: kept through closing and opening again, so it is not sent twice. */
   running: boolean;
+  /** Counts the openings: a call's answer closes the menu only while it is the opening that sent it. */
+  opening: number;
   /** A form field the menu could not read, before anything was sent. */
   fieldError: { field: string; message: string } | null;
   /** The last call that did not succeed: sent again with the same input, it keeps its idempotency key, closed or not. */
@@ -26,24 +51,62 @@ export interface CommandMenuSlice {
   closeCommandMenu: () => void;
   chooseCommand: (entry: CommandEntry) => Promise<void>;
   backToCommands: () => void;
+  searchCommands: (query: string) => void;
+  /** cmdk moved the list's selection, to `value`, among the screens and groups found then (`foundValues`, as JSON). */
+  selectCommand: (value: string, among: string) => void;
+  /** The member moved the list's selection themselves, by key or pointer. */
+  moveCommandSelection: () => void;
+  /** Shows a found screen's or group's actions. */
+  chooseTarget: (target: CommandTarget) => void;
+  runTargetAction: (action: TargetAction) => Promise<void>;
   /** Closes the menu and switches to `org`, from its list of orgs. */
   chooseOrg: (org: { id: string; name: string }) => Promise<void>;
   submitToolForm: (label: string, tool: ToolListing, form: FormData) => Promise<void>;
 }
 
-const CLOSED: CommandMenuState = { open: false, form: null, choosingOrg: false, running: false, fieldError: null, pending: null };
+const CLOSED: CommandMenuState = {
+  open: false,
+  query: '',
+  selection: null,
+  moved: false,
+  backed: false,
+  form: null,
+  target: null,
+  choosingOrg: false,
+  running: false,
+  opening: 0,
+  fieldError: null,
+  pending: null,
+};
+
+/** The menu closed: what outlives an opening (a call on its way, the last one that failed, the count) stays. */
+const closed = (m: CommandMenuState): CommandMenuState => ({ ...CLOSED, running: m.running, opening: m.opening, pending: m.pending });
 
 export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router }) => {
+  /** Starts a call from this opening, unless one is on its way; the opening it was sent from, or null. */
+  const start = (change: (m: CommandMenuState) => Partial<CommandMenuState> = () => ({})) => {
+    if (get().commandMenu.running) return null;
+    set((s) => ({ commandMenu: { ...s.commandMenu, running: true, ...change(s.commandMenu) } }));
+    return get().commandMenu.opening;
+  };
+  /** A call answered: the menu it was sent from closes when it worked, and a later opening is left as it is. A tool's call also settles its `pending`. */
+  const finish = (from: number, ok: boolean, pending?: PendingCall | null) =>
+    set((s) => {
+      const m = { ...s.commandMenu, running: false, ...(pending === undefined ? {} : { pending }) };
+      return { commandMenu: ok && m.open && m.opening === from ? closed(m) : m };
+    });
+
   const run = async (label: string, tool: ToolListing, read: Record<string, unknown>) => {
     const { input, pending } = withKey(tool, read, get().commandMenu.pending);
-    set((s) => ({ commandMenu: { ...s.commandMenu, running: true, fieldError: null, pending } }));
+    const from = start(() => ({ fieldError: null, pending }));
+    if (from === null) return;
     try {
       const output = await callToolByName(tool.name, input);
-      set({ commandMenu: CLOSED });
+      finish(from, true, null);
       toast.success(label, { description: resultText(output) });
       if (tool.mutates) await router.invalidate();
     } catch (err) {
-      set((s) => ({ commandMenu: { ...s.commandMenu, running: false } }));
+      finish(from, false, pending);
       toast.error(label, { description: toolMessage(err) });
     }
   };
@@ -51,12 +114,13 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
   return {
     commandMenu: CLOSED,
     // The phone drawer has the menu's button: the menu takes its place.
-    openCommandMenu: () => set((s) => ({ commandMenu: { ...CLOSED, open: true, pending: s.commandMenu.pending }, ui: { ...s.ui, drawerOpen: false } })),
-    closeCommandMenu: () => set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } })),
+    openCommandMenu: () =>
+      set((s) => ({ commandMenu: { ...closed(s.commandMenu), open: true, opening: s.commandMenu.opening + 1 }, ui: { ...s.ui, drawerOpen: false } })),
+    closeCommandMenu: () => set((s) => ({ commandMenu: closed(s.commandMenu) })),
     chooseCommand: async (entry) => {
       switch (entry.kind) {
         case 'go':
-          set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
+          set((s) => ({ commandMenu: closed(s.commandMenu) }));
           await router.navigate({ to: entry.to });
           return;
         case 'tool':
@@ -67,14 +131,44 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           if (entry.action === 'switch') {
             set((s) => ({ commandMenu: { ...s.commandMenu, choosingOrg: true } }));
           } else {
-            set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
+            set((s) => ({ commandMenu: closed(s.commandMenu) }));
             get().openCreateOrg();
           }
       }
     },
-    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, choosingOrg: false, fieldError: null } })),
+    // The search stays as typed, so Back returns to what it found.
+    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, target: null, choosingOrg: false, fieldError: null, backed: true } })),
+    searchCommands: (query) => set((s) => ({ commandMenu: { ...s.commandMenu, query, moved: false } })),
+    selectCommand: (value, among) => set((s) => ({ commandMenu: { ...s.commandMenu, selection: { value, among } } })),
+    moveCommandSelection: () => set((s) => (s.commandMenu.moved ? s : { commandMenu: { ...s.commandMenu, moved: true } })),
+    chooseTarget: (target) => set((s) => ({ commandMenu: { ...s.commandMenu, target } })),
+    async runTargetAction(action) {
+      const close = () => set((s) => ({ commandMenu: closed(s.commandMenu) }));
+      switch (action.kind) {
+        case 'open-screen':
+          close();
+          await router.navigate({ to: '/screens/$screenId', params: { screenId: action.screenId } });
+          return;
+        case 'open-group':
+          close();
+          await router.navigate({ to: '/screens', search: { group: action.groupId } });
+          return;
+        case 'tool': {
+          const from = start();
+          if (from === null) return;
+          try {
+            await callTool(action.tool, { screenId: action.screenId });
+            finish(from, true);
+            toast.success(`${action.label}: ${action.screenName}`, { description: action.done });
+          } catch (err) {
+            finish(from, false);
+            toast.error(`${action.label}: ${action.screenName}`, { description: toolMessage(err) });
+          }
+        }
+      }
+    },
     chooseOrg: async (org) => {
-      set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
+      set((s) => ({ commandMenu: closed(s.commandMenu) }));
       await get().switchOrg(org, 'switcher');
     },
     submitToolForm: async (label, tool, form) => {
