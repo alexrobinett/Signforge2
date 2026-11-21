@@ -563,6 +563,11 @@ export interface CalendarFeed {
     end: string;
     allDay: boolean;
     location: string;
+    /**
+     * Who booked it: the ORGANIZER's display name (its CN), or `''`. Never the address, which a
+     * screen in a corridor would show to everyone passing.
+     */
+    organizer: string;
   }[];
 }
 export interface NewsFeed {
