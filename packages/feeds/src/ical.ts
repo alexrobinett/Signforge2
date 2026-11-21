@@ -256,9 +256,10 @@ function occurrence(item: ICAL.Event, start: ICAL.Time, end: ICAL.Time | null, d
   const title = clean(c.getFirstPropertyValue('summary')) || 'Untitled';
   const location = clean(c.getFirstPropertyValue('location'));
   // The name only: the value is a mailto address, which a screen must not show, and so may the
-  // name be (Google writes the address when there is no display name; "Name <address>").
+  // name be (Google writes the address when there is no display name; "Name <address>"). NFKC folds
+  // the at signs that read as one (full-width ＠, small ﹫) into @ before the check.
   const name = clean(c.getFirstProperty('organizer')?.getParameter('cn'));
-  const organizer = name.includes('@') ? '' : name;
+  const organizer = name.normalize('NFKC').includes('@') ? '' : name;
 
   if (start.isDate) {
     let endT = end ?? (hasLength ? item.endDate : null);

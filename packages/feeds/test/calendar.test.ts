@@ -235,10 +235,13 @@ describe('edge cases', () => {
         'ORGANIZER;CN=c_1888a1b2@resource.calendar.google.com:mailto:c_1888a1b2@resource.calendar.google.com',
       ],
       ['UID:e@test', 'DTSTART:20261118T160000Z', 'SUMMARY:Bracketed', 'ORGANIZER;CN="Jane Doe <jane@x.com>":mailto:jane@x.com'],
+      // An address in look-alike at signs, the full-width and the small one, which read as @ on screen.
+      ['UID:f@test', 'DTSTART:20261118T170000Z', 'SUMMARY:Full-width', 'ORGANIZER;CN=jane.doe\uff20gmail.com:mailto:jane.doe@gmail.com'],
+      ['UID:g@test', 'DTSTART:20261118T180000Z', 'SUMMARY:Small', 'ORGANIZER;CN=jane.doe\ufe6bgmail.com:mailto:jane.doe@gmail.com'],
     );
     const events = parseCalendar(cal, { now }).events;
-    expect(events.map((e) => e.organizer)).toEqual(['Shah, Priya', '', '', '', '']);
-    expect(JSON.stringify(events.map((e) => e.organizer))).not.toContain('@');
+    expect(events.map((e) => e.organizer)).toEqual(['Shah, Priya', '', '', '', '', '', '']);
+    expect(JSON.stringify(events.map((e) => e.organizer)).normalize('NFKC')).not.toContain('@');
   });
 
   it('is reachable through normaliseFeed', () => {
