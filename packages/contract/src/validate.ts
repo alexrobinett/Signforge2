@@ -24,6 +24,7 @@ import {
   MAX_SYNC_PLAY_COUNTS,
   PREVIEW_PROTOCOL,
   SCREEN_KINDS,
+  MAX_URL_BYTES,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
   TABLE_ROWS_PATH,
@@ -146,7 +147,11 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
     case 'select':
       return isStr(v) && def.options.includes(v) ? undefined : `field "${name}" must be one of ${def.options.join(', ')}`;
     case 'url':
-      if (!isStr(v) || (v !== '' && !safeUrl(v))) return `field "${name}" must be an https address`;
+      if (!isStr(v)) return `field "${name}" must be an https address`;
+      // A lone surrogate has no UTF-8 form: no QR code can carry it. In a `u` pattern a pair is one code point, so only lone ones match.
+      if (/\p{Surrogate}/u.test(v)) return `field "${name}" must be well-formed text`;
+      if (v !== '' && !safeUrl(v)) return `field "${name}" must be an https address`;
+      if (new TextEncoder().encode(v).length > MAX_URL_BYTES) return `field "${name}" is longer than ${MAX_URL_BYTES} bytes`;
       if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
       return undefined;
   }

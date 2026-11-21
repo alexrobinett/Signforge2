@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   IMAGE_SAMPLE_CELL,
   MANIFEST_SCHEMA,
+  MAX_URL_BYTES,
   SCREEN_BOX,
   SUPPORTED_MANIFEST_SCHEMAS,
   SUPPORTED_PROTOCOLS,
@@ -109,6 +110,27 @@ describe('validateSpotData', () => {
     expect(validateSpotData(qr, { qrUrl: `https://example.com/${'a'.repeat(30)}` }, {})).toEqual(['field "qrUrl" is longer than 40']);
     expect(validateSpotData(qr, { qrUrl: 42 }, {})).toEqual(['field "qrUrl" must be an https address']);
   });
+
+  it('holds a url to MAX_URL_BYTES of UTF-8, which a QR code can always carry, counting multi-byte characters by their bytes', () => {
+    const link: Record<string, FieldDef> = { link: { type: 'url', label: 'Link' } };
+    const base = 'https://example.com/';
+    expect(MAX_URL_BYTES).toBe(2048);
+    // ASCII: one byte a character.
+    expect(validateSpotData(link, { link: base + 'a'.repeat(2048 - base.length) }, {})).toEqual([]);
+    expect(validateSpotData(link, { link: base + 'a'.repeat(2049 - base.length) }, {})).toEqual(['field "link" is longer than 2048 bytes']);
+    // The euro sign is three bytes in UTF-8 and one UTF-16 code unit: 676 of them make exactly 2048 bytes.
+    const euros = base + '€'.repeat((2048 - base.length) / 3);
+    expect(new TextEncoder().encode(euros).length).toBe(2048);
+    expect(validateSpotData(link, { link: euros }, {})).toEqual([]);
+    expect(validateSpotData(link, { link: `${euros}a` }, {})).toEqual(['field "link" is longer than 2048 bytes']);
+  });
+
+  it('refuses a url that is not well-formed Unicode, which cannot be written as UTF-8, and keeps a surrogate pair', () => {
+    const link: Record<string, FieldDef> = { link: { type: 'url', label: 'Link' } };
+    for (const lone of ['https://example.com/\uD800', 'https://example.com/\uDC00x', 'https://example.com/\uDC00\uD800'])
+      expect(validateSpotData(link, { link: lone }, {})).toEqual(['field "link" must be well-formed text']);
+    expect(validateSpotData(link, { link: 'https://example.com/\uD83D\uDE00' }, {})).toEqual([]);
+  });
 });
 
 describe('image size', () => {
@@ -154,7 +176,7 @@ const validBrand = (): BrandKit => ({
 });
 
 const validManifest = (): ScreenManifest => ({
-  schema: 3,
+  schema: MANIFEST_SCHEMA,
   id: 'm1',
   generatedAt: '2026-11-17T00:00:00.000Z',
   screen: {
@@ -705,12 +727,12 @@ describe('validateManifest', () => {
 
 describe('versions', () => {
   it('plays the current manifest schema and the one before it', () => {
-    expect(MANIFEST_SCHEMA).toBe(4);
-    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([3, 4]);
-    expect(validateManifest({ ...validManifest(), schema: 3 })).toEqual([]);
+    expect(MANIFEST_SCHEMA).toBe(5);
+    expect(SUPPORTED_MANIFEST_SCHEMAS).toEqual([4, 5]);
     expect(validateManifest({ ...validManifest(), schema: 4 })).toEqual([]);
-    // A player that knows only schema 3 refuses a template declaring a table: the server tells it to reload (apps/api sync's canPlay).
-    expect(validateManifest({ ...validManifest(), schema: 2 })).toEqual(['manifest schema 2 is not one this player can play (3, 4)']);
+    expect(validateManifest({ ...validManifest(), schema: 5 })).toEqual([]);
+    // A player that knows only schemas 3 and 4 refuses a template with a url field (#191): the server tells it to reload (apps/api sync's canPlay).
+    expect(validateManifest({ ...validManifest(), schema: 3 })).toEqual(['manifest schema 3 is not one this player can play (4, 5)']);
   });
 
   it('drives protocol 1 and 2 bundles, and refuses a newer one', () => {
