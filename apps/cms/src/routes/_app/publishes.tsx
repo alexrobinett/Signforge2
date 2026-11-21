@@ -61,7 +61,6 @@ function PublishesPage() {
   const v = versionName(publish);
   const latest = publishes[0];
   const done = screens.filter((s) => s.outcome === 'playing').length;
-  const waiting = screens.filter((s) => s.outcome !== 'playing' && s.outcome !== 'replaced').length;
 
   return (
     // Room at the foot for the toast, so it never covers the last row's button.
@@ -74,7 +73,7 @@ function PublishesPage() {
           </h2>
           <p className="text-sm text-muted-foreground">
             <strong className="font-mono text-base font-semibold text-foreground">{done}</strong> of {screens.length} playing it
-            {waiting === 0 && screens.length > 0 ? ' · complete' : ''}
+            {publish.open === 0 && screens.length > 0 ? ' · complete' : ''}
           </p>
         </div>
         {screens.length ? (

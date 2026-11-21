@@ -9,7 +9,7 @@
  * the isolation boundary. The schema's composite `(org_id, id)` foreign keys are a second line.
  */
 import type { ScreenKind } from '@signforge/contract';
-import { and, asc, desc, eq, getTableColumns, getTableName, gt, inArray, isNull, lt, lte, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, getTableName, gt, gte, inArray, isNull, lt, lte, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { alias, type SQLiteColumn, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
@@ -357,6 +357,43 @@ const statusColumns = {
     Boolean,
   ),
 };
+
+/**
+ * The facts a screen's place in a publish's rollout is decided from, for a `publish_screens` row
+ * joined to its screen: whether it reports the manifest the publish gave it, whether that is still
+ * its desired one, and whether it is revoked (as its state reads it: revoked, or every credential
+ * it had is). The decision is `@signforge/tools`'s rollout.ts, and only there.
+ */
+const rolloutFacts = {
+  reports: sql<boolean>`${s.screens.reportedManifestId} IS ${s.publishScreens.manifestId}`.mapWith(Boolean),
+  current: sql<boolean>`${s.screens.desiredManifestId} IS ${s.publishScreens.manifestId}`.mapWith(Boolean),
+  revoked: sql<boolean>`(${s.screens.status} = 'revoked' OR (${statusColumns.credentialsRevoked}))`.mapWith(Boolean),
+};
+
+/** How many of a publish's screens have one combination of `rolloutFacts`. */
+export interface RolloutCount {
+  reports: boolean;
+  current: boolean;
+  revoked: boolean;
+  screens: number;
+}
+
+/** For each publish `where` picks, how many of its screens have each combination of `rolloutFacts`, by publish id. */
+export async function rolloutCounts(db: Db, where: SQL | undefined): Promise<Map<string, RolloutCount[]>> {
+  const p = s.publishes;
+  const ps = s.publishScreens;
+  const rows = await db
+    .select({ publishId: p.id, ...rolloutFacts, screens: sql<number>`count(*)`.mapWith(Number) })
+    .from(p)
+    .innerJoin(ps, and(eq(ps.orgId, p.orgId), eq(ps.publishId, p.id)))
+    .innerJoin(s.screens, and(eq(s.screens.orgId, ps.orgId), eq(s.screens.id, ps.screenId)))
+    .where(where)
+    .groupBy(p.id, sql`2`, sql`3`, sql`4`)
+    .all();
+  const out = new Map<string, RolloutCount[]>();
+  for (const { publishId, ...count } of rows) out.set(publishId, [...(out.get(publishId) ?? []), count]);
+  return out;
+}
 
 export function scoped(d1: D1Database, orgId: string) {
   assertId(orgId, 'orgId');
@@ -1308,26 +1345,14 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       /**
        * Publishes newest first, `limit` of them from below `beforeRevision`, each with who made it
-       * (a member's name), for a roll back the revision it went back to, and how its rollout stands: the screens it switched, how many report
-       * playing its manifest, and how many a later publish moved on.
+       * (a member's name), for a roll back the revision it went back to, and its rollout's
+       * `rolloutCounts`, read after the page: a publish's screens commit with it.
        */
-      history: ({ beforeRevision, limit }: { beforeRevision?: number; limit: number }) => {
+      history: async ({ beforeRevision, limit }: { beforeRevision?: number; limit: number }) => {
         const p = s.publishes;
         const restored = alias(s.publishes, 'restored');
-        const sc = s.screens;
-        const rows = (where: SQL) =>
-          sql<number>`(SELECT count(*) FROM ${ps} JOIN ${sc} ON ${sc.orgId} = ${ps.orgId} AND ${sc.id} = ${ps.screenId}
-            WHERE ${ps.orgId} = ${p.orgId} AND ${ps.publishId} = ${p.id} AND ${where})`.mapWith(Number);
-        return db
-          .select({
-            ...getTableColumns(p),
-            actorName: s.user.name,
-            restoresRevision: restored.revision,
-            screens: rows(sql`1`),
-            applied: rows(sql`${sc.reportedManifestId} = ${ps.manifestId}`),
-            // Moved on and not reporting it: a screen still reporting it is playing it.
-            replaced: rows(sql`${sc.desiredManifestId} IS NOT ${ps.manifestId} AND ${sc.reportedManifestId} IS NOT ${ps.manifestId}`),
-          })
+        const page = await db
+          .select({ ...getTableColumns(p), actorName: s.user.name, restoresRevision: restored.revision })
           .from(p)
           .leftJoin(s.user, and(eq(p.actorKind, 'user'), eq(s.user.id, p.actorId)))
           .leftJoin(restored, and(eq(restored.orgId, p.orgId), eq(restored.id, p.restoresId)))
@@ -1335,11 +1360,16 @@ export function scoped(d1: D1Database, orgId: string) {
           .orderBy(desc(p.revision))
           .limit(limit)
           .all();
+        const [newest, oldest] = [page[0], page.at(-1)];
+        if (!newest || !oldest) return [];
+        // The page is every publish between its revisions: a range, past the 100-parameter limit.
+        const counts = await rolloutCounts(db, and(eq(p.orgId, orgId), gte(p.revision, oldest.revision), lte(p.revision, newest.revision)));
+        return page.map((h) => ({ ...h, rollout: counts.get(h.id) ?? [] }));
       },
       /** A publish's screens, by name, with the manifest each got and what its state is worked out from now. */
       rollout: (publishId: string) =>
         db
-          .select({ ...statusColumns, name: s.screens.name, manifestId: ps.manifestId })
+          .select({ ...statusColumns, ...rolloutFacts, name: s.screens.name, manifestId: ps.manifestId })
           .from(ps)
           .innerJoin(s.screens, and(eq(s.screens.orgId, ps.orgId), eq(s.screens.id, ps.screenId)))
           .where(and(eq(ps.orgId, orgId), eq(ps.publishId, publishId)))
