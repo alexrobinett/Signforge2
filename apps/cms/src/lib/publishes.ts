@@ -4,79 +4,18 @@
  * (docs/research/cms-ux.md, ideas 5 and 6).
  */
 
-/** A publish as `list_publishes` and `get_publish` return it. */
-export interface PublishView {
-  id: string;
-  revision: number;
-  /** For a roll back: the publish whose screens it put back, and its revision. */
-  restoresId: string | null;
-  restoresRevision: number | null;
-  by: { kind: string; id: string; name: string | null };
-  createdAt: number;
-  finishedAt: number | null;
-  /** Once finished: how many of its screens the five-minute check saw playing it (0 when replaced before any check saw one). */
-  reached: number | null;
-  screens: number;
-  playing: number;
-  replaced: number;
-}
+import type { ToolOutput } from '@signforge/tools/outputs';
 
-export type Outcome = 'playing' | 'downloading' | 'asleep' | 'offline' | 'waiting' | 'fell_back' | 'revoked' | 'replaced';
+/** A publish as `list_publishes` and `get_publish` return it. */
+export type PublishView = ToolOutput<'list_publishes'>['publishes'][number];
+
+/** `get_publish`'s answer: its publish null when the org has never published. */
+export type PublishDetail = ToolOutput<'get_publish'>;
 
 /** One screen of a publish's rollout. */
-export interface RolloutScreen {
-  screenId: string;
-  name: string;
-  outcome: Outcome;
-  filesMissing: number | null;
-  wakesAt: string | null;
-  lastSeenAt: number | null;
-}
+export type RolloutScreen = PublishDetail['screens'][number];
 
-/** `get_publish`'s answer: null when the org has never published. */
-export interface PublishDetail {
-  publish: PublishView | null;
-  screens: RolloutScreen[];
-}
-
-/** What `publish` and `roll_back_publish` made, as the store's actions read it. */
-export interface Made {
-  id: string;
-  revision: number;
-  screens: number;
-  previousId: string | null;
-}
-
-export interface PublishResult {
-  publish: Made | null;
-  held: { kind: string; id: string; problems: string[] }[];
-  screens: { screenId: string; outcome: 'updated' | 'unchanged' | 'failed'; problems: string[] }[];
-}
-
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const isMade = (v: unknown): v is Made => isRecord(v) && typeof v.id === 'string' && typeof v.revision === 'number' && typeof v.screens === 'number';
-
-/** The publish a `publish` or `roll_back_publish` call made, or null when it changed nothing. */
-export function madeOf(output: unknown): Made | null {
-  if (isRecord(output) && (output.publish === null || isMade(output.publish))) return output.publish;
-  throw new Error('SignForge answered without the publish. Reload the page to see it.');
-}
-
-/** A `publish` call's answer, read past the publish it made: drafts held back and screens that could not be compiled. */
-export function publishResultOf(output: unknown): PublishResult {
-  const publish = madeOf(output);
-  const list = (key: string) => (isRecord(output) && Array.isArray(output[key]) ? output[key].filter(isRecord) : []);
-  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
-  return {
-    publish,
-    held: list('held').map((h) => ({ kind: String(h.kind), id: String(h.id), problems: strings(h.problems) })),
-    screens: list('screens').map((s) => ({
-      screenId: String(s.screenId),
-      outcome: s.outcome === 'updated' || s.outcome === 'unchanged' ? s.outcome : 'failed',
-      problems: strings(s.problems),
-    })),
-  };
-}
+export type Outcome = RolloutScreen['outcome'];
 
 /** How a past publish's rollout stands, in a few words. */
 export function standing(p: PublishView): string {

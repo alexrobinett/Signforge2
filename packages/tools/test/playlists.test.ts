@@ -1,7 +1,6 @@
 // The playlist tools: drafts made, ordered and deleted through the registry, as the CMS's
 // playlist editor calls them.
-import { scoped } from '@signforge/db';
-import { seedOrg } from '@signforge/db/testing';
+import { seedOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { dispatch, registry } from '../src';
@@ -10,7 +9,7 @@ import { memberOf } from './member';
 
 async function setup(orgId: string) {
   const o = await seedOrg(env.DB, orgId);
-  const org = scoped(env.DB, orgId);
+  const org = testScope(env.DB, orgId);
   return { o, org, call: editorCalls(org) };
 }
 

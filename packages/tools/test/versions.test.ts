@@ -1,6 +1,6 @@
 // Conditional updates: a change made from an old read is refused, not written over someone else's.
-import { scoped, type OrgScope } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import type { OrgScope } from '@signforge/db';
+import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller } from '../src';
@@ -28,8 +28,8 @@ const audited = async (action: string) => (await person.org.auditLog.list()).fil
 
 beforeEach(async () => {
   o = await seedOrg(env.DB, `ver-${++n}`);
-  person = as(scoped(env.DB, o.orgId), 'user');
-  agent = as(scoped(env.DB, o.orgId), 'agent');
+  person = as(testScope(env.DB, o.orgId), 'user');
+  agent = as(testScope(env.DB, o.orgId), 'agent');
 });
 
 describe('ifVersion', () => {
@@ -50,7 +50,7 @@ describe('ifVersion', () => {
   });
 
   it('refuses inside the batch when the row moves on between the read and the commit', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     // The agent's rename lands after the person's tool has read the screen, just before it commits.
     const racing: OrgScope = {
       ...org,
@@ -82,7 +82,7 @@ describe('ifVersion', () => {
 
 describe('group members', () => {
   it("keep a member an agent added while a person's settings form was open", async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     const other = await org.screens.insert({ name: 'Other', timezone: 'UTC', orientation: 'landscape' });
     const empty = (await call(person, 'create_group', { name: 'Windows' })).group;
     // The person opens the form for `other` (the group is empty then), and an agent adds the lobby.

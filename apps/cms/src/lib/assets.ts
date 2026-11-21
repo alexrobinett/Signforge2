@@ -1,32 +1,8 @@
-/**
- * The asset tools' outputs as the CMS reads them (`list_assets` in packages/tools/src/assets.ts,
- * the source of truth), and the library's words for them.
- */
-interface RenditionView {
-  orientation: 'landscape' | 'portrait';
-  sha256: string;
-  type: string;
-  size: number;
-  width: number | null;
-  height: number | null;
-}
+/** The asset library's words for `list_assets`' rows. */
+import type { ToolOutput } from '@signforge/tools/outputs';
 
 /** One row of `list_assets`. `sha256`, `type`, `size`, `width` and `height` are the landscape rendition's. */
-export interface AssetView {
-  id: string;
-  name: string;
-  kind: 'image' | 'video';
-  status: 'pending' | 'verified' | 'rejected';
-  sha256: string;
-  type: string;
-  size: number;
-  width: number | null;
-  height: number | null;
-  renditions: RenditionView[];
-  createdAt: number;
-  updatedAt: number;
-  usageCount: number;
-}
+export type AssetView = ToolOutput<'list_assets'>['assets'][number];
 
 const TYPE_WORD: Record<string, string> = { 'image/jpeg': 'JPEG', 'image/png': 'PNG', 'image/webp': 'WebP', 'image/svg+xml': 'SVG' };
 

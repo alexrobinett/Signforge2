@@ -5,22 +5,15 @@
  * the same phrases (`eventText`).
  */
 
-type ActorKind = 'user' | 'agent' | 'device' | 'system';
+import type { ToolOutput } from '@signforge/tools/outputs';
 
-/** One entry of `list_audit_log`. */
-export interface AuditEntry {
-  at: number;
-  actor: { kind: ActorKind; id: string; clientId: string | null };
-  action: string;
-  target: { kind: string; id: string } | null;
-  /** As recorded: `{ input }` for a tool (secrets already redacted), the fields kept for a membership change, `{ tool, refused }` for an agent's limit. */
-  detail: Record<string, unknown>;
-}
+/** A `list_audit_log` page. */
+export type AuditPage = ToolOutput<'list_audit_log'>;
 
-export interface AuditPage {
-  entries: AuditEntry[];
-  next: string | null;
-}
+/** One entry of `list_audit_log`. Its detail is as recorded: `{ input }` for a tool (secrets already redacted), the fields kept for a membership change, `{ tool, refused }` for an agent's limit. */
+export type AuditEntry = AuditPage['entries'][number];
+
+type ActorKind = AuditEntry['actor']['kind'];
 
 const WHEN = { day: 86_400_000, week: 7 * 86_400_000, month: 30 * 86_400_000 } as const;
 export type When = keyof typeof WHEN;
@@ -41,24 +34,27 @@ export const WHO_OPTIONS: { value: keyof typeof WHO_KINDS; label: string }[] = [
   { value: 'system', label: 'System' },
 ];
 
-/** The page's filters, as its URL carries them. */
+/**
+ * The page's filters, as its URL carries them: kinds, ids and a time span, nothing a person
+ * typed. The text search is not here: it can be an email or a name, so it lives in the store
+ * and reaches the server in a POST body, never a URL (#140).
+ */
 export interface AuditFilters {
   who?: string;
   what?: string;
   target?: string;
   targetId?: string;
   when?: When;
-  q?: string;
 }
 
-/** `list_audit_log`'s input for the filters, `when` counted back from `now`. */
-export function auditInput(f: AuditFilters, now: number): Record<string, unknown> {
+/** `list_audit_log`'s input for the filters and the search (`query`), `when` counted back from `now`. */
+export function auditInput(f: AuditFilters, query: string, now: number): Record<string, unknown> {
   return {
     ...(f.who ? { actor: isWhoKind(f.who) ? { kind: WHO_KINDS[f.who] } : { id: f.who } } : {}),
     ...(f.what ? { action: f.what } : {}),
     ...(f.target ? { target: { kind: f.target, ...(f.targetId ? { id: f.targetId } : {}) } } : {}),
     ...(f.when ? { from: now - WHEN[f.when] } : {}),
-    ...(f.q ? { query: f.q } : {}),
+    ...(query ? { query } : {}),
   };
 }
 

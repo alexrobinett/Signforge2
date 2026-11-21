@@ -8,15 +8,8 @@
  */
 import { spotProblems, type CompileInput } from '@signforge/compiler';
 import { compileProbe, DEFAULT_FIT, spotFromDraft, type DraftReads, type Probe, type SpotDraft as SavedDraft } from '@signforge/compiler/draft';
-import {
-  validateSpotData,
-  type FieldDef,
-  type Orientation,
-  type ScalarFieldDef,
-  type ScreenManifest,
-  type TemplateManifest,
-  type Transition,
-} from '@signforge/contract';
+import { validateSpotData, type FieldDef, type Orientation, type ScalarFieldDef, type ScreenManifest, type Transition } from '@signforge/contract';
+import type { ToolOutput } from '@signforge/tools/outputs';
 import type { AssetView } from './assets';
 import type { BindingInput } from './live-data';
 
@@ -24,38 +17,15 @@ export type SpotKind = SavedDraft['kind'];
 type Fit = NonNullable<SavedDraft['fit']>;
 
 /** One spot's draft, as `get_spot` returns it. */
-export interface SpotView extends SavedDraft {
-  version: number;
-  published: boolean;
-  draftChanged: boolean;
-  publishedAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-}
+export type SpotView = ToolOutput<'get_spot'>['spot'];
 
-export interface TemplateVersionView {
-  id: string;
-  key: string;
-  version: string;
-  status: 'draft' | 'approved' | 'retired';
-  manifest: TemplateManifest;
-}
+/** A template, its versions oldest first, as `list_templates` returns it. */
+export type TemplateView = ToolOutput<'list_templates'>['templates'][number];
 
-export interface TemplateView {
-  id: string;
-  owner: 'base' | 'org';
-  key: string;
-  name: string;
-  versions: TemplateVersionView[];
-}
+export type TemplateVersionView = TemplateView['versions'][number];
 
 /** `get_spot_preview`'s output: a compile input without its screen and content, and the org's time zone for new screens. */
-export interface SpotPreview {
-  preview: Pick<CompileInput, 'templates' | 'files' | 'dataSources' | 'brand'>;
-  brandKitId: string | null;
-  problems: string[];
-  timezone: string | null;
-}
+export type SpotPreview = ToolOutput<'get_spot_preview'>;
 
 /** What the editor edits: the parts of a spot's draft a person changes. */
 export interface SpotDraft {

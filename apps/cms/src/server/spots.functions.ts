@@ -4,8 +4,6 @@
  * `get_data_source`). The query keys and options over them are in src/queries/spots.ts.
  */
 import { createServerFn } from '@tanstack/react-start';
-import type { DataSourceView, SnapshotView } from '~/lib/live-data';
-import type { SpotPreview, SpotView } from '~/lib/spots';
 import { all, inOrg, tool } from './tools.server';
 
 /**
@@ -20,7 +18,7 @@ export const getSpots = createServerFn(read).handler(async () => ({
 
 export const getSpot = createServerFn(read)
   .validator((spotId: string) => spotId)
-  .handler(async ({ data: spotId }) => (await inOrg(() => tool<{ spot: SpotView }>('get_spot', { spotId }, { missing: 'null' }), null))?.spot ?? null);
+  .handler(async ({ data: spotId }) => (await inOrg(() => tool('get_spot', { spotId }, { missing: 'null' }), null))?.spot ?? null);
 
 export const getTemplates = createServerFn(read).handler(async () => ({
   templates: await inOrg(() => all('list_templates', (p) => p.templates), []),
@@ -38,7 +36,7 @@ interface PreviewRequest {
 
 export const getSpotPreview = createServerFn(read)
   .validator((input: PreviewRequest) => input)
-  .handler(({ data }) => tool<SpotPreview>('get_spot_preview', data));
+  .handler(({ data }) => tool('get_spot_preview', data));
 
 /** The org's sources, with their health and the spots that read them: the spot editor's pickers and the Integrations page. */
 export const getDataSources = createServerFn(read).handler(async () => ({
@@ -47,6 +45,4 @@ export const getDataSources = createServerFn(read).handler(async () => ({
 
 export const getDataSource = createServerFn(read)
   .validator((dataSourceId: string) => dataSourceId)
-  .handler(({ data: dataSourceId }) =>
-    tool<{ dataSource: DataSourceView; snapshot: SnapshotView | null }>('get_data_source', { dataSourceId }, { missing: 'null' }),
-  );
+  .handler(({ data: dataSourceId }) => tool('get_data_source', { dataSourceId }, { missing: 'null' }));

@@ -3,8 +3,7 @@
  * `/api/tools` route runs it, without sign-in. The browser page and the bucket's S3 API (served by
  * Miniflare at /cdn-cgi/local/r2/s3) share its origin.
  */
-import { scoped } from '@signforge/db';
-import { seedOrganization } from '@signforge/db/testing';
+import { seedOrganization, testScope } from '@signforge/db/testing';
 import { dispatch, r2Presigner, registry, type Caller } from '../src';
 
 interface Env {
@@ -30,14 +29,20 @@ export default {
     }
     if (request.method === 'POST' && url.pathname.startsWith('/use/')) {
       // A spot that shows the asset, as the spot editor (M3-16) will make one.
-      const spot = await scoped(env.DB, ORG).spots.insert({ name: 'Uses it', kind: 'image', durationMs: 8000, assetId: url.pathname.slice(5), fit: 'cover' });
+      const spot = await testScope(env.DB, ORG).spots.insert({
+        name: 'Uses it',
+        kind: 'image',
+        durationMs: 8000,
+        assetId: url.pathname.slice(5),
+        fit: 'cover',
+      });
       return Response.json({ spotId: spot.id });
     }
     const tool = /^\/tools\/([a-z_]+)$/.exec(url.pathname);
     if (request.method === 'POST' && tool) {
       const s3 = JSON.parse(env.S3) as { bucket: string; accessKeyId: string; secretAccessKey: string };
       const caller: Caller = {
-        org: scoped(env.DB, ORG),
+        org: testScope(env.DB, ORG),
         role: 'owner',
         actor: { kind: 'user', id: 'user-e2e', clientId: 'cms' },
         blobs: env.BLOBS,

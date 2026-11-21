@@ -4,20 +4,13 @@
  * spots.functions.ts). The query options over it are in src/queries/integrations.ts.
  */
 import { createServerFn } from '@tanstack/react-start';
-import type { ConnectionView } from '~/lib/integrations';
 import { all, inOrg } from './tools.server';
-
-interface ConnectionsPage {
-  next: string | null;
-  connections: ConnectionView[];
-  providers: string[];
-}
 
 export const getConnections = createServerFn({ method: 'GET' }).handler(() =>
   inOrg(
     async () => {
       let providers: string[] = [];
-      const connections = await all<ConnectionView, ConnectionsPage>('list_connections', (p) => {
+      const connections = await all('list_connections', (p) => {
         providers = p.providers;
         return p.connections;
       });

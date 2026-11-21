@@ -4,8 +4,8 @@
  */
 import { env } from 'cloudflare:workers';
 import { appendResponseHeader, getRequest } from '@tanstack/react-start/server';
-import { ORG_CHANGED, TAB_ORG_HEADER } from '@signforge/api/tab-org';
-import { OrgChanged } from '~/lib/org-changed';
+import { TAB_ORG_HEADER } from '@signforge/api/tab-org';
+import { isOrgChanged, refusalOf } from '~/lib/tools';
 
 /** Headers from the browser that the API reads: the session cookies, the client address for rate limits and the tab's org (src/lib/tab-org.ts). */
 const FORWARDED = ['cookie', 'cf-connecting-ip', 'user-agent', 'accept-language', TAB_ORG_HEADER];
@@ -13,7 +13,7 @@ const FORWARDED = ['cookie', 'cf-connecting-ip', 'user-agent', 'accept-language'
 /**
  * Call the API as the signed-in browser, from server code: a GET, or a JSON POST with `body` (a tool's input). Any cookie the API sets (Better Auth
  * refreshing its cache cookie) goes back to the browser, which must keep every one of them. A call
- * from a tab whose org is no longer the session's throws the API's sentence, telling the member to reload.
+ * from a tab whose org is no longer the session's throws its `Refusal` (`org_changed`), whose sentence tells the member to reload.
  */
 export async function callApi(path: `/api/${string}`, body?: unknown): Promise<Response> {
   const incoming = getRequest();
@@ -31,11 +31,8 @@ export async function callApi(path: `/api/${string}`, body?: unknown): Promise<R
   const res = await env.API.fetch(new Request(new URL(path, incoming.url), init));
   for (const cookie of res.headers.getSetCookie()) appendResponseHeader('set-cookie', cookie);
   if (res.status === 409) {
-    const refusal: { error?: string; message?: string } | null = await res
-      .clone()
-      .json()
-      .catch(() => null);
-    if (refusal?.error === ORG_CHANGED) throw new OrgChanged(refusal.message);
+    const refusal = await refusalOf(res.clone(), `${path} failed: ${res.status}`);
+    if (isOrgChanged(refusal)) throw refusal;
   }
   return res;
 }

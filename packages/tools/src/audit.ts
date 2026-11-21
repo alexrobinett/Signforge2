@@ -7,30 +7,15 @@
  * allow (#77), and the cursor, made from each row's time and `rowid` and the org, is what pages.
  */
 import { z } from 'zod';
-import { keysetPage, nextOutput, pageInput } from './paging';
+import { keysetPage, pageInput } from './paging';
 import { defineTool, ToolError } from './tool';
-
-const ACTOR_KINDS = ['user', 'agent', 'device', 'system'] as const;
+import { ACTOR_KINDS, outputs } from './outputs';
 
 /**
  * Membership changes whose detail names the invitee by email. Better Auth lets only owners list
  * invitations, so only an owner gets the email here, or finds the row by it.
  */
 const INVITATIONS = ['invite_member', 'cancel_invitation', 'reject_invitation'];
-
-const entryOutput = z.object({
-  at: z.number().describe('When, in ms since the epoch'),
-  actor: z.object({
-    kind: z.enum(ACTOR_KINDS).describe('user is a member, agent an agent grant, device a screen, system SignForge itself or sf push'),
-    id: z.string().describe("The member's user id, the grant's id, the screen's id, or the system's name"),
-    clientId: z.string().nullable().describe('The app it acted through: cms, sf-push, or an agent’s OAuth client'),
-  }),
-  action: z.string().describe('The tool called, or the membership change (invite_member, ...), or rate_limited for an agent over its limits'),
-  target: z.object({ kind: z.string(), id: z.string() }).nullable().describe('What was changed; null when nothing one thing was'),
-  detail: z
-    .record(z.string(), z.unknown())
-    .describe('What was recorded: for a tool, { input } with secrets redacted, and { refused } when it was refused but changed something'),
-});
 
 const listAuditLog = defineTool({
   name: 'list_audit_log',
@@ -54,7 +39,7 @@ const listAuditLog = defineTool({
     to: z.number().int().nonnegative().optional().describe('Only entries before this time, in ms'),
     query: z.string().trim().min(1).max(100).optional().describe('Only entries whose action, actor, target or recorded input contains this text'),
   }),
-  output: z.object({ entries: z.array(entryOutput), next: nextOutput }),
+  output: outputs.list_audit_log,
   example: {},
   handler: async ({ org, input, role }) => {
     const { actor, target, action, from, to, query } = input;

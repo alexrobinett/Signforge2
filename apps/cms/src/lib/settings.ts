@@ -1,64 +1,26 @@
 /**
- * What the Settings and Account pages read: `get_org_settings`'s output (packages/tools
- * src/settings.ts is the source of truth) and Better Auth's members, invitations and sessions.
+ * What the Settings and Account pages read: `get_org_settings`'s output, the alert channels and
+ * deliveries, and Better Auth's members, invitations and sessions.
  */
-import type { DisplayHours } from './screen-types';
+import type { ToolOutput } from '@signforge/tools/outputs';
 import type { Role } from '~/server/shell.functions';
 
-export type Audience = 'owners' | 'editors' | 'everyone';
-export type AlertKind = 'screen_offline' | 'publish_finished' | 'agent_refused';
+export type OrgSettings = ToolOutput<'get_org_settings'>['settings'];
+export type AlertKind = keyof OrgSettings['alerts'];
 /** `who` is for email; Slack and the webhook post to one place each (#88). */
-export interface AlertRule {
-  who: Audience;
-  email: boolean;
-  slack: boolean;
-  webhook: boolean;
-}
+export type AlertRule = OrgSettings['alerts'][AlertKind];
+export type Audience = AlertRule['who'];
 
 /** `get_alert_channels`' view of a channel: its host, never its URL or secret. */
-export interface AlertChannel {
-  kind: 'slack' | 'webhook';
-  host: string;
-  /** A user id, or an agent grant id. */
-  connectedBy: string;
-  secretSetAt: number | null;
-  version: number;
-  updatedAt: number;
-}
+export type AlertChannel = NonNullable<ToolOutput<'get_alert_channels'>['slack']>;
 
 /** One row of `list_alert_deliveries`. */
-export interface AlertDelivery {
-  id: string;
-  channel: 'email' | 'slack' | 'webhook';
-  eventType: string;
-  status: 'pending' | 'delivered' | 'failed';
-  attempts: number;
-  lastAttemptAt: number | null;
-  lastHttpStatus: number | null;
-  lastError: string | null;
-  createdAt: number;
-}
+export type AlertDelivery = ToolOutput<'list_alert_deliveries'>['deliveries'][number];
 
 export const CHANNEL_LABELS: Record<AlertDelivery['channel'], string> = { email: 'Email', slack: 'Slack', webhook: 'Webhook' };
 
 /** The events a delivery carries, as the log names them. */
 export const EVENT_LABELS: Record<string, string> = { 'screen.offline': 'Screen offline', 'screen.back': 'Screen back', test: 'Test' };
-
-export interface OrgSettings {
-  timezone: string | null;
-  locale: string | null;
-  displayHours: DisplayHours | null;
-  updateWindow: { from: string; to: string };
-  unreachableAfterMinutes: number;
-  /** Whether editors publish, or only owners (owner decision Q7). */
-  editorsPublish: boolean;
-  /** Days audit rows are kept before the nightly job deletes them (#41). */
-  auditRetentionDays: number;
-  alerts: Record<AlertKind, AlertRule>;
-  updatedAt: number | null;
-  /** Moves on with every change; each save sends it back as `ifVersion`, so it cannot overwrite a newer one. */
-  version: number;
-}
 
 export interface Member {
   id: string;

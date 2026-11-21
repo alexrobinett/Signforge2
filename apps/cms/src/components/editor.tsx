@@ -1,7 +1,7 @@
 /**
  * What the spot and playlist editors share (canvas board Spot editor A): the header with the
  * back link, the name and the save state; the alert for a refused save; the form's sections; Publish;
- * and EditorFields, which the brand kit, screen and settings pages use too.
+ * and EditorFields, which the brand kit, screen, settings, audit log and assets pages and the pairing form use too.
  */
 import { Link } from '@tanstack/react-router';
 import { ChevronLeftIcon } from 'lucide-react';

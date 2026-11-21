@@ -113,8 +113,29 @@ describe("a call made for org B with org A's ids", () => {
   it('changes nothing', async () => {
     const { a } = s;
     const b = s.b.scope;
-    expect(await b.screens.update(a.screen, { name: 'hijacked' })).toBeUndefined();
-    expect(await b.screens.credentials.update(a.credential, { revokedAt: 1 })).toBeUndefined();
+    const ra = s.a.scope;
+    // Org B handed rows as org A read them: its staged changes and deletes still write only org B's rows.
+    await b.commit([
+      ...b.screens.stage.update((await ra.screens.get(a.screen))!, { name: 'hijacked' }).writes,
+      ...b.screens.credentials.stage.update((await ra.screens.credentials.get(a.credential))!, { revokedAt: 1 }).writes,
+      ...(await b.spots.stage.update((await ra.spots.get(a.imageSpot))!, { name: 'hijacked' })).writes,
+      ...b.connections.stage.update((await ra.connections.get(a.connection))!, { status: 'disconnected', credentialsSealed: null }).writes,
+      ...b.templates.stage.update((await ra.templates.get(a.template))!, { name: 'hijacked' }).writes,
+      ...b.screens.stage.delete(a.screen).writes,
+      ...b.screens.credentials.stage.delete(a.credential).writes,
+      ...b.screenGroups.stage.delete(a.group).writes,
+      ...b.assets.stage.delete(a.asset).writes,
+      ...b.assets.renditions.stage.delete(a.rendition).writes,
+      ...b.templates.stage.delete(a.template).writes,
+      ...b.templates.versions.stage.delete(a.templateVersion).writes,
+      ...b.spots.stage.delete(a.imageSpot).writes,
+      ...b.playlists.stage.delete(a.playlist).writes,
+      ...b.scheduleEntries.stage.delete(a.scheduleEntry).writes,
+      ...b.publishes.stage.delete(a.publish).writes,
+      ...b.dataSources.stage.delete(a.dataSource).writes,
+      ...b.connections.stage.delete(a.connection).writes,
+      ...b.brandKits.stage.delete(a.brandKit).writes,
+    ]);
     expect(await b.screens.setDesiredManifest(a.screen, 'f'.repeat(64))).toBe(false);
     await b.screens.reportManifest(a.screen, 'f'.repeat(64), { arrivedAt: 1 });
     expect(
@@ -127,29 +148,23 @@ describe("a call made for org B with org A's ids", () => {
         counts: [{ hour: a.hour, spotId: a.templateSpot, plays: 100, ms: 1 }],
       }),
     ).toBeUndefined();
-    expect(await b.spots.update(a.imageSpot, { name: 'hijacked' })).toBeUndefined();
-    expect(await b.connections.update(a.connection, { status: 'disconnected', credentialsSealed: null })).toBeUndefined();
-    expect(await b.templates.update(a.template, { name: 'hijacked' })).toBeUndefined();
     expect(await b.screenGroups.removeMember(a.group, a.screen)).toBe(false);
-    for (const del of [
-      () => b.screens.delete(a.screen),
-      () => b.screens.credentials.delete(a.credential),
-      () => b.screenGroups.delete(a.group),
-      () => b.assets.delete(a.asset),
-      () => b.assets.renditions.delete(a.rendition),
-      () => b.templates.delete(a.template),
-      () => b.templates.versions.delete(a.templateVersion),
-      () => b.spots.delete(a.imageSpot),
-      () => b.playlists.delete(a.playlist),
-      () => b.scheduleEntries.delete(a.scheduleEntry),
-      () => b.publishes.delete(a.publish),
-      () => b.dataSources.delete(a.dataSource),
-      () => b.connections.delete(a.connection),
-      () => b.brandKits.delete(a.brandKit),
-    ])
-      expect(await del()).toBe(false);
 
-    const ra = s.a.scope;
+    for (const [name, read] of [
+      ['screenGroups', () => ra.screenGroups.get(a.group)],
+      ['assets', () => ra.assets.get(a.asset)],
+      ['renditions', () => ra.assets.renditions.get(a.rendition)],
+      ['templates', () => ra.templates.get(a.template)],
+      ['templateVersions', () => ra.templates.versions.get(a.templateVersion)],
+      ['playlists', () => ra.playlists.get(a.playlist)],
+      ['scheduleEntries', () => ra.scheduleEntries.get(a.scheduleEntry)],
+      ['publishes', () => ra.publishes.get(a.publish)],
+      ['dataSources', () => ra.dataSources.get(a.dataSource)],
+      ['brandKits', () => ra.brandKits.get(a.brandKit)],
+    ] as const)
+      expect(await read(), name).toBeDefined();
+    expect(await ra.templates.get(a.template)).toMatchObject({ name: 'Menu' });
+    expect(await ra.connections.get(a.connection)).toMatchObject({ status: 'active', credentialsSealed: 'sealed:grant' });
     expect(await ra.screens.get(a.screen)).toMatchObject({
       name: 'org-a lobby',
       desiredManifestId: null,
@@ -178,13 +193,15 @@ describe("a call made for org B with org A's ids", () => {
       ['putSnapshot', () => b.dataSources.putSnapshot(a.dataSource, { version: 'x', fetchedAt: 0, checkedAt: 0, dataJson: '{}' })],
       ['savePoll', () => b.dataSources.savePoll(a.dataSource, { source: { nextPollAt: 0, failures: 1 }, checkedAt: 0 })],
       ['playCounts.add', () => b.playCounts.add(a.screen, [{ hour: a.hour, spotId: a.templateSpot, plays: 1, ms: 1 }])],
-      ['spot on A template version', () => b.spots.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })],
-      ['spot moved to A template version', () => b.spots.update(s.b.templateSpot, { templateVersionId: a.templateVersion })],
-      ['spot image field on A asset', () => b.spots.update(s.b.templateSpot, { assetMapJson: JSON.stringify({ photo: a.asset }) })],
-      ['spot staged with A asset', async () => b.spots.stage.update((await b.spots.get(s.b.imageSpot))!, { assetId: a.asset })],
-      ['spot bound to A data source', () => b.spots.update(s.b.templateSpot, { bindingsJson: JSON.stringify({ title: { source: a.dataSource, path: 't' } }) })],
+      ['spot on A template version', () => b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })],
+      ['spot moved to A template version', async () => b.spots.stage.update((await b.spots.get(s.b.templateSpot))!, { templateVersionId: a.templateVersion })],
       [
-        'spot staged bound to A data source',
+        'spot image field on A asset',
+        async () => b.spots.stage.update((await b.spots.get(s.b.templateSpot))!, { assetMapJson: JSON.stringify({ photo: a.asset }) }),
+      ],
+      ['spot staged with A asset', async () => b.spots.stage.update((await b.spots.get(s.b.imageSpot))!, { assetId: a.asset })],
+      [
+        'spot bound to A data source',
         async () =>
           b.spots.stage.update((await b.spots.get(s.b.templateSpot))!, { bindingsJson: JSON.stringify({ title: { source: a.dataSource, path: 't' } }) }),
       ],
@@ -205,6 +222,45 @@ describe('rows a scope writes', () => {
     const moved = await b.screenGroups.update(row.id, { orgId: 'org-a', id: 'stolen' } as never);
     expect(moved).toMatchObject({ orgId: 'org-b', id: row.id });
     expect(await s.a.scope.screenGroups.get(row.id)).toBeUndefined();
+  });
+
+  // Each repository that upserts or updates from a caller's values, handed a row whose org, key or
+  // id point elsewhere (as a row read back from `get` does): nothing moves out of org B.
+  it('stay in its org when an upsert or update is handed another org, key or id', async () => {
+    const { a } = s;
+    const b = s.b.scope;
+    const ra = s.a.scope;
+
+    const channel = { host: 'hooks.slack.test', urlEncrypted: 'sealed:url', secretEncrypted: null, secretSetAt: null, connectedBy: 'u' };
+    await b.commit((await b.alertChannels.stage.put('slack', channel)).writes);
+    // A full row, retargeted: the conflict update must not move org B's channel to org A's webhook.
+    const retargeted = { ...(await b.alertChannels.get('slack'))!, orgId: a.orgId, kind: 'webhook' as const, host: 'moved.test' };
+    const put = await b.alertChannels.stage.put('slack', retargeted);
+    expect(put.row).toMatchObject({ orgId: 'org-b', kind: 'slack', host: 'moved.test' });
+    await b.commit(put.writes);
+    expect(await b.alertChannels.get('slack')).toMatchObject({ orgId: 'org-b', kind: 'slack', host: 'moved.test', rowVersion: 2 });
+    expect(await ra.alertChannels.get('webhook')).toBeUndefined();
+
+    await b.commit((await b.settings.stage.set({ locale: 'en-GB', orgId: a.orgId, publishRevision: 99 } as never)).writes);
+    expect(await b.settings.get()).toMatchObject({ orgId: 'org-b', locale: 'en-GB', publishRevision: 0 });
+    expect(await ra.settings.get()).toBeUndefined();
+
+    const elsewhere = { orgId: a.orgId, dataSourceId: a.dataSource };
+    await b.dataSources.putSnapshot(s.b.dataSource, { version: 'put', fetchedAt: 2, checkedAt: 2, dataJson: '{}', ...elsewhere } as never);
+    await b.dataSources.savePoll(s.b.dataSource, {
+      source: { nextPollAt: 0, ...elsewhere, id: a.dataSource } as never,
+      snapshot: { version: 'poll', fetchedAt: 3, checkedAt: 3, dataJson: '{}', ...elsewhere } as never,
+    });
+    expect(await ra.dataSources.snapshot(a.dataSource)).toMatchObject({ version: 'v1' });
+    expect(await b.dataSources.snapshot(s.b.dataSource)).toMatchObject({ orgId: 'org-b', version: 'poll' });
+    expect(await b.dataSources.get(s.b.dataSource)).toMatchObject({ orgId: 'org-b' });
+
+    await b.playCounts.add(s.b.screen, [{ hour: a.hour, spotId: a.templateSpot, plays: 1, ms: 1, orgId: a.orgId, screenId: a.screen } as never]);
+    expect((await ra.playCounts.list({ from: a.hour, to: a.hour + 3_600_000 })).map((c) => c.plays)).toEqual([3]);
+
+    await b.connections.saveGrant(s.b.connection, 'sealed:grant', { credentialsSealed: 'sealed:new', expiresAt: null, orgId: a.orgId, id: 'stolen' } as never);
+    expect(await b.connections.get(s.b.connection)).toMatchObject({ orgId: 'org-b', credentialsSealed: 'sealed:new' });
+    expect(await ra.connections.get(s.b.connection)).toBeUndefined();
   });
 
   it('are staged the same way: stamped with its org, and changing nothing of another org', async () => {
@@ -320,6 +376,11 @@ describe('base templates', () => {
     for (const o of [s.a.scope, s.b.scope]) {
       expect(await o.templates.get(s.base.template)).toMatchObject({ orgId: null });
       expect(await o.templates.versions.forTemplate(s.base.template)).toHaveLength(1);
+      const base = (await o.templates.get(s.base.template))!;
+      await o.commit([...o.templates.stage.update(base, { name: 'hijacked' }).writes, ...o.templates.versions.stage.delete(s.base.templateVersion).writes]);
+      expect(await o.templates.get(s.base.template)).toEqual(base);
+      expect(await o.templates.versions.get(s.base.templateVersion)).toBeDefined();
+      // A test's direct writes (testScope) refuse them too.
       expect(await o.templates.update(s.base.template, { name: 'hijacked' })).toBeUndefined();
       expect(await o.templates.versions.delete(s.base.templateVersion)).toBe(false);
     }

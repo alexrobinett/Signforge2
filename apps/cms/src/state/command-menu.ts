@@ -4,7 +4,7 @@
  */
 import { toast } from 'sonner';
 import { needsInput, resultText, toolInput, withKey, type CommandEntry, type PendingCall, type ToolListing } from '~/lib/command-menu';
-import { callTool, toolMessage } from '~/lib/tools';
+import { callToolByName, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 interface CommandMenuState {
@@ -34,7 +34,7 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
     const { input, pending } = withKey(tool, read, get().commandMenu.pending);
     set((s) => ({ commandMenu: { ...s.commandMenu, running: true, fieldError: null, pending } }));
     try {
-      const output = await callTool(tool.name, input);
+      const output = await callToolByName(tool.name, input);
       set({ commandMenu: CLOSED });
       toast.success(label, { description: resultText(output) });
       if (tool.mutates) await router.invalidate();

@@ -84,7 +84,7 @@ describe('exporting the audit log', () => {
     const { store, run } = exporter();
     await run();
     expect(files).toEqual([]);
-    expect(store.getState().audit).toEqual({ exporting: false, exportNote: { text: message, failed: true } });
+    expect(store.getState().audit).toEqual({ query: '', exporting: false, exportNote: { text: message, failed: true } });
   });
 
   it('leaves no file when the member switched org in another tab, and says to reload', async () => {
@@ -94,6 +94,6 @@ describe('exporting the audit log', () => {
     await run();
     expect(orgs).toEqual(['org_north']);
     expect(files).toEqual([]);
-    expect(store.getState().audit).toEqual({ exporting: false, exportNote: { text: message, failed: true } });
+    expect(store.getState().audit).toEqual({ query: '', exporting: false, exportNote: { text: message, failed: true } });
   });
 });

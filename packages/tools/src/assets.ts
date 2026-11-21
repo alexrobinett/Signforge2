@@ -17,45 +17,16 @@ import type { Asset, AssetRendition, OrgScope } from '@signforge/db';
 import { readImageInfo, RENDITION_TYPES } from '@signforge/media/image-info';
 import { z } from 'zod';
 import { id, idempotencyKey, name } from './fields';
-import { nextOutput, page, pageInput } from './paging';
+import { page, pageInput } from './paging';
 import { orgBlobKey, uploadKey } from './r2';
 import { defineTool, notFound, ToolError } from './tool';
 import type { UploadSigner } from './upload';
+import { ORIENTATIONS, ASSET_STATUSES, outputs, type AssetView, type RenditionView } from './outputs';
 
 /** The most one rendition may weigh. A 3413x1920 PNG, the largest a cover-scaled 4K image gets, is well under it. */
 export const MAX_RENDITION_BYTES = 20 * 1024 * 1024;
 /** How long an upload URL works. */
 export const UPLOAD_URL_SECONDS = 15 * 60;
-
-const ORIENTATIONS = ['landscape', 'portrait'] as const;
-const STATUSES = ['pending', 'verified', 'rejected'] as const;
-
-const renditionOutput = z.object({
-  orientation: z.enum(ORIENTATIONS),
-  sha256: z.string(),
-  type: z.string(),
-  size: z.number(),
-  width: z.number().nullable().describe('Null for SVG'),
-  height: z.number().nullable().describe('Null for SVG'),
-});
-export type RenditionView = z.infer<typeof renditionOutput>;
-
-export const assetOutput = z.object({
-  id: z.string(),
-  name: z.string(),
-  kind: z.enum(['image', 'video']),
-  status: z.enum(STATUSES).describe('pending until finalize_asset checks the upload; only verified assets may be used'),
-  sha256: z.string().describe("The landscape rendition's, as are type, size, width and height"),
-  type: z.string(),
-  size: z.number(),
-  width: z.number().nullable(),
-  height: z.number().nullable(),
-  durationMs: z.number().nullable().describe("A video's length; null for an image"),
-  renditions: z.array(renditionOutput),
-  createdAt: z.number(),
-  updatedAt: z.number(),
-});
-export type AssetView = z.infer<typeof assetOutput>;
 
 // SVG renditions have no pixel size; the column is NOT NULL, so they store 0.
 const renditionView = (r: AssetRendition): RenditionView => ({
@@ -112,10 +83,10 @@ const listAssets = defineTool({
   mutates: false,
   input: z.object({
     query: z.string().trim().max(100).optional().describe('Part of the name, any case'),
-    status: z.enum(STATUSES).optional(),
+    status: z.enum(ASSET_STATUSES).optional(),
     ...pageInput,
   }),
-  output: z.object({ assets: z.array(assetOutput.extend({ usageCount: z.number().describe('How many spots use it') })), next: nextOutput }),
+  output: outputs.list_assets,
   example: {},
   handler: async ({ org, input }) => {
     const q = input.query?.toLowerCase();
@@ -140,20 +111,13 @@ const getAsset = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ assetId: id('asset') }),
-  output: z.object({ asset: assetOutput, spotIds: z.array(z.string()) }),
+  output: outputs.get_asset,
   example: { assetId: 'ast_example' },
   handler: async ({ org, input }) => {
     const a = await requireAsset(org, input.assetId);
     const [renditions, usage] = await Promise.all([org.assets.renditions.forAsset(a.id), org.assets.usage([a.id])]);
     return { asset: assetView(a, renditions), spotIds: usage.get(a.id) ?? [] };
   },
-});
-
-const uploadOutput = z.object({
-  asset: assetOutput,
-  uploads: z
-    .array(z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() }))
-    .describe('One per file the server does not already hold'),
 });
 
 const createAssetUpload = defineTool({
@@ -190,7 +154,7 @@ const createAssetUpload = defineTool({
       if (l.sha256 === p.sha256 && (l.type !== p.type || l.size !== p.size))
         ctx.addIssue({ code: 'custom', path: ['renditions'], message: 'the same file cannot have two types or sizes' });
     }),
-  output: uploadOutput,
+  output: outputs.create_asset_upload,
   example: {
     name: 'Summer menu photo',
     renditions: {
@@ -270,7 +234,7 @@ const renewAssetUpload = defineTool({
   mutates: true,
   needs: ['uploads'],
   input: z.object({ assetId: id('asset') }),
-  output: uploadOutput,
+  output: outputs.renew_asset_upload,
   example: { assetId: 'ast_example' },
   handler: async ({ org, blobs, input, services: { uploads } }) => {
     const asset = await requireAsset(org, input.assetId);
@@ -294,7 +258,7 @@ const finalizeAsset = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ assetId: id('asset') }),
-  output: z.object({ asset: assetOutput, changed: z.boolean() }),
+  output: outputs.finalize_asset,
   example: { assetId: 'ast_example' },
   target: (input) => ({ kind: 'asset', id: input.assetId }),
   handler: async ({ org, blobs, input, write }) => {
@@ -388,7 +352,7 @@ const deleteAsset = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ assetId: id('asset') }),
-  output: z.object({ deleted: z.string().describe("The deleted asset's id") }),
+  output: outputs.delete_asset,
   example: { assetId: 'ast_example' },
   target: (input) => ({ kind: 'asset', id: input.assetId }),
   handler: async ({ org, blobs, input, write }) => {

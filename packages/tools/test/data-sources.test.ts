@@ -1,6 +1,5 @@
 // Data source tools (M3-23): CRUD over an org's feeds, with the feed URL sealed before it is stored.
-import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { dispatch, registry, type Caller, type FeedUrlSealer, type PlaceFinder, type TableReader, ToolError } from '../src';
@@ -21,7 +20,7 @@ const refusal = (name: string, input: unknown, caller = owner) => dispatch(regis
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'feeds-org');
-  owner = memberOf(scoped(env.DB, o.orgId), 'owner', { feedUrls: sealer });
+  owner = memberOf(testScope(env.DB, o.orgId), 'owner', { feedUrls: sealer });
 });
 
 describe('data sources', () => {
@@ -53,7 +52,7 @@ describe('data sources', () => {
   });
 
   it('lists each source with its last good check and the spots that bind it, as drafted or as published', async () => {
-    await owner.org.spots.update(o.templateSpot, { bindingsJson: JSON.stringify({ title: { source: 'holidays', path: 'events.0.title' } }) });
+    await o.scope.spots.update(o.templateSpot, { bindingsJson: JSON.stringify({ title: { source: 'holidays', path: 'events.0.title' } }) });
     const { dataSources } = await call('list_data_sources', {});
     const holidays = dataSources.find((d: { id: string }) => d.id === 'holidays');
     expect(holidays).toMatchObject({ lastCheckedAt: 2000, spots: [{ id: o.templateSpot, name: expect.any(String) }] });
@@ -63,12 +62,12 @@ describe('data sources', () => {
       lastCheckedAt: null,
       spots: [],
     });
-    await owner.org.spots.update(o.templateSpot, { bindingsJson: null });
+    await o.scope.spots.update(o.templateSpot, { bindingsJson: null });
     await call('delete_data_source', { dataSourceId: 'unpolled' });
   });
 
   it('updates, polling a changed URL afresh', async () => {
-    await owner.org.dataSources.update('holidays', { etag: '"old"', failures: 3, lastError: 'timeout', nextPollAt: 99 });
+    await o.scope.dataSources.update('holidays', { etag: '"old"', failures: 3, lastError: 'timeout', nextPollAt: 99 });
     const { dataSource } = await call('update_data_source', { dataSourceId: 'holidays', feedUrl: 'https://other.example.com/h.ics', horizonDays: null });
     expect(dataSource).toMatchObject({ horizonDays: null, failures: 0, lastError: null });
     expect(await owner.org.dataSources.get('holidays')).toMatchObject({
@@ -102,13 +101,13 @@ describe('data sources', () => {
   });
 
   it('refuses to delete a source a spot binds, and deletes one no spot binds', async () => {
-    await owner.org.spots.update(o.templateSpot, { bindingsJson: JSON.stringify({ title: { source: 'holidays', path: 'events.0.title' } }) });
+    await o.scope.spots.update(o.templateSpot, { bindingsJson: JSON.stringify({ title: { source: 'holidays', path: 'events.0.title' } }) });
     expect(await refusal('delete_data_source', { dataSourceId: 'holidays' })).toMatchObject({
       ok: false,
       error: 'conflict',
       details: { spotIds: [o.templateSpot] },
     });
-    await owner.org.spots.update(o.templateSpot, { bindingsJson: null });
+    await o.scope.spots.update(o.templateSpot, { bindingsJson: null });
     expect(await call('delete_data_source', { dataSourceId: 'holidays' })).toEqual({ deleted: 'holidays' });
     expect(await owner.org.dataSources.snapshot('holidays')).toBeUndefined();
   });
@@ -120,7 +119,7 @@ describe('table sources', () => {
       dataSourceId: (await call('create_data_source', { name: 'x', format: 'json', feedUrl: 'https://a.example.com/x' })).dataSource.id,
     });
     const ids = (await owner.org.dataSources.list()).map((d) => d.id);
-    for (const id of ids.slice(0, 2)) await owner.org.dataSources.delete(id);
+    for (const id of ids.slice(0, 2)) await o.scope.dataSources.delete(id);
     const { dataSource: csv } = await call('create_data_source', { id: 'menu', name: 'Menu', format: 'csv', feedUrl: 'https://menu.example.com/menu.csv' });
     expect(csv).toMatchObject({ format: 'csv', rowsPath: null });
     const { dataSource: json } = await call('create_data_source', {
@@ -139,7 +138,7 @@ describe('table sources', () => {
   });
 
   it('polls a json-table source afresh when the path to its rows changes', async () => {
-    await owner.org.dataSources.update('stock', { etag: '"e"', failures: 2, lastError: 'not-a-table', nextPollAt: 99 });
+    await o.scope.dataSources.update('stock', { etag: '"e"', failures: 2, lastError: 'not-a-table', nextPollAt: 99 });
     expect(await call('update_data_source', { dataSourceId: 'stock', rowsPath: null })).toMatchObject({
       dataSource: { rowsPath: null, failures: 0, lastError: null },
     });

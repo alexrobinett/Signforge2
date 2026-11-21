@@ -11,9 +11,10 @@ import { BINDING_PATH, type DataSnapshot } from '@signforge/contract';
 import { type DataSourceRow, newId, type OrgScope, published } from '@signforge/db';
 import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
 import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name, version } from './fields';
-import { nextOutput, page, pageInput } from './paging';
+import { id, idempotencyKey, ifVersion, name } from './fields';
+import { page, pageInput } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
+import { type dataSourceOutput, outputs, sourceFormat, TABLE_FORMATS } from './outputs';
 
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
 const MAX_DATA_SOURCES = 10;
@@ -40,12 +41,6 @@ const horizonDays = z
   .min(1)
   .max(366)
   .describe('Calendars only: how many days ahead events reach (default 30). A holiday board wants months, a meeting room days');
-const TABLE_FORMATS = ['csv', 'json-table'] as const;
-const format = z
-  .enum(['json', 'ical', 'rss', ...TABLE_FORMATS, 'provider'])
-  .describe(
-    "json passes through; ical becomes a CalendarFeed, rss (RSS 2.0 or Atom) a NewsFeed, csv (with a header row) and json-table (a list of objects) a TableFeed; provider reads a resource through a connection, shaped by the connection's provider",
-  );
 const rowsPath = z
   .string()
   .max(200)
@@ -66,26 +61,6 @@ function locatorOf(v: { format: string; feedUrl?: string; connectionId?: string;
   if (!locator) throw new ToolError('invalid_input', PROVIDER_FIELDS);
   return locator;
 }
-
-const dataSourceOutput = z.object({
-  id: z.string(),
-  name: z.string(),
-  format,
-  connectionId: z.string().nullable().describe('A provider source: the connection it reads through'),
-  refreshS: z.number(),
-  horizonDays: z.number().nullable(),
-  rowsPath: z.string().nullable().describe('A json-table source: the path to its list of objects; null for the whole document'),
-  nextPollAt: z.number(),
-  failures: z.number().describe('Polls in a row that failed; the poller backs off, up to 6 hours'),
-  lastError: z
-    .string()
-    .nullable()
-    .describe('Why the last poll failed, as a category (timeout, http-status, private-address, ...; for a provider source needs-reconnect or disconnected)'),
-  version: version.describe('Moves on when the source is changed (not with polls); pass it as ifVersion to update only what you read'),
-  createdAt: z.number(),
-  updatedAt: z.number(),
-});
-const dataSourceResult = z.object({ dataSource: dataSourceOutput });
 
 const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   id: d.id,
@@ -125,11 +100,6 @@ const HORIZON_ONLY_ICAL = 'horizonDays is for ical sources only';
 
 const target = (input: { dataSourceId: string }) => ({ kind: 'data_source', id: input.dataSourceId });
 
-const listedSourceOutput = dataSourceOutput.extend({
-  lastCheckedAt: z.number().nullable().describe('When a poll last found the feed still saying it: its last good check'),
-  spots: z.array(z.object({ id: z.string(), name: z.string() })).describe('The spots that bind it, as drafted or as published'),
-});
-
 const listDataSources = defineTool({
   name: 'list_data_sources',
   description:
@@ -138,7 +108,7 @@ const listDataSources = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ ...pageInput }),
-  output: z.object({ dataSources: z.array(listedSourceOutput), next: nextOutput }),
+  output: outputs.list_data_sources,
   example: {},
   handler: async ({ org, input }) => {
     const { rows, next } = page(await org.dataSources.list(), (d) => [d.id], input);
@@ -162,10 +132,6 @@ const listDataSources = defineTool({
   },
 });
 
-const snapshotOutput = z
-  .object({ id: z.string(), version: z.number(), fetchedAt: z.string(), checkedAt: z.string(), data: z.unknown() })
-  .describe('The latest snapshot, as screens get it; null until a poll succeeds');
-
 const getDataSource = defineTool({
   name: 'get_data_source',
   description:
@@ -174,7 +140,7 @@ const getDataSource = defineTool({
   minRole: 'viewer',
   mutates: false,
   input: z.object({ dataSourceId: id('data source') }),
-  output: z.object({ dataSource: dataSourceOutput, snapshot: snapshotOutput.nullable() }),
+  output: outputs.get_data_source,
   example: { dataSourceId: 'weather' },
   handler: async ({ org, input }) => {
     const row = await requireSource(org, input.dataSourceId);
@@ -204,7 +170,7 @@ const createDataSource = defineTool({
     .object({
       id: id('data source').optional().describe('The id spots bind with, such as weather; made for you if absent'),
       name: name('data source'),
-      format,
+      format: sourceFormat,
       feedUrl: feedUrl.optional().describe('Feeds: the URL, https, on the default port, naming a public host. Stored encrypted and never shown again'),
       connectionId: id('connection').optional().describe('Provider sources only: the connection to read through'),
       resource: resource.optional(),
@@ -215,7 +181,7 @@ const createDataSource = defineTool({
     })
     .refine((v) => calendarOnly(v.format, v.horizonDays), { message: HORIZON_ONLY_ICAL, path: ['horizonDays'] })
     .refine((v) => jsonTableOnly(v.format, v.rowsPath), { message: ROWS_PATH_ONLY_JSON_TABLE, path: ['rowsPath'] }),
-  output: dataSourceResult,
+  output: outputs.create_data_source,
   example: {
     id: 'weather',
     name: 'Weather, Atlanta',
@@ -264,7 +230,7 @@ const updateDataSource = defineTool({
     rowsPath: rowsPath.nullable().optional(),
     ifVersion,
   }),
-  output: dataSourceResult,
+  output: outputs.update_data_source,
   example: { dataSourceId: 'weather', refreshS: 600 },
   target,
   handler: async ({ org, input, write, services: { feedUrls } }) => {
@@ -314,7 +280,7 @@ const deleteDataSource = defineTool({
   minRole: 'editor',
   mutates: true,
   input: z.object({ dataSourceId: id('data source') }),
-  output: z.object({ deleted: z.string().describe("The deleted data source's id") }),
+  output: outputs.delete_data_source,
   example: { dataSourceId: 'weather' },
   target,
   handler: async ({ org, input, write }) => {
@@ -324,16 +290,6 @@ const deleteDataSource = defineTool({
     write(org.dataSources.stage.delete(input.dataSourceId));
     return { deleted: input.dataSourceId };
   },
-});
-
-const placeOutput = z.object({
-  id: z.number().describe("The geocoder's id for the place"),
-  name: z.string(),
-  region: z.string().describe("State or province, or ''"),
-  country: z.string(),
-  latitude: z.number(),
-  longitude: z.number(),
-  timezone: z.string().describe('IANA time zone'),
 });
 
 const findPlaces = defineTool({
@@ -346,7 +302,7 @@ const findPlaces = defineTool({
   // Unlimited, one member could use up the geocoder's free allowance for every org.
   needs: ['rateLimit', 'places'],
   input: z.object({ query: z.string().trim().min(2, 'type at least 2 letters of the place').max(100).describe('A place name, such as Atlanta') }),
-  output: z.object({ places: z.array(placeOutput) }),
+  output: outputs.find_places,
   example: { query: 'Atlanta' },
   handler: async ({ input, services: { places, rateLimit } }) => {
     if (!(await rateLimit('place_search'))) throw new ToolError('rate_limited', 'too many place searches; wait a minute and try again');
@@ -370,11 +326,7 @@ const readTable = defineTool({
       rowsPath: rowsPath.optional(),
     })
     .refine((v) => jsonTableOnly(v.format, v.rowsPath), { message: ROWS_PATH_ONLY_JSON_TABLE, path: ['rowsPath'] }),
-  output: z.object({
-    table: z
-      .object({ columns: z.array(z.string()), rows: z.array(z.array(z.union([z.string(), z.number()]))) })
-      .describe('The TableFeed a snapshot would hold'),
-  }),
+  output: outputs.read_table,
   example: { feedUrl: 'https://example.com/menu.csv', format: 'csv' },
   handler: async ({ input, services: { tables, rateLimit } }) => {
     if (!(await rateLimit('table_read'))) throw new ToolError('rate_limited', 'too many table reads; wait a minute and try again');

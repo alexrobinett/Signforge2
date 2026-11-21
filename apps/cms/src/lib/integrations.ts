@@ -4,34 +4,21 @@
  * what is built and what is planned. Only the built ones do anything; the roadmap is #81.
  */
 import { SNAPSHOT_STALE_MS } from '@signforge/contract';
-import type { DataSourceView } from './live-data';
+import type { ToolOutput } from '@signforge/tools/outputs';
 
 const DAY_MS = 86_400_000;
 
 /** One data source as `list_data_sources` lists it: the view `get_data_source` gives too, with its health and the spots that read it. */
-export interface ListedSource extends DataSourceView {
-  /** A provider source: the connection it reads through. */
-  connectionId: string | null;
-  nextPollAt: number;
-  /** When a poll last found the data screens have still current; null before a good poll. */
-  lastCheckedAt: number | null;
-  spots: { id: string; name: string }[];
-}
+export type ListedSource = ToolOutput<'list_data_sources'>['dataSources'][number];
 
-export type SourceFormat = DataSourceView['format'];
+export type SourceFormat = ListedSource['format'];
 
 /** What the page groups sources by: their format, with a CSV and a JSON table one kind (issue #84). */
 export type SourceKind = Exclude<SourceFormat, 'csv' | 'json-table'> | 'table';
 export const kindOf = (format: SourceFormat): SourceKind => (format === 'csv' || format === 'json-table' ? 'table' : format);
 
 /** An account the org connected at a provider, as `list_connections` lists it; never its credentials. */
-export interface ConnectionView {
-  id: string;
-  provider: string;
-  account: string;
-  status: 'active' | 'needs_reconnect' | 'disconnected';
-  lastError: string | null;
-}
+export type ConnectionView = ToolOutput<'list_connections'>['connections'][number];
 
 /** A provider's name as people write it: `google` is Google. */
 export const providerName = (provider: string) => provider.charAt(0).toUpperCase() + provider.slice(1);

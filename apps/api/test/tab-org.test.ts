@@ -1,7 +1,7 @@
 // A CMS tab names the org it shows (#129). After the member switches org in another tab, a call
 // from the tab still showing the old org is refused, never run in the session's new org.
 import { env } from 'cloudflare:workers';
-import { scoped } from '@signforge/db';
+import { testScope } from '@signforge/db/testing';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { TAB_ORG_HEADER } from '../src/api/tab-org';
 import { Client, email, testApp } from './client';
@@ -21,7 +21,7 @@ beforeAll(async () => {
   await alice.signIn(email('alice'));
   await bob.signIn(email('bob'));
   north = (await alice.createOrg('Northside')).id;
-  screen = (await scoped(env.DB, north).screens.insert({ name: 'Lobby', timezone: 'UTC', orientation: 'landscape' })).id;
+  screen = (await testScope(env.DB, north).screens.insert({ name: 'Lobby', timezone: 'UTC', orientation: 'landscape' })).id;
   south = (await alice.createOrg('Southside')).id;
   bobs = (await bob.createOrg('Bob Co')).id;
   // Another tab switched to Southside: this session's active org.
@@ -33,7 +33,7 @@ describe("a tab on the session's old org", () => {
     const res = await alice.tool('rename_screen', { screenId: screen, name: 'Moved' }, from(north));
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual(switched);
-    expect(await scoped(env.DB, north).screens.get(screen)).toMatchObject({ name: 'Lobby' });
+    expect(await testScope(env.DB, north).screens.get(screen)).toMatchObject({ name: 'Lobby' });
   });
 
   it("is refused a read, such as the audit log an export pages through, rather than given the new org's", async () => {

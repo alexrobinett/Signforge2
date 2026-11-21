@@ -7,39 +7,14 @@
  */
 import type { ScheduleEntry, ScreenManifest } from '@signforge/contract';
 import { activeTakeover, localTime, resolvePlaylist } from '@signforge/player-core';
+import type { ToolOutput } from '@signforge/tools/outputs';
 import { dayRange } from './days';
 
-/** What an entry plays where and when, as drafted or as published. */
-interface EntryFields {
-  playlistId: string;
-  target: 'org' | 'group' | 'screen';
-  groupId: string | null;
-  screenId: string | null;
-  priority: number;
-  startDate: string | null;
-  endDate: string | null;
-  days: number[] | null;
-  from: string | null;
-  to: string | null;
-  startsAt: string | null;
-  endsAt: string | null;
-  takeover: boolean;
-}
+/** One schedule entry or takeover, its draft, as `list_schedule_entries` returns it: `deleted` waits for a publish, `live` is what screens play. */
+export type ScheduleEntryView = ToolOutput<'list_schedule_entries'>['entries'][number];
 
-/** One schedule entry or takeover, its draft, as `list_schedule_entries` returns it. */
-export interface ScheduleEntryView extends EntryFields {
-  id: string;
-  /** Deleted, waiting for a publish: screens keep `live` until then. */
-  deleted: boolean;
-  /** The published version, what screens play; null if never published. */
-  live: EntryFields | null;
-  version: number;
-  published: boolean;
-  draftChanged: boolean;
-  publishedAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-}
+/** What an entry plays where and when, as drafted or as published. */
+type EntryFields = NonNullable<ScheduleEntryView['live']>;
 
 /** "Mon–Fri, 06:00–10:00", "Sat, all day, 2026-12-01 to 2026-12-24", or "Always". */
 export function describeWhen(e: Pick<ScheduleEntryView, 'days' | 'from' | 'to' | 'startDate' | 'endDate'>): string {

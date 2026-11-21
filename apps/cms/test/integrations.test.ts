@@ -29,6 +29,8 @@ const source = (over: Partial<ListedSource> = {}): ListedSource => ({
   failures: 0,
   lastError: null,
   version: 1,
+  createdAt: 0,
+  updatedAt: 0,
   lastCheckedAt: Date.parse('2026-11-18T15:05:00Z'),
   spots: [],
   ...over,
@@ -97,7 +99,18 @@ describe('a source in words', () => {
 });
 
 describe('what the connection callback sent back', () => {
-  const google: ConnectionView = { id: 'con_1', provider: 'google', account: 'facilities@example.com', status: 'active', lastError: null };
+  const google: ConnectionView = {
+    id: 'con_1',
+    provider: 'google',
+    account: 'facilities@example.com',
+    scopes: [],
+    status: 'active',
+    expiresAt: null,
+    lastError: null,
+    createdBy: 'usr_1',
+    createdAt: 0,
+    updatedAt: 0,
+  };
 
   it('says connected only for a connection the org has', () => {
     expect(connectionNotice({ connected: 'con_1' }, [google])).toBe('Connected facilities@example.com at Google.');

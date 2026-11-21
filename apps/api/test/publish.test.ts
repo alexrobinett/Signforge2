@@ -1,8 +1,7 @@
 // Publishing from the CMS (M3-18): the publish tool through the API's caller, its org lock, and
 // the queue that tells the screens it switched.
 import type { ServerSocketMessage } from '@signforge/contract';
-import { scoped } from '@signforge/db';
-import { seedOrg } from '@signforge/db/testing';
+import { seedOrg, testScope } from '@signforge/db/testing';
 import { dispatch, registry, type Caller } from '@signforge/tools';
 import { runInDurableObject } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
@@ -25,7 +24,7 @@ async function until(check: () => boolean | Promise<boolean>, ms = 5000) {
 describe('publish through the API', () => {
   it("switches a screen and reaches its open socket through the queue, holding the org's lock", async () => {
     const seed = await seedOrg(env.DB, 'api-publish');
-    const org = scoped(env.DB, seed.orgId);
+    const org = testScope(env.DB, seed.orgId);
     const { credential, secretHash } = await mintCredential(seed.screen);
     await org.screens.credentials.insert({ screenId: seed.screen, secretHash });
     const { socketTicket } = await syncAs(credential, syncBody());

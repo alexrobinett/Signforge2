@@ -28,9 +28,6 @@ export const pageInput = {
   cursor: z.string().max(1000).optional().describe("The previous page's next, to get the page after it"),
 };
 
-/** The output field a list tool adds. */
-export const nextOutput = z.string().nullable().describe('Pass as cursor to get the next page; null on the last page');
-
 /** A sort key: compared element by element. */
 export type SortKey = readonly (string | number)[];
 

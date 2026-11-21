@@ -26,7 +26,7 @@ import { assetsQuery, dataSourceKeys, dataSourceQuery, spotKeys, spotPreviewQuer
 import { compilePreview, draftOf, fieldProblems, versionsById, type SpotDraft, type SpotKind, type SpotView } from '~/lib/spots';
 import { orgOnScreen } from '~/lib/live';
 import { madeByEditor } from '~/lib/live-data';
-import { callTool, spotOf, ToolCallError, toolMessage } from '~/lib/tools';
+import { callTool, Refusal, toolMessage } from '~/lib/tools';
 import type { SliceCreator } from './store';
 import { autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
@@ -262,14 +262,14 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     state: { read: () => get().spotEditor.drafts, write: (change) => editor((e) => ({ ...e, drafts: change(e.drafts) })) },
     async save({ key: spotId, draft: { orgId, edit: d, version } }) {
       const spot = await queryClient.query({ ...spotQuery(orgId, spotId), staleTime: 'static' });
-      if (!spot) throw new ToolCallError('not_found', 'This spot was deleted.');
+      if (!spot) throw new Refusal('not_found', 'This spot was deleted.');
       const kindFields =
         spot.kind === 'template'
           ? { data: d.data, assets: d.assets, bindings: d.bindings }
           : spot.kind === 'url'
             ? { url: d.url }
             : { fit: d.fit, ...(d.assetId ? { assetId: d.assetId } : {}) };
-      const saved = spotOf(await callTool('update_spot', { spotId, name: d.name.trim(), durationMs: d.durationMs, ...kindFields, ifVersion: version }));
+      const saved = (await callTool('update_spot', { spotId, name: d.name.trim(), durationMs: d.durationMs, ...kindFields, ifVersion: version })).spot;
       queryClient.setQueryData(spotKeys.one(orgId, spotId), saved);
       void dropUnbound(orgId, spot, saved);
       void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
@@ -347,7 +347,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
             ? { kind: 'url', url: d.url.trim() }
             : { kind: 'image', assetId: d.assetId };
       try {
-        const spot = spotOf(await callTool('create_spot', { name: d.name.trim(), ...kind, idempotencyKey: key }));
+        const spot = (await callTool('create_spot', { name: d.name.trim(), ...kind, idempotencyKey: key })).spot;
         queryClient.setQueryData(spotKeys.one(orgId, spot.id), spot);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
         await router.navigate({ to: '/spots/$spotId', params: { spotId: spot.id } });

@@ -1,5 +1,5 @@
 // The conventions every tool keeps: it declares what it returns, and a list pages.
-import { scoped } from '@signforge/db';
+import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -16,6 +16,7 @@ import {
   type AnyTool,
   type Caller,
 } from '../src';
+import { outputs, type ToolName } from '../src/outputs';
 import { seededMembers } from './member';
 
 const { o, as } = seededMembers('conv-org');
@@ -35,6 +36,11 @@ describe('every registered tool', () => {
       expect(t.output, `${t.name} has no output schema`).toBeInstanceOf(z.ZodType);
       expect(() => z.toJSONSchema(t.output, { io: 'output', unrepresentable: 'any' }), t.name).not.toThrow();
     }
+  });
+
+  it('returns the output its name has in outputs.ts, the schema the CMS types its calls by', () => {
+    for (const t of all) expect(t.output === outputs[t.name as ToolName], `${t.name}'s output is not outputs.${t.name}`).toBe(true);
+    expect(Object.keys(outputs).sort()).toEqual(TOOLS.map((t) => t.name).sort());
   });
 
   it('pages if it lists: limit and cursor in, next out', () => {
@@ -96,7 +102,7 @@ describe('the output check', () => {
 
 describe('paging', () => {
   it('defaults the limit, caps it, and walks every row once', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     for (let i = 0; i < 4; i++) await org.screens.insert({ name: `Page ${i}`, timezone: 'UTC', orientation: 'landscape' });
     const all = (await org.screens.list()).map((s) => s.id);
     expect(all.length).toBe(5);
@@ -121,7 +127,7 @@ describe('paging', () => {
   });
 
   it('gives every list tool the same rows, in the same order, one at a time as all at once', async () => {
-    const org = scoped(env.DB, o.orgId);
+    const org = testScope(env.DB, o.orgId);
     // Assets made back to back often share a millisecond; the id breaks the tie.
     for (const n of ['Tie a', 'Tie b', 'Tie c'])
       await org.assets.insert({ kind: 'image', name: n, sha256: 'a'.repeat(64), type: 'image/png', size: 1, width: 1, height: 1, status: 'verified' });

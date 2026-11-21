@@ -1,7 +1,7 @@
 // Connectors (#83): the OAuth round trip through the real routes against a fake provider
 // (test/fake-provider.ts), credentials sealed at rest and never shown or audited, refresh,
 // revoke on disconnect, and provider data sources polled through their adapter.
-import { scoped } from '@signforge/db';
+import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ProviderError, type ProviderFetch, providerFetch } from '../src/connectors/adapter';
@@ -36,7 +36,7 @@ const connectionIdOf = async (who: Client) => (await connect(who)).searchParams.
 
 /** Everything SignForge stores or shows about this org that a token could leak into. */
 async function everythingShown(who: Client, id: string) {
-  const org = scoped(env.DB, id);
+  const org = testScope(env.DB, id);
   return JSON.stringify([
     await json(await who.tool('list_connections', {})),
     await json(await who.tool('list_data_sources', {})),
@@ -52,7 +52,7 @@ async function rotatingSource(sourceId: string) {
   const who = new Client(testApp({ connectors: { adapters: [rotating.adapter], fetch: rotating.fetch } }));
   await who.signIn(email(sourceId));
   const id = (await who.createOrg(`Rotating ${sourceId}`)).id;
-  const o = scoped(env.DB, id);
+  const o = testScope(env.DB, id);
   const { authorizeUrl } = await json(await who.tool('start_connection', { provider: 'fake' }));
   const back = rotating.consent(authorizeUrl);
   const conn = new URL((await who.get(`${back.pathname}${back.search}`)).headers.get('location') ?? '', 'https://x').searchParams.get('connected') ?? '';
@@ -105,7 +105,7 @@ describe('connecting an account', () => {
 
   it('seals the tokens, bound to the org and connection, and never shows or audits one', async () => {
     const id = await connectionIdOf(owner);
-    const row = await scoped(env.DB, orgId).connections.get(id);
+    const row = await testScope(env.DB, orgId).connections.get(id);
     const grant = await openGrant(env, { orgId, id }, row?.credentialsSealed ?? '');
     expect(grant).toMatchObject({ accessToken: expect.stringMatching(/^fake-access-/), refreshToken: expect.stringMatching(/^fake-refresh-/) });
     expect(await openGrant(env, { orgId, id: 'con_other' }, row?.credentialsSealed ?? '')).toBeUndefined();
@@ -140,12 +140,12 @@ describe('connecting an account', () => {
   it("refuses a callback for another org's authorization, which its member can still finish", async () => {
     const { authorizeUrl } = await json(await owner.tool('start_connection', { provider: 'fake' }));
     const back = fake.consent(authorizeUrl);
-    const before = (await scoped(env.DB, orgId).connections.list()).length;
+    const before = (await testScope(env.DB, orgId).connections.list()).length;
     const wrong = await stranger.get(`${back.pathname}${back.search}`);
     expect(new URL(wrong.headers.get('location') ?? '', 'https://x').searchParams.get('connectionError')).toBe('not_found');
     const right = await owner.get(`${back.pathname}${back.search}`);
     expect(new URL(right.headers.get('location') ?? '', 'https://x').searchParams.get('connected')).toMatch(/^con_/);
-    expect((await scoped(env.DB, orgId).connections.list()).length).toBe(before + 1);
+    expect((await testScope(env.DB, orgId).connections.list()).length).toBe(before + 1);
   });
 
   it('refuses a code issued for another PKCE challenge (an attacker swapping in their own code)', async () => {
@@ -183,7 +183,7 @@ describe('connecting an account', () => {
       expect(r.status).toBe(303);
       return Object.fromEntries(new URL(r.headers.get('location') ?? '', 'https://x').searchParams);
     });
-    return { provider, outcomes, connections: await scoped(env.DB, id).connections.list() };
+    return { provider, outcomes, connections: await testScope(env.DB, id).connections.list() };
   }
 
   it('answers a doubled callback cleanly when the granted one commits first: one connection, one refusal', async () => {
@@ -208,12 +208,12 @@ describe('connecting an account', () => {
 
   it('revokes the grant at the provider on disconnect, and deletes the credentials', async () => {
     const id = await connectionIdOf(owner);
-    const row = await scoped(env.DB, orgId).connections.get(id);
+    const row = await testScope(env.DB, orgId).connections.get(id);
     const grant = await openGrant(env, { orgId, id }, row?.credentialsSealed ?? '');
     expect(fake.liveRefreshTokens()).toContain(grant?.refreshToken);
     expect(await json(await owner.tool('disconnect', { connectionId: id }))).toEqual({ deleted: true, dataSourceIds: [] });
     expect(fake.liveRefreshTokens()).not.toContain(grant?.refreshToken);
-    expect(await scoped(env.DB, orgId).connections.get(id)).toBeUndefined();
+    expect(await testScope(env.DB, orgId).connections.get(id)).toBeUndefined();
   });
 });
 
@@ -263,7 +263,7 @@ describe('a token answer', () => {
 describe('a provider data source', () => {
   let connectionId: string;
   let expiresAt: number;
-  const org = () => scoped(env.DB, orgId);
+  const org = () => testScope(env.DB, orgId);
   const poll = (now: number, f = fake) => pollDataSources(env, { now, connectors: { adapters: [f.adapter], fetch: f.fetch } });
   const due = (id: string) => org().dataSources.update(id, { nextPollAt: 0 });
   const tokenRequests = () => fake.requests.filter((r) => r.grantType === 'refresh_token').length;
