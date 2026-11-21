@@ -11,6 +11,8 @@ interface CommandMenuState {
   open: boolean;
   /** The tool whose form is showing, by name; null shows the list. */
   form: string | null;
+  /** Showing the member's orgs, from "Switch organization…", instead of the commands. */
+  choosingOrg: boolean;
   running: boolean;
   /** A form field the menu could not read, before anything was sent. */
   fieldError: { field: string; message: string } | null;
@@ -24,10 +26,12 @@ export interface CommandMenuSlice {
   closeCommandMenu: () => void;
   chooseCommand: (entry: CommandEntry) => Promise<void>;
   backToCommands: () => void;
+  /** Closes the menu and switches to `org`, from its list of orgs. */
+  chooseOrg: (org: { id: string; name: string }) => Promise<void>;
   submitToolForm: (label: string, tool: ToolListing, form: FormData) => Promise<void>;
 }
 
-const CLOSED: CommandMenuState = { open: false, form: null, running: false, fieldError: null, pending: null };
+const CLOSED: CommandMenuState = { open: false, form: null, choosingOrg: false, running: false, fieldError: null, pending: null };
 
 export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router }) => {
   const run = async (label: string, tool: ToolListing, read: Record<string, unknown>) => {
@@ -50,16 +54,29 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
     openCommandMenu: () => set((s) => ({ commandMenu: { ...CLOSED, open: true, pending: s.commandMenu.pending }, ui: { ...s.ui, drawerOpen: false } })),
     closeCommandMenu: () => set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } })),
     chooseCommand: async (entry) => {
-      if (entry.kind === 'go') {
-        set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
-        await router.navigate({ to: entry.to });
-      } else if (needsInput(entry.tool)) {
-        set((s) => ({ commandMenu: { ...s.commandMenu, form: entry.tool.name, fieldError: null } }));
-      } else {
-        await run(entry.label, entry.tool, {});
+      switch (entry.kind) {
+        case 'go':
+          set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
+          await router.navigate({ to: entry.to });
+          return;
+        case 'tool':
+          if (needsInput(entry.tool)) set((s) => ({ commandMenu: { ...s.commandMenu, form: entry.tool.name, fieldError: null } }));
+          else await run(entry.label, entry.tool, {});
+          return;
+        case 'org':
+          if (entry.action === 'switch') {
+            set((s) => ({ commandMenu: { ...s.commandMenu, choosingOrg: true } }));
+          } else {
+            set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
+            get().openCreateOrg();
+          }
       }
     },
-    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, fieldError: null } })),
+    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, choosingOrg: false, fieldError: null } })),
+    chooseOrg: async (org) => {
+      set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
+      await get().switchOrg(org, 'switcher');
+    },
     submitToolForm: async (label, tool, form) => {
       if (get().commandMenu.running) return;
       const read = toolInput(tool.fields, form);

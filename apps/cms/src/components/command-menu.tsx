@@ -1,13 +1,15 @@
 import { useParams } from '@tanstack/react-router';
-import { ArrowLeftIcon, CornerDownLeftIcon, LoaderCircleIcon } from 'lucide-react';
+import { ArrowLeftIcon, Building2Icon, CheckIcon, CornerDownLeftIcon, LoaderCircleIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useCallback } from 'react';
 import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { commandEntries, NULL_CHOICE, type CommandEntry, type Field, type ToolListing } from '~/lib/command-menu';
+import { OrgAvatar } from '~/components/org-switcher';
+import { commandEntries, NULL_CHOICE, orgCommands, type CommandEntry, type Field } from '~/lib/command-menu';
 import { SECTIONS } from '~/lib/sections';
+import type { Shell } from '~/server/shell.functions';
 import { useAppStore } from '~/state/provider';
 
 const FIELD =
@@ -16,6 +18,9 @@ const FIELD =
 const Mono = ({ children, className = '' }: { children: string; className?: string }) => (
   <span className={`shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground ${className}`}>{children}</span>
 );
+
+/** The org list's first button takes focus when the list replaces the commands. Stable, so it runs once. */
+const focusFirstButton = (list: HTMLUListElement | null) => list?.querySelector('button')?.focus();
 
 /** The form's first field takes focus when the form appears. Stable, so it runs once per form. */
 const focusFirstField = (form: HTMLFormElement | null) => form?.querySelector<HTMLElement>('input, select, textarea')?.focus();
@@ -135,20 +140,65 @@ function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> })
 }
 
 /**
- * ⌘K: go to any section, or run any tool the member's role allows, from every signed-in page.
- * The entries are the tool registry agents call (src/lib/command-menu.ts). It opens with no motion.
+ * "Switch organization…": the member's orgs as buttons, the active one marked, the first focused.
+ * Not a second cmdk list: cmdk 1.1.1 leaves `aria-activedescendant` on an item a filter removed.
  */
-export function CommandMenu({ tools }: { tools: ToolListing[] }) {
+function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
+  const back = useAppStore((s) => s.backToCommands);
+  const chooseOrg = useAppStore((s) => s.chooseOrg);
+  const switchingTo = useAppStore((s) => s.orgs.switchingTo);
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center gap-2 border-b py-2.5 pr-4 pl-2">
+        <Button type="button" variant="ghost" size="icon" onClick={back} aria-label="Back to commands">
+          <ArrowLeftIcon className="size-4.5" aria-hidden />
+        </Button>
+        <h3 id="switch-org-heading" className="text-base font-semibold">
+          Switch organization
+        </h3>
+      </div>
+      <ul ref={focusFirstButton} aria-labelledby="switch-org-heading" className="max-h-[min(470px,60dvh)] space-y-0.5 overflow-y-auto p-2">
+        {shell.organizations.map((org) => {
+          const active = org.id === shell.organization?.id;
+          return (
+            <li key={org.id}>
+              <button
+                type="button"
+                onClick={() => void chooseOrg(org)}
+                disabled={switchingTo !== null}
+                aria-current={active || undefined}
+                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
+              >
+                <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
+                <span className="min-w-0 flex-1 truncate">{org.name}</span>
+                {active && <CheckIcon className="size-4" aria-hidden />}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * ⌘K: go to any section, run any tool the member's role allows, or switch or create an org, from
+ * every signed-in page. The tools are the registry agents call (src/lib/command-menu.ts). It opens
+ * with no motion.
+ */
+export function CommandMenu({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const open = useAppStore((s) => s.commandMenu.open);
   const form = useAppStore((s) => s.commandMenu.form);
+  const choosingOrg = useAppStore((s) => s.commandMenu.choosingOrg);
   const running = useAppStore((s) => s.commandMenu.running);
   const openMenu = useAppStore((s) => s.openCommandMenu);
   const close = useAppStore((s) => s.closeCommandMenu);
   const choose = useAppStore((s) => s.chooseCommand);
 
-  const entries = commandEntries(tools);
+  const entries = [...commandEntries(shell.tools), ...orgCommands(shell.organizations.length)];
   const picked = entries.find((e) => e.kind === 'tool' && e.tool.name === form);
   const go = entries.filter((e) => e.kind === 'go');
+  const org = entries.filter((e) => e.kind === 'org');
   const actions = entries.filter((e) => e.kind === 'tool');
   const icon = (to: string) => SECTIONS.find((s) => s.to === to)?.icon;
 
@@ -157,6 +207,7 @@ export function CommandMenu({ tools }: { tools: ToolListing[] }) {
     return (
       <CommandItem key={e.id} value={e.id} keywords={[e.label, ...e.keywords]} disabled={running} onSelect={() => void choose(e)}>
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
+        {e.kind === 'org' && <Building2Icon className="size-4 text-muted-foreground" aria-hidden />}
         <span className="line-clamp-2 min-w-0 flex-1 sm:truncate">{e.label}</span>
         {e.kind === 'tool' && <Mono className="hidden sm:inline">{e.tool.name}</Mono>}
       </CommandItem>
@@ -174,6 +225,8 @@ export function CommandMenu({ tools }: { tools: ToolListing[] }) {
           </DialogPrimitive.Description>
           {picked?.kind === 'tool' ? (
             <ToolForm key={picked.id} entry={picked} />
+          ) : choosingOrg ? (
+            <OrgList shell={shell} hues={hues} />
           ) : (
             <Command label="Search pages and actions" loop>
               <CommandInput placeholder="Go to a page, or type an action">
@@ -182,6 +235,7 @@ export function CommandMenu({ tools }: { tools: ToolListing[] }) {
               <CommandList>
                 <CommandEmpty>No page or action matches. Try a verb like “rename” or “restart”.</CommandEmpty>
                 <CommandGroup heading="Go to">{go.map(item)}</CommandGroup>
+                <CommandGroup heading="Organization">{org.map(item)}</CommandGroup>
                 {actions.length > 0 && <CommandGroup heading="Actions">{actions.map(item)}</CommandGroup>}
               </CommandList>
               <p className="flex items-center gap-2 border-t bg-muted/50 px-4 py-3 text-[13px] text-muted-foreground">

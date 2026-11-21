@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
-import { LogOutIcon, MonitorIcon, MoonIcon, SunIcon, UserIcon } from 'lucide-react';
+import { LogOutIcon, MonitorIcon, MoonIcon, PlusIcon, SunIcon, UserIcon } from 'lucide-react';
 import { Button } from '~/components/ui/button';
 import {
   DropdownMenu,
@@ -32,6 +32,7 @@ export function UserMenu({ user, compact = false }: { user: Shell['user']; compa
   const navigate = useNavigate();
   const theme = useAppStore((s) => s.ui.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const openCreateOrg = useAppStore((s) => s.openCreateOrg);
   const display = user.name || user.email;
 
   async function signOut() {
@@ -75,6 +76,9 @@ export function UserMenu({ user, compact = false }: { user: Shell['user']; compa
           <Link to="/account">
             <UserIcon aria-hidden /> Your account
           </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={openCreateOrg}>
+          <PlusIcon aria-hidden /> Create organization…
         </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>

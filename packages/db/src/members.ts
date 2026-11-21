@@ -27,6 +27,23 @@ export async function memberOrgNames(d1: D1Database, userId: string, orgIds: str
   return new Map(rows.map((r) => [r.id, r.name]));
 }
 
+/**
+ * The org a new session starts in (#182): the user's only org, or the one they last made active
+ * while they are still its member; otherwise none, and the CMS asks which. The remembered org is
+ * written by the `session_org_remembered` trigger (migration 0029), and the insert's
+ * `session_org_is_a_membership` trigger clears an org whose membership ended after this read.
+ */
+export async function startingOrg(d1: D1Database, userId: string): Promise<string | null> {
+  const rows = await drizzle(d1)
+    .select({ orgId: member.organizationId, last: user.lastActiveOrganizationId })
+    .from(member)
+    .innerJoin(user, eq(user.id, member.userId))
+    .where(eq(member.userId, userId))
+    .all();
+  if (rows.length === 1) return rows[0]!.orgId;
+  return rows.find((r) => r.orgId === r.last)?.orgId ?? null;
+}
+
 /** Whether an organization exists. The deploy-secret tree checks the org it is told to write to. */
 export async function organizationExists(d1: D1Database, orgId: string): Promise<boolean> {
   return (await drizzle(d1).select({ id: organization.id }).from(organization).where(eq(organization.id, orgId)).get()) !== undefined;
