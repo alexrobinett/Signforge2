@@ -62,10 +62,6 @@
       "size": 77514,
       "type": "text/html"
     },
-    "1cd48aa96096ac70ce01aecdce737986e9f4bd7f90a9dfac1074c2467fa76c50": {
-      "size": 395995,
-      "type": "text/html"
-    },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
       "size": 639,
       "type": "image/svg+xml"
@@ -81,6 +77,10 @@
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
+    },
+    "86a3977f8cffa6d9efe3b8b155d97a1ed12842e7e3f7f89a65fa033891023cef": {
+      "size": 396101,
+      "type": "text/html"
     },
     "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
       "size": 23664,
@@ -111,7 +111,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "5c8664cbfa36c22ce313af144be2a5c0848bfb39c692372d6210db1b5f673041",
+  "id": "bddabf56149b6c0bb85ff0c93195db9de5b99dbf2f3d57b848d34aa14acb729f",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -287,7 +287,7 @@
   },
   "templates": {
     "base/countdown@1.0.0": {
-      "html": "1cd48aa96096ac70ce01aecdce737986e9f4bd7f90a9dfac1074c2467fa76c50",
+      "html": "86a3977f8cffa6d9efe3b8b155d97a1ed12842e7e3f7f89a65fa033891023cef",
       "manifest": {
         "background": "#000000",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",

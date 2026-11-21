@@ -1451,6 +1451,22 @@ describe('countdown (#198)', () => {
       }
   });
 
+  // Ambient motion and the ring's sweep took a portrait fade over 1% dropped on the Pi (spike/pi-perf/RESULTS.md, Countdown).
+  it("holds its ambient motion and Night's sweep still in portrait, and keeps them in landscape", async () => {
+    const moving: Record<string, number[]> = {};
+    for (const orientation of ['landscape', 'portrait'] as const) {
+      const s = await screen(orientation);
+      for (const look of looks) {
+        const f = await s.show({ look, mode: 'up', target: '2026-04-21T09:00', recordDays: 301 });
+        (moving[orientation] ??= []).push(
+          await f.evaluate(() => [...document.querySelectorAll('.lk-wobble, .lk-pulse, .lk-ping, .ring .fill, .arm')].filter((e) => e.getAnimations().length).length),
+        );
+      }
+    }
+    // Pop: the tile, two stickers and a dot; Night: the ping, two halves and the arm; Corporate: the marker.
+    expect(moving).toEqual({ landscape: [4, 0, 4, 1], portrait: [0, 0, 0, 0] });
+  });
+
   it('with reduced motion, shows the final frame with nothing animating', async () => {
     const s = await screen();
     await s.hst.page.emulateMedia({ reducedMotion: 'reduce' });

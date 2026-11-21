@@ -685,6 +685,12 @@ h1 {
   background: none;
   color: var(--lk-text);
 }
+/* Portrait holds its ambient motion and Night's sweep still: on the Pi they took a fade into a
+   portrait countdown over 1% dropped (Pop 1.11 to 1.78%, Night 0.94 to 1.33%), and without them it
+   stays under (spike/pi-perf/RESULTS.md, Countdown). The ring is drawn at its share from the start. */
+:root[data-orientation='portrait'] :is(.lk-wobble, .lk-pulse, .lk-ping, .ring .fill, .arm, .seam) {
+  animation: none;
+}
 :root[data-look='poster'][data-facts='off'] .stage {
   padding-bottom: 6.7vmin;
 }
