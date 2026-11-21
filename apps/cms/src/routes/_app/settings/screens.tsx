@@ -284,7 +284,8 @@ function RenameDialog({ orgId }: { orgId: string }) {
   const nameGroup = useAppStore((s) => s.nameGroup);
   const renameGroup = useAppStore((s) => s.renameGroup);
   const reload = useAppStore((s) => s.reloadGroupRename);
-  const close = useAppStore((s) => s.closeGroupDialog);
+  const reloading = useAppStore((s) => s.groups.dialog?.kind === 'rename' && s.groups.dialog.reloading);
+  const close = useAppStore((s) => s.cancelGroupDialog);
   if (!draft) return null;
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -300,13 +301,22 @@ function RenameDialog({ orgId }: { orgId: string }) {
         <form onSubmit={submit} className="grid gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor={id}>Name</Label>
-            <Input id={id} value={draft.edit.name} onChange={(e) => nameGroup(e.target.value)} maxLength={100} required />
+            {/* While Reload reads the group again, the name takes no typing: what it reopens on replaces it. */}
+            <Input
+              id={id}
+              value={draft.edit.name}
+              onChange={(e) => nameGroup(e.target.value)}
+              maxLength={100}
+              required
+              readOnly={reloading}
+              aria-busy={reloading || undefined}
+            />
           </div>
           <div role="alert" className="flex flex-wrap items-center gap-2 text-sm font-medium text-destructive empty:hidden">
             {draft.error}
             {draft.stale && (
-              <Button type="button" variant="outline" size="sm" onClick={() => void reload(orgId)}>
-                <RotateCwIcon aria-hidden /> Reload
+              <Button type="button" variant="outline" size="sm" onClick={() => void reload(orgId)} aria-disabled={reloading || undefined}>
+                {reloading ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <RotateCwIcon aria-hidden />} {reloading ? 'Reloading…' : 'Reload'}
               </Button>
             )}
           </div>
@@ -334,7 +344,7 @@ function entryText(e: ScheduleEntryView, names: Map<string, string>) {
 function DeleteDialog({ orgId, group, blockedBy, entries }: { orgId: string; group: GroupView; blockedBy: string[]; entries: ScheduleEntryView[] }) {
   const pending = useAppStore((s) => s.groups.dialog?.pending ?? false);
   const deleteGroup = useAppStore((s) => s.deleteGroup);
-  const close = useAppStore((s) => s.closeGroupDialog);
+  const close = useAppStore((s) => s.cancelGroupDialog);
   const { playlists } = useSuspenseQuery(playlistsQuery(orgId)).data;
   const names = new Map(playlists.map((p) => [p.id, p.name]));
   const blocked = blockedBy.length > 0;
@@ -363,7 +373,8 @@ function DeleteDialog({ orgId, group, blockedBy, entries }: { orgId: string; gro
           <Refused />
         )}
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={close}>
+          {/* While its delete runs, Cancel waits for it (the store ignores it), and says so. */}
+          <Button type="button" variant="outline" onClick={close} aria-disabled={pending || undefined} className={cn(pending && 'opacity-60')}>
             Cancel
           </Button>
           {blocked ? (
@@ -392,7 +403,7 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
   const search = useAppStore((s) => s.searchGroupMembers);
   const choose = useAppStore((s) => s.chooseGroupMember);
   const save = useAppStore((s) => s.saveGroupMembers);
-  const close = useAppStore((s) => s.closeGroupDialog);
+  const close = useAppStore((s) => s.cancelGroupDialog);
   if (dialog?.kind !== 'members') return null;
   const q = dialog.query.trim().toLowerCase();
   const listed = screens.filter((s) => s.name.toLowerCase().includes(q)).toSorted((a, b) => a.name.localeCompare(b.name));
@@ -448,7 +459,8 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
           </fieldset>
           <Refused />
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={close}>
+            {/* While Save runs, Cancel waits for it (the store ignores it), so a save is all or nothing. */}
+            <Button type="button" variant="outline" onClick={close} aria-disabled={pending || undefined} className={cn(pending && 'opacity-60')}>
               Cancel
             </Button>
             <Button type="submit" aria-disabled={pending || undefined}>
