@@ -67,10 +67,16 @@ it('checks what a stylesheet that style.css imports brings into the bundle: netw
     );
     writeFileSync(join(at, 'main.ts'), "import { defineTemplate } from '@signforge/template-sdk';\ndefineTemplate({});\n");
     writeFileSync(join(at, 'style.css'), "@import './extra.css';\n.a { color: var(--sf-text, #fff); }\n");
-    writeFileSync(join(at, 'extra.css'), '.b { background: url(//tracker.example/p.gif); }\n.d { color: #ff0000; }\n');
-    const { problems, report } = await buildTemplate(at);
-    expect(problems).toEqual(['a template may not load anything from the network']);
-    expect(report.warnings).toEqual([expect.stringMatching(/extra\.css:2: literal colour #ff0000 in color/)]);
+    for (const network of [
+      '.b { background: url(//tracker.example/p.gif); }',
+      '.b { background-image: image-set("//tracker.example/p.gif" 1x); }',
+      '.b { background-image: -webkit-image-set("https://tracker.example/p.gif" 1x); }',
+    ]) {
+      writeFileSync(join(at, 'extra.css'), `${network}\n.d { color: #ff0000; }\n`);
+      const { problems, report } = await buildTemplate(at);
+      expect(problems, network).toEqual(['a template may not load anything from the network']);
+      expect(report.warnings, network).toEqual([expect.stringMatching(/extra\.css:2: literal colour #ff0000 in color/)]);
+    }
   } finally {
     rmSync(at, { recursive: true, force: true });
   }
