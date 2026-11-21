@@ -1,0 +1,11 @@
+{
+  "id": "qr-fixture",
+  "version": "1.0.0",
+  "name": "QR fixture",
+  "description": "Test fixture: draws its url field as a QR code, so a test can read what the bundle carries.",
+  "fields": { "link": { "type": "url", "label": "Link", "default": "https://example.com/" } },
+  "duration": { "defaultMs": 8000, "minMs": 4000, "maxMs": 60000 },
+  "orientations": ["landscape"],
+  "uses": [],
+  "background": "#000"
+}

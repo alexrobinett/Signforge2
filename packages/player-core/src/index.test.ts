@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DataSnapshot, FieldDef, ScreenManifest, Spot, TemplateManifest } from '@signforge/contract';
-import { SNAPSHOT_STALE_MS } from '@signforge/contract';
+import { MANIFEST_SCHEMA, SNAPSHOT_STALE_MS } from '@signforge/contract';
 import {
   Sequencer,
   activeTakeover,
@@ -23,7 +23,7 @@ const spot = (id: string): Spot => ({ id, name: id, kind: 'image', file: `sha-${
 
 function manifest(over: Partial<ScreenManifest> = {}): ScreenManifest {
   return {
-    schema: 3,
+    schema: MANIFEST_SCHEMA,
     id: 'm1',
     generatedAt: '2026-11-16T00:00:00Z',
     screen: { id: 's1', name: 'Counter', timezone: 'America/New_York', orientation: 'landscape' },
@@ -475,10 +475,10 @@ describe('files', () => {
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
     // A release plays schema N and N-1, so a screen updated while offline keeps its cached manifest.
-    expect(validateManifest(manifest({ schema: 3 }))).toEqual([]);
     expect(validateManifest(manifest({ schema: 4 }))).toEqual([]);
-    expect(validateManifest(manifest({ schema: 2 }))).toEqual(['manifest schema 2 is not one this player can play (3, 4)']);
-    expect(validateManifest(manifest({ schema: 5 }))).toEqual(['manifest schema 5 is not one this player can play (3, 4)']);
+    expect(validateManifest(manifest({ schema: 5 }))).toEqual([]);
+    expect(validateManifest(manifest({ schema: 3 }))).toEqual(['manifest schema 3 is not one this player can play (4, 5)']);
+    expect(validateManifest(manifest({ schema: 6 }))).toEqual(['manifest schema 6 is not one this player can play (4, 5)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);
