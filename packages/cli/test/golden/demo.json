@@ -74,10 +74,6 @@
       "size": 1042,
       "type": "image/svg+xml"
     },
-    "51f43a39e533659bcd1968bb24d9cfc7d04a2e87c98b69c1899797b150d8fb8f": {
-      "size": 397232,
-      "type": "text/html"
-    },
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
@@ -110,12 +106,16 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "bd8c0e3ecf210d7e1b8e2b838f71c5c8c4af3e79b966ff1e31353b9794d5f86d": {
+      "size": 397258,
+      "type": "text/html"
+    },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
       "size": 24452,
       "type": "font/woff2"
     }
   },
-  "id": "3a0d1a3c6cb0964bb201f196b97a0d36086e404aed013f5a675129d297c5a7b1",
+  "id": "419311808e29709da18377ea9e33ff1ddf2f4a1dc1d74f6f29be23218788155d",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -165,7 +165,7 @@
       "to": "10:00"
     }
   ],
-  "schema": 5,
+  "schema": 6,
   "screen": {
     "displayHours": {
       "exceptions": [
@@ -304,7 +304,7 @@
   },
   "templates": {
     "base/announcement@1.0.0": {
-      "html": "51f43a39e533659bcd1968bb24d9cfc7d04a2e87c98b69c1899797b150d8fb8f",
+      "html": "bd8c0e3ecf210d7e1b8e2b838f71c5c8c4af3e79b966ff1e31353b9794d5f86d",
       "manifest": {
         "background": "#000000",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",

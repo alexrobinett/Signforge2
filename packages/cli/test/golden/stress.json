@@ -36,10 +36,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "51f43a39e533659bcd1968bb24d9cfc7d04a2e87c98b69c1899797b150d8fb8f": {
-      "size": 397232,
-      "type": "text/html"
-    },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
@@ -80,6 +76,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "bd8c0e3ecf210d7e1b8e2b838f71c5c8c4af3e79b966ff1e31353b9794d5f86d": {
+      "size": 397258,
+      "type": "text/html"
+    },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
       "sample": "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd",
       "size": 182996,
@@ -107,7 +107,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "bda5779c49a1c3b761a5d480b3460a4ce7cba7c57649cea9d6203b3a704acbcb",
+  "id": "33f25935912edeab79ef440f94058360b58d900f733b374a2524fadb9bdc50e7",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -172,7 +172,7 @@
     }
   },
   "schedule": [],
-  "schema": 5,
+  "schema": 6,
   "screen": {
     "id": "stress-screen",
     "name": "Stress test screen",
@@ -712,7 +712,7 @@
       }
     },
     "base/announcement@1.0.0": {
-      "html": "51f43a39e533659bcd1968bb24d9cfc7d04a2e87c98b69c1899797b150d8fb8f",
+      "html": "bd8c0e3ecf210d7e1b8e2b838f71c5c8c4af3e79b966ff1e31353b9794d5f86d",
       "manifest": {
         "background": "#000000",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",

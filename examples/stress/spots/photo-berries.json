@@ -1,8 +1,1 @@
-{
-  "name": "Photo promo, 1080p photo",
-  "kind": "template",
-  "template": "photo-promo",
-  "durationMs": 6000,
-  "data": { "eyebrow": "This week", "headline": "Fresh picked", "body": "Local berries, by the pint", "price": "$3.99" },
-  "assets": { "photo": "berries-1080.jpg" }
-}
+{ "name": "Photo promo, 1080p photo", "kind": "template", "template": "photo-promo", "durationMs": 6000, "data": { "eyebrow": "This week", "headline": "Fresh picked", "body": "Local berries, by the pint", "price": "$3.99" }, "assets": { "photo": "berries-1080.jpg" } }

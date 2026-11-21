@@ -4,5 +4,16 @@
     "type": "fade",
     "ms": 600
   },
-  "items": ["news-npr", "news-bbc", "news-nyt", "news-verge", "news-hn", "news-lemonde", "holidays-us", "holidays-uk", "weather-atlanta", "weather-reykjavik"]
+  "items": [
+    "news-npr",
+    "news-bbc",
+    "news-nyt",
+    "news-verge",
+    "news-hn",
+    "news-lemonde",
+    "holidays-us",
+    "holidays-uk",
+    "weather-atlanta",
+    "weather-reykjavik"
+  ]
 }
