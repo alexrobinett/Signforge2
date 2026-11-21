@@ -57,31 +57,32 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   await expect(paired).toContainText('code: [redacted]');
   await expect(paired).not.toContainText(code);
 
-  // Filter to the CMS change.
-  await page.getByLabel('What').selectOption('update_org_settings');
+  // Filter to the CMS change. The filters' labels are matched exactly: a random id in a row's
+  // "Only member <id>" link can contain "who" (#178's e2e run met mem_…kwhoy).
+  await page.getByLabel('What', { exact: true }).selectOption('update_org_settings');
   await expect(page).toHaveURL(/what=update_org_settings/);
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText('Settings changed');
   await expect(rows.first()).toContainText('timezone: Europe/London');
 
   // Search, then clear.
-  await page.getByLabel('What').selectOption('');
-  await page.getByLabel('Search').fill('Lobby 12');
-  await page.getByLabel('Search').press('Enter');
+  await page.getByLabel('What', { exact: true }).selectOption('');
+  await page.getByLabel('Search', { exact: true }).fill('Lobby 12');
+  await page.getByLabel('Search', { exact: true }).press('Enter');
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText('Renamed to Lobby 12');
   await page.getByRole('button', { name: 'Clear filters' }).click();
   // The whole log as last read: both pages, read again.
   await expect(rows).toHaveCount(58);
-  await expect(page.getByLabel('Search')).toHaveValue('');
+  await expect(page.getByLabel('Search', { exact: true })).toHaveValue('');
 
   // One target: the screen's own history.
-  await page.getByLabel('Who').selectOption('people');
+  await page.getByLabel('Who', { exact: true }).selectOption('people');
   await onlyTheScreen();
 
   // Export what the filters match: the screen's 56 entries, its code still redacted.
   await page.getByRole('link', { name: 'Show every screen' }).click();
-  await page.getByLabel('Target').selectOption('screen');
+  await page.getByLabel('Target', { exact: true }).selectOption('screen');
   await expect(rows).toHaveCount(50);
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export CSV' }).click();
@@ -164,11 +165,11 @@ test("searching the audit log for an invitee's email keeps it out of the page's 
   const rows = page.locator('tbody tr');
   await expect(rows).toHaveCount(1);
   // The search narrows within the link's filters.
-  await page.getByLabel('Search').fill('nobody-here@example.com');
-  await page.getByLabel('Search').press('Enter');
+  await page.getByLabel('Search', { exact: true }).fill('nobody-here@example.com');
+  await page.getByLabel('Search', { exact: true }).press('Enter');
   await expect(page.getByText('Nothing matches these filters.')).toBeVisible();
-  await page.getByLabel('Search').fill(invitee);
-  await page.getByLabel('Search').press('Enter');
+  await page.getByLabel('Search', { exact: true }).fill(invitee);
+  await page.getByLabel('Search', { exact: true }).press('Enter');
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText(invitee);
 
