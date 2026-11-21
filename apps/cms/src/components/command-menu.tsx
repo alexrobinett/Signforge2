@@ -19,8 +19,8 @@ const Mono = ({ children, className = '' }: { children: string; className?: stri
   <span className={`shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground ${className}`}>{children}</span>
 );
 
-/** The org list's search takes focus when the list replaces the commands. Stable, so it runs once. */
-const focusSearch = (input: HTMLInputElement | null) => input?.focus();
+/** The org list's first button takes focus when the list replaces the commands. Stable, so it runs once. */
+const focusFirstButton = (list: HTMLUListElement | null) => list?.querySelector('button')?.focus();
 
 /** The form's first field takes focus when the form appears. Stable, so it runs once per form. */
 const focusFirstField = (form: HTMLFormElement | null) => form?.querySelector<HTMLElement>('input, select, textarea')?.focus();
@@ -139,32 +139,43 @@ function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> })
   );
 }
 
-/** "Switch organization…": the member's orgs, the active one checked. */
+/**
+ * "Switch organization…": the member's orgs as buttons, the active one marked, the first focused.
+ * Not a second cmdk list: cmdk 1.1.1 leaves `aria-activedescendant` on an item a filter removed.
+ */
 function OrgList({ shell, colours }: { shell: Shell; colours: Map<string, number> }) {
   const back = useAppStore((s) => s.backToCommands);
   const chooseOrg = useAppStore((s) => s.chooseOrg);
   return (
-    <Command label="Find an organization" loop>
+    <div className="flex flex-col">
       <div className="flex items-center gap-2 border-b py-2.5 pr-4 pl-2">
         <Button type="button" variant="ghost" size="icon" onClick={back} aria-label="Back to commands">
           <ArrowLeftIcon className="size-4.5" aria-hidden />
         </Button>
-        <h3 className="text-base font-semibold">Switch organization</h3>
+        <h3 id="switch-org-heading" className="text-base font-semibold">
+          Switch organization
+        </h3>
       </div>
-      <CommandInput ref={focusSearch} placeholder="Find an organization" />
-      <CommandList>
-        <CommandEmpty>No organization matches.</CommandEmpty>
-        <CommandGroup heading="Organizations">
-          {shell.organizations.map((org) => (
-            <CommandItem key={org.id} value={org.id} keywords={[org.name]} onSelect={() => void chooseOrg(org)}>
-              <OrgAvatar name={org.name} colour={colours.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
-              <span className="min-w-0 flex-1 truncate">{org.name}</span>
-              {org.id === shell.organization?.id && <CheckIcon className="size-4" aria-label="Active" />}
-            </CommandItem>
-          ))}
-        </CommandGroup>
-      </CommandList>
-    </Command>
+      <ul ref={focusFirstButton} aria-labelledby="switch-org-heading" className="max-h-[min(470px,60dvh)] space-y-0.5 overflow-y-auto p-2">
+        {shell.organizations.map((org) => {
+          const active = org.id === shell.organization?.id;
+          return (
+            <li key={org.id}>
+              <button
+                type="button"
+                onClick={() => void chooseOrg(org)}
+                aria-current={active || undefined}
+                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <OrgAvatar name={org.name} colour={colours.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
+                <span className="min-w-0 flex-1 truncate">{org.name}</span>
+                {active && <CheckIcon className="size-4" aria-hidden />}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

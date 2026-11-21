@@ -96,8 +96,11 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await page.keyboard.type('switch organization');
   await expect(menu.getByRole('option', { selected: true })).toHaveText('Switch organization…');
   await page.keyboard.press('Enter');
-  await expect(menu.getByRole('option', { name: 'Acme Coffee' })).toBeVisible();
-  await page.keyboard.type('blue');
+  const orgs = menu.getByRole('list', { name: 'Switch organization' });
+  await expect(orgs.getByRole('button', { name: 'Acme Coffee' })).toBeFocused();
+  await expect(orgs.getByRole('button', { name: 'Acme Coffee' })).toHaveAttribute('aria-current', 'true');
+  await page.keyboard.press('Tab');
+  await expect(orgs.getByRole('button', { name: 'Blue Harbour Cinemas' })).toBeFocused();
   await axe(page);
   await screenshot(page, '05b-command-switch-org');
   await page.keyboard.press('Enter');
