@@ -58,7 +58,58 @@ async function setup(orgId: string) {
   return { org, version: v.id, asset: asset.id, call: editorCalls(org) };
 }
 
+/** A countdown: a target no default or min fits, which a new spot leaves for the editor to pick. */
+const countdown: TemplateManifest = {
+  id: 'countdown',
+  version: '1.0.0',
+  name: 'Countdown',
+  fields: { target: { type: 'datetime', label: 'Target' }, title: { type: 'text', label: 'Title', default: 'Launch' } },
+  duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 },
+  orientations: ['landscape'],
+  uses: [],
+  background: '#000',
+  protocol: 2,
+};
+
+async function addCountdown(org: Awaited<ReturnType<typeof setup>>['org']) {
+  const t = await org.templates.insert({ key: 'countdown', name: 'Countdown' });
+  const v = await org.templates.versions.insert({
+    templateId: t.id,
+    version: '1.0.0',
+    manifestJson: JSON.stringify(countdown),
+    bundleSha256: sha('f'),
+    status: 'approved',
+    checkReportJson: JSON.stringify({ ok: true, bundleBytes: 1234, checks: [], checkedAt: 0, sourcesSha256: sha('0') }),
+  });
+  return v.id;
+}
+
 describe('spot drafts', () => {
+  it('creates a spot whose datetime is not picked yet, as one whose photo is not, and holds a picked one to the contract', async () => {
+    const { org, call } = await setup('spots-date');
+    const version = await addCountdown(org);
+    // What the New spot dialog sends for a field with no default or min (apps/cms startData), and what an agent may leave out.
+    const { spot } = await ok(call('create_spot', { name: 'Launch', kind: 'template', templateVersionId: version, data: { target: '' } }));
+    expect(spot).toMatchObject({ data: { target: '' }, version: 1 });
+    await ok(call('create_spot', { name: 'Launch too', kind: 'template', templateVersionId: version }));
+    const spotId = (spot as { id: string }).id;
+    expect(await ok(call('update_spot', { spotId, data: { target: '2026-12-24T18:00' } }))).toMatchObject({ spot: { data: { target: '2026-12-24T18:00' } } });
+    expect(await call('update_spot', { spotId, data: { target: '0026-12-24T18:00' } })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+      details: [{ path: 'data', message: 'field "target" must be in 1900 or later' }],
+    });
+    expect(await call('update_spot', { spotId, data: { target: '2026-12-24', title: 'x' } })).toMatchObject({
+      ok: false,
+      details: [{ path: 'data', message: 'field "target" must be a date and time (YYYY-MM-DDTHH:mm)' }],
+    });
+    // Unpicked again, the rest of the data is still checked.
+    expect(await call('update_spot', { spotId, data: { target: '', nope: 1 } })).toMatchObject({
+      ok: false,
+      details: [{ path: 'data', message: 'unknown field "nope"' }],
+    });
+  });
+
   it('creates a template spot with the template duration, and reads it back', async () => {
     const { call, version } = await setup('spots-create');
     const { spot } = await ok(call('create_spot', { name: 'Fresh picked', kind: 'template', templateVersionId: version, idempotencyKey: 'key-create-1' }));

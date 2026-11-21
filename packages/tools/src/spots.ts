@@ -8,7 +8,7 @@
  * holds it back until then.
  */
 import { spotProblems } from '@signforge/compiler';
-import { bindingOf, DEFAULT_FIT, unverified } from '@signforge/compiler/draft';
+import { bindingOf, DEFAULT_FIT, unsetFields, unverified } from '@signforge/compiler/draft';
 import {
   BINDING_PATH,
   missingColumns,
@@ -108,16 +108,16 @@ const invalid = (path: string, problems: string[]) =>
   );
 
 /**
- * Refuses a template draft a screen would refuse. Image fields with no asset yet are left out of
- * the check, and every other field must pass, so a new spot can be saved before its photo is picked.
+ * Refuses a template draft a screen would refuse. The fields a draft may leave unset
+ * (`unsetFields`: an image with no asset, a date not picked) are left out of the check, and every
+ * other field must pass, so a new spot can be saved before its photo or its day is picked.
  */
 function checkTemplateDraft(
   t: { key: string; manifest: TemplateManifest; html: string },
   draft: { durationMs: number; data: Record<string, unknown>; assets: Record<string, string>; bindings: Record<string, Binding> },
 ) {
-  const fields: Record<string, FieldDef> = Object.fromEntries(
-    Object.entries(t.manifest.fields).filter(([name, def]) => def.type !== 'image' || name in draft.assets || name in draft.bindings),
-  );
+  const unset = unsetFields(t.manifest.fields, draft);
+  const fields: Record<string, FieldDef> = Object.fromEntries(Object.entries(t.manifest.fields).filter(([name]) => !unset.has(name)));
   for (const name of Object.keys(draft.assets))
     if (t.manifest.fields[name]?.type !== 'image') throw invalid('assets', [`"${name}" is not an image field of ${t.key}`]);
   const problems = spotProblems(
@@ -127,7 +127,7 @@ function checkTemplateDraft(
       kind: 'template',
       template: t.key,
       durationMs: draft.durationMs,
-      data: draft.data,
+      data: Object.fromEntries(Object.entries(draft.data).filter(([name]) => !unset.has(name))),
       assets: draft.assets,
       bindings: draft.bindings,
     },

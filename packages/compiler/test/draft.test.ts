@@ -1,5 +1,6 @@
+import type { FieldDef } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { compileProbe, spotFromDraft, type DraftAsset, type DraftReads, type Probe, type SpotDraft } from '../src/draft';
+import { compileProbe, spotFromDraft, unsetFields, type DraftAsset, type DraftReads, type Probe, type SpotDraft } from '../src/draft';
 import { opts, promo } from './fixtures';
 
 const sha = (c: string) => c.repeat(64);
@@ -38,6 +39,23 @@ const draft = (d: Partial<SpotDraft> & Pick<SpotDraft, 'kind'>): SpotDraft => ({
   fit: null,
   url: null,
   ...d,
+});
+
+describe('unsetFields', () => {
+  it('names an image with no asset and a date or datetime not picked: what a draft may save without, and a publish holds back for', () => {
+    const fields: Record<string, FieldDef> = {
+      photo: { type: 'image', label: 'Photo' },
+      logo: { type: 'image', label: 'Logo' },
+      target: { type: 'datetime', label: 'Target' },
+      opens: { type: 'date', label: 'Opens', default: '2026-12-01' },
+      closes: { type: 'date', label: 'Closes', default: '2026-12-31' },
+      title: { type: 'text', label: 'Title' },
+    };
+    // A default stands in for a value left out; a value cleared to '' is not picked.
+    const draft = { data: { target: '', closes: '', title: '' }, assets: { logo: 'ast_1' }, bindings: {} };
+    expect(unsetFields(fields, draft)).toEqual(new Set(['photo', 'target', 'closes']));
+    expect(unsetFields(fields, { ...draft, data: { target: '2026-12-24T18:00' } })).toEqual(new Set(['photo']));
+  });
 });
 
 describe('spotFromDraft', () => {

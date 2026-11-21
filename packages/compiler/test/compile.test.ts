@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateManifest } from '@signforge/contract';
+import { type TemplateManifest, validateManifest } from '@signforge/contract';
 import { compileScreen } from '../src/index';
 import { opts, org, promo } from './fixtures';
 
@@ -59,6 +59,21 @@ describe('compileScreen', () => {
       'spot bad-data: field "price" must be a number',
       'spot orphan: template base/gone@2.0.0 is not available',
     ]);
+  });
+
+  it('never sends a screen a date or datetime not picked yet: a draft may hold one, the spot is refused', async () => {
+    const input = org();
+    const countdown: TemplateManifest = {
+      ...promo,
+      id: 'countdown',
+      fields: { target: { type: 'datetime', label: 'Target' }, day: { type: 'date', label: 'Day' } },
+    };
+    input.templates['base/countdown@1.0.0'] = { manifest: countdown, html: 'a'.repeat(64) };
+    input.spots.push({ id: 'launch', name: 'Launch', kind: 'template', template: 'base/countdown@1.0.0', data: { target: '' }, assets: {}, durationMs: 8000 });
+    input.playlists[0]!.items.push({ spot: 'launch' });
+    const result = await compileScreen(input, opts());
+    expect(result.manifest).toBeUndefined();
+    expect(result.problems).toEqual(['spot launch: field "target" has no date and time yet', 'spot launch: field "day" is missing']);
   });
 
   it('keeps only the schedule entries that target this screen, its groups or the whole org', async () => {

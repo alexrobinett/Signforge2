@@ -54,11 +54,9 @@ describe('date and datetime fields in the spot editor', () => {
     for (const attr of ['aria-invalid="true"', 'aria-describedby="field-opens-error"']) expect(opens).toContain(attr);
   });
 
-  it('starts a date at its min, and one with no min empty, which the editor asks to be picked', () => {
+  it('starts a date at its min, and one with no min empty, which the editor says needs one', () => {
     expect(startData(fields)).toEqual({ opens: '2026-12-01', target: '', events: [] });
-    expect(fieldProblems(fields, { data: startData(fields), assets: {} })).toEqual(
-      new Map([['target', ['field "target" must be a date and time (YYYY-MM-DDTHH:mm)']]]),
-    );
+    expect(fieldProblems(fields, { data: startData(fields), assets: {} })).toEqual(new Map([['target', ['field "target" has no date and time yet']]]));
   });
 
   it("puts the contract's message by the field for a day outside min and max, and none for one inside", () => {

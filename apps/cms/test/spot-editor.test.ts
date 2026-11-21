@@ -13,7 +13,7 @@ import { assetsQuery, spotKeys, spotPreviewQuery, templatesQuery } from '../src/
 import { getDataSource } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
 import { createSpotSourceSlice, type SpotSourceSlice } from '../src/state/spot-source';
-import { draftOf } from '../src/lib/spots';
+import { draftOf, fieldProblems } from '../src/lib/spots';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
 
 // The tab's org comes from the page's router, which a store test has none of.
@@ -200,6 +200,50 @@ describe('the stage (review of #97)', () => {
     await held;
     expect(store.getState().spotEditor.refusals).toEqual(['asset ast_new is still being checked']);
     expect(posted).toEqual([]);
+  });
+});
+
+describe('a date not picked yet (review of #192, 1)', () => {
+  it('saves an edit to a spot whose datetime is not picked, as the server takes it, and says under the field that it needs one', async () => {
+    const queryClient = new QueryClient();
+    const store = createStore<SpotEditorSlice>()((set, get) => createSpotEditorSlice(set as never, get as never, { router, queryClient } as never));
+    const countdown: TemplateManifest = {
+      id: 'countdown',
+      version: '1.0.0',
+      name: 'Countdown',
+      fields: { target: { type: 'datetime', label: 'Target' }, title: { type: 'text', label: 'Title', default: 'Launch', maxLength: 20 } },
+      duration: { defaultMs: 8000, minMs: 4000, maxMs: 60000 },
+      orientations: ['landscape'],
+      uses: [],
+      background: '#000',
+    };
+    const launch: SpotView = {
+      ...spot('spt_launch', 1),
+      kind: 'template',
+      url: null,
+      templateVersionId: 'tv_countdown',
+      data: { target: '' },
+      assets: {},
+      bindings: {},
+    };
+    queryClient.setQueryData(spotKeys.one(ORG, launch.id), launch);
+    queryClient.setQueryData(templatesQuery(ORG).queryKey, {
+      templates: [{ versions: [{ id: 'tv_countdown', status: 'approved', manifest: countdown }] }],
+    } as never);
+
+    store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, title: 'Doors open' } }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toMatchObject([{ name: 'update_spot', input: { spotId: launch.id, data: { target: '', title: 'Doors open' }, ifVersion: 1 } }]);
+    expect(fieldProblems(countdown.fields, { data: { target: '', title: 'Doors open' }, assets: {} })).toEqual(
+      new Map([['target', ['field "target" has no date and time yet']]]),
+    );
+
+    // A title over its limit is still held back, as the server would refuse it.
+    answers[0]!({ spot: { ...launch, data: { target: '', title: 'Doors open' }, version: 2 } });
+    await vi.advanceTimersByTimeAsync(0);
+    store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, title: 'x'.repeat(21) } }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toHaveLength(1);
   });
 });
 

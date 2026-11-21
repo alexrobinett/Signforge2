@@ -7,7 +7,7 @@
  * What it reads is the seam (`DraftReads`): the tools read the org's rows, the CMS its asset and
  * template views.
  */
-import type { Binding, DataSource, Orientation, Playlist, ScreenManifest, Sha256, Spot, TableMapping, TemplateManifest } from '@signforge/contract';
+import type { Binding, DataSource, FieldDef, Orientation, Playlist, ScreenManifest, Sha256, Spot, TableMapping, TemplateManifest } from '@signforge/contract';
 import { compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from './index';
 
 type Fit = 'cover' | 'contain';
@@ -20,6 +20,26 @@ export interface DraftBinding {
   dataSourceId: string;
   path: string;
   table?: TableMapping;
+}
+
+/**
+ * The fields a template draft may leave without a value for now: an image with no asset (nor
+ * binding) yet, and a date or datetime not picked yet (`''`, or left out with no default). No
+ * start value fits every spot for those (a photo, a countdown's target), so a new spot is saved
+ * without one, and the publish holds the spot back in the contract's words ("has no asset", "has
+ * no date yet") until it has one. Every other field must hold a value a screen takes.
+ */
+export function unsetFields(
+  fields: Record<string, FieldDef>,
+  draft: { data: Record<string, unknown>; assets: Record<string, string>; bindings: Record<string, unknown> },
+): Set<string> {
+  const unset = ([name, def]: [string, FieldDef]) => {
+    if (def.type === 'image') return !(name in draft.assets || name in draft.bindings);
+    if (def.type !== 'date' && def.type !== 'datetime') return false;
+    const v = draft.data[name] ?? def.default;
+    return v === undefined || v === '';
+  };
+  return new Set(Object.entries(fields).flatMap((f) => (unset(f) ? [f[0]] : [])));
 }
 
 /** A spot's draft (or published version), as `get_spot` gives it. */
