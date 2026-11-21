@@ -34,6 +34,8 @@ interface IntegrationsState {
   feedUrl: string;
   pending: boolean;
   error: string | null;
+  /** A news feed's photos switch as it was just set, shown until the saved source comes back (or the save is refused). */
+  settingPhotos: { id: string; photos: boolean } | null;
   /** The source whose deletion is being confirmed: its address is sealed, so it cannot be had back. */
   deleting: ListedSource | null;
   /** The connection whose disconnection is being confirmed: getting it back needs the provider's consent again. */
@@ -79,6 +81,7 @@ const initial: IntegrationsState = {
   feedUrl: '',
   pending: false,
   error: null,
+  settingPhotos: null,
   deleting: null,
   disconnecting: null,
   connecting: null,
@@ -146,15 +149,18 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
         (err) => (isStale(err) ? 'This changed since you opened it. Close this and open it again to see it.' : toolMessage(err)),
       ),
 
-    setSourcePhotos: (orgId, source, photos) =>
-      attempt(
+    async setSourcePhotos(orgId, source, photos) {
+      integrations((s) => ({ ...s, settingPhotos: { id: source.id, photos } }));
+      await attempt(
         async () => {
           await callTool('update_data_source', { dataSourceId: source.id, photos, ifVersion: source.version });
           await refresh(orgId);
           integrations((s) => ({ ...s, pending: false }));
         },
         (err) => (isStale(err) ? 'This changed since you opened it. Close this and open it again to see it.' : toolMessage(err)),
-      ),
+      );
+      integrations((s) => ({ ...s, settingPhotos: null }));
+    },
 
     askToDeleteSource: (deleting) => integrations((s) => ({ ...s, deleting, error: null })),
 

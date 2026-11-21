@@ -88,6 +88,8 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
   const changeSourceUrl = useAppStore((st) => st.changeSourceUrl);
   const askToDeleteSource = useAppStore((st) => st.askToDeleteSource);
   const setSourcePhotos = useAppStore((st) => st.setSourcePhotos);
+  const settingPhotos = useAppStore((st) => st.integrations.settingPhotos);
+  const photos = settingPhotos?.id === source.id ? settingPhotos.photos : source.photos;
   const state = sourceState(source, clock);
   const inputId = `source-url-${source.id}`;
   const photosId = `source-photos-${source.id}`;
@@ -115,14 +117,14 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
               id={photosId}
               type="checkbox"
               className="size-4 accent-primary"
-              checked={source.photos}
+              checked={photos}
               disabled={!canManage || pending}
               onChange={(e) => void setSourcePhotos(orgId, source, e.target.checked)}
             />
             <Label htmlFor={photosId}>Show story photos</Label>
           </div>
           <p className="text-sm text-muted-foreground">
-            {source.photos
+            {photos
               ? 'SignForge fetches and checks each story’s photo, and screens show its copy. Turn this off to show headlines only.'
               : 'Screens show headlines only.'}
           </p>

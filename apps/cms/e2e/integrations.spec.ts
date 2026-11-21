@@ -86,6 +86,8 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await photos.uncheck();
   await expect(feeds.getByText('Screens show headlines only.')).toBeVisible();
   await expect(photos).not.toBeChecked();
+  // Enabled again once the change is saved.
+  await expect(photos).toBeEnabled();
   await owner.keyboard.press('Escape');
   expect((await tool(owner, 'list_data_sources', {})).dataSources.find((d: { name: string }) => d.name === 'Northside blog')).toMatchObject({ photos: false });
 
