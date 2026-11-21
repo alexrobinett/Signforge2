@@ -97,7 +97,8 @@ describe('import boundary', () => {
     expect(Object.keys(pkg.exports).sort()).toEqual(['.', './testing']);
   });
 
-  it('exports no table objects', async () => {
+  // Importing the whole source the first time is the slow part: 5.1 s on CI's runner (run 44918053355), past the default.
+  it('exports no table objects', { timeout: 60_000 }, async () => {
     // Imported by path so this Node-typed file does not type-check the Workers-typed source.
     for (const path of ['../../src/index.ts', '../../src/testing.ts']) {
       const mod = (await import(path)) as Record<string, unknown>;
