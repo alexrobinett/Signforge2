@@ -120,9 +120,17 @@ interface Host {
   open(frame: string, html: string): Promise<void>;
   /**
    * With `sampled`, each image goes with its sample (`sampleAsset`), as a screen sends an image
-   * uploaded with one; `'broken'`, with a PNG header and nothing that decodes.
+   * uploaded with one; `'broken'`, with a PNG header and nothing that decodes. A play lasts 8 s unless `durationMs` says otherwise.
    */
-  init(frame: string, data: Data, assets?: Record<string, string>, now?: number, theme?: FrameTheme, sampled?: boolean | 'broken'): Promise<void>;
+  init(
+    frame: string,
+    data: Data,
+    assets?: Record<string, string>,
+    now?: number,
+    theme?: FrameTheme,
+    sampled?: boolean | 'broken',
+    durationMs?: number,
+  ): Promise<void>;
   post(frame: string, type: 'play' | 'reset'): Promise<void>;
   /** Wait until the frame has sent `type` `count` times in all. */
   waitFor(frame: string, type: string, count: number): Promise<void>;
@@ -176,11 +184,11 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
       );
       await waitFor(frame, 'loaded', 1);
     },
-    async init(frame, data, assets = {}, now = NOW, theme, sampled = false) {
+    async init(frame, data, assets = {}, now = NOW, theme, sampled = false, durationMs = 8000) {
       const samples = sampled ? Object.fromEntries(Object.keys(assets).map((field) => [field, sampleAsset(field)])) : {};
       const broken = sampled === 'broken';
       await page.evaluate(
-        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size }) => {
+        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs }) => {
           const w = window as unknown as {
             frames_: Record<string, HTMLIFrameElement>;
             SFSample: typeof import('@signforge/media/sample');
@@ -224,7 +232,7 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
             type: 'init',
             data,
             assets: blobs,
-            durationMs: 8000,
+            durationMs,
             orientation,
             viewport: size,
             timezone: 'UTC',
@@ -234,7 +242,7 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
           };
           w.frames_[frame]!.contentWindow!.postMessage(init, '*');
         },
-        { frame, data, assets, samples, broken, sf, now, theme, orientation, size },
+        { frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs },
       );
     },
     post: (frame, type) =>
@@ -854,8 +862,8 @@ describe('the look kit (#190)', () => {
     return {
       hst,
       frame,
-      async play(data: Data, theme?: FrameTheme) {
-        await hst.init('fresh', spotData(t.manifest, data), photo, NOW, theme);
+      async play(data: Data, theme?: FrameTheme, durationMs?: number) {
+        await hst.init('fresh', spotData(t.manifest, data), photo, NOW, theme, false, durationMs);
         await hst.waitFor('fresh', 'ready', ++inits);
         return frame();
       },
@@ -941,9 +949,11 @@ describe('the look kit (#190)', () => {
 
   it('every element has an intro and, timed from --sf-duration, an outro, moving only transform and opacity', async () => {
     const k = await kitFrame();
+    // Not 8 s, the stylesheet's fallback for --sf-duration: the outros must follow the play's own length.
+    const durationMs = 11_000;
     for (const look of looks) {
-      const f = await k.play({ look });
-      const { props, ends } = await f.evaluate(() => {
+      const f = await k.play({ look }, undefined, durationMs);
+      const { props, ends } = await f.evaluate((durationMs) => {
         const props = new Set<string>();
         for (const a of document.getAnimations())
           for (const k of (a.effect as KeyframeEffect).getKeyframes())
@@ -959,11 +969,11 @@ describe('the look kit (#190)', () => {
           return `${sel} ${timed
             .map(Math.round)
             .sort((a, b) => a - b)
-            .map((ms) => (ms === 8000 ? 'outro at the end' : ms <= 2000 ? 'intro' : `${ms} ms`))
+            .map((ms) => (ms === durationMs ? 'outro at the end' : ms <= 2000 ? 'intro' : `${ms} ms`))
             .join(', ')}`;
         });
         return { props: [...props].sort(), ends };
-      });
+      }, durationMs);
       expect(props, look).toEqual(['opacity', 'transform']);
       const both = (sel: string) => `${sel} intro, outro at the end`;
       const photo = look === 'poster' ? ['.photo ', both('.cover')] : [both('.photo'), '.cover '];
@@ -1024,12 +1034,24 @@ describe('the look kit (#190)', () => {
     await hst.open('fresh', t.html);
     await hst.init('fresh', b, photo);
     await hst.waitFor('fresh', 'ready', 1);
+    const fresh = await hst.dom('fresh');
+    // The editor's path: play, then `reset`, wait for `loaded`, then init with the new data.
     await hst.open('reset', t.html);
     await hst.init('reset', a, photo);
     await hst.waitFor('reset', 'ready', 1);
     await hst.post('reset', 'play');
+    await hst.post('reset', 'reset');
+    await hst.waitFor('reset', 'loaded', 2);
     await hst.init('reset', b, photo);
     await hst.waitFor('reset', 'ready', 2);
-    expect(await hst.dom('reset')).toBe(await hst.dom('fresh'));
+    expect(await hst.dom('reset')).toBe(fresh);
+    // A second init with no reset in between is treated the same way.
+    await hst.open('again', t.html);
+    await hst.init('again', a, photo);
+    await hst.waitFor('again', 'ready', 1);
+    await hst.post('again', 'play');
+    await hst.init('again', b, photo);
+    await hst.waitFor('again', 'ready', 2);
+    expect(await hst.dom('again')).toBe(fresh);
   });
 });
