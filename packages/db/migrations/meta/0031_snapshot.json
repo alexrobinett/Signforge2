@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f1d3443b-b519-44d2-a528-1edf2993ded1",
+  "id": "e0a8df72-7f4d-4b1c-b732-b9a8fb2f3019",
   "prevId": "5c65e227-7cf5-4bd7-a630-0f5f1d51fc4f",
   "tables": {
     "account": {
@@ -1500,6 +1500,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "source_id": {
+          "name": "source_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_sha256": {
+          "name": "source_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "file_sha256": {
           "name": "file_sha256",
           "type": "text",
@@ -1548,6 +1562,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "failures": {
+          "name": "failures",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "created_at": {
           "name": "created_at",

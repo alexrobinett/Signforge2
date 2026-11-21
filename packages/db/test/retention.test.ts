@@ -1,7 +1,7 @@
 // Audit retention (#41): each org's audit rows go once older than its retention, in bounded batches.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { expireAuditRows, scoped } from '../src/index';
+import { expireAuditRows, expiredFeedImages, FEED_IMAGE_TTL_MS, scoped } from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 const DAY = 24 * 60 * 60_000;
@@ -55,5 +55,21 @@ describe('expireAuditRows', () => {
     expect(await bulkLeft()).toBe(0);
     expect(await expireAuditRows(env.DB, now)).toBe(0);
     expect(await actions(s.b.orgId)).toContain('other-31');
+  });
+});
+
+describe('expiredFeedImages', () => {
+  it("finds every org's photos no poll has named for a week past their check, the oldest first, at most the limit", async () => {
+    const cutoff = now - FEED_IMAGE_TTL_MS;
+    const hold = (orgId: string, url: string, until: number) => scoped(env.DB, orgId).feedImages.hold([url], { until, now: until, sourceId: 'news' });
+    await hold(s.a.orgId, 'https://old.example/a.jpg', cutoff - 2);
+    await hold(s.b.orgId, 'https://old.example/b.jpg', cutoff - 1);
+    await hold(s.a.orgId, 'https://old.example/just-in-time.jpg', cutoff);
+    await hold(s.b.orgId, 'https://new.example/b.jpg', now);
+    expect(await expiredFeedImages(env.DB, now, 10)).toEqual([
+      { orgId: s.a.orgId, url: 'https://old.example/a.jpg' },
+      { orgId: s.b.orgId, url: 'https://old.example/b.jpg' },
+    ]);
+    expect(await expiredFeedImages(env.DB, now, 1)).toEqual([{ orgId: s.a.orgId, url: 'https://old.example/a.jpg' }]);
   });
 });

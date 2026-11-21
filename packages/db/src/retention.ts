@@ -79,3 +79,25 @@ async function deleteInBatches(db: ReturnType<typeof drizzle>, batch: SQL): Prom
   }
   return deleted;
 }
+
+/** A feed photo no poll has named for this long after it was due is forgotten: past any screen's stale snapshot (`SNAPSHOT_STALE_MS`, a day). */
+export const FEED_IMAGE_TTL_MS = 7 * DAY_MS;
+
+/**
+ * Every org's feed photos (`feed_images`) due a check more than FEED_IMAGE_TTL_MS before `now`:
+ * a poll that still named one would have queued it, moving its check on. Returns each one's org
+ * and URL, the oldest first, at most `limit`; the delete goes through the org's scope
+ * (`feedImages.forget`), which keeps any a snapshot still names. It reads every org's rows (no
+ * index leads with the check time, as tenant indexes lead with the org): a few hundred per org,
+ * once a day.
+ */
+export async function expiredFeedImages(d1: D1Database, now: number, limit: number): Promise<{ orgId: string; url: string }[]> {
+  const fi = s.feedImages;
+  return drizzle(d1)
+    .select({ orgId: fi.orgId, url: fi.url })
+    .from(fi)
+    .where(lt(fi.nextCheckAt, now - FEED_IMAGE_TTL_MS))
+    .orderBy(fi.nextCheckAt)
+    .limit(limit)
+    .all();
+}

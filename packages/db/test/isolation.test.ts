@@ -471,12 +471,12 @@ describe('feed images', () => {
     const url = 'https://news.example/photo.jpg';
     const a = s.a.scope.feedImages;
     const b = s.b.scope.feedImages;
-    await a.hold([url], 10);
+    await a.hold([url], { until: 10, now: 1, sourceId: 'news' });
     await a.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64), etag: '"a"', nextCheckAt: 20, lastError: null });
     expect(await b.get([url])).toEqual([]);
     // Org B's own fetch of it, and its failures, touch only its own row.
     await b.save(url, { fileSha256: 'c'.repeat(64), nextCheckAt: 30 });
-    await b.hold([url], 40);
+    await b.hold([url], { until: 40, now: 1, sourceId: 'news' });
     await b.save(url, { lastError: 'timeout', nextCheckAt: 50 });
     expect(await a.get([url])).toEqual([
       expect.objectContaining({ orgId: 'org-a', fileSha256: 'a'.repeat(64), etag: '"a"', nextCheckAt: 20, lastError: null }),
@@ -487,14 +487,55 @@ describe('feed images', () => {
   it('holds a URL it already has without losing its image', async () => {
     const url = 'https://news.example/kept.jpg';
     const a = s.a.scope.feedImages;
-    await a.hold([url], 10);
+    await a.hold([url], { until: 10, now: 1, sourceId: 'news' });
     await a.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64), nextCheckAt: 20 });
-    await a.hold([url, 'https://news.example/new.jpg'], 30);
+    await a.hold([url, 'https://news.example/new.jpg'], { until: 30, now: 2, sourceId: 'other' });
     expect((await a.get([url, 'https://news.example/new.jpg'])).map((r) => [r.url, r.fileSha256, r.nextCheckAt])).toEqual(
       expect.arrayContaining([
         [url, 'a'.repeat(64), 30],
         ['https://news.example/new.jpg', null, 30],
       ]),
     );
+  });
+
+  it("counts the rows a day's polls made, the org's and one source's, in its own org only", async () => {
+    const t = 1_000_000;
+    const a = s.a.scope.feedImages;
+    await a.hold(['https://count.example/1.jpg', 'https://count.example/2.jpg'], { until: t + 10, now: t, sourceId: 'one' });
+    await a.hold(['https://count.example/3.jpg'], { until: t + 10, now: t + 5, sourceId: 'two' });
+    await a.hold(['https://count.example/old.jpg'], { until: t + 10, now: t - 1, sourceId: 'one' });
+    // Held again: still made when first named, by the source that first named it.
+    await a.hold(['https://count.example/1.jpg'], { until: t + 20, now: t + 6, sourceId: 'two' });
+    expect(await a.madeSince(t, 'one')).toEqual({ org: 3, source: 2 });
+    expect(await a.madeSince(t, 'two')).toEqual({ org: 3, source: 1 });
+    expect(await s.b.scope.feedImages.madeSince(t, 'one')).toEqual({ org: 0, source: 0 });
+  });
+
+  it('forgets rows and gives the hashes nothing else of the org names, keeping a row a snapshot still names', async () => {
+    const a = s.a.scope.feedImages;
+    const sha = (c: string) => c.repeat(64);
+    const urls = ['https://gc.example/alone.jpg', 'https://gc.example/shared.jpg', 'https://gc.example/twin.jpg', 'https://gc.example/shown.jpg'];
+    await a.hold(urls, { until: 1, now: 1, sourceId: 'news' });
+    await a.save(urls[0]!, { fileSha256: sha('1'), thumbSha256: sha('2'), sampleSha256: sha('3'), nextCheckAt: 1 });
+    // Its file is also an asset's, and its thumbnail also another row's.
+    await a.save(urls[1]!, { fileSha256: (await s.a.scope.assets.get(s.a.asset))!.sha256, thumbSha256: sha('5'), nextCheckAt: 1 });
+    await a.save(urls[2]!, { fileSha256: sha('6'), thumbSha256: sha('5'), nextCheckAt: 1 });
+    // The source's latest snapshot still names this one.
+    await a.save(urls[3]!, { fileSha256: sha('7'), thumbSha256: sha('8'), nextCheckAt: 1 });
+    await s.a.scope.dataSources.putSnapshot(s.a.dataSource, {
+      version: 'gc',
+      fetchedAt: 1,
+      checkedAt: 1,
+      dataJson: JSON.stringify({ items: [{ image: { file: sha('7') } }] }),
+    });
+    // Org B holds the same hash: not org A's to keep or give.
+    await s.b.scope.feedImages.hold([urls[0]!], { until: 1, now: 1, sourceId: 'news' });
+    await s.b.scope.feedImages.save(urls[0]!, { fileSha256: sha('1'), nextCheckAt: 1 });
+
+    expect((await a.forget(urls.slice(0, 2).concat(urls[3]!))).sort()).toEqual([sha('1'), sha('2'), sha('3')]);
+    expect((await a.get(urls)).map((r) => r.url).sort()).toEqual([urls[2], urls[3]].sort());
+    expect(await s.b.scope.feedImages.get([urls[0]!])).toHaveLength(1);
+    // Once the twin goes too, the thumbnail both named is free.
+    expect((await a.forget([urls[2]!])).sort()).toEqual([sha('5'), sha('6')]);
   });
 });

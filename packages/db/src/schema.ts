@@ -873,7 +873,8 @@ export const dataSnapshots = sqliteTable(
  * The photos the org's news sources name, by the URL a feed gives (apps/api src/data/images.ts):
  * the stored copy's hashes once one was fetched and checked, the validators it came with, and when
  * to look at the URL again. One row per URL however many of the org's sources name it. A failed
- * fetch keeps the last good hashes. The files are the org's blobs in R2, by hash.
+ * fetch keeps the last good hashes. The files are the org's blobs in R2, by hash. A row no poll has
+ * named for a week goes, with the files nothing else names (`expiredFeedImages`, ./retention.ts).
  */
 export const feedImages = sqliteTable(
   'feed_images',
@@ -881,6 +882,10 @@ export const feedImages = sqliteTable(
     orgId: orgId(),
     /** As the feed names it, http or https: what a poll looks it up by. */
     url: text('url').notNull(),
+    /** The source whose poll first named it: what a source's daily budget of new photos counts. No foreign key: the row may outlive the source until it expires. */
+    sourceId: text('source_id').notNull(),
+    /** The fetched bytes' hash: a fetch that brings the same bytes again is not decoded again. */
+    sourceSha256: text('source_sha256'),
     /** `NewsImage.file`, `.sample` and `.thumb`; null until a fetch succeeds. */
     fileSha256: text('file_sha256'),
     sampleSha256: text('sample_sha256'),
@@ -891,7 +896,10 @@ export const feedImages = sqliteTable(
     nextCheckAt: integer('next_check_at').notNull(),
     /** Why the last fetch failed, as a category; null once one succeeds. */
     lastError: text('last_error'),
-    createdAt: created(),
+    /** Fetches in a row that failed: each waits longer, up to a day. */
+    failures: integer('failures').notNull().default(0),
+    /** When a poll first named it, on the poller's clock: the daily budgets count rows made in the last day. */
+    createdAt: integer('created_at').notNull(),
     updatedAt: updated(),
   },
   (t) => [primaryKey({ columns: [t.orgId, t.url] })],

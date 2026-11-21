@@ -1573,18 +1573,88 @@ export function scoped(d1: D1Database, orgId: string) {
               )
             ).flat()
           : [],
-      /** Held until `until`: queued to be fetched, so a poll before then does not queue them again. A URL new to the org gets its row, with no image yet. */
-      hold: async (urls: readonly string[], until: number) => {
-        const values = urls.map((url) => ({ orgId, url, nextCheckAt: until }));
+      /**
+       * Held until `until`: queued to be fetched, so a poll before then does not queue them again. A
+       * URL new to the org gets its row, with no image yet, made `now` and counted against
+       * `sourceId`'s daily budget (`madeSince`).
+       */
+      hold: async (urls: readonly string[], { until, now, sourceId }: { until: number; now: number; sourceId: string }) => {
+        const values = urls.map((url) => ({ orgId, url, sourceId, nextCheckAt: until, createdAt: now }));
         if (values.length)
           await db.batch(
-            chunk(values, 5).map((part) =>
+            chunk(values, 6).map((part) =>
               db
                 .insert(fi)
                 .values(part)
                 .onConflictDoUpdate({ target: [fi.orgId, fi.url], set: updateSet(fi, { nextCheckAt: until }) }),
             ) as [never, ...never[]],
           );
+      },
+      /** How many rows were made at or after `since`: the org's, and of those, the ones `sourceId` made. */
+      madeSince: async (since: number, sourceId: string) => {
+        const row = await db
+          .select({ org: sql<number>`count(*)`, source: sql<number>`coalesce(sum(${fi.sourceId} = ${sourceId}), 0)` })
+          .from(fi)
+          .where(and(eq(fi.orgId, orgId), gte(fi.createdAt, since)))
+          .get();
+        return { org: row?.org ?? 0, source: row?.source ?? 0 };
+      },
+      /**
+       * Delete these rows, but not one whose copy the org's latest snapshots still name (a source
+       * whose polls fail keeps playing its last good one). Returns the hashes of the deleted rows'
+       * files that nothing of the org names any more: no other row, no asset, no snapshot. Those
+       * blobs may go.
+       */
+      forget: async (urls: readonly string[]): Promise<string[]> => {
+        const shasOf = (r: typeof fi.$inferSelect) => [r.fileSha256, r.sampleSha256, r.thumbSha256].filter((x): x is string => x !== null);
+        const rows = urls.length
+          ? (
+              await Promise.all(
+                chunk([...urls], 1).map((part) =>
+                  db
+                    .select()
+                    .from(fi)
+                    .where(and(eq(fi.orgId, orgId), inArray(fi.url, part)))
+                    .all(),
+                ),
+              )
+            ).flat()
+          : [];
+        const snapshots = (await db.select({ json: snap.dataJson }).from(snap).where(eq(snap.orgId, orgId)).all()).map((r) => r.json);
+        const named = (sha: string) => snapshots.some((json) => json.includes(sha));
+        const gone = rows.filter((r) => !shasOf(r).some(named));
+        if (!gone.length) return [];
+        await db.batch(
+          chunk(
+            gone.map((r) => r.url),
+            1,
+          ).map((part) => db.delete(fi).where(and(eq(fi.orgId, orgId), inArray(fi.url, part)))) as [never, ...never[]],
+        );
+        const candidates = [...new Set(gone.flatMap(shasOf))];
+        const kept = new Set<string>();
+        const ar = s.assetRenditions;
+        for (const part of chunk(candidates, 3)) {
+          const [photos, assetRows, renditions] = await Promise.all([
+            db
+              .select()
+              .from(fi)
+              .where(and(eq(fi.orgId, orgId), or(inArray(fi.fileSha256, part), inArray(fi.sampleSha256, part), inArray(fi.thumbSha256, part))))
+              .all(),
+            db
+              .select({ sha256: s.assets.sha256 })
+              .from(s.assets)
+              .where(and(eq(s.assets.orgId, orgId), inArray(s.assets.sha256, part)))
+              .all(),
+            db
+              .select({ sha256: ar.sha256, sampleSha256: ar.sampleSha256 })
+              .from(ar)
+              .where(and(eq(ar.orgId, orgId), or(inArray(ar.sha256, part), inArray(ar.sampleSha256, part))))
+              .all(),
+          ]);
+          for (const sha of [...photos.flatMap(shasOf), ...assetRows.map((a) => a.sha256), ...renditions.flatMap((r) => [r.sha256, r.sampleSha256])])
+            if (sha) kept.add(sha);
+        }
+        return candidates.filter((sha) => !kept.has(sha));
       },
       /** What fetching `url` found: on success its hashes and validators, on a failure its category, the hashes kept. */
       save: async (url: string, found: RowPatch<typeof s.feedImages> & { nextCheckAt: number }) => {
