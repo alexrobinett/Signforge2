@@ -221,7 +221,8 @@ export function targetActions(
   const actions: TargetAction[] = [{ kind: 'open-screen', label: 'Open', screenId }];
   // These open a dialog, sending nothing: they need no read of this opening, though not on a revoked screen.
   if (listed('create_schedule_entry')) actions.push({ kind: 'play-here', label: 'Play a playlist here…', screenId });
-  if (listed('start_takeover')) actions.push({ kind: 'take-over', label: 'Take over…', screenId });
+  // A takeover is started, then published at once: an editor where only owners publish keeps start_takeover, not publish.
+  if (listed('start_takeover') && listed('publish')) actions.push({ kind: 'take-over', label: 'Take over…', screenId });
   if (may('identify_screen'))
     actions.push({
       kind: 'tool',

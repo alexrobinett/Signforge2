@@ -134,6 +134,17 @@ describe("a found screen's and group's actions (#180)", () => {
     );
   });
 
+  it('offers no takeover to an editor where only owners publish: it would start, and its publish be refused', () => {
+    const noPublish = parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role: 'editor', editorsPublish: false }) })));
+    expect(noPublish.map((t) => t.name)).toContain('start_takeover');
+    expect(targetActions({ kind: 'screen', screen }, noPublish, true).map((a) => a.label)).toEqual([
+      'Open',
+      'Play a playlist here…',
+      'Identify (10 s)',
+      'Restart player',
+    ]);
+  });
+
   it('only opens a screen for a viewer, whose role has neither tool, and a revoked screen for anyone', () => {
     expect(labels('viewer')).toEqual(['Open']);
     expect(labels('owner', { ...screen, status: 'revoked' })).toEqual(['Open']);
