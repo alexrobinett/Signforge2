@@ -1,6 +1,7 @@
 /**
  * One kind's data sources, in a dialog: each with its health and the spots that read it, its URL
- * changed or the source deleted (editors and owners), and a feed or calendar added by its address.
+ * changed, a news feed's photos switched off or on, or the source deleted (editors and owners), and
+ * a feed or calendar added by its address.
  */
 import { safeUrl } from '@signforge/contract';
 import type { SubmitEvent } from 'react';
@@ -86,8 +87,10 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
   const typeSourceUrl = useAppStore((st) => st.typeSourceUrl);
   const changeSourceUrl = useAppStore((st) => st.changeSourceUrl);
   const askToDeleteSource = useAppStore((st) => st.askToDeleteSource);
+  const setSourcePhotos = useAppStore((st) => st.setSourcePhotos);
   const state = sourceState(source, clock);
   const inputId = `source-url-${source.id}`;
+  const photosId = `source-photos-${source.id}`;
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     void changeSourceUrl(orgId, source);
@@ -105,6 +108,26 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
       {state.tone === 'waiting' && <p className="text-sm text-muted-foreground">Its first check of this address runs within a minute.</p>}
       <p className="text-sm text-muted-foreground">{source.spots.length ? `Used by ${source.spots.map((x) => x.name).join(', ')}.` : 'No spot uses it yet.'}</p>
       {source.format === 'json' && state.tone === 'failing' && <p className="text-sm text-muted-foreground">{weatherFixWords(source)}</p>}
+      {source.format === 'rss' && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <input
+              id={photosId}
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={source.photos}
+              disabled={!canManage || pending}
+              onChange={(e) => void setSourcePhotos(orgId, source, e.target.checked)}
+            />
+            <Label htmlFor={photosId}>Show story photos</Label>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {source.photos
+              ? 'SignForge fetches and checks each story’s photo, and screens show its copy. Turn this off to show headlines only.'
+              : 'Screens show headlines only.'}
+          </p>
+        </div>
+      )}
       {canManage &&
         source.format !== 'provider' &&
         (editing && hasAddress(source) ? (

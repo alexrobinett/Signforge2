@@ -25,6 +25,7 @@ const source = (over: Partial<ListedSource> = {}): ListedSource => ({
   refreshS: 300,
   horizonDays: null,
   rowsPath: null,
+  photos: true,
   nextPollAt: NOW + 60_000,
   failures: 0,
   lastError: null,
