@@ -607,8 +607,28 @@ export interface NewsFeed {
    */
   language: string;
   /** Newest first. */
-  items: { title: string; published: string; source: string }[];
+  items: { title: string; published: string; source: string; image?: NewsImage }[];
 }
+
+/**
+ * A story's photo as a screen gets it: the server's checked copy of the image the feed names,
+ * stored by hash in the org's storage, as an uploaded image is. The feed's own URL never reaches a
+ * screen. Only the first stories of a feed have one, and only once the server has fetched it: a
+ * story without one plays as a story with no photo. A screen that does not hold the files plays it
+ * the same way. Players before this field ignore it, as they ignore any property a list's item
+ * does not define.
+ */
+export interface NewsImage {
+  /** The photo scaled to cover a landscape screen (`coverSize` with `SCREEN_BOX.landscape`), never larger than the feed's: a JPEG, or a WebP for any other type. */
+  file: Sha256;
+  /** Its sample (`ManifestFile.sample`); none when any pixel is not opaque. */
+  sample?: Sha256;
+  /** A small copy for a list row, scaled to cover `NEWS_THUMB_BOX`, of the same type. */
+  thumb: Sha256;
+}
+
+/** The box a story's thumbnail (`NewsImage.thumb`) covers: a list row's picture, a quarter of a landscape screen's width. */
+export const NEWS_THUMB_BOX = { w: 480, h: 270 } as const;
 
 /**
  * A CSV file or a JSON list of objects, as the server converts a `csv` or `json-table` source.
