@@ -646,6 +646,71 @@ What ships costs no more than the version before the review: about 100 ms per pr
 
 Runs alternated (before, master, fix, fix, master, before, three times) on 2026-11-21 00:08-00:37; nothing was skipped. Against before #168: portrait +12 ms (95% bootstrap interval -68 to +49 ms, Mann-Whitney p 0.42), within noise; landscape +29 ms (1.5 to 47.5 ms, p 0.004), not. The landscape rest is the measuring's own main-thread work (a forced style and layout of about 12 ms, the sample's decode and canvas) not yet traced. The before runs' 1300 ms and 467-533 ms frames while playing were in three of its six landscape runs and none of the others'.
 
+## The look kit (issue #190, 2026-11-21)
+
+The kit's test template (`packages/template-looks/looks-test`) under each look. The layout: a headline, body, figure and meta beside a 1080p photo (berries-1080) that drifts, a crawl, a pulsing dot and a wobbling eyebrow, all switched on. The branch's player was at `http://localhost:8090/cpb190/` (its own origin) with content built per orientation, each look a spot of 10 s played on its own. Method: `device/pi/isolate.py`'s measurement pointed at that player, 10 s to settle and 30 s measured. The HTTP cache and the origin's storage were cleared and the service worker bypassed before each spec, the supervisor stopped, and `__sf.prepares` read after each spec. The five prepares of a spec include its first, which follows a cold load: 520 to 661 ms in every spec. Portrait was set with `wlr-randr --transform 90` and restored afterwards.
+
+| Orientation | Transition | Look | Overall | Playing | Loading next | Worst frame | Prepares (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | Pop | 0.28% | 0.00% | 8.6% | 50 ms | 562, 312, 311, 326, 308 |
+| | | Poster | 0.50% | 0.00% | 10.3% | 67 ms | 637, 331, 343, 627, 456 |
+| | | Night | 0.33% | 0.00% | 10.9% | 50 ms | 520, 280, 295, 293, 305 |
+| | | Corporate | 0.39% | 0.00% | 12.1% | 67 ms | 629, 439, 319, 323, 286 |
+| | fade | Pop | 0.78, 0.61, 0.67% | 0.12, 0.06, 0.00% | 13 to 19% | 117, 67, 67 ms | 533, 329, 414, 310, 326 |
+| | | Poster | 0.33% | 0.00% | 9.5% | 50 ms | 661, 330, 328, 364, 344 |
+| | | Night | 0.44% | 0.00% | 14.0% | 67 ms | 618, 308, 311, 294, 325 |
+| | | Corporate | 0.39% | 0.00% | 13.7% | 50 ms | 551, 279, 278, 276, 275 |
+| portrait | cut | Pop | 1.28% | 0.41% | 19.8% | 83 ms | 561, 626, 478, 446, 461 |
+| | | Poster | 0.89% | 0.06% | 15.5% | 67 ms | 605, 507, 759, 441, 419 |
+| | | Night | 1.06% | 0.06% | 19.0% | 67 ms | 588, 483, 665, 462, 453 |
+| | | Corporate | 1.33% | 0.29% | 20.2% | 83 ms | 577, 466, 445, 655, 438 |
+| | fade | Pop | 2.33% | 0.43% | 21.8% | 83 ms | 543, 728, 466, 445, 543 |
+| | | Poster | 1.39% | 0.06% | 16.5% | 67 ms | 609, 649, 483, 498, 721 |
+| | | Night | 1.39% | 0.12% | 15.9% | 83 ms | 542, 516, 486, 464, 506 |
+| | | Corporate | 1.89% | 0.25% | 21.5% | 83 ms | 564, 474, 582, 446, 513 |
+
+Prepare medians over cut and fade (10 each): landscape Pop 326, Poster 354, Night 307, Corporate 303 ms; portrait Pop 511, Poster 556, Night 496, Corporate 494 ms. While fading, landscape dropped 0 to 2.2% of frames and portrait 7.5 to 17.4%. The 117 ms frame came in one of three landscape Pop fade runs only. Nothing was skipped.
+
+- **Decoding a look's fonts is not the cost.** In the player page, `new FontFace(name, url(<the bundle's data: URL>)).load()` takes 2 to 3 ms per family, median of 5, two rounds: Inter 2.4 to 3.3, Bricolage Grotesque 2.0 to 2.4, Instrument Serif's two faces 2.2 to 2.9, Unbounded 2.4 to 2.8, Space Mono's two faces 1.7 to 2.3, Inter Tight 2.2 to 2.3 ms. So a look's own faces cost under 10 ms: Night, with three families, the most.
+- **A bundle with only Pop's faces, first A/B** (re-measured below, which corrects it). The same template with only Pop's faces in its bundle (139,470 bytes, against 369,674) was played alternately with the full one, Pop, cut, three runs each. Landscape: prepare median 323 against 475 ms (15 each), overall 0.28, 0.50, 0.72% against 0.61, 0.89, 0.83%. Portrait: 426 against 517 ms, overall 1.83 (one 300 ms frame while playing), 1.28, 1.11% against 1.55, 1.72, 1.78%. Part of it is the player's own reading of every bundle before it frames it (`containedFrames`, parse5 and a SHA-256 of the script), measured in the kiosk page: 43 to 47 ms for the full bundle, 13 to 16 ms for Pop's. The rest was put down to Chromium parsing the larger document; the trace below does not bear that out. Its landscape median (475 ms) also disagreed with the per-look table above, which measured the same full bundle and look at 326 ms.
+- In portrait the test template is over 1% overall even with Pop's faces alone, and its prepares are near or over 500 ms. Its frames are dropped while the next spot loads (16 to 24%); while it only plays it stays at 0.06 to 0.43%. Each template built on the kit (#197 to #202) measures its own layout.
+
+### Re-measured for the review (2026-11-21, 03:20 to 04:10)
+
+The same player and method, the bundles rebuilt with the fonts' licence notice (375,031 and 144,827 bytes), Pop, cut, 10 s spots, 30 s measured after 10 s to settle. Medians leave out each run's first prepare, which follows a cold load; those are given apart.
+
+**The A/B, alternated ABBA twice per orientation (four runs, 16 prepares each):**
+
+| Orientation | Bundle | Prepare median | Per run, after the first | First prepare | Overall | Playing | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | Pop's faces | 294 ms | 275-312 in every run | 417-425 ms | 0.28-0.33% | 0.00% | 33-67 ms |
+| | all four looks | 415 ms | 309-388 (one 690), 421-468, 409-475, 326-344 | 544-646 ms | 0.50-1.44% | 0.00-0.06% | 67-300 ms |
+| portrait | Pop's faces | 427 ms | 425-516, 406-648 (two runs) | 431-477 ms | 0.89, 1.28% | 0.35, 0.41% | 50-67 ms |
+| | all four looks | 485 ms | 432-655, 443-555 (two runs) | 536-727 ms | 1.67, 1.94% | 0.35, 0.41% | 83-100 ms |
+
+- **The full bundle's prepares are bimodal.** Its landscape runs sit either at the Pop-only bundle's level (326-344 ms) or about 130 ms higher (409-475 ms), a whole run at a time. The first per-look table caught the fast mode, the first A/B the slow one. With Pop's faces only, all four landscape runs were fast here.
+- **The first prepare after a page loads** is about 180 ms slower with the full bundle in landscape (544-646 against 417-425 ms), every run.
+- **The trace finds no thread doing more work for the full bundle.** This was a browser-wide trace (CDP `Tracing.start` on the browser target) over 22 s after 12 s to settle, two traces per bundle in landscape. Summed per prepare, task time per thread was the same within about 20 ms for both bundles: GPU main about 1,500 ms, viz compositor about 700, renderer main threads about 680-700, compositor about 490, browser main about 160, thread pool 78-104. On the renderers' main threads, style, layout and paint took the same time; HTML parsing took about 20 ms a prepare for the full bundle and under 17 ms for Pop's (out of its top 28 events). Under tracing both bundles fell into the slow mode at times: Pop's prepares reached 446 to 591 ms in two of its three traces. So beyond the player's parse and hash (43-47 against 13-16 ms) the gap is waiting, not work, and its cause is not found.
+- **300 ms frames.** One came in the first landscape run of the full bundle, while the next spot was preparing (the 690 ms prepare). The other was in the first session's first Pop-only portrait run, while playing. Neither came again in 30 later runs.
+
+**What takes portrait over 1%:** the same full bundle, Pop, with one part switched off at a time, two runs each, alternated (prepares after the first):
+
+| Variant | Overall | Playing | Loading next | Prepares |
+| --- | --- | --- | --- | --- |
+| everything on | 1.94, 1.67% | 0.35, 0.41% | 25-30% | 432-655 ms |
+| no photo drift (`.lk-drift`) | 0.67, 0.72% | 0.12, 0.17% | 12.4% | 430-650 ms |
+| no ambient motion (drift, wobble, pulse, ping) | 0.94, 0.44% | 0.06% | 8-18% | 381-554 ms |
+| no `will-change` on the kit's classes | 1.50, 1.28% | 0.35, 0.41% | 18-20% | 449-768 ms |
+| no crawl (`showCrawl` off) | 1.22, 1.39% | 0.24, 0.41% | 16-18% | 478-841 ms |
+| no photo (`showPhoto` off) | 0.89, 0.61% | 0.06% | 17-21% | 313-333 ms (531 once) |
+| Pop's faces only | 1.28, 0.89% | 0.35, 0.41% | 12-20% | 406-648 ms |
+
+- The ablation ran on Pop only; every look drifts its photo (22 to 32 s a cycle). Its "everything on" and "Pop's faces only" rows are the same runs as the portrait A/B above.
+- The photo's drift is the largest part of what takes portrait over 1%: a photo the screen's width, rescaled every frame while the next spot loads. With the drift off the template stays under 1% with everything else on (0.67, 0.72%). It is not the only part: the four-look bundle drops more than one with Pop's faces only (1.67, 1.94% against 0.89, 1.28%), most of it while the next spot loads (25 to 30% against 12 to 20%), where its slower prepare falls. Two runs per variant, and earlier Pop-only portrait runs ranged from 0.89 to 1.83%.
+- Since then the kit holds `.lk-drift` still in portrait (docs/template-spec.md, Looks).
+- The photo is also most of the prepare: with it off, prepares fall from about 480 to about 330 ms, as photo-promo's decode cost (Photo samples, above).
+- Dropping `will-change` does not help.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.

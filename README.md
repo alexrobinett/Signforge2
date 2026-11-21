@@ -56,6 +56,7 @@ apps/template-check Worker and container: the runtime check of uploaded template
 packages/contract   every shape a screen sees: manifest, template protocol, budgets, checks
 packages/player     the web player; packages/player-core holds its pure logic
 packages/template-sdk  what a template imports to talk to the player
+packages/template-looks  the four looks a template can offer: type, fonts, motion and toggles
 packages/compiler   org data and a screen into a manifest
 packages/cli        `sf`: build, push and seed templates and content
 packages/db, tools, media, feeds   tenancy-scoped data access, the tool registry, image handling, feed normalising
