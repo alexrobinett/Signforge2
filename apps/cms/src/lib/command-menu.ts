@@ -1,8 +1,10 @@
 /**
  * The command menu's entries: one per sidebar section, then one per tool the member's role may use,
  * read from `GET /api/tools` (the registry's `describeTools`, the list an agent gets). A tool's
- * form comes from its input's JSON Schema.
+ * form comes from its input's JSON Schema. Typing also finds screens and groups by name (#180),
+ * each with its own actions (`targetActions`).
  */
+import type { GroupView, ScreenView } from './screen-types';
 import { SECTIONS, type Section } from './sections';
 
 /** One input of a tool's form. `key` is an idempotency key: never shown, filled by `withKey`. */
@@ -174,4 +176,43 @@ export function resultText(output: unknown): string {
     return [];
   });
   return parts.join(', ') || 'Done';
+}
+
+/** A screen or a group ⌘K found, whose actions are showing. */
+export type CommandTarget = { kind: 'screen'; id: string } | { kind: 'group'; id: string };
+
+/**
+ * What ⌘K offers on a screen or a group it found. A new action is a case here, a line in
+ * `targetActions`, and a case in the store's `runTargetAction` (src/state/command-menu.ts).
+ */
+export type TargetAction =
+  | { kind: 'open-screen'; label: string; screenId: string }
+  | { kind: 'open-group'; label: string; groupId: string }
+  | { kind: 'tool'; label: string; tool: 'identify_screen' | 'restart_screen'; screenId: string; screenName: string; done: string };
+
+/** A screen's or a group's actions, those the member's role allows (the tools the shell listed); a revoked screen can only be opened. */
+export function targetActions(target: { kind: 'screen'; screen: ScreenView } | { kind: 'group'; group: GroupView }, tools: ToolListing[]): TargetAction[] {
+  if (target.kind === 'group') return [{ kind: 'open-group', label: 'Show its screens', groupId: target.group.id }];
+  const { id: screenId, name: screenName, status } = target.screen;
+  const may = (tool: string) => status !== 'revoked' && tools.some((t) => t.name === tool);
+  const actions: TargetAction[] = [{ kind: 'open-screen', label: 'Open', screenId }];
+  if (may('identify_screen'))
+    actions.push({
+      kind: 'tool',
+      label: 'Identify (10 s)',
+      tool: 'identify_screen',
+      screenId,
+      screenName,
+      done: 'Sent. The screen shows its name for 10 seconds, if it is connected.',
+    });
+  if (may('restart_screen'))
+    actions.push({
+      kind: 'tool',
+      label: 'Restart player',
+      tool: 'restart_screen',
+      screenId,
+      screenName,
+      done: 'Sent. The player restarts and plays from its cache at once.',
+    });
+  return actions;
 }

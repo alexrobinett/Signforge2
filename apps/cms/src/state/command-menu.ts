@@ -1,16 +1,31 @@
 /**
- * The command menu (⌘K): open or closed, the tool whose form is showing, and running a tool. The
- * entries come from the shell's loader (src/lib/command-menu.ts); results and refusals are toasts.
+ * The command menu (⌘K): open or closed, what is typed, the tool whose form or the screen or group
+ * whose actions are showing, and running a tool or an action. The entries come from the shell's
+ * loader and the screens list (src/lib/command-menu.ts); results and refusals are toasts.
  */
 import { toast } from 'sonner';
-import { needsInput, resultText, toolInput, withKey, type CommandEntry, type PendingCall, type ToolListing } from '~/lib/command-menu';
-import { callToolByName, toolMessage } from '~/lib/tools';
+import {
+  needsInput,
+  resultText,
+  toolInput,
+  withKey,
+  type CommandEntry,
+  type CommandTarget,
+  type PendingCall,
+  type TargetAction,
+  type ToolListing,
+} from '~/lib/command-menu';
+import { callTool, callToolByName, toolMessage } from '~/lib/tools';
 import type { AppStore, SliceCreator, StoreDeps } from './store';
 
 interface CommandMenuState {
   open: boolean;
+  /** What is typed in the list's search: past the sections and tools, it finds screens and groups. */
+  query: string;
   /** The tool whose form is showing, by name; null shows the list. */
   form: string | null;
+  /** The screen or group whose actions are showing; null shows the list. */
+  target: CommandTarget | null;
   running: boolean;
   /** A form field the menu could not read, before anything was sent. */
   fieldError: { field: string; message: string } | null;
@@ -24,10 +39,14 @@ export interface CommandMenuSlice {
   closeCommandMenu: () => void;
   chooseCommand: (entry: CommandEntry) => Promise<void>;
   backToCommands: () => void;
+  searchCommands: (query: string) => void;
+  /** Shows a found screen's or group's actions. */
+  chooseTarget: (target: CommandTarget) => void;
+  runTargetAction: (action: TargetAction) => Promise<void>;
   submitToolForm: (label: string, tool: ToolListing, form: FormData) => Promise<void>;
 }
 
-const CLOSED: CommandMenuState = { open: false, form: null, running: false, fieldError: null, pending: null };
+const CLOSED: CommandMenuState = { open: false, query: '', form: null, target: null, running: false, fieldError: null, pending: null };
 
 export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get, { router }) => {
   const run = async (label: string, tool: ToolListing, read: Record<string, unknown>) => {
@@ -59,7 +78,34 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
         await run(entry.label, entry.tool, {});
       }
     },
-    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, fieldError: null } })),
+    // The search stays as typed, so Back returns to what it found.
+    backToCommands: () => set((s) => ({ commandMenu: { ...s.commandMenu, form: null, target: null, fieldError: null } })),
+    searchCommands: (query) => set((s) => ({ commandMenu: { ...s.commandMenu, query } })),
+    chooseTarget: (target) => set((s) => ({ commandMenu: { ...s.commandMenu, target } })),
+    async runTargetAction(action) {
+      const close = () => set((s) => ({ commandMenu: { ...CLOSED, pending: s.commandMenu.pending } }));
+      switch (action.kind) {
+        case 'open-screen':
+          close();
+          await router.navigate({ to: '/screens/$screenId', params: { screenId: action.screenId } });
+          return;
+        case 'open-group':
+          close();
+          await router.navigate({ to: '/screens', search: { group: action.groupId } });
+          return;
+        case 'tool':
+          if (get().commandMenu.running) return;
+          set((s) => ({ commandMenu: { ...s.commandMenu, running: true } }));
+          try {
+            await callTool(action.tool, { screenId: action.screenId });
+            close();
+            toast.success(`${action.label}: ${action.screenName}`, { description: action.done });
+          } catch (err) {
+            set((s) => ({ commandMenu: { ...s.commandMenu, running: false } }));
+            toast.error(`${action.label}: ${action.screenName}`, { description: toolMessage(err) });
+          }
+      }
+    },
     submitToolForm: async (label, tool, form) => {
       if (get().commandMenu.running) return;
       const read = toolInput(tool.fields, form);

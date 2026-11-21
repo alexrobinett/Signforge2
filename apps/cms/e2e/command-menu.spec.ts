@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, screenshot, signInAs } from './helpers';
+import { axe, fillUntilEnabled, hydrated, screenshot, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
@@ -16,7 +16,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await hydrated(page);
 
   const menu = page.getByRole('dialog', { name: 'Command menu' });
-  const search = menu.getByRole('combobox', { name: 'Search pages and actions' });
+  const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
   const toast = (text: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: text });
 
   // Open with Ctrl+K: focus is in the search, every tool an owner may use is listed.
@@ -101,5 +101,49 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.keyboard.press('ControlOrMeta+k');
   await expect(search).toBeFocused();
   await page.keyboard.press('ControlOrMeta+k');
+  await expect(menu).toBeHidden();
+
+  // Typing part of a screen's name finds it (#180); Enter shows its actions, Open first.
+  const { screens } = await tool(page, 'list_screens', {});
+  const deli = screens.find((s: { name: string }) => s.name === 'Deli counter').id;
+  const { group } = await tool(page, 'create_group', { name: 'Front of house', screenIds: [deli] });
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('deli');
+  await expect(menu.getByRole('option', { selected: true })).toContainText('Deli counter');
+  await expect(menu.getByRole('option', { name: /Front of house/ })).toHaveCount(0);
+  await axe(page);
+  await screenshot(page, '32-command-menu-screen');
+  await page.keyboard.press('Enter');
+  const actions = menu.getByRole('option');
+  await expect(actions).toHaveText(['Open', 'Identify (10 s)', 'Restart player']);
+  await expect(menu.getByRole('combobox', { name: 'Actions for Deli counter' })).toBeFocused();
+  await axe(page);
+  await screenshot(page, '33-command-menu-screen-actions');
+  await page.keyboard.type('identify');
+  await page.keyboard.press('Enter');
+  await expect(toast('Identify (10 s): Deli counter')).toBeVisible();
+  await expect(menu).toBeHidden();
+
+  // Back returns to what was found; Open goes to the screen's page.
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('counter');
+  await page.keyboard.press('Enter');
+  await menu.getByRole('button', { name: 'Back to commands' }).click();
+  await expect(search).toHaveValue('counter');
+  await expect(search).toBeFocused();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/screens/${deli}$`));
+  await expect(page.getByRole('heading', { name: 'Deli counter', level: 1 })).toBeVisible();
+
+  // A group by its name, or a screen by its group's: the group's action shows its screens on the Screens page.
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('house');
+  await expect(menu.getByRole('option', { name: /Deli counter/ })).toBeVisible();
+  await menu.getByRole('option', { name: /Front of house/ }).click();
+  await expect(menu.getByRole('option')).toHaveText(['Show its screens']);
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/screens\\?group=${group.id}$`));
+  await expect(page.getByRole('button', { name: 'Front of house 1', pressed: true })).toBeVisible();
   await expect(menu).toBeHidden();
 });

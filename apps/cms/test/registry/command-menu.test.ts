@@ -1,6 +1,7 @@
 import { describeTools, registry, TOOLS, type Role } from '@signforge/tools';
 import { describe, expect, it } from 'vitest';
-import { commandEntries, needsInput, NULL_CHOICE, parseToolList, resultText, toolInput, withKey } from '../../src/lib/command-menu';
+import { commandEntries, needsInput, NULL_CHOICE, parseToolList, resultText, targetActions, toolInput, withKey } from '../../src/lib/command-menu';
+import type { ScreenView } from '../../src/lib/screen-types';
 import { SECTIONS } from '../../src/lib/sections';
 
 // What `GET /api/tools` sends: `describeTools` for the member's role, in an org where editors publish (the default).
@@ -104,5 +105,27 @@ describe('a result toast', () => {
     expect(resultText({ screen: { id: 's', name: 'Lobby' } })).toBe('Lobby');
     expect(resultText({ screenId: 's', seconds: 10 })).toBe('Done');
     expect(resultText({ screenId: 's', manifestId: 'm', changed: false })).toBe('Nothing changed: it was already so');
+  });
+});
+
+describe("a found screen's and group's actions (#180)", () => {
+  const screen = { id: 'scr_1', name: '0157 Drive-thru L', status: 'active' } as ScreenView;
+  const labels = (role: Role, s: ScreenView = screen) => targetActions({ kind: 'screen', screen: s }, listed(role)).map((a) => a.label);
+
+  it('opens, identifies and restarts a screen for an editor, Open first', () => {
+    expect(labels('editor')).toEqual(['Open', 'Identify (10 s)', 'Restart player']);
+    expect(targetActions({ kind: 'screen', screen }, listed('owner'))).toContainEqual(
+      expect.objectContaining({ kind: 'tool', tool: 'identify_screen', screenId: 'scr_1', screenName: '0157 Drive-thru L' }),
+    );
+  });
+
+  it('only opens a screen for a viewer, whose role has neither tool, and a revoked screen for anyone', () => {
+    expect(labels('viewer')).toEqual(['Open']);
+    expect(labels('owner', { ...screen, status: 'revoked' })).toEqual(['Open']);
+  });
+
+  it("shows a group's screens on the Screens page", () => {
+    const group = { id: 'grp_1', name: 'North', screenIds: [], version: 1, createdAt: 0, updatedAt: 0 };
+    expect(targetActions({ kind: 'group', group }, listed('viewer'))).toEqual([{ kind: 'open-group', label: 'Show its screens', groupId: 'grp_1' }]);
   });
 });

@@ -24,14 +24,14 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'bas
 export const byName = (a: Named, b: Named) => collator.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /** Whether every word of the query is in one of the texts, in any case. An empty query matches. */
-const matchesQuery = (query: string, texts: string[]) => {
+export const matchesQuery = (query: string, texts: string[]) => {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const hay = texts.map((t) => t.toLowerCase());
   return words.every((w) => hay.some((t) => t.includes(w)));
 };
 
 /** What a screen is found by: its name and its groups' names. */
-const screenKeywords = (screen: Named, groups: readonly GroupLike[]) => [
+export const screenKeywords = (screen: Named, groups: readonly GroupLike[]) => [
   screen.name,
   ...groups.filter((g) => g.screenIds.includes(screen.id)).map((g) => g.name),
 ];
