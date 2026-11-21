@@ -11,7 +11,7 @@ One job, `check`, in `.github/workflows/ci.yml`, on every pull request and every
 2. The repo-wide checks, a few seconds each, on every run: Biome lint, the format check on changed files, knip, jscpd, `turbo boundaries`, the contract-commit check and the template-dependency check.
 3. The plan: `turbo run … --dry=json` lists the tasks that will run (`--affected` and no `test:e2e` on a pull request). Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media, tools and template-check).
 4. The stress media, only if the cli's or the tools' tests run (see [Stress media](#stress-media)).
-5. `turbo run typecheck test lint --affected --summarize` on a pull request, or `turbo run typecheck test test:e2e lint --summarize` on `master`, with Turbo's cache restored from earlier runs.
+5. `turbo run typecheck test lint --affected --summarize` on a pull request, or `turbo run typecheck test test:e2e lint --summarize` on `master`, with Turbo's cache restored from earlier runs. The job may run 60 minutes: on `master` with cold caches (a contract change rebuilds nearly everything) the tests take about 16 minutes and the CMS e2e about 20 (2026-11-21).
 6. The timing summary on the run's page: each step's time, then each Turbo task's time and whether it came from the cache (`scripts/ci-summary.sh`).
 
 ## What "affected" means
