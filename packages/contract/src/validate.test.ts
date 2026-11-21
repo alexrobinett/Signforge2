@@ -983,6 +983,28 @@ describe('forbidden CSS', () => {
   });
 });
 
+describe('network check', () => {
+  const problems = (html: string) =>
+    checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'network')?.problems;
+  const refused = ['a template may not load anything from the network'];
+
+  // A stylesheet that style.css imports reaches the bundle without meeting the source lint.
+  it('refuses absolute and protocol-relative URLs in the bundle', () => {
+    for (const html of [
+      '<style>.b{background:url(//tracker.example/p.gif)}</style>',
+      '<style>.b{background:url( "//tracker.example/p.gif")}</style>',
+      '<style>.b{background:url(https://tracker.example/p.gif)}</style>',
+      '<img src="//tracker.example/p.gif">',
+      "<a href='https://tracker.example/'>",
+    ])
+      expect(problems(html), html).toEqual(refused);
+  });
+
+  it('passes data: URLs and paths', () => {
+    expect(problems('<style>.b{background:url(data:image/png;base64,AA==)}</style><img src="a.png"><a href="#x">')).toEqual([]);
+  });
+});
+
 describe('script check', () => {
   const problems = (html: string) =>
     checkTemplateBundle({ manifest: template, html, sources: { 'main.ts': '' } }).checks.find((c) => c.check === 'scripts')?.problems;

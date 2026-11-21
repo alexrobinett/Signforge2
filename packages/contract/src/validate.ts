@@ -1017,7 +1017,9 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
   if (protocol !== undefined && !SUPPORTED_PROTOCOLS.includes(protocol)) manifestProblems.push(`protocol ${String(protocol)} is not supported`);
 
   const network: string[] = [];
-  if (/\b(?:src|href)\s*=\s*["']https?:/i.test(html) || /url\(\s*["']?https?:/i.test(html)) network.push('a template may not load anything from the network');
+  // Protocol-relative too: a stylesheet style.css imports reaches the bundle without the source lint.
+  if (/\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) || /url\(\s*["']?(?:https?:)?\/\//i.test(html))
+    network.push('a template may not load anything from the network');
 
   // Comments are stripped first, so a note about `fetch` is not a call to it. `//` after a colon is a URL, and is kept.
   const authored = Object.values(sources)
