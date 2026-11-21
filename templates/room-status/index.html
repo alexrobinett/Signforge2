@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Room status</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="stage">
+  <div class="ident card lk-badge lk-d1">
+    <div class="lk-mask room-mask"><h1 class="room lk-text lk-d1" data-sf="room">Harbour Room</h1></div>
+    <p class="facts" data-show="facts">
+      <span class="seats lk-fade lk-d2"><b class="v"></b><span class="k"> seats</span></span>
+      <span class="floor lk-fade lk-d2"><span class="k">Floor </span><b class="v"></b></span>
+    </p>
+  </div>
+  <p class="clock lk-fade lk-d2" data-show="clock">
+    <span class="live" aria-hidden="true"><i class="ring lk-ping"></i><i class="dot lk-pulse"></i></span>
+    <span class="date"></span>
+    <span class="time"><span class="hh"></span><span class="colon">:</span><span class="mm"></span><span class="ap"></span></span>
+  </p>
+  <div class="rule r1 lk-draw lk-d1"></div>
+  <div class="status">
+    <p class="kicker lk-text lk-d3"><i class="dot lk-pulse" aria-hidden="true"></i>Status now</p>
+    <div class="lk-mask word-mask"><p class="word lk-text lk-d2"></p></div>
+    <p class="for lk-text lk-d3"><span class="k"></span> <b class="v"></b></p>
+    <p class="until lk-text lk-d4"></p>
+  </div>
+  <div class="rule r2 lk-draw lk-d4"></div>
+  <p class="line lk-fade lk-d4"></p>
+  <p class="next lk-fade lk-d5" data-show="next"></p>
+  <section class="schedule card lk-fade lk-d3" data-show="schedule">
+    <p class="head"><span class="today">Today</span><span class="allday"></span></p>
+    <div class="body">
+      <ol class="items"></ol>
+      <div class="pin lk-fade lk-d7" data-show="now-line"><span class="pin-pill card lk-pulse">now</span></div>
+      <div class="track">
+        <div class="hours lk-fade lk-d3"></div>
+        <i class="nowline lk-draw lk-d7" data-show="now-line"><b class="glow"></b><b class="dot"></b></i>
+      </div>
+      <p class="free-day lk-text lk-d4"></p>
+    </div>
+  </section>
+</div>
+<template id="item">
+  <li class="item card lk-fade"><span class="when"></span><span class="what"></span><span class="sub"></span><i class="bar lk-draw lk-d7"></i></li>
+</template>
+<template id="block">
+  <div class="block card lk-fade"><span class="when"></span><span class="what"></span></div>
+</template>
+<template id="now-row">
+  <li class="now-row lk-fade lk-d5"><span>Now</span><i></i></li>
+</template>
+<script type="module" src="main.ts"></script>
+</body>
+</html>

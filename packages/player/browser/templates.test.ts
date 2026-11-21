@@ -1054,3 +1054,95 @@ describe('the look kit (#190)', () => {
     await expectSameAsFresh(await host('landscape', true), t.html, a, b, photo, photo);
   });
 });
+
+describe('room status (#199)', () => {
+  const looks = ['pop', 'poster', 'night', 'corporate'] as const;
+  const t = () => built.get('room-status')!;
+  /** A booking `from` to `to` hours after NOW (15:00 UTC, the screen's zone), as the calendar feed writes it. */
+  const booking = (title: string, from: number, to: number, organizer = '') => ({ title, start: at(from), end: at(to), allDay: false, organizer });
+  const today = [booking('Stand-up', -5, -4.5), booking('Design review', 0.5, 1.5, 'Priya Shah'), booking('Hiring sync', 2, 2.5)];
+
+  /** One frame at a screen's own size; `show` inits it with the template's defaults under `data` and waits for ready. */
+  async function room(orientation: Orientation = 'landscape') {
+    const hst = await host(orientation, true);
+    await hst.open('fresh', t().html);
+    let inits = 0;
+    return {
+      hst,
+      async show(data: Data, theme?: FrameTheme, now = NOW) {
+        await hst.init('fresh', spotData(t().manifest, data), {}, now, theme);
+        await hst.waitFor('fresh', 'ready', ++inits);
+        return hst.page.mainFrame().childFrames()[0]!;
+      },
+    };
+  }
+
+  /** What the room says: its state, the status word, how long, the line under it and the schedule's place holder. */
+  const says = (f: Frame) =>
+    f.evaluate(() => {
+      const text = (sel: string) => document.querySelector(sel)?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
+      return {
+        state: document.documentElement.dataset.state,
+        word: text('.word'),
+        for: text('.for'),
+        line: text('.line'),
+        next: text('.next'),
+        freeDay: text('.free-day'),
+        allDay: text('.allday'),
+      };
+    });
+
+  it('works out free or busy, until when and for how long from the screen clock', async () => {
+    const r = await room();
+    const seen: Record<string, unknown> = {};
+    const cases: [string, Data][] = [
+      ['between meetings', { events: today }],
+      ['in a meeting', { events: [booking('Design review', -0.25, 0.75, 'Priya Shah'), booking('Hiring sync', 2, 2.5)] }],
+      ['after the last meeting', { events: [booking('Stand-up', -5, -4.5)] }],
+      ['with no events', { events: [] }],
+      ['with only tomorrow booked', { events: [booking('Retro', 20, 21)] }],
+      ['on a day with an all-day event', { events: [{ title: 'Offsite', start: '2026-11-17', end: '2026-11-18', allDay: true, organizer: '' }, booking('Hiring sync', 2, 2.5)] }],
+    ];
+    for (const [name, data] of cases) seen[name] = await says(await r.show({ look: 'corporate', ...data }));
+    expect(seen).toEqual({
+      'between meetings': {
+        state: 'free',
+        word: 'Available',
+        for: 'Free for 30 min',
+        line: 'Free until 3:30 PM, then Design review',
+        next: null,
+        freeDay: null,
+        allDay: null,
+      },
+      'in a meeting': {
+        state: 'busy',
+        word: 'In use',
+        for: 'Time left 45 min',
+        line: 'Design review, until 3:45 PM · Priya Shah',
+        next: 'Next: Hiring sync at 5:00 PM',
+        freeDay: null,
+        allDay: null,
+      },
+      'after the last meeting': {
+        state: 'free',
+        word: 'Available',
+        for: null,
+        line: 'Nothing else booked today',
+        next: null,
+        freeDay: 'Free for the rest of the day',
+        allDay: null,
+      },
+      'with no events': { state: 'free', word: 'Available', for: null, line: 'Nothing booked today', next: null, freeDay: 'Free all day', allDay: null },
+      'with only tomorrow booked': { state: 'free', word: 'Available', for: null, line: 'Nothing booked today', next: null, freeDay: 'Free all day', allDay: null },
+      'on a day with an all-day event': {
+        state: 'free',
+        word: 'Available',
+        for: 'Free for 2 hr',
+        line: 'Free until 5:00 PM, then Hiring sync',
+        next: null,
+        freeDay: null,
+        allDay: 'All day: Offsite',
+      },
+    });
+  });
+});

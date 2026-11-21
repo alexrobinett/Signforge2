@@ -245,6 +245,9 @@ importers:
       '@signforge/template-photo-promo':
         specifier: workspace:*
         version: link:../../templates/photo-promo
+      '@signforge/template-room-status':
+        specifier: workspace:*
+        version: link:../../templates/room-status
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../../packages/template-sdk
@@ -381,6 +384,9 @@ importers:
       '@signforge/template-photo-promo':
         specifier: workspace:*
         version: link:../../templates/photo-promo
+      '@signforge/template-room-status':
+        specifier: workspace:*
+        version: link:../../templates/room-status
       '@signforge/template-weather':
         specifier: workspace:*
         version: link:../../templates/weather
@@ -469,6 +475,9 @@ importers:
       '@signforge/template-photo-promo':
         specifier: workspace:*
         version: link:../../templates/photo-promo
+      '@signforge/template-room-status':
+        specifier: workspace:*
+        version: link:../../templates/room-status
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../../packages/template-sdk
@@ -530,6 +539,9 @@ importers:
       '@signforge/template-photo-promo':
         specifier: workspace:*
         version: link:../../templates/photo-promo
+      '@signforge/template-room-status':
+        specifier: workspace:*
+        version: link:../../templates/room-status
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../template-sdk
@@ -690,6 +702,9 @@ importers:
       '@signforge/template-photo-promo':
         specifier: workspace:*
         version: link:../../templates/photo-promo
+      '@signforge/template-room-status':
+        specifier: workspace:*
+        version: link:../../templates/room-status
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../template-sdk
@@ -920,6 +935,15 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.3.0
+
+  templates/room-status:
+    dependencies:
+      '@signforge/template-looks':
+        specifier: workspace:*
+        version: link:../../packages/template-looks
+      '@signforge/template-sdk':
+        specifier: workspace:*
+        version: link:../../packages/template-sdk
 
   templates/weather:
     dependencies:
