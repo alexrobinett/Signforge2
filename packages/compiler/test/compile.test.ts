@@ -66,14 +66,23 @@ describe('compileScreen', () => {
     const countdown: TemplateManifest = {
       ...promo,
       id: 'countdown',
-      fields: { target: { type: 'datetime', label: 'Target' }, day: { type: 'date', label: 'Day' } },
+      fields: {
+        target: { type: 'datetime', label: 'Target' },
+        day: { type: 'date', label: 'Day' },
+        events: { type: 'list', label: 'Events', item: { at: { type: 'datetime', label: 'At' } } },
+      },
     };
     input.templates['base/countdown@1.0.0'] = { manifest: countdown, html: 'a'.repeat(64) };
-    input.spots.push({ id: 'launch', name: 'Launch', kind: 'template', template: 'base/countdown@1.0.0', data: { target: '' }, assets: {}, durationMs: 8000 });
+    const data = { target: '', events: [{ at: '2026-12-24T18:00' }, { at: '' }] };
+    input.spots.push({ id: 'launch', name: 'Launch', kind: 'template', template: 'base/countdown@1.0.0', data, assets: {}, durationMs: 8000 });
     input.playlists[0]!.items.push({ spot: 'launch' });
     const result = await compileScreen(input, opts());
     expect(result.manifest).toBeUndefined();
-    expect(result.problems).toEqual(['spot launch: field "target" has no date and time yet', 'spot launch: field "day" is missing']);
+    expect(result.problems).toEqual([
+      'spot launch: field "target" has no date and time yet',
+      'spot launch: field "day" is missing',
+      'spot launch: field "events[2].at" has no date and time yet',
+    ]);
   });
 
   it('keeps only the schedule entries that target this screen, its groups or the whole org', async () => {
