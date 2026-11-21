@@ -32,7 +32,7 @@ Failures throw `FeedError` with a `code` (`too-large`, `doctype`, `malformed`, `
 
 ### Images
 
-`parseNews` finds each kept story's image (`{ url, width?, height? }`, the size only when the feed gives it) and the feed's logo. Both are third-party URLs, so they stay on the server: a screen never fetches, and `normaliseFeed` leaves them out. Nothing fetches them yet: the poller is to fetch, check and store them (#195), and a snapshot to name each by its hash (#196). Why this order, and what real feeds do: `docs/research/rss-images.md`.
+`parseNews` finds each kept story's image (`{ url, width?, height? }`, the size only when the feed gives it) and the feed's logo. Both are third-party URLs, so they stay on the server: a screen never fetches, and `normaliseFeed` leaves them out. For a news source with photos on, the poller calls `parseNews` with the feed's URL and fetches, checks and stores the first stories' photos, and the snapshot names each stored copy by its hash (`NewsImage` in the contract; `apps/api/src/data/images.ts`). The parser keeps `http:` URLs, which the server tries once over https, and checks no host: that is the server's fetch guards'. `width` and `height` are the feed's claims, never trusted for the copy. Why this order, and what real feeds do: `docs/research/rss-images.md`.
 
 An item's image is the first of these that has one:
 

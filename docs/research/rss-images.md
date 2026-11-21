@@ -27,7 +27,7 @@ There is no single standard. Real feeds use one or more of these, so the parser 
 ## Where the image goes
 
 - `parseNews` (in `packages/feeds`, not the contract) gives each item an `image?: { url, width?, height? }`, the source URL as found, and the feed a `logo?`. The contract holds the shapes a screen sees, and a screen never sees these: `normaliseFeed`, which the poller stores, leaves them out.
-- What a screen sees is the stored, checked copy: the snapshot names each image by hash, and the template gets it as an asset (`data-sf-src` on a list row, an image property allowed in list items). That shape joins the contract when screens get images.
+- What a screen sees is the stored, checked copy: the snapshot names each image by hash, and the template gets it as an asset (`data-sf-src` on a list row, an image property allowed in list items). That shape is the contract's `NewsImage` (#195).
 
 ## Getting the image to the screen
 
@@ -38,7 +38,7 @@ Screens and templates have no network, and a feed's image URL is untrusted input
 - **Cost per poll:** polls run every 5 minutes on a Worker with 30 s of CPU shared with other orgs' sources. So:
   - fetch only images for items that will be shown (the first `maxItems`, at most 10 per source);
   - remember URL → hash with the response's `ETag` / `Last-Modified` and skip unchanged URLs;
-  - run the resize off the poll path, through the same queue or binding uploads use;
+  - run the resize off the poll path (#195: uploads resize in the browser and a Worker has no decoder, so the poll queues each photo and the queue's consumer has the Images binding decode and scale it);
   - a source keeps its last good images when a fetch fails.
 - **Sync and player:** the snapshot lists the hashes it uses; the sync sends missing blobs; the player pins them for as long as a snapshot it holds refers to them (as for manifest files) and evicts afterwards. A story whose image did not arrive plays as a story with no image.
 - **Templates:** an item's image is an asset URL or empty, never a remote URL. Contrast over a photo uses the thumbnail (`readableOver`), as photo-promo does.
