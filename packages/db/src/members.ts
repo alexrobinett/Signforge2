@@ -30,7 +30,7 @@ export async function memberOrgNames(d1: D1Database, userId: string, orgIds: str
 /**
  * The org a new session starts in (#182): the user's only org, or the one they last made active
  * while they are still its member; otherwise none, and the CMS asks which. The remembered org is
- * written by the `session_org_remembered` trigger (migration 0029), and the insert's
+ * written by the `session_org_remembered` trigger (migration 0030), and the insert's
  * `session_org_is_a_membership` trigger clears an org whose membership ended after this read.
  */
 export async function startingOrg(d1: D1Database, userId: string): Promise<string | null> {
