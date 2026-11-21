@@ -70,10 +70,6 @@
       "size": 582,
       "type": "image/svg+xml"
     },
-    "450f599e73fe5a92314661a2205133aefcbc18287abb91b8b6a051dc8b4189ae": {
-      "size": 122679,
-      "type": "text/html"
-    },
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
@@ -85,6 +81,10 @@
     "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
       "size": 23664,
       "type": "font/woff2"
+    },
+    "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402": {
+      "size": 122679,
+      "type": "text/html"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
@@ -111,7 +111,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "7c183812e339587b8f748570d21182aa568919a17a44c8936a944ce211ab1789",
+  "id": "db48d63bf44bd29daf1b2198e9e913dfdc249bd2b34b662d342f02f55c06e58f",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -161,7 +161,7 @@
       "to": "10:00"
     }
   ],
-  "schema": 5,
+  "schema": 6,
   "screen": {
     "displayHours": {
       "exceptions": [
@@ -280,7 +280,7 @@
   },
   "templates": {
     "base/alert@1.0.0": {
-      "html": "450f599e73fe5a92314661a2205133aefcbc18287abb91b8b6a051dc8b4189ae",
+      "html": "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402",
       "manifest": {
         "background": "#111827",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",

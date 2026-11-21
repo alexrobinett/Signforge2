@@ -351,6 +351,16 @@ describe('commands', () => {
     expect((await sync(s, body())).commands).toEqual([]);
   });
 
+  it('tell a player from before #192, which refuses date and datetime fields, to reload for a template with one: a player that knows them is not', async () => {
+    const s = await setUp('sync-date-fields');
+    const fields = { day: { type: 'date', label: 'Day', default: '2026-11-27' }, target: { type: 'datetime', label: 'Target', default: '2026-11-27T18:00' } };
+    await publish(s, 'm-date', { schema: MANIFEST_SCHEMA, templates: { 'base/countdown@1.0.0': { html: 'a'.repeat(64), manifest: { fields, protocol: 2 } } } });
+    // What master's player reports before #192: schemas 4 and 5. Its validator refuses both field types in any manifest.
+    const before = body({ player: { version: '1.0.0', manifestSchemas: [4, 5], protocols: [1, 2] } });
+    expect((await sync(s, before)).commands).toEqual([{ type: 'reload' }]);
+    expect((await sync(s, body())).commands).toEqual([]);
+  });
+
   it("carry the screen's display override while the screen reports another, and its clearing", async () => {
     const s = await setUp('sync-override');
     const until = new Date(Date.now() + 3_600_000).toISOString();

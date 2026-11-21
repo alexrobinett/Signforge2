@@ -181,6 +181,45 @@ describe('publishOrg', () => {
     expect(again.screens.map((s) => s.manifest!.id)).toEqual(result.screens.map((s) => s.manifest!.id));
   });
 
+  it('holds back a spot whose datetime is not picked yet, saying so, as one with no photo; once it has one, it plays', async () => {
+    const { org, lobby } = await seedSmallOrg('pub-date');
+    await org.commit((await publishOrg(org, opts)).writes);
+    const countdown: TemplateManifest = { ...promo, id: 'countdown', name: 'Countdown', fields: { target: { type: 'datetime', label: 'Target' } } };
+    const version = await addTemplate(org, countdown, sha('e'));
+    // As create_spot saves it from the New spot dialog: the target left for the editor to pick.
+    await org.spots.insert({
+      id: x('launch'),
+      name: 'Launch',
+      kind: 'template',
+      durationMs: 8000,
+      templateVersionId: version.id,
+      dataJson: '{"target":""}',
+      assetMapJson: '{}',
+    });
+    await org.playlists.setItems(x('main'), [x('deal'), x('still'), x('launch')]);
+
+    const held = await publishOrg(org, opts);
+    expect(held.drafts.held).toEqual([
+      { kind: 'playlist', id: x('main'), problems: [`spot ${x('launch')} is not published`] },
+      { kind: 'spot', id: x('launch'), problems: [`spot ${x('launch')}: field "target" has no date and time yet`] },
+    ]);
+    // The screen keeps the published playlist, with nothing empty in it.
+    const before = held.screens.find((s) => s.screenId === lobby.id)!.manifest!;
+    expect(Object.keys(before.spots).sort()).toEqual([x('deal'), x('still')]);
+    await org.commit(held.writes);
+
+    await org.spots.update(x('launch'), { dataJson: '{"target":"2026-12-24T18:00"}' });
+    const playing = await publishOrg(org, opts);
+    expect(playing.drafts.held).toEqual([]);
+    expect(playing.drafts.promoted).toEqual([
+      { kind: 'playlist', id: x('main') },
+      { kind: 'spot', id: x('launch') },
+    ]);
+    const after = playing.screens.find((s) => s.screenId === lobby.id)!.manifest!;
+    expect(after.spots[x('launch')]).toMatchObject({ kind: 'template', template: templateKey(countdown, org.orgId), data: { target: '2026-12-24T18:00' } });
+    expect(after.playlists[x('main')]!.items.map((i) => i.spot)).toEqual([x('deal'), x('still'), x('launch')]);
+  });
+
   it('keeps the published version of a draft that breaks, and reports it', async () => {
     const { org, lobby } = await seedSmallOrg('pub-keep');
     await org.commit((await publishOrg(org, opts)).writes);

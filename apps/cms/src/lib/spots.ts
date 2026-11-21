@@ -91,10 +91,14 @@ export function startValue(d: ScalarFieldDef): unknown {
       return '#ffffff';
     case 'select':
       return d.options[0];
+    case 'date':
+    case 'datetime':
+      // No day is right for every template (a countdown's target, an event's start): without a `min`, the editor asks for one.
+      return d.min ?? '';
   }
 }
 
-/** A new spot's data: a value for each field the template gives no default, so the draft starts valid. */
+/** A new spot's data: a value for each field the template gives no default, so the draft starts valid but for a date to pick. */
 export const startData = (fields: Record<string, FieldDef>) =>
   Object.fromEntries(
     Object.entries(fields).flatMap(([name, def]) =>

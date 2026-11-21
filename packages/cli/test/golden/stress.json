@@ -36,10 +36,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "450f599e73fe5a92314661a2205133aefcbc18287abb91b8b6a051dc8b4189ae": {
-      "size": 122679,
-      "type": "text/html"
-    },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
@@ -62,6 +58,10 @@
     },
     "913346150e69dde5d0918b465704b2f98527779f51467b9b62706390d7936306": {
       "size": 73465,
+      "type": "text/html"
+    },
+    "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402": {
+      "size": 122679,
       "type": "text/html"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
@@ -107,7 +107,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "51dc9784c81e6c4e94d3fbe86c0719a635bd963d04b4163140a2df9216f117b7",
+  "id": "eca71d2d1af3b9a1b06ab7632be216b57223c5f4c19ba207cc9f9fc902b8f90f",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -172,7 +172,7 @@
     }
   },
   "schedule": [],
-  "schema": 5,
+  "schema": 6,
   "screen": {
     "id": "stress-screen",
     "name": "Stress test screen",
@@ -692,7 +692,7 @@
       }
     },
     "base/alert@1.0.0": {
-      "html": "450f599e73fe5a92314661a2205133aefcbc18287abb91b8b6a051dc8b4189ae",
+      "html": "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402",
       "manifest": {
         "background": "#111827",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
