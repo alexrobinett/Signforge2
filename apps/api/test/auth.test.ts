@@ -227,6 +227,22 @@ describe('the org a new session starts in (#182)', () => {
     expect((await next.session()).body.organization).toEqual({ id: ids[1], role: 'owner' });
   });
 
+  it('is the org a session chose last, even one it was already on (re-check of #208)', async () => {
+    const t = testApp();
+    const addr = email('re-pick');
+    const { c: laptop, ids } = await memberOf(t, addr, ['Laptop', 'Phone']);
+    expect((await laptop.setActive(ids[0]!)).status).toBe(200);
+    const phone = new Client(t);
+    await phone.signIn(addr);
+    expect((await phone.setActive(ids[1]!)).status).toBe(200);
+    // The laptop, still on its org, chooses it again: the latest choice.
+    expect((await laptop.setActive(ids[0]!)).status).toBe(200);
+
+    const next = new Client(t);
+    await next.signIn(addr);
+    expect((await next.session()).body.organization).toEqual({ id: ids[0], role: 'owner' });
+  });
+
   it('never stores an org whose membership ends between its read and the session insert (review of #208, 1)', async () => {
     const t = testApp();
     const addr = email('revoked');

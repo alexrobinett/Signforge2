@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { defaultFilter } from 'cmdk';
-import { ArrowLeftIcon, Building2Icon, CheckIcon, CornerDownLeftIcon, LoaderCircleIcon, UsersIcon } from 'lucide-react';
+import { ArrowLeftIcon, Building2Icon, CornerDownLeftIcon, LoaderCircleIcon, UsersIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useCallback } from 'react';
 import { OrgAvatar } from '~/components/org-switcher';
@@ -242,6 +242,11 @@ function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> })
   );
 }
 
+/**
+ * "Switch organization…": the member's other orgs as buttons, the first focused. The active one is
+ * not offered: choosing it would reload for nothing, and the sidebar switcher ignores it too.
+ * Not a second cmdk list: cmdk 1.1.1 leaves `aria-activedescendant` on an item a filter removed.
+ */
 function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const back = useAppStore((s) => s.backToCommands);
   const chooseOrg = useAppStore((s) => s.chooseOrg);
@@ -257,24 +262,21 @@ function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
         </h3>
       </div>
       <ul ref={focusFirstButton} aria-labelledby="switch-org-heading" className="max-h-[min(470px,60dvh)] space-y-0.5 overflow-y-auto p-2">
-        {shell.organizations.map((org) => {
-          const active = org.id === shell.organization?.id;
-          return (
+        {shell.organizations
+          .filter((org) => org.id !== shell.organization?.id)
+          .map((org) => (
             <li key={org.id}>
               <button
                 type="button"
                 onClick={() => void chooseOrg(org)}
                 disabled={switchingTo !== null}
-                aria-current={active || undefined}
                 className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
               >
                 <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
                 <span className="min-w-0 flex-1 truncate">{org.name}</span>
-                {active && <CheckIcon className="size-4" aria-hidden />}
               </button>
             </li>
-          );
-        })}
+          ))}
       </ul>
     </div>
   );
