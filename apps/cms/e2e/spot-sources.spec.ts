@@ -274,7 +274,7 @@ test('a template with two sources: a place for the weather and a feed for the ne
   const rss = `<?xml version="1.0"?><rss version="2.0"><channel><title>Frame desk</title><language>en</language>
     <item><title>Night market opens on the square</title></item>
   </channel></rss>`;
-  pollFound(spotId, feed.id, parseNews(rss));
+  pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/frame.rss' }));
   await page.reload();
   await hydrated(page);
   await expect(weather.getByText('88°F, overcast')).toBeVisible();
