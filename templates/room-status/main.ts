@@ -35,6 +35,13 @@ const DATES: Partial<Record<Look, Intl.DateTimeFormatOptions>> = {
   corporate: { weekday: 'long', day: 'numeric', month: 'long' },
 };
 
+const UNUSED: Record<Look, string> = {
+  pop: '.kicker, .live, .date, .for, .until, .rule, .today',
+  poster: '.kicker, .live, .for, .until, .pin',
+  night: '.kicker, .date, .rule, .today, .pin, .for .k',
+  corporate: '.live, .until, .pin',
+};
+
 /** Lists draw the day as rows of bookings, timelines as blocks along the hours. */
 const TIMELINE: Record<Look, boolean> = { pop: false, poster: true, night: true, corporate: false };
 
@@ -68,8 +75,11 @@ function render(ctx: TemplateContext): void {
 defineTemplate({
   async prepare(ctx) {
     await applyLook(ctx);
-    const { data, root } = ctx;
+    const { data } = ctx;
     const look = LOOKS.find((l) => l === data.look)!;
+    // Parts a look does not draw are removed, not hidden, so no text is left for a screen reader to
+    // read out or for the layout to make room for.
+    for (const part of document.querySelectorAll(UNUSED[look])) part.remove();
     const now = clockNow();
     const today = dayKey(ctx, now);
     const time = formatter(ctx, { hour: 'numeric', minute: '2-digit', hourCycle: data.hour24 ? 'h23' : 'h12' });
@@ -86,58 +96,63 @@ defineTemplate({
     // An all-day event's end date is exclusive. It is noted, not counted as a booking: on a room's
     // calendar it is as often a note (a holiday, cleaning) as a booking.
     const allDay = bookings.filter((b) => b.allDay && b.start.slice(0, 10) <= today && (b.end ? b.end.slice(0, 10) > today : b.start.slice(0, 10) === today));
+    const el = (sel: string) => document.querySelector<HTMLElement>(sel);
+    const drop = (sel: string) => el(sel)?.remove();
+    // Switched off, or not drawn in this look.
+    const put = (sel: string, text: string) => {
+      const target = el(sel);
+      if (target) target.textContent = text;
+    };
     const remaining = day.filter((m) => m.end > now);
     const current = remaining.find((m) => m.start <= now);
     const next = remaining.find((m) => m.start > now);
-    root.dataset.state = current ? 'busy' : 'free';
+    el('.stage')!.dataset.state = current ? 'busy' : 'free';
     target = current?.end ?? next?.start;
 
-    const el = (sel: string) => document.querySelector<HTMLElement>(sel);
-    const drop = (sel: string) => el(sel)?.remove();
     el('.word')!.textContent = WORDS[look][current ? 1 : 0];
-    const seats = Number(data.seats);
-    el('.seats .v')!.textContent = String(seats);
-    el('.seats .k')!.textContent = seats === 1 ? ' seat' : ' seats';
-    if (data.floor) el('.floor .v')!.textContent = String(data.floor);
+    put('.seats .v', String(data.seats));
+    put('.seats .k', data.seats === 1 ? ' seat' : ' seats');
+    if (data.floor) put('.floor .v', String(data.floor));
     else drop('.floor');
 
-    // The line under the status, in each look's words: free until when and what then, or the meeting on now.
-    const parts: [cls: string, text: string][] = [];
-    const organizer = data.showOrganiser && current?.organizer ? (look === 'poster' ? `Booked by ${current.organizer}` : ` · ${current.organizer}`) : '';
+    // The line under the status, in each look's words: free until when and what then, or the meeting
+    // on now. The time comes first, so a long title cut by the clamp never takes it with it.
+    const line = el('.line')!;
+    const say = (kick: string, title: string) => {
+      if (kick) line.append(Object.assign(document.createElement('span'), { className: 'kick', textContent: kick }));
+      if (title) line.append(Object.assign(document.createElement('span'), { className: 'title', textContent: title }));
+    };
     if (current) {
       const until = at(current.end);
-      if (look === 'poster') parts.push(['kick', `Now, until ${until}`], ['title', current.title]);
-      else if (look === 'night') parts.push(['title', current.title]);
-      else parts.push(['title', current.title], ['kick', look === 'pop' ? ` · until ${until}` : `, until ${until}`]);
-      if (organizer) parts.push(['org', organizer]);
-      el('.for .k')!.textContent = 'Time left';
-      el('.until')!.textContent = `left, until ${until}`;
+      say(look === 'poster' ? `Now, until ${until}` : look === 'night' ? '' : `Until ${until} · `, current.title);
+      put('.for .k', 'Time left');
+      put('.until', `left, until ${until}`);
     } else if (next) {
       const until = at(next.start);
       const then = data.showNext ? next.title : '';
-      if (look === 'night') {
-        if (then) parts.push(['kick', 'Next: '], ['title', then], ['kick', ` at ${until}`]);
-      } else parts.push(['kick', `${look === 'pop' ? 'Grab it' : 'Free'} until ${until}${then ? ', then ' : ''}`], ...(then ? [['title', then] as [string, string]] : []));
-      el('.for .k')!.textContent = 'Free for';
-      el('.until')!.textContent = `until ${until}`;
+      if (look === 'night') say(then && `Next at ${until}: `, then);
+      else say(`${look === 'pop' ? 'Grab it' : 'Free'} until ${until}${then && ', then '}`, then);
+      put('.for .k', 'Free for');
+      put('.until', `until ${until}`);
     } else {
-      parts.push(['kick', day.length ? 'Nothing else booked today' : 'Nothing booked today']);
+      say(day.length ? 'Nothing else booked today' : 'Nothing booked today', '');
       drop('.for');
       drop('.until');
     }
-    const line = el('.line')!;
-    if (parts.length) for (const [cls, text] of parts) line.append(Object.assign(document.createElement('span'), { className: cls, textContent: text }));
-    else line.remove();
+    if (!line.childElementCount) line.remove();
+    if (current?.organizer) put('.org', `Booked by ${current.organizer}`);
+    else drop('.org');
     const after = current && remaining.find((m) => m.start >= current.end && m !== current);
-    if (data.showNext && after) el('.next')!.textContent = `Next: ${after.title} at ${at(after.start)}`;
+    if (after) put('.next', `Next at ${at(after.start)}: ${after.title}`);
     else drop('.next');
 
     const schedule = el('.schedule');
-    if (allDay.length) el('.allday')!.textContent = `All day: ${allDay.map((b) => b.title).join(' · ')}`;
+    if (allDay.length) put('.allday', `All day: ${allDay.map((b) => b.title).join(' · ')}`);
     else drop('.allday');
     if (schedule && !remaining.length) {
       el('.free-day')!.textContent = day.length ? 'Free for the rest of the day' : 'Free all day';
       drop('.items');
+      drop('.pin');
       drop('.track');
     } else if (schedule) {
       drop('.free-day');
@@ -175,27 +190,30 @@ function list(look: Look, day: Meeting[], now: Date, current: Meeting | undefine
     li.classList.toggle('current', m === current);
     li.querySelector('.when')!.textContent = look === 'pop' ? `${at(m.start)} – ${at(m.end)}` : at(m.start);
     li.querySelector('.what')!.textContent = m.title;
-    li.querySelector('.sub')!.textContent = `Until ${at(m.end)}`;
+    if (look === 'corporate') li.querySelector('.sub')!.textContent = `Until ${at(m.end)}`;
+    else li.querySelector('.sub')!.remove();
+    // The meeting on now shows how far it has gone, which is the now line's place while the room is busy.
     if (m === current) li.style.setProperty('--progress', String((now.getTime() - m.start.getTime()) / (m.end.getTime() - m.start.getTime())));
-    else li.querySelector('.bar')!.remove();
+    if (m !== current || !nowLine) li.querySelector('.bar')!.remove();
     items.append(li);
   });
   // Corporate's now line is a row of its own, before the next meeting; Pop's is a pin above the cards.
   const nextRow = [...items.children].find((li) => !li.classList.contains('past'));
-  if (look === 'corporate' && nowLine && !current) items.insertBefore(document.querySelector<HTMLTemplateElement>('#now-row')!.content.cloneNode(true), nextRow ?? null);
+  if (look === 'corporate' && nowLine && !current)
+    items.insertBefore(document.querySelector<HTMLTemplateElement>('#now-row')!.content.cloneNode(true), nextRow ?? null);
   // As many rows as fit: drop meetings that are over first, then from the end.
-  const over = () => items.scrollHeight > items.clientHeight + 1 || items.scrollWidth > items.clientWidth + 1;
+  const across = getComputedStyle(items).flexDirection === 'row';
+  const over = () => (across ? items.scrollWidth > items.clientWidth + 1 : items.scrollHeight > items.clientHeight + 1);
   while (over() && items.children.length > 1) (items.querySelector('.past') ?? items.lastElementChild!).remove();
   const pin = document.querySelector<HTMLElement>('.pin');
-  if (pin) placePin(pin, items, current);
+  if (pin) placePin(pin, items, across, current);
 }
 
 /**
  * Pop's pin above its cards (in portrait, beside them): over the meeting on now at the point it has
  * reached, or in the gap before the next one. Kept inside the row.
  */
-function placePin(pin: HTMLElement, items: HTMLElement, current: Meeting | undefined): void {
-  const across = getComputedStyle(items).flexDirection === 'row';
+function placePin(pin: HTMLElement, items: HTMLElement, across: boolean, current: Meeting | undefined): void {
   const cards = [...items.children].filter((c): c is HTMLElement => c instanceof HTMLElement);
   const startOf = (c: HTMLElement) => (across ? c.offsetLeft : c.offsetTop);
   const sizeOf = (c: HTMLElement) => (across ? c.offsetWidth : c.offsetHeight);
@@ -256,7 +274,7 @@ function timeline(ctx: TemplateContext, day: Meeting[], now: Date, at: (d: Date)
   for (const block of track.querySelectorAll<HTMLElement>('.block')) {
     const what = block.querySelector<HTMLElement>('.what')!;
     const em = Number.parseFloat(getComputedStyle(what).fontSize);
-    if (block.scrollHeight > block.clientHeight + 1 || what.clientWidth < 2.5 * em) block.classList.add('tight');
+    if (block.scrollHeight > block.clientHeight + 1 || block.scrollWidth > block.clientWidth + 1 || what.clientWidth < 2.5 * em) block.replaceChildren();
   }
 }
 
@@ -269,6 +287,8 @@ function inkCards(): void {
   const seen = new Map<string, string[]>();
   for (const card of document.querySelectorAll<HTMLElement>('.card')) {
     const s = getComputedStyle(card);
+    // A card that paints nothing (a row on Corporate's panel) keeps the inks of the card under it.
+    if (s.backgroundColor === 'rgba(0, 0, 0, 0)') continue;
     const wants = ['--ink', '--ink-muted', '--ink-accent'].map((v) => s.getPropertyValue(v).trim());
     const key = `${s.backgroundColor} ${wants.join(' ')}`;
     if (!seen.has(key)) {
