@@ -20,16 +20,10 @@ type Answer = { status?: number; body?: string; headers?: Record<string, string>
 /** Guards whose fetch answers from `feeds` by URL and records requests; every host resolves to a public address. */
 function feedsAt(feeds: Record<string, Answer | (() => Answer)>) {
   const requests: Request[] = [];
-  let inFlight = 0;
-  let maxInFlight = 0;
   const guards: FetchGuards = {
     fetch: async (input, init) => {
       const req = new Request(input, init);
       requests.push(req);
-      inFlight++;
-      maxInFlight = Math.max(maxInFlight, inFlight);
-      await new Promise((r) => setTimeout(r, 5));
-      inFlight--;
       const f = feeds[req.url];
       if (!f) return new Response('nope', { status: 404 });
       const a = typeof f === 'function' ? f() : f;
@@ -37,7 +31,7 @@ function feedsAt(feeds: Record<string, Answer | (() => Answer)>) {
     },
     resolve: async () => ['93.184.216.34'],
   };
-  return { guards, requests, maxInFlight: () => maxInFlight };
+  return { guards, requests };
 }
 
 let o: SeededOrg;
@@ -209,12 +203,43 @@ describe('pollDataSources', () => {
   });
 
   it('fetches at most 2 at a time from one host', async () => {
-    const ids = [];
+    const ids: string[] = [];
     for (let i = 0; i < 5; i++) ids.push(await source('json', `https://busy.test/${i}`));
     const feed = feedsAt(Object.fromEntries(ids.map((_, i) => [`https://busy.test/${i}`, { body: `{"i":${i}}` }])));
-    await poll(feed.guards);
+    // Each request is answered only when the test lets it go, so what is in flight is the test's to see.
+    const held: (() => void)[] = [];
+    const arrived: (() => void)[] = [];
+    const guards: FetchGuards = {
+      ...feed.guards,
+      fetch: async (input, init) => {
+        await new Promise<void>((answer) => {
+          held.push(answer);
+          for (const wake of arrived.splice(0)) wake();
+        });
+        return feed.guards.fetch(input, init);
+      },
+    };
+    const inFlight = async (n: number) => {
+      while (held.length < n) await new Promise<void>((r) => arrived.push(r));
+    };
+    // Every source asked D1 for its row before the first request started, and D1 answers in order:
+    // once a read asked for now returns, every source has its row, and any request free to start has started.
+    const startedAll = () => o.scope.dataSources.get(ids[0]!);
+
+    const run = poll(guards);
+    await inFlight(2);
+    await startedAll();
+    expect(held).toHaveLength(2);
+    // As each one is answered, the next starts.
+    for (let next = 2; next < 5; next++) {
+      held.shift()?.();
+      await inFlight(2);
+      await startedAll();
+      expect(held).toHaveLength(2);
+    }
+    while (held.length) held.shift()?.();
+    await run;
     expect(feed.requests).toHaveLength(5);
-    expect(feed.maxInFlight()).toBe(2);
   });
 
   it("calls the Worker's own fetch as workerd requires, unbound from any object", async () => {
