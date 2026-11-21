@@ -2,7 +2,7 @@
 // action run (a tool call, through a stubbed `fetch`, or a navigation). Nothing waits on a clock.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
-import type { TargetAction } from '../src/lib/command-menu';
+import type { CommandEntry, TargetAction } from '../src/lib/command-menu';
 import { createCommandMenuSlice, type CommandMenuSlice } from '../src/state/command-menu';
 import { toast } from 'sonner';
 
@@ -94,7 +94,7 @@ describe('a call on its way across closing and opening again', () => {
     const { store } = menuStore();
     const held = holdNextCall();
     const list = { name: 'list_screens', description: 'List the screens.', mutates: false, fields: [] };
-    const entry = { kind: 'tool', id: 'tool:list_screens', label: 'List the screens', tool: list, keywords: [] } as const;
+    const entry: CommandEntry = { kind: 'tool', id: 'tool:list_screens', label: 'List the screens', tool: list, keywords: [] };
     store.getState().openCommandMenu();
     const first = store.getState().chooseCommand(entry);
     await held.sent;

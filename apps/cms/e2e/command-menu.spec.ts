@@ -29,7 +29,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
 
   // Filter to a tool that needs input, run it from its form: pair a screen a player started.
   const start = await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.14' } });
-  const { code } = (await start.json()) as { code: string };
+  const { code, pollToken } = (await start.json()) as { code: string; pollToken: string };
   await page.keyboard.type('pair a screen');
   await expect(menu.getByRole('option', { selected: true })).toContainText('Pair a screen');
   await page.keyboard.press('Enter');
@@ -103,47 +103,105 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.keyboard.press('ControlOrMeta+k');
   await expect(menu).toBeHidden();
 
-  // Typing part of a screen's name finds it (#180); Enter shows its actions, Open first.
+  // Typing part of a screen's name finds it (#180); Enter shows its actions, Open first. Each Enter waits for focus and
+  // for the option it means to be selected: cmdk moves the selection in a step of its own after each keystroke.
   const { screens } = await tool(page, 'list_screens', {});
   const deli = screens.find((s: { name: string }) => s.name === 'Deli counter').id;
   const { group } = await tool(page, 'create_group', { name: 'Front of house', screenIds: [deli] });
+  const actions = menu.getByRole('option');
+  const selected = menu.getByRole('option', { selected: true });
+  const actionsSearch = menu.getByRole('combobox', { name: 'Actions for Deli counter' });
   await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
   await page.keyboard.type('deli');
-  await expect(menu.getByRole('option', { selected: true })).toContainText('Deli counter');
+  await expect(selected).toContainText('Deli counter');
   await expect(menu.getByRole('option', { name: /Front of house/ })).toHaveCount(0);
   await axe(page);
   await screenshot(page, '32-command-menu-screen');
   await page.keyboard.press('Enter');
-  const actions = menu.getByRole('option');
+  await expect(actionsSearch).toBeFocused();
   await expect(actions).toHaveText(['Open', 'Identify (10 s)', 'Restart player']);
-  await expect(menu.getByRole('combobox', { name: 'Actions for Deli counter' })).toBeFocused();
   await axe(page);
   await screenshot(page, '33-command-menu-screen-actions');
   await page.keyboard.type('identify');
+  await expect(selected).toHaveText('Identify (10 s)');
   await page.keyboard.press('Enter');
   await expect(toast('Identify (10 s): Deli counter')).toBeVisible();
   await expect(menu).toBeHidden();
 
-  // Back returns to what was found; Open goes to the screen's page.
+  // Enter on Back goes back, to what was found, and does not run the selected action; Open goes to the screen's page.
   await page.keyboard.press('ControlOrMeta+k');
-  await page.keyboard.type('counter');
-  await page.keyboard.press('Enter');
-  await menu.getByRole('button', { name: 'Back to commands' }).click();
-  await expect(search).toHaveValue('counter');
   await expect(search).toBeFocused();
+  await page.keyboard.type('counter');
+  await expect(selected).toContainText('Deli counter');
   await page.keyboard.press('Enter');
+  await expect(actionsSearch).toBeFocused();
+  await expect(selected).toHaveText('Open');
+  await menu.getByRole('button', { name: 'Back to commands' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue('counter');
+  await expect(page).not.toHaveURL(new RegExp(`/screens/${deli}$`));
+  await expect(selected).toContainText('Deli counter');
+  await page.keyboard.press('Enter');
+  await expect(actionsSearch).toBeFocused();
+  await expect(selected).toHaveText('Open');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`/screens/${deli}$`));
   await expect(page.getByRole('heading', { name: 'Deli counter', level: 1 })).toBeVisible();
 
   // A group by its name, or a screen by its group's: the group's action shows its screens on the Screens page.
   await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
   await page.keyboard.type('house');
   await expect(menu.getByRole('option', { name: /Deli counter/ })).toBeVisible();
   await menu.getByRole('option', { name: /Front of house/ }).click();
-  await expect(menu.getByRole('option')).toHaveText(['Show its screens']);
+  await expect(actions).toHaveText(['Show its screens']);
+  await expect(selected).toHaveText('Show its screens');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(new RegExp(`/screens\\?group=${group.id}$`));
   await expect(page.getByRole('button', { name: 'Front of house 1', pressed: true })).toBeVisible();
+  await expect(menu).toBeHidden();
+
+  // A screen revoked since the menu last read the list: while this opening's read is held, the cached screen is only
+  // opened, and a name the cache lacks is being looked for. Off Screens, whose poll reads the list; in the app, as a
+  // page load empties the cache.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Playlists' }).click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/poll`, { data: { pollToken }, headers: { 'cf-connecting-ip': '192.0.2.14' } });
+  const { credentials } = await tool(page, 'get_screen', { screenId: deli });
+  await tool(page, 'revoke_screen_credential', { screenId: deli, credentialId: credentials[0].id });
+  await tool(page, 'create_group', { name: 'Kiosk 9' });
+  // The server refuses a command to a revoked screen too.
+  expect((await page.request.post('/api/tools/identify_screen', { data: { screenId: deli } })).status()).toBe(409);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const listRead = (url: URL) =>
+    url.pathname.startsWith('/_serverFn/') &&
+    Buffer.from(url.pathname.split('/')[2] ?? '', 'base64url')
+      .toString()
+      .includes('getScreens_');
+  await page.route(listRead, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('kiosk 9');
+  await expect(menu.getByText('Looking for screens…')).toBeVisible();
+  await search.fill('deli');
+  await expect(selected).toContainText('Deli counter');
+  await page.keyboard.press('Enter');
+  await expect(actionsSearch).toBeFocused();
+  await expect(menu.getByRole('status')).toHaveText('Checking Deli counter before Identify and Restart…');
+  await expect(actions).toHaveText(['Open']);
+  release();
+  await expect(menu.getByRole('status')).toHaveText('');
+  await expect(menu.getByRole('heading', { name: 'Deli counter' })).toBeVisible();
+  await expect(actions).toHaveText(['Open']);
+  await page.unroute(listRead);
+  await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
 });

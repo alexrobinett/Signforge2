@@ -190,11 +190,19 @@ export type TargetAction =
   | { kind: 'open-group'; label: string; groupId: string }
   | { kind: 'tool'; label: string; tool: 'identify_screen' | 'restart_screen'; screenId: string; screenName: string; done: string };
 
-/** A screen's or a group's actions, those the member's role allows (the tools the shell listed); a revoked screen can only be opened. */
-export function targetActions(target: { kind: 'screen'; screen: ScreenView } | { kind: 'group'; group: GroupView }, tools: ToolListing[]): TargetAction[] {
+/**
+ * A screen's or a group's actions, those the member's role allows (the tools the shell listed). A
+ * screen gets commands only once `checked`, its record read since the menu opened: a cached one
+ * may be revoked since. A revoked screen can only be opened.
+ */
+export function targetActions(
+  target: { kind: 'screen'; screen: ScreenView } | { kind: 'group'; group: GroupView },
+  tools: ToolListing[],
+  checked: boolean,
+): TargetAction[] {
   if (target.kind === 'group') return [{ kind: 'open-group', label: 'Show its screens', groupId: target.group.id }];
   const { id: screenId, name: screenName, status } = target.screen;
-  const may = (tool: string) => status !== 'revoked' && tools.some((t) => t.name === tool);
+  const may = (tool: string) => checked && status !== 'revoked' && tools.some((t) => t.name === tool);
   const actions: TargetAction[] = [{ kind: 'open-screen', label: 'Open', screenId }];
   if (may('identify_screen'))
     actions.push({
@@ -216,3 +224,10 @@ export function targetActions(target: { kind: 'screen'; screen: ScreenView } | {
     });
   return actions;
 }
+
+/**
+ * A found screen's or group's item key, from its keywords: cmdk reads an item's keywords only when
+ * its value changes, so a change to them remounts it. JSON, as a join would make "North,East" one
+ * group's name and two groups' the same.
+ */
+export const targetItemKey = (value: string, keywords: string[]) => `${value}:${JSON.stringify(keywords)}`;

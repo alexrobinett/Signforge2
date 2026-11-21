@@ -9,7 +9,16 @@ import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { commandEntries, NULL_CHOICE, targetActions, type CommandEntry, type CommandTarget, type Field, type ToolListing } from '~/lib/command-menu';
+import {
+  commandEntries,
+  NULL_CHOICE,
+  targetActions,
+  targetItemKey,
+  type CommandEntry,
+  type CommandTarget,
+  type Field,
+  type ToolListing,
+} from '~/lib/command-menu';
 import { useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { SECTIONS } from '~/lib/sections';
@@ -36,18 +45,38 @@ const filter = (value: string, search: string, keywords?: string[]) =>
 
 const screenCount = (n: number) => `${n} ${n === 1 ? 'screen' : 'screens'}`;
 
-/** A found screen's or group's actions (`targetActions`): Open first, so Enter opens it. */
-function TargetView({ target, screens, groups, tools }: { target: CommandTarget; screens: ScreenView[]; groups: GroupView[]; tools: ToolListing[] }) {
+/**
+ * A found screen's or group's actions (`targetActions`): Open first, so Enter opens it. A screen's
+ * commands wait for the list read on this opening (`checked`). The header is outside cmdk's root,
+ * which takes Enter for the selected action: Enter on Back goes back.
+ */
+function TargetView({
+  target,
+  screens,
+  groups,
+  tools,
+  checked,
+  checking,
+}: {
+  target: CommandTarget;
+  screens: ScreenView[];
+  groups: GroupView[];
+  tools: ToolListing[];
+  checked: boolean;
+  checking: boolean;
+}) {
   const running = useAppStore((s) => s.commandMenu.running);
   const back = useAppStore((s) => s.backToCommands);
   const run = useAppStore((s) => s.runTargetAction);
   const screen = target.kind === 'screen' ? screens.find((s) => s.id === target.id) : undefined;
   const group = target.kind === 'group' ? groups.find((g) => g.id === target.id) : undefined;
-  const actions = screen ? targetActions({ kind: 'screen', screen }, tools) : group ? targetActions({ kind: 'group', group }, tools) : [];
-  const name = screen?.name ?? group?.name ?? 'Not found';
+  const actions = screen ? targetActions({ kind: 'screen', screen }, tools, checked) : group ? targetActions({ kind: 'group', group }, tools, checked) : [];
+  const name = screen?.name ?? group?.name ?? (checking ? 'Checking…' : 'Not found');
+  // Said only where the role has commands and the screen is not known to be revoked: only the check is missing.
+  const waiting = screen && !checked && screen.status !== 'revoked' && tools.some((t) => t.name === 'identify_screen' || t.name === 'restart_screen');
 
   return (
-    <Command label={`Actions for ${name}`} loop>
+    <>
       <div className="flex items-center gap-2 border-b py-2.5 pr-4 pl-2">
         <Button type="button" variant="ghost" size="icon" onClick={back} aria-label="Back to commands">
           <ArrowLeftIcon className="size-4.5" aria-hidden />
@@ -59,18 +88,25 @@ function TargetView({ target, screens, groups, tools }: { target: CommandTarget;
           {screen ? KIND_WORD[screen.state.kind] : group ? screenCount(group.screenIds.length) : ''}
         </span>
       </div>
-      <CommandInput ref={focusSearch} placeholder={`Filter the actions for ${name}`} />
-      <CommandList>
-        <CommandEmpty>{screen || group ? 'No action matches.' : 'It is no longer here. Go back and search again.'}</CommandEmpty>
-        <CommandGroup heading="Actions">
-          {actions.map((a) => (
-            <CommandItem key={a.label} value={a.label} disabled={running} onSelect={() => void run(a)}>
-              <span className="min-w-0 flex-1 truncate">{a.label}</span>
-            </CommandItem>
-          ))}
-        </CommandGroup>
-      </CommandList>
-    </Command>
+      <Command label={`Actions for ${name}`} loop>
+        <CommandInput ref={focusSearch} placeholder={`Filter the actions for ${name}`} />
+        <CommandList>
+          <CommandEmpty>
+            {screen || group ? 'No action matches.' : checking ? 'Checking it is still here…' : 'It is no longer here. Go back and search again.'}
+          </CommandEmpty>
+          <CommandGroup heading="Actions">
+            {actions.map((a) => (
+              <CommandItem key={a.label} value={a.label} disabled={running} onSelect={() => void run(a)}>
+                <span className="min-w-0 flex-1 truncate">{a.label}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+        <p role="status" className="border-t px-4 py-3 text-[13px] text-muted-foreground empty:sr-only">
+          {waiting && (checking ? `Checking ${name} before Identify and Restart…` : `Identify and Restart wait until SignForge answers about ${name}.`)}
+        </p>
+      </Command>
+    </>
   );
 }
 
@@ -223,9 +259,11 @@ function MenuBody({ tools }: { tools: ToolListing[] }) {
   const search = useAppStore((s) => s.searchCommands);
   const chooseTarget = useAppStore((s) => s.chooseTarget);
   // The org's screens and groups (`list_screens`, `list_groups`): the Screens page's list, shown from its cache and read again
-  // on each open (stale at once, past the app's 10 s), so a screen or group someone else made since is found.
+  // on each opening (this body mounts on each), so a screen or group someone else made since is found.
   const orgId = useOrgId();
-  const fleet = useQuery({ ...screensQuery(orgId), enabled: orgId !== '', staleTime: 0 });
+  const fleet = useQuery({ ...screensQuery(orgId), enabled: orgId !== '', refetchOnMount: 'always' });
+  // Read since this opening, and it worked: only then may a screen be sent a command.
+  const checked = fleet.isFetchedAfterMount && fleet.isSuccess;
   const screens = fleet.data?.screens ?? [];
   const groups = fleet.data?.groups ?? [];
   const searching = query.trim() !== '';
@@ -250,7 +288,7 @@ function MenuBody({ tools }: { tools: ToolListing[] }) {
   return picked?.kind === 'tool' ? (
     <ToolForm key={picked.id} entry={picked} />
   ) : target ? (
-    <TargetView target={target} screens={screens} groups={groups} tools={tools} />
+    <TargetView target={target} screens={screens} groups={groups} tools={tools} checked={checked} checking={fleet.isFetching} />
   ) : (
     <Command label="Search pages, screens and actions" loop filter={filter}>
       <CommandInput ref={focusSearch} value={query} onValueChange={search} placeholder="Go to a page, find a screen, or type an action">
@@ -258,7 +296,9 @@ function MenuBody({ tools }: { tools: ToolListing[] }) {
       </CommandInput>
       <CommandList>
         <CommandEmpty>
-          {searching && fleet.isPending ? 'Looking for screens…' : 'No page, screen or action matches. Try part of a screen’s name, or a verb like “rename”.'}
+          {searching && !checked && fleet.isFetching
+            ? 'Looking for screens…'
+            : 'No page, screen or action matches. Try part of a screen’s name, or a verb like “rename”.'}
         </CommandEmpty>
         {/* Found by name only: listed before anything is typed, a fleet of 200 would bury the pages. */}
         {searching && screens.length > 0 && (
@@ -267,8 +307,7 @@ function MenuBody({ tools }: { tools: ToolListing[] }) {
               const keywords = screenKeywords(s, groups);
               return (
                 <CommandItem
-                  // cmdk reads an item's keywords only when its value changes: keyed on them, a screen put in a group since is found by it.
-                  key={`${s.id}:${keywords.join()}`}
+                  key={targetItemKey(s.id, keywords)}
                   value={`screen:${s.id}`}
                   keywords={keywords}
                   disabled={running}
@@ -286,7 +325,7 @@ function MenuBody({ tools }: { tools: ToolListing[] }) {
           <CommandGroup heading="Groups">
             {[...groups].sort(byName).map((g) => (
               <CommandItem
-                key={`${g.id}:${g.name}`}
+                key={targetItemKey(g.id, [g.name])}
                 value={`group:${g.id}`}
                 keywords={[g.name]}
                 disabled={running}

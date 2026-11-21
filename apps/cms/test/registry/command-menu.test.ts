@@ -1,6 +1,16 @@
 import { describeTools, registry, TOOLS, type Role } from '@signforge/tools';
 import { describe, expect, it } from 'vitest';
-import { commandEntries, needsInput, NULL_CHOICE, parseToolList, resultText, targetActions, toolInput, withKey } from '../../src/lib/command-menu';
+import {
+  commandEntries,
+  needsInput,
+  NULL_CHOICE,
+  parseToolList,
+  resultText,
+  targetActions,
+  targetItemKey,
+  toolInput,
+  withKey,
+} from '../../src/lib/command-menu';
 import type { ScreenView } from '../../src/lib/screen-types';
 import { SECTIONS } from '../../src/lib/sections';
 
@@ -110,11 +120,12 @@ describe('a result toast', () => {
 
 describe("a found screen's and group's actions (#180)", () => {
   const screen = { id: 'scr_1', name: '0157 Drive-thru L', status: 'active' } as ScreenView;
-  const labels = (role: Role, s: ScreenView = screen) => targetActions({ kind: 'screen', screen: s }, listed(role)).map((a) => a.label);
+  const labels = (role: Role, s: ScreenView = screen, checked = true) =>
+    targetActions({ kind: 'screen', screen: s }, listed(role), checked).map((a) => a.label);
 
   it('opens, identifies and restarts a screen for an editor, Open first', () => {
     expect(labels('editor')).toEqual(['Open', 'Identify (10 s)', 'Restart player']);
-    expect(targetActions({ kind: 'screen', screen }, listed('owner'))).toContainEqual(
+    expect(targetActions({ kind: 'screen', screen }, listed('owner'), true)).toContainEqual(
       expect.objectContaining({ kind: 'tool', tool: 'identify_screen', screenId: 'scr_1', screenName: '0157 Drive-thru L' }),
     );
   });
@@ -124,8 +135,17 @@ describe("a found screen's and group's actions (#180)", () => {
     expect(labels('owner', { ...screen, status: 'revoked' })).toEqual(['Open']);
   });
 
+  it('only opens a screen read from the cache before this opening: it may be revoked since, so commands wait for a fresh read', () => {
+    expect(labels('owner', screen, false)).toEqual(['Open']);
+  });
+
+  it('keys an item by its keywords, so a name with a comma is not two names', () => {
+    expect(targetItemKey('screen:scr_1', ['Lobby', 'North,East'])).not.toBe(targetItemKey('screen:scr_1', ['Lobby', 'North', 'East']));
+    expect(targetItemKey('screen:scr_1', ['Lobby'])).toBe(targetItemKey('screen:scr_1', ['Lobby']));
+  });
+
   it("shows a group's screens on the Screens page", () => {
     const group = { id: 'grp_1', name: 'North', screenIds: [], version: 1, createdAt: 0, updatedAt: 0 };
-    expect(targetActions({ kind: 'group', group }, listed('viewer'))).toEqual([{ kind: 'open-group', label: 'Show its screens', groupId: 'grp_1' }]);
+    expect(targetActions({ kind: 'group', group }, listed('viewer'), false)).toEqual([{ kind: 'open-group', label: 'Show its screens', groupId: 'grp_1' }]);
   });
 });
