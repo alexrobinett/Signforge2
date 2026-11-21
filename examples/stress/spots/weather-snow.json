@@ -1,1 +1,7 @@
-{ "name": "Weather, snow (fixed data)", "kind": "template", "template": "weather", "durationMs": 8000, "data": { "city": "Denver", "temp": 28, "high": 31, "low": 19, "code": 73, "isDay": 0, "wind": 8, "humidity": 80 } }
+{
+  "name": "Weather, snow (fixed data)",
+  "kind": "template",
+  "template": "weather",
+  "durationMs": 8000,
+  "data": { "city": "Denver", "temp": 28, "high": 31, "low": 19, "code": 73, "isDay": 0, "wind": 8, "humidity": 80 }
+}

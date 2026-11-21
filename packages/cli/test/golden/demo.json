@@ -70,6 +70,14 @@
       "size": 582,
       "type": "image/svg+xml"
     },
+    "44b18bb0524b41f1334b4106b46ddfb4a21959f8d37135ec403180772cc293b3": {
+      "size": 1042,
+      "type": "image/svg+xml"
+    },
+    "51f43a39e533659bcd1968bb24d9cfc7d04a2e87c98b69c1899797b150d8fb8f": {
+      "size": 397232,
+      "type": "text/html"
+    },
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
@@ -107,7 +115,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "6bece55b91675e9e37e2e16c9d8498c9af68c0ade00c239acf33ca09165b9615",
+  "id": "3a0d1a3c6cb0964bb201f196b97a0d36086e404aed013f5a675129d297c5a7b1",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -117,6 +125,9 @@
         },
         {
           "spot": "energy"
+        },
+        {
+          "spot": "announcement"
         },
         {
           "spot": "coffee"
@@ -200,6 +211,46 @@
     "timezone": "America/New_York"
   },
   "spots": {
+    "announcement": {
+      "assets": {
+        "photo": "44b18bb0524b41f1334b4106b46ddfb4a21959f8d37135ec403180772cc293b3"
+      },
+      "data": {
+        "body": "Come for coffee, a tour and the first look at the roof terrace.",
+        "eyebrow": "Company news",
+        "facts": [
+          {
+            "label": "Date",
+            "value": "Monday 7 December"
+          },
+          {
+            "label": "Tours",
+            "value": "9 to 11 am"
+          },
+          {
+            "label": "Where",
+            "value": "Pier 9, lobby"
+          }
+        ],
+        "headline": "Pier 9 opens on Monday",
+        "look": "pop",
+        "meta": "From the People Team · 20 November",
+        "qrLabel": "Scan for the floor plan",
+        "qrUrl": "https://example.com/pier-9",
+        "showBody": true,
+        "showEyebrow": true,
+        "showFacts": true,
+        "showLogo": true,
+        "showMeta": true,
+        "showPhoto": true,
+        "showQr": true
+      },
+      "durationMs": 10000,
+      "id": "announcement",
+      "kind": "template",
+      "name": "Announcement",
+      "template": "base/announcement@1.0.0"
+    },
     "coffee": {
       "durationMs": 5000,
       "file": "39c371806d28d473a6e3ede0711932e4f33841ca35890c9a94648b03a2d719fb",
@@ -252,6 +303,146 @@
     }
   },
   "templates": {
+    "base/announcement@1.0.0": {
+      "html": "51f43a39e533659bcd1968bb24d9cfc7d04a2e87c98b69c1899797b150d8fb8f",
+      "manifest": {
+        "background": "#000000",
+        "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
+        "duration": {
+          "defaultMs": 10000,
+          "maxMs": 60000,
+          "minMs": 5000
+        },
+        "fields": {
+          "body": {
+            "default": "Come for coffee, a tour and the first look at the roof terrace.",
+            "label": "Body",
+            "maxLength": 280,
+            "type": "text"
+          },
+          "eyebrow": {
+            "default": "Company news",
+            "label": "Eyebrow",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "facts": {
+            "default": [
+              {
+                "label": "Date",
+                "value": "Monday 7 December"
+              },
+              {
+                "label": "Tours",
+                "value": "9 to 11 am"
+              },
+              {
+                "label": "Where",
+                "value": "Pier 9, lobby"
+              }
+            ],
+            "item": {
+              "label": {
+                "label": "Label",
+                "maxLength": 16,
+                "type": "text"
+              },
+              "value": {
+                "label": "Value",
+                "maxLength": 32,
+                "type": "text"
+              }
+            },
+            "label": "Facts",
+            "maxItems": 3,
+            "type": "list"
+          },
+          "headline": {
+            "default": "Pier 9 opens on Monday",
+            "label": "Headline",
+            "maxLength": 80,
+            "type": "text"
+          },
+          "look": {
+            "default": "pop",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "type": "select"
+          },
+          "meta": {
+            "default": "From the People Team · 20 November",
+            "label": "Posted by",
+            "maxLength": 48,
+            "type": "text"
+          },
+          "photo": {
+            "label": "Photo",
+            "type": "image"
+          },
+          "qrLabel": {
+            "default": "Scan for the floor plan",
+            "label": "QR code label",
+            "maxLength": 40,
+            "type": "text"
+          },
+          "qrUrl": {
+            "default": "",
+            "label": "QR code link",
+            "maxLength": 100,
+            "type": "url"
+          },
+          "showBody": {
+            "default": true,
+            "label": "Show the body",
+            "type": "boolean"
+          },
+          "showEyebrow": {
+            "default": true,
+            "label": "Show the eyebrow",
+            "type": "boolean"
+          },
+          "showFacts": {
+            "default": true,
+            "label": "Show the facts",
+            "type": "boolean"
+          },
+          "showLogo": {
+            "default": true,
+            "label": "Show the logo",
+            "type": "boolean"
+          },
+          "showMeta": {
+            "default": true,
+            "label": "Show who posted it",
+            "type": "boolean"
+          },
+          "showPhoto": {
+            "default": true,
+            "label": "Show the photo",
+            "type": "boolean"
+          },
+          "showQr": {
+            "default": true,
+            "label": "Show the QR code",
+            "type": "boolean"
+          }
+        },
+        "id": "announcement",
+        "name": "Announcement",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 2,
+        "uses": [],
+        "version": "1.0.0"
+      }
+    },
     "base/cstore-promo@1.2.4": {
       "html": "1a4020bbad33d42b78a5bc6a531ef7115d4295c59317935eff06618f7fe384e7",
       "manifest": {

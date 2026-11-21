@@ -1,1 +1,7 @@
-{ "name": "Weather, rain (fixed data)", "kind": "template", "template": "weather", "durationMs": 8000, "data": { "city": "Seattle", "temp": 52, "high": 55, "low": 47, "code": 63, "isDay": 1, "wind": 12, "humidity": 88 } }
+{
+  "name": "Weather, rain (fixed data)",
+  "kind": "template",
+  "template": "weather",
+  "durationMs": 8000,
+  "data": { "city": "Seattle", "temp": 52, "high": 55, "low": 47, "code": 63, "isDay": 1, "wind": 12, "humidity": 88 }
+}

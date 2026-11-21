@@ -4,9 +4,5 @@
     "type": "fade",
     "ms": 600
   },
-  "items": [
-    "sport-drinks",
-    "energy",
-    "coffee"
-  ]
+  "items": ["sport-drinks", "energy", "announcement", "coffee"]
 }

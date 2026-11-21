@@ -36,6 +36,10 @@
       "size": 639,
       "type": "image/svg+xml"
     },
+    "51f43a39e533659bcd1968bb24d9cfc7d04a2e87c98b69c1899797b150d8fb8f": {
+      "size": 397232,
+      "type": "text/html"
+    },
     "57d1fcbf6149a0587639284f9baa739df2efe86f6124933537618ea6884273f8": {
       "size": 360551,
       "type": "image/jpeg"
@@ -103,7 +107,7 @@
       "type": "image/jpeg"
     }
   },
-  "id": "886df800fb34cba1522c7ef3be804338716619c613257f5c4ce616e95fd96505",
+  "id": "bda5779c49a1c3b761a5d480b3460a4ce7cba7c57649cea9d6203b3a704acbcb",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -116,6 +120,9 @@
         },
         {
           "spot": "photo-river"
+        },
+        {
+          "spot": "announcement"
         },
         {
           "spot": "holidays"
@@ -173,6 +180,46 @@
     "timezone": "America/New_York"
   },
   "spots": {
+    "announcement": {
+      "assets": {
+        "photo": "eb0966d962b46dc427ebcebc346328f8d802233feb83d52e9ea5338377b9f688"
+      },
+      "data": {
+        "body": "Come for coffee, a tour and the first look at the roof terrace.",
+        "eyebrow": "Company news",
+        "facts": [
+          {
+            "label": "Date",
+            "value": "Monday 7 December"
+          },
+          {
+            "label": "Tours",
+            "value": "9 to 11 am"
+          },
+          {
+            "label": "Where",
+            "value": "Pier 9, lobby"
+          }
+        ],
+        "headline": "Pier 9 opens on Monday",
+        "look": "night",
+        "meta": "From the People Team · 20 November",
+        "qrLabel": "Scan for the floor plan",
+        "qrUrl": "https://example.com/pier-9",
+        "showBody": true,
+        "showEyebrow": true,
+        "showFacts": true,
+        "showLogo": true,
+        "showMeta": true,
+        "showPhoto": true,
+        "showQr": true
+      },
+      "durationMs": 10000,
+      "id": "announcement",
+      "kind": "template",
+      "name": "Announcement, 4K photo and QR code",
+      "template": "base/announcement@1.0.0"
+    },
     "clock": {
       "assets": {},
       "data": {
@@ -662,6 +709,146 @@
         "protocol": 2,
         "uses": [],
         "version": "1.3.1"
+      }
+    },
+    "base/announcement@1.0.0": {
+      "html": "51f43a39e533659bcd1968bb24d9cfc7d04a2e87c98b69c1899797b150d8fb8f",
+      "manifest": {
+        "background": "#000000",
+        "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
+        "duration": {
+          "defaultMs": 10000,
+          "maxMs": 60000,
+          "minMs": 5000
+        },
+        "fields": {
+          "body": {
+            "default": "Come for coffee, a tour and the first look at the roof terrace.",
+            "label": "Body",
+            "maxLength": 280,
+            "type": "text"
+          },
+          "eyebrow": {
+            "default": "Company news",
+            "label": "Eyebrow",
+            "maxLength": 24,
+            "type": "text"
+          },
+          "facts": {
+            "default": [
+              {
+                "label": "Date",
+                "value": "Monday 7 December"
+              },
+              {
+                "label": "Tours",
+                "value": "9 to 11 am"
+              },
+              {
+                "label": "Where",
+                "value": "Pier 9, lobby"
+              }
+            ],
+            "item": {
+              "label": {
+                "label": "Label",
+                "maxLength": 16,
+                "type": "text"
+              },
+              "value": {
+                "label": "Value",
+                "maxLength": 32,
+                "type": "text"
+              }
+            },
+            "label": "Facts",
+            "maxItems": 3,
+            "type": "list"
+          },
+          "headline": {
+            "default": "Pier 9 opens on Monday",
+            "label": "Headline",
+            "maxLength": 80,
+            "type": "text"
+          },
+          "look": {
+            "default": "pop",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "type": "select"
+          },
+          "meta": {
+            "default": "From the People Team · 20 November",
+            "label": "Posted by",
+            "maxLength": 48,
+            "type": "text"
+          },
+          "photo": {
+            "label": "Photo",
+            "type": "image"
+          },
+          "qrLabel": {
+            "default": "Scan for the floor plan",
+            "label": "QR code label",
+            "maxLength": 40,
+            "type": "text"
+          },
+          "qrUrl": {
+            "default": "",
+            "label": "QR code link",
+            "maxLength": 100,
+            "type": "url"
+          },
+          "showBody": {
+            "default": true,
+            "label": "Show the body",
+            "type": "boolean"
+          },
+          "showEyebrow": {
+            "default": true,
+            "label": "Show the eyebrow",
+            "type": "boolean"
+          },
+          "showFacts": {
+            "default": true,
+            "label": "Show the facts",
+            "type": "boolean"
+          },
+          "showLogo": {
+            "default": true,
+            "label": "Show the logo",
+            "type": "boolean"
+          },
+          "showMeta": {
+            "default": true,
+            "label": "Show who posted it",
+            "type": "boolean"
+          },
+          "showPhoto": {
+            "default": true,
+            "label": "Show the photo",
+            "type": "boolean"
+          },
+          "showQr": {
+            "default": true,
+            "label": "Show the QR code",
+            "type": "boolean"
+          }
+        },
+        "id": "announcement",
+        "name": "Announcement",
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "protocol": 2,
+        "uses": [],
+        "version": "1.0.0"
       }
     },
     "base/clock@1.2.3": {

@@ -3,6 +3,14 @@
   "kind": "template",
   "template": "cstore-promo",
   "durationMs": 8000,
-  "data": { "quantity": "2", "price": "4", "points": "400", "promo": "Buy any 2", "product": "Sport Drinks", "detail": "All flavours, 710 mL", "disclaimer": "Limited time offer. See store for details." },
+  "data": {
+    "quantity": "2",
+    "price": "4",
+    "points": "400",
+    "promo": "Buy any 2",
+    "product": "Sport Drinks",
+    "detail": "All flavours, 710 mL",
+    "disclaimer": "Limited time offer. See store for details."
+  },
   "assets": { "imageLeft": "bottle-blue.svg", "imageCenter": "bottle-green.svg", "imageRight": "bottle-red.svg" }
 }

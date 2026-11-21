@@ -1,0 +1,8 @@
+{
+  "name": "Announcement, 4K photo and QR code",
+  "kind": "template",
+  "template": "announcement",
+  "durationMs": 10000,
+  "data": { "look": "night", "qrUrl": "https://example.com/pier-9" },
+  "assets": { "photo": "river-4k.jpg" }
+}

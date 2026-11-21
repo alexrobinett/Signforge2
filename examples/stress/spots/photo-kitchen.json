@@ -1,1 +1,8 @@
-{ "name": "Photo promo, 4K photo 2", "kind": "template", "template": "photo-promo", "durationMs": 8000, "data": { "eyebrow": "Made here", "headline": "Hot and ready", "body": "Breakfast sandwiches all day", "price": "$4.49" }, "assets": { "photo": "kitchen-4k.jpg" } }
+{
+  "name": "Photo promo, 4K photo 2",
+  "kind": "template",
+  "template": "photo-promo",
+  "durationMs": 8000,
+  "data": { "eyebrow": "Made here", "headline": "Hot and ready", "body": "Breakfast sandwiches all day", "price": "$4.49" },
+  "assets": { "photo": "kitchen-4k.jpg" }
+}
