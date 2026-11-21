@@ -68,7 +68,8 @@ function ScalarInput({
           inputMode="url"
           placeholder="https://"
           value={typeof value === 'string' ? value : ''}
-          onChange={(e) => onChange(e.target.value)}
+          // The contract refuses space around an address; the input drops it, as a url input's value does.
+          onChange={(e) => onChange(e.target.value.trim())}
           {...aria}
         />
       );
