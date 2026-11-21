@@ -22,7 +22,7 @@ import { draftColors, kitDraftOf, shownColors, type BrandKitView, type KitDraft 
 import { useCanManage, useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { versionsById, type SpotView } from '~/lib/spots';
-import { byName } from '~/lib/targets';
+import { byName, namesOf } from '~/lib/targets';
 import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
@@ -231,7 +231,7 @@ function KitEditor() {
   const ready = unsaved && draftColors(draft) !== null && draft.name.trim() !== '' && !stale;
   const versions = versionsById(templates);
   const withTemplates = previewSpots(spots);
-  const reach = kit.reach.map((id) => screens.find((s) => s.id === id)?.name ?? id);
+  const reach = namesOf(kit.reach, screens);
   const statusWord = unsaved
     ? 'Unsaved changes'
     : savedAt

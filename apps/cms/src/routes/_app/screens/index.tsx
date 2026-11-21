@@ -26,7 +26,7 @@ import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
 import { byWord, publishTitle } from '~/lib/publishes';
-import { isScreenSort, sortScreens, type ScreenSort } from '~/lib/targets';
+import { isScreenSort, namesOf, sortScreens, type ScreenSort } from '~/lib/targets';
 import { publishQuery } from '~/queries/publishes';
 import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
@@ -316,7 +316,11 @@ function Locations({ groups, screens, onPick }: { groups: GroupView[]; screens: 
                 </span>
                 <span className="text-[13px] text-muted-foreground">
                   {members.length} {members.length === 1 ? 'screen' : 'screens'}
-                  {needs.length > 0 && ` · ${needs.map((s) => s.name).join(', ')} ${needs.length === 1 ? 'needs' : 'need'} you`}
+                  {needs.length > 0 &&
+                    ` · ${namesOf(
+                      needs.map((s) => s.id),
+                      members,
+                    ).join(', ')} ${needs.length === 1 ? 'needs' : 'need'} you`}
                 </span>
               </button>
             </EditorFields>

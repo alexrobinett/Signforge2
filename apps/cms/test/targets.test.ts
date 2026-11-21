@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byName, findTargets, groupReach, sortScreens } from '../src/lib/targets';
+import { byName, findTargets, groupReach, namesOf, sortScreens } from '../src/lib/targets';
 
 const STATE = { reason: null, wakesAt: null, filesMissing: null };
 type Kind = 'online' | 'updating' | 'asleep' | 'unreachable' | 'needs_you';
@@ -106,5 +106,15 @@ describe('sortScreens', () => {
   it('leaves the list it was given as it was', () => {
     sortScreens(fleet, 'name');
     expect(fleet.map((s) => s.id)).toEqual(['scr_1', 'scr_2', 'scr_3', 'scr_4', 'scr_5']);
+  });
+});
+
+describe('namesOf', () => {
+  it("names screens by name, not in the id order a group or a kit's reach lists them", () => {
+    expect(namesOf(['scr_a', 'scr_b', 'scr_c'], SCREENS)).toEqual(['0142 Drive-thru L', '0157 Lobby promo', '0203 Drive-thru L']);
+  });
+
+  it('names an id no screen has by itself', () => {
+    expect(namesOf(['scr_gone', 'scr_c'], SCREENS)).toEqual(['0142 Drive-thru L', 'scr_gone']);
   });
 });

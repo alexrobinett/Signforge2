@@ -59,6 +59,13 @@ export function groupReach(group: GroupLike, screens: readonly Named[]): string 
   return `${members.length} ${members.length === 1 ? 'screen' : 'screens'}: ${named}${more}`;
 }
 
+/** The names of the screens with these ids, by name, as a list of them reads; an id no screen has is named by itself. */
+export const namesOf = (ids: readonly string[], screens: readonly Named[]) =>
+  ids
+    .map((id) => screens.find((s) => s.id === id) ?? { id, name: id })
+    .sort(byName)
+    .map((s) => s.name);
+
 type Compare = (a: ScreenLike, b: ScreenLike) => number;
 const NAME: Compare = () => 0;
 // Most urgent first, as the rollup ranks them; asleep is on purpose, so it is last.
