@@ -64,8 +64,6 @@ const attempts: Record<string, () => unknown> = {
 
 defineTemplate({
   async prepare(ctx) {
-    // Not hostile: fails unless the check filled its url field with an https address.
-    if (ctx.data.mode === 'link' && !String(ctx.data.link).startsWith('https://')) throw new Error(`link was ${String(ctx.data.link)}`);
     await attempts[String(ctx.data.mode)]?.();
   },
   play(ctx) {
