@@ -162,14 +162,14 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await expect(page.getByRole('rowheader', { name: /Lobby/ })).toBeVisible();
   // By name unless a column says otherwise; a column's header sorts by it, and again the other way (#180).
   const heard = page.getByRole('columnheader', { name: 'Last heard' });
-  await expect(page.getByRole('columnheader', { name: 'Screen' })).toHaveAttribute('aria-sort', 'ascending');
+  await expect(page.getByRole('columnheader', { name: 'Screen', exact: true })).toHaveAttribute('aria-sort', 'ascending');
   await heard.getByRole('link').click();
   await expect(page).toHaveURL(/sort=heard/);
   await expect(heard).toHaveAttribute('aria-sort', 'ascending');
   await heard.getByRole('link').click();
   await expect(page).toHaveURL(/sort=-heard/);
   await expect(heard).toHaveAttribute('aria-sort', 'descending');
-  await expect(page.getByRole('columnheader', { name: 'Screen' })).not.toHaveAttribute('aria-sort');
+  await expect(page.getByRole('columnheader', { name: 'Screen', exact: true })).not.toHaveAttribute('aria-sort');
   await axe(page);
   await shots(page, '15-screens-table');
 
