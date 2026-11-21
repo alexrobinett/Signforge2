@@ -1,0 +1,37 @@
+{
+  "id": "room-status",
+  "version": "1.0.0",
+  "name": "Room status",
+  "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
+  "fields": {
+    "room": { "type": "text", "label": "Room name", "default": "Harbour Room", "maxLength": 32 },
+    "seats": { "type": "number", "label": "Seats", "default": 8, "min": 1, "max": 999, "step": 1 },
+    "floor": { "type": "text", "label": "Floor (optional)", "default": "", "maxLength": 16 },
+    "hour24": { "type": "boolean", "label": "24-hour time", "default": false },
+    "look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" },
+    "events": {
+      "type": "list",
+      "label": "Bookings",
+      "maxItems": 25,
+      "default": [],
+      "item": {
+        "title": { "type": "text", "label": "Title" },
+        "start": { "type": "text", "label": "Start (YYYY-MM-DD or ISO time)" },
+        "end": { "type": "text", "label": "End", "default": "" },
+        "allDay": { "type": "boolean", "label": "All day", "default": false },
+        "organizer": { "type": "text", "label": "Organiser", "default": "" }
+      }
+    },
+    "showSchedule": { "type": "boolean", "label": "Show today's schedule", "default": true },
+    "showNext": { "type": "boolean", "label": "Show the next meeting", "default": true },
+    "showClock": { "type": "boolean", "label": "Show the clock", "default": true },
+    "showFacts": { "type": "boolean", "label": "Show the seats and floor", "default": true },
+    "showNowLine": { "type": "boolean", "label": "Show the now line", "default": true },
+    "showOrganiser": { "type": "boolean", "label": "Show who booked the meeting", "default": false }
+  },
+  "duration": { "defaultMs": 10000, "minMs": 5000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#000000",
+  "live": { "source": "ical", "fields": { "events": "events" } }
+}

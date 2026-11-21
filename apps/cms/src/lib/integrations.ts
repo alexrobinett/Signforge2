@@ -52,7 +52,13 @@ export const CATALOGUE: ConnectorGroup[] = [
     items: [
       { mono: 'RSS', name: 'RSS / Atom', does: 'Headlines for the News template.', state: 'built', kind: 'rss' },
       { mono: 'WX', name: 'Weather', does: 'Current conditions and forecast for a place, into the Weather template.', state: 'built', kind: 'json' },
-      { mono: 'iCal', name: 'iCal URL', does: 'Any calendar that publishes an .ics link, into the Agenda template.', state: 'built', kind: 'ical' },
+      {
+        mono: 'iCal',
+        name: 'iCal URL',
+        does: 'Any calendar that publishes an .ics link, into the Agenda and Room status templates.',
+        state: 'built',
+        kind: 'ical',
+      },
       planned('GC', 'Google Calendar', 'Pick calendars and rooms after signing in with Google; no public links.'),
       planned('365', 'Microsoft 365 / Outlook', 'Calendars and room resources from Exchange Online.'),
       planned('GS', 'Google Sheets', 'A sheet as a menu or price list; one row per item.'),

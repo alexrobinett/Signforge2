@@ -197,12 +197,17 @@ export type CommandTarget = { kind: 'screen'; id: string } | { kind: 'group'; id
 export type TargetAction =
   | { kind: 'open-screen'; label: string; screenId: string }
   | { kind: 'open-group'; label: string; groupId: string }
+  /** The schedule's entry dialog, aimed at the screen (#181). */
+  | { kind: 'play-here'; label: string; screenId: string }
+  /** The takeover dialog, aimed at the screen (#181). */
+  | { kind: 'take-over'; label: string; screenId: string }
   | { kind: 'tool'; label: string; tool: 'identify_screen' | 'restart_screen'; screenId: string; screenName: string; done: string };
 
 /**
  * A screen's or a group's actions, those the member's role allows (the tools the shell listed). A
  * screen gets commands only once `checked`, its record read since the menu opened: a cached one
- * may be revoked since. A revoked screen can only be opened.
+ * may be revoked since. Playing a playlist on it or taking it over opens the schedule's dialogs
+ * (#181). A revoked screen can only be opened.
  */
 export function targetActions(
   target: { kind: 'screen'; screen: ScreenView } | { kind: 'group'; group: GroupView },
@@ -211,8 +216,13 @@ export function targetActions(
 ): TargetAction[] {
   if (target.kind === 'group') return [{ kind: 'open-group', label: 'Show its screens', groupId: target.group.id }];
   const { id: screenId, name: screenName, status } = target.screen;
-  const may = (tool: string) => checked && status !== 'revoked' && tools.some((t) => t.name === tool);
+  const listed = (tool: string) => status !== 'revoked' && tools.some((t) => t.name === tool);
+  const may = (tool: string) => checked && listed(tool);
   const actions: TargetAction[] = [{ kind: 'open-screen', label: 'Open', screenId }];
+  // These open a dialog, sending nothing: they need no read of this opening, though not on a revoked screen.
+  if (listed('create_schedule_entry')) actions.push({ kind: 'play-here', label: 'Play a playlist here…', screenId });
+  // A takeover is started, then published at once: an editor where only owners publish keeps start_takeover, not publish.
+  if (listed('start_takeover') && listed('publish')) actions.push({ kind: 'take-over', label: 'Take over…', screenId });
   if (may('identify_screen'))
     actions.push({
       kind: 'tool',
@@ -268,9 +278,8 @@ export function selectedItem(selection: Selection | null, found: readonly string
 /** The keys cmdk 1.1.1 moves its selection with: arrows, Home and End, and its vim bindings (Ctrl+N, J, P, K). Not PageUp or PageDown, which it ignores. */
 const MOVE_KEYS = new Set(['ArrowUp', 'ArrowDown', 'Home', 'End']);
 
-/** Whether a key press is the member moving ⌘K's selection themselves (`moved`). */
-export const movesSelection = (e: { key: string; ctrlKey: boolean; altKey: boolean }) =>
-  !e.altKey && (MOVE_KEYS.has(e.key) || (e.ctrlKey && ['n', 'j', 'p', 'k'].includes(e.key)));
+/** Whether a key press is the member moving ⌘K's selection themselves (`moved`). With Alt, cmdk moves to the next or previous group. */
+export const movesSelection = (e: { key: string; ctrlKey: boolean }) => MOVE_KEYS.has(e.key) || (e.ctrlKey && ['n', 'j', 'p', 'k'].includes(e.key));
 
 /**
  * Whether a pointer move is the member moving ⌘K's selection: cmdk selects by pointer only over an

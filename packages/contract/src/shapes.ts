@@ -588,6 +588,13 @@ export interface CalendarFeed {
     end: string;
     allDay: boolean;
     location: string;
+    /**
+     * Who booked it: the ORGANIZER's display name (its CN), or `''`. Never the address, which a
+     * screen in a corridor would show to everyone passing: a name holding an `@` (a CN that is an
+     * address, or `Name <address>`) is `''` too. A connector maps the display name by the same rule
+     * (Google `organizer.displayName`, Graph `organizer.emailAddress.name`), never the address.
+     */
+    organizer: string;
   }[];
 }
 export interface NewsFeed {

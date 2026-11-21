@@ -26,11 +26,15 @@ import {
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
-import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
+import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { clockLength, loopMs, playlistDraftOf, playlistPublishWord, rowKeys, type PlaylistView } from '~/lib/playlists';
 import { seconds, spotWhat, versionsById } from '~/lib/spots';
+import { aimedAt, describeWhen, runsAfter, stateWord, timeWord } from '~/lib/schedule';
+import { isRetired } from '~/lib/screen-status';
 import { cn } from '~/lib/utils';
 import { playlistQuery } from '~/queries/playlists';
+import { scheduleQuery } from '~/queries/schedule';
+import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 import { shown } from '~/state/versioned-draft';
@@ -46,6 +50,8 @@ export const Route = createFileRoute('/_app/playlists/$playlistId')({
       queryClient.query(templatesQuery(orgId)),
       queryClient.query(assetsQuery(orgId)),
       queryClient.query(brandKitsQuery(orgId)),
+      queryClient.query(scheduleQuery(orgId)),
+      queryClient.query(screensQuery(orgId)),
     ]);
     if (!playlist) throw notFound();
   },
@@ -120,7 +126,6 @@ function PlaylistEditor() {
   const deletePlaylist = useAppStore((s) => s.deletePlaylist);
   const publishing = useAppStore((s) => s.publishing.pending);
   const publish = useAppStore((s) => s.publishPlaylist);
-  const makeDefault = useAppStore((s) => s.makeDefaultPlaylist);
 
   if (!playlist) return null;
   const draft = editing ?? playlistDraftOf(playlist);
@@ -291,23 +296,7 @@ function PlaylistEditor() {
               <SpotPicker spots={spots} versions={versions} counts={counts} onAdd={(s) => add(orgId, playlist.id, s.id)} />
             </EditorSection>
             <EditorSection title="Where it plays">
-              {playlist.isDefault ? (
-                <p className="flex items-start gap-2 text-sm">
-                  <CheckIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                  The default playlist: every screen plays it when no schedule says otherwise.
-                </p>
-              ) : (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    Screens play the default playlist when no schedule says otherwise. Until there is one, publishing reaches no screen.
-                  </p>
-                  {canPublish && (
-                    <Button type="button" variant="outline" className="self-start" disabled={publishing} onClick={() => void makeDefault(orgId, playlist.id)}>
-                      Play on every screen
-                    </Button>
-                  )}
-                </>
-              )}
+              <WherePlays orgId={orgId} playlist={playlist} />
             </EditorSection>
             <EditorSection title="Transition">
               <div className="flex flex-col gap-2">
@@ -402,5 +391,66 @@ function PlaylistEditor() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+/**
+ * Where the playlist plays (#181): how many screens should be showing it now (their published
+ * manifests, as the Screens page reads them), every entry that plays it, as drafted, and the ways
+ * to put it on more: Schedule on screens, or Play on every screen as the default.
+ */
+function WherePlays({ orgId, playlist }: { orgId: string; playlist: PlaylistView }) {
+  const canManage = useCanManage();
+  const canPublish = useCanPublish();
+  const publishing = useAppStore((s) => s.publishing.pending);
+  const makeDefault = useAppStore((s) => s.makeDefaultPlaylist);
+  const openNewEntry = useAppStore((s) => s.openNewEntry);
+  const { entries } = useSuspenseQuery(scheduleQuery(orgId)).data;
+  const { screens, groups, at } = useSuspenseQuery(screensQuery(orgId)).data;
+  const now = useNow(at);
+  const on = screens.filter((s) => !isRetired(s) && s.showing?.playlist?.id === playlist.id).length;
+  // A takeover over by now, as drafted and on screens, plays nowhere again.
+  const plays = entries.filter((e) => e.playlistId === playlist.id && (!e.takeover || runsAfter(e, now) || runsAfter(e.live, now)));
+  return (
+    <>
+      <p role="status" className="text-sm font-medium">
+        {on ? `On ${on === 1 ? '1 screen' : `${on} screens`} now` : 'On no screen now'}
+      </p>
+      {playlist.isDefault ? (
+        <p className="flex items-start gap-2 text-sm">
+          <CheckIcon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+          The default playlist: every screen plays it when no schedule says otherwise.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Screens play the default playlist when no schedule says otherwise. Until there is one, publishing reaches no screen.
+        </p>
+      )}
+      {plays.length > 0 && (
+        <ul aria-label="Entries that play it" className="divide-y rounded-lg border text-sm">
+          {plays.map((e) => (
+            <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3 py-2">
+              <span>
+                <strong className="font-semibold">{aimedAt(e, screens, groups)}</strong>{' '}
+                <span className="text-muted-foreground">· {e.takeover ? `takeover until ${timeWord((e.live ?? e).endsAt ?? '')}` : describeWhen(e)}</span>
+              </span>
+              <span className="text-[13px] text-muted-foreground">{stateWord(e)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {canManage && (
+          <Button type="button" variant="outline" onClick={() => openNewEntry(orgId, { playlistId: playlist.id })}>
+            Schedule on screens…
+          </Button>
+        )}
+        {canPublish && !playlist.isDefault && (
+          <Button type="button" variant="outline" disabled={publishing} onClick={() => void makeDefault(orgId, playlist.id)}>
+            Play on every screen
+          </Button>
+        )}
+      </div>
+    </>
   );
 }

@@ -2,7 +2,10 @@
  * One screen (canvas board "Screen detail"): what it should be showing, what it is doing, its
  * cache, display hours with exceptions, versions and recent events; Identify, Restart, wake or
  * sleep now; settings, and revoke behind a confirmation (the one thing here that cannot be undone).
+ * Play on this screen and Take over this screen open the schedule's dialogs aimed at it, and
+ * Scheduled here lists the entries that reach it (#181).
  */
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, getRouteApi, Link, notFound } from '@tanstack/react-router';
 import { LoaderCircleIcon, MoonIcon, MoreHorizontalIcon, RotateCwIcon, ScanEyeIcon, SunIcon, UndoIcon } from 'lucide-react';
 import { useId, type SubmitEvent, type ReactNode } from 'react';
@@ -26,18 +29,27 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
-import { useCanManage, useNow, useOrgId, useRole } from '~/lib/live';
+import { useCanManage, useCanPublish, useNow, useOrgId, useRole } from '~/lib/live';
 import { eventText } from '~/lib/audit';
 import { ago, describeScreen, localClock } from '~/lib/screen-status';
+import type { PlaylistView } from '~/lib/playlists';
+import { describeWhen, howItReaches, runsAfter, stateWord, timeWord, type ScheduleEntryView } from '~/lib/schedule';
 import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
 import { byName } from '~/lib/targets';
+import { playlistsQuery } from '~/queries/playlists';
+import { scheduleQuery } from '~/queries/schedule';
 import { getScreen } from '~/server/screens.functions';
 import { useAppStore } from '~/state/provider';
 import { editorDraft, hoursDraftOf, settingsDraftOf, type ScreenAction } from '~/state/screens';
 
 export const Route = createFileRoute('/_app/screens/$screenId')({
-  loader: async ({ params }) => {
-    const detail = await getScreen({ data: params.screenId });
+  loader: async ({ params, context: { queryClient }, parentMatchPromise }) => {
+    const orgId = (await parentMatchPromise).loaderData?.organization?.id;
+    const [detail] = await Promise.all([
+      getScreen({ data: params.screenId }),
+      orgId && queryClient.query(scheduleQuery(orgId)),
+      orgId && queryClient.query(playlistsQuery(orgId)),
+    ]);
     if (!detail) throw notFound();
     return detail;
   },
@@ -64,7 +76,12 @@ function ScreenPage() {
   const orgId = useOrgId();
   const canManage = useCanManage();
   const owner = useRole() === 'owner';
+  const canPublish = useCanPublish();
   const now = useNow(at);
+  const openNewEntry = useAppStore((s) => s.openNewEntry);
+  const openTakeover = useAppStore((s) => s.openTakeover);
+  const { entries } = useSuspenseQuery(scheduleQuery(orgId)).data;
+  const { playlists } = useSuspenseQuery(playlistsQuery(orgId)).data;
   const chooseWeekScreen = useAppStore((s) => s.chooseWeekScreen);
   // What it plays now (M3-19), from its published manifest: what was published, not what is drafted.
   const plays = screen.showing;
@@ -117,6 +134,14 @@ function ScreenPage() {
           {canManage && !revoked && (
             <div className="flex flex-wrap gap-2 sm:ml-auto">
               <EditorFields>
+                <Button variant="outline" onClick={() => openNewEntry(orgId, { target: 'screen', screenId: screen.id })}>
+                  Play on this screen…
+                </Button>
+                {canPublish && (
+                  <Button variant="outline" onClick={() => openTakeover(orgId, { target: 'screen', screenId: screen.id })}>
+                    Take over this screen…
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   disabled={!!busy}
@@ -232,6 +257,8 @@ function ScreenPage() {
             )}
           </figure>
 
+          <ScheduledHere screen={screen} entries={entries} playlists={playlists} groups={groups} now={now} />
+
           <Section title="Recent events">
             {events.length ? (
               <ol className="text-[15px]">
@@ -343,6 +370,57 @@ function ScreenPage() {
 }
 
 const short = (id: string | null) => (id ? <span title={id}>{id.slice(0, 7)}</span> : 'none');
+
+/** The entries that reach this screen, each with how it gets there, as drafted, and the Schedule page to change them on. */
+function ScheduledHere({
+  screen,
+  entries,
+  playlists,
+  groups,
+  now,
+}: {
+  screen: ScreenView;
+  entries: ScheduleEntryView[];
+  playlists: PlaylistView[];
+  groups: GroupView[];
+  now: number;
+}) {
+  const chooseWeekScreen = useAppStore((s) => s.chooseWeekScreen);
+  const names = new Map(playlists.map((p) => [p.id, p.name]));
+  // A takeover over by now, as drafted and on screens, plays nowhere again.
+  const here = entries.flatMap((e) => {
+    const how = howItReaches(e, screen.id, groups);
+    return how && (!e.takeover || runsAfter(e, now) || runsAfter(e.live, now)) ? [{ e, how }] : [];
+  });
+  return (
+    <Section
+      title="Scheduled here"
+      action={
+        <Link to="/schedule" onClick={() => chooseWeekScreen(screen.id)} className="text-sm text-primary underline-offset-4 hover:underline">
+          Schedule
+        </Link>
+      }
+    >
+      {here.length ? (
+        <ul className="divide-y text-[15px]">
+          {here.map(({ e, how }) => (
+            <li key={e.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-2 first:pt-0 last:pb-0">
+              <span>
+                <strong className="font-semibold">{names.get(e.playlistId) ?? 'A removed playlist'}</strong>{' '}
+                <span className="text-muted-foreground">
+                  · {how} · {e.takeover ? `takeover until ${timeWord((e.live ?? e).endsAt ?? '')}` : describeWhen(e)}
+                </span>
+              </span>
+              <span className="text-[13px] text-muted-foreground">{stateWord(e)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">No entry reaches it: it plays the default playlist.</p>
+      )}
+    </Section>
+  );
+}
 
 function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   const id = useId();
