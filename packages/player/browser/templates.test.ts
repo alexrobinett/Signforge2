@@ -1237,6 +1237,88 @@ describe('alert (#200)', () => {
   });
 });
 
+/**
+ * What is wrong with a template's layout at rest: text past the screen, past its clamp or cut by a
+ * box around it, painted over, and texts that overlap. Each text is its lines' boxes, cut to every
+ * box that clips it. `marks` are other things that count as text (room status's now line and pin);
+ * with `inside`, each text must also stay within its nearest ancestor matching it (a card).
+ */
+const faults = (f: Frame, { marks = '', inside = '' } = {}) =>
+  f.evaluate(
+    ({ marks, inside }) => {
+      for (const a of document.getAnimations()) a.currentTime = 2000;
+      type Box = { l: number; t: number; r: number; b: number };
+      const cut = (a: Box, b: Box): Box => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
+      const box = (r: DOMRect): Box => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+      const clips = (el: Element) => getComputedStyle(el).overflow !== 'visible';
+      const name = (el: Element) => `.${[...el.classList].filter((c) => !c.startsWith('lk-')).join('.') || el.tagName}`;
+      const found: string[] = [];
+      const texts: { el: Element; boxes: Box[] }[] = [];
+      const screen = { l: 0, t: 0, r: innerWidth, b: innerHeight };
+      for (const el of document.querySelectorAll('.stage *')) {
+        const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
+        if (!own.length) continue;
+        const s = getComputedStyle(el);
+        const em = Number.parseFloat(s.fontSize);
+        // A clamp or an ellipsis is a cut the layout means; any other box that clips cuts the text.
+        // A crawl slides through its window: the window's cut is meant too.
+        const meant = (p: Element) =>
+          getComputedStyle(p).webkitLineClamp !== 'none' || getComputedStyle(p).textOverflow === 'ellipsis' || Boolean(el.closest('.lk-crawl'));
+        if (s.display !== 'inline' && clips(el) && !meant(el)) {
+          if (el.scrollHeight > el.clientHeight + em / 2) found.push(`${name(el)} runs ${el.scrollHeight - el.clientHeight}px past its box`);
+          if (el.scrollWidth > el.clientWidth + 1) found.push(`${name(el)} runs ${el.scrollWidth - el.clientWidth}px wide`);
+        }
+        // A line's box, not its glyphs' font box: display type set solid has glyph boxes that overlap the lines around them.
+        const lineHeight = Number.parseFloat(s.lineHeight) || Number.POSITIVE_INFINITY;
+        const range = document.createRange();
+        range.setStartBefore(own[0]!);
+        range.setEndAfter(own.at(-1)!);
+        const boxes: Box[] = [];
+        for (const line of range.getClientRects()) {
+          let b = box(line);
+          const middle = (b.t + b.b) / 2;
+          const half = Math.min(b.b - b.t, lineHeight) / 2;
+          b = { ...b, t: middle - half, b: middle + half };
+          if (clips(el) && s.display !== 'inline') b = cut(b, box(el.getBoundingClientRect()));
+          for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+            if (!clips(p)) continue;
+            const c = cut(b, box(p.getBoundingClientRect()));
+            if (!meant(p) && (b.b - c.b > em / 2 || c.t - b.t > em / 2 || b.r - c.r > 1 || c.l - b.l > 1)) found.push(`${name(el)} is cut by ${name(p)}`);
+            b = c;
+          }
+          if (b.r - b.l < 1 || b.b - b.t < 1) continue;
+          const on = cut(b, screen);
+          if (on.r - on.l < b.r - b.l - 1 || on.b - on.t < b.b - b.t - 1) found.push(`${name(el)} runs off the screen`);
+          // Nothing painted over it: what is on top at the middle of the line is the text's own box. A hit
+          // on a glyph's font box that reaches past its element's box (display type set solid) is no cover.
+          const [x, y] = [(b.l + b.r) / 2, (b.t + b.b) / 2];
+          const top = document.elementFromPoint(x, y);
+          const over = top?.getBoundingClientRect();
+          if (top && over && !el.contains(top) && !top.contains(el) && x >= over.left && x <= over.right && y >= over.top && y <= over.bottom)
+            found.push(`${name(el)} is covered by ${name(top)}`);
+          boxes.push(b);
+        }
+        const card = inside && el.parentElement?.closest(inside);
+        if (card) {
+          const c = box(card.getBoundingClientRect());
+          if (boxes.some((b) => b.l < c.l - 1 || b.r > c.r + 1 || b.t < c.t - 1 || b.b > c.b + 1)) found.push(`${name(el)} runs out of ${name(card)}`);
+        }
+        texts.push({ el, boxes });
+      }
+      if (marks) for (const el of document.querySelectorAll(marks)) texts.push({ el, boxes: [...el.getClientRects()].map(box) });
+      for (let i = 0; i < texts.length; i++)
+        for (let j = i + 1; j < texts.length; j++) {
+          const [a, b] = [texts[i]!, texts[j]!];
+          // One element inside the other, or two runs of one sentence.
+          if (a.el.contains(b.el) || b.el.contains(a.el) || a.el.parentElement === b.el.parentElement) continue;
+          const meet = a.boxes.some((p) => b.boxes.some((q) => Math.min(p.r, q.r) - Math.max(p.l, q.l) > 1 && Math.min(p.b, q.b) - Math.max(p.t, q.t) > 1));
+          if (meet) found.push(`${name(a.el)} meets ${name(b.el)}`);
+        }
+      return [...new Set(found)];
+    },
+    { marks, inside },
+  );
+
 describe('room status (#199)', () => {
   const looks = ['pop', 'poster', 'night', 'corporate'] as const;
   const t = () => built.get('room-status')!;
@@ -1470,78 +1552,14 @@ describe('room status (#199)', () => {
   /** Every toggle on, each one off on its own, and all of them off. */
   const toggleSets: Data[] = [allOn, ...toggles.map((t) => ({ ...allOn, [t]: false })), allOff];
 
-  /**
-   * What is wrong with the layout at rest: text past the screen, past its clamp or cut by a box
-   * around it, and texts (the now line and the pin among them) that overlap. Each text is its
-   * lines' boxes, cut to every box that clips it.
-   */
-  const faults = (f: Frame) =>
-    f.evaluate(() => {
-      for (const a of document.getAnimations()) a.currentTime = 2000;
-      type Box = { l: number; t: number; r: number; b: number };
-      const cut = (a: Box, b: Box): Box => ({ l: Math.max(a.l, b.l), t: Math.max(a.t, b.t), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) });
-      const box = (r: DOMRect): Box => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
-      const clips = (el: Element) => getComputedStyle(el).overflow !== 'visible';
-      const name = (el: Element) => `.${[...el.classList].filter((c) => !c.startsWith('lk-')).join('.') || el.tagName}`;
-      const found: string[] = [];
-      const texts: { el: Element; boxes: Box[] }[] = [];
-      const screen = { l: 0, t: 0, r: innerWidth, b: innerHeight };
-      for (const el of document.querySelectorAll('.stage *')) {
-        const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
-        if (!own.length) continue;
-        const s = getComputedStyle(el);
-        const em = Number.parseFloat(s.fontSize);
-        // A clamp or an ellipsis is a cut the layout means; any other box that clips cuts the text.
-        const meant = (p: Element) => getComputedStyle(p).webkitLineClamp !== 'none' || getComputedStyle(p).textOverflow === 'ellipsis';
-        if (s.display !== 'inline' && clips(el) && !meant(el)) {
-          if (el.scrollHeight > el.clientHeight + em / 2) found.push(`${name(el)} runs ${el.scrollHeight - el.clientHeight}px past its box`);
-          if (el.scrollWidth > el.clientWidth + 1) found.push(`${name(el)} runs ${el.scrollWidth - el.clientWidth}px wide`);
-        }
-        // A line's box, not its glyphs' font box: display type set solid has glyph boxes that overlap the lines around them.
-        const lineHeight = Number.parseFloat(s.lineHeight) || Number.POSITIVE_INFINITY;
-        const range = document.createRange();
-        range.setStartBefore(own[0]!);
-        range.setEndAfter(own.at(-1)!);
-        const boxes: Box[] = [];
-        for (const line of range.getClientRects()) {
-          let b = box(line);
-          const middle = (b.t + b.b) / 2;
-          const half = Math.min(b.b - b.t, lineHeight) / 2;
-          b = { ...b, t: middle - half, b: middle + half };
-          if (clips(el) && s.display !== 'inline') b = cut(b, box(el.getBoundingClientRect()));
-          for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
-            if (!clips(p)) continue;
-            const c = cut(b, box(p.getBoundingClientRect()));
-            if (!meant(p) && (b.b - c.b > em / 2 || c.t - b.t > em / 2 || b.r - c.r > 1 || c.l - b.l > 1)) found.push(`${name(el)} is cut by ${name(p)}`);
-            b = c;
-          }
-          if (b.r - b.l < 1 || b.b - b.t < 1) continue;
-          const on = cut(b, screen);
-          if (on.r - on.l < b.r - b.l - 1 || on.b - on.t < b.b - b.t - 1) found.push(`${name(el)} runs off the screen`);
-          // Nothing painted over it: what is on top at the middle of the line is the text's own box. A hit
-          // on a glyph's font box that reaches past its element's box (display type set solid) is no cover.
-          const [x, y] = [(b.l + b.r) / 2, (b.t + b.b) / 2];
-          const top = document.elementFromPoint(x, y);
-          const over = top?.getBoundingClientRect();
-          if (top && over && !el.contains(top) && !top.contains(el) && x >= over.left && x <= over.right && y >= over.top && y <= over.bottom)
-            found.push(`${name(el)} is covered by ${name(top)}`);
-          boxes.push(b);
-        }
-        texts.push({ el, boxes });
-      }
-      for (const el of document.querySelectorAll('.nowline, .pin-pill')) texts.push({ el, boxes: [...el.getClientRects()].map(box) });
-      for (let i = 0; i < texts.length; i++)
-        for (let j = i + 1; j < texts.length; j++) {
-          const [a, b] = [texts[i]!, texts[j]!];
-          // One element inside the other, or two runs of one sentence.
-          if (a.el.contains(b.el) || b.el.contains(a.el) || a.el.parentElement === b.el.parentElement) continue;
-          const meet = a.boxes.some((p) => b.boxes.some((q) => Math.min(p.r, q.r) - Math.max(p.l, q.l) > 1 && Math.min(p.b, q.b) - Math.max(p.t, q.t) > 1));
-          if (meet) found.push(`${name(a.el)} meets ${name(b.el)}`);
-        }
+  /** The layout's faults, the now line and Pop's pin counted as text, and a schedule drawn empty. */
+  const roomFaults = async (f: Frame) => [
+    ...(await faults(f, { marks: '.nowline, .pin-pill' })),
+    ...(await f.evaluate(() => {
       const schedule = document.querySelector('.schedule');
-      if (schedule && !schedule.querySelector('.item, .block, .free-day')) found.push('an empty schedule');
-      return [...new Set(found)];
-    });
+      return schedule && !schedule.querySelector('.item, .block, .free-day') ? ['an empty schedule'] : [];
+    })),
+  ];
 
   for (const orientation of ['landscape', 'portrait'] as const)
     it(`every text fits and nothing overlaps, the now line included, in every look and toggle, ${orientation}`, async () => {
@@ -1554,12 +1572,12 @@ describe('room status (#199)', () => {
               Object.keys(set)
                 .filter((k) => !set[k])
                 .join(', ') || 'all on';
-            for (const fault of await faults(await r.show({ look, ...data, ...set }))) found.push(`${look}, ${day}, ${off}: ${fault}`);
+            for (const fault of await roomFaults(await r.show({ look, ...data, ...set }))) found.push(`${look}, ${day}, ${off}: ${fault}`);
           }
       // The timeline's hours across a change of clocks and from midnight.
       for (const look of looks)
         for (const [day, now, events] of zoned)
-          for (const fault of await faults(await r.show({ look, ...allOn, events }, undefined, Date.parse(now), 'America/New_York')))
+          for (const fault of await roomFaults(await r.show({ look, ...allOn, events }, undefined, Date.parse(now), 'America/New_York')))
             found.push(`${look}, ${day}: ${fault}`);
       expect(found).toEqual([]);
     }, 300_000);
