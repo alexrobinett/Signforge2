@@ -74,14 +74,23 @@ describe('update_screen_labels', () => {
     expect(await run('update_screen_labels', { screenIds: [o.screen], remove: ['Region'] })).toMatchObject({ ok: false, error: 'invalid_input' });
   });
 
-  it('checks values: 1 to 63 characters once trimmed, printable, spaces allowed', async () => {
-    for (const value of ['North Side', 'Ünïcödé 店', 'x'.repeat(63), ` ${'x'.repeat(63)} `])
+  it('checks values: 1 to 63 characters once trimmed, printable, spaces allowed, well-formed Unicode', async () => {
+    for (const value of ['North Side', 'Ünïcödé 店', '😀', 'x'.repeat(63), ` ${'x'.repeat(63)} `])
       expect((await run('update_screen_labels', { screenIds: [o.screen], set: { v: value } })).ok, value).toBe(true);
-    for (const value of ['', '   ', 'x'.repeat(64), 'a\nb', 'a\tb', 'a\u0000b', 'a b'])
+    for (const value of ['', '   ', 'x'.repeat(64), 'a\nb', 'a\tb', 'a\u0000b', 'a b', '\uD800', '\uDC00', 'a\uD800b', '\uDC00\uD800'])
       expect(await run('update_screen_labels', { screenIds: [o.screen], set: { v: value } }), JSON.stringify(value)).toMatchObject({
         ok: false,
         error: 'invalid_input',
       });
+  });
+
+  it('refuses a dropped __proto__ key and lone surrogates without writing any label', async () => {
+    const s = await newScreen('No partial write');
+    const withProto = JSON.parse('{"region":"North","__proto__":"invalid"}');
+    expect(await run('update_screen_labels', { screenIds: [s.id], set: withProto })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await labelsOf(s.id)).toEqual({});
+    expect(await run('update_screen_labels', { screenIds: [s.id], set: { region: '\uD800' } })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await labelsOf(s.id)).toEqual({});
   });
 
   it('refuses reserved keys: system labels, name, id, status and sf.', async () => {
@@ -235,6 +244,7 @@ describe('list_screens({ selector })', () => {
       { all: [{ key: 'region', op: 'in', values: [] }] },
       { all: [{ key: 'region', op: 'exists', values: ['a'] }] },
       { all: [{ key: 'region', op: 'like', values: ['a'] }] },
+      { all: [{ key: 'region', op: 'eq', values: ['\uD800'] }] },
     ];
     for (const selector of refused)
       expect(await run('list_screens', { selector }), JSON.stringify(selector)).toMatchObject({ ok: false, error: 'invalid_input' });
@@ -288,6 +298,11 @@ describe('claim_screen', () => {
     await startPairing(env.DB, { code: 'LAB234', pollTokenHash: 'c'.repeat(64), now: Date.now() });
     const claim = { code: 'LAB234', name: 'Claimed', timezone: 'Europe/London', orientation: 'portrait' };
     expect(await run('claim_screen', { ...claim, labels: { orientation: 'landscape' } })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await run('claim_screen', { ...claim, labels: JSON.parse('{"region":"North","__proto__":"invalid"}') })).toMatchObject({
+      ok: false,
+      error: 'invalid_input',
+    });
+    expect(await run('claim_screen', { ...claim, labels: { region: '\uD800' } })).toMatchObject({ ok: false, error: 'invalid_input' });
     const { screen } = await call('claim_screen', { ...claim, labels: { region: ' North ', store: '0142' } });
     expect(screen).toMatchObject({ labels: { region: 'North', store: '0142' }, systemLabels: { orientation: 'portrait' } });
     expect(await labelsOf(screen.id)).toEqual({ region: 'North', store: '0142' });

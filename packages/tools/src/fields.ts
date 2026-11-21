@@ -105,17 +105,24 @@ const labelValue = z
   .trim()
   .min(1, 'a label value cannot be empty')
   .max(63, 'a label value is at most 63 characters')
-  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u, 'a label value is printable characters, spaces allowed')
+  // \p{Cs} rejects lone surrogates, which D1 reads back as U+FFFD.
+  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}\p{Cs}]*$/u, 'a label value is printable characters, spaces allowed')
   .describe('Up to 63 characters, spaces allowed; matched case-insensitively');
 
 /** Labels to set, by key, as `claim_screen` and `update_screen_labels` take them; the tools check the limits. */
-export const labels = z.record(z.string(), labelValue).superRefine((set, ctx) => {
-  // Checked here, not as the record's key schema, whose refusal says only "Invalid key in record".
-  for (const key of Object.keys(set)) {
-    const checked = labelKey.safeParse(key);
-    if (!checked.success) ctx.addIssue({ code: 'custom', path: [key], message: checked.error.issues[0]!.message });
-  }
-});
+export const labels = z.preprocess(
+  (raw, ctx) => {
+    // Checked before z.record, which drops `__proto__` silently and whose key refusal says only "Invalid key in record".
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      for (const key of Object.keys(raw)) {
+        const checked = labelKey.safeParse(key);
+        if (!checked.success) ctx.addIssue({ code: 'custom', path: [key], message: checked.error.issues[0]!.message });
+      }
+    }
+    return raw;
+  },
+  z.record(z.string(), labelValue),
+);
 
 /** How many values each op takes. */
 const valueCount = (op: (typeof SELECTOR_OPS)[number], n: number) => (op === 'eq' || op === 'neq' ? n === 1 : op === 'in' || op === 'notin' ? n >= 1 : n === 0);
