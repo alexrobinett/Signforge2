@@ -23,7 +23,8 @@ describe('Clock', () => {
     // Sent at device T-1h, answered 200 ms later, server said T+100.
     const saved = c.synced(T + 100, T - 3_600_000, T - 3_600_000 + 200);
     expect(c.offsetMs).toBe(3_600_000);
-    expect(saved).toEqual({ offsetMs: 3_600_000, syncedAt: T + 200 });
+    // The server's own time: the real time was at least that when the answer arrived.
+    expect(saved).toEqual({ offsetMs: 3_600_000, syncedAt: T + 100 });
     t.advance(200);
     expect(c.now()).toBe(T + 200);
   });
@@ -67,5 +68,14 @@ describe('Clock', () => {
     expect(new Clock(device(BUILD - 1).opts).trust()).toEqual({ clockTrusted: false, notBefore: BUILD });
     c.synced(T + 1000, T - 86_400_000, T - 86_400_000);
     expect(c.trust()).toEqual({});
+  });
+
+  it("after a reboot, bounds the real time by the last sync's server time, never by half its round trip (#200)", () => {
+    // A 20 s round trip whose answer came back fast: the server's time was stamped just before it
+    // arrived, so the server time plus half the round trip would run 10 s ahead of the real time.
+    const t = device(T);
+    const saved = new Clock(t.opts).synced(T + 19_000, T, T + 20_000);
+    const back = device(T - 86_400_000);
+    expect(new Clock({ ...back.opts, persisted: saved }).trust()).toEqual({ clockTrusted: false, notBefore: T + 19_000 });
   });
 });

@@ -105,7 +105,8 @@ describe('takeovers', () => {
   // the real time can be, and this takeover has not ended by then.
   it('an Alert takeover plays on a clock the screen does not trust; another takeover does not', async () => {
     const behind = { clockAt: new Date('2020-01-01T00:00:00Z') };
-    const bounds = { startsAt: iso(T0 - HOUR), endsAt: iso(T0 + 2 * HOUR) };
+    // Started at the page's own clock, years before any build, so the build's age never matters.
+    const bounds = { startsAt: iso(behind.clockAt.getTime()), endsAt: iso(T0 + 2 * HOUR) };
     const p = await h.openPlayer((s) => s.publish(alertContent(bounds)), {}, behind);
     const s = await p.until((s) => played(s).includes('t'));
     expect(s.clock.trusted).toBe(false);

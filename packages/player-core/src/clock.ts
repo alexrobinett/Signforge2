@@ -4,7 +4,8 @@
  * time: the schedule, display hours, play counts and templates.
  *
  * - Each sync measures `offsetMs` (server time minus device time, taking the request's midpoint)
- *   and returns it with the corrected time it was measured at (`syncedAt`), for the caller to persist.
+ *   and returns it with the server's time from that answer (`syncedAt`), for the caller to persist:
+ *   the real time was at least that when the answer came, whatever the two legs of the round trip took.
  * - A jump of the device clock against the monotonic clock of more than 2 s (NTP stepping it) is
  *   folded into the offset, so corrected time stays continuous until the next sync.
  * - At start the persisted offset is used, but the clock is not trusted if corrected time is
@@ -15,6 +16,7 @@
 /** What the caller persists after a sync. */
 export interface PersistedClock {
   offsetMs: number;
+  /** The server's time in the last good answer: no later than the real time when it arrived. */
   syncedAt: number;
 }
 
@@ -83,6 +85,6 @@ export class Clock {
     this.markWall = this.o.deviceNow();
     this.markMono = this.o.monoNow();
     this.trusted = true;
-    return { offsetMs: this.offsetMs, syncedAt: receivedAt + this.offsetMs };
+    return { offsetMs: this.offsetMs, syncedAt: serverMs };
   }
 }
