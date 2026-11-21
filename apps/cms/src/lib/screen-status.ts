@@ -76,7 +76,7 @@ const NEEDS_YOU: Record<NonNullable<ScreenView['state']['reason']>, string> = {
 };
 
 /** Most urgent first. Asleep is on purpose, so it is never a problem and ranks below online. */
-const URGENCY: StateKind[] = ['needs_you', 'unreachable', 'updating', 'online', 'asleep'];
+export const URGENCY: StateKind[] = ['needs_you', 'unreachable', 'updating', 'online', 'asleep'];
 
 /** A location's (a group's) state: its most urgent screen's. */
 export function rollup(screens: readonly { state: { kind: StateKind } }[]): StateKind | null {

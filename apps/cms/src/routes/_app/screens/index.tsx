@@ -6,7 +6,7 @@
  */
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { CloudOffIcon, LayoutGridIcon, PlusIcon, SearchIcon, TableIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, CloudOffIcon, LayoutGridIcon, PlusIcon, SearchIcon, TableIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
@@ -26,6 +26,7 @@ import { useCanManage, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
 import { byWord, publishTitle } from '~/lib/publishes';
+import { isScreenSort, sortScreens, type ScreenSort } from '~/lib/targets';
 import { publishQuery } from '~/queries/publishes';
 import { screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
@@ -36,6 +37,8 @@ interface Search {
   q?: string;
   group?: string;
   status?: StateKind;
+  /** Absent: by name. */
+  sort?: ScreenSort;
 }
 
 export const Route = createFileRoute('/_app/screens/')({
@@ -44,6 +47,7 @@ export const Route = createFileRoute('/_app/screens/')({
     ...(typeof s.q === 'string' && s.q ? { q: s.q } : {}),
     ...(typeof s.group === 'string' && s.group ? { group: s.group } : {}),
     ...(isStateKind(s.status) ? { status: s.status } : {}),
+    ...(isScreenSort(s.sort) && s.sort !== 'name' ? { sort: s.sort } : {}),
   }),
   // The org's settings give the pairing form its defaults for new screens. The list is read again
   // on every load, as after a change (`router.invalidate()` in the store's actions), never from the cache.
@@ -77,7 +81,8 @@ function ScreensPage() {
     return m;
   }, [groups]);
 
-  const shown = screens.filter((s) => {
+  const sort = search.sort ?? 'name';
+  const matching = screens.filter((s) => {
     if (search.group && !groupsOf.get(s.id)?.some((g) => g.id === search.group)) return false;
     if (search.status && s.state.kind !== search.status) return false;
     if (search.q) {
@@ -86,6 +91,7 @@ function ScreensPage() {
     }
     return true;
   });
+  const shown = sortScreens(matching, sort);
   const set = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
 
   if (!screens.length) {
@@ -182,7 +188,7 @@ function ScreensPage() {
       ) : view === 'tiles' ? (
         <Tiles screens={shown} groupsOf={groupsOf} now={now} />
       ) : (
-        <ScreenTable screens={shown} groupsOf={groupsOf} now={now} />
+        <ScreenTable screens={shown} groupsOf={groupsOf} now={now} sort={sort} />
       )}
     </div>
   );
@@ -376,7 +382,41 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
   );
 }
 
-function ScreenTable({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Map<string, GroupView[]>; now: number }) {
+/** A column the table sorts by: a link to the sort, the other way when it is the sort already. */
+function SortHeader({
+  column,
+  sort,
+  align = 'left',
+  children,
+}: {
+  column: 'name' | 'status' | 'heard';
+  sort: ScreenSort;
+  align?: 'left' | 'right';
+  children: string;
+}) {
+  const desc: ScreenSort = `-${column}`;
+  const on = sort === column ? 'ascending' : sort === desc ? 'descending' : undefined;
+  const Arrow = on === 'descending' ? ArrowDownIcon : ArrowUpIcon;
+  const next = on === 'ascending' ? desc : column;
+  return (
+    <th scope="col" aria-sort={on} className={cn('px-3 py-2.5 font-semibold', align === 'right' ? 'text-right' : 'text-left')}>
+      <Link
+        to="/screens"
+        search={(prev) => ({ ...prev, sort: next === 'name' ? undefined : next })}
+        replace
+        className={cn(
+          'inline-flex items-center gap-1 rounded outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50',
+          on && 'text-foreground',
+        )}
+      >
+        {children}
+        <Arrow className={cn('size-3.5', !on && 'invisible')} aria-hidden />
+      </Link>
+    </th>
+  );
+}
+
+function ScreenTable({ screens, groupsOf, now, sort }: { screens: ScreenView[]; groupsOf: Map<string, GroupView[]>; now: number; sort: ScreenSort }) {
   return (
     <div className="relative overflow-x-auto rounded-xl border bg-card">
       <table className="w-full min-w-[56rem] border-collapse text-sm">
@@ -385,12 +425,12 @@ function ScreenTable({ screens, groupsOf, now }: { screens: ScreenView[]; groups
             <th scope="col" className="px-3 py-2.5 pl-4 text-left font-semibold">
               Should be showing
             </th>
-            <th scope="col" className="px-3 py-2.5 text-left font-semibold">
+            <SortHeader column="name" sort={sort}>
               Screen
-            </th>
-            <th scope="col" className="px-3 py-2.5 text-left font-semibold">
+            </SortHeader>
+            <SortHeader column="status" sort={sort}>
               Status
-            </th>
+            </SortHeader>
             <th scope="col" className="px-3 py-2.5 text-left font-semibold">
               What it is doing
             </th>
@@ -400,9 +440,9 @@ function ScreenTable({ screens, groupsOf, now }: { screens: ScreenView[]; groups
             <th scope="col" className="px-3 py-2.5 text-right font-semibold">
               Version
             </th>
-            <th scope="col" className="px-3 py-2.5 text-right font-semibold">
+            <SortHeader column="heard" sort={sort} align="right">
               Last heard
-            </th>
+            </SortHeader>
             <th scope="col" className="px-3 py-2.5 pr-4">
               <span className="sr-only">Action</span>
             </th>

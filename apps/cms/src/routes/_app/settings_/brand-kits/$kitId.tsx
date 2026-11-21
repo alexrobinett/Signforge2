@@ -22,6 +22,7 @@ import { draftColors, kitDraftOf, shownColors, type BrandKitView, type KitDraft 
 import { useCanManage, useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { versionsById, type SpotView } from '~/lib/spots';
+import { byName } from '~/lib/targets';
 import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
@@ -150,7 +151,7 @@ function KitUse({
         <legend className="mb-1 text-sm font-semibold">Groups</legend>
         {groups.length ? (
           <ul>
-            {groups.map((g) =>
+            {[...groups].sort(byName).map((g) =>
               choice(
                 g.id,
                 `${g.name} · ${g.screenIds.length} ${g.screenIds.length === 1 ? 'screen' : 'screens'}`,
@@ -174,7 +175,7 @@ function KitUse({
         <legend className="mb-1 text-sm font-semibold">Screens, on their own</legend>
         {screens.length ? (
           <ul>
-            {screens.map((s) =>
+            {[...screens].sort(byName).map((s) =>
               choice(
                 s.id,
                 s.name,
