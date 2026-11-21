@@ -1,22 +1,17 @@
 /**
- * The kit's stylesheet passes the brand colour lint (a template's `sources` hold only its own
- * files, so the build's lint never reads an imported stylesheet), and a template carrying all four
- * looks builds within the bundle budget. How it plays is tested in the player's browser tests
- * (`packages/player/browser/templates.test.ts`, the look kit).
+ * A template carrying all four looks builds within the bundle budget, with no problems and no
+ * colour warnings (the build lints the kit's stylesheet with the template's own). How it plays is
+ * tested in the player's browser tests (`packages/player/browser/templates.test.ts`, the look kit).
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { brandColourWarnings, TEMPLATE_BUDGET } from '@signforge/contract';
+import { TEMPLATE_BUDGET } from '@signforge/contract';
 import { buildTemplate } from '@signforge/cli/template';
 import { expect, it } from 'vitest';
 import { LOOKS } from '../src/index';
 
 const dir = join(import.meta.dirname, '..');
 const css = readFileSync(join(dir, 'looks.css'), 'utf8');
-
-it('passes the brand colour lint: every literal colour is the fallback inside a var()', () => {
-  expect(brandColourWarnings({ 'looks.css': css })).toEqual([]);
-});
 
 it('styles every look, and the test template offers each', () => {
   for (const look of LOOKS) expect(css, look).toContain(`[data-look='${look}'] {`);
@@ -35,4 +30,13 @@ it('builds a template carrying all four looks within the bundle budget', async (
   console.log({ ...faces, 'everything else': built.report.bundleBytes - fontBytes, total: built.report.bundleBytes });
   expect(Object.keys(faces).sort()).toEqual(['lk-body', 'lk-corporate', 'lk-night', 'lk-night-mono', 'lk-pop', 'lk-poster']);
   expect(built.report.bundleBytes).toBeLessThan(TEMPLATE_BUDGET.maxBundleBytes);
+});
+
+it("carries each font's copyright notice and the OFL into the bundle, as the licence asks of every copy", async () => {
+  const { html } = await buildTemplate(join(dir, 'looks-test'));
+  for (const project of ['Inter', 'Bricolage Grotesque', 'Instrument Serif', 'Unbounded', 'Space Mono'])
+    expect(html, project).toMatch(new RegExp(`Copyright 20\\d\\d The ${project} Project Authors`));
+  expect(html).toContain('(https://github.com/rsms/inter-tight)');
+  expect(html).toContain('SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007');
+  expect(html).toContain('5) The Font Software, modified or unmodified, in part or in whole,');
 });
