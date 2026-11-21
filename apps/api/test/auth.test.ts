@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { TAB_ORG_HEADER } from '../src/api/tab-org';
 import { Client, email, testApp } from './client';
 
 describe('sign-up and sign-in by email code', () => {
@@ -123,3 +124,159 @@ describe('organizations', () => {
     expect((await c.get('/api/anything')).status).toBe(403);
   });
 });
+
+describe('the org a new session starts in (#182)', () => {
+  /** A member of `orgs` new orgs, none of them made active by creating it. */
+  async function memberOf(t: ReturnType<typeof testApp>, addr: string, names: string[]) {
+    const c = new Client(t);
+    await c.signIn(addr);
+    const ids: string[] = [];
+    for (const name of names) {
+      const slug = `${name.toLowerCase()}-${Math.random().toString(36).slice(2, 8)}`;
+      ids.push((await c.ok<{ id: string }>('/api/auth/organization/create', { name, slug, keepCurrentActiveOrganization: true })).id);
+    }
+    expect((await c.session()).body.organization).toBeNull();
+    return { c, ids };
+  }
+
+  it("is a member's only org, from the cookie the sign-in sets", async () => {
+    const t = testApp();
+    const addr = email('one-org');
+    const { ids } = await memberOf(t, addr, ['Solo']);
+    const fresh = new Client(t);
+    await fresh.signIn(addr);
+    expect((await fresh.session()).body.organization).toEqual({ id: ids[0], role: 'owner' });
+  });
+
+  it("is the org the tab check sees from a new session's first call", async () => {
+    const t = testApp();
+    const addr = email('first-call');
+    const { ids } = await memberOf(t, addr, ['Solo']);
+    // Each its own new session, so the call is the first after sign-in.
+    const matching = new Client(t);
+    await matching.signIn(addr);
+    expect((await matching.tool('list_screens', {}, { [TAB_ORG_HEADER]: ids[0]! })).status).toBe(200);
+    const stale = new Client(t);
+    await stale.signIn(addr);
+    expect((await stale.tool('list_screens', {}, { [TAB_ORG_HEADER]: 'org_elsewhere' })).status).toBe(409);
+  });
+
+  it('is the org last made active, in any session, after signing out', async () => {
+    const t = testApp();
+    const addr = email('two-orgs');
+    const { c, ids } = await memberOf(t, addr, ['North', 'South']);
+    expect((await c.setActive(ids[1]!)).status).toBe(200);
+    await c.ok('/api/auth/sign-out');
+
+    const fresh = new Client(t);
+    await fresh.signIn(addr);
+    expect((await fresh.session()).body.organization).toEqual({ id: ids[1], role: 'owner' });
+    expect((await fresh.setActive(ids[0]!)).status).toBe(200);
+    const later = new Client(t);
+    await later.signIn(addr);
+    expect((await later.session()).body.organization).toEqual({ id: ids[0], role: 'owner' });
+  });
+
+  it('is none for a member of several orgs who never chose one, so the CMS asks', async () => {
+    const t = testApp();
+    const addr = email('unchosen');
+    await memberOf(t, addr, ['East', 'West']);
+    const fresh = new Client(t);
+    await fresh.signIn(addr);
+    expect((await fresh.session()).body.organization).toBeNull();
+  });
+
+  it('is none when the org last made active is one the member has since left', async () => {
+    const t = testApp();
+    const addr = email('left');
+    const { c, ids } = await memberOf(t, addr, ['Stay', 'Also', 'Gone']);
+    expect((await c.setActive(ids[2]!)).status).toBe(200);
+    await env.DB.prepare('DELETE FROM member WHERE organizationId = ?').bind(ids[2]).run();
+
+    const fresh = new Client(t);
+    await fresh.signIn(addr);
+    expect((await fresh.session()).body.organization).toBeNull();
+  });
+
+  it("is not moved by another device's session refreshing its expiry (review of #208, 2)", async () => {
+    onTestFinished(() => void vi.useRealTimers());
+    const t0 = Date.parse('2026-11-20T09:00:00Z');
+    vi.setSystemTime(t0);
+    const t = testApp();
+    const addr = email('two-devices');
+    const { c: laptop, ids } = await memberOf(t, addr, ['Laptop', 'Phone']);
+    expect((await laptop.setActive(ids[0]!)).status).toBe(200);
+    vi.setSystemTime(t0 + 60_000);
+    const phone = new Client(t);
+    await phone.signIn(addr);
+    expect((await phone.setActive(ids[1]!)).status).toBe(200);
+
+    // Two days on, past Better Auth's one-day update age: the laptop's next read refreshes its
+    // session's expiry, its org unchanged.
+    vi.setSystemTime(t0 + 2 * 24 * 3_600_000);
+    const laptopSession = () =>
+      env.DB.prepare('SELECT expiresAt FROM session s JOIN user u ON u.id = s.userId WHERE u.email = ? ORDER BY s.createdAt LIMIT 1')
+        .bind(addr)
+        .first('expiresAt');
+    const before = await laptopSession();
+    expect((await laptop.session()).body.organization).toEqual({ id: ids[0], role: 'owner' });
+    expect(await laptopSession()).not.toBe(before);
+
+    const next = new Client(t);
+    await next.signIn(addr);
+    expect((await next.session()).body.organization).toEqual({ id: ids[1], role: 'owner' });
+  });
+
+  it('never stores an org whose membership ends between its read and the session insert (review of #208, 1)', async () => {
+    const t = testApp();
+    const addr = email('revoked');
+    const { ids } = await memberOf(t, addr, ['Only']);
+    // The membership is deleted right after the hook reads it, before Better Auth inserts the session.
+    let revoked = false;
+    const revokeAfterRead = (sql: string) => async () => {
+      if (revoked || !/lastActiveOrganizationId/.test(sql) || !/"member"/.test(sql)) return;
+      revoked = true;
+      await env.DB.prepare('DELETE FROM member WHERE organizationId = ?').bind(ids[0]).run();
+    };
+    const racing = new Client(t, undefined, { ...env, DB: racingD1(revokeAfterRead) });
+    await racing.signIn(addr);
+    expect(revoked).toBe(true);
+
+    const stored = await env.DB.prepare(
+      'SELECT s.activeOrganizationId AS org FROM session s JOIN user u ON u.id = s.userId WHERE u.email = ? ORDER BY s.createdAt DESC LIMIT 1',
+    )
+      .bind(addr)
+      .first('org');
+    expect(stored).toBeNull();
+    // The cookie the sign-in set may still name the org (Better Auth issues it from the insert's
+    // values); every request checks membership again, so it reaches nothing.
+    expect((await racing.session()).body.organization).toBeNull();
+    const refused = await racing.tool('list_screens');
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: 'not_a_member' });
+  });
+});
+
+/** The D1 binding, running `after(sql)()` once each statement prepared from `sql` has run. */
+function racingD1(after: (sql: string) => () => Promise<void>): D1Database {
+  const wrap = (stmt: D1PreparedStatement, sql: string): D1PreparedStatement =>
+    new Proxy(stmt, {
+      get(target, key) {
+        if (key === 'bind') return (...values: unknown[]) => wrap(target.bind(...values), sql);
+        const value: unknown = Reflect.get(target, key);
+        if (typeof value !== 'function' || !['all', 'raw', 'first', 'run'].includes(String(key))) return value;
+        return async (...args: unknown[]) => {
+          const result: unknown = await value.apply(target, args);
+          await after(sql)();
+          return result;
+        };
+      },
+    });
+  return new Proxy(env.DB, {
+    get(target, key) {
+      if (key === 'prepare') return (sql: string) => wrap(target.prepare(sql), sql);
+      const value: unknown = Reflect.get(target, key);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}

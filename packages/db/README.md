@@ -21,6 +21,7 @@ The table objects (`src/schema.ts`) are not exported. `test/node/boundary.test.t
 Code that has to find a row before it knows the org (device auth by screen id, pairing, the data-source poller) gets a narrow function here, added by the ticket that needs it. It does not get the tables. So far:
 
 - `findMembership(db, orgId, userId)`: re-checks the active org on every `/api` request.
+- `startingOrg(db, userId)`: the org a new session starts in (the user's only org, or the one they last made active while still its member; else none), for Better Auth's session create hook in `apps/api` (#182). Migration 0029's triggers remember each change of a session's org on the user, and clear a new session's org whose membership ended after this read.
 - `findDeviceScreen(db, screenId)` (`src/device.ts`): a screen's org, desired and previous manifest ids, and the hashes of its unrevoked credentials (each with whether it was used yet) (none if the screen is revoked). The device API checks the secret against them, then uses `scoped(db, orgId)`.
   The temporary `/admin` upload routes (M3-04) also use it to find a screen's org, behind the deploy secret. The publish they end with goes through the tool registry with `scoped(db, orgId)`.
 
