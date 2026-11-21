@@ -705,7 +705,9 @@ The same player and method, the bundles rebuilt with the fonts' licence notice (
 | no photo (`showPhoto` off) | 0.89, 0.61% | 0.06% | 17-21% | 313-333 ms (531 once) |
 | Pop's faces only | 1.28, 0.89% | 0.35, 0.41% | 12-20% | 406-648 ms |
 
-- The photo's drift is what takes portrait over 1%: a photo the screen's width, rescaled every frame while the next spot loads. With the drift off the template stays under 1% with everything else on.
+- The ablation ran on Pop only; every look drifts its photo (22 to 32 s a cycle). Its "everything on" and "Pop's faces only" rows are the same runs as the portrait A/B above.
+- The photo's drift is the largest part of what takes portrait over 1%: a photo the screen's width, rescaled every frame while the next spot loads. With the drift off the template stays under 1% with everything else on (0.67, 0.72%). It is not the only part: the four-look bundle drops more than one with Pop's faces only (1.67, 1.94% against 0.89, 1.28%), most of it while the next spot loads (25 to 30% against 12 to 20%), where its slower prepare falls. Two runs per variant, and earlier Pop-only portrait runs ranged from 0.89 to 1.83%.
+- Since then the kit holds `.lk-drift` still in portrait (docs/template-spec.md, Looks).
 - The photo is also most of the prepare: with it off, prepares fall from about 480 to about 330 ms, as photo-promo's decode cost (Photo samples, above).
 - Dropping `will-change` does not help.
 

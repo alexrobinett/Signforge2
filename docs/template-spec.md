@@ -141,7 +141,7 @@ Text in the primary or accent colour on the page uses `--lk-primary-ink` or `--l
 | Night | Unbounded, Space Mono, Inter | variable, 400 and 700, variable | 67,895 + 44,374 + 64,367 |
 | Corporate | Inter Tight | variable | 59,855 |
 
-Inter is shared by three looks. The OFL asks that every copy carry each font's copyright notice and the licence: a `/*! … */` comment at the top of `looks.css` holds both, and the build keeps it in the bundle (5,357 bytes). A bundle with all four looks is 375,031 bytes, the test template included (`packages/template-looks/test/kit.test.ts`).
+Inter is shared by three looks. The OFL asks that every copy carry each font's copyright notice and the licence: a `/*! … */` comment at the top of `looks.css` holds both, and the build keeps it in the bundle (5,357 bytes). A bundle with all four looks is 375,089 bytes, the test template included (`packages/template-looks/test/kit.test.ts`).
 
 On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other looks' faces costs more (`spike/pi-perf/RESULTS.md`, The look kit). The player reads every bundle before it frames it, about 30 ms more for this one than for a bundle with only Pop's faces. The first prepare after a page loads takes about 180 ms more. After that, prepares fall into a fast mode (about 300 ms in landscape for the test template) or a slow one (about 420 to 480 ms). The four-look bundle's runs land in the slow mode more often. A trace finds no thread doing more work for it, so the slow mode's cause is not known yet.
 
@@ -157,7 +157,7 @@ On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other loo
 | `lk-photo` | slide in, tilted | none (see `lk-cover`) | zoom out of 1.06 | settle from 1.04 |
 | `lk-cover` | none | ink wipe: a block over a photo, scaled away | none | none |
 | `lk-draw` | a rule or bar drawn left to right | the same | the same | the same |
-| `lk-drift`, ambient | slow drift | slow push-in | slow pan | slow push-in |
+| `lk-drift`, ambient, landscape only | slow drift | slow push-in | slow pan | slow push-in |
 | `lk-wobble`, ambient | sticker wobble | none | none | none |
 | `lk-pulse` / `lk-ping`, ambient | bounce / none | none | live pulse / ping | breathing / none |
 | `lk-crawl` | steady crawl, `--lk-crawl-speed` vmin a second | the same | the same | the same |
@@ -168,7 +168,7 @@ On the Pi, decoding a look's own faces costs under 10 ms. Carrying the other loo
 - A crawl is a `.lk-crawl` strip filled in `prepare` and passed to `crawl(strip, ctx)`. It holds its content twice and slides by exactly one copy at the look's speed, however long the text is.
 - Under `prefers-reduced-motion` nothing animates: every element shows its final frame, and a crawl is one line cut with an ellipsis.
 - The Rules' cap holds: at most about 50 elements animating at once. Every element with a kit motion class also has `will-change: transform, opacity` for the whole spot, so each is a layer of its own, and a list with `lk-text` on each row reaches the cap quickly.
-- `lk-drift` is the costly one. A drifting photo across the screen's width is what took the test template over 1% of frames dropped in portrait; with the drift off it dropped 0.67 to 0.72% (RESULTS.md, The look kit).
+- `lk-drift` holds still in portrait. A photo drifting across a portrait screen's width was the largest part of what took the test template over 1% of frames dropped there (RESULTS.md, The look kit): 1.67 to 1.94% with it, 0.67 to 0.72% without. The kit turns it off in portrait (`:root[data-orientation='portrait'] .lk-drift`) until a portrait template measures it under 1%. Landscape keeps it.
 
 **Bundles.** `sf build` also runs the colour lint over every stylesheet `style.css` imports, the kit's included, and names each file from the template's directory. The server lints only the files it receives, the template's own. A template's bundle holds the kit, so an edit to `looks.css` or to the kit's script changes the bundle of every template that imports it. Each such template then needs a new version, as under Budgets.
 
