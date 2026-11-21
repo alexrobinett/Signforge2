@@ -195,6 +195,14 @@ export function howItReaches(
   return 'Every screen';
 }
 
+/**
+ * The schedule as screens have it: each published entry as it was published (`live`), though its
+ * draft changed or waits to be removed; one never published is left out. What a pinned publish of
+ * one more entry builds on (Save and publish, #181).
+ */
+export const publishedEntries = (entries: readonly ScheduleEntryView[]): ScheduleEntryView[] =>
+  entries.flatMap((e) => (e.live ? [{ ...e, ...e.live, deleted: false, draftChanged: false }] : []));
+
 /** The entry being written in the dialog, aimed at one screen, as the tools take its when (null for a field left out). */
 interface DraftEntry {
   playlistId: string;
@@ -324,7 +332,8 @@ export function entryPreview(s: {
   const raise = top && top.priority < MAX_PRIORITY ? { priority: top.priority + 1, above: names(top.playlistId) } : null;
 
   const listed = [...runs.values()];
-  if (loses === plays && listed.length === 1) {
+  const never = loses === plays;
+  if (never && listed.length === 1) {
     const e = winnerOf(listed[0]!.winner);
     return { text: `${name} would not play: ${what(e)} ${e.takeover ? 'cuts in' : `wins whenever it would (priority ${e.priority})`}.`, raise };
   }
@@ -335,6 +344,7 @@ export function entryPreview(s: {
     return `${allDays(r.days) ? '' : `${dayRange(r.days)} `}${span} when ${what(e)} ${beats(e)}`;
   });
   const more = listed.length > 3 ? ` and ${listed.length - 3} more times` : '';
+  if (never) return { text: `${name} would not play: ${shown.join('; ')}${more}.`, raise };
   const exceptions = shown.length ? `, except ${shown.join('; ')}${more}` : '';
   return { text: `Plays ${name} ${when === 'Always' ? 'all day' : when}${exceptions}.`, raise };
 }

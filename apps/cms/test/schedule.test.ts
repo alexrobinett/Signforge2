@@ -5,7 +5,7 @@
 import type { ScheduleEntry, ScreenManifest } from '@signforge/contract';
 import { resolvePlaylist } from '@signforge/player-core';
 import { describe, expect, it } from 'vitest';
-import { describeWhen, entryPreview, weekOf, type ScheduleEntryView } from '../src/lib/schedule';
+import { describeWhen, entryPreview, publishedEntries, weekOf, type ScheduleEntryView } from '../src/lib/schedule';
 
 const entry = (id: string, over: Partial<ScheduleEntryView>): ScheduleEntryView => ({
   id,
@@ -281,5 +281,48 @@ describe('entryPreview', () => {
 
   it('says when its dates leave it out of this week', () => {
     expect(preview([], { startDate: '2026-12-01', endDate: '2026-12-24' }).text).toBe('Holiday promo does not play this week: 2026-12-01 to 2026-12-24.');
+  });
+});
+
+describe('entryPreview after Save and publish, over what screens have (#181 review)', () => {
+  /** The preview over the published schedule plus this entry, which publishes alone and last. */
+  const live = (entries: ScheduleEntryView[], over: Partial<typeof draft> = {}) =>
+    entryPreview({ screen: utcLobby, groups: driveThru, entries: publishedEntries(entries), draft: { ...draft, ...over }, defaultPlaylistId: 'main', names, at });
+  const published = { ...breakfast, live: { ...breakfast } };
+
+  it('keeps an outranking entry removed but not published: screens still have it', () => {
+    const removed = { ...published, deleted: true, draftChanged: true };
+    expect(preview([removed]).text).toBe('Plays Holiday promo all day.');
+    expect(live([removed])).toEqual({
+      text: 'Plays Holiday promo all day, except 06:00–10:30 when Breakfast on Drive-thru wins (priority 10).',
+      raise: { priority: 11, above: 'Breakfast' },
+    });
+  });
+
+  it('keeps the published priority of an entry whose lower one is not published', () => {
+    const lowered = { ...published, priority: 0, draftChanged: true };
+    expect(preview([lowered]).text).toBe('Plays Holiday promo all day.');
+    expect(live([lowered]).text).toBe('Plays Holiday promo all day, except 06:00–10:30 when Breakfast on Drive-thru wins (priority 10).');
+  });
+
+  it('leaves out an entry never published, which the drafted line counts', () => {
+    const unpublished = { ...breakfast, published: false, draftChanged: true, publishedAt: null, live: null };
+    expect(preview([unpublished]).raise).toEqual({ priority: 11, above: 'Breakfast' });
+    expect(live([unpublished])).toEqual({ text: 'Plays Holiday promo all day.', raise: null });
+  });
+
+  it('wins a full tie with a published entry for the same screen: it publishes last, the newest', () => {
+    const same = shipped('sch_same', { playlistId: 'breakfast', target: 'screen', screenId: 'scr_lobby' });
+    expect(live([{ ...same, live: { ...same } }]).text).toBe('Plays Holiday promo all day.');
+  });
+});
+
+describe('entryPreview when it loses everywhere', () => {
+  it('says it would not play, though more than one entry wins its times', () => {
+    const weekdays = shipped('sch_weekdays', { playlistId: 'breakfast', days: [1, 2, 3, 4, 5], priority: 5 });
+    const weekend = shipped('sch_weekend', { playlistId: 'flash', days: [6, 0], priority: 3 });
+    expect(preview([weekdays, weekend]).text).toBe(
+      'Holiday promo would not play: Mon–Fri all day when Breakfast on every screen wins (priority 5); Sat, Sun all day when Flash sale on every screen wins (priority 3).',
+    );
   });
 });
