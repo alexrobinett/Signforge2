@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Countdown</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="stage"></div>
+<template id="pop">
+  <div class="figure lk-badge lk-d1">
+    <div class="disc lk-wobble">
+      <p class="number lk-badge lk-d3"></p>
+      <p class="rest lk-fade lk-d4"></p>
+      <p class="done lk-badge lk-d3"></p>
+    </div>
+  </div>
+  <div class="copy">
+    <div class="stickers">
+      <div class="sticker lk-badge lk-d2"><span class="unit pill lk-wobble"></span></div>
+      <div class="sticker lk-badge lk-d3" data-show="record"><span class="best pill lk-wobble"></span></div>
+    </div>
+    <h1 class="title lk-text lk-d3">The winter party</h1>
+    <p class="detail lk-text lk-d4" data-show="detail"></p>
+    <dl class="facts" data-show="facts"></dl>
+    <div class="progress" data-show="progress"><div class="dots"></div><p class="progress-label lk-text lk-d6"></p></div>
+  </div>
+</template>
+<template id="poster">
+  <header class="head">
+    <div class="lk-mask"><p class="kicker lk-text lk-d1"></p></div>
+    <div class="lk-mask" data-show="detail"><p class="detail lk-text lk-d2"></p></div>
+  </header>
+  <div class="rule lk-draw lk-d1"></div>
+  <div class="lk-mask title-box"><h1 class="title lk-text lk-d2">The winter party</h1></div>
+  <div class="board">
+    <div class="tiles"></div>
+    <div class="lk-mask done-box"><p class="done lk-text lk-d3"></p></div>
+    <aside class="record lk-fade lk-d4" data-show="record"><p class="k">Record to beat</p><p class="v"></p><p class="s"></p></aside>
+  </div>
+  <div class="band lk-fade lk-d7" data-show="facts"><p class="lk-crawl"></p></div>
+</template>
+<template id="poster-tile">
+  <div class="unit-col">
+    <div class="tile"><p class="v lk-text lk-d3"></p><i class="split lk-draw lk-d5" data-show="progress"></i></div>
+    <div class="rule-s lk-draw lk-d5"></div>
+    <div class="lk-mask"><p class="n lk-text lk-d5"></p></div>
+  </div>
+</template>
+<template id="night">
+  <div class="figure lk-fade lk-d1">
+    <div class="ring" data-show="progress">
+      <div class="track"><div class="half r"><i class="fill a"></i></div><div class="half l"><i class="fill b"></i></div><i class="seam"></i><div class="hole"></div></div>
+      <i class="cap start"></i>
+      <div class="arm"><i class="cap ping lk-ping"></i><i class="cap end"></i></div>
+    </div>
+    <div class="centre">
+      <div class="lk-mask"><p class="number lk-text lk-d4"></p></div>
+      <div class="lk-mask"><p class="done lk-text lk-d4"></p></div>
+      <div class="lk-mask"><p class="sub lk-text lk-d5"></p></div>
+    </div>
+  </div>
+  <div class="copy">
+    <div class="lk-mask"><p class="unit-row lk-text lk-d2">// <span class="unit"></span></p></div>
+    <div class="lk-mask title-box"><h1 class="title lk-text lk-d3">The winter party</h1></div>
+    <dl class="facts"></dl>
+  </div>
+</template>
+<template id="corporate">
+  <header class="head"><p class="kicker lk-fade lk-d1"></p></header>
+  <div class="rule lk-draw lk-d1"></div>
+  <div class="main">
+    <div class="figure">
+      <p class="unit-row lk-text lk-d2"><i class="mark"></i><span class="unit"></span></p>
+      <p class="number lk-text lk-d3"></p>
+      <p class="rest lk-text lk-d4"></p>
+      <p class="done lk-text lk-d3"></p>
+    </div>
+    <div class="copy">
+      <h1 class="title lk-text lk-d4">The winter party</h1>
+      <p class="detail lk-text lk-d5" data-show="detail"></p>
+      <div class="scale lk-text lk-d6" data-show="progress">
+        <p class="ends"><span class="from"></span><span class="to"></span></p>
+        <div class="bar"><i class="fill lk-draw lk-d7"></i><i class="marker lk-fade lk-d8"><b class="lk-pulse"></b></i></div>
+      </div>
+    </div>
+  </div>
+  <footer class="foot">
+    <div class="rule lk-draw lk-d6"></div>
+    <dl class="facts"></dl>
+  </footer>
+</template>
+<template id="fact"><div class="fact lk-text"><dt></dt><dd></dd></div></template>
+<script type="module" src="main.ts"></script>
+</body>
+</html>

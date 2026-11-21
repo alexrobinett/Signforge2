@@ -1,0 +1,14 @@
+{
+  "name": "Countdown (minutes ticking)",
+  "kind": "template",
+  "template": "countdown",
+  "durationMs": 10000,
+  "data": {
+    "look": "night",
+    "mode": "up",
+    "target": "2026-04-21T09:00",
+    "title": "Since the Riverside warehouse opened",
+    "units": "days, hours and minutes",
+    "recordDays": 400
+  }
+}
