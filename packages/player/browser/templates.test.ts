@@ -1308,6 +1308,36 @@ describe('announcement (#197)', () => {
     }
   });
 
+  // Poster's photo is uncovered by an ink block: at the start of play the frame is ink, and the photo shows once the block has gone.
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`Poster's photo frame is ink as play starts and the photo once the wipe is done, ${orientation}`, async () => {
+      const k = await screenFrame(t(), orientation, { photo: '#ff0000' });
+      const at = async (ms: number) => {
+        const f = k.frame();
+        const centre = await f.evaluate((ms) => {
+          for (const a of document.getAnimations()) {
+            a.pause();
+            a.currentTime = ms;
+          }
+          const r = document.querySelector('.frame')!.getBoundingClientRect();
+          return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+        }, ms);
+        const png = (await k.hst.page.screenshot({ clip: { ...centre, width: 1, height: 1 } })).toString('base64');
+        return k.hst.page.evaluate(async (png) => {
+          const img = new Image();
+          img.src = `data:image/png;base64,${png}`;
+          await img.decode();
+          const g = new OffscreenCanvas(1, 1).getContext('2d')!;
+          g.drawImage(img, 0, 0);
+          return `rgb(${[...g.getImageData(0, 0, 1, 1).data.slice(0, 3)].join(', ')})`;
+        }, png);
+      };
+      await k.play({ look: 'poster', ...everything });
+      await k.hst.post('fresh', 'play');
+      const ink = await k.frame().evaluate(() => getComputedStyle(document.querySelector('.lk-cover')!).backgroundColor);
+      expect({ start: await at(0), done: await at(2000) }).toEqual({ start: ink, done: 'rgb(255, 0, 0)' });
+    });
+
   it('with reduced motion, shows the final frame with nothing animating', async () => {
     const k = await screenFrame(t(), 'landscape', photo);
     await k.hst.page.emulateMedia({ reducedMotion: 'reduce' });
