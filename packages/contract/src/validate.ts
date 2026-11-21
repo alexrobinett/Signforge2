@@ -150,6 +150,8 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       if (!isStr(v)) return `field "${name}" must be an https address`;
       // A lone surrogate has no UTF-8 form: no QR code can carry it. In a `u` pattern a pair is one code point, so only lone ones match.
       if (/\p{Surrogate}/u.test(v)) return `field "${name}" must be well-formed text`;
+      // The URL parser ignores space around an address, but the value is stored and drawn as typed: a QR code would carry it.
+      if (v !== v.trim()) return `field "${name}" must not start or end with a space`;
       if (v !== '' && !safeUrl(v)) return `field "${name}" must be an https address`;
       if (new TextEncoder().encode(v).length > MAX_URL_BYTES) return `field "${name}" is longer than ${MAX_URL_BYTES} bytes`;
       if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;

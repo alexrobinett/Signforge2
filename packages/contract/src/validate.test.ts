@@ -131,6 +131,13 @@ describe('validateSpotData', () => {
       expect(validateSpotData(link, { link: lone }, {})).toEqual(['field "link" must be well-formed text']);
     expect(validateSpotData(link, { link: 'https://example.com/\uD83D\uDE00' }, {})).toEqual([]);
   });
+
+  it('refuses a url with space around it, which the URL parser would ignore but a QR code would carry', () => {
+    const link: Record<string, FieldDef> = { link: { type: 'url', label: 'Link' } };
+    for (const spaced of [' https://example.com/', 'https://example.com/ ', '\thttps://example.com/\n', ' '])
+      expect(validateSpotData(link, { link: spaced }, {})).toEqual(['field "link" must not start or end with a space']);
+    expect(validateSpotData(link, { link: 'https://example.com/a%20b' }, {})).toEqual([]);
+  });
 });
 
 describe('image size', () => {
