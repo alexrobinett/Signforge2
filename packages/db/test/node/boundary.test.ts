@@ -1,7 +1,7 @@
 // The tenancy guard's other half: nothing outside packages/db may reach the table objects.
 // Code elsewhere imports `@signforge/db` (repositories and row types), and nothing else from this
-// package, except that tests (and the local dev-screen script) may import `@signforge/db/testing`,
-// whose direct writes production code must never reach.
+// package, except that tests in a package's own test/ or e2e/ directory (and the local dev-screen
+// script) may import `@signforge/db/testing`, whose direct writes production code must never reach.
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,10 +14,13 @@ const SKIP = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', '.wrang
 const CODE = /\.(?:[cm]?[jt]sx?)$/;
 const TESTING = '@signforge/db/testing';
 
+/** A workspace package's own `test` or `e2e` directory (pnpm-workspace.yaml), not such a folder deeper in its source. */
+const TEST_DIR = /^(?:apps|packages|templates)\/[^/]+\/(?:test|e2e)\//;
+
 /** Whether `file` may import `@signforge/db/testing`: a test, a test's harness or an e2e spec, or the local dev-screen script. */
 function mayUseTesting(file: string): boolean {
-  const parts = relative(ROOT, file).split(sep);
-  return parts.includes('test') || parts.includes('e2e') || parts.join('/') === 'apps/api/scripts/dev-screen.ts';
+  const path = relative(ROOT, file).split(sep).join('/');
+  return TEST_DIR.test(path) || path === 'apps/api/scripts/dev-screen.ts';
 }
 const SPECIFIER =
   /\b(?:import|export)\s[^'";]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]/g;
@@ -59,10 +62,25 @@ describe('import boundary', () => {
 
   it('keeps the testing adapter out of production code', () => {
     const testing = "import { testScope } from '@signforge/db/testing';";
-    for (const prod of ['apps/api/src/x.ts', 'packages/tools/src/x.ts', 'apps/cms/src/lib/x.ts', 'apps/api/scripts/other.ts'])
+    for (const prod of [
+      'apps/api/src/x.ts',
+      'packages/tools/src/x.ts',
+      'apps/cms/src/lib/x.ts',
+      'apps/api/scripts/other.ts',
+      // A `test` or `e2e` folder inside a package's source is still production code.
+      'apps/api/src/test/x.ts',
+      'packages/tools/src/e2e/x.ts',
+      'test/x.ts',
+    ])
       expect(forbiddenImports(join(ROOT, prod), testing), prod).toEqual([TESTING]);
     expect(forbiddenImports(join(ROOT, 'apps/api/src/x.ts'), "const t = await import('@signforge/db/testing');")).toEqual([TESTING]);
-    for (const allowed of ['apps/api/test/x.test.ts', 'packages/tools/test/harness-worker.ts', 'apps/cms/e2e/helpers.ts', 'apps/api/scripts/dev-screen.ts'])
+    for (const allowed of [
+      'apps/api/test/x.test.ts',
+      'packages/tools/test/harness-worker.ts',
+      'packages/db/test/node/x.test.ts',
+      'apps/cms/e2e/helpers.ts',
+      'apps/api/scripts/dev-screen.ts',
+    ])
       expect(forbiddenImports(join(ROOT, allowed), testing), allowed).toEqual([]);
   });
 
