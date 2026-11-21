@@ -351,7 +351,7 @@ test("a screen's actions are disabled in the server's HTML, until the page has h
   await expect(page.getByRole('button', { name: 'Restart player' })).toBeEnabled();
 });
 
-test("the Screens page's pairing form, and its search, filters and locations, are disabled in the server's HTML, until the page has hydrated (#140)", async ({
+test("the Screens page's pairing form, and its search and filters, are disabled in the server's HTML, until the page has hydrated (#140)", async ({
   page,
   request,
 }) => {
@@ -368,13 +368,12 @@ test("the Screens page's pairing form, and its search, filters and locations, ar
 
   const { code } = await startPairing(request);
   const { screen } = await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
-  // In a group, so it filters from both its toolbar chip and its Locations card.
+  // In a group, so the Group filter has it.
   await tool(page, 'create_group', { name: 'Windows', screenIds: [screen.id] });
-  // The Locations card is named by its text: the group, its screen's state (never synced) and its count.
-  const filters = ['Search screens', 'Status', 'Tiles', 'Table', 'All 1', 'Windows 1', 'WindowsUnreachable1 screen'];
+  const filters = ['Search screens', 'Group', 'Status', 'Tiles', 'Table'];
   expect(await disabledOnServer(page, '/screens', filters)).toEqual(Object.fromEntries(filters.map((n) => [n, [true]])));
   await page.goto('/screens');
   await hydrated(page);
   await expect(page.getByLabel('Status', { exact: true })).toBeEnabled();
-  await expect(page.getByRole('list', { name: 'By location' }).getByRole('button')).toBeEnabled();
+  await expect(page.getByLabel('Group', { exact: true })).toBeEnabled();
 });

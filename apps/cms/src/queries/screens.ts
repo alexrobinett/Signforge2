@@ -4,8 +4,9 @@
  * and then polls only what each screen is doing (`list_screen_status`), which reads no manifests.
  * The full list is read again when the poll sees what it does not have (`listOutOfDate`).
  */
-import { queryOptions } from '@tanstack/react-query';
+import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { listOutOfDate } from '~/lib/fleet-status';
+import type { GroupView } from '~/lib/screen-types';
 import { getScreenStatus, getScreens } from '~/server/screens.functions';
 import { retryUnlessRedirect } from './retry';
 
@@ -17,6 +18,15 @@ import { retryUnlessRedirect } from './retry';
 const POLL_MS = 15_000;
 
 export const screensQuery = (orgId: string) => queryOptions({ queryKey: ['org', orgId, 'screens'], queryFn: () => getScreens() });
+
+/** A group as a tool answered with it, or its deletion, into the list the Screens pages read. */
+export function putGroup(client: QueryClient, orgId: string, change: GroupView | { deleted: string }) {
+  client.setQueryData(screensQuery(orgId).queryKey, (list) => {
+    if (!list) return list;
+    if ('deleted' in change) return { ...list, groups: list.groups.filter((g) => g.id !== change.deleted) };
+    return { ...list, groups: list.groups.map((g) => (g.id === change.id ? change : g)) };
+  });
+}
 
 export const screenStatusQuery = (orgId: string) =>
   queryOptions({

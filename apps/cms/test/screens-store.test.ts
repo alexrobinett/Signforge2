@@ -1,12 +1,17 @@
 // The screen page's editors in the store: the settings and display hours drafts. Tool calls go
 // through a stubbed `fetch` that answers from a queue the test fills; nothing waits on a clock.
+import { QueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { GroupView, ScreenView } from '../src/lib/screen-types';
-import { createScreensSlice, editorDraft, type ScreensSlice } from '../src/state/screens';
+import { screensQuery } from '../src/queries/screens';
+import { createScreensSlice, editorDraft, selectedIn, type ScreensSlice } from '../src/state/screens';
 
 // The tab's org comes from the page's router, which a store test has none of.
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
+vi.mock('~/server/screens.functions', () => ({ getScreens: vi.fn(), getScreenStatus: vi.fn() }));
+vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 const ORG = 'org_1';
 const screen: ScreenView = {
@@ -33,6 +38,8 @@ beforeEach(() => {
   calls = [];
   replies = [];
   router.invalidate.mockClear();
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.error).mockClear();
   vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
     calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
     const reply = await (replies.length ? replies.shift() : { status: 200, body: {} });
@@ -114,5 +121,69 @@ describe('the settings editor (versioned draft)', () => {
     // The page has read the rename; the reopened form, saved as it is, would put the old name back.
     await store.getState().saveScreenSettings({ ...screen, name: 'Front lobby', version: 4 } as never, groups);
     expect(calls[1]).toMatchObject({ name: 'rename_screen', input: { name: 'Lobby', ifVersion: 3 } });
+  });
+});
+
+describe('the Screens table selection (#183)', () => {
+  const front = { id: 'grp_front', name: 'Front', screenIds: ['scr_0'], version: 2 } as GroupView;
+
+  function withList() {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(screensQuery(ORG).queryKey, { screens: [], groups: [front], at: 0 });
+    const store = createStore<ScreensSlice>()((set, get) => createScreensSlice(set as never, get as never, { router, queryClient } as never));
+    return { store, queryClient };
+  }
+
+  it('adds the selected screens to a group in one call, and the page shows them in it', async () => {
+    const { store, queryClient } = withList();
+    replies.push({ status: 200, body: { group: { ...front, screenIds: ['scr_0', 'scr_1', 'scr_2', 'scr_3'], version: 3 } } });
+    await store.getState().addScreensToGroup(ORG, front, ['scr_1', 'scr_2', 'scr_3']);
+    expect(calls).toEqual([{ name: 'add_group_members', input: { groupId: 'grp_front', screenIds: ['scr_1', 'scr_2', 'scr_3'] } }]);
+    expect(queryClient.getQueryData(screensQuery(ORG).queryKey)?.groups[0]).toMatchObject({ screenIds: ['scr_0', 'scr_1', 'scr_2', 'scr_3'], version: 3 });
+    expect(toast.success).toHaveBeenCalledWith('Added 3 screens to Front');
+  });
+
+  it('removes them from a group in one call', async () => {
+    const { store } = withList();
+    replies.push({ status: 200, body: { group: { ...front, screenIds: [], version: 3 } } });
+    await store.getState().removeScreensFromGroup(ORG, front, ['scr_0', 'scr_1']);
+    expect(calls).toEqual([{ name: 'remove_group_members', input: { groupId: 'grp_front', screenIds: ['scr_0', 'scr_1'] } }]);
+    expect(toast.success).toHaveBeenCalledWith('Removed 2 screens from Front');
+  });
+
+  it('a refusal is said, and the selection kept to try again', async () => {
+    const { store } = withList();
+    store.getState().selectScreens(ORG, ['scr_1', 'scr_2'], true);
+    replies.push({ status: 404, body: { error: 'not_found', message: 'group grp_front not found' } });
+    await store.getState().addScreensToGroup(ORG, front, ['scr_1', 'scr_2']);
+    expect(toast.error).toHaveBeenCalledWith('Not added to Front', { description: 'group grp_front not found' });
+    expect(selectedIn(store.getState().screens, ORG)).toEqual(['scr_1', 'scr_2']);
+  });
+
+  it('a second bulk change while one is on its way is ignored', async () => {
+    const { store } = withList();
+    let answer: (r: Reply) => void = () => {};
+    replies.push(new Promise<Reply>((resolve) => (answer = resolve)));
+    const first = store.getState().addScreensToGroup(ORG, front, ['scr_1']);
+    expect(store.getState().screens.bulkPending).toBe(true);
+    await store.getState().removeScreensFromGroup(ORG, front, ['scr_1']);
+    answer({ status: 200, body: { group: front } });
+    await first;
+    expect(calls.map((c) => c.name)).toEqual(['add_group_members']);
+    expect(store.getState().screens.bulkPending).toBe(false);
+  });
+
+  it('selects and unselects rows, all shown at once too, and a selection belongs to its org', () => {
+    const { store } = withList();
+    store.getState().selectScreens(ORG, ['scr_1', 'scr_2'], true);
+    store.getState().selectScreens(ORG, ['scr_2'], false);
+    store.getState().selectScreens(ORG, ['scr_1', 'scr_3'], true);
+    expect(selectedIn(store.getState().screens, ORG)).toEqual(['scr_1', 'scr_3']);
+    expect(selectedIn(store.getState().screens, 'org_2')).toEqual([]);
+    // Selecting in another org starts that org's selection afresh.
+    store.getState().selectScreens('org_2', ['scr_9'], true);
+    expect(selectedIn(store.getState().screens, 'org_2')).toEqual(['scr_9']);
+    store.getState().clearScreenSelection();
+    expect(selectedIn(store.getState().screens, 'org_2')).toEqual([]);
   });
 });

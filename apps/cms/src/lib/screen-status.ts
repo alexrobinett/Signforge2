@@ -75,6 +75,13 @@ const NEEDS_YOU: Record<NonNullable<ScreenView['state']['reason']>, string> = {
   fallback: 'The latest version played nothing, so it went back to the one before',
 };
 
+/**
+ * Whether a screen is retired: every credential it had is revoked. It plays nothing until paired
+ * again, so the Screens page leaves it out of its list, its counts and the group pickers, and its
+ * Retired filter shows it. From the state, which the poll keeps current.
+ */
+export const isRetired = (s: { state: Pick<ScreenView['state'], 'kind' | 'reason'> }) => s.state.kind === 'needs_you' && s.state.reason === 'revoked';
+
 /** Most urgent first. Asleep is on purpose, so it is never a problem and ranks below online. */
 const URGENCY: StateKind[] = ['needs_you', 'unreachable', 'updating', 'online', 'asleep'];
 
