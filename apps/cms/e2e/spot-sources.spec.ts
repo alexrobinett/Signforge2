@@ -241,7 +241,8 @@ test('a template with two sources: a place for the weather and a feed for the ne
   await weather.getByLabel('Place').fill('Atl');
   await weather.getByRole('list', { name: 'Places found' }).getByRole('button', { name: 'Atlanta, Georgia, United States' }).click();
   await expect(weather.getByText('Weather, Atlanta, Georgia, United States (°F, mph)')).toBeVisible();
-  // Binding the weather leaves the news picker as it was.
+  // Binding the weather leaves the news picker as it was. The org has feeds already: this one is added by its address.
+  await news.getByRole('button', { name: 'Add a feed by its address' }).click();
   await news.getByLabel('Address').fill('https://feeds.example.com/frame.rss');
   await news.getByLabel('Name', { exact: true }).fill('Frame desk');
   await news.getByRole('button', { name: 'Add feed' }).click();
