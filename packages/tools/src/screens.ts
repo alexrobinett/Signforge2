@@ -9,7 +9,7 @@ import { keysetPage, page, pageInput } from './paging';
 import { manifestKey } from './r2';
 import { screenState, shouldBeShowing, type StateInput } from './screen-state';
 import { unreachableAfterMs } from './settings';
-import { defineTool, notFound } from './tool';
+import { defineTool, notFound, ToolError } from './tool';
 import { outputs, type CredentialView, type ScreenView } from './outputs';
 
 /** How long a display override lasts at most: on a screen without display hours, and over a closed weekend. */
@@ -55,6 +55,9 @@ export function liveOverride(json: string | null, now: number): DisplayOverride 
   return Date.parse(o.until) > now ? o : null;
 }
 
+/** A screen is revoked once marked so, or once every credential it collected is revoked; one that never collected one is waiting to pair. */
+const isRevoked = (s: Screen, creds: readonly ScreenCredential[]) => s.status === 'revoked' || (creds.length > 0 && creds.every((c) => c.revokedAt != null));
+
 /**
  * A screen as tools return it. `credentials` are the screen's, and `unreachableMs` the org's
  * threshold, when the caller has them already (a list reads each once); a screen whose every
@@ -69,7 +72,7 @@ export async function screenView(
   unreachableMs?: number,
 ): Promise<ScreenView> {
   const [creds, afterMs] = await Promise.all([credentials ?? org.screens.credentials.forScreen(s.id), unreachableMs ?? unreachableAfterMs(org)]);
-  const revoked = s.status === 'revoked' || (creds.length > 0 && creds.every((c) => c.revokedAt != null));
+  const revoked = isRevoked(s, creds);
   const hb = parseHeartbeat(s.heartbeatJson);
   const hours = hoursOf(s);
   const override = liveOverride(s.displayOverrideJson ?? null, now);
@@ -124,6 +127,14 @@ async function requireScreen(org: OrgScope, screenId: string) {
   const row = await org.screens.get(screenId);
   if (!row) throw notFound('screen', screenId);
   return row;
+}
+
+/** A screen a command may go to: a revoked one plays nothing, and its socket is closed, so it is refused rather than reported sent. */
+async function requireActiveScreen(org: OrgScope, screenId: string) {
+  const screen = await requireScreen(org, screenId);
+  if (isRevoked(screen, await org.screens.credentials.forScreen(screen.id)))
+    throw new ToolError('conflict', `screen ${screenId} is revoked: pair it again to send it commands`);
+  return screen;
 }
 
 /** The (redacted) input an audit row recorded. */
@@ -297,7 +308,7 @@ const setDisplayOverride = defineTool({
 
 const identifyScreen = defineTool({
   name: 'identify_screen',
-  description: `Show the screen's name over its content for ${IDENTIFY_SECONDS} seconds, so someone in the room can tell which screen it is. Reaches a screen whose socket is open; one that is unreachable does not get it. Returns { screenId, seconds }.`,
+  description: `Show the screen's name over its content for ${IDENTIFY_SECONDS} seconds, so someone in the room can tell which screen it is. Reaches a screen whose socket is open; one that is unreachable does not get it, and a revoked one is refused (conflict). Returns { screenId, seconds }.`,
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
@@ -307,7 +318,7 @@ const identifyScreen = defineTool({
   example: { screenId: 'scr_example' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, notify }) => {
-    const screen = await requireScreen(org, input.screenId);
+    const screen = await requireActiveScreen(org, input.screenId);
     notify((screens) => screens.command(screen.id, { type: 'identify', name: screen.name, seconds: IDENTIFY_SECONDS }));
     return { screenId: screen.id, seconds: IDENTIFY_SECONDS };
   },
@@ -316,7 +327,7 @@ const identifyScreen = defineTool({
 const restartScreen = defineTool({
   name: 'restart_screen',
   description:
-    "Restart the screen's player now: it reloads, plays from its cache at once and syncs. Use it when a screen looks stuck. Reaches a screen whose socket is open. Rebooting the device is not available yet. Returns { screenId }.",
+    "Restart the screen's player now: it reloads, plays from its cache at once and syncs. Use it when a screen looks stuck. Reaches a screen whose socket is open; a revoked one is refused (conflict). Rebooting the device is not available yet. Returns { screenId }.",
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
@@ -326,7 +337,7 @@ const restartScreen = defineTool({
   example: { screenId: 'scr_example' },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, input, notify }) => {
-    const screen = await requireScreen(org, input.screenId);
+    const screen = await requireActiveScreen(org, input.screenId);
     notify((screens) => screens.command(screen.id, { type: 'restart' }));
     return { screenId: screen.id };
   },

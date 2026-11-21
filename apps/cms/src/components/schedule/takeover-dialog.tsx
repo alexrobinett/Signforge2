@@ -13,7 +13,7 @@ import type { PlaylistView } from '~/lib/playlists';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { useAppStore } from '~/state/provider';
 import { DIALOG } from '~/state/schedule';
-import { TargetFields } from './target-fields';
+import { TargetPicker } from './target-picker';
 
 const DAY_MS = 86_400_000;
 
@@ -82,7 +82,7 @@ export function TakeoverDialog({
               ))}
             </NativeSelect>
           </div>
-          <TargetFields value={d} screens={screens} groups={groups} onChange={edit} />
+          <TargetPicker label="Plays on" value={d} screens={screens} groups={groups} onPick={edit} />
           <div className="grid gap-1.5">
             <label htmlFor={`${id}-until`} className="text-sm font-medium">
               Until

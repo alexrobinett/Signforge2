@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, screenshot, signInAs } from './helpers';
+import { expect, test, type Request } from '@playwright/test';
+import { axe, fillUntilEnabled, hydrated, screenshot, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
@@ -16,8 +16,21 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await hydrated(page);
 
   const menu = page.getByRole('dialog', { name: 'Command menu' });
-  const search = menu.getByRole('combobox', { name: 'Search pages and actions' });
+  const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
   const toast = (text: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: text });
+  /** The screens list's read (`getScreens`), which a test holds or fails by its route. */
+  const listRead = (url: URL) =>
+    url.pathname.startsWith('/_serverFn/') &&
+    Buffer.from(url.pathname.split('/')[2] ?? '', 'base64url')
+      .toString()
+      .includes('getScreens_');
+  // An opening joins a list read already on its way (begun leaving Screens, say), so a test that routes the next read
+  // first waits for those to finish, by their own events.
+  const reading = new Set<Request>();
+  page.on('request', (r) => void (listRead(new URL(r.url())) && reading.add(r)));
+  page.on('requestfinished', (r) => void reading.delete(r));
+  page.on('requestfailed', (r) => void reading.delete(r));
+  const listReadsDone = () => expect.poll(() => reading.size).toBe(0);
 
   // Open with Ctrl+K: focus is in the search, every tool an owner may use is listed.
   await page.keyboard.press('ControlOrMeta+k');
@@ -29,7 +42,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
 
   // Filter to a tool that needs input, run it from its form: pair a screen a player started.
   const start = await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.14' } });
-  const { code } = (await start.json()) as { code: string };
+  const { code, pollToken } = (await start.json()) as { code: string; pollToken: string };
   await page.keyboard.type('pair a screen');
   await expect(menu.getByRole('option', { selected: true })).toContainText('Pair a screen');
   await page.keyboard.press('Enter');
@@ -102,4 +115,163 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await expect(search).toBeFocused();
   await page.keyboard.press('ControlOrMeta+k');
   await expect(menu).toBeHidden();
+
+  // Typing part of a screen's name finds it (#180); Enter shows its actions, Open first. Each Enter waits for focus and
+  // for the option it means to be selected: cmdk moves the selection in a step of its own after each keystroke.
+  const { screens } = await tool(page, 'list_screens', {});
+  const deli = screens.find((s: { name: string }) => s.name === 'Deli counter').id;
+  const { group } = await tool(page, 'create_group', { name: 'Front of house', screenIds: [deli] });
+  const actions = menu.getByRole('option');
+  const selected = menu.getByRole('option', { selected: true });
+  const actionsSearch = menu.getByRole('combobox', { name: 'Actions for Deli counter' });
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('deli');
+  await expect(selected).toContainText('Deli counter');
+  await expect(menu.getByRole('option', { name: /Front of house/ })).toHaveCount(0);
+  await axe(page);
+  await screenshot(page, '32-command-menu-screen');
+  await page.keyboard.press('Enter');
+  await expect(actionsSearch).toBeFocused();
+  await expect(actions).toHaveText(['Open', 'Identify (10 s)', 'Restart player']);
+  await axe(page);
+  await screenshot(page, '33-command-menu-screen-actions');
+  await page.keyboard.type('identify');
+  await expect(selected).toHaveText('Identify (10 s)');
+  await page.keyboard.press('Enter');
+  await expect(toast('Identify (10 s): Deli counter')).toBeVisible();
+  await expect(menu).toBeHidden();
+
+  // Enter on Back goes back, to what was found, and does not run the selected action; Open goes to the screen's page.
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('counter');
+  await expect(selected).toContainText('Deli counter');
+  await page.keyboard.press('Enter');
+  await expect(actionsSearch).toBeFocused();
+  await expect(selected).toHaveText('Open');
+  await menu.getByRole('button', { name: 'Back to commands' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue('counter');
+  await expect(page).not.toHaveURL(new RegExp(`/screens/${deli}$`));
+  await expect(selected).toContainText('Deli counter');
+  await page.keyboard.press('Enter');
+  await expect(actionsSearch).toBeFocused();
+  await expect(selected).toHaveText('Open');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/screens/${deli}$`));
+  await expect(page.getByRole('heading', { name: 'Deli counter', level: 1 })).toBeVisible();
+
+  // A group by its name, or a screen by its group's: the group's action shows its screens on the Screens page.
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('house');
+  await expect(menu.getByRole('option', { name: /Deli counter/ })).toBeVisible();
+  await menu.getByRole('option', { name: /Front of house/ }).click();
+  await expect(actions).toHaveText(['Show its screens']);
+  await expect(selected).toHaveText('Show its screens');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/screens\\?group=${group.id}$`));
+  await expect(page.getByLabel('Group', { exact: true })).toHaveValue(group.id);
+  await expect(menu).toBeHidden();
+
+  // The list's read failing, with no retry left: a cached screen's commands are off, and the list and the screen
+  // say so and how to try again. Off Screens, whose poll reads the list; in the app, as a page load empties the cache.
+  const listStatus = menu.getByRole('status');
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Playlists' }).click();
+  await expect(page).toHaveURL(/\/playlists$/);
+  await listReadsDone();
+  await page.route(listRead, (route) => route.abort());
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('deli');
+  await expect(listStatus).toHaveText(
+    'Couldn’t check the screens: they are as last read, and Identify and Restart are off. Close ⌘K and open it again to retry.',
+  );
+  await expect(selected).toContainText('Deli counter');
+  await page.keyboard.press('Enter');
+  await expect(actionsSearch).toBeFocused();
+  await expect(listStatus).toHaveText('Couldn’t check Deli counter, so Identify and Restart are off. Close ⌘K and open it again to retry.');
+  await expect(actions).toHaveText(['Open']);
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await page.unroute(listRead);
+
+  // A screen revoked since the menu last read the list: while this opening's read is held, the cached screen is only
+  // opened, and a name the cache lacks is being looked for.
+  await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/poll`, { data: { pollToken }, headers: { 'cf-connecting-ip': '192.0.2.14' } });
+  const { credentials } = await tool(page, 'get_screen', { screenId: deli });
+  await tool(page, 'revoke_screen_credential', { screenId: deli, credentialId: credentials[0].id });
+  await tool(page, 'create_group', { name: 'Kiosk 9' });
+  // The server refuses a command to a revoked screen too.
+  expect((await page.request.post('/api/tools/identify_screen', { data: { screenId: deli } })).status()).toBe(409);
+  /** Holds the list's reads until `release`. */
+  const holdListRead = async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(listRead, async (route) => {
+      await held;
+      await route.continue();
+    });
+    return release;
+  };
+  await listReadsDone();
+  let release = await holdListRead();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('kiosk 9');
+  await expect(menu.getByText('Looking for screens…')).toBeVisible();
+  await search.fill('deli');
+  await expect(selected).toContainText('Deli counter');
+  await page.keyboard.press('Enter');
+  await expect(actionsSearch).toBeFocused();
+  await expect(listStatus).toHaveText('Checking Deli counter before Identify and Restart…');
+  await expect(actions).toHaveText(['Open']);
+  release();
+  await expect(listStatus).toHaveText('');
+  await expect(menu.getByRole('heading', { name: 'Deli counter' })).toBeVisible();
+  await expect(actions).toHaveText(['Open']);
+  await page.unroute(listRead);
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+
+  // After a page load the cache is empty: typed before the list lands, the screen it finds is selected once it does,
+  // over the tool cmdk selected meanwhile, so Enter opens the screen.
+  await page.reload();
+  await hydrated(page);
+  release = await holdListRead();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('deli');
+  await expect(listStatus).toHaveText('Looking for screens…');
+  // Neither is the member choosing: a pointer over the search or the footer selects nothing, and cmdk ignores PageDown.
+  const centre = async (target: ReturnType<typeof menu.getByText>) => {
+    const box = (await target.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  };
+  await centre(search);
+  await centre(menu.getByText(/These actions are the tool registry/));
+  await page.keyboard.press('PageDown');
+  release();
+  await expect(selected).toContainText('Deli counter');
+  await page.keyboard.press('Enter');
+  await expect(actionsSearch).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await page.unroute(listRead);
+
+  // An empty cache and a read that fails: the list says no screens could be read, and how to try again.
+  await page.route(listRead, (route) => route.abort());
+  await page.reload();
+  await hydrated(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('deli');
+  await expect(listStatus).toHaveText('Couldn’t read the screens, so none are listed. Close ⌘K and open it again to retry.');
+  await expect(menu.getByRole('option', { name: /Deli counter/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.unroute(listRead);
 });

@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { contrastRatio } from '@signforge/compiler';
 import type { AssetView } from '../src/lib/assets';
-import { type BrandKitView, draftColors, duplicateInput, kitDraftOf, kitPairs, pairFix, shownColors, updateInput, withDraftKit } from '../src/lib/brand-kits';
+import {
+  type BrandKitView,
+  draftColors,
+  duplicateInput,
+  kitDraftOf,
+  kitPairs,
+  pairFix,
+  screensText,
+  shownColors,
+  updateInput,
+  withDraftKit,
+} from '../src/lib/brand-kits';
 
 /** Northside's dark kit from the design boards, with the accent's text set by hand to white. */
 const northside = {
@@ -161,5 +172,19 @@ describe('withDraftKit', () => {
     expect(
       withDraftKit({ preview, kitId: 'bk_1', draft: { ...d, colors: { ...d.colors, text: '#ff' } }, assets: [], orientation: 'landscape' }),
     ).toBeUndefined();
+  });
+});
+
+describe("a kit's screens, its reach and its conflicts (#180)", () => {
+  const screens = [
+    { id: 'scr_1', name: 'Window' },
+    { id: 'scr_2', name: 'Counter' },
+    { id: 'scr_3', name: 'Annex' },
+    { id: 'scr_4', name: 'Lobby' },
+  ];
+
+  it('names the screens it reaches by name, not in the id order the tool lists them, then how many more', () => {
+    expect(screensText(['scr_1', 'scr_2', 'scr_3'], screens)).toBe('Annex, Counter, Window');
+    expect(screensText(['scr_1', 'scr_2', 'scr_3', 'scr_4'], screens)).toBe('Annex, Counter, Lobby and 1 more');
   });
 });

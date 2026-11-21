@@ -12,6 +12,7 @@ import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
 import { isOrientation, type GroupView } from '~/lib/screen-types';
+import { byName } from '~/lib/targets';
 import { useAppStore } from '~/state/provider';
 import { DisplayHoursEditor, hoursProblems } from './display-hours-editor';
 import { normaliseCode, PAIRING_CODE_LENGTH, PairingCodeInput } from './pairing-code-input';
@@ -111,7 +112,7 @@ export function PairScreenForm({ groups, compact = false }: { groups: GroupView[
               <fieldset className="grid gap-1.5">
                 <legend className="mb-1.5 text-sm font-medium">Groups</legend>
                 <div className="flex flex-wrap gap-x-4 gap-y-2">
-                  {groups.map((g) => (
+                  {groups.toSorted(byName).map((g) => (
                     <label key={g.id} className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"

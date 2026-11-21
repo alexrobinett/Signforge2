@@ -18,10 +18,11 @@ import { EditorFields } from '~/components/editor';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
-import { draftColors, kitDraftOf, shownColors, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
+import { draftColors, kitDraftOf, screensText, shownColors, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { useCanManage, useOrgId } from '~/lib/live';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { versionsById, type SpotView } from '~/lib/spots';
+import { byName } from '~/lib/targets';
 import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
@@ -67,12 +68,6 @@ function Panel({ id, title, children }: { id: string; title: string; children: R
   );
 }
 
-/** A few names, then how many more. */
-function names(list: string[]) {
-  if (list.length <= 3) return list.join(', ');
-  return `${list.slice(0, 3).join(', ')} and ${list.length - 3} more`;
-}
-
 /** Default, groups and screens: who chose this kit, and the screens its edits reach. */
 function KitUse({
   kit,
@@ -92,7 +87,6 @@ function KitUse({
   const busy = useAppStore(kitActionRunning);
   const assign = useAppStore((s) => s.assignKit);
   const makeDefault = useAppStore((s) => s.makeDefaultKit);
-  const nameOf = (id: string) => screens.find((s) => s.id === id)?.name ?? id;
   const otherKit = (has: (k: BrandKitView) => boolean) => kits.find((k) => k.id !== kit.id && has(k))?.name;
   const choice = (key: string, label: string, saved: boolean, other: string | undefined, target: { groupId: string } | { screenId: string }) => {
     // While its change is on the way, the box shows where it is going.
@@ -141,8 +135,12 @@ function KitUse({
         <Alert>
           <TriangleAlertIcon aria-hidden />
           <AlertDescription>
-            {names(kit.conflicts.map((c) => nameOf(c.screenId)))} {kit.conflicts.length === 1 ? 'is' : 'are'} in groups that chose different kits, so{' '}
-            {kit.conflicts.length === 1 ? 'it' : 'they'} cannot publish. Give the screen a kit of its own, or change a group.
+            {screensText(
+              kit.conflicts.map((c) => c.screenId),
+              screens,
+            )}{' '}
+            {kit.conflicts.length === 1 ? 'is' : 'are'} in groups that chose different kits, so {kit.conflicts.length === 1 ? 'it' : 'they'} cannot publish.
+            Give the screen a kit of its own, or change a group.
           </AlertDescription>
         </Alert>
       )}
@@ -150,7 +148,7 @@ function KitUse({
         <legend className="mb-1 text-sm font-semibold">Groups</legend>
         {groups.length ? (
           <ul>
-            {groups.map((g) =>
+            {[...groups].sort(byName).map((g) =>
               choice(
                 g.id,
                 `${g.name} · ${g.screenIds.length} ${g.screenIds.length === 1 ? 'screen' : 'screens'}`,
@@ -174,7 +172,7 @@ function KitUse({
         <legend className="mb-1 text-sm font-semibold">Screens, on their own</legend>
         {screens.length ? (
           <ul>
-            {screens.map((s) =>
+            {[...screens].sort(byName).map((s) =>
               choice(
                 s.id,
                 s.name,
@@ -230,7 +228,6 @@ function KitEditor() {
   const ready = unsaved && draftColors(draft) !== null && draft.name.trim() !== '' && !stale;
   const versions = versionsById(templates);
   const withTemplates = previewSpots(spots);
-  const reach = kit.reach.map((id) => screens.find((s) => s.id === id)?.name ?? id);
   const statusWord = unsaved
     ? 'Unsaved changes'
     : savedAt
@@ -252,10 +249,10 @@ function KitEditor() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <p role="status" className="max-w-[46ch] text-sm">
-            {reach.length ? (
+            {kit.reach.length ? (
               <>
-                Edits reach <strong className="font-semibold">{reach.length === 1 ? '1 screen' : `${reach.length} screens`}</strong> at the next publish:{' '}
-                {names(reach)}.
+                Edits reach <strong className="font-semibold">{kit.reach.length === 1 ? '1 screen' : `${kit.reach.length} screens`}</strong> at the next
+                publish: {screensText(kit.reach, screens)}.
               </>
             ) : (
               'No screen wears this kit yet. Edits reach screens once it is used and published.'
