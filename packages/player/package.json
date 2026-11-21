@@ -17,6 +17,7 @@
     "@signforge/cli": "workspace:*",
     "@signforge/media": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
+    "@signforge/template-announcement": "workspace:*",
     "@signforge/template-clock": "workspace:*",
     "@signforge/template-cstore-promo": "workspace:*",
     "@signforge/template-looks": "workspace:*",
@@ -27,6 +28,7 @@
     "@signforge/template-weather": "workspace:*",
     "@types/node": "^26.6.6",
     "esbuild": "^0.28.2",
+    "jsqr": "^1.4.0",
     "playwright": "1.65.1",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"

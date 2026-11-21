@@ -1,0 +1,46 @@
+{
+  "id": "announcement",
+  "version": "1.0.0",
+  "name": "Announcement",
+  "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
+  "fields": {
+    "look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" },
+    "eyebrow": { "type": "text", "label": "Eyebrow", "default": "Company news", "maxLength": 24 },
+    "headline": { "type": "text", "label": "Headline", "default": "Pier 9 opens on Monday", "maxLength": 80 },
+    "body": {
+      "type": "text",
+      "label": "Body",
+      "default": "Come for coffee, a tour and the first look at the roof terrace.",
+      "maxLength": 280
+    },
+    "meta": { "type": "text", "label": "Posted by", "default": "From the People Team · 20 November", "maxLength": 48 },
+    "facts": {
+      "type": "list",
+      "label": "Facts",
+      "maxItems": 3,
+      "item": {
+        "label": { "type": "text", "label": "Label", "maxLength": 16 },
+        "value": { "type": "text", "label": "Value", "maxLength": 32 }
+      },
+      "default": [
+        { "label": "Date", "value": "Monday 7 December" },
+        { "label": "Tours", "value": "9 to 11 am" },
+        { "label": "Where", "value": "Pier 9, lobby" }
+      ]
+    },
+    "photo": { "type": "image", "label": "Photo" },
+    "qrUrl": { "type": "url", "label": "QR code link", "default": "", "maxLength": 100 },
+    "qrLabel": { "type": "text", "label": "QR code label", "default": "Scan for the floor plan", "maxLength": 40 },
+    "showPhoto": { "type": "boolean", "label": "Show the photo", "default": true },
+    "showQr": { "type": "boolean", "label": "Show the QR code", "default": true },
+    "showEyebrow": { "type": "boolean", "label": "Show the eyebrow", "default": true },
+    "showBody": { "type": "boolean", "label": "Show the body", "default": true },
+    "showMeta": { "type": "boolean", "label": "Show who posted it", "default": true },
+    "showFacts": { "type": "boolean", "label": "Show the facts", "default": true },
+    "showLogo": { "type": "boolean", "label": "Show the logo", "default": true }
+  },
+  "duration": { "defaultMs": 10000, "minMs": 5000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#000000"
+}

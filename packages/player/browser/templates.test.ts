@@ -12,6 +12,7 @@ import { readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
+import jsQR from 'jsqr';
 import type { Frame, Page } from 'playwright';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -57,6 +58,12 @@ const cases: Record<string, { a: Data; b: Data; assetsA?: Record<string, string>
     },
     b: { events: [{ title: 'Lunch', start: at(-0.5), end: at(1), allDay: false, location: 'Canteen' }], rows: 3 },
   },
+  announcement: {
+    a: { look: 'pop', showFacts: false },
+    b: { look: 'night', qrUrl: 'https://example.com/plan', facts: [{ label: 'When', value: 'Monday' }] },
+    assetsA: { photo: '#963' },
+    assetsB: { photo: '#369' },
+  },
   clock: { a: { greeting: 'Welcome', message: 'Doors open at 6', seconds: true }, b: { hour24: true } },
   'cstore-promo': {
     a: { promo: 'Buy any 3', product: 'Energy', price: '6' },
@@ -98,6 +105,18 @@ const DEMO_KIT: BrandColors = {
   muted: '#a5b4cb',
 };
 
+/** A light kit whose accent is the default palette's amber, which reads on dark only. */
+const LIGHT_KIT: BrandColors = {
+  primary: '#1d4ed8',
+  onPrimary: '#ffffff',
+  accent: '#f59e0b',
+  onAccent: '#000000',
+  background: '#ffffff',
+  surface: '#f1f5f9',
+  text: '#0f172a',
+  muted: '#475569',
+};
+
 /** No kit, the demo kit and `light`: the kits a template's painted contrast is measured under. */
 const noDemoAndLight = (light: BrandColors): [string, FrameTheme | undefined][] => [
   ['no kit', undefined],
@@ -128,6 +147,7 @@ interface Host {
   /**
    * With `sampled`, each image goes with its sample (`sampleAsset`), as a screen sends an image
    * uploaded with one; `'broken'`, with a PNG header and nothing that decodes. A play lasts 8 s unless `durationMs` says otherwise.
+   * With `logo`, the theme carries a 4x1 logo of that colour.
    */
   init(
     frame: string,
@@ -137,6 +157,7 @@ interface Host {
     theme?: FrameTheme,
     sampled?: boolean | 'broken',
     durationMs?: number,
+    logo?: string,
   ): Promise<void>;
   post(frame: string, type: 'play' | 'reset'): Promise<void>;
   /** Wait until the frame has sent `type` `count` times in all. */
@@ -192,11 +213,11 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
       );
       await waitFor(frame, 'loaded', 1);
     },
-    async init(frame, data, assets = {}, now = NOW, theme, sampled = false, durationMs = 8000) {
+    async init(frame, data, assets = {}, now = NOW, theme, sampled = false, durationMs = 8000, logo) {
       const samples = sampled ? Object.fromEntries(Object.keys(assets).map((field) => [field, sampleAsset(field)])) : {};
       const broken = sampled === 'broken';
       await page.evaluate(
-        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs }) => {
+        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, logo }) => {
           const w = window as unknown as {
             frames_: Record<string, HTMLIFrameElement>;
             SFSample: typeof import('@signforge/media/sample');
@@ -235,6 +256,15 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
             sc.getContext('2d')!.putImageData(new ImageData(sample.data, sample.width, sample.height), 0, 0);
             blobs[key] = await png(sc);
           }
+          let logoPng: Blob | undefined;
+          if (logo) {
+            const c = document.createElement('canvas');
+            [c.width, c.height] = [4, 1];
+            const g = c.getContext('2d')!;
+            g.fillStyle = logo;
+            g.fillRect(0, 0, 4, 1);
+            logoPng = await png(c);
+          }
           const init = {
             sf,
             type: 'init',
@@ -246,11 +276,11 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
             timezone: 'UTC',
             locale: 'en-US',
             clock: { now, offsetMs: now - Date.now() },
-            theme,
+            theme: theme && logoPng ? { ...theme, logo: { onDark: logoPng } } : theme,
           };
           w.frames_[frame]!.contentWindow!.postMessage(init, '*');
         },
-        { frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs },
+        { frame, data, assets, samples, broken, sf, now, theme, orientation, size, durationMs, logo },
       );
     },
     post: (frame, type) =>
@@ -830,6 +860,27 @@ describe('text on a brand colour (#57, #69, #92)', () => {
     }
 });
 
+/**
+ * One frame of `t` at a screen's own size; `play(data, theme)` inits it with `assets` and waits for
+ * ready. The Pi shows 1080p at scale 1: at half that size, a 20 px label is 10 px, and Linux paints
+ * the cores of its strokes lighter (the kit's Corporate meta line read 3.90:1 on CI's runner).
+ */
+async function screenFrame(t: { html: string; manifest: TemplateManifest }, orientation: Orientation, assets: Record<string, string>) {
+  const hst = await host(orientation, true);
+  await hst.open('fresh', t.html);
+  let inits = 0;
+  const frame = () => hst.page.mainFrame().childFrames()[0]!;
+  return {
+    hst,
+    frame,
+    async play(data: Data, theme?: FrameTheme, durationMs?: number, logo?: string) {
+      await hst.init('fresh', spotData(t.manifest, data), assets, NOW, theme, false, durationMs, logo);
+      await hst.waitFor('fresh', 'ready', ++inits);
+      return frame();
+    },
+  };
+}
+
 describe('the look kit (#190)', () => {
   const looks = ['pop', 'poster', 'night', 'corporate'] as const;
   /** Each look's font families, as looks.css names them. */
@@ -839,43 +890,14 @@ describe('the look kit (#190)', () => {
     night: ['lk-night', 'lk-night-mono', 'lk-body'],
     corporate: ['lk-corporate'],
   };
-  const light: BrandColors = {
-    primary: '#1d4ed8',
-    onPrimary: '#ffffff',
-    accent: '#f59e0b',
-    onAccent: '#000000',
-    background: '#ffffff',
-    surface: '#f1f5f9',
-    text: '#0f172a',
-    muted: '#475569',
-  };
-  const kits = noDemoAndLight(light);
+  const kits = noDemoAndLight(LIGHT_KIT);
   const photo = { photo: '#808080' };
   let t: { html: string; manifest: TemplateManifest };
   beforeAll(async () => {
     t = await buildTemplate(resolve(import.meta.dirname, '../../template-looks/looks-test'));
   }, 60_000);
 
-  /**
-   * One frame of the test template at a screen's own size; `play(data, theme)` inits it and waits
-   * for ready. The Pi shows 1080p at scale 1: at half that size, a 20 px label is 10 px, and Linux
-   * paints the cores of its strokes lighter (Corporate's meta line read 3.90:1 on CI's runner).
-   */
-  async function kitFrame(orientation: Orientation = 'landscape') {
-    const hst = await host(orientation, true);
-    await hst.open('fresh', t.html);
-    let inits = 0;
-    const frame = () => hst.page.mainFrame().childFrames()[0]!;
-    return {
-      hst,
-      frame,
-      async play(data: Data, theme?: FrameTheme, durationMs?: number) {
-        await hst.init('fresh', spotData(t.manifest, data), photo, NOW, theme, false, durationMs);
-        await hst.waitFor('fresh', 'ready', ++inits);
-        return frame();
-      },
-    };
-  }
+  const kitFrame = (orientation: Orientation = 'landscape') => screenFrame(t, orientation, photo);
 
   for (const orientation of ['landscape', 'portrait'] as const)
     it(`every text reads as painted in every look, with no kit, the demo kit and a light kit, ${orientation}`, async () => {
@@ -1052,5 +1074,216 @@ describe('the look kit (#190)', () => {
     const a = spotData(t.manifest, { look: 'pop', showPhoto: false }),
       b = spotData(t.manifest, { look: 'night', showCrawl: false });
     await expectSameAsFresh(await host('landscape', true), t.html, a, b, photo, photo);
+  });
+});
+
+describe('announcement (#197)', () => {
+  const looks = ['pop', 'poster', 'night', 'corporate'] as const;
+  const kits = noDemoAndLight(LIGHT_KIT);
+  const demo = kits[1]![1];
+  const photo = { photo: '#808080' };
+  const qrUrl = 'https://example.com/floor-plan';
+  /** The kit's logo: only a kit with one shows it. */
+  const logo = '#ff00ff';
+  const t = () => built.get('announcement')!;
+  /** Wide words, `n` characters: copy at a field's `maxLength`. */
+  const words = (n: number) => 'Wwwwwww Wwwww '.repeat(30).slice(0, n);
+  const long: Data = {
+    eyebrow: 'W'.repeat(24),
+    headline: words(80),
+    body: words(280),
+    meta: words(48),
+    qrLabel: words(40),
+    qrUrl: `https://example.com/${'w'.repeat(80)}`,
+    facts: [1, 2, 3].map(() => ({ label: 'W'.repeat(16), value: words(32) })),
+  };
+  const toggles = ['Photo', 'Qr', 'Eyebrow', 'Body', 'Meta', 'Facts', 'Logo'];
+  const allOff: Data = Object.fromEntries(toggles.map((n) => [`show${n}`, false]));
+  /** Each toggle off alone, all off, and long copy (one unbroken word too) with the photo and without. */
+  const variants: [string, Data][] = [
+    ['all on', {}],
+    ['long copy', long],
+    ['long copy, photo off', { ...long, showPhoto: false }],
+    ['an 80-letter word', { headline: 'W'.repeat(80) }],
+    ...toggles.map((n): [string, Data] => [`${n.toLowerCase()} off`, { [`show${n}`]: false }]),
+    ['all off', allOff],
+    ['all off, long headline', { ...allOff, headline: long.headline }],
+  ];
+
+  /**
+   * What is wrong with the layout at rest: a block off the screen, two blocks overlapping, text cut
+   * sideways without an ellipsis, or clamped text showing more lines than its clamp.
+   */
+  const layoutProblems = (f: Frame) =>
+    f.evaluate(() => {
+      for (const a of document.getAnimations()) a.currentTime = 3000;
+      const out: string[] = [];
+      const blocks = ['.eyebrow', '.logo', '.headline-box', '.body', '.facts', '.qr', '.meta', '.photo'].flatMap((sel) => {
+        const el = document.querySelector(sel);
+        return el ? [[sel, el.getBoundingClientRect()] as const] : [];
+      });
+      for (const [sel, r] of blocks)
+        if (r.left < -1 || r.top < -1 || r.right > innerWidth + 1 || r.bottom > innerHeight + 1) out.push(`${sel} leaves the screen`);
+      for (const [i, [a, ra]] of blocks.entries())
+        for (const [b, rb] of blocks.slice(i + 1)) {
+          const w = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
+          const h = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
+          if (w > 1 && h > 1) out.push(`${a} overlaps ${b}`);
+        }
+      for (const el of document.querySelectorAll<HTMLElement>('.stage :is(.pill, .headline, .body, dt, dd, .qr-label, .meta-in)')) {
+        const s = getComputedStyle(el);
+        const name = el.className || el.tagName;
+        if (el.scrollWidth > el.clientWidth + 1 && s.textOverflow !== 'ellipsis') out.push(`${name} is cut sideways`);
+        const clamp = Number(s.getPropertyValue('-webkit-line-clamp'));
+        const room = clamp * Number.parseFloat(s.lineHeight) + Number.parseFloat(s.paddingTop) + Number.parseFloat(s.paddingBottom);
+        if (clamp && el.clientHeight > room + 1) out.push(`${name} shows more than its ${clamp} lines`);
+      }
+      return out;
+    });
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`nothing leaves the screen, overlaps or overflows its clamp, in every look and toggle, with long copy, ${orientation}`, async () => {
+      const k = await screenFrame(t(), orientation, photo);
+      const found: string[] = [];
+      for (const look of looks)
+        for (const [variant, data] of variants) {
+          const f = await k.play({ look, qrUrl, ...data }, demo, undefined, logo);
+          for (const p of await layoutProblems(f)) found.push(`${look}, ${variant}: ${p}`);
+        }
+      expect(found).toEqual([]);
+    }, 180_000);
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`every text reads as painted in every look, with no kit, the demo kit and a light kit, ${orientation}`, async () => {
+      const k = await screenFrame(t(), orientation, photo);
+      const found: string[] = [];
+      for (const [kit, theme] of kits)
+        for (const look of looks)
+          for (const [variant, data] of [variants[0]!, ['photo and body off', { showPhoto: false, showBody: false }]] as const) {
+            const f = await k.play({ look, qrUrl, ...data }, theme, undefined, logo);
+            for (const l of await paintedContrast(k.hst.page, f, '.stage')) found.push(`${look}, ${kit}, ${variant}: ${l}`);
+          }
+      expect(found).toEqual([]);
+    }, 180_000);
+
+  it('marks each toggle on the root and removes what is off; the type steps up without the photo and the footer closes up without the QR code', async () => {
+    const k = await screenFrame(t(), 'landscape', photo);
+    const measure = (f: Frame) =>
+      f.evaluate(() => {
+        for (const a of document.getAnimations()) a.currentTime = 3000;
+        const root = document.documentElement;
+        const top = (sel: string) => document.querySelector(sel)?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
+        return {
+          marks: ['photo', 'qr', 'eyebrow', 'body', 'meta', 'facts', 'logo'].map((m) => `${m}=${root.getAttribute(`data-${m}`)}`),
+          present: ['.photo', '.qr', '.eyebrow', '.body', '.meta', '.facts', '.logo'].filter((s) => document.querySelector(s)),
+          headline: Number.parseFloat(getComputedStyle(document.querySelector('.headline')!).fontSize),
+          headlineWidth: document.querySelector('.headline-box')!.getBoundingClientRect().width,
+          footerTop: Math.min(top('.qr'), top('.meta')),
+        };
+      });
+    for (const look of looks) {
+      const on = await measure(await k.play({ look, qrUrl }, demo, undefined, logo));
+      expect(on.marks, look).toEqual(['photo=on', 'qr=on', 'eyebrow=on', 'body=on', 'meta=on', 'facts=on', 'logo=on']);
+      expect(on.present, look).toEqual(['.photo', '.qr', '.eyebrow', '.body', '.meta', '.facts', '.logo']);
+      const off = await measure(await k.play({ look, qrUrl, ...allOff }, demo, undefined, logo));
+      expect(off.marks, look).toEqual(['photo=off', 'qr=off', 'eyebrow=off', 'body=off', 'meta=off', 'facts=off', 'logo=off']);
+      expect(off.present, look).toEqual([]);
+      expect((await measure(await k.play({ look, qrUrl, showPhoto: false }))).headline, look).toBeGreaterThan(on.headline);
+      const noQr = await measure(await k.play({ look, qrUrl, showQr: false }, demo, undefined, logo));
+      // Night's code stands beside the headline, which takes its width; the others' sits in the footer, which closes up to the meta line.
+      if (look === 'night') expect(noQr.headlineWidth, look).toBeGreaterThan(on.headlineWidth);
+      else expect(noQr.footerTop, look).toBeGreaterThan(on.footerTop);
+    }
+  });
+
+  it('leaves out what has nothing to show: no photo, no QR address, no logo in the kit, no facts, an empty line', async () => {
+    const k = await screenFrame(t(), 'landscape', {});
+    for (const look of looks) {
+      const f = await k.play({ look, qrUrl: '', facts: [], eyebrow: '', body: '', meta: '' });
+      const left = await f.evaluate(() => ({
+        marks: ['photo', 'qr', 'eyebrow', 'body', 'meta', 'facts', 'logo'].map((m) => `${m}=${document.documentElement.getAttribute(`data-${m}`)}`),
+        present: ['.photo', '.qr', '.eyebrow', '.body', '.meta', '.facts', '.logo'].filter((s) => document.querySelector(s)),
+      }));
+      expect(left, look).toEqual({ marks: ['photo=off', 'qr=off', 'eyebrow=off', 'body=off', 'meta=off', 'facts=off', 'logo=off'], present: [] });
+    }
+  });
+
+  it('the QR code is dark on white with its quiet zone in every look and kit, and reads back as its address', async () => {
+    for (const orientation of ['landscape', 'portrait'] as const) {
+      const k = await screenFrame(t(), orientation, photo);
+      for (const [kit, theme] of kits)
+        for (const look of looks) {
+          const f = await k.play({ look, qrUrl: long.qrUrl }, theme);
+          const { fills, clip } = await f.evaluate(() => {
+            for (const a of document.getAnimations()) a.currentTime = 3000;
+            const svg = document.querySelector('#qr svg')!;
+            const r = svg.getBoundingClientRect();
+            return {
+              fills: [getComputedStyle(svg.querySelector('rect')!).fill, getComputedStyle(svg.querySelector('path')!).fill],
+              clip: { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) },
+            };
+          });
+          expect(fills, `${look}, ${kit}`).toEqual(['rgb(255, 255, 255)', 'rgb(0, 0, 0)']);
+          const png = (await k.hst.page.screenshot({ clip })).toString('base64');
+          const rgba = await k.hst.page.evaluate(async (png) => {
+            const img = new Image();
+            img.src = `data:image/png;base64,${png}`;
+            await img.decode();
+            const g = new OffscreenCanvas(img.width, img.height).getContext('2d')!;
+            g.drawImage(img, 0, 0);
+            return [...g.getImageData(0, 0, img.width, img.height).data];
+          }, png);
+          expect(jsQR(Uint8ClampedArray.from(rgba), clip.width, clip.height)?.data, `${look}, ${kit}, ${orientation}`).toBe(long.qrUrl);
+        }
+    }
+  }, 120_000);
+
+  it('every element has an intro and, timed from --sf-duration, an outro; only transform and opacity move, on fewer than 50 elements', async () => {
+    const k = await screenFrame(t(), 'landscape', photo);
+    const durationMs = 11_000;
+    for (const look of looks) {
+      const f = await k.play({ look, qrUrl }, demo, durationMs, logo);
+      const m = await f.evaluate((durationMs) => {
+        const props = new Set<string>();
+        for (const a of document.getAnimations())
+          for (const k of (a.effect as KeyframeEffect).getKeyframes())
+            for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
+        const moving = [...document.querySelectorAll<HTMLElement>('.lk-text, .lk-fade, .lk-badge, .lk-photo, .lk-draw, .lk-cover')].filter(
+          (el) => el.getClientRects().length,
+        );
+        const unmatched = moving.flatMap((el) => {
+          const ends = el
+            .getAnimations()
+            .map((a) => Math.round(a.effect!.getComputedTiming().endTime as number))
+            .filter(Number.isFinite)
+            .sort((a, b) => a - b);
+          return ends.length === 2 && ends[0]! <= 2000 && ends[1] === durationMs ? [] : [`${el.className}: ${ends.join(', ')}`];
+        });
+        return {
+          props: [...props].sort(),
+          unmatched,
+          moving: moving.length,
+          animated: new Set(document.getAnimations().map((a) => (a.effect as KeyframeEffect).target)).size,
+        };
+      }, durationMs);
+      expect(m.props, look).toEqual(['opacity', 'transform']);
+      expect(m.unmatched, look).toEqual([]);
+      expect(m.moving, look).toBeGreaterThan(10);
+      expect(m.animated, look).toBeLessThanOrEqual(50);
+    }
+  });
+
+  it('with reduced motion, shows the final frame with nothing animating', async () => {
+    const k = await screenFrame(t(), 'landscape', photo);
+    await k.hst.page.emulateMedia({ reducedMotion: 'reduce' });
+    for (const look of looks) {
+      const f = await k.play({ look, qrUrl }, demo, undefined, logo);
+      await k.hst.post('fresh', 'play');
+      const still = await f.evaluate(() => ({
+        animations: document.getAnimations().length,
+        hidden: [...document.querySelectorAll<HTMLElement>('.stage *')].filter((el) => getComputedStyle(el).opacity !== '1').map((el) => el.className),
+      }));
+      expect(still, look).toEqual({ animations: 0, hidden: [] });
+    }
   });
 });
