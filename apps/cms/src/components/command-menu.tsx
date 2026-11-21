@@ -146,6 +146,7 @@ function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> })
 function OrgList({ shell, colours }: { shell: Shell; colours: Map<string, number> }) {
   const back = useAppStore((s) => s.backToCommands);
   const chooseOrg = useAppStore((s) => s.chooseOrg);
+  const switchingTo = useAppStore((s) => s.orgs.switchingTo);
   return (
     <div className="flex flex-col">
       <div className="flex items-center gap-2 border-b py-2.5 pr-4 pl-2">
@@ -164,8 +165,9 @@ function OrgList({ shell, colours }: { shell: Shell; colours: Map<string, number
               <button
                 type="button"
                 onClick={() => void chooseOrg(org)}
+                disabled={switchingTo !== null}
                 aria-current={active || undefined}
-                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
               >
                 <OrgAvatar name={org.name} colour={colours.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
                 <span className="min-w-0 flex-1 truncate">{org.name}</span>

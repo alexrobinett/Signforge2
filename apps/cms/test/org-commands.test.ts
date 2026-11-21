@@ -69,3 +69,27 @@ describe('the organization commands in the store', () => {
     expect(store.getState().orgs.createDialogOpen).toBe(true);
   });
 });
+
+describe('one switch at a time (review of #208, 3)', () => {
+  it('a second switch, from ⌘K or the switcher, while one is on its way does nothing', async () => {
+    let release = () => {};
+    orgs.switchOrganization.mockClear();
+    orgs.switchOrganization.mockImplementationOnce(() => new Promise<void>((resolve) => (release = resolve)));
+    const store = appStore();
+    store.getState().openCommandMenu();
+    const first = store.getState().chooseOrg({ id: 'org_b', name: 'Harbor East' });
+    expect(store.getState().orgs.switchingTo).toBe('org_b');
+
+    store.getState().openCommandMenu();
+    await store.getState().chooseOrg({ id: 'org_c', name: 'Harbor West' });
+    await store.getState().switchOrg({ id: 'org_c', name: 'Harbor West' }, 'switcher');
+    expect(orgs.switchOrganization).toHaveBeenCalledTimes(1);
+    expect(store.getState().orgs.switchingTo).toBe('org_b');
+
+    release();
+    await first;
+    expect(store.getState().orgs).toMatchObject({ switchingTo: null, status: 'Switched to Harbor East.' });
+    await store.getState().chooseOrg({ id: 'org_c', name: 'Harbor West' });
+    expect(orgs.switchOrganization).toHaveBeenLastCalledWith(router, 'org_c');
+  });
+});

@@ -27,7 +27,10 @@ export interface OrgsState {
 
 export interface OrgsSlice {
   orgs: OrgsState;
-  /** Makes `org` active. From the switcher or ⌘K it announces progress; from the picker it shows an error only. */
+  /**
+   * Makes `org` active, unless a switch is already on its way. From the switcher or ⌘K it
+   * announces progress; from the picker it shows an error only.
+   */
   switchOrg: (org: { id: string; name: string }, from: 'switcher' | 'picker') => Promise<void>;
   /** Opens the create dialog, closing the phone drawer it may be opened from. */
   openCreateOrg: () => void;
@@ -56,6 +59,9 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     orgs: initialOrgs,
 
     async switchOrg(org, from) {
+      // One switch at a time, from any menu: two would share the tab's reload (`reloadAs`), and
+      // the second's would be refused as a tab on the old org.
+      if (get().orgs.switchingTo !== null) return;
       const announce = from === 'switcher';
       set((s) => ({
         orgs: {
