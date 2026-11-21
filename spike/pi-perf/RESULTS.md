@@ -620,6 +620,32 @@ The first run of it cost far more than the PR's version (prepare median, 14 each
 
 What ships costs no more than the version before the review: about 100 ms per prepare in landscape and 160 ms in portrait over master, the canvas decode of the photo. Portrait is slower for every build, master included (3 of its 18 prepares over 500 ms). Sampling only the text's box is not clearly cheaper, and with one end of the push-in it would not measure what the screen shows at the other. Nothing was skipped; the 333, 267 and 250 ms frames were single runs of the box variants.
 
+## Photo samples: what #168's prepare cost was (issue #169, 2026-11-20/21)
+
+#168's eyebrow measurement added about 90 ms to photo-promo's prepare in landscape and 160 ms in portrait. #169 gives each photo a sample, its darkest and lightest pixel per 16 px cell as a small PNG (`ManifestFile.sample`), for photo-promo to read instead of the photo. Same method as above: each build on its own player at `http://localhost:8090/cpb169/<build>/` with its own `examples/stress` content (the demo kit's colours, built for the screen's orientation, so portrait content has the 3413x1920 renditions), photo-berries, photo-river and photo-kitchen, cut, HTTP cache, service worker and origin storage cleared before each run, 10 s to settle, 45-50 s measured, supervisor stopped, `isolate.py`'s measurement plus `__sf.prepares`.
+
+**Reading the sample alone did not help** (landscape, prepare medians pooled over runs of 6): master before #168 (`e55876e`) 226 ms, #168 (`75cb16a`) 310, the sample read after the photo loads 326. Variants on the branch's player: no eyebrow measurement 240; only the box read and `fonts.ready` 244; waiting for the photo's load, no canvas, 320; `await img.decode()` in prepare, no canvas, 284; the sample read without waiting for the photo 326.
+
+**A trace** (CDP `Tracing.start` on the browser target, every process; marks at the start and end of the template's `prepare`):
+
+- In every build the photo is decoded twice off the main thread before `ready`: once for the SDK's `img.decode()` in `settle`, once by the first raster (`ImageDecodeTask`, about 45-75 ms each for a 1080p photo). They take one lock and run one after the other.
+- With no measurement, the SDK's decode is requested before the photo has loaded and runs first; `ready` follows it, and the raster's decode runs beside the first frames: init to ready 120-200 ms.
+- #168's `prepare` takes 107-195 ms: 70 ms of it is the photo decoded on the main thread for the canvas (`OffscreenCanvasRenderingContext2D::FinalizeFrame`, `DecodingImageGenerator::getPixels`). The two decodes off the main thread come after.
+- When `prepare` waits (for the photo's load, or a sample's decode), a frame commits with the loaded photo meanwhile, the raster's decode is scheduled first, and the SDK's `img.decode()` waits behind it: `ready` then waits for both decodes, about 80 ms more. Calling `img.decode()` at the start of prepare makes it worse (365 ms): each call decodes again.
+
+**The fix** (photo-promo 1.4.0): the photo is `visibility: hidden` until `prepare` returns, so no frame paints it first, and with a sample its size is taken from the sample, to the cell, so prepare does not wait for it to load. Hiding the photo alone, in #168's version, does not help (329 ms): its main-thread decode stays.
+
+| Orientation | Build | Runs | Prepare median | Run medians | Range | Over 500 ms | Playing | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | before #168 (`e55876e`) | 6 | 230 ms | 218-261 | 194-344 | 0 of 36 | 0.00-2.95% | 1300 ms |
+| | master (`f9ddeba`, #168) | 6 | 318 ms | 300-327 | 264-613 | 1 of 36 | 0.00-0.23% | 383 ms |
+| | **#169** | 6 | 259 ms | 243-277 | 227-679 | 1 of 36 | 0.00-0.04% | 333 ms |
+| portrait | before #168 | 6 | 415 ms | 396-595 | 294-853 | 10 of 35 | 0.04-0.97% | 333 ms |
+| | master | 6 | 683 ms | 586-1014 | 382-1668 | 20 of 31 | 0.00-1.00% | 417 ms |
+| | **#169** | 6 | 427 ms | 415-487 | 329-905 | 10 of 33 | 0.04-0.32% | 350 ms |
+
+Runs alternated (before, master, fix, fix, master, before, three times) on 2026-11-21 00:08-00:37; nothing was skipped. Against before #168: portrait +12 ms (95% bootstrap interval -68 to +49 ms, Mann-Whitney p 0.42), within noise; landscape +29 ms (1.5 to 47.5 ms, p 0.004), not. The landscape rest is the measuring's own main-thread work (a forced style and layout of about 12 ms, the sample's decode and canvas) not yet traced. The before runs' 1300 ms and 467-533 ms frames while playing were in three of its six landscape runs and none of the others'.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.

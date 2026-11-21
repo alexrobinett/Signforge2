@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
+  IMAGE_SAMPLE_CELL,
   MANIFEST_SCHEMA,
   SCREEN_BOX,
   SUPPORTED_MANIFEST_SCHEMAS,
@@ -22,6 +23,7 @@ import {
   parseTemplateManifest,
   parseTemplateRuntimeReport,
   requiredFiles,
+  sampleAsset,
   validateBrandKit,
   displayHoursProblems,
   scheduleEntryProblems,
@@ -31,6 +33,7 @@ import {
   validateTableFeed,
   validateBoundValue,
   fitsScreenBox,
+  imageSampleSize,
   imageSizeProblem,
   validateDataSnapshot,
   validateDeviceCommand,
@@ -682,7 +685,6 @@ describe('brand', () => {
   it('lists the brand fonts and logo among the files a screen must hold', () => {
     expect([...requiredFiles(validManifest())].sort()).toEqual(['sha-font', 'sha-html', 'sha-logo', 'sha-photo']);
   });
-
   it('checks every colour, the shape, the fonts and that brand files are listed', () => {
     const m = validManifest() as unknown as { brand: Record<string, unknown>; files: Record<string, unknown> };
     delete m.files['sha-logo'];
@@ -697,6 +699,39 @@ describe('brand', () => {
       'brand: body font file 1: style must be normal or italic',
       'file sha-logo is referenced but not listed',
     ]);
+  });
+});
+
+describe('image samples', () => {
+  const withSample = (sample: { size: number; type: string } | undefined) => {
+    const m = validManifest();
+    m.files['sha-photo']!.sample = 'sha-sample';
+    if (sample) m.files['sha-sample'] = sample;
+    return m;
+  };
+
+  it("lists the sample of a template spot's image among the files a screen must hold, and no other image's", () => {
+    const m = withSample({ size: 10, type: 'image/png' });
+    expect([...requiredFiles(m)].sort()).toEqual(['sha-font', 'sha-html', 'sha-logo', 'sha-photo', 'sha-sample']);
+    m.spots.menu = { id: 'menu', name: 'Menu', kind: 'image', file: 'sha-photo', fit: 'cover', durationMs: 8000 };
+    expect([...requiredFiles(m)].sort()).toEqual(['sha-font', 'sha-html', 'sha-logo', 'sha-photo']);
+  });
+
+  it('refuses a sample that is not a PNG listed in files', () => {
+    expect(validateManifest(withSample({ size: 10, type: 'image/png' }))).toEqual([]);
+    expect(validateManifest(withSample(undefined))).toEqual(["file sha-photo's sample must be a PNG listed in files"]);
+    expect(validateManifest(withSample({ size: 10, type: 'image/jpeg' }))).toEqual(["file sha-photo's sample must be a PNG listed in files"]);
+  });
+
+  it('has a column per cell of the width, and a row per cell of the height for the darkest and again for the lightest', () => {
+    expect(IMAGE_SAMPLE_CELL).toBe(16);
+    expect(imageSampleSize(1920, 1080)).toEqual({ width: 120, height: 136 });
+    expect(imageSampleSize(3413, 1920)).toEqual({ width: 214, height: 240 });
+    expect(imageSampleSize(1, 1)).toEqual({ width: 1, height: 2 });
+  });
+
+  it('carries the sample in init beside its field', () => {
+    expect(sampleAsset('photo')).toBe('photo:sample');
   });
 });
 

@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@signforge/cli": "workspace:*",
+    "@signforge/media": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
     "@signforge/template-clock": "workspace:*",
     "@signforge/template-cstore-promo": "workspace:*",

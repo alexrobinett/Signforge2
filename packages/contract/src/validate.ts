@@ -619,14 +619,22 @@ export function validateBrandKit(b: unknown): string[] {
 
 // ------------------------------------------------------------- screen manifest
 
-/** Every file hash a manifest refers to. The manifest must already be valid. */
+/**
+ * Every file hash a manifest refers to, and the sample of each image a template spot shows: only a
+ * template reads one. The manifest must already be valid.
+ */
 export function requiredFiles(manifest: ScreenManifest): Set<string> {
   const out = new Set<string>();
   if (manifest.brand) brandFiles(manifest.brand).forEach((f) => out.add(f));
   for (const t of Object.values(manifest.templates)) out.add(t.html);
   for (const s of Object.values(manifest.spots)) {
-    if (s.kind === 'template') Object.values(s.assets).forEach((a) => out.add(a));
-    else if (s.kind === 'image' || s.kind === 'video') out.add(s.file);
+    if (s.kind === 'template') {
+      for (const a of Object.values(s.assets)) {
+        out.add(a);
+        const sample = manifest.files[a]?.sample;
+        if (sample) out.add(sample);
+      }
+    } else if (s.kind === 'image' || s.kind === 'video') out.add(s.file);
   }
   return out;
 }
@@ -659,6 +667,8 @@ export function validateManifest(m: unknown): string[] {
 
   for (const [sha, f] of Object.entries(files)) {
     if (!isCount(own(f, 'size')) || !isText(own(f, 'type'))) errors.push(`file ${sha.slice(0, 12)} needs a size and a type`);
+    const sample = own(f, 'sample');
+    if (sample !== undefined && own(own(files, sample), 'type') !== 'image/png') errors.push(`file ${sha.slice(0, 12)}'s sample must be a PNG listed in files`);
   }
 
   const referenced = new Set<string>();

@@ -27,8 +27,9 @@ function stressOrg(change: { timezone?: string | null; status?: AssetView['statu
     ]),
   );
   const assets: OrgGraph['assets'] = new Map();
+  const samples = new Set(Object.values(golden.files).flatMap((f) => (f.sample ? [f.sample] : [])));
   for (const [file, f] of Object.entries(golden.files)) {
-    if (f.type === 'text/html' || f.type.startsWith('font/')) continue;
+    if (f.type === 'text/html' || f.type.startsWith('font/') || samples.has(file)) continue;
     const video = f.type.startsWith('video/');
     const base = { orgId: 'org', name: file.slice(0, 8), createdAt: 0, updatedAt: 0 };
     const rendition = (orientation: Orientation, sha256: string, size: number) => ({
@@ -41,6 +42,8 @@ function stressOrg(change: { timezone?: string | null; status?: AssetView['statu
       size,
       width: 0,
       height: 0,
+      sampleSha256: sha256 === file ? (f.sample ?? null) : null,
+      sampleSize: sha256 === file && f.sample ? golden.files[f.sample]!.size : null,
     });
     assets.set(assetId(file), {
       asset: {
@@ -103,7 +106,15 @@ function views(graph: OrgGraph, draft: SpotDraft, orientation: Orientation) {
   const spot: SpotView = { ...draft, version: 1, published: false, draftChanged: true, publishedAt: null, createdAt: 0, updatedAt: 0 };
   const assets: AssetView[] = [...graph.assets.values()].map(({ asset: a, renditions }) => ({
     ...a,
-    renditions: renditions.map((r) => ({ orientation: r.orientation, sha256: r.sha256, type: r.type, size: r.size, width: r.width, height: r.height })),
+    renditions: renditions.map((r) => ({
+      orientation: r.orientation,
+      sha256: r.sha256,
+      type: r.type,
+      size: r.size,
+      width: r.width,
+      height: r.height,
+      sample: r.sampleSha256 && r.sampleSize !== null ? { sha256: r.sampleSha256, size: r.sampleSize } : null,
+    })),
     usageCount: 0,
   }));
   const v = draft.templateVersionId ? graph.templateVersions.get(draft.templateVersionId) : undefined;

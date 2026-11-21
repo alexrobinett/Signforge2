@@ -302,15 +302,20 @@ export function resolveSpotData(
 // --------------------------------------------------------------------- files
 
 /**
- * The files one spot needs to play: a template spot its bundle and assets, and from frame protocol
- * 2 the brand kit's fonts and logo, which it reads as it prepares; an image or video its file.
+ * The files one spot needs to play: a template spot its bundle and assets with their samples, and
+ * from frame protocol 2 the brand kit's fonts and logo, which it reads as it prepares; an image or
+ * video its file.
  */
 export function spotFiles(spot: Spot, manifest: ScreenManifest): Set<string> {
   const out = new Set<string>();
   if (spot.kind === 'template') {
     const t = manifest.templates[spot.template];
     if (t) out.add(t.html);
-    Object.values(spot.assets).forEach((a) => out.add(a));
+    for (const a of Object.values(spot.assets)) {
+      out.add(a);
+      const sample = manifest.files[a]?.sample;
+      if (sample) out.add(sample);
+    }
     if (manifest.brand && (t?.manifest.protocol ?? 1) >= 2) brandFiles(manifest.brand).forEach((f) => out.add(f));
   } else if (spot.kind === 'image' || spot.kind === 'video') out.add(spot.file);
   return out;

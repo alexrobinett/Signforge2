@@ -15,7 +15,8 @@
  *
  * Images `sf build` scales (sharp, so libvips) differ by a few bytes between macOS and Linux, so
  * a derived file, one that is not a byte-for-byte copy of a file in the project, is compared by
- * where the manifest uses it, like a bundle. The sources themselves keep their hashes.
+ * where the manifest uses it, like a bundle, and an image's sample by the image it samples. The
+ * sources themselves keep their hashes.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -29,7 +30,12 @@ const root = join(import.meta.dirname, '../../..');
 const out = mkdtempSync(join(tmpdir(), 'sf-golden-'));
 afterAll(() => rmSync(out, { recursive: true, force: true }));
 
-type Manifest = { id?: string; spots?: unknown; templates: Record<string, { html: string }>; files: Record<string, { size: number; type: string }> };
+type Manifest = {
+  id?: string;
+  spots?: unknown;
+  templates: Record<string, { html: string }>;
+  files: Record<string, { size: number; type: string; sample?: string }>;
+};
 
 const idOf = (m: Manifest) =>
   createHash('sha256')
@@ -51,7 +57,7 @@ function sourceShas(project: string): Set<string> {
   return shas;
 }
 
-/** A stable name for each bundle and derived file: the template key, or where the spots first use it. */
+/** A stable name for each bundle and derived file: the template key, where the spots first use it, or the image it samples. */
 function stableNames(m: Manifest, sources: Set<string>): Map<string, string> {
   const names = new Map(Object.entries(m.templates).map(([key, t]) => [t.html, `<bundle ${key}>`]));
   const visit = (value: unknown, path: string): void => {
@@ -63,22 +69,25 @@ function stableNames(m: Manifest, sources: Set<string>): Map<string, string> {
     }
   };
   visit(m.spots, 'spots');
+  for (const [sha, f] of Object.entries(m.files)) if (f.sample) names.set(f.sample, `<sample of ${names.get(sha) ?? sha}>`);
   return names;
 }
 
 /** `built` with `golden`'s hash and size for each bundle and derived file they share by name, and its id recomputed. */
 function withFilesOf(built: Manifest, golden: Manifest, sources: Set<string>): Manifest {
   const goldenByName = new Map([...stableNames(golden, sources)].map(([sha, name]) => [name, sha]));
-  let json = JSON.stringify(built);
+  const swaps: [string, string][] = [];
   const files = { ...built.files };
   for (const [sha, name] of stableNames(built, sources)) {
     const g = goldenByName.get(name);
     if (!g || g === sha) continue;
     delete files[sha];
     if (golden.files[g]) files[g] = golden.files[g]!;
-    json = json.replaceAll(sha, g);
+    swaps.push([sha, g]);
   }
-  const m = { ...(JSON.parse(json) as Manifest), files };
+  // In the file entries kept as built too: a source image's entry names its derived sample.
+  const swapped = (value: unknown) => JSON.parse(swaps.reduce((text, [sha, g]) => text.replaceAll(sha, g), JSON.stringify(value)));
+  const m = { ...(swapped(built) as Manifest), files: swapped(files) as Manifest['files'] };
   return { ...m, id: idOf(m) };
 }
 

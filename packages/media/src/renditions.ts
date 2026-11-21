@@ -10,9 +10,14 @@
  * - A raster image that needs no scaling and no rotation ships as it is, if it is a JPEG, PNG or WebP.
  * - Anything else is drawn and encoded: a JPEG as JPEG, every other type (PNG, WebP, AVIF, GIF, ...)
  *   as WebP, which keeps transparency.
+ *
+ * Each raster rendition with no transparent pixel gets its sample (`imageSample`), made from the
+ * rendition's own bytes decoded again, as a screen decodes them: an encoder's ringing is detail
+ * the screen shows.
  */
 import { coverSize, SCREEN_BOX } from '@signforge/contract';
 import { readImageInfo, type RenditionType } from './image-info';
+import { imageSample } from './sample';
 
 export type Orientation = keyof typeof SCREEN_BOX;
 export const ORIENTATIONS = ['landscape', 'portrait'] as const satisfies readonly Orientation[];
@@ -29,6 +34,8 @@ export interface Rendition {
   sha256: string;
   /** True when the original bytes are shipped unchanged. */
   original: boolean;
+  /** Its sample, a PNG; none for SVG or an image with any transparent pixel. */
+  sample?: { blob: Blob; size: number; sha256: string };
 }
 
 export interface RenditionOptions {
@@ -99,7 +106,17 @@ export async function makeRenditions(file: Blob, options: RenditionOptions = {})
       const size = coverSize(bitmap.width, bitmap.height, SCREEN_BOX[orientation]);
       if (!size.scaled && info && info.orientation === 1 && SHIP_AS_IS.has(info.type)) {
         const blob = new Blob([bytes], { type: info.type });
-        return { orientation, blob, type: info.type, width: info.width, height: info.height, size: blob.size, sha256: await sha256Hex(bytes), original: true };
+        const shipped = {
+          orientation,
+          blob,
+          type: info.type,
+          width: info.width,
+          height: info.height,
+          size: blob.size,
+          sha256: await sha256Hex(bytes),
+          original: true,
+        };
+        return withSample(shipped);
       }
       const canvas = new OffscreenCanvas(size.width, size.height);
       const ctx = canvas.getContext('2d');
@@ -111,10 +128,28 @@ export async function makeRenditions(file: Blob, options: RenditionOptions = {})
       // A browser that cannot encode WebP falls back to PNG; the blob's own type says which it made.
       const type = blob.type as RenditionType;
       if (!SHIP_AS_IS.has(type)) throw new MediaError(`this browser encoded ${type || 'an unknown type'}`);
-      return { orientation, blob, type, width: size.width, height: size.height, size: blob.size, sha256: await sha256Hex(blob), original: false };
+      return withSample({ orientation, blob, type, width: size.width, height: size.height, size: blob.size, sha256: await sha256Hex(blob), original: false });
     };
     const [landscape, portrait] = await Promise.all([make('landscape'), make('portrait')]);
     return { source: { type: sourceType, width: bitmap.width, height: bitmap.height, size: file.size }, landscape, portrait };
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** The rendition with its sample, when it has no transparent pixel. */
+async function withSample(r: Rendition): Promise<Rendition> {
+  const bitmap = await createImageBitmap(r.blob, { imageOrientation: 'from-image' });
+  try {
+    const g = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d', { willReadFrequently: true });
+    if (!g) throw new MediaError('this browser cannot draw images off screen');
+    g.drawImage(bitmap, 0, 0);
+    const sample = imageSample(g.getImageData(0, 0, bitmap.width, bitmap.height).data, bitmap.width, bitmap.height);
+    if (!sample) return r;
+    const canvas = new OffscreenCanvas(sample.width, sample.height);
+    canvas.getContext('2d')!.putImageData(new ImageData(sample.data, sample.width, sample.height), 0, 0);
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    return { ...r, sample: { blob, size: blob.size, sha256: await sha256Hex(blob) } };
   } finally {
     bitmap.close();
   }

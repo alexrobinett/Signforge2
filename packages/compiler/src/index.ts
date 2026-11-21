@@ -12,6 +12,7 @@ import {
   type BrandColors,
   type BrandKit,
   type FieldDef,
+  type ManifestFile,
   MANIFEST_SCHEMA,
   manifestIdInput,
   requiredFiles,
@@ -43,7 +44,7 @@ export interface CompileInput {
   /** Template versions the org may use, by key. */
   templates: Record<string, { manifest: TemplateManifest; html: Sha256 }>;
   /** Every uploaded file a spot or template may refer to. */
-  files: Record<Sha256, { size: number; type: string }>;
+  files: Record<Sha256, ManifestFile>;
   /** Template spots may leave fields out; their defaults are filled in here. */
   spots: Spot[];
   playlists: Playlist[];
@@ -177,7 +178,7 @@ export async function compileScreen(input: CompileInput, opts: CompileOptions): 
     schema: MANIFEST_SCHEMA,
     screen: input.screen,
     ...(brand ? { brand } : {}),
-    files: {},
+    files: input.files,
     templates,
     spots,
     playlists,
@@ -186,9 +187,13 @@ export async function compileScreen(input: CompileInput, opts: CompileOptions): 
     defaultPlaylist: input.defaultPlaylist,
   };
   const files: ScreenManifest['files'] = {};
-  for (const sha of [...requiredFiles(draft as ScreenManifest)].sort()) {
+  const required = requiredFiles(draft as ScreenManifest);
+  for (const sha of [...required].sort()) {
     const f = input.files[sha];
-    if (f) files[sha] = f;
+    if (!f) continue;
+    // A sample goes only with an image a template shows: an image spot's or a logo's is not sent.
+    const { sample, ...file } = f;
+    files[sha] = sample && required.has(sample) ? f : file;
   }
   const body = { ...draft, files };
   const manifest: ScreenManifest = { ...body, id: await opts.hash(manifestIdInput(body)), generatedAt: opts.now.toISOString() };

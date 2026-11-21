@@ -105,6 +105,20 @@ describe('compileScreen', () => {
     expect(Object.keys(full.files)).toContain('c'.repeat(64));
   });
 
+  it("carries the sample of each image a template spot shows, and no other image's", async () => {
+    const input = org();
+    input.files['b'.repeat(64)]!.sample = 'e'.repeat(64);
+    input.files['c'.repeat(64)]!.sample = 'f'.repeat(64);
+    input.files['e'.repeat(64)] = { size: 30, type: 'image/png' };
+    input.files['f'.repeat(64)] = { size: 30, type: 'image/png' };
+    // The back room's image spot plays the still photo (c), the deal's template the other (b).
+    input.schedule = [{ id: 'evenings', playlist: 'back-room', priority: 5, target: 'group', targetId: 'front', from: '18:00', to: '22:00' }];
+    const { manifest } = await compileScreen(input, opts());
+    expect(Object.keys(manifest!.files).sort()).toEqual(['a', 'b', 'c', 'e'].map((c) => c.repeat(64)));
+    expect(manifest!.files['b'.repeat(64)]).toMatchObject({ sample: 'e'.repeat(64) });
+    expect(manifest!.files['c'.repeat(64)]).not.toHaveProperty('sample');
+  });
+
   it('checks only what it compiles: a broken spot no schedule of this screen reaches does not stop it', async () => {
     const input = org();
     input.spots.push({

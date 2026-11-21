@@ -1,4 +1,5 @@
 /** Every shape in the contract, with the constants that go with it. The checks for them are in `validate.ts`. */
+import { IMAGE_SAMPLE_CELL } from './sample.ts';
 
 /** Frame protocols this player can drive. */
 export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
@@ -228,6 +229,16 @@ export function imageSizeProblem(width: number, height: number, box: ScreenBox):
 export const fitsScreenBox = (width: number, height: number, box: ScreenBox) => imageSizeProblem(width, height, box) === undefined;
 
 /**
+ * The size in pixels of the sample of a `width`x`height` image (`ManifestFile.sample`): a column
+ * per `IMAGE_SAMPLE_CELL` of its width, a row per cell of its height for its darkest pixels, and as
+ * many again for its lightest.
+ */
+export const imageSampleSize = (width: number, height: number) => ({
+  width: Math.ceil(width / IMAGE_SAMPLE_CELL),
+  height: 2 * Math.ceil(height / IMAGE_SAMPLE_CELL),
+});
+
+/**
  * Code a template author may not write. Templates run with every request blocked, but the policy
  * cannot stop a frame navigating itself, and these never belong in a template anyway. Checked
  * against the author's own files, not the bundled SDK.
@@ -423,7 +434,10 @@ export interface FrameTheme {
 
 export interface InitPayload {
   data: Record<string, unknown>;
-  /** Image fields, by field name. The SDK turns each into an object URL. */
+  /**
+   * Image fields, by field name, and under `sampleAsset(field)` the sample of a field's image when
+   * its file has one (`ManifestFile.sample`). The SDK turns each into an object URL.
+   */
   assets: Record<string, Blob>;
   /** How long this play lasts. The template fits its outro to it. */
   durationMs: number;
@@ -660,6 +674,25 @@ export interface ScheduleEntry {
   endsAt?: string;
 }
 
+/** One file of a manifest. */
+export interface ManifestFile {
+  size: number;
+  type: string;
+  /**
+   * An opaque raster image's sample, a file listed in the same `files`: a PNG of the image's
+   * darkest and lightest pixel (WCAG relative luminance) in each cell of `IMAGE_SAMPLE_CELL` by
+   * `IMAGE_SAMPLE_CELL` pixels, the last row and column of cells cut by the image's edge. Its top
+   * half has each cell's darkest pixel and its bottom half each cell's lightest, at the cell's place
+   * (`imageSampleSize`). A template that measures text over the image reads it in place of decoding
+   * the image again, which costs a Pi 4 100 ms or more of a prepare; `init` carries it beside the
+   * image (`sampleAsset`), and a manifest names it only for an image a template spot shows
+   * (`requiredFiles`). Made when the image is uploaded and by `sf build`; an image uploaded
+   * before has none, and an image with any transparent pixel never has one, since what shows
+   * through is known only where it plays.
+   */
+  sample?: Sha256;
+}
+
 /** Everything one screen needs. Immutable; a change produces a new manifest with a new id. */
 /** A daily window in the screen's time zone. A `to` at or before `from` crosses midnight and belongs to the day it starts on. `24:00` is end of day. */
 export interface TimeWindow {
@@ -686,7 +719,7 @@ export interface ScreenManifest {
   generatedAt: string;
   screen: { id: string; name: string; timezone: string; locale?: string; orientation: Orientation; displayHours?: DisplayHours };
   /** Every file the manifest refers to, fetched from `blobs/<sha256>` beside the manifest. */
-  files: Record<Sha256, { size: number; type: string }>;
+  files: Record<Sha256, ManifestFile>;
   templates: Record<string, { manifest: TemplateManifest; html: Sha256 }>;
   spots: Record<string, Spot>;
   playlists: Record<string, Playlist>;

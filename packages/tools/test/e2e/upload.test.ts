@@ -99,7 +99,15 @@ describe('a 4K phone photo with an EXIF rotation', () => {
       const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const file = new File([bytes], 'IMG_0042.jpg', { type: 'image/jpeg' });
       const { asset, renditions } = await (globalThis as any).SFMedia.uploadImage(file, { callTool: (globalThis as any).callTool });
-      const one = (r: any) => ({ type: r.type, width: r.width, height: r.height, size: r.size, sha256: r.sha256, original: r.original });
+      const one = (r: any) => ({
+        type: r.type,
+        width: r.width,
+        height: r.height,
+        size: r.size,
+        sha256: r.sha256,
+        original: r.original,
+        sample: { sha256: r.sample.sha256, size: r.sample.size },
+      });
       return { asset, source: renditions.source, landscape: one(renditions.landscape), portrait: one(renditions.portrait) };
     }, photo.toString('base64'));
 
@@ -110,9 +118,33 @@ describe('a 4K phone photo with an EXIF rotation', () => {
     expect(result.portrait).toMatchObject({ type: 'image/jpeg', width: 3413, height: 1920, original: false });
     expect(result.asset).toMatchObject({ status: 'verified', width: 1920, height: 1080 });
     expect(result.asset.renditions).toEqual([
-      { orientation: 'landscape', sha256: result.landscape.sha256, type: 'image/jpeg', size: result.landscape.size, width: 1920, height: 1080 },
-      { orientation: 'portrait', sha256: result.portrait.sha256, type: 'image/jpeg', size: result.portrait.size, width: 3413, height: 1920 },
+      {
+        orientation: 'landscape',
+        sha256: result.landscape.sha256,
+        type: 'image/jpeg',
+        size: result.landscape.size,
+        width: 1920,
+        height: 1080,
+        sample: result.landscape.sample,
+      },
+      {
+        orientation: 'portrait',
+        sha256: result.portrait.sha256,
+        type: 'image/jpeg',
+        size: result.portrait.size,
+        width: 3413,
+        height: 1920,
+        sample: result.portrait.sample,
+      },
     ]);
+    // Each rendition's sample went up and was checked with it: a PNG of its rendition's sample size.
+    for (const [r, w, h] of [
+      [result.landscape, 120, 136],
+      [result.portrait, 214, 240],
+    ] as const) {
+      const bytes = await stored(r.sample.sha256);
+      expect(readImageInfo(new Uint8Array(bytes!))).toMatchObject({ type: 'image/png', width: w, height: h });
+    }
 
     // What R2 holds: the pixels themselves are turned (no EXIF left to rely on), quadrants in place.
     for (const [r, w, h] of [

@@ -11,8 +11,8 @@ const photo: DraftAsset = {
   type: 'image/jpeg',
   size: 2000,
   renditions: [
-    { orientation: 'landscape', sha256: sha('b'), type: 'image/jpeg', size: 2000 },
-    { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500 },
+    { orientation: 'landscape', sha256: sha('b'), type: 'image/jpeg', size: 2000, sample: null },
+    { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, sample: null },
   ],
 };
 const clip: DraftAsset = { kind: 'video', status: 'verified', sha256: sha('d'), type: 'video/mp4', size: 9000, renditions: [] };
@@ -70,6 +70,20 @@ describe('spotFromDraft', () => {
       templates: { 'base/promo@1.0.0': { manifest: promo, html: sha('a') } },
       files: { [sha('a')]: { size: 1000, type: 'text/html' }, [sha('c')]: { size: 1500, type: 'image/jpeg' } },
     });
+  });
+
+  it("lists a rendition's sample in its file entry, and the sample among the files", () => {
+    const sampled: DraftAsset = {
+      ...photo,
+      renditions: [
+        photo.renditions[0]!,
+        { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, sample: { sha256: sha('e'), size: 300 } },
+      ],
+    };
+    const into = { templates: {}, files: {} };
+    const { spot } = spotFromDraft(draft({ kind: 'image', assetId: 'photo' }), 'portrait', reads({ photo: sampled }), into);
+    expect(spot).toMatchObject({ file: sha('c') });
+    expect(into.files).toEqual({ [sha('c')]: { size: 1500, type: 'image/jpeg', sample: sha('e') }, [sha('e')]: { size: 300, type: 'image/png' } });
   });
 
   it('gives a spot with no bindings none at all', () => {

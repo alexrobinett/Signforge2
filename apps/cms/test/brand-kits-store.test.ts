@@ -176,7 +176,7 @@ describe("the kit page's previews (review of #103)", () => {
       width: 400,
       height: 100,
       durationMs: null,
-      renditions: [{ orientation: 'landscape', sha256: 'e'.repeat(64), type: 'image/png', size: 900, width: 400, height: 100 }],
+      renditions: [{ orientation: 'landscape', sha256: 'e'.repeat(64), type: 'image/png', size: 900, width: 400, height: 100, sample: null }],
       createdAt: 0,
       updatedAt: 0,
       usageCount: 1,

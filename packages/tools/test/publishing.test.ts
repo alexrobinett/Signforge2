@@ -428,7 +428,18 @@ describe('loadCompileInput', () => {
           status: 'verified',
         });
         if (!video) {
-          await org.assets.renditions.insert({ assetId: asset.id, orientation: 'landscape', sha256: file, type: f.type, size: f.size, width: 0, height: 0 });
+          // The golden's image as uploaded with its sample, which a template spot's image keeps.
+          const sample = f.sample ? { sampleSha256: f.sample, sampleSize: golden.files[f.sample]!.size } : {};
+          await org.assets.renditions.insert({
+            assetId: asset.id,
+            orientation: 'landscape',
+            sha256: file,
+            type: f.type,
+            size: f.size,
+            width: 0,
+            height: 0,
+            ...sample,
+          });
           await org.assets.renditions.insert({ assetId: asset.id, orientation: 'portrait', sha256: sha('9'), type: f.type, size: 1, width: 0, height: 0 });
         }
         assetIds.set(file, asset.id);

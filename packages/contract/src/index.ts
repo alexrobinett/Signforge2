@@ -8,7 +8,8 @@
  * Nothing here depends on a browser or on Node. The shapes and their constants are in
  * `shapes.ts`, the runtime checks for every shape in `validate.ts`, and `parse.ts` turns each check
  * into a parser that hands back the typed value. `frame.ts` holds the few values a template bundle
- * carries; the template SDK imports them alone, as `@signforge/contract/frame`.
+ * carries; the template SDK imports them alone, as `@signforge/contract/frame`, and `sample.ts` those
+ * of an image's sample, as `@signforge/contract/sample`, which only a template that reads one carries.
  *
  * Versioning. Screens and template bundles outlive any one release, so both versions are ranges:
  *  - A template bundle records the frame protocol it was built against (`TemplateManifest.protocol`)
@@ -21,6 +22,7 @@
  */
 
 export * from './frame.ts';
+export * from './sample.ts';
 export * from './shapes.ts';
 export * from './validate.ts';
 export * from './parse.ts';

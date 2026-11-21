@@ -46,7 +46,7 @@ export interface DraftAsset {
   sha256: Sha256;
   size: number;
   type: string;
-  renditions: { orientation: Orientation; sha256: Sha256; size: number; type: string }[];
+  renditions: { orientation: Orientation; sha256: Sha256; size: number; type: string; sample: { sha256: Sha256; size: number } | null }[];
 }
 
 /** A template version: its key, manifest and bundle. A draft version plays on no screen. */
@@ -72,8 +72,8 @@ export const unverified = (assetId: string, status: DraftAsset['status']): strin
   status === 'pending' ? `asset ${assetId} is still being checked` : status === 'rejected' ? `asset ${assetId} was rejected` : undefined;
 
 /**
- * The file an asset plays as on a screen of this orientation, added to `files`, or why there is
- * none. Only a verified asset has one: until `finalize_asset` checks an upload, its files are not
+ * The file an asset plays as on a screen of this orientation, added to `files` with its sample
+ * when it has one, or why there is none. Only a verified asset has one: until `finalize_asset` checks an upload, its files are not
  * where screens, or the stage, read them.
  */
 export function assetFile(
@@ -86,10 +86,15 @@ export function assetFile(
   if (!a) return { problem: `asset ${assetId} does not exist` };
   const problem = unverified(assetId, a.status);
   if (problem) return { problem };
-  const f = a.kind === 'video' ? a : a.renditions.find((r) => r.orientation === orientation);
-  if (!f) return { problem: `asset ${assetId} has no ${orientation} rendition` };
-  files[f.sha256] = { size: f.size, type: f.type };
-  return { sha: f.sha256 };
+  if (a.kind === 'video') {
+    files[a.sha256] = { size: a.size, type: a.type };
+    return { sha: a.sha256 };
+  }
+  const r = a.renditions.find((x) => x.orientation === orientation);
+  if (!r) return { problem: `asset ${assetId} has no ${orientation} rendition` };
+  files[r.sha256] = { size: r.size, type: r.type, ...(r.sample ? { sample: r.sample.sha256 } : {}) };
+  if (r.sample) files[r.sample.sha256] = { size: r.sample.size, type: 'image/png' };
+  return { sha: r.sha256 };
 }
 
 /**

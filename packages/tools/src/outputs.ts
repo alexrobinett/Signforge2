@@ -253,6 +253,10 @@ const renditionOutput = z.object({
   size: z.number(),
   width: z.number().nullable().describe('Null for SVG'),
   height: z.number().nullable().describe('Null for SVG'),
+  sample: z
+    .object({ sha256: z.string(), size: z.number() })
+    .nullable()
+    .describe('Its sample, a PNG of its darkest and lightest pixel per 16 px cell; null for SVG, an image with transparency, or one uploaded before samples'),
 });
 export type RenditionView = z.infer<typeof renditionOutput>;
 

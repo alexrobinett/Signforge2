@@ -7,11 +7,12 @@
  * then wait forever, so only the player can end the spot; the others throw once the attempt is
  * refused, as a template that does not handle a failed load would.
  * It shows `label` and lists the titles of `items` in `#box` the way a news template would, trusting
- * the shape (so `items: {}` throws), marks whether it received asset `file`, runs a CSS animation
- * the SDK must hold until play, and marks `play`.
+ * the shape (so `items: {}` throws), marks whether it received asset `file` and the size of the
+ * sample beside it, runs a CSS animation the SDK must hold until play, and marks `play`.
  */
 import { Sha256 } from '@signforge/player-core/sha256';
 import { defineTemplate } from '@signforge/template-sdk';
+import { sampleAsset } from '@signforge/template-sdk/backdrop';
 import { attribute, childPage, childScript } from './child';
 
 const forever = () => new Promise<never>(() => {});
@@ -119,6 +120,13 @@ defineTemplate({
     document.body.dataset.prepared = '1';
     document.body.dataset.visibleInPrepare = getComputedStyle(document.getElementById('label')!).visibility;
     document.body.dataset.asset = ctx.assets.file ? '1' : '';
+    const sample = ctx.assets[sampleAsset('file')];
+    if (sample) {
+      const img = new Image();
+      img.src = sample;
+      await img.decode();
+      document.body.dataset.sample = `${img.naturalWidth}x${img.naturalHeight}`;
+    }
     const mode = String(ctx.data.mode ?? 'ok');
     const target = String(ctx.data.target ?? '');
     if (mode === 'throw') throw new Error('fixture prepare failed');

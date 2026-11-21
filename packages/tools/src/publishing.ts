@@ -44,6 +44,7 @@ import {
   type TemplateVersion,
   type Write,
 } from '@signforge/db';
+import { renditionView } from './assets';
 import { kitColors } from './brand';
 import { ended } from './schedule';
 import { ToolError } from './tool';
@@ -127,7 +128,7 @@ function graphReads(graph: OrgGraph): DraftReads {
   return {
     asset: (id) => {
       const a = graph.assets.get(id);
-      return a && { ...a.asset, renditions: a.renditions };
+      return a && { ...a.asset, renditions: a.renditions.map(renditionView) };
     },
     templateVersion: (id) => graph.templateVersions.get(id),
   };

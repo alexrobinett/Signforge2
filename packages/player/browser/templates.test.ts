@@ -9,10 +9,21 @@
  * clock, agenda and news draw the same thing in every frame.
  */
 import { readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { build } from 'esbuild';
 import type { Frame, Page } from 'playwright';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { PROTOCOL_VERSION, type BrandColors, type FieldDef, type FrameTheme, type Orientation, type TemplateManifest } from '@signforge/contract';
+import {
+  IMAGE_SAMPLE_CELL,
+  PROTOCOL_VERSION,
+  sampleAsset,
+  type BrandColors,
+  type FieldDef,
+  type FrameTheme,
+  type Orientation,
+  type TemplateManifest,
+} from '@signforge/contract';
 import { buildTemplate } from '@signforge/cli/template';
 import { useHarness } from './harness';
 
@@ -31,7 +42,8 @@ type Data = Record<string, unknown>;
 /**
  * Two different sets of data per template; `assets` name the colour each image field is drawn in,
  * or colours separated by spaces for vertical stripes of them, 1 px wide on an 8x8 image, or on an
- * image of the size before a colon (`960x540: #000 #fff`: detail at the screen's own scale).
+ * image of the size before a colon (`960x540: #000 #fff`: detail at the screen's own scale). After
+ * `; `, a block of another colour on top: `960x540: #fff; #000 40,300,320,60` (x, y, width, height).
  */
 const cases: Record<string, { a: Data; b: Data; assetsA?: Record<string, string>; assetsB?: Record<string, string> }> = {
   agenda: {
@@ -87,8 +99,13 @@ const DEMO_KIT: BrandColors = {
 };
 
 const built = new Map<string, { html: string; manifest: TemplateManifest }>();
+/** `imageSample` from @signforge/media, as a script for the host page: an image's sample, made as the CMS makes it. */
+let sampler = '';
 beforeAll(async () => {
   for (const name of names) built.set(name, await buildTemplate(join(templatesDir, name)));
+  const entry = createRequire(import.meta.url).resolve('@signforge/media/sample');
+  sampler = (await build({ entryPoints: [entry], bundle: true, write: false, format: 'iife', globalName: 'SFSample', logLevel: 'silent' })).outputFiles[0]!
+    .text;
 }, 60_000);
 
 /** The template's defaults with `over` on top, as the compiler hands a spot to the player. */
@@ -101,7 +118,11 @@ function spotData(manifest: TemplateManifest, over: Data): Data {
 interface Host {
   page: Page;
   open(frame: string, html: string): Promise<void>;
-  init(frame: string, data: Data, assets?: Record<string, string>, now?: number, theme?: FrameTheme): Promise<void>;
+  /**
+   * With `sampled`, each image goes with its sample (`sampleAsset`), as a screen sends an image
+   * uploaded with one; `'broken'`, with a PNG header and nothing that decodes.
+   */
+  init(frame: string, data: Data, assets?: Record<string, string>, now?: number, theme?: FrameTheme, sampled?: boolean | 'broken'): Promise<void>;
   post(frame: string, type: 'play' | 'reset'): Promise<void>;
   /** Wait until the frame has sent `type` `count` times in all. */
   waitFor(frame: string, type: string, count: number): Promise<void>;
@@ -114,6 +135,7 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
   const page = await h.blankPage();
   const size = orientation === 'landscape' ? { width: 960, height: 540 } : { width: 540, height: 960 };
   await page.setViewportSize(size);
+  await page.addScriptTag({ content: sampler });
   await page.evaluate(() => {
     const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]> };
     w.frames_ = {};
@@ -154,13 +176,20 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
       );
       await waitFor(frame, 'loaded', 1);
     },
-    async init(frame, data, assets = {}, now = NOW, theme) {
+    async init(frame, data, assets = {}, now = NOW, theme, sampled = false) {
+      const samples = sampled ? Object.fromEntries(Object.keys(assets).map((field) => [field, sampleAsset(field)])) : {};
+      const broken = sampled === 'broken';
       await page.evaluate(
-        async ({ frame, data, assets, sf, now, theme, orientation, size }) => {
-          const w = window as unknown as { frames_: Record<string, HTMLIFrameElement> };
+        async ({ frame, data, assets, samples, broken, sf, now, theme, orientation, size }) => {
+          const w = window as unknown as {
+            frames_: Record<string, HTMLIFrameElement>;
+            SFSample: typeof import('@signforge/media/sample');
+          };
+          const png = (c: HTMLCanvasElement) => new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
           const blobs: Record<string, Blob> = {};
           for (const [field, spec] of Object.entries(assets)) {
-            const [, width = '8', height = '8', colours = spec] = /^(\d+)x(\d+): (.*)$/.exec(spec) ?? [];
+            const [, width = '8', height = '8', drawn = spec] = /^(\d+)x(\d+): (.*)$/.exec(spec) ?? [];
+            const [colours = '', block] = drawn.split('; ');
             const c = document.createElement('canvas');
             c.width = Number(width);
             c.height = Number(height);
@@ -170,7 +199,25 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
               g.fillStyle = stripes[x % stripes.length]!;
               g.fillRect(x, 0, 1, c.height);
             }
-            blobs[field] = await new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
+            if (block) {
+              const [colour, rect = ''] = block.split(' ');
+              const [x = 0, y = 0, bw = 0, bh = 0] = rect.split(',').map(Number);
+              g.fillStyle = colour!;
+              g.fillRect(x, y, bw, bh);
+            }
+            blobs[field] = await png(c);
+            const key = samples[field];
+            if (!key) continue;
+            if (broken) {
+              blobs[key] = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], { type: 'image/png' });
+              continue;
+            }
+            const sample = w.SFSample.imageSample(g.getImageData(0, 0, c.width, c.height).data, c.width, c.height)!;
+            const sc = document.createElement('canvas');
+            sc.width = sample.width;
+            sc.height = sample.height;
+            sc.getContext('2d')!.putImageData(new ImageData(sample.data, sample.width, sample.height), 0, 0);
+            blobs[key] = await png(sc);
           }
           const init = {
             sf,
@@ -187,7 +234,7 @@ async function host(orientation: Orientation = 'landscape'): Promise<Host> {
           };
           w.frames_[frame]!.contentWindow!.postMessage(init, '*');
         },
-        { frame, data, assets, sf, now, theme, orientation, size },
+        { frame, data, assets, samples, broken, sf, now, theme, orientation, size },
       );
     },
     post: (frame, type) =>
@@ -564,8 +611,11 @@ describe('text on a brand colour (#57, #69, #92)', () => {
     ['a kit with a mid-tone background', kit(slate), slate.accent],
   ];
   const menu = { items: [{ name: 'Soup', description: 'Hot', price: '$4', tag: 'New' }] };
-  /** Each template's spot, given the accent `$brand.accent` resolves to. */
-  const spots = (accent: string): [template: string, data: Data, photo?: string][] => [
+  /**
+   * Each template's spot, given the accent `$brand.accent` resolves to and `blocks`, the photos that
+   * are one colour under photo-promo's eyebrow and the other everywhere else (`blockPhotos`).
+   */
+  const spots = (accent: string, blocks: string[]): [template: string, data: Data, photo?: string, sampled?: boolean | 'broken'][] => [
     ['news', { accent, items: [{ title: 'Story', published: at(-1), source: 'Wire' }] }],
     ['agenda', { accent, events: [...(cases.agenda!.b.events as unknown[]), ...(cases.agenda!.a.events as unknown[])] }],
     ['clock', { accent }],
@@ -573,12 +623,16 @@ describe('text on a brand colour (#57, #69, #92)', () => {
     // The copy sits on a shade of the kit's background over the photo, whatever the photo is: light,
     // dark, mid-tone, or light and dark under the same text, in broad stripes and in stripes 1 px
     // wide at the screen's scale, which a photo measured at less than its painted detail averages
-    // to grey.
-    ['photo-promo', {}, '#ffffff'],
-    ['photo-promo', {}, '#000000'],
-    ['photo-promo', {}, '#808080'],
-    ['photo-promo', {}, '#000000 #ffffff'],
-    ['photo-promo', {}, '960x540: #000000 #ffffff'],
+    // to grey. Each with the photo's sample, which photo-promo reads in place of the photo, and
+    // without one, as a photo uploaded before samples is.
+    // Photos painted at twice their size or less are measured from their sample, and the blocks
+    // only from the cells under the eyebrow: any other cells give another answer.
+    ...['#ffffff', '#000000', '#808080', '#000000 #ffffff', '960x540: #000000 #ffffff', ...blocks].flatMap((photo): [string, Data, string, boolean][] => [
+      ['photo-promo', {}, photo, true],
+      ['photo-promo', {}, photo, false],
+    ]),
+    // A sample that does not decode: the photo is measured instead.
+    ['photo-promo', {}, blocks[0]!, 'broken'],
     ['menu-board', { accent, ...menu }],
     ['menu-board', { accent, ...menu, theme: 'light' }],
   ];
@@ -602,6 +656,51 @@ describe('text on a brand colour (#57, #69, #92)', () => {
     ['menu-board', '.price'],
   ];
 
+  const blocks = new Map<Orientation, Promise<string[]>>();
+  /**
+   * Two 960x540 photos for `orientation`, white with a black block where photo-promo's eyebrow is
+   * measured and black with a white one: the photo under the text through the push-in, mapped as
+   * main.ts maps it, and three cells more on each side, as the sample knows the photo's size only to
+   * the cell.
+   */
+  function blockPhotos(orientation: Orientation): Promise<string[]> {
+    const made =
+      blocks.get(orientation) ??
+      (async () => {
+        const hst = await host(orientation);
+        const t = built.get('photo-promo')!;
+        await hst.open('fresh', t.html);
+        await hst.init('fresh', spotData(t.manifest, {}), { photo: '960x540: #808080' });
+        await hst.waitFor('fresh', 'ready', 1);
+        const [x, y, x1, y1] = await hst.page
+          .mainFrame()
+          .childFrames()[0]!
+          .evaluate(() => {
+            const eyebrow = document.querySelector<HTMLElement>('.eyebrow')!;
+            const text = document.createRange();
+            text.selectNodeContents(eyebrow);
+            const { left, width } = text.getBoundingClientRect();
+            const top = document.querySelector('.copy')!.getBoundingClientRect().top + eyebrow.offsetTop;
+            const height = eyebrow.offsetHeight;
+            const push = Number(getComputedStyle(document.querySelector('.photo')!).getPropertyValue('--push'));
+            const [vw, vh, nw, nh] = [innerWidth, innerHeight, 960, 540];
+            const scale = Math.max(vw / nw, vh / nh);
+            const at = (p: number, size: number, natural: number, s: number) => (size / 2 + (p - size / 2) / s - (size - natural * scale) / 2) / scale;
+            return [
+              Math.min(at(left, vw, nw, 1), at(left, vw, nw, push)),
+              Math.min(at(top, vh, nh, 1), at(top, vh, nh, push)),
+              Math.max(at(left + width, vw, nw, 1), at(left + width, vw, nw, push)),
+              Math.max(at(top + height, vh, nh, 1), at(top + height, vh, nh, push)),
+            ];
+          });
+        const m = 3 * IMAGE_SAMPLE_CELL;
+        const rect = [Math.floor(x!) - m, Math.floor(y!) - m, Math.ceil(x1! - x!) + 2 * m, Math.ceil(y1! - y!) + 2 * m].join(',');
+        return [`960x540: #ffffff; #000000 ${rect}`, `960x540: #000000; #ffffff ${rect}`];
+      })();
+    blocks.set(orientation, made);
+    return made;
+  }
+
   /** Run `check` on each spot of `spots(accent)` under `theme`, in a frame of its own, ready and on top. */
   async function eachSpot(
     orientation: Orientation,
@@ -610,13 +709,14 @@ describe('text on a brand colour (#57, #69, #92)', () => {
     check: (name: string, f: Frame, page: Page) => Promise<void>,
   ) {
     const hst = await host(orientation);
-    for (const [i, [name, data, photo]] of spots(accent).entries()) {
+    for (const [i, [name, data, photo, sampled]] of spots(accent, await blockPhotos(orientation)).entries()) {
       const t = built.get(name)!;
       const frame = `f${i}`;
       await hst.open(frame, t.html);
-      await hst.init(frame, spotData(t.manifest, data), photo ? { photo } : {}, NOW, theme);
+      await hst.init(frame, spotData(t.manifest, data), photo ? { photo } : {}, NOW, theme, sampled);
       await hst.waitFor(frame, 'ready', 1);
-      await check(`${name}${data.theme ? ` (${data.theme})` : ''}${photo ? ` (photo ${photo})` : ''}`, hst.page.mainFrame().childFrames()[i]!, hst.page);
+      const label = `${name}${data.theme ? ` (${data.theme})` : ''}${photo ? ` (photo ${photo}${sampled === 'broken' ? ', broken sample' : sampled ? ', sampled' : ''})` : ''}`;
+      await check(label, hst.page.mainFrame().childFrames()[i]!, hst.page);
       // The frames overlap: the next one is measured on top.
       await hst.page.evaluate((frame) => {
         (window as unknown as { frames_: Record<string, HTMLIFrameElement> }).frames_[frame]!.style.visibility = 'hidden';
@@ -685,7 +785,17 @@ describe('text on a brand colour (#57, #69, #92)', () => {
       // this test the pixels in the box.
       it(`accent text reads on its backdrop under ${label}, ${orientation}, in the accent where that reads`, async () => {
         const found: string[] = [];
+        /** photo-promo's eyebrow over each photo, with the photo's sample and without. */
+        const eyebrows = new Map<string, string[]>();
         await eachSpot(orientation, theme, accent, async (name, f, page) => {
+          if (name.startsWith('photo-promo')) {
+            const eyebrow = await f.evaluate(() => {
+              const el = document.querySelector('.eyebrow')!;
+              return `${getComputedStyle(el).color}${el.classList.contains('scrim') ? ' on the scrim' : ''}`;
+            });
+            const photo = name.replace(/, (sampled|broken sample)/, '');
+            eyebrows.set(photo, [...(eyebrows.get(photo) ?? []), eyebrow]);
+          }
           for (const [, text] of onBackdrop.filter(([n]) => name.startsWith(n))) {
             const { color, pixels, large } = await textOnBackdrop(f, page, text);
             const min = large ? 3 : 4.5;
@@ -696,6 +806,9 @@ describe('text on a brand colour (#57, #69, #92)', () => {
               found.push(`${name} ${text}: ${color}, not the accent, which reads at ${reads.toFixed(2)}:1`);
           }
         });
+        // The sample stands in for the photo, and a broken one leaves the photo: the same eyebrow every way.
+        for (const [photo, seen] of eyebrows)
+          if (new Set(seen).size > 1) found.push(`${photo} .eyebrow differs: ${seen.join(', ')} (sampled, unsampled${seen[2] ? ', broken sample' : ''})`);
         expect(found).toEqual([]);
       });
     }
