@@ -247,6 +247,31 @@ describe('images', () => {
     ]);
   });
 
+  it('picks the smallest Media RSS candidate covering 1920x1080 rather than a 4K copy, and falls back to widest when none covers it', () => {
+    const group = (contents: string) =>
+      `<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title>T</title><item><title>x</title><media:group>${contents}</media:group></item></channel></rss>`;
+    // 1920x1080 covers the target box and beats 3840x2160; 640x360 does not cover it.
+    expect(
+      images(
+        group(
+          '<media:content url="https://cdn.example/4k.jpg" medium="image" width="3840" height="2160"/>' +
+            '<media:content url="https://cdn.example/hd.jpg" medium="image" width="1920" height="1080"/>' +
+            '<media:content url="https://cdn.example/sm.jpg" medium="image" width="640" height="360"/>',
+        ),
+      ),
+    ).toEqual([{ url: 'https://cdn.example/hd.jpg', width: 1920, height: 1080 }]);
+    // Wide enough (2000) but too short (900) does not cover 1920x1080: 2400x1350 covers and beats 4000x2250.
+    expect(
+      images(
+        group(
+          '<media:content url="https://cdn.example/short.jpg" medium="image" width="2000" height="900"/>' +
+            '<media:content url="https://cdn.example/huge.jpg" medium="image" width="4000" height="2250"/>' +
+            '<media:content url="https://cdn.example/fit.jpg" medium="image" width="2400" height="1350"/>',
+        ),
+      ),
+    ).toEqual([{ url: 'https://cdn.example/fit.jpg', width: 2400, height: 1350 }]);
+  });
+
   it('takes an Atom enclosure link of an image type, resolved against xml:base', () => {
     expect(images(atomEnclosures)).toEqual([
       { url: 'https://blog.museum.example/media/hall.webp' },
@@ -349,6 +374,13 @@ describe('HTML tag boundaries', () => {
 
 describe('srcset candidates', () => {
   const body = (html: string) => rss(`<item><title>x</title><link>https://example.com/p/</link><description><![CDATA[${html}]]></description></item>`);
+
+  it('picks the smallest srcset candidate covering 1920w rather than a wider 4K one, else the widest', () => {
+    expect(images(body('<img src="s.jpg" srcset="a.jpg 640w, b.jpg 4096w, c.jpg 2048w, d.jpg 1200w">'))).toEqual([
+      { url: 'https://example.com/p/c.jpg', width: 2048 },
+    ]);
+    expect(images(body('<img src="s.jpg" srcset="a.jpg 640w, b.jpg 1600w, c.jpg 1200w">'))).toEqual([{ url: 'https://example.com/p/b.jpg', width: 1600 }]);
+  });
 
   it('drops tracking and avatar candidates before ranking, then falls back to src', () => {
     expect(images(body('<img src="photo.jpg" srcset="https://pixel.wp.com/b.gif 4000w, small.jpg 300w">'))).toEqual([
