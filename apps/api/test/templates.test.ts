@@ -68,12 +68,13 @@ beforeAll(async () => {
 });
 
 describe('sf template seed', () => {
-  it('builds all ten templates cleanly', () => {
+  it('builds all eleven templates cleanly', () => {
     expect(BUILDS.map((b) => b.dir)).toEqual([
       'agenda',
       'alert',
       'announcement',
       'clock',
+      'countdown',
       'cstore-promo',
       'menu-board',
       'news',

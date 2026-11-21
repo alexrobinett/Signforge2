@@ -1,0 +1,34 @@
+{
+  "id": "countdown",
+  "version": "1.0.0",
+  "name": "Countdown",
+  "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
+  "fields": {
+    "look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" },
+    "mode": { "type": "select", "label": "Count", "options": ["down", "up"], "default": "down" },
+    "target": { "type": "datetime", "label": "Counts down to, or up from" },
+    "title": { "type": "text", "label": "What it counts to", "default": "The winter party", "maxLength": 60 },
+    "doneText": { "type": "text", "label": "Once it is here", "default": "It's here!", "maxLength": 40 },
+    "units": { "type": "select", "label": "Units", "options": ["days", "days and hours", "days, hours and minutes"], "default": "days" },
+    "recordDays": { "type": "number", "label": "Record in days, counting up (0 for none)", "default": 0, "min": 0, "max": 99999, "step": 1 },
+    "progressDays": { "type": "number", "label": "Show the progress over the last days, counting down", "default": 14, "min": 1, "max": 999, "step": 1 },
+    "facts": {
+      "type": "list",
+      "label": "Facts",
+      "maxItems": 3,
+      "item": {
+        "label": { "type": "text", "label": "Label", "maxLength": 16 },
+        "value": { "type": "text", "label": "Value", "maxLength": 32 }
+      },
+      "default": [{ "label": "Where", "value": "Pier 9 roof terrace" }]
+    },
+    "showProgress": { "type": "boolean", "label": "Show the progress", "default": true },
+    "showRecord": { "type": "boolean", "label": "Show the record", "default": true },
+    "showFacts": { "type": "boolean", "label": "Show the facts", "default": true },
+    "showDetail": { "type": "boolean", "label": "Show the date line", "default": true }
+  },
+  "duration": { "defaultMs": 10000, "minMs": 5000, "maxMs": 60000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#000000"
+}

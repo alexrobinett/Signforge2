@@ -1,0 +1,714 @@
+@import '@signforge/template-looks/looks.css';
+
+/* One stage, filled in prepare from the look's own markup (index.html), so each look is laid out
+   as its board on the concept canvas draws it. Sizes are the boards' 1920x1080 pixels in vmin
+   (1vmin is 10.8 px at 1080p, in portrait too). */
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+p,
+h1,
+dl,
+dd {
+  margin: 0;
+}
+h1 {
+  font-size: inherit;
+  font-weight: inherit;
+}
+.stage {
+  /* `--size` takes a count of more digits down a step; `--rest-k` makes room for the hours and minutes. */
+  --size: 1;
+  --rest-k: 1;
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.stage[data-digits='3'] {
+  --size: 0.72;
+}
+.stage[data-digits='4'] {
+  --size: 0.54;
+}
+.stage:not([data-units='1']) {
+  --rest-k: 0.8;
+}
+.title,
+.done {
+  --fit: 1;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-wrap: balance;
+}
+
+.fact {
+  min-width: 0;
+}
+.fact dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pop: a tomato tile with the number, stickers, and a row of dots. */
+[data-look='pop'] .stage {
+  display: flex;
+  align-items: center;
+  gap: 8.1vmin;
+  padding: 8.1vmin 10.4vmin;
+}
+[data-look='pop'] .figure {
+  flex: none;
+  width: 66.7vmin;
+  height: 66.7vmin;
+}
+[data-look='pop'] .disc {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 5vmin;
+  border-radius: 11.1vmin;
+  background: var(--lk-primary);
+  color: var(--lk-on-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1vmin;
+  transform: rotate(-3deg);
+}
+[data-look='pop'] .number {
+  font: var(--lk-display-weight) calc(51.9vmin * var(--size) * var(--rest-k)) / 0.8 var(--lk-font-display);
+  letter-spacing: -0.05em;
+  padding-bottom: 0.06em;
+}
+[data-look='pop'] .rest {
+  font: 700 6.5vmin / 1 var(--lk-font-display);
+}
+[data-look='pop'] .done {
+  font: var(--lk-display-weight) calc(13.9vmin * var(--fit)) / 1 var(--lk-font-display);
+  letter-spacing: var(--lk-display-tracking);
+  text-align: center;
+  -webkit-line-clamp: 4;
+}
+[data-look='pop'] .copy {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3vmin;
+}
+[data-look='pop'] .copy > *,
+[data-look='night'] .copy > *,
+[data-look='corporate'] .copy > * {
+  flex: none;
+}
+[data-look='pop'] .stickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5vmin 2vmin;
+}
+[data-look='pop'] .pill {
+  display: inline-block;
+  padding: 1.3vmin 3vmin;
+  border-radius: var(--lk-radius-pill);
+  background: var(--lk-accent);
+  color: var(--lk-on-accent);
+  font: var(--lk-label-weight) 3.9vmin / 1.1 var(--lk-font-display);
+  white-space: nowrap;
+  transform: rotate(-3deg);
+}
+[data-look='pop'] .best {
+  background: var(--lk-primary);
+  color: var(--lk-on-primary);
+}
+[data-look='pop'] .title {
+  font: var(--lk-display-weight) calc(11.1vmin * var(--lk-scale) * var(--fit)) / 1 var(--lk-font-display);
+  letter-spacing: var(--lk-display-tracking);
+  -webkit-line-clamp: 3;
+}
+[data-look='pop'] .detail {
+  font-size: 3.3vmin;
+  line-height: 1.35;
+  color: var(--lk-muted);
+}
+[data-look='pop'] .facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.3vmin 3.3vmin;
+  font-size: 3vmin;
+  line-height: 1.3;
+}
+[data-look='pop'] .fact {
+  display: flex;
+  gap: 1.1vmin;
+  max-width: 100%;
+}
+[data-look='pop'] .fact dt {
+  flex: none;
+  font-weight: 700;
+}
+[data-look='pop'] .fact dd {
+  color: var(--lk-muted);
+}
+[data-look='pop'] .progress {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5vmin;
+  padding-top: 0.7vmin;
+}
+[data-look='pop'] .dots {
+  --lk-stagger: 0.05s;
+  display: flex;
+  gap: 1.3vmin;
+}
+[data-look='pop'] .dot {
+  display: block;
+  box-sizing: border-box;
+  width: 3.9vmin;
+  height: 3.9vmin;
+  border-radius: 50%;
+  border: 0.46vmin solid var(--lk-accent);
+}
+[data-look='pop'] .dot.on {
+  background: var(--lk-accent);
+}
+[data-look='pop'] .progress-label {
+  font: 600 2.4vmin / 1.2 var(--lk-font-body);
+  color: var(--lk-muted);
+}
+
+/* Poster: a header line, the title in the serif, the figures on black tiles split as a flip clock's,
+   the record on red, and the facts crawling along a black band. */
+[data-look='poster'] .stage {
+  display: flex;
+  flex-direction: column;
+  gap: 4.1vmin;
+  padding: 6.7vmin 8.9vmin 0;
+}
+[data-look='poster'] .head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 3vmin;
+  font: var(--lk-label-weight) 2vmin / 1.2 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: uppercase;
+}
+[data-look='poster'] .head .lk-mask {
+  min-width: 0;
+}
+[data-look='poster'] .detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-look='poster'] .rule {
+  flex: none;
+  height: var(--lk-rule);
+  margin-top: -2.4vmin;
+  background: var(--lk-rule-color);
+}
+[data-look='poster'] .title-box {
+  flex: none;
+}
+[data-look='poster'] .title {
+  font: 400 calc(13.9vmin * var(--lk-scale) * var(--fit)) / 0.95 var(--lk-font-display);
+  letter-spacing: var(--lk-display-tracking);
+  -webkit-line-clamp: 2;
+}
+[data-look='poster'] .board {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 3vmin;
+}
+[data-look='poster'] .tiles {
+  --tile: 31.5vmin;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 3vmin;
+}
+[data-look='poster'] .unit-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5vmin;
+}
+[data-look='poster'] .tile {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--lk-text);
+  color: var(--lk-bg);
+}
+[data-look='poster'] .tile .v {
+  font: 800 calc(var(--tile) * var(--size) * var(--lk-scale)) / 1 var(--lk-font-body);
+  letter-spacing: -0.04em;
+}
+[data-look='poster'] .split {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 0.37vmin;
+  margin-top: -0.185vmin;
+  background: var(--lk-bg);
+}
+[data-look='poster'] .rule-s {
+  height: max(1px, 0.1vmin);
+  background: var(--lk-rule-color);
+}
+[data-look='poster'] .n,
+[data-look='poster'] .record .k {
+  font: var(--lk-label-weight) 2.2vmin / 1.2 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: uppercase;
+}
+[data-look='poster'] .done-box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+[data-look='poster'] .done {
+  font: italic 400 calc(17.4vmin * var(--fit)) / 1 var(--lk-font-display);
+  color: var(--lk-primary-ink-large);
+  -webkit-line-clamp: 3;
+}
+[data-look='poster'] .record {
+  flex: none;
+  width: 48vmin;
+  box-sizing: border-box;
+  padding: 3.7vmin;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2vmin;
+  background: var(--lk-primary);
+  color: var(--lk-on-primary);
+}
+[data-look='poster'] .record .v {
+  font: 800 18.5vmin / 0.9 var(--lk-font-body);
+  letter-spacing: -0.04em;
+}
+[data-look='poster'] .record .s {
+  font: italic 400 4.3vmin / 1.1 var(--lk-font-display);
+}
+[data-look='poster'] .band {
+  flex: none;
+  height: 7.8vmin;
+  margin: 0 -8.9vmin;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  background: var(--lk-text);
+  color: var(--lk-bg);
+  font: italic 400 3.9vmin / 1.2 var(--lk-font-display);
+}
+[data-look='poster'] .band .lk-crawl {
+  min-width: 0;
+  padding-inline-start: 8.9vmin;
+}
+
+/* Night: the ring, two half-discs turned inside their halves, and the copy in lime and lilac. */
+[data-look='night'] .stage {
+  display: flex;
+  align-items: center;
+  gap: 11.1vmin;
+  padding: 7.4vmin 10.4vmin;
+}
+[data-look='night'] .figure {
+  position: relative;
+  flex: none;
+  width: 70.4vmin;
+  height: 70.4vmin;
+}
+[data-look='night'] .ring,
+[data-look='night'] .track,
+[data-look='night'] .arm {
+  position: absolute;
+  inset: 0;
+}
+[data-look='night'] .track {
+  border-radius: 50%;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--lk-text) 12%, var(--lk-bg));
+}
+[data-look='night'] .half {
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  overflow: hidden;
+}
+[data-look='night'] .half.r {
+  left: 50%;
+}
+[data-look='night'] .half.l {
+  left: 0;
+}
+[data-look='night'] .fill {
+  position: absolute;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--lk-primary);
+}
+/* The right half fills first, from 12 o'clock to 6; then the left, from 6 back up to 12. */
+[data-look='night'] .fill.a {
+  left: -100%;
+  border-radius: 9999px 0 0 9999px;
+  transform-origin: 100% 50%;
+  transform: rotate(var(--a1, 0deg));
+  animation: cd-sweep var(--t1, 0s) linear 0.5s both;
+}
+[data-look='night'] .fill.b {
+  left: 100%;
+  border-radius: 0 9999px 9999px 0;
+  transform-origin: 0 50%;
+  transform: rotate(var(--a2, 0deg));
+  animation: cd-sweep var(--t2, 0s) linear calc(0.5s + var(--t1, 0s)) both;
+}
+/* Where the halves meet at 6 o'clock their edges are each smoothed on a fraction of a pixel, and
+   the track showed through as a hairline on the Pi: past half, a strip of the fill covers it, from
+   the moment the left half starts. 12 o'clock is under the start cap. */
+[data-look='night'] .seam {
+  position: absolute;
+  left: calc(50% - 0.2vmin);
+  bottom: 0;
+  width: 0.4vmin;
+  height: 8vmin;
+  background: var(--lk-primary);
+  animation: cd-show 0s linear calc(0.5s + var(--t1, 0s)) both;
+}
+[data-look='night'] .ring:not([data-past-half]) .seam {
+  display: none;
+}
+[data-look='night'] .hole {
+  position: absolute;
+  inset: 5.2vmin;
+  border-radius: 50%;
+  background: var(--lk-bg);
+}
+[data-look='night'] .cap {
+  position: absolute;
+  top: 0;
+  left: calc(50% - 2.6vmin);
+  box-sizing: border-box;
+  width: 5.2vmin;
+  height: 5.2vmin;
+  border-radius: 50%;
+  background: var(--lk-primary);
+}
+[data-look='night'] .cap.ping {
+  background: none;
+  border: 0.37vmin solid var(--lk-primary);
+}
+[data-look='night'] .arm {
+  transform: rotate(var(--a, 0deg));
+  animation: cd-sweep var(--t, 0s) linear 0.5s both;
+}
+[data-look='night'] .centre {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  padding: 9vmin;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9vmin;
+  text-align: center;
+}
+[data-look='night'] .number {
+  font: var(--lk-display-weight) calc(26.9vmin * var(--size) * var(--rest-k)) / 1.04 var(--lk-font-display);
+  letter-spacing: -0.04em;
+}
+[data-look='night'] .sub {
+  font: 400 3.1vmin / 1.3 var(--lk-font-label);
+  color: var(--lk-accent-ink);
+}
+[data-look='night'] .done {
+  font: var(--lk-display-weight) calc(10vmin * var(--fit)) / 1.1 var(--lk-font-display);
+  color: var(--lk-primary-ink-large);
+  -webkit-line-clamp: 4;
+}
+[data-look='night'] .copy {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3.7vmin;
+}
+[data-look='night'] .unit-row {
+  font: 400 2.6vmin / 1.3 var(--lk-font-label);
+  color: var(--lk-accent-ink);
+}
+[data-look='night'] .title {
+  font: 700 calc(8.9vmin * var(--lk-scale) * var(--fit)) / 1.08 var(--lk-font-display);
+  color: var(--lk-primary-ink-large);
+  -webkit-line-clamp: 4;
+}
+[data-look='night'] .facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.85vmin;
+}
+[data-look='night'] .fact {
+  --lk-motion: var(--lk-badge-motion);
+  max-width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.74vmin;
+  padding: 2vmin 2.8vmin;
+  border: 0.19vmin solid color-mix(in srgb, var(--lk-text) 22%, var(--lk-bg));
+  border-radius: var(--lk-radius-small);
+}
+[data-look='night'] .fact dt {
+  font: 400 2vmin / 1.2 var(--lk-font-label);
+  color: var(--lk-muted);
+}
+[data-look='night'] .fact dd {
+  font: 500 3.3vmin / 1.2 var(--lk-font-body);
+}
+
+/* Corporate: an annual report's page, hairlines and a light number on a twelve-column grid. */
+[data-look='corporate'] .stage {
+  display: flex;
+  flex-direction: column;
+  gap: 3vmin;
+  padding: 6.7vmin 7.4vmin 7.4vmin;
+}
+[data-look='corporate'] .kicker,
+[data-look='corporate'] .ends,
+[data-look='corporate'] .fact dt {
+  font: var(--lk-label-weight) 1.85vmin / 1.2 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: uppercase;
+  color: var(--lk-muted);
+}
+[data-look='corporate'] .rule {
+  flex: none;
+  height: var(--lk-rule);
+  background: var(--lk-rule-color);
+}
+[data-look='corporate'] .main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  column-gap: 2.2vmin;
+  align-items: center;
+}
+[data-look='corporate'] .figure {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.74vmin;
+}
+[data-look='corporate'] .unit-row {
+  display: flex;
+  align-items: center;
+  gap: 1.3vmin;
+  font: var(--lk-label-weight) 2vmin / 1.2 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: uppercase;
+  color: var(--lk-accent-ink);
+}
+[data-look='corporate'] .mark {
+  flex: none;
+  width: 0.93vmin;
+  height: 0.93vmin;
+  background: var(--lk-accent);
+}
+[data-look='corporate'] .number {
+  font: var(--lk-figure-weight) calc(48vmin * var(--size) * var(--rest-k)) / 0.9 var(--lk-font-display);
+  letter-spacing: -0.05em;
+  margin-left: -0.06em;
+}
+[data-look='corporate'] .rest {
+  font: var(--lk-figure-weight) 6vmin / 1 var(--lk-font-display);
+  color: var(--lk-muted);
+}
+[data-look='corporate'] .done {
+  font: var(--lk-display-weight) calc(13vmin * var(--fit)) / 1.04 var(--lk-font-display);
+  letter-spacing: var(--lk-display-tracking);
+  -webkit-line-clamp: 3;
+}
+[data-look='corporate'] .copy {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2.6vmin;
+  padding-left: 4.4vmin;
+  border-left: var(--lk-rule) solid var(--lk-rule-color);
+}
+[data-look='corporate'] .title {
+  font: var(--lk-display-weight) calc(7.4vmin * var(--lk-scale) * var(--fit)) / 1.06 var(--lk-font-display);
+  letter-spacing: -0.02em;
+  -webkit-line-clamp: 3;
+}
+[data-look='corporate'] .detail {
+  font-size: 3vmin;
+  line-height: 1.45;
+  color: var(--lk-muted);
+}
+[data-look='corporate'] .scale {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5vmin;
+  padding-top: 1.1vmin;
+}
+[data-look='corporate'] .ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 2vmin;
+}
+[data-look='corporate'] .bar {
+  position: relative;
+  height: 0.93vmin;
+  background: color-mix(in srgb, var(--lk-text) 10%, var(--lk-bg));
+}
+[data-look='corporate'] .bar .fill {
+  position: absolute;
+  inset: 0;
+  background: var(--lk-accent);
+  transform: scaleX(var(--share, 0));
+}
+[data-look='corporate'] .marker {
+  position: absolute;
+  top: -0.83vmin;
+  left: calc(var(--share, 0) * 100%);
+  width: 0.37vmin;
+  height: 2.6vmin;
+  margin-left: -0.185vmin;
+}
+[data-look='corporate'] .marker b {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--lk-text);
+}
+[data-look='corporate'] .foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2.2vmin;
+}
+[data-look='corporate'] .facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2.2vmin;
+}
+[data-look='corporate'] .fact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.74vmin;
+}
+[data-look='corporate'] .fact dd {
+  font: 500 2.8vmin / 1.2 var(--lk-font-body);
+}
+
+/* Type steps up into the room an element leaves. */
+:root[data-facts='off'][data-record='off'] .title,
+:root[data-progress='off'][data-look='pop'] .title {
+  --lk-scale: var(--lk-step);
+}
+
+/* Portrait: each look's figure above its copy. */
+:root[data-orientation='portrait'][data-look='pop'] .stage,
+:root[data-orientation='portrait'][data-look='night'] .stage {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6vmin;
+  padding: 8.1vmin 7.4vmin;
+}
+:root[data-orientation='portrait'] .figure {
+  align-self: center;
+}
+:root[data-orientation='portrait'][data-look='pop'] .copy,
+:root[data-orientation='portrait'][data-look='night'] .copy {
+  flex: 1;
+  min-height: 0;
+}
+:root[data-orientation='portrait'][data-look='poster'] .board,
+:root[data-orientation='portrait'][data-look='poster'] .tiles {
+  flex-direction: column;
+}
+:root[data-orientation='portrait'][data-look='poster'] .tiles {
+  --tile: 26vmin;
+  min-height: 0;
+}
+:root[data-orientation='portrait'][data-look='poster'] .stage[data-units='1'] .tiles {
+  --tile: 37vmin;
+}
+:root[data-orientation='portrait'][data-look='poster'] .record {
+  width: auto;
+}
+:root[data-orientation='portrait'][data-look='corporate'] .main {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  row-gap: 4.4vmin;
+}
+:root[data-orientation='portrait'][data-look='corporate'] .copy {
+  padding: 4.4vmin 0 0;
+  border-left: 0;
+  border-top: var(--lk-rule) solid var(--lk-rule-color);
+}
+:root[data-orientation='portrait'][data-look='corporate'] .facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* Poster's tiles without their black (the progress off) stand on the paper, a step larger. */
+:root[data-look='poster'][data-progress='off'] .tile {
+  --lk-scale: var(--lk-step);
+  background: none;
+  color: var(--lk-text);
+}
+/* Portrait holds its ambient motion and Night's sweep still: on the Pi they took a fade into a
+   portrait countdown over 1% dropped (Pop 1.11 to 1.78%, Night 0.94 to 1.33%), and without them it
+   stays under (spike/pi-perf/RESULTS.md, Countdown). The ring is drawn at its share from the start. */
+:root[data-orientation='portrait'] :is(.lk-wobble, .lk-pulse, .lk-ping, .ring .fill, .arm, .seam) {
+  animation: none;
+}
+:root[data-look='poster'][data-facts='off'] .stage {
+  padding-bottom: 6.7vmin;
+}
+
+/* Figures that change as the time passes keep their width: every look's figure face has tabular
+   figures (Night's mono is monospaced). After each look's `font`, which resets them. */
+[data-look] :is(.number, .rest, .sub, .tile .v, .record .v) {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@keyframes cd-show {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes cd-sweep {
+  from {
+    transform: rotate(0deg);
+  }
+}

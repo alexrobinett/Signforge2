@@ -161,7 +161,7 @@ test('every base template can be configured and previewed', async () => {
   await page.setViewportSize({ width: 1920, height: 1200 });
   for (const t of templates) {
     const v = t.versions.findLast((x: { status: string }) => x.status === 'approved');
-    const fields = Object.entries(v.manifest.fields as Record<string, { type: string; label: string; maxLength?: number }>);
+    const fields = Object.entries(v.manifest.fields as Record<string, { type: string; label: string; maxLength?: number; default?: unknown }>);
     await page.goto('/spots');
     await hydrated(page);
     await page.getByRole('button', { name: 'New spot' }).click();
@@ -177,6 +177,9 @@ test('every base template can be configured and previewed', async () => {
         .getByRole('button', { name: /berries\.png/ })
         .click();
     }
+    // A date with no default starts unpicked, and the spot is held back until one is (Countdown's target).
+    for (const [name, def] of fields.filter(([, d]) => (d.type === 'date' || d.type === 'datetime') && d.default === undefined))
+      await page.locator(`#field-${name}`).fill(def.type === 'date' ? '2026-12-24' : '2026-12-24T18:00');
     const stage = page.getByRole('region', { name: 'Live preview' });
     await expect(stage.getByText('Drawn by the player your screens run.'), t.key).toBeVisible({ timeout: 30_000 });
     // A text field changed in the form reaches the stage.
