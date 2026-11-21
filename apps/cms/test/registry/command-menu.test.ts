@@ -127,8 +127,8 @@ describe("a found screen's and group's actions (#180)", () => {
   const labels = (role: Role, s: ScreenView = screen, checked = true) =>
     targetActions({ kind: 'screen', screen: s }, listed(role), checked).map((a) => a.label);
 
-  it('opens, identifies and restarts a screen for an editor, Open first', () => {
-    expect(labels('editor')).toEqual(['Open', 'Identify (10 s)', 'Restart player']);
+  it('opens a screen, plays a playlist on it or takes it over, identifies and restarts it for an editor, Open first (#181)', () => {
+    expect(labels('editor')).toEqual(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)', 'Restart player']);
     expect(targetActions({ kind: 'screen', screen }, listed('owner'), true)).toContainEqual(
       expect.objectContaining({ kind: 'tool', tool: 'identify_screen', screenId: 'scr_1', screenName: '0157 Drive-thru L' }),
     );
@@ -140,7 +140,7 @@ describe("a found screen's and group's actions (#180)", () => {
   });
 
   it('only opens a screen read from the cache before this opening: it may be revoked since, so commands wait for a fresh read', () => {
-    expect(labels('owner', screen, false)).toEqual(['Open']);
+    expect(labels('owner', screen, false)).toEqual(['Open', 'Play a playlist here…', 'Take over…']);
   });
 
   it('keys an item by its keywords, so a name with a comma is not two names', () => {
@@ -189,9 +189,13 @@ describe("what counts as the member moving ⌘K's selection (#180)", () => {
     for (const k of ['n', 'j', 'p', 'k']) expect(movesSelection(key(k, { ctrlKey: true }))).toBe(true);
   });
 
-  it('does not count PageUp or PageDown, which cmdk ignores, a letter typed, or Alt with an arrow', () => {
+  it('does not count PageUp or PageDown, which cmdk ignores, or a letter typed', () => {
     for (const k of ['PageUp', 'PageDown', 'n', 'Enter']) expect(movesSelection(key(k))).toBe(false);
-    expect(movesSelection(key('ArrowDown', { altKey: true }))).toBe(false);
+  });
+
+  it('counts Alt with an arrow or a vim binding: cmdk moves to the next or previous group', () => {
+    expect(movesSelection(key('ArrowDown', { altKey: true }))).toBe(true);
+    expect(movesSelection(key('j', { ctrlKey: true, altKey: true }))).toBe(true);
   });
 
   it('counts a pointer move only onto an enabled item other than the one selected', () => {
