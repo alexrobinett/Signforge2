@@ -3,7 +3,8 @@
  * on another's tree: `/api` for CMS users (session cookie), `/v1/device` for screens (bearer
  * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. `/admin` takes
  * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
- * A queue consumer tells the screens a publish switched (src/publish.ts).
+ * Two queue consumers: one tells the screens a publish switched (src/publish.ts), the other stores
+ * the photos of news feeds' stories that the poller queues (src/data/images.ts).
  * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
  * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
  * keys, audit rows and alert deliveries (packages/db retention.ts).
@@ -19,6 +20,7 @@ import { createApi } from './api';
 import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
+import { type FeedImageJob, storeFeedImages } from './data/images';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
 import { emailSenderFor } from './email';
@@ -72,15 +74,25 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   },
 };
 
+/** Whether a batch is the photos queue's: each environment names its queues with its own suffix (wrangler.jsonc). */
+const isFeedImages = (batch: MessageBatch<PublishNotice | FeedImageJob>): batch is MessageBatch<FeedImageJob> =>
+  batch.queue.startsWith('signforge-feed-images');
+const isNotices = (batch: MessageBatch<PublishNotice | FeedImageJob>): batch is MessageBatch<PublishNotice> =>
+  batch.queue.startsWith('signforge-publish-notices');
+
 export default {
   fetch: app.fetch,
-  queue: (batch, env) => deliverNotices(batch, env),
+  queue: async (batch, env) => {
+    if (isFeedImages(batch)) return storeFeedImages(batch, env);
+    if (isNotices(batch)) return deliverNotices(batch, env);
+    throw new Error(`No consumer for queue "${batch.queue}"`);
+  },
   scheduled(controller, env, ctx) {
     const job = CRON_JOBS[controller.cron];
     if (!job) throw new Error(`No job for cron "${controller.cron}"`);
     ctx.waitUntil(job(env, controller.scheduledTime));
   },
-} satisfies ExportedHandler<Env, PublishNotice>;
+} satisfies ExportedHandler<Env, PublishNotice | FeedImageJob>;
 
 // Durable Object classes are exported from the Worker's entry point.
 export { ScreenObject } from './device/screen-object';

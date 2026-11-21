@@ -14,6 +14,9 @@
  * then fail as `needs-reconnect` without asking the provider again, until a person reconnects it.
  * Sources sharing a connection refresh it once per run.
  *
+ * A news (`rss`) source with `photos` on gives its first stories the org's copies of their photos,
+ * and queues the ones it has none of yet (./images.ts).
+ *
  * Writes per poll: one row (the source's next poll) and, when the feed still says the same, the
  * snapshot's `checked_at`, or when it changed, the snapshot; for a provider source, also the
  * connection's grant when it was refreshed. A failure backs off, doubling the refresh interval
@@ -21,18 +24,19 @@
  */
 import { type Binding, canonicalJson, MAX_SNAPSHOT_BYTES, snapshotBytes } from '@signforge/contract';
 import { claimDueDataSources, type DataSourceRow, type OrgScope, published, scoped } from '@signforge/db';
-import { FeedError, normaliseFeed } from '@signforge/feeds';
+import { FeedError, normaliseFeed, parseNews } from '@signforge/feeds';
 import { type BindingSpot, type BoundField, boundFields, PLAYER_LOCALE, snapshotFit } from '@signforge/player-core';
 import { type ConnectorDeps, connectorDeps, workerFetch } from '../connectors';
 import { type Grant, type ProviderAdapter, ProviderError, type ProviderFetch, providerFetch } from '../connectors/adapter';
 import { openGrant, sealGrant } from '../connectors/vault';
 import { openFeedUrl } from './cipher';
 import { FetchError, type FetchGuards, feedGuards, guardedFetch } from './fetch';
+import { newsWithPhotos, sha256Hex } from './images';
 
 /**
  * Sources polled per run. Each takes three external fetches (two DNS lookups and the feed), more
- * with redirects, and the Free plan allows 50 per invocation; a source not claimed this minute is
- * claimed the next.
+ * with redirects, and a news source with photos one more (the queue send), and the Free plan allows
+ * 50 per invocation; a source not claimed this minute is claimed the next.
  */
 const POLLS_PER_RUN = 12;
 /** How long a claimed source is held for its run at least: past the fetch's 5 seconds, with redirects. The claim holds it for its next backoff when that is longer. */
@@ -134,7 +138,7 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, locator: str
     const { data } = res;
     if (snapshotBytes(data) > MAX_SNAPSHOT_BYTES) throw new PollFailure('too-large');
     const dataJson = canonicalJson(data);
-    const version = await sha256(dataJson);
+    const version = await sha256Hex(new TextEncoder().encode(dataJson));
     const source = { ...ok, etag: res.etag, lastModified: res.lastModified };
     const held = await org.dataSources.snapshot(row.id);
     if (held?.version === version) {
@@ -165,7 +169,12 @@ async function read(run: Run, org: OrgScope, row: DataSourceRow, locator: string
   const validators = format === 'ical' ? {} : { etag: row.etag, lastModified: row.lastModified };
   const res = await guardedFetch(locator, validators, run.guards);
   if (res.status === 'not-modified') return res;
-  return { status: 'ok', data: convert(format, row, res.body, run.now), etag: res.etag, lastModified: res.lastModified };
+  // The feed's URL, which a photo's relative link resolves against last.
+  const data =
+    format === 'rss' && row.photos
+      ? await newsWithPhotos(run.env, org, row.id, parseNews(res.body, { url: locator }), run.now)
+      : convert(format, row, res.body, run.now);
+  return { status: 'ok', data, etag: res.etag, lastModified: res.lastModified };
 }
 
 /** A provider resource's data, read with the connection's grant. */
@@ -244,16 +253,12 @@ function convert(format: Exclude<DataSourceRow['format'], 'provider'>, { horizon
     case 'ical':
       return normaliseFeed('ical', body, { now: new Date(now), ...(horizonDays ? { horizonDays } : {}) });
     case 'rss':
+      // Photos off: no image is looked for, and none named.
       return normaliseFeed('rss', body);
     case 'csv':
     case 'json-table':
       return normaliseFeed(format, body, rowsPath ? { rowsPath } : {});
   }
-}
-
-async function sha256(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;

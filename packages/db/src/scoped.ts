@@ -1467,6 +1467,18 @@ export function scoped(d1: D1Database, orgId: string) {
               .where(and(eq(s.dataSources.orgId, orgId), eq(s.dataSources.connectionId, connectionId))),
           ),
       },
+      /**
+       * Read whole at the next poll, whatever the feed's validators would say: its stories' photos
+       * changed (apps/api src/data/images.ts), and a 304 would leave its snapshot without them.
+       * Its version, failures and backoff stay, as with a poll.
+       */
+      readAfresh: async (dataSourceId: string) => {
+        await db
+          .update(s.dataSources)
+          .set(updateSet(s.dataSources, { etag: null, lastModified: null }))
+          .where(and(eq(s.dataSources.orgId, orgId), eq(s.dataSources.id, dataSourceId)))
+          .run();
+      },
       /** The sources that read through `connectionId`. */
       usingConnection: (connectionId: string) =>
         db

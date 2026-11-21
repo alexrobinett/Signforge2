@@ -83,6 +83,24 @@ describe('a poll saved', () => {
   });
 });
 
+describe('dataSources.readAfresh', () => {
+  it("drops the source's validators in its own org only, leaving its schedule, failures and version", async () => {
+    await a.scope.dataSources.update(a.dataSource, { etag: '"a"', lastModified: 'Mon', nextPollAt: NOW + 5, failures: 2 });
+    await b.scope.dataSources.update(b.dataSource, { etag: '"b"', lastModified: 'Tue' });
+    const before = (await a.scope.dataSources.get(a.dataSource))!;
+    await a.scope.dataSources.readAfresh(a.dataSource);
+    await a.scope.dataSources.readAfresh(b.dataSource);
+    expect(await a.scope.dataSources.get(a.dataSource)).toMatchObject({
+      etag: null,
+      lastModified: null,
+      nextPollAt: NOW + 5,
+      failures: 2,
+      rowVersion: before.rowVersion,
+    });
+    expect(await b.scope.dataSources.get(b.dataSource)).toMatchObject({ etag: '"b"', lastModified: 'Tue' });
+  });
+});
+
 describe('dataSources.stage.deleteUnbound', () => {
   it('deletes, with its snapshot, each source made before a time that no spot binds in its draft or its published version, checked when the batch runs', async () => {
     const o = await seedOrg(env.DB, 'org-unbound');
