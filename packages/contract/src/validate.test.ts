@@ -36,6 +36,7 @@ import {
   fitsScreenBox,
   imageSampleSize,
   imageSizeProblem,
+  liveSources,
   validateDataSnapshot,
   validateDeviceCommand,
   MAX_IDENTIFY_SECONDS,
@@ -484,6 +485,65 @@ describe('validateTemplateManifest', () => {
     expect(validateTemplateManifest({ ...weather(), live: { source: 'rss', fields: { temp: 'items' }, place: 'city' } })).toEqual([
       'live: place and units are for open-meteo sources only',
     ]);
+  });
+
+  /** Weather from Open-Meteo and headlines from a feed, as an Info frame takes them (#193). */
+  const twoSources = (): TemplateManifest => {
+    const m = weather();
+    m.fields.items = { type: 'list', label: 'Headlines', item: { title: { type: 'text', label: 'Title' } }, default: [] };
+    m.live = {
+      sources: {
+        weather: { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'city', units: { temperature: 'unit' } },
+        headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items' } },
+      },
+    };
+    return m;
+  };
+
+  totalOn('validateTemplateManifest with several live sources', mutated(twoSources), validateTemplateManifest);
+
+  it('takes several named sources, each with a label and the fields it feeds, and reads either form by name', () => {
+    expect(validateTemplateManifest(twoSources())).toEqual([]);
+    expect(Object.keys(liveSources(twoSources().live!))).toEqual(['weather', 'headlines']);
+    const one = weather().live!;
+    expect(liveSources(one)).toEqual({ source: one });
+  });
+
+  it('holds each named source to the rules of one, and feeds a field from one source only', () => {
+    const m = twoSources();
+    m.live = {
+      sources: {
+        weather: { label: '', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'temp' },
+        headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items', temp: 'title' }, units: { wind: 'windUnit' } },
+        'no good': { label: 'Bad', source: 'table', fields: { high: 'rows' } },
+      },
+    };
+    expect(validateTemplateManifest(m)).toEqual([
+      'live: sources.weather: label is required',
+      'live: field "temp" is fed by both "weather" and "headlines"',
+      'live: source name "no good" must be letters, digits, dashes and underscores',
+      'live: sources.weather: place "temp" must be a text field the source does not fill',
+      'live: sources.headlines: place and units are for open-meteo sources only',
+      'live: sources.no good: field "high": a table fills list fields only, at "rows"',
+    ]);
+  });
+
+  it('keeps a field a named source leaves to people free of every other source', () => {
+    const m = twoSources();
+    m.live = {
+      sources: {
+        weather: { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'city' },
+        headlines: { label: 'Headlines', source: 'rss', fields: { city: 'title' } },
+      },
+    };
+    expect(validateTemplateManifest(m)).toEqual(['live: sources.weather: place "city" must be a text field the source does not fill']);
+  });
+
+  it('takes one source or several, not both, and at least one', () => {
+    expect(validateTemplateManifest({ ...weather(), live: { ...weather().live, sources: twoSources().live } })).toEqual([
+      'live: takes one source or several sources, not both',
+    ]);
+    expect(validateTemplateManifest({ ...weather(), live: { sources: {} } })).toEqual(['live: sources must name at least one source']);
   });
 });
 
