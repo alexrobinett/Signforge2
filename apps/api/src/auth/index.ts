@@ -2,7 +2,7 @@
  * Better Auth, built per request from the environment (proven in M3-00). Passing the D1 binding
  * as `database` makes Better Auth use its own D1 dialect with transactions off.
  */
-import { rememberActiveOrg, scoped, startingOrg } from '@signforge/db';
+import { scoped, startingOrg } from '@signforge/db';
 import { betterAuth } from 'better-auth';
 import type { EmailSender } from '../email';
 import { authOptions } from './options';
@@ -30,7 +30,6 @@ export function createAuth(env: Env, request: Request, email: EmailSender) {
       appUrl,
       audit: (orgId, entry) => scoped(env.DB, orgId).auditLog.append(entry),
       startingOrg: (userId) => startingOrg(env.DB, userId),
-      rememberActiveOrg: (userId, orgId) => rememberActiveOrg(env.DB, userId, orgId),
     }),
     database: env.DB,
     baseURL: origin,

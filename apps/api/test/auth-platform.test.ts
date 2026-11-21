@@ -77,7 +77,6 @@ describe("packages/db's migrations", () => {
         appUrl: 'https://cms.test',
         audit: async () => {},
         startingOrg: async () => null,
-        rememberActiveOrg: async () => {},
       }),
       database: env.DB,
     });

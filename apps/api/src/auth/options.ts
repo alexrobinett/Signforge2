@@ -141,11 +141,9 @@ export interface AuthDeps {
   audit: (orgId: string, entry: Parameters<OrgScope['auditLog']['append']>[0]) => Promise<unknown>;
   /** The org a new session starts in, or null to let the member choose (`startingOrg`). */
   startingOrg: (userId: string) => Promise<string | null>;
-  /** Records the org a session made active, for `startingOrg` (`rememberActiveOrg`). */
-  rememberActiveOrg: (userId: string, orgId: string) => Promise<unknown>;
 }
 
-export function authOptions({ email, appUrl, audit, startingOrg, rememberActiveOrg }: AuthDeps) {
+export function authOptions({ email, appUrl, audit, startingOrg }: AuthDeps) {
   return {
     basePath: '/api/auth',
     // Password hashing does not fit the free plan's CPU limit; sign-in is passwordless.
@@ -154,16 +152,13 @@ export function authOptions({ email, appUrl, audit, startingOrg, rememberActiveO
     user: { additionalFields: { lastActiveOrganizationId: { type: 'string', required: false, input: false, returned: false } } },
     // A session starts in the member's only org, or the one they last made active (#182), so only a
     // member of several orgs who never chose one is asked. Set at creation, so the cookie cache the
-    // sign-in sets carries it, and the tab check (#129) sees it from the first request.
+    // sign-in sets carries it, and the tab check (#129) sees it from the first request. The read is
+    // not atomic with Better Auth's insert: the insert's trigger clears an org left in between
+    // (migration 0029), and every request checks membership again. Triggers remember each switch.
     databaseHooks: {
       session: {
         create: {
           before: async ({ userId }) => ({ data: { activeOrganizationId: await startingOrg(userId) } }),
-        },
-        update: {
-          after: async ({ userId, activeOrganizationId }) => {
-            if (typeof activeOrganizationId === 'string') await rememberActiveOrg(userId, activeOrganizationId);
-          },
         },
       },
     },

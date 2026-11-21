@@ -12,7 +12,6 @@ export const auth = betterAuth({
     appUrl: 'http://localhost',
     audit: async () => {},
     startingOrg: async () => null,
-    rememberActiveOrg: async () => {},
   }),
   database: new DatabaseSync(':memory:'),
 });
