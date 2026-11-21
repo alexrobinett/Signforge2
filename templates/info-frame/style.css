@@ -1,0 +1,1079 @@
+@import '@signforge/template-looks/looks.css';
+
+/* Info frame: a photo panel with a caption, a rail with the clock and the weather, and a crawl,
+   in the look kit's four looks. Sizes are the concept canvas's (Info frame A to D, drawn at
+   1920x1080) in vmin. main.ts sets `data-rail` (right, left or off: off also when the rail would
+   hold only the logo) and `data-ticker` (bottom, top or off: off also with no headlines); the
+   look kit sets the toggles' marks (`data-clock`, `data-weather`, `data-forecast`, `data-caption`,
+   `data-logo`) and removes what is off. Text sits on cards whose inks main.ts measures
+   (`--card-*` from `--ink*`); the photo carries no text of its own. */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+* {
+  box-sizing: border-box;
+}
+p,
+h1 {
+  margin: 0;
+  font: inherit;
+}
+
+/* The frame: the main row (photo and rail), and the crawl under it or over it. */
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--if-gap);
+  padding: var(--if-pad);
+  background: var(--if-ground, var(--lk-bg));
+  overflow: hidden;
+}
+:root:where([data-ticker='top']) .stage {
+  flex-direction: column-reverse;
+}
+.main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: var(--if-gap);
+}
+:root:where([data-rail='left']) .main {
+  flex-direction: row-reverse;
+}
+
+/* Cards: each asks for its inks, and main.ts writes what reads on its fill as `--card-*`. */
+.card {
+  --ink: var(--lk-text);
+  --ink-muted: var(--lk-muted);
+  --ink-accent: var(--lk-accent-ink);
+  --ink-primary: var(--lk-primary-ink);
+  color: var(--card-text, var(--ink));
+}
+
+/* The photo panel, and what sits on the photo: the caption, and without a rail the chip and the logo. */
+.panel {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--if-panel-radius, 0);
+  background: var(--lk-surface);
+}
+.photo-drift,
+.photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.photo {
+  display: block;
+  object-fit: cover;
+}
+.corner-logo {
+  position: absolute;
+  left: var(--if-inset);
+  top: var(--if-inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--if-logo-pad, 1.1vmin 1.8vmin);
+}
+.logo {
+  display: block;
+  width: var(--if-logo-w, 15vmin);
+  height: var(--if-logo-h, 5.2vmin);
+  object-fit: contain;
+}
+.chip {
+  position: absolute;
+  right: var(--if-inset);
+  top: var(--if-inset);
+  display: flex;
+  align-items: center;
+  gap: var(--if-chip-gap);
+  padding: var(--if-chip-pad);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.chip-time,
+.chip-weather {
+  display: flex;
+  align-items: center;
+  gap: 0.6vmin;
+  line-height: 1.1;
+}
+.glyph {
+  display: flex;
+}
+.glyph svg {
+  width: 100%;
+  height: 100%;
+}
+.chip .glyph {
+  width: 1em;
+  height: 1em;
+}
+.caption {
+  position: absolute;
+  left: var(--if-inset);
+  bottom: var(--if-inset);
+  max-width: calc(100% - 2 * var(--if-inset));
+  display: flex;
+  align-items: center;
+  gap: var(--if-caption-gap);
+  padding: var(--if-caption-pad);
+  overflow: hidden;
+}
+.copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8vmin;
+}
+.title {
+  font-size: calc(var(--if-title) * var(--if-title-fit, 1));
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.line {
+  color: var(--card-muted, var(--ink-muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.price-in {
+  flex: none;
+}
+.price {
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* The rail: the clock, the weather and the logo, one over another. */
+.rail {
+  flex: none;
+  width: var(--if-rail-w);
+  display: flex;
+  flex-direction: column;
+  gap: var(--if-rail-gap);
+  padding: var(--if-rail-pad, 0);
+  overflow: hidden;
+}
+.clock,
+.weather {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rail-time {
+  display: flex;
+  align-items: baseline;
+  gap: 1.3vmin;
+  white-space: nowrap;
+  font-size: calc(var(--if-clock) * var(--if-fit, 1));
+}
+.time {
+  display: flex;
+}
+.date {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.now {
+  display: flex;
+  align-items: center;
+  gap: 1.85vmin;
+  white-space: nowrap;
+}
+.now .glyph {
+  flex: none;
+  width: calc(var(--if-icon) * var(--if-fit, 1));
+  height: calc(var(--if-icon) * var(--if-fit, 1));
+}
+.now .temp-now {
+  font-size: calc(var(--if-temp) * var(--if-fit, 1));
+  line-height: 1;
+}
+.place,
+.wline {
+  color: var(--card-muted, var(--ink-muted));
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.place {
+  -webkit-line-clamp: 1;
+}
+.days {
+  display: flex;
+}
+.day {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  white-space: nowrap;
+}
+.dname,
+.lo {
+  color: var(--card-muted, var(--ink-muted));
+}
+.rail-logo {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+}
+
+/* The crawl, with its label. */
+.ticker {
+  flex: none;
+  height: var(--if-ticker-h);
+  display: flex;
+  align-items: center;
+  gap: var(--if-ticker-gap);
+  padding: var(--if-ticker-pad, 0);
+  overflow: hidden;
+}
+.label {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 1.5vmin;
+  white-space: nowrap;
+}
+.window {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+.lk-crawl {
+  line-height: 1.3;
+}
+.colon {
+  animation: if-blink 1s steps(1, end) infinite;
+}
+.live {
+  position: relative;
+  width: 1.48vmin;
+  height: 1.48vmin;
+}
+.live i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--card-primary, var(--ink-primary));
+}
+
+[data-look='poster'] .cond,
+[data-look='night'] .cond {
+  text-transform: lowercase;
+}
+
+/* ---------------------------------------------------------------- Pop (Info frame A) */
+[data-look='pop'] {
+  --if-pad: 2.96vmin;
+  --if-gap: 2.6vmin;
+  --if-panel-radius: 3.7vmin;
+  --if-inset: 3.33vmin;
+  /* Pop's cards are white on the blush ground; a kit's surface where there is one. */
+  --if-card: var(--sf-surface, #ffffff);
+  --if-rail-w: 42.6vmin;
+  --if-rail-gap: 2.96vmin;
+  --if-rail-pad: 4.44vmin 3.7vmin 3.7vmin;
+  --if-clock: 12.96vmin;
+  --if-temp: 9.63vmin;
+  --if-icon: 8.9vmin;
+  --if-title: 6.67vmin;
+  --if-caption-pad: 2.96vmin 3.7vmin;
+  --if-caption-gap: 3.7vmin;
+  --if-chip-pad: 1.48vmin 2.96vmin;
+  --if-chip-gap: 2.22vmin;
+  --if-ticker-h: 10.37vmin;
+  --if-ticker-gap: 2.96vmin;
+  --if-ticker-pad: 0 1.85vmin;
+}
+[data-look='pop'] .panel {
+  --lk-motion: if-pop-in;
+}
+[data-look='pop'] .corner-logo,
+[data-look='pop'] .chip {
+  background: var(--if-card);
+}
+[data-look='pop'] .corner-logo {
+  border-radius: 1.48vmin;
+}
+[data-look='pop'] .chip {
+  border-radius: var(--lk-radius-pill);
+  font: 800 4.44vmin / 1.1 var(--lk-font-display);
+}
+[data-look='pop'] .caption {
+  right: var(--if-inset);
+  border-radius: 2.96vmin;
+  background: var(--lk-text);
+  --ink: var(--lk-bg);
+  --ink-muted: color-mix(in srgb, var(--lk-bg) 85%, var(--lk-text));
+}
+[data-look='pop'] .title {
+  font: 800 calc(var(--if-title) * var(--if-title-fit, 1)) / 1.02 var(--lk-font-display);
+  letter-spacing: -0.015em;
+}
+[data-look='pop'] .line {
+  font-size: 2.78vmin;
+}
+[data-look='pop'] .price {
+  padding: 1.3vmin 2.78vmin;
+  border-radius: 2.4vmin;
+  background: var(--lk-primary);
+  --ink: var(--lk-on-primary);
+  font: 800 8.15vmin / 1 var(--lk-font-display);
+  transform: rotate(-3deg);
+}
+[data-look='pop'] .rail {
+  --lk-motion: if-slide;
+  border-radius: var(--lk-radius);
+  background: var(--if-card);
+}
+[data-look='pop'] .rail-time {
+  font-family: var(--lk-font-display);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+[data-look='pop'] .clock {
+  gap: 0.56vmin;
+  padding-left: 0.37vmin;
+}
+[data-look='pop'] .date {
+  font-size: 2.78vmin;
+  font-weight: 600;
+}
+[data-look='pop'] .weather {
+  --lk-motion: lk-pop-rise;
+  gap: 1.11vmin;
+  padding: 2.96vmin;
+  border-radius: 2.96vmin;
+  background: var(--lk-primary);
+  --ink: var(--lk-on-primary);
+  --ink-muted: var(--lk-on-primary);
+}
+[data-look='pop'] :is(.now, .wline, .place) {
+  --lk-motion: none;
+}
+[data-look='pop'] .now .temp-now {
+  font-family: var(--lk-font-display);
+  font-weight: 800;
+}
+[data-look='pop'] .weather .glyph {
+  --lk-pulse-motion: if-bob;
+  --lk-pulse-s: 4s;
+}
+[data-look='pop'] :is(.wline, .place) {
+  font-size: 2.59vmin;
+  font-weight: 600;
+}
+[data-look='pop'] .forecast {
+  display: flex;
+  flex-direction: column;
+  padding-top: 0.56vmin;
+}
+[data-look='pop'] .forecast-rule {
+  height: 0.19vmin;
+  background: currentColor;
+}
+[data-look='pop'] .days {
+  padding-top: 1.67vmin;
+}
+[data-look='pop'] .day {
+  --lk-motion: lk-pop-in;
+  font-size: 2.22vmin;
+  font-weight: 600;
+}
+[data-look='pop'] .hi {
+  font: 800 3.89vmin / 1.1 var(--lk-font-display);
+}
+[data-look='pop'] .rail-logo .logo {
+  width: 18.5vmin;
+  height: 6.67vmin;
+  object-position: left center;
+}
+[data-look='pop'] .ticker {
+  --lk-motion: lk-pop-rise;
+  border-radius: var(--lk-radius-pill);
+  background: var(--lk-text);
+  --ink: var(--lk-bg);
+  font-size: 3.33vmin;
+  font-weight: 500;
+}
+[data-look='pop'] .label {
+  padding: 1.11vmin 2.59vmin;
+  border-radius: var(--lk-radius-pill);
+  background: var(--lk-accent);
+  --ink: var(--lk-on-accent);
+  font: 800 2.96vmin / 1.1 var(--lk-font-display);
+}
+
+/* ---------------------------------------------------------------- Poster (Info frame B) */
+[data-look='poster'] {
+  --if-pad: 0;
+  --if-gap: 0;
+  --if-inset: 0;
+  --if-line: 0.28vmin solid var(--lk-text);
+  --if-rail-w: 44.4vmin;
+  --if-rail-gap: 2.59vmin;
+  --if-rail-pad: 4.44vmin 4.44vmin 3.7vmin;
+  --if-clock: 13.9vmin;
+  --if-temp: 11.1vmin;
+  --if-icon: 0;
+  --if-title: 8.52vmin;
+  --if-caption-pad: 3.33vmin 4.44vmin 3.7vmin 4.07vmin;
+  --if-caption-gap: 0;
+  --if-chip-pad: 1.85vmin 2.96vmin;
+  --if-chip-gap: 2.59vmin;
+  --if-ticker-h: 9.63vmin;
+  --if-ticker-gap: 0;
+}
+[data-look='poster'] :is(.corner-logo, .chip, .caption, .rail) {
+  background: var(--lk-bg);
+}
+[data-look='poster'] .corner-logo {
+  --lk-motion: if-drop;
+  padding: 2vmin 3vmin;
+  border-right: var(--if-line);
+  border-bottom: var(--if-line);
+}
+[data-look='poster'] .chip {
+  --lk-motion: if-drop;
+  align-items: baseline;
+  border-left: var(--if-line);
+  border-bottom: var(--if-line);
+  font: 700 2.78vmin / 1 var(--lk-font-label);
+}
+[data-look='poster'] .chip-time {
+  font: 400 7.04vmin / 1 var(--lk-font-display);
+}
+[data-look='poster'] .chip-weather {
+  align-items: baseline;
+  gap: 1vmin;
+}
+[data-look='poster'] .cond {
+  font: italic 400 3.52vmin / 1 var(--lk-font-display);
+}
+[data-look='poster'] .caption {
+  --lk-motion: if-slide-left;
+  max-width: min(100vmin, 100%);
+  flex-direction: column;
+  align-items: stretch;
+  border-top: var(--if-line);
+  border-right: var(--if-line);
+}
+[data-look='poster'] .copy {
+  gap: 1.11vmin;
+}
+[data-look='poster'] .eyebrow {
+  color: var(--card-accent, var(--ink-accent));
+  font: var(--lk-label-weight) 2.04vmin / 1.2 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: var(--lk-label-case);
+}
+[data-look='poster'] .title {
+  font: 400 calc(var(--if-title) * var(--if-title-fit, 1)) / 0.98 var(--lk-font-display);
+  text-wrap: balance;
+}
+[data-look='poster'] .line {
+  font-size: 2.59vmin;
+}
+[data-look='poster'] .rail {
+  --lk-motion: none;
+  border-left: var(--if-line);
+}
+:where([data-rail='left'])[data-look='poster'] .rail {
+  border-left: 0;
+  border-right: var(--if-line);
+}
+[data-look='poster'] .clock {
+  gap: 0.93vmin;
+}
+[data-look='poster'] .rail-time {
+  font-family: var(--lk-font-display);
+  font-weight: 400;
+  line-height: 0.92;
+}
+[data-look='poster'] .date {
+  font: var(--lk-label-weight) 2.04vmin / 1.2 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: var(--lk-label-case);
+}
+[data-look='poster'] .clock-rule {
+  height: 1px;
+  margin-top: 1.48vmin;
+  background: var(--lk-text);
+}
+[data-look='poster'] .weather {
+  --lk-motion: none;
+  gap: 1.11vmin;
+}
+[data-look='poster'] .now {
+  align-items: baseline;
+}
+[data-look='poster'] .now .temp-now {
+  font-family: var(--lk-font-display);
+  line-height: 0.92;
+}
+[data-look='poster'] .now .cond {
+  font-size: calc(3.89vmin * var(--if-fit, 1));
+}
+[data-look='poster'] .wline {
+  font-size: 2.41vmin;
+}
+[data-look='poster'] .forecast {
+  display: flex;
+  flex-direction: column;
+  margin-top: 1.11vmin;
+}
+[data-look='poster'] .forecast-rule {
+  height: 0.28vmin;
+  background: var(--lk-text);
+}
+[data-look='poster'] .days {
+  flex-direction: column;
+}
+[data-look='poster'] .day {
+  flex-direction: row;
+  align-items: baseline;
+  padding: 1.3vmin 0;
+  border-bottom: 1px solid var(--lk-text);
+}
+[data-look='poster'] .dname {
+  flex: none;
+  width: 6.67vmin;
+  color: inherit;
+  font: var(--lk-label-weight) 2.04vmin / 1.2 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: var(--lk-label-case);
+}
+[data-look='poster'] .sky {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: italic 400 2.96vmin / 1.2 var(--lk-font-display);
+  text-transform: lowercase;
+}
+[data-look='poster'] .hi {
+  font: 700 2.59vmin / 1.2 var(--lk-font-label);
+}
+[data-look='poster'] .rail-logo .logo {
+  width: 16.7vmin;
+  height: 5.93vmin;
+  object-position: left center;
+}
+[data-look='poster'] .ticker {
+  background: var(--lk-text);
+  --ink: var(--lk-bg);
+  align-items: stretch;
+  font: 400 4.26vmin / 1 var(--lk-font-display);
+}
+[data-look='poster'] .label {
+  --lk-motion: if-slide-left;
+  padding: 0 3.7vmin;
+  background: var(--lk-primary);
+  --ink: var(--lk-on-primary);
+  font: 800 2.41vmin / 1 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: var(--lk-label-case);
+}
+[data-look='poster'] .window {
+  padding-left: 3.7vmin;
+}
+
+/* ---------------------------------------------------------------- Night (Info frame C) */
+[data-look='night'] {
+  --if-pad: 2.22vmin;
+  --if-gap: 2.22vmin;
+  --if-panel-radius: 2.96vmin;
+  --if-inset: 2.59vmin;
+  --if-rail-w: 40.7vmin;
+  --if-rail-gap: 2.22vmin;
+  --if-clock: 11.1vmin;
+  --if-temp: 8.89vmin;
+  --if-icon: 8.15vmin;
+  --if-title: 5.93vmin;
+  --if-caption-pad: 3.15vmin 3.7vmin 3.52vmin;
+  --if-caption-gap: 3.7vmin;
+  --if-chip-pad: 1.48vmin 2.59vmin;
+  --if-chip-gap: 1.85vmin;
+  --if-ticker-h: 8.89vmin;
+  --if-ticker-gap: 2.59vmin;
+  --if-ticker-pad: 0 2.96vmin;
+}
+[data-look='night'] :is(.clock, .weather, .rail-logo) {
+  padding: 3.33vmin 3.7vmin;
+  border-radius: var(--lk-radius);
+  background: var(--lk-surface);
+}
+[data-look='night'] .corner-logo {
+  border-radius: 1.3vmin;
+  background: var(--lk-bg);
+}
+[data-look='night'] .chip {
+  border: 0.19vmin solid var(--lk-primary);
+  border-radius: var(--lk-radius-pill);
+  background: var(--lk-bg);
+  font: 400 2.78vmin / 1.1 var(--lk-font-label);
+}
+[data-look='night'] .chip-time {
+  color: var(--card-primary, var(--ink-primary));
+  font: 700 4.07vmin / 1.1 var(--lk-font-display);
+}
+[data-look='night'] .caption {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-width: none;
+  background: var(--lk-primary);
+  --ink: var(--lk-on-primary);
+  --ink-muted: var(--lk-on-primary);
+}
+[data-look='night'] .title {
+  font: 800 calc(var(--if-title) * var(--if-title-fit, 1)) / 1.04 var(--lk-font-display);
+  letter-spacing: -0.015em;
+}
+[data-look='night'] .line {
+  font: 400 2.41vmin / 1.3 var(--lk-font-label);
+}
+[data-look='night'] .price {
+  font: 800 8.89vmin / 1 var(--lk-font-display);
+  letter-spacing: -0.03em;
+}
+[data-look='night'] .rail {
+  --lk-motion: if-slide;
+}
+[data-look='night'] .clock {
+  --ink-accent: var(--lk-accent);
+  --ink-primary: var(--lk-primary);
+  justify-content: center;
+  gap: 1.11vmin;
+}
+[data-look='night'] .rail-time {
+  color: var(--card-primary, var(--ink-primary));
+  font-family: var(--lk-font-display);
+  font-weight: 700;
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+}
+[data-look='night'] .seconds {
+  order: 1;
+  height: 0.37vmin;
+  border-radius: 0.19vmin;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--lk-text) 14%, var(--lk-surface));
+}
+[data-look='night'] .tick-bar {
+  display: block;
+  height: 100%;
+  background: var(--lk-accent);
+  transform-origin: left center;
+  transform: scaleX(var(--if-second, 0));
+  animation: if-minute 60s linear infinite;
+}
+[data-look='night'] .date {
+  order: 2;
+  color: var(--card-accent, var(--ink-accent));
+  font: 400 2.41vmin / 1.3 var(--lk-font-label);
+  text-transform: lowercase;
+}
+[data-look='night'] .weather {
+  --ink-accent: var(--lk-accent);
+  flex: 1;
+  justify-content: center;
+  gap: 1.3vmin;
+}
+[data-look='night'] :is(.now, .wline, .place) {
+  --lk-motion: none;
+}
+[data-look='night'] .now .glyph {
+  color: var(--card-accent, var(--ink-accent));
+  --lk-pulse-motion: none;
+}
+[data-look='night'] .now .temp-now {
+  font-family: var(--lk-font-display);
+  font-weight: 700;
+}
+[data-look='night'] :is(.wline, .place) {
+  font: 400 2.22vmin / 1.3 var(--lk-font-label);
+  text-transform: lowercase;
+}
+[data-look='night'] .days {
+  gap: 1.11vmin;
+  margin-top: 0.74vmin;
+}
+[data-look='night'] .day {
+  gap: 0.37vmin;
+  padding: 1.3vmin 0;
+  border: 0.19vmin solid color-mix(in srgb, var(--lk-text) 22%, var(--lk-surface));
+  border-radius: 1.67vmin;
+}
+[data-look='night'] .dname {
+  font: 400 2.04vmin / 1.2 var(--lk-font-label);
+  text-transform: lowercase;
+}
+[data-look='night'] .hi {
+  font: 700 2.96vmin / 1.1 var(--lk-font-display);
+}
+[data-look='night'] .rail-logo {
+  flex: none;
+  justify-content: center;
+  margin-top: 0;
+  padding-block: 2.2vmin;
+}
+[data-look='night'] .ticker {
+  border-radius: 2.22vmin;
+  background: var(--lk-surface);
+  --ink-primary: var(--lk-primary);
+  font-size: 3.15vmin;
+}
+[data-look='night'] .label {
+  color: var(--card-primary, var(--ink-primary));
+  font: 700 2.41vmin / 1 var(--lk-font-label);
+  text-transform: lowercase;
+}
+
+/* ---------------------------------------------------------------- Corporate (Info frame D) */
+[data-look='corporate'] {
+  --if-pad: 2.96vmin;
+  --if-gap: 2.22vmin;
+  --if-inset: 2.96vmin;
+  --if-ground: var(--lk-surface);
+  --if-rule: color-mix(in srgb, var(--lk-on-primary) 18%, var(--lk-primary));
+  /* Corporate's light blue for labels on navy. */
+  --if-label: color-mix(in srgb, var(--lk-accent) 45%, var(--lk-on-primary));
+  --if-rail-w: 42.6vmin;
+  --if-rail-gap: 2.96vmin;
+  --if-rail-pad: 4.44vmin 4.07vmin 3.7vmin;
+  --if-clock: 12.2vmin;
+  --if-temp: 8.89vmin;
+  --if-icon: 7.4vmin;
+  --if-title: 5.93vmin;
+  --if-caption-pad: 2.96vmin 3.7vmin;
+  --if-caption-gap: 3.7vmin;
+  --if-chip-pad: 1.67vmin 2.96vmin;
+  --if-chip-gap: 2.59vmin;
+  --if-ticker-h: 8.52vmin;
+  --if-ticker-gap: 2.96vmin;
+}
+[data-look='corporate'] :is(.corner-logo, .caption, .ticker, .rail-logo) {
+  background: var(--lk-bg);
+}
+[data-look='corporate'] :is(.chip, .rail, .label) {
+  background: var(--lk-primary);
+  --ink: var(--lk-on-primary);
+  --ink-muted: color-mix(in srgb, var(--lk-on-primary) 80%, var(--lk-primary));
+  --ink-accent: var(--if-label);
+}
+[data-look='corporate'] .chip {
+  font: 400 2.96vmin / 1 var(--lk-font-body);
+}
+[data-look='corporate'] .chip-time {
+  align-items: baseline;
+  gap: 0.93vmin;
+  font: 300 4.81vmin / 1 var(--lk-font-display);
+}
+[data-look='corporate'] .chip-weather {
+  gap: 1.11vmin;
+  padding-left: 2.59vmin;
+  border-left: 1px solid var(--if-rule);
+}
+[data-look='corporate'] .chip .glyph {
+  width: 3.7vmin;
+  height: 3.7vmin;
+}
+[data-look='corporate'] .ap {
+  color: var(--card-accent, var(--ink-accent));
+  font: var(--lk-label-weight) 1.85vmin / 1 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+}
+[data-look='corporate'] .caption {
+  max-width: min(101.9vmin, calc(100% - 2 * var(--if-inset)));
+}
+[data-look='corporate'] .copy {
+  gap: 0.93vmin;
+}
+[data-look='corporate'] .title {
+  font: 500 calc(var(--if-title) * var(--if-title-fit, 1)) / 1.08 var(--lk-font-display);
+  letter-spacing: -0.02em;
+}
+[data-look='corporate'] .line {
+  font-size: 2.41vmin;
+}
+[data-look='corporate'] .price-in {
+  padding-left: 3.7vmin;
+  border-left: 1px solid var(--lk-rule-color);
+}
+[data-look='corporate'] .price {
+  font: 300 8.15vmin / 1 var(--lk-font-display);
+  letter-spacing: -0.03em;
+}
+[data-look='corporate'] .clock {
+  gap: 1.11vmin;
+}
+[data-look='corporate'] :is(.date, .place, .dname) {
+  color: var(--card-accent, var(--ink-accent));
+  font: var(--lk-label-weight) 1.85vmin / 1.2 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: var(--lk-label-case);
+}
+[data-look='corporate'] .date {
+  order: -1;
+}
+[data-look='corporate'] .rail-time {
+  font-weight: 300;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+}
+[data-look='corporate'] .rail-time .ap {
+  font-size: 2.22vmin;
+  letter-spacing: var(--lk-label-tracking);
+}
+[data-look='corporate'] .weather {
+  --lk-motion: none;
+  gap: 1.48vmin;
+}
+[data-look='corporate'] .weather-rule {
+  height: 1px;
+  background: var(--if-rule);
+}
+[data-look='corporate'] .now .temp-now {
+  font-weight: 300;
+  letter-spacing: -0.03em;
+}
+[data-look='corporate'] .weather .glyph {
+  --lk-pulse-motion: none;
+}
+[data-look='corporate'] .wline {
+  font-size: 2.41vmin;
+}
+[data-look='corporate'] .days {
+  margin-top: 0.74vmin;
+  border-top: 1px solid var(--if-rule);
+}
+[data-look='corporate'] .day {
+  align-items: flex-start;
+  gap: 0.56vmin;
+  padding: 1.67vmin 0 0 1.85vmin;
+  border-left: 1px solid var(--if-rule);
+}
+[data-look='corporate'] .day:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+[data-look='corporate'] .hi {
+  font: 400 3.33vmin / 1.1 var(--lk-font-body);
+}
+[data-look='corporate'] .lo {
+  font-size: 2.22vmin;
+}
+[data-look='corporate'] .rail-logo {
+  align-self: flex-start;
+  padding: 0.9vmin 1.4vmin;
+}
+[data-look='corporate'] .ticker {
+  font: 400 2.96vmin / 1 var(--lk-font-body);
+  align-items: stretch;
+}
+[data-look='corporate'] .label {
+  padding: 0 2.96vmin;
+  font: var(--lk-label-weight) 1.85vmin / 1 var(--lk-font-label);
+  letter-spacing: var(--lk-label-tracking);
+  text-transform: var(--lk-label-case);
+}
+[data-look='corporate'] .label::before {
+  content: '';
+  width: 0.74vmin;
+  height: 0.74vmin;
+  background: var(--card-accent, var(--ink-accent));
+}
+[data-look='corporate'] .window {
+  padding-left: 2.96vmin;
+}
+
+/* ---------------------------------------------------------------- What is on
+   The clock grows when the weather is off, the weather when the forecast is: the canvas's sizes. */
+:root[data-look='pop'][data-forecast='off'] {
+  --if-clock: 14.8vmin;
+  --if-temp: 12.96vmin;
+  --if-icon: 11.85vmin;
+}
+:root[data-look='pop'][data-weather='off'] {
+  --if-clock: 17.6vmin;
+}
+:root[data-look='poster'][data-forecast='off'] {
+  --if-clock: 16.7vmin;
+  --if-temp: 14.8vmin;
+}
+:root[data-look='poster'][data-weather='off'] {
+  --if-clock: 20.4vmin;
+}
+:root[data-look='night'][data-forecast='off'] {
+  --if-temp: 12.2vmin;
+  --if-icon: 11.1vmin;
+}
+:root[data-look='night'][data-weather='off'] {
+  --if-clock: 14.8vmin;
+}
+:root[data-look='corporate'][data-forecast='off'] {
+  --if-clock: 13.9vmin;
+  --if-temp: 12.2vmin;
+  --if-icon: 10.4vmin;
+}
+:root[data-look='corporate'][data-weather='off'] {
+  --if-clock: 16.7vmin;
+}
+/* Night's clock card fills the rail when it is alone. */
+:where([data-weather='off'])[data-look='night'] .clock {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------- Portrait
+   The rail is a band under the photo (rail right) or over it (rail left): the clock beside the
+   weather, the logo under the clock. */
+:root:where([data-orientation='portrait']) .main {
+  flex-direction: column;
+}
+:root:where([data-orientation='portrait'][data-rail='left']) .main {
+  flex-direction: column-reverse;
+}
+:root:where([data-orientation='portrait']) .rail {
+  width: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  grid-template-rows: min-content 1fr;
+  grid-template-areas: 'clock weather' 'logo weather';
+  align-items: start;
+}
+:root:where([data-orientation='portrait']) .clock {
+  grid-area: clock;
+}
+:root:where([data-orientation='portrait']) .weather {
+  grid-area: weather;
+  align-self: stretch;
+}
+:root:where([data-orientation='portrait']) .rail-logo {
+  grid-area: logo;
+  align-self: end;
+  margin-top: 0;
+}
+:root:where([data-orientation='portrait'][data-logo='off']) .rail {
+  grid-template-rows: 1fr;
+  grid-template-areas: 'clock weather';
+}
+:root:where([data-orientation='portrait'][data-weather='off']) .rail {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 1fr;
+  grid-template-areas: 'clock logo';
+  align-items: center;
+}
+:root:where([data-orientation='portrait'][data-clock='off']) .rail {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 1fr;
+  grid-template-areas: 'weather logo';
+  align-items: center;
+}
+:where([data-orientation='portrait'])[data-look='poster'] .rail {
+  border-left: 0;
+  border-top: var(--if-line);
+}
+:where([data-orientation='portrait'][data-rail='left'])[data-look='poster'] .rail {
+  border-right: 0;
+  border-top: 0;
+  border-bottom: var(--if-line);
+}
+:where([data-orientation='portrait'])[data-look='night'] .clock {
+  align-self: stretch;
+}
+/* Looping motion holds still in portrait: with it running, fades into a portrait countdown
+   dropped over 1% of frames on the Pi (spike/pi-perf/RESULTS.md, Countdown; #218). The crawl runs. */
+:root:where([data-orientation='portrait']) :is(.lk-wobble, .lk-pulse, .lk-ping, .colon, .tick-bar) {
+  animation: none;
+}
+
+/* Figures that change as the time passes keep their width. After each look's `font`, which resets them. */
+[data-look] :is(.rail-time, .chip-time, .temp-now, .hi, .lo) {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes if-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.015);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* The rail slides in from its own side of the screen. */
+@keyframes if-slide {
+  from {
+    opacity: 0;
+    transform: translateX(var(--if-from, 13vmin));
+  }
+}
+:root:where([data-rail='left']) .rail {
+  --if-from: -13vmin;
+}
+:root:where([data-orientation='portrait']) .rail {
+  --if-from: 0;
+}
+@keyframes if-slide-left {
+  from {
+    transform: translateX(-110%);
+  }
+}
+@keyframes if-drop {
+  from {
+    transform: translateY(-110%);
+  }
+}
+@keyframes if-bob {
+  0%,
+  100% {
+    transform: none;
+  }
+  50% {
+    transform: translateY(-0.56vmin);
+  }
+}
+@keyframes if-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+@keyframes if-minute {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}

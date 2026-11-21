@@ -239,6 +239,9 @@ importers:
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
+      '@signforge/template-info-frame':
+        specifier: workspace:*
+        version: link:../../templates/info-frame
       '@signforge/template-menu-board':
         specifier: workspace:*
         version: link:../../templates/menu-board
@@ -381,6 +384,9 @@ importers:
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
+      '@signforge/template-info-frame':
+        specifier: workspace:*
+        version: link:../../templates/info-frame
       '@signforge/template-menu-board':
         specifier: workspace:*
         version: link:../../templates/menu-board
@@ -478,6 +484,9 @@ importers:
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
+      '@signforge/template-info-frame':
+        specifier: workspace:*
+        version: link:../../templates/info-frame
       '@signforge/template-menu-board':
         specifier: workspace:*
         version: link:../../templates/menu-board
@@ -545,6 +554,9 @@ importers:
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
+      '@signforge/template-info-frame':
+        specifier: workspace:*
+        version: link:../../templates/info-frame
       '@signforge/template-looks':
         specifier: workspace:*
         version: link:../template-looks
@@ -711,6 +723,9 @@ importers:
       '@signforge/template-cstore-promo':
         specifier: workspace:*
         version: link:../../templates/cstore-promo
+      '@signforge/template-info-frame':
+        specifier: workspace:*
+        version: link:../../templates/info-frame
       '@signforge/template-looks':
         specifier: workspace:*
         version: link:../template-looks
@@ -930,6 +945,15 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.3.0
         version: 5.3.0
+
+  templates/info-frame:
+    dependencies:
+      '@signforge/template-looks':
+        specifier: workspace:*
+        version: link:../../packages/template-looks
+      '@signforge/template-sdk':
+        specifier: workspace:*
+        version: link:../../packages/template-sdk
 
   templates/menu-board:
     dependencies:
