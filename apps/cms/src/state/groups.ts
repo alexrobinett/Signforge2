@@ -8,7 +8,9 @@
  *
  * Each dialog opened has an id. A request belongs to the dialog that sent it: its pending state and
  * refusal are that dialog's, and an answer that comes once it is closed changes nothing. While
- * Members saves, its checklist takes no change; closed before its writes are sent, it sends none.
+ * a delete or Members save runs, Cancel waits for it (`cancelGroupDialog`), so a save is all or
+ * nothing, and Members' checklist takes no change; a dialog closed another way before its writes
+ * are sent sends none.
  */
 import { orgOnScreen } from '~/lib/live';
 import { isRetired } from '~/lib/screen-status';
@@ -21,7 +23,8 @@ import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, type Drafts } from './versioned-draft';
 
 type DialogOf =
-  | { kind: 'rename' }
+  /** `reloading`: Reload is reading the groups again; the name takes no typing until it reopens. */
+  | { kind: 'rename'; reloading: boolean }
   /** `blockedBy`: the schedule entries `delete_group` was refused for, once it was. */
   | { kind: 'delete'; blockedBy: string[] }
   /** `edits`: the boxes this person changed, by screen; any other shows the group as the page holds it. */
@@ -60,6 +63,8 @@ export interface GroupsSlice {
    * none for no change. A screen revoked meanwhile (its status read again first) is left as it is.
    */
   saveGroupMembers: (orgId: string, group: GroupView) => Promise<void>;
+  /** Cancel, Escape or a click outside: ignored while the dialog's delete or save runs. */
+  cancelGroupDialog: () => void;
   closeGroupDialog: () => void;
 }
 
@@ -116,10 +121,13 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
     groups: { dialog: null, renames: {} },
 
     openGroupRename(orgId, group) {
-      open(orgId, group.id, { kind: 'rename' });
+      open(orgId, group.id, { kind: 'rename', reloading: false });
       renames.open(DIALOG, { orgId, record: group.id, version: group.version, edit: { name: group.name } });
     },
-    nameGroup: (name) => renames.update(DIALOG, () => ({ name })),
+    nameGroup: (name) => {
+      const d = dialog();
+      if (d?.kind === 'rename' && !d.reloading) renames.update(DIALOG, () => ({ name }));
+    },
     async renameGroup(orgId) {
       const d = get().groups.renames[DIALOG];
       if (d?.orgId !== orgId) return;
@@ -128,11 +136,14 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
     },
     async reloadGroupRename(orgId) {
       const d = dialog();
-      if (d?.kind !== 'rename' || d.orgId !== orgId) return;
+      if (d?.kind !== 'rename' || d.reloading || d.orgId !== orgId) return;
+      onDialog(d.id, (x) => (x.kind === 'rename' ? { ...x, reloading: true } : x));
       await queryClient.invalidateQueries({ queryKey: screensQuery(orgId).queryKey, exact: true });
       // Dismissed or replaced meanwhile: that was the person's answer.
       const now = queryClient.getQueryData(screensQuery(orgId).queryKey)?.groups.find((g) => g.id === d.groupId);
-      if (now && dialog()?.id === d.id) get().openGroupRename(orgId, now);
+      if (dialog()?.id !== d.id) return;
+      if (now) get().openGroupRename(orgId, now);
+      else onDialog(d.id, (x) => (x.kind === 'rename' ? { ...x, reloading: false } : x));
     },
 
     askToDeleteGroup: (orgId, groupId) => open(orgId, groupId, { kind: 'delete', blockedBy: [] }),
@@ -179,6 +190,10 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
         if (add.length && dialog()?.id === d.id)
           putGroup(queryClient, orgId, (await callTool('add_group_members', { groupId: group.id, screenIds: add })).group);
       });
+    },
+
+    cancelGroupDialog() {
+      if (!dialog()?.pending) get().closeGroupDialog();
     },
 
     closeGroupDialog() {
