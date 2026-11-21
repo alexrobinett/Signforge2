@@ -381,6 +381,9 @@ importers:
       '@signforge/template-photo-promo':
         specifier: workspace:*
         version: link:../../templates/photo-promo
+      '@signforge/template-sdk':
+        specifier: workspace:*
+        version: link:../../packages/template-sdk
       '@signforge/template-weather':
         specifier: workspace:*
         version: link:../../templates/weather

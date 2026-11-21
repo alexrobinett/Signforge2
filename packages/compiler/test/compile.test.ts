@@ -105,6 +105,29 @@ describe('compileScreen', () => {
     expect(Object.keys(full.files)).toContain('c'.repeat(64));
   });
 
+  it("binds each field of a template with two sources to its own source's snapshot, and carries both sources (#193)", async () => {
+    const input = org();
+    const live = {
+      sources: {
+        weather: { label: 'Weather', source: 'open-meteo', fields: { price: 'current.temperature_2m' } },
+        headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items' } },
+      },
+    } as const;
+    input.templates['base/promo@1.0.0'] = { manifest: { ...promo, live }, html: 'a'.repeat(64) };
+    input.dataSources = [
+      { id: 'forecast', refreshS: 300 },
+      { id: 'news', refreshS: 300 },
+      { id: 'unused', refreshS: 300 },
+    ];
+    const deal = input.spots[0] as Extract<(typeof input.spots)[number], { kind: 'template' }>;
+    deal.bindings = { price: { source: 'forecast', path: 'current.temperature_2m' }, items: { source: 'news', path: 'items' } };
+    const { manifest, problems } = await compileScreen(input, opts());
+    expect(problems).toEqual([]);
+    expect(manifest!.spots.deal).toMatchObject({ bindings: deal.bindings });
+    expect(Object.keys(manifest!.dataSources)).toEqual(['forecast', 'news']);
+    expect(manifest!.templates['base/promo@1.0.0']?.manifest.live).toEqual(live);
+  });
+
   it("carries the sample of each image a template spot shows, and no other image's", async () => {
     const input = org();
     input.files['b'.repeat(64)]!.sample = 'e'.repeat(64);

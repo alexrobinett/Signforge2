@@ -18,7 +18,9 @@
     // The e2e run starts the API from apps/api, serves the player build as the test screen and the spot
     // editor's stage, and seeds the templates with the CLI; declaring them makes Turbo rerun the e2e when
     // one changes, and build the player before the CMS.
+    // The two-source fixture template is built and pushed by the e2e's global setup.
     "apps/cms": {
+      "entry": ["e2e/fixtures/two-sources/main.ts", "e2e/fixtures/two-sources/style.css"],
       "ignoreIssues": { "src/components/ui/**": ["exports"] },
       "ignoreDependencies": ["@signforge/player", "@signforge/template-.*"]
     },

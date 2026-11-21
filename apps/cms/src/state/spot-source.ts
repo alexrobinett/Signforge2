@@ -1,9 +1,10 @@
 /**
  * Where a spot's live data comes from (issue #79): the spot editor's Source section. People choose
  * the source, never the values: a place and units for a weather template, a news feed, a calendar.
- * Choosing one finds or makes the org's data source (`create_data_source`) and binds every live
- * field the template declares (`live.fields`) to it, in the draft the editor saves
- * (src/state/spot-editor.ts). A source another spot uses is left as it is.
+ * Choosing one finds or makes the org's data source (`create_data_source`) and binds every field
+ * the template's source declares (`live.fields`) to it, in the draft the editor saves
+ * (src/state/spot-editor.ts). A source another spot uses is left as it is. A template with several
+ * named sources (#193) has a picker for each, with state of its own.
  *
  * A weather source follows from the place, the units and the template's variables
  * (`weatherSource` in src/lib/live-data.ts), so a second spot for the same place and units reuses it.
@@ -13,7 +14,7 @@
  * bound with a guessed mapping the person then adjusts. What was read is kept (`readTables`) for
  * the stage to play until the source's first poll.
  */
-import { type LiveData, readPath, type TableFeed, type TemplateManifest } from '@signforge/contract';
+import { type LiveSourceDef, readPath, type TableFeed, type TemplateManifest } from '@signforge/contract';
 import { bindAll, type PlaceView, type TableFormat, weatherSource, type WeatherUnits } from '~/lib/live-data';
 import type { SpotView } from '~/lib/spots';
 import { callTool, toolMessage } from '~/lib/tools';
@@ -25,9 +26,8 @@ const SEARCH_DELAY_MS = 300;
 /** A new calendar's look-ahead, as `create_data_source` defaults it. */
 const DEFAULT_HORIZON_DAYS = 30;
 
+/** One source picker's state. */
 interface SpotSourceState {
-  /** The spot this state belongs to; another spot's page starts from `initial`. */
-  spotId: string | null;
   /** The picker is open over a source already bound ("Change source"); a spot with none always shows it. */
   changing: boolean;
   placeQuery: string;
@@ -62,46 +62,57 @@ interface SpotSourceState {
 
 type TableForm = Pick<SpotSourceState, 'tableUrl' | 'tableFormat' | 'rowsPath' | 'tableName'>;
 
-/** What the source actions need of the open spot. */
-export interface SourceTarget {
+/** One source picker on a spot's page: the spot, and the name of the template's source it binds (`liveSources`). */
+export interface PickerRef {
+  spot: Pick<SpotView, 'id'>;
+  source: string;
+}
+
+/** What the source actions need of the open spot and one of its template's sources. */
+export interface SourceTarget extends PickerRef {
   orgId: string;
   spot: SpotView;
   manifest: TemplateManifest;
-  live: LiveData;
+  live: LiveSourceDef;
+}
+
+/** The pickers of one spot's page, by source name; another spot's page starts from none. */
+interface SpotSources {
+  spotId: string | null;
+  pickers: Partial<Record<string, SpotSourceState>>;
 }
 
 export interface SpotSourceSlice {
-  spotSource: SpotSourceState;
+  spotSource: SpotSources;
   /** By source id, the table `read_table` read when the editor added it: the stage plays it until the first poll. */
   readTables: Partial<Record<string, TableFeed>>;
   /** Opens or closes the picker over a bound source; a weather picker opens looking up `placeQuery` (the spot's place). */
-  changeSource: (spotId: string, open: boolean, placeQuery?: string) => void;
+  changeSource: (at: PickerRef, open: boolean, placeQuery?: string) => void;
   /** The place being typed; looked up a moment after typing stops. */
-  typePlace: (spotId: string, query: string) => void;
-  pickUnits: (spotId: string, units: WeatherUnits) => void;
+  typePlace: (at: PickerRef, query: string) => void;
+  pickUnits: (at: PickerRef, units: WeatherUnits) => void;
   /** Binds the weather fields to the forecast for `place`, making that source if the org has none. */
   connectWeather: (target: SourceTarget, place: PlaceView, units: WeatherUnits) => Promise<void>;
-  /** Binds the live fields to one of the org's sources. */
+  /** Binds the source's fields to one of the org's sources. */
   connectSource: (target: SourceTarget, dataSourceId: string) => Promise<void>;
-  openFeedForm: (spotId: string, open: boolean) => void;
+  openFeedForm: (at: PickerRef, open: boolean) => void;
   /** The fallback section opened or closed, as the person toggled it. */
-  toggleFallback: (spotId: string, open: boolean) => void;
-  chooseFeed: (spotId: string, dataSourceId: string) => void;
+  toggleFallback: (at: PickerRef, open: boolean) => void;
+  chooseFeed: (at: PickerRef, dataSourceId: string) => void;
   /** "Change source" has taken focus after a bind. */
-  focusedChange: (spotId: string) => void;
-  editFeed: (spotId: string, change: Partial<Pick<SpotSourceState, 'feedUrl' | 'feedName' | 'horizonDays'>>) => void;
+  focusedChange: (at: PickerRef) => void;
+  editFeed: (at: PickerRef, change: Partial<Pick<SpotSourceState, 'feedUrl' | 'feedName' | 'horizonDays'>>) => void;
   /** Adds the feed in the form as a source and binds the live fields to it. */
   addFeed: (target: SourceTarget, format: 'rss' | 'ical') => Promise<void>;
   /** The table form changed; what was read from the old link no longer shows, unless only the name changed. */
-  editTable: (spotId: string, change: Partial<TableForm>) => void;
+  editTable: (at: PickerRef, change: Partial<TableForm>) => void;
   /** Reads the form's link now (`read_table`), to show its columns and first rows. */
-  readTable: (spotId: string) => Promise<void>;
+  readTable: (at: PickerRef) => Promise<void>;
   /** Adds the link that was read as a source and binds the table fields to it, with a guessed mapping. */
   addTable: (target: SourceTarget) => Promise<void>;
 }
 
 const initial: SpotSourceState = {
-  spotId: null,
   changing: false,
   placeQuery: '',
   places: null,
@@ -124,28 +135,40 @@ const initial: SpotSourceState = {
   error: null,
 };
 
-/** The source state of `spotId`'s page: the store's, or a fresh one for another spot. */
-export const sourceStateOf = (state: SpotSourceState, spotId: string): SpotSourceState => (state.spotId === spotId ? state : initial);
+/** One picker's state: the store's, or a fresh one for another spot's page or a picker not used yet. */
+export const sourceStateOf = (state: SpotSources, at: PickerRef): SpotSourceState =>
+  (state.spotId === at.spot.id && Object.hasOwn(state.pickers, at.source) ? state.pickers[at.source] : undefined) ?? initial;
 
 export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, { queryClient }) => {
-  const source = (spotId: string, change: (s: SpotSourceState) => SpotSourceState) =>
-    set((s) => ({ spotSource: { ...change(sourceStateOf(s.spotSource, spotId)), spotId } }));
-  let searchTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Counts searches, so a slow answer never replaces a newer one. */
-  let searchSeq = 0;
+  const source = (at: PickerRef, change: (s: SpotSourceState) => SpotSourceState) =>
+    set((s) => ({
+      spotSource: {
+        spotId: at.spot.id,
+        pickers: { ...(s.spotSource.spotId === at.spot.id ? s.spotSource.pickers : {}), [at.source]: change(sourceStateOf(s.spotSource, at)) },
+      },
+    }));
+  /** Each picker's pending search, and a count of its searches, so a slow answer never replaces a newer one. */
+  const searches = new Map<string, { timer?: ReturnType<typeof setTimeout>; seq: number }>();
+  const searchOf = (at: PickerRef) => {
+    const key = `${at.spot.id}/${at.source}`;
+    const found = searches.get(key) ?? { seq: 0 };
+    searches.set(key, found);
+    return found;
+  };
 
-  async function search(spotId: string, query: string) {
-    const seq = ++searchSeq;
+  async function search(at: PickerRef, query: string) {
+    const mine = searchOf(at);
+    const seq = ++mine.seq;
     try {
       const places = (await callTool('find_places', { query })).places;
-      if (seq === searchSeq) source(spotId, (s) => ({ ...s, places, searching: false }));
+      if (seq === mine.seq) source(at, (s) => ({ ...s, places, searching: false }));
     } catch (err) {
-      if (seq === searchSeq) source(spotId, (s) => ({ ...s, places: null, searching: false, error: `Could not look the place up: ${toolMessage(err)}` }));
+      if (seq === mine.seq) source(at, (s) => ({ ...s, places: null, searching: false, error: `Could not look the place up: ${toolMessage(err)}` }));
     }
   }
 
   /**
-   * Binds the live fields to `dataSourceId` and sets the fields the source decides (`data`).
+   * Binds the source's fields to `dataSourceId` and sets the fields the source decides (`data`).
    * The stage compiles against the preview's sources and plays the source's snapshot, so both are
    * read first; another spot's source stays as it is.
    */
@@ -162,7 +185,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
       data: { ...d.data, ...data },
       bindings: bindAll(t.manifest, t.live, d.bindings, dataSourceId, columns),
     }));
-    source(t.spot.id, (s) => ({ ...initial, units: s.units, fallbackOpen: s.fallbackOpen, focusChange: true }));
+    source(t, (s) => ({ ...initial, units: s.units, fallbackOpen: s.fallbackOpen, focusChange: true }));
   }
 
   /**
@@ -177,35 +200,36 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
     }
   }
 
-  async function attempt(spotId: string, run: () => Promise<void>) {
-    source(spotId, (s) => ({ ...s, pending: true, error: null }));
+  async function attempt(at: PickerRef, run: () => Promise<void>) {
+    source(at, (s) => ({ ...s, pending: true, error: null }));
     try {
       await run();
     } catch (err) {
-      source(spotId, (s) => ({ ...s, pending: false, error: toolMessage(err) }));
+      source(at, (s) => ({ ...s, pending: false, error: toolMessage(err) }));
     }
   }
 
   return {
-    spotSource: initial,
+    spotSource: { spotId: null, pickers: {} },
     readTables: {},
 
-    changeSource(spotId, changing, placeQuery) {
-      source(spotId, (s) => ({ ...initial, changing, fallbackOpen: s.fallbackOpen }));
-      if (changing && placeQuery) get().typePlace(spotId, placeQuery);
+    changeSource(at, changing, placeQuery) {
+      source(at, (s) => ({ ...initial, changing, fallbackOpen: s.fallbackOpen }));
+      if (changing && placeQuery) get().typePlace(at, placeQuery);
     },
 
-    typePlace(spotId, placeQuery) {
-      clearTimeout(searchTimer);
+    typePlace(at, placeQuery) {
+      const mine = searchOf(at);
+      clearTimeout(mine.timer);
       const query = placeQuery.trim();
-      source(spotId, (s) => ({ ...s, placeQuery, searching: query.length >= 2, error: null, ...(query.length < 2 ? { places: null } : {}) }));
-      if (query.length >= 2) searchTimer = setTimeout(() => void search(spotId, query), SEARCH_DELAY_MS);
+      source(at, (s) => ({ ...s, placeQuery, searching: query.length >= 2, error: null, ...(query.length < 2 ? { places: null } : {}) }));
+      if (query.length >= 2) mine.timer = setTimeout(() => void search(at, query), SEARCH_DELAY_MS);
     },
 
-    pickUnits: (spotId, units) => source(spotId, (s) => ({ ...s, units })),
+    pickUnits: (at, units) => source(at, (s) => ({ ...s, units })),
 
     connectWeather: (t, place, units) =>
-      attempt(t.spot.id, async () => {
+      attempt(t, async () => {
         const wanted = await weatherSource(t.live, place, units);
         const { dataSources } = await queryClient.query(dataSourcesQuery(t.orgId));
         const id = dataSources.some((d) => d.id === wanted.id) ? wanted.id : await create(t.orgId, { ...wanted, format: 'json' });
@@ -218,40 +242,40 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
         await bind(t, id, data);
       }),
 
-    connectSource: (t, dataSourceId) => attempt(t.spot.id, () => bind(t, dataSourceId, {})),
+    connectSource: (t, dataSourceId) => attempt(t, () => bind(t, dataSourceId, {})),
 
-    openFeedForm: (spotId, adding) => source(spotId, (s) => ({ ...s, adding, error: null })),
+    openFeedForm: (at, adding) => source(at, (s) => ({ ...s, adding, error: null })),
 
-    toggleFallback: (spotId, fallbackOpen) => source(spotId, (s) => ({ ...s, fallbackOpen })),
+    toggleFallback: (at, fallbackOpen) => source(at, (s) => ({ ...s, fallbackOpen })),
 
-    chooseFeed: (spotId, feedChoice) => source(spotId, (s) => ({ ...s, feedChoice, error: null })),
+    chooseFeed: (at, feedChoice) => source(at, (s) => ({ ...s, feedChoice, error: null })),
 
-    focusedChange: (spotId) => source(spotId, (s) => ({ ...s, focusChange: false })),
+    focusedChange: (at) => source(at, (s) => ({ ...s, focusChange: false })),
 
-    editFeed: (spotId, change) => source(spotId, (s) => ({ ...s, ...change, error: null })),
+    editFeed: (at, change) => source(at, (s) => ({ ...s, ...change, error: null })),
 
     // A new address, format or path makes what was read stale; a new name does not.
-    editTable: (spotId, change) =>
-      source(spotId, (s) => ({ ...s, ...change, table: Object.keys(change).every((k) => k === 'tableName') ? s.table : null, error: null })),
+    editTable: (at, change) =>
+      source(at, (s) => ({ ...s, ...change, table: Object.keys(change).every((k) => k === 'tableName') ? s.table : null, error: null })),
 
-    async readTable(spotId) {
-      const { tableUrl, tableFormat, rowsPath } = sourceStateOf(get().spotSource, spotId);
-      source(spotId, (s) => ({ ...s, reading: true, table: null, error: null }));
+    async readTable(at) {
+      const { tableUrl, tableFormat, rowsPath } = sourceStateOf(get().spotSource, at);
+      source(at, (s) => ({ ...s, reading: true, table: null, error: null }));
       try {
         const output = await callTool('read_table', {
           feedUrl: tableUrl.trim(),
           format: tableFormat,
           ...(tableFormat === 'json-table' && rowsPath.trim() ? { rowsPath: rowsPath.trim() } : {}),
         });
-        source(spotId, (s) => ({ ...s, reading: false, table: output.table }));
+        source(at, (s) => ({ ...s, reading: false, table: output.table }));
       } catch (err) {
-        source(spotId, (s) => ({ ...s, reading: false, error: toolMessage(err) }));
+        source(at, (s) => ({ ...s, reading: false, error: toolMessage(err) }));
       }
     },
 
     addTable: (t) =>
-      attempt(t.spot.id, async () => {
-        const { tableUrl, tableFormat, rowsPath, tableName, table } = get().spotSource;
+      attempt(t, async () => {
+        const { tableUrl, tableFormat, rowsPath, tableName, table } = sourceStateOf(get().spotSource, t);
         if (!table) return;
         const url = tableUrl.trim();
         const id = await create(t.orgId, {
@@ -266,8 +290,8 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
       }),
 
     addFeed: (t, format) =>
-      attempt(t.spot.id, async () => {
-        const { feedUrl, feedName, horizonDays } = get().spotSource;
+      attempt(t, async () => {
+        const { feedUrl, feedName, horizonDays } = sourceStateOf(get().spotSource, t);
         const id = await create(t.orgId, {
           // Never the address itself: a private calendar's is a secret, and the name is shown.
           name: feedName.trim() || (URL.canParse(feedUrl.trim()) ? new URL(feedUrl.trim()).hostname : 'Feed'),

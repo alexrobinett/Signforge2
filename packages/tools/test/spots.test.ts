@@ -168,6 +168,37 @@ describe('spot bindings', () => {
     });
   });
 
+  it("binds a template's two sources each to a data source of its own, and reads both back (#193)", async () => {
+    const { call, org } = await setup('spots-bind-two');
+    const frame: TemplateManifest = {
+      ...promo,
+      id: 'frame',
+      fields: { ...promo.fields, temp: { type: 'number', label: 'Temperature', default: 72 } },
+      live: {
+        sources: {
+          weather: { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' } },
+          headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items' } },
+        },
+      },
+    };
+    const t = await org.templates.insert({ key: 'frame', name: 'Frame' });
+    const v = await org.templates.versions.insert({
+      templateId: t.id,
+      version: '1.0.0',
+      manifestJson: JSON.stringify(frame),
+      bundleSha256: sha('a'),
+      status: 'approved',
+      checkReportJson: JSON.stringify({ ok: true, bundleBytes: 1234, checks: [], checkedAt: 0, sourcesSha256: sha('0') }),
+    });
+    const bindings = { temp: { dataSourceId: 'weather', path: 'current.temperature_2m' }, items: { dataSourceId: 'news', path: 'items' } };
+    const { spot } = await ok(call('create_spot', { name: 'Frame', kind: 'template', templateVersionId: v.id, assets: {}, bindings }));
+    const spotId = (spot as { id: string }).id;
+    expect(await ok(call('get_spot', { spotId }))).toMatchObject({ spot: { bindings } });
+    const { dataSources } = await ok(call('list_data_sources', {}));
+    for (const id of ['weather', 'news'])
+      expect((dataSources as { id: string; spots: { id: string }[] }[]).find((d) => d.id === id)?.spots).toEqual([expect.objectContaining({ id: spotId })]);
+  });
+
   it('refuses a source the org does not have', async () => {
     const { call, version } = await setup('spots-bind-missing');
     expect(

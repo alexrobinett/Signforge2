@@ -95,7 +95,7 @@ describe('a table template (issue #84)', () => {
 
   it('types its list fields until they are bound, then they are live', () => {
     expect(Object.keys(typedFields(m, {}))).toEqual(['title', 'items']);
-    const bound = bindAll(m, m.live!, {}, 'src_menu', ['Item', 'Price']);
+    const bound = bindAll(m, manifest.live, {}, 'src_menu', ['Item', 'Price']);
     expect(bound).toEqual({ items: { dataSourceId: 'src_menu', path: 'rows', table: { columns: { name: 'Item', price: 'Price' } } } });
     expect(Object.keys(typedFields(m, bound))).toEqual(['title']);
   });
@@ -120,5 +120,37 @@ describe('a table template (issue #84)', () => {
 
   it('is a source a person added, which the editor never deletes', () => {
     expect(madeByEditor('src_8f2k3j4h5g6f7d8s')).toBe(false);
+  });
+});
+
+describe('a template with two sources (#193)', () => {
+  const live = {
+    sources: {
+      weather: { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'city', units: { temperature: 'unit' } },
+      headlines: { label: 'Headlines', source: 'rss', fields: { items: 'items' } },
+    },
+  } as const;
+  const m: TemplateManifest = {
+    id: 'frame',
+    version: '1.0.0',
+    name: 'Frame',
+    fields: {
+      city: { type: 'text', label: 'City', default: 'Atlanta' },
+      temp: { type: 'number', label: 'Temperature', default: 72 },
+      unit: { type: 'select', label: 'Unit', options: ['°F', '°C'], default: '°F' },
+      items: { type: 'list', label: 'Headlines', default: [], item: { title: { type: 'text', label: 'Title' } } },
+      caption: { type: 'text', label: 'Caption', default: '' },
+    },
+    duration: { defaultMs: 1, minMs: 1, maxMs: 1 },
+    orientations: ['landscape'],
+    uses: [],
+    background: '#000',
+    live: structuredClone(live),
+  };
+
+  it("leaves every source's fields and settings out of the typed ones, and binds one source's fields without touching the other's", () => {
+    expect(Object.keys(typedFields(m, {}))).toEqual(['city', 'caption']);
+    const weather = { temp: { dataSourceId: 'weather-1', path: 'current.temperature_2m' } };
+    expect(bindAll(m, live.sources.headlines, weather, 'news')).toEqual({ ...weather, items: { dataSourceId: 'news', path: 'items' } });
   });
 });

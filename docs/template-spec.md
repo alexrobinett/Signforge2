@@ -42,7 +42,7 @@ The build (`sf build`) bundles these into one self-contained HTML file with the 
 - `orientations`: `landscape`, `portrait` or both.
 - `uses`: list `canvas`, `webgl` or `audio` if the template needs them.
 - `background`: the colour shown around the template when it is letterboxed on an orientation it does not support.
-- `live` (optional): the fields a data source fills. See [Live data](#live-data).
+- `live` (optional): the fields a data source fills, or several data sources by name. See [Live data](#live-data).
 - `protocol` is added by the build: the frame protocol of the SDK it bundled. A rebuilt template speaks the current protocol (2), so it needs a new version; published bundles keep the protocol they were built with, and the player speaks every protocol in `SUPPORTED_PROTOCOLS` (1 and 2).
 
 ## Lifecycle
@@ -124,6 +124,22 @@ Any non-image field can be bound to a data source instead of a fixed value. The 
 - `fields`: each live field's path in the snapshot, as a binding names it (`BINDING_PATH`). Not an image field.
 - `place` (Open-Meteo only): a text field that starts as the name of the place picked. People may still change it.
 - `units` (Open-Meteo only): the select fields that choose the units the forecast is fetched in, `temperature` with options from `°F`, `°C` and `wind` from `mph`, `km/h` (`WEATHER_UNITS`). The CMS sets them with the place, so the numbers and the unit shown always agree.
+
+**Several sources.** A template whose fields come from more than one feed, such as the weather from Open-Meteo and the headlines from a news feed in one frame, names each source under `sources` (#193). Each named source takes the keys above, and a `label`, which the CMS shows over that source's picker; the Source section has one picker for each.
+
+```json
+"live": {
+  "sources": {
+    "weather": { "label": "Weather", "source": "open-meteo", "fields": { "temp": "current.temperature_2m" }, "place": "city", "units": { "temperature": "unit" } },
+    "headlines": { "label": "Headlines", "source": "rss", "fields": { "items": "items" } }
+  }
+}
+```
+
+- A name is an id (`ID_PATTERN`). A field is fed by one source at most, and a field a source names as its `place` or `units` is one no source fills.
+- A spot binds each field to a data source of its own, so each source goes stale, fails or falls back on its own: the weather can show its fallback while the headlines stay live.
+- `liveSources` in `packages/contract` reads either form by name; the one source of a template that declares one is named `source`.
+- A template that declares `sources` needs manifest schema 7 (`MANIFEST_SCHEMA`). A player before #193 refuses it in any manifest, so the server tells it to reload (`canPlay`), as for schema 4. Templates that declare one source are unchanged.
 
 `validateTemplateManifest` checks all of it. A template with no `live` is typed by people. The base templates: weather (`open-meteo`), news (`rss`: `items`, `language`), agenda (`ical`: `events`), menu-board (`table`: `items`).
 

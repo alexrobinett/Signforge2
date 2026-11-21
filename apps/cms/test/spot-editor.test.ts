@@ -2,7 +2,7 @@
 // for a save on its way and publishes the latest edit, and a spot left with an edit waiting is
 // saved (#150). Tool calls go through a stubbed `fetch`, held open until the test answers; the
 // autosave's second is fake time.
-import { PREVIEW_PROTOCOL, type TemplateManifest } from '@signforge/contract';
+import { liveSources, PREVIEW_PROTOCOL, type TemplateManifest } from '@signforge/contract';
 import news from '@signforge/template-news/template.json';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +12,7 @@ import type { SpotView } from '../src/lib/spots';
 import { assetsQuery, spotKeys, spotPreviewQuery, templatesQuery } from '../src/queries/spots';
 import { getDataSource } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
-import { createSpotSourceSlice, type SpotSourceSlice } from '../src/state/spot-source';
+import { createSpotSourceSlice, sourceStateOf, type SpotSourceSlice } from '../src/state/spot-source';
 import { draftOf } from '../src/lib/spots';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
 
@@ -271,7 +271,9 @@ describe('a place picked while a typed edit saves (re-check of #153, 2)', () => 
     void store.getState().saveSpotDraft(v4.id);
     await vi.advanceTimersByTimeAsync(0);
     // The pick starts from the page's spot at 4, then waits on the source's read.
-    const binding = store.getState().connectSource({ orgId: ORG, spot: v4, manifest, live: manifest.live! }, 'dsrc_news');
+    const binding = store
+      .getState()
+      .connectSource({ orgId: ORG, spot: v4, manifest, source: 'source', live: liveSources(manifest.live!).source! }, 'dsrc_news');
     await vi.advanceTimersByTimeAsync(0);
     // Meanwhile the typed edit's save is answered: the spot is at 5.
     answers[0]!({ spot: { ...v4, name: 'Typed', version: 5 } });
@@ -282,5 +284,44 @@ describe('a place picked while a typed edit saves (re-check of #153, 2)', () => 
       version: 5,
       edit: { name: 'Typed', bindings: { items: { dataSourceId: 'dsrc_news' } } },
     });
+  });
+});
+
+describe('a template with two sources (#193)', () => {
+  it("keeps each picker to itself, and binds a source's fields only, leaving the other source's bindings", async () => {
+    const queryClient = new QueryClient();
+    const store = createStore<SpotEditorSlice & SpotSourceSlice>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router, queryClient } as never),
+      ...createSpotSourceSlice(set as never, get as never, { router, queryClient } as never),
+    }));
+    const weather = { label: 'Weather', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'city' } as const;
+    const headlines = { label: 'Headlines', source: 'rss', fields: { items: 'items' } } as const;
+    const manifest: TemplateManifest = { ...(news as unknown as TemplateManifest), live: { sources: { weather, headlines } } };
+    const v4: SpotView = {
+      ...spot('spt_frame', 4),
+      kind: 'template',
+      templateVersionId: 'tpv_frame',
+      url: null,
+      data: {},
+      assets: {},
+      bindings: { temp: { dataSourceId: 'weather-1', path: 'current.temperature_2m' } },
+    };
+    queryClient.setQueryData(spotKeys.one(ORG, v4.id), v4);
+    vi.mocked(getDataSource).mockResolvedValue({ dataSource: { id: 'dsrc_news' }, snapshot: null } as never);
+    const at = (source: string) => ({ spot: v4, source });
+
+    store.getState().editFeed(at('headlines'), { feedUrl: 'https://feeds.example.com/world.rss' });
+    store.getState().openFeedForm(at('weather'), true);
+    expect(sourceStateOf(store.getState().spotSource, at('headlines'))).toMatchObject({ feedUrl: 'https://feeds.example.com/world.rss', adding: false });
+    expect(sourceStateOf(store.getState().spotSource, at('weather'))).toMatchObject({ feedUrl: '', adding: true });
+
+    await store.getState().connectSource({ orgId: ORG, spot: v4, manifest, source: 'headlines', live: headlines }, 'dsrc_news');
+    expect(store.getState().spotEditor.drafts.spt_frame?.edit.bindings).toEqual({
+      temp: { dataSourceId: 'weather-1', path: 'current.temperature_2m' },
+      items: { dataSourceId: 'dsrc_news', path: 'items' },
+    });
+    // The bind closed the headlines picker only.
+    expect(sourceStateOf(store.getState().spotSource, at('headlines')).focusChange).toBe(true);
+    expect(sourceStateOf(store.getState().spotSource, at('weather')).adding).toBe(true);
   });
 });
