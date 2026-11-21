@@ -3,7 +3,7 @@
 import { MANIFEST_SCHEMA, MAX_SYNC_REQUEST_BYTES, MAX_SYNC_SOURCES, type SyncRequest } from '@signforge/contract';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mintCredential } from '../src/device/credential';
 import { parseHeartbeat } from '@signforge/tools';
 import { manifestKey } from '../src/r2';
@@ -134,8 +134,11 @@ describe('play counts', () => {
 describe('the heartbeat', () => {
   it('records last seen, the player version and what the screen reported', async () => {
     const s = await setUp('sync-heartbeat');
-    const before = Date.now();
-    const deviceTime = new Date(Date.now() - 3_600_000).toISOString();
+    // The server's clock (vi.setSystemTime: the Worker runs in the tests' isolate).
+    const now = Date.parse('2026-11-20T12:00:00Z');
+    onTestFinished(() => void vi.useRealTimers());
+    vi.setSystemTime(now);
+    const deviceTime = new Date(now - 3_600_000).toISOString();
     await sync(
       s,
       body({
@@ -148,7 +151,7 @@ describe('the heartbeat', () => {
       }),
     );
     const row = await s.seed.scope.screens.get(s.seed.screen);
-    expect(row?.lastSeenAt).toBeGreaterThanOrEqual(before);
+    expect(row?.lastSeenAt).toBe(now);
     expect(row?.playerVersion).toBe('2.1.0');
     const beat = parseHeartbeat(row!.heartbeatJson);
     expect(beat).toMatchObject({
@@ -158,9 +161,8 @@ describe('the heartbeat', () => {
       dataRejected: { weather: 4 },
       player: { manifestSchemas: [MANIFEST_SCHEMA], protocols: [2] },
     });
-    // The device clock is an hour slow: the drift the server saw is about an hour.
-    expect(beat!.driftMs).toBeGreaterThan(3_590_000);
-    expect(beat!.driftMs).toBeLessThan(3_610_000);
+    // The device clock is an hour slow: the drift the server saw is an hour.
+    expect(beat!.driftMs).toBe(3_600_000);
   });
 
   it('takes a heartbeat from a player that reports every source it has seen, and stores at most MAX_SYNC_SOURCES', async () => {

@@ -325,8 +325,8 @@ describe('a provider data source', () => {
   });
 
   it('reads again once reconnected in place: its sources are polled at once, their backoff gone', async () => {
-    // Backed off by the failed polls: not due for a while yet.
-    for (const id of ['rooms-a', 'rooms-b']) expect((await org().dataSources.get(id))?.nextPollAt).toBeGreaterThan(Date.now());
+    // Backed off by the failed polls: not due even at the last one's time.
+    for (const id of ['rooms-a', 'rooms-b']) expect((await org().dataSources.get(id))?.nextPollAt).toBeGreaterThan(expiresAt + 10 * 60_000);
     const back = await connect(owner, { provider: 'fake', connectionId });
     expect(back.searchParams.get('connected')).toBe(connectionId);
     expect(await org().connections.get(connectionId)).toMatchObject({ status: 'active', lastError: null });

@@ -4,7 +4,7 @@ import type { PairPollResponse, PairStartResponse } from '@signforge/contract';
 import { validatePairPollResponse, validatePairStartResponse } from '@signforge/contract';
 import { createExecutionContext } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { app } from '../src/index';
 import { Client, clockLimits, email, nextIp, testApp } from './client';
 
@@ -65,11 +65,11 @@ describe('pairing', () => {
   });
 
   it('a claimed code gives the screen its credential, and the credential works', async () => {
+    onTestFinished(() => void vi.useRealTimers());
+    vi.setSystemTime('2026-11-20T12:00:00Z');
     const p = await start();
     expect(p.code).toMatch(CODE);
-    const ttl = Date.parse(p.expiresAt) - Date.now();
-    expect(ttl).toBeGreaterThan(14 * 60_000);
-    expect(ttl).toBeLessThanOrEqual(15 * 60_000);
+    expect(p.expiresAt).toBe('2026-11-20T12:15:00.000Z');
     expect(await poll(p)).toEqual({ status: 'waiting' });
 
     // Typed as people type it: lower case, with a space.
