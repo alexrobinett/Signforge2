@@ -39,11 +39,7 @@ function photograph(svg: SVGSVGElement, scale = 4): { width: number; dark: (x: n
 }
 
 describe('qrSvg', () => {
-  const urls = [
-    'https://example.com/',
-    'https://intranet.example.com/floor-plans/pier-9?floor=3&wing=north#lobby',
-    `https://example.com/${'a'.repeat(280)}`,
-  ];
+  const urls = ['https://example.com/', 'https://intranet.example.com/floor-plans/pier-9?floor=3&wing=north#lobby', `https://example.com/${'a'.repeat(280)}`];
 
   for (const url of urls) {
     it(`draws a code a reader decodes back to the address (${url.length} characters)`, () => {
