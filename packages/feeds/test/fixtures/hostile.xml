@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Hostile</title>
+    <link>javascript:alert(1)</link>
+    <image><url>javascript:alert(1)</url></image>
+    <item>
+      <title>A data URL in Media RSS and an enclosure</title>
+      <link>https://hostile.example/1</link>
+      <pubDate>Fri, 20 Nov 2026 12:00:00 +0000</pubDate>
+      <media:content url="data:image/svg+xml;base64,PHN2Zy8+" medium="image" width="4000"/>
+      <enclosure url="file:///etc/passwd" type="image/png"/>
+      <content:encoded><![CDATA[<img src="javascript:alert(1)" width="900"><img src="data:image/png;base64,iVBORw0KGgo=" width="900"><img srcset="file:///etc/shadow 3000w, https://hostile.example/ok.jpg 800w" src="vbscript:x">]]></content:encoded>
+    </item>
+    <item xml:base="file:///var/www/">
+      <title>A file: base turns a relative src into a file URL</title>
+      <link>https://hostile.example/2</link>
+      <pubDate>Fri, 20 Nov 2026 11:00:00 +0000</pubDate>
+      <description>&lt;img src="photo.jpg"&gt;</description>
+    </item>
+    <item>
+      <title>Unclosed tags, an entity-hidden scheme and an attribute without quotes</title>
+      <link>javascript:void(0)</link>
+      <pubDate>Fri, 20 Nov 2026 10:00:00 +0000</pubDate>
+      <description>&lt;img src="&amp;#106;avascript:alert(1)"&gt;&lt;img src=relative.jpg&gt;&lt;img src="https://hostile.example/never-closed.jpg"</description>
+    </item>
+  </channel>
+</rss>
