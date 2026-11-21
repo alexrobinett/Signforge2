@@ -161,6 +161,12 @@ export const publishOutput = z.object({
   screens: z.number().int().describe('Screens it switched'),
   playing: z.number().int().describe('Of those, how many say they are playing it'),
   replaced: z.number().int().describe('Of those, how many a later publish has switched, and do not say they play this one'),
+  open: z
+    .number()
+    .int()
+    .describe(
+      'Of those, how many it still waits on: neither playing, replaced nor revoked. Its rollout is over at 0, and the five-minute check then marks it finished',
+    ),
 });
 
 export const OUTCOMES = ['playing', 'downloading', 'asleep', 'offline', 'waiting', 'fell_back', 'revoked', 'replaced'] as const;

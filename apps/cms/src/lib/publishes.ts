@@ -26,6 +26,9 @@ export function standing(p: PublishView): string {
   return `${p.playing} of ${p.screens}`;
 }
 
+/** Whether a rollout is over, as its page says "complete": it switched screens, and each plays it, was replaced or was revoked. */
+export const rolloutComplete = (p: Pick<PublishView, 'screens' | 'open'>) => p.screens > 0 && p.open === 0;
+
 /** A publish's name as people say it. */
 export const versionName = (p: { revision: number }) => `v${p.revision}`;
 

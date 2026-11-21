@@ -23,11 +23,12 @@ import { parseHeartbeat } from './heartbeat';
 import { keysetPage, pageInput } from './paging';
 import { publishOrg, type DraftPin } from './publishing';
 import { manifestKey } from './r2';
-import { screenState, type ScreenState } from './screen-state';
+import { outcomeOf, tally } from './rollout';
+import { screenState } from './screen-state';
 import { stateInput } from './screens';
 import { unreachableAfterMs } from './settings';
 import { defineTool, notFound, ToolError, type ToolContext } from './tool';
-import { draftRef, type OUTCOMES, outputs, type publishOutput, type ToolOutput } from './outputs';
+import { draftRef, outputs, type publishOutput, type ToolOutput } from './outputs';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -216,19 +217,23 @@ const rollBackPublish = defineTool({
 
 type PublishView = z.output<typeof publishOutput>;
 
-const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[number]): PublishView => ({
-  id: h.id,
-  revision: h.revision,
-  restoresId: h.restoresId,
-  restoresRevision: h.restoresRevision,
-  by: { kind: h.actorKind, id: h.actorId, name: h.actorName },
-  createdAt: h.createdAt,
-  finishedAt: h.finishedAt,
-  reached: h.reached,
-  screens: h.screens,
-  playing: h.applied,
-  replaced: h.replaced,
-});
+const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[number]): PublishView => {
+  const { screens, playing, replaced, open } = tally(h.rollout);
+  return {
+    id: h.id,
+    revision: h.revision,
+    restoresId: h.restoresId,
+    restoresRevision: h.restoresRevision,
+    by: { kind: h.actorKind, id: h.actorId, name: h.actorName },
+    createdAt: h.createdAt,
+    finishedAt: h.finishedAt,
+    reached: h.reached,
+    screens,
+    playing,
+    replaced,
+    open,
+  };
+};
 
 const listPublishes = defineTool({
   name: 'list_publishes',
@@ -249,20 +254,6 @@ const listPublishes = defineTool({
     return { publishes: rows.map(publishView), next };
   },
 });
-
-type Outcome = (typeof OUTCOMES)[number];
-
-/** Where a screen stands on the manifest a publish gave it, from what it reports and its state. */
-function outcomeOf(r: { manifestId: string; desiredManifestId: string | null; reportedManifestId: string | null }, state: ScreenState): Outcome {
-  if (r.reportedManifestId === r.manifestId) return 'playing';
-  if (r.desiredManifestId !== r.manifestId) return 'replaced';
-  if (state.kind === 'asleep') return 'asleep';
-  if (state.kind === 'updating') return 'downloading';
-  if (state.kind === 'unreachable' || state.reason === 'behind') return 'offline';
-  if (state.reason === 'revoked') return 'revoked';
-  if (state.reason === 'fallback') return 'fell_back';
-  return 'waiting';
-}
 
 const getPublish = defineTool({
   name: 'get_publish',
@@ -287,7 +278,7 @@ const getPublish = defineTool({
     const [rows, afterMs] = await Promise.all([org.publishes.rollout(found.id), unreachableAfterMs(org)]);
     const now = Date.now();
     const screens = rows.map((r) => {
-      const state = screenState(stateInput(r, r.status === 'revoked' || r.credentialsRevoked, parseHeartbeat(r.heartbeatJson), afterMs), now);
+      const state = screenState(stateInput(r, r.revoked, parseHeartbeat(r.heartbeatJson), afterMs), now);
       const outcome = outcomeOf(r, state);
       return {
         screenId: r.id,

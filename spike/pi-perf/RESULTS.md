@@ -473,6 +473,21 @@ Medians of the six runs, before against after: overall 0.53 and 0.54%, playing 0
 
 Afterwards the rig went back to the player it had (`index-Dwf3l023.js`, checked in the page after the kiosk restart), on `kiosk.env.cloud`, with the supervisor running.
 
+### Bound fields in player-core (second architecture review, item 4, #155, 2026-11-20)
+
+A snapshot the player is offered is now checked by `packages/player-core/src/bound.ts`, the rule the sync and the poller use too, which also refuses a table that lacks a mapped column; the spot's locale comes from `screenLocale`. Nothing that draws changed. Master (`3cecf24`) against the branch (`fd682f7`), both built with Vite (main script 229.20 and 229.63 kB). #144's method, as for the playback module above: `examples/stress` built once from the branch and served to both players at `http://localhost:8090/cpb155/<build>/`, the full 16-spot playlist, cut, 120 s per run after 10 s to settle, HTTP cache cleared, the service worker bypassed and the origin's storage cleared before each run, the supervisor stopped (the soak logger was already stopped). Six runs per build, from 20:47 to 21:13, in the order before, after, after, before, before, after, after, before, before, after, after, before. Every run drew 7201 or 7202 frames, and nothing was skipped.
+
+| Build | Overall (`all%`) | Playing (`play%`) | Loading next | Worst frame | Prepare median per run (15 each) | Prepare max per run |
+| --- | --- | --- | --- | --- | --- | --- |
+| Before (`3cecf24`) | 0.87, 0.57, 0.58, 0.81, 0.67, 0.68% | 0.20, 0.13, 0.14, 0.11, 0.13, 0.13% | 20.8, 15.2, 15.8, 21.4, 17.8, 19.2% | 300, 117, 134, 367, 250, 117 ms | 281, 285, 257, 296, 267, 246 ms | 747, 470, 653, 804, 517, 634 ms |
+| After (`fd682f7`) | 0.47, 0.49, 0.53, 0.49, 0.72, 0.46% | 0.10, 0.07, 0.11, 0.10, 0.39, 0.14% | 12.7, 13.8, 14.5, 13.5, 12.4, 11.4% | 133, 83, 100, 117, 283, 117 ms | 249, 263, 275, 261, 252, 260 ms | 712, 527, 456, 507, 420, 459 ms |
+
+Medians of the six runs, before against after: overall 0.68 and 0.49%, playing 0.13 and 0.11%, loading next 18.5 and 13.1%. All 90 prepares of each build: median 267 and 262 ms, 90th percentile 440 and 413 ms, over 500 ms 7 and 3 times. No cost. The branch's losses while loading are lower in this session; nothing in the change runs while a spot loads (a snapshot is checked when it is offered, once a minute here), so that is the session's spread, not a gain.
+
+Afterwards the rig went back to the player it had (`index-Bx5JgWcb.js`, checked in the page after the kiosk restart), on `kiosk.env.cloud`, with the supervisor running.
+
+After the review, the player also offers a snapshot it refused for the manifest playing to the next manifest it adopts, when the sync had named that one. The same method, master (`3cecf24`'s player, which master has not changed since) against `6155e28` (main script 229.97 kB), three runs each from 22:01 to 22:14 in the order before, after, after, before, before, after, every run 7201 to 7203 frames with nothing skipped: overall 0.72, 0.44, 0.60% against 0.53, 0.49, 0.54%; playing 0.13, 0.10, 0.20% against 0.13, 0.10, 0.13%; loading next 19.4, 12.1, 13.8% against 14.2, 13.3, 14.0%; all 45 prepares median 257 and 269 ms, 90th percentile 448 and 358 ms, over 500 ms 2 and 0 times. No cost. The rig went back to the same player on `kiosk.env.cloud`, with the supervisor running.
+
 ## The sun and moon cross the sky (issue #70, 2026-11-18)
 
 weather 1.3.0 places the sun or moon on an arc from sunrise, sunset and `now()`, mixes the day and night skies, and adds a dawn or dusk glow, the moon's phase (a `clip-path`) and stars. Four spots with fixed data, with sunrise and sunset set around the time of the run: clear midday, partly cloudy 5 min after sunset (glow, clouds, faint stars), clear night (moon, stars), rain 5 min after sunset (glow muted, rain tiles). Before: master's weather 1.2.1 with `isDay` instead. This branch's player at a subdirectory of the rig, cut, 45 s per spot after 10 s to settle, HTTP cache cleared and the service worker bypassed before each run, the soak logger stopped, `device/pi/isolate.py`'s measurement plus `__sf.prepares`. Order before, after, after, before. Portrait by rotating the output (`wlr-randr --transform 90`; cage resizes Chromium to 1080×1920), restored afterwards.
@@ -658,3 +673,4 @@ python3 ~/spike/run.py <label> compositor compositor:nosandbox filter layout
 ```
 
 Switch modes with `wlr-randr --output HDMI-A-1 --mode 1920x1080@60` (set `XDG_RUNTIME_DIR=/run/user/1000` and `WAYLAND_DISPLAY=wayland-0` first).
+

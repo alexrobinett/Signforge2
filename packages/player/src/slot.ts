@@ -14,7 +14,7 @@ import {
   type Spot,
   type TemplateMessage,
 } from '@signforge/contract';
-import { containedFrames, READY_TIMEOUT_MS, resolveSpotData, TEMPLATE_SANDBOX } from '@signforge/player-core';
+import { containedFrames, READY_TIMEOUT_MS, resolveSpotData, screenLocale, TEMPLATE_SANDBOX } from '@signforge/player-core';
 import { clock, now } from './clock';
 import { liveData, reportRejected } from './data';
 import { getFile } from './source';
@@ -302,7 +302,7 @@ export class Slot {
       (e: MessageEvent<TemplateMessage>) => {
         if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
         if (e.data.type === 'loaded') {
-          const locale = live.manifest.screen.locale ?? 'en-US';
+          const locale = screenLocale(live.manifest);
           const { data, rejected } = resolveSpotData(live.spot, t.manifest.fields, liveData, now(), locale);
           reportRejected(rejected);
           this.post({

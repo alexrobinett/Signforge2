@@ -778,7 +778,7 @@ export const publishes = sqliteTable(
     uniqueIndex('publishes_org_id_uq').on(t.orgId, t.id),
     index('publishes_org_created_idx').on(t.orgId, t.createdAt),
     uniqueIndex('publishes_org_revision_uq').on(t.orgId, t.revision),
-    // The five-minute check reads the rollouts not yet finished, in every org (findFinishedRollouts).
+    // The five-minute check reads the rollouts not yet finished, in every org (findUnfinishedRollouts).
     index('publishes_unfinished_idx').on(t.orgId).where(sql`${t.finishedAt} IS NULL`),
   ],
 );

@@ -114,21 +114,30 @@ describe('guardedFetch', () => {
   });
 
   it('counts the DNS lookups in the deadline, and reports one that runs it out as dns', async () => {
-    const timeoutMs = 50;
-    // A DNS-over-HTTPS server that answers after ten deadlines, unless the request is aborted first.
-    const slowDns: typeof fetch = (_input, init) =>
-      new Promise((answer, reject) => {
-        const late = setTimeout(() => answer(Response.json({ Answer: [{ type: 1, data: '93.184.216.34' }] })), 10 * timeoutMs);
-        init?.signal?.addEventListener('abort', () => {
-          clearTimeout(late);
-          reject(init.signal?.reason);
-        });
-      });
-    const guards = { ...stub({ 'https://feed.test/': ok('late') }).guards, resolve: dohResolver(slowDns), timeoutMs };
-    const start = Date.now();
-    const code = await refusal(guardedFetch('https://feed.test/', {}, guards));
-    // Well under the ~10 deadlines the old separate lookup timer took, with room for a slow runner.
-    expect({ code, inTime: Date.now() - start < 5 * timeoutMs }).toEqual({ code: 'dns', inTime: true });
+    const untilAborted = (signal: AbortSignal | null | undefined) =>
+      new Promise<Response>((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason)));
+    // The lookups run under the fetch's one signal, the one its request gets: its deadline ends whichever is running.
+    const lookups: (AbortSignal | null | undefined)[] = [];
+    const answering: typeof fetch = async (_input, init) => {
+      lookups.push(init?.signal);
+      return Response.json({ Answer: [{ type: 1, data: '93.184.216.34' }] });
+    };
+    let request: AbortSignal | null | undefined;
+    const silentFeed: FetchGuards = {
+      fetch: async (_input, init) => {
+        request = init?.signal;
+        return untilAborted(init?.signal);
+      },
+      resolve: dohResolver(answering),
+      timeoutMs: 20,
+    };
+    expect(await refusal(guardedFetch('https://feed.test/', {}, silentFeed))).toBe('timeout');
+    expect(request).toBeInstanceOf(AbortSignal);
+    expect(lookups).toHaveLength(2);
+    for (const signal of lookups) expect(signal).toBe(request);
+    // A DNS-over-HTTPS server that never answers: only the deadline ends its lookups, and that is a dns refusal.
+    const silentDns: typeof fetch = async (_input, init) => untilAborted(init?.signal);
+    expect(await refusal(guardedFetch('https://feed.test/', {}, { ...stub({}).guards, resolve: dohResolver(silentDns), timeoutMs: 20 }))).toBe('dns');
   });
 
   it("reports Cloudflare's refusal to reach a private address as a blocked address, not the feed's answer", async () => {

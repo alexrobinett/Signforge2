@@ -2,8 +2,9 @@
  * The data-source poller (docs/backend-plan.md, Data sources). A one-minute Cron Trigger claims
  * the sources that are due, in every org, and polls each: a guarded, conditional fetch
  * (./fetch.ts), converted by its format (`@signforge/feeds`), checked against the fields that
- * published spots bind to it (./fit.ts), and written only when the data changed. Screens get the snapshots on
- * their next sync. A table (`csv`, `json-table`) that lacks a column a published spot maps fails
+ * published spots bind to it by the rule a screen keeps a snapshot by (player-core's
+ * `snapshotFit`), and written only when the data changed. Screens get the snapshots on their next
+ * sync. A table (`csv`, `json-table`) that lacks a column a published spot maps fails
  * as `missing-column`, whatever else it fills: the person renamed or dropped a column.
  *
  * A provider source (`format: 'provider'`) is read through its connection's adapter instead
@@ -18,15 +19,15 @@
  * connection's grant when it was refreshed. A failure backs off, doubling the refresh interval
  * up to 6 hours, and keeps the last good snapshot.
  */
-import { type Binding, canonicalJson, MAX_SNAPSHOT_BYTES, missingColumns, readPath, snapshotBytes } from '@signforge/contract';
+import { type Binding, canonicalJson, MAX_SNAPSHOT_BYTES, snapshotBytes } from '@signforge/contract';
 import { claimDueDataSources, type DataSourceRow, type OrgScope, published, scoped } from '@signforge/db';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
+import { type BindingSpot, type BoundField, boundFields, PLAYER_LOCALE, snapshotFit } from '@signforge/player-core';
 import { type ConnectorDeps, connectorDeps, workerFetch } from '../connectors';
 import { type Grant, type ProviderAdapter, ProviderError, type ProviderFetch, providerFetch } from '../connectors/adapter';
 import { openGrant, sealGrant } from '../connectors/vault';
 import { openFeedUrl } from './cipher';
 import { FetchError, type FetchGuards, feedGuards, guardedFetch } from './fetch';
-import { type BoundField, fitsBoundFields } from './fit';
 
 /**
  * Sources polled per run. Each takes three external fetches (two DNS lookups and the feed), more
@@ -140,9 +141,8 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, locator: str
       await org.dataSources.savePoll(row.id, { source, checkedAt: now });
       return;
     }
-    const bound = await boundFields(org, row.id);
-    if (lacksMappedColumn(bound, data)) throw new PollFailure('missing-column');
-    if (!fitsBoundFields(bound, data)) throw new PollFailure('unfit');
+    const { refused } = snapshotFit(await publishedBoundFields(org, row.id), data);
+    if (refused) throw new PollFailure(refused);
     await org.dataSources.savePoll(row.id, { source, snapshot: { version, fetchedAt: now, checkedAt: now, dataJson } });
   } catch (e) {
     if (!(e instanceof PollFailure || e instanceof FetchError || e instanceof FeedError || e instanceof ProviderError)) throw e;
@@ -251,12 +251,6 @@ function convert(format: Exclude<DataSourceRow['format'], 'provider'>, { horizon
   }
 }
 
-/** Whether a table (a `TableFeed`) lacks a column some published spot's table binding names. */
-function lacksMappedColumn(bound: readonly BoundField[], data: unknown): boolean {
-  const columns = readPath(data, 'columns');
-  return Array.isArray(columns) && bound.some((b) => b.binding.table && missingColumns(columns, b.binding.table).length > 0);
-}
-
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -265,29 +259,29 @@ async function sha256(text: string): Promise<string> {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
 /**
- * Screens write numbers into text in their own locale; the poller checks for one in which the
- * value fits, and each screen checks again in its own (`snapshotFit`).
+ * The fields published spots bind to `sourceId` (drafts do not count: screens play what was
+ * published), in each locale the org's screens play in, so the poller refuses only what no screen
+ * would keep; each screen checks again in its own (`snapshotFit`). With no screen yet, the locale
+ * the org gives new ones.
  */
-const FIT_LOCALE = 'en-US';
-
-/** The fields published spots bind to `sourceId`. Drafts do not count: screens play what was published. */
-async function boundFields(org: OrgScope, sourceId: string): Promise<BoundField[]> {
+async function publishedBoundFields(org: OrgScope, sourceId: string): Promise<BoundField[]> {
   const fieldsOf = new Map<string, unknown>();
-  const out: BoundField[] = [];
+  const spots: BindingSpot[] = [];
   for (const draft of await org.spots.list()) {
     const spot = published(draft);
     if (spot?.kind !== 'template' || !spot.bindingsJson || !spot.templateVersionId) continue;
     // Written by the spot tools, which checked them.
     const bindings: Record<string, Binding> = JSON.parse(spot.bindingsJson);
-    for (const [field, binding] of Object.entries(bindings)) {
-      if (binding.source !== sourceId) continue;
-      if (!fieldsOf.has(spot.templateVersionId)) {
-        const version = await org.templates.versions.get(spot.templateVersionId);
-        const manifest: unknown = version ? JSON.parse(version.manifestJson) : undefined;
-        fieldsOf.set(spot.templateVersionId, isObject(manifest) ? manifest.fields : undefined);
-      }
-      out.push({ fields: fieldsOf.get(spot.templateVersionId), field, binding, locale: FIT_LOCALE });
+    if (!Object.values(bindings).some((b) => b.source === sourceId)) continue;
+    if (!fieldsOf.has(spot.templateVersionId)) {
+      const version = await org.templates.versions.get(spot.templateVersionId);
+      const manifest: unknown = version ? JSON.parse(version.manifestJson) : undefined;
+      fieldsOf.set(spot.templateVersionId, isObject(manifest) ? manifest.fields : undefined);
     }
+    spots.push({ id: draft.id, fields: fieldsOf.get(spot.templateVersionId), bindings });
   }
-  return out;
+  if (!spots.length) return [];
+  const set = await org.screens.locales();
+  const locales = set.length ? set : [(await org.settings.get())?.locale ?? null];
+  return boundFields(spots, [...new Set(locales.map((l) => l ?? PLAYER_LOCALE))]).get(sourceId) ?? [];
 }
