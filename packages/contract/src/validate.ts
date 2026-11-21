@@ -1031,7 +1031,10 @@ export function checkTemplateBundle(input: { manifest: unknown; html: string; so
 
   const network: string[] = [];
   // Protocol-relative too: a stylesheet style.css imports reaches the bundle without the source lint.
-  if (/\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) || /url\(\s*["']?(?:https?:)?\/\//i.test(html))
+  // In the bundle's styles, any quoted string that is a network address: `image-set("//x" 1x)` is
+  // fetched with no url() around it. Comments go first, a font licence notice's addresses with them.
+  const styles = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]!.replace(/\/\*[\s\S]*?\*\//g, '')).join('\n');
+  if (/\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) || /url\(\s*["']?(?:https?:)?\/\//i.test(html) || /["']\s*(?:https?:)?\/\//i.test(styles))
     network.push('a template may not load anything from the network');
 
   // Comments are stripped first, so a note about `fetch` is not a call to it. `//` after a colon is a URL, and is kept.

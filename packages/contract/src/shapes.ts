@@ -289,7 +289,7 @@ export const TEMPLATE_SCRIPT_START = '"use strict";';
  */
 export const FORBIDDEN_CSS: { pattern: RegExp; reason: string }[] = [
   { pattern: /backdrop-filter\s*:/i, reason: '`backdrop-filter` drops about a fifth of frames over moving content' },
-  { pattern: /@import\b/, reason: 'stylesheets must be bundled, not imported at run time' },
+  { pattern: /@import\b/i, reason: 'stylesheets must be bundled, not imported at run time' },
 ];
 
 /** The checks a built template is put through, by `sf build` and again by the server. */

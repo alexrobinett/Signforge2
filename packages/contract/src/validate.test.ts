@@ -1052,6 +1052,7 @@ describe('forbidden CSS', () => {
 
   it('refuses a bundle that still imports a stylesheet at run time', () => {
     expect(problems('<style>@import "x.css";.a{color:red}</style>')).toEqual(['stylesheets must be bundled, not imported at run time']);
+    expect(problems('<style>@IMPORT "x.css";</style>')).toEqual(['stylesheets must be bundled, not imported at run time']);
     expect(problems('<style>.a{color:red}</style>')).toEqual([]);
   });
 });
@@ -1069,12 +1070,19 @@ describe('network check', () => {
       '<style>.b{background:url(https://tracker.example/p.gif)}</style>',
       '<img src="//tracker.example/p.gif">',
       "<a href='https://tracker.example/'>",
+      // A string in image-set() is fetched as a URL, with no url() around it.
+      '<style>.b{background-image:image-set("//t.example/p.gif" 1x)}</style>',
+      '<style>.b{background-image:-webkit-image-set("https://t.example/p.gif" 1x)}</style>',
+      "<style>.b{background-image:image-set('data:image/png;base64,AA==' 1x, 'HTTPS://t.example/p.gif' 2x)}</style>",
+      '<style>/* a note */.b{background-image:image-set("//t.example/p.gif" 1x)}</style>',
     ])
       expect(problems(html), html).toEqual(refused);
   });
 
-  it('passes data: URLs and paths', () => {
+  it('passes data: URLs, paths, and network addresses in comments, such as a font licence notice', () => {
     expect(problems('<style>.b{background:url(data:image/png;base64,AA==)}</style><img src="a.png"><a href="#x">')).toEqual([]);
+    const notice = '/*! Copyright 2022 The Inter Project Authors (https://github.com/rsms/inter-tight)\n   see "https://openfontlicense.org" */';
+    expect(problems(`<style>${notice}.b{content:"a"}.c{background-image:image-set("p.png" 1x)}</style>`)).toEqual([]);
   });
 });
 
