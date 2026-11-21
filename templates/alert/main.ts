@@ -27,9 +27,13 @@ defineTemplate({
     document.getElementById('ends')!.textContent = `Ends at ${String(data.endsAt)}`;
 
     // The look kit's toggle convention (docs/template-spec.md, Looks): a mark on the root, and what
-    // is off removed, so the grid closes up. A QR code with no address is off.
+    // is off removed, so the grid closes up. A QR code with no address is off, and so is an empty end.
     const url = String(data.qrUrl);
-    const shown = { qr: data.showQr === true && url !== '', 'issued-by': data.showIssuedBy === true, 'ends-at': data.showEndsAt === true };
+    const shown = {
+      qr: data.showQr === true && url !== '',
+      'issued-by': data.showIssuedBy === true,
+      'ends-at': data.showEndsAt === true && String(data.endsAt) !== '',
+    };
     for (const [mark, on] of Object.entries(shown)) {
       root.setAttribute(`data-${mark}`, on ? 'on' : 'off');
       if (!on) for (const el of document.querySelectorAll(`[data-show="${mark}"]`)) el.remove();

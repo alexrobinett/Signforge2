@@ -1153,8 +1153,9 @@ describe('alert (#200)', () => {
     const off = await read(await k.play({ showQr: false, showIssuedBy: false, showEndsAt: false }));
     expect(off).toEqual({ marks: ['qr=off', 'issued-by=off', 'ends-at=off'], present: [], headline: off.headline, qr: undefined });
     expect(off.headline / on.headline).toBeCloseTo(1.12, 2);
-    // No address, no code.
+    // No address, no code; no end, no "Ends at".
     expect((await read(await k.play({ qrUrl: '' }))).marks[0]).toBe('qr=off');
+    expect((await read(await k.play({ endsAt: '' }))).marks[2]).toBe('ends-at=off');
   });
 
   it('steps the type down until long copy fits', async () => {
