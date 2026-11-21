@@ -90,6 +90,12 @@ describe('XML safety', () => {
       `<!---><a --><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">${rss('')}`,
       `<!--><a --><!DOCTYPE rss [<!ATTLIST rss foo CDATA "bar">]>${rss('')}`,
       `<?xml version="1.0"?><?><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd"><?x ?>${rss('')}`,
+      // `<!---->` ends at the `-->` that starts right after `<!--`, so the DOCTYPE after it is outside.
+      `<?xml version="1.0"?><!----><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd"><!-- -->${rss('')}`,
+      // The validator reads `<?> … ?>` as one PI, the parser `<?>` and then a closing tag that ends at its
+      // first `>`, quotes and all: so the DOCTYPE after it is read, and refused.
+      `<?xml version="1.0"?><?> </a "><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">" > ?>${rss('')}`,
+      `<?xml version="1.0"?><?> </a '><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">' > ?>${rss('')}`,
       // A CDATA section is skipped whole, and a DOCTYPE the parser would read inside the feed is refused too.
       `<![CDATA[<a]]><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">${rss('')}`,
       rss('<item><title>x</title></item><!DOCTYPE rss SYSTEM "http://evil.example/x.dtd">'),
@@ -108,6 +114,7 @@ describe('XML safety', () => {
       '-->',
       '<!-->',
       '<!--->',
+      '<!---->',
       '<?x',
       '<?>',
       '?>',
@@ -118,6 +125,7 @@ describe('XML safety', () => {
       '<a>',
       '</a>',
       '</a "',
+      '<?></a "',
       '<a',
       '>',
       '"',
@@ -171,13 +179,13 @@ describe('XML safety', () => {
       expect({ where, markup, doctype: code === 'doctype' }).toEqual({ where, markup, doctype: read });
     }
     // Distinct documents the parser accepts, of each kind, so the agreement means something: with this
-    // seed, 32,283 distinct documents, of which the parser accepts 426 that it reads a DOCTYPE in and
-    // 2,422 that it reads none in. A walk changed to end a tag, comment or CDATA a character off, to
-    // skip no quotes in a tag or one too many in a PI, or to read CDATA as a tag, fails here; a closing
-    // tag that skips quotes cannot be told apart, as the parser's validator refuses any quote there.
+    // seed, 32,487 distinct documents, of which the parser accepts 414 that it reads a DOCTYPE in and
+    // 2,507 that it reads none in. A walk changed to end a tag, comment or CDATA a character off, to
+    // skip no quotes in an opening tag, quotes in a closing tag or one character too many after a
+    // quote, or to read CDATA as a tag, fails here.
     expect(seen.size).toBeGreaterThan(32_000);
-    expect(distinct.read).toBeGreaterThanOrEqual(400);
-    expect(distinct.notRead).toBeGreaterThanOrEqual(2_400);
+    expect(distinct.read).toBeGreaterThanOrEqual(390);
+    expect(distinct.notRead).toBeGreaterThanOrEqual(2_450);
   });
 
   it('refuses a prolog whose processing instruction or comment is never closed', () => {
