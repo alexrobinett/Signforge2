@@ -711,6 +711,39 @@ The same player and method, the bundles rebuilt with the fonts' licence notice (
 - The photo is also most of the prepare: with it off, prepares fall from about 480 to about 330 ms, as photo-promo's decode cost (Photo samples, above).
 - Dropping `will-change` does not help.
 
+## The Announcement (issue #197, 2026-11-21)
+
+`templates/announcement` in each look, everything on: eyebrow, headline, body, three facts, the meta line and a QR code (`https://example.com/pier-9`) beside a 4K photo (river-4k, scaled by `sf build` to the screen's rendition). Same method as The look kit above: the branch's player at `http://localhost:8090/cp197/`, content built per orientation, each look a spot of 10 s played on its own, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed, the supervisor stopped, `__sf.prepares` read after each spec, portrait set with `wlr-randr --transform 90`. Bundle 397,258 bytes with all four looks (349,236 of it the looks' fonts). Measured at 059d2d8; the one later change to the bundle drops a check for a photo that every spot has.
+
+| Orientation | Transition | Look | Overall | Playing | Loading next | Worst frame | Prepares after the first (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | Pop | 0.39% | 0.00% | 9.6% | 67 ms | 476, 397, 410, 392 |
+| | | Poster | 0.28% | 0.00% | 5.2% | 50 ms | 432, 464, 530, 590 |
+| | | Night | 0.39% | 0.00% | 11.3% | 67 ms | 330, 329, 344, 343 |
+| | | Corporate | 0.28% | 0.00% | 7.6% | 50 ms | 493, 406, 340, 322 |
+| | fade | Pop | 0.33% | 0.00% | 8.1% | 50 ms | 396, 394, 412, 409 |
+| | | Poster | 0.33% | 0.00% | 7.6% | 50 ms | 478, 433, 428, 445 |
+| | | Night | 0.56% | 0.12% | 11.6% | 67 ms | 313, 378, 364, 394 |
+| | | Corporate | 0.33% | 0.00% | 10.2% | 50 ms | 330, 311, 311, 343 |
+| portrait | cut | Pop | 0.61% | 0.12% | 5.9% | 67 ms | 798, 847, 868, 827 |
+| | | Poster | 0.56% | 0.30% | 4.2% | 50 ms | 595, 609, 641, 691 |
+| | | Night | 0.39% | 0.12% | 6.5% | 50 ms | 428, 428, 423, 422 |
+| | | Corporate | 0.56% | 0.35% | 5.1% | 50 ms | 449, 427, 427, 424 |
+| | fade | Pop | 1.22% | 0.13% | 6.4% | 67 ms | 819, 880, 920, 1049 |
+| | | Poster | 0.56% | 0.19% | 5.4% | 50 ms | 596, 612, 611, 610 |
+| | | Night | 0.89% | 0.18% | 5.1% | 67 ms | 434, 428, 445, 427 |
+| | | Corporate | 0.61% | 0.24% | 5.4% | 50 ms | 502, 421, 402, 419 |
+
+Prepare medians over cut and fade (8 each, the first left out): landscape Pop 403, Poster 455, Night 344, Corporate 335 ms; portrait Pop 858, Poster 611, Night 428, Corporate 426 ms. Each spec's first prepare follows a cold load: 612 to 857 ms in landscape, 929 to 1,095 ms in portrait. While fading, landscape dropped 0% and portrait 1 to 10% of the transition's frames. Nothing was skipped.
+
+- **Within budget in landscape**, every look under 1% overall and none dropped while playing (Night 0.12% in one run), prepares under 500 ms at the median.
+- **Portrait: frames within budget except Pop with a fade (1.22%), prepares not for Pop and Poster.** Night and Corporate prepare in about 425 ms, Poster in about 610 and Pop in about 860.
+- **What the portrait prepares are made of** (portrait, cut, one run each, prepares after the first): Pop with the photo off 293 to 307 ms, Pop with the facts off 528 to 548, Poster with the photo off 228 to 262. So the photo is most of it, as in The look kit and Photo samples above, and in Pop the facts on top (with them its long-copy fitting takes a step, below). Not the cause: `text-wrap: balance` and `pretty` (Pop 810 to 846, Poster 611 to 670 with plain wrapping), Pop's tilted card and Poster's ink block (Pop 815 to 988, Poster 595 to 665 without them), Bricolage Grotesque's optical sizes (landscape, Pop 396 to 413 with `font-optical-sizing: none`). Night and Corporate carry the same photo at about 425 ms, so why it costs Pop and Poster more is not found yet.
+- **Fitting long copy costs a layout per step.** The first build stepped the headline down one size at a time, with the sizes set on the root: Pop, which needs three steps for the default copy in landscape, prepared in 553 to 624 ms (cut). Setting them on the copy and searching the steps by halves brought it to about 400 ms.
+- **Pop's photo stands straight.** The canvas tilts it 2°; tilted, a drifting photo in a rounded frame dropped 0.77% of frames while playing in landscape (cut, 1.22% overall). Upright, 0.00%.
+- Two single long frames came in variants that do not ship (300 ms in the optical-size variant, 333 ms in the plain-wrapping one), both while playing; neither came in the 16 runs of the table.
+- **The QR code** (version 2, 25 modules and the quiet zone) read back with jsQR from the player's own screenshot (CDP `Page.captureScreenshot`) of Night and Pop in landscape, and still at 30% of the screenshot's size (25% for Night), about 1.4 to 1.6 screen pixels per camera pixel. It was not photographed with a phone (see the PR).
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
