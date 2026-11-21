@@ -1083,6 +1083,15 @@ describe('announcement (#197)', () => {
   const demo = kits[1]![1];
   const photo = { photo: '#808080' };
   const qrUrl = 'https://example.com/floor-plan';
+  /** Every element on: a QR address and three facts, which the template's defaults leave empty (no board but Corporate's has facts). */
+  const everything: Data = {
+    qrUrl,
+    facts: [
+      { label: 'Date', value: 'Monday 7 December' },
+      { label: 'Tours', value: '9 to 11 am' },
+      { label: 'Where', value: 'Pier 9, lobby' },
+    ],
+  };
   /** The kit's logo: only a kit with one shows it. */
   const logo = '#ff00ff';
   const t = () => built.get('announcement')!;
@@ -1153,7 +1162,7 @@ describe('announcement (#197)', () => {
       const found: string[] = [];
       for (const look of looks)
         for (const [variant, data] of variants) {
-          const f = await k.play({ look, qrUrl, ...data }, demo, undefined, logo);
+          const f = await k.play({ look, ...everything, ...data }, demo, undefined, logo);
           for (const p of await layoutProblems(f)) found.push(`${look}, ${variant}: ${p}`);
         }
       expect(found).toEqual([]);
@@ -1166,7 +1175,7 @@ describe('announcement (#197)', () => {
       for (const [kit, theme] of kits)
         for (const look of looks)
           for (const [variant, data] of [variants[0]!, ['photo and body off', { showPhoto: false, showBody: false }]] as const) {
-            const f = await k.play({ look, qrUrl, ...data }, theme, undefined, logo);
+            const f = await k.play({ look, ...everything, ...data }, theme, undefined, logo);
             for (const l of await paintedContrast(k.hst.page, f, '.stage')) found.push(`${look}, ${kit}, ${variant}: ${l}`);
           }
       expect(found).toEqual([]);
@@ -1188,14 +1197,14 @@ describe('announcement (#197)', () => {
         };
       });
     for (const look of looks) {
-      const on = await measure(await k.play({ look, qrUrl }, demo, undefined, logo));
+      const on = await measure(await k.play({ look, ...everything }, demo, undefined, logo));
       expect(on.marks, look).toEqual(['photo=on', 'qr=on', 'eyebrow=on', 'body=on', 'meta=on', 'facts=on', 'logo=on']);
       expect(on.present, look).toEqual(['.photo', '.qr', '.eyebrow', '.body', '.meta', '.facts', '.logo']);
-      const off = await measure(await k.play({ look, qrUrl, ...allOff }, demo, undefined, logo));
+      const off = await measure(await k.play({ look, ...everything, ...allOff }, demo, undefined, logo));
       expect(off.marks, look).toEqual(['photo=off', 'qr=off', 'eyebrow=off', 'body=off', 'meta=off', 'facts=off', 'logo=off']);
       expect(off.present, look).toEqual([]);
-      expect((await measure(await k.play({ look, qrUrl, showPhoto: false }))).headline, look).toBeGreaterThan(on.headline);
-      const noQr = await measure(await k.play({ look, qrUrl, showQr: false }, demo, undefined, logo));
+      expect((await measure(await k.play({ look, ...everything, showPhoto: false }))).headline, look).toBeGreaterThan(on.headline);
+      const noQr = await measure(await k.play({ look, ...everything, showQr: false }, demo, undefined, logo));
       // Night's code stands beside the headline, which takes its width; the others' sits in the footer, which closes up to the meta line.
       if (look === 'night') expect(noQr.headlineWidth, look).toBeGreaterThan(on.headlineWidth);
       else expect(noQr.footerTop, look).toBeGreaterThan(on.footerTop);
@@ -1214,21 +1223,39 @@ describe('announcement (#197)', () => {
     }
   });
 
-  it('the QR code is dark on white with its quiet zone in every look and kit, and reads back as its address', async () => {
+  // The defaults at the look's own sizes: no step of the long-copy fitting, which costs a Pi a layout pass each.
+  it("plays the template's defaults, with a photo and a QR code, at the look's own type sizes in every look and orientation", async () => {
+    const steps: string[] = [];
+    for (const orientation of ['landscape', 'portrait'] as const) {
+      const k = await screenFrame(t(), orientation, photo);
+      for (const look of looks) {
+        const f = await k.play({ look, qrUrl });
+        steps.push(
+          `${look}, ${orientation}: ${await f.evaluate(() => getComputedStyle(document.querySelector('.copy')!).getPropertyValue('--fit-headline').trim())}`,
+        );
+      }
+    }
+    expect(steps).toEqual(['landscape', 'portrait'].flatMap((o) => looks.map((l) => `${l}, ${o}: 1`)));
+  });
+
+  it('the QR code is at least 30vmin, dark on white with its quiet zone in every look and kit, and reads back at that size as a 100-character address', async () => {
+    expect(long.qrUrl).toHaveLength(100);
     for (const orientation of ['landscape', 'portrait'] as const) {
       const k = await screenFrame(t(), orientation, photo);
       for (const [kit, theme] of kits)
         for (const look of looks) {
           const f = await k.play({ look, qrUrl: long.qrUrl }, theme);
-          const { fills, clip } = await f.evaluate(() => {
+          const { fills, clip, vmin } = await f.evaluate(() => {
             for (const a of document.getAnimations()) a.currentTime = 3000;
             const svg = document.querySelector('#qr svg')!;
             const r = svg.getBoundingClientRect();
             return {
               fills: [getComputedStyle(svg.querySelector('rect')!).fill, getComputedStyle(svg.querySelector('path')!).fill],
               clip: { x: Math.floor(r.x), y: Math.floor(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) },
+              vmin: r.width / (Math.min(innerWidth, innerHeight) / 100),
             };
           });
+          expect(vmin, `${look}, ${kit}, ${orientation}`).toBeGreaterThanOrEqual(29.9);
           expect(fills, `${look}, ${kit}`).toEqual(['rgb(255, 255, 255)', 'rgb(0, 0, 0)']);
           const png = (await k.hst.page.screenshot({ clip })).toString('base64');
           const rgba = await k.hst.page.evaluate(async (png) => {
@@ -1248,7 +1275,7 @@ describe('announcement (#197)', () => {
     const k = await screenFrame(t(), 'landscape', photo);
     const durationMs = 11_000;
     for (const look of looks) {
-      const f = await k.play({ look, qrUrl }, demo, durationMs, logo);
+      const f = await k.play({ look, ...everything }, demo, durationMs, logo);
       const m = await f.evaluate((durationMs) => {
         const props = new Set<string>();
         for (const a of document.getAnimations())
@@ -1284,7 +1311,7 @@ describe('announcement (#197)', () => {
     const k = await screenFrame(t(), 'landscape', photo);
     await k.hst.page.emulateMedia({ reducedMotion: 'reduce' });
     for (const look of looks) {
-      const f = await k.play({ look, qrUrl }, demo, undefined, logo);
+      const f = await k.play({ look, ...everything }, demo, undefined, logo);
       await k.hst.post('fresh', 'play');
       const still = await f.evaluate(() => ({
         animations: document.getAnimations().length,

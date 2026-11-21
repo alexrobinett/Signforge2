@@ -76,10 +76,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "bd8c0e3ecf210d7e1b8e2b838f71c5c8c4af3e79b966ff1e31353b9794d5f86d": {
-      "size": 397258,
-      "type": "text/html"
-    },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
       "sample": "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd",
       "size": 182996,
@@ -105,9 +101,13 @@
       "sample": "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f",
       "size": 421529,
       "type": "image/jpeg"
+    },
+    "f69dedcbd97fc31f338a5fe1feba800af9768c73e660af2759bddba60683bb9d": {
+      "size": 398022,
+      "type": "text/html"
     }
   },
-  "id": "33f25935912edeab79ef440f94058360b58d900f733b374a2524fadb9bdc50e7",
+  "id": "d7b178d3e6f2f974e55263d7fd37d8e3ddba0c63861cd0452375c866cf7b4d42",
   "playlists": {
     "stress": {
       "id": "stress",
@@ -187,20 +187,7 @@
       "data": {
         "body": "Come for coffee, a tour and the first look at the roof terrace.",
         "eyebrow": "Company news",
-        "facts": [
-          {
-            "label": "Date",
-            "value": "Monday 7 December"
-          },
-          {
-            "label": "Tours",
-            "value": "9 to 11 am"
-          },
-          {
-            "label": "Where",
-            "value": "Pier 9, lobby"
-          }
-        ],
+        "facts": [],
         "headline": "Pier 9 opens on Monday",
         "look": "night",
         "meta": "From the People Team · 20 November",
@@ -712,7 +699,7 @@
       }
     },
     "base/announcement@1.0.0": {
-      "html": "bd8c0e3ecf210d7e1b8e2b838f71c5c8c4af3e79b966ff1e31353b9794d5f86d",
+      "html": "f69dedcbd97fc31f338a5fe1feba800af9768c73e660af2759bddba60683bb9d",
       "manifest": {
         "background": "#000000",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
@@ -735,20 +722,7 @@
             "type": "text"
           },
           "facts": {
-            "default": [
-              {
-                "label": "Date",
-                "value": "Monday 7 December"
-              },
-              {
-                "label": "Tours",
-                "value": "9 to 11 am"
-              },
-              {
-                "label": "Where",
-                "value": "Pier 9, lobby"
-              }
-            ],
+            "default": [],
             "item": {
               "label": {
                 "label": "Label",

@@ -20,7 +20,8 @@ body {
 :root {
   --fit-headline: 1;
   --fit-body: 1;
-  --qr: 20vmin;
+  /* At least 30vmin in every look: 324 px at 1080p, about 20 cm on a 55-inch panel (docs/template-spec.md). */
+  --qr: 30vmin;
 }
 :root[data-photo='off'] {
   --lk-scale: var(--lk-step);
@@ -154,6 +155,8 @@ body {
 }
 /* The code is always dark on white with its quiet zone, whatever the look or the kit: readers need it. */
 .tile {
+  /* The code itself is --qr wide: a look's border or frame goes outside it. */
+  box-sizing: content-box;
   flex: none;
   width: var(--qr);
   height: var(--qr);
@@ -217,10 +220,10 @@ body {
   grid-template-areas:
     'eyebrow eyebrow logo'
     'headline headline headline'
-    'body body body'
-    'facts facts facts'
-    '. . .'
-    'qr meta meta';
+    'body body qr'
+    'facts facts qr'
+    '. . qr'
+    'meta meta qr';
 }
 [data-look='pop'] .eyebrow {
   margin-bottom: var(--lk-gap);
@@ -263,8 +266,11 @@ body {
 }
 [data-look='pop'] .qr {
   --lk-motion: var(--lk-badge-motion);
-  margin-right: 3.7vmin;
-  padding: 1.7vmin 3.7vmin 1.7vmin 1.7vmin;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.5vmin;
+  margin-left: 3.7vmin;
+  padding: 1.7vmin;
   border-radius: 3.3vmin;
   background: var(--lk-accent);
   color: var(--lk-on-accent);
@@ -274,15 +280,13 @@ body {
   line-height: 1.05;
 }
 [data-look='pop'] .tile {
-  --qr: 18.5vmin;
   border-radius: 1.4vmin;
   overflow: hidden;
 }
 [data-look='pop'] .qr-label {
-  max-width: 8em;
-}
-[data-look='pop'] .meta {
-  align-self: center;
+  max-width: var(--qr);
+  padding-inline: 0.4em;
+  -webkit-line-clamp: 2;
 }
 [data-look='pop'] .meta-in {
   -webkit-line-clamp: 3;
@@ -302,22 +306,24 @@ body {
   border-radius: var(--lk-radius);
 }
 :where([data-orientation='portrait'])[data-look='pop'] .copy {
-  grid-template-rows: min-content min-content min-content min-content minmax(0, 1fr) min-content min-content;
   grid-template-areas:
     'eyebrow eyebrow logo'
     'headline headline headline'
     'body body body'
     'facts facts facts'
     '. . .'
-    'qr qr qr'
-    'meta meta meta';
+    'qr meta meta';
 }
 :where([data-orientation='portrait'])[data-look='pop'] .qr {
-  justify-self: start;
-  margin-right: 0;
+  margin: var(--lk-gap) 3.7vmin 0 0;
 }
 :where([data-orientation='portrait'])[data-look='pop'] .photo {
   flex-basis: 30vh;
+}
+
+/* Without the code, Pop's and Poster's copy takes its column. */
+:is([data-look='pop'], [data-look='poster']):where([data-qr='off']) :is(.body, .facts, .foot-rule, .meta) {
+  grid-column: 1 / -1;
 }
 
 /* Poster: a printed bill. A ruled header, a serif headline that slides out of its mask, a ruled
@@ -326,6 +332,17 @@ body {
 [data-look='poster'] .copy {
   padding: 6.7vmin 8.1vmin 6.7vmin 8.9vmin;
   grid-template-rows: min-content min-content min-content min-content min-content minmax(0, 1fr) min-content min-content;
+  grid-template-areas:
+    'eyebrow eyebrow logo'
+    'rule rule rule'
+    'headline headline headline'
+    'body body qr'
+    'facts facts qr'
+    '. . qr'
+    'frule frule qr'
+    'meta meta qr';
+}
+:where([data-orientation='portrait'])[data-look='poster'] .copy {
   grid-template-areas:
     'eyebrow eyebrow logo'
     'rule rule rule'
@@ -382,7 +399,10 @@ body {
   color: var(--lk-text);
 }
 [data-look='poster'] .qr {
-  flex-direction: row-reverse;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1.5vmin;
+  align-self: end;
   margin-left: 3.7vmin;
   font-family: var(--lk-font-label);
   font-weight: var(--lk-label-weight);
@@ -396,14 +416,19 @@ body {
 }
 [data-look='poster'] .qr-label {
   text-align: right;
-  max-width: 11em;
+  max-width: var(--qr);
+  -webkit-line-clamp: 2;
 }
+/* The look gives the photo no motion of its own: the ink block uncovers it. It still fades in under
+   the block, so it starts unpainted and the first frames before play do not decode it for the screen
+   while the SDK's decode waits (photo-promo, #168). */
 [data-look='poster'] .photo {
+  --lk-motion: lk-fade;
   flex-basis: 42.7vw;
   border-left: var(--lk-rule) solid var(--lk-text);
 }
 :where([data-orientation='portrait'])[data-look='poster'] .photo {
-  flex-basis: 36vh;
+  flex-basis: 33vh;
   border-left: 0;
   border-bottom: var(--lk-rule) solid var(--lk-text);
 }
@@ -423,7 +448,7 @@ body {
     'photo photo'
     'headline qr'
     'body qr'
-    'facts facts';
+    'facts qr';
 }
 /* Without the code, the copy takes its column. */
 [data-look='night']:where([data-qr='off']) :is(.headline-box, .body) {
@@ -436,7 +461,7 @@ body {
     'photo photo'
     'headline qr'
     'body qr'
-    'facts facts';
+    'facts qr';
 }
 [data-look='night']:where([data-photo='off']) .stage {
   grid-template-rows: min-content min-content minmax(0, 1fr) min-content min-content min-content;
@@ -526,13 +551,20 @@ body {
   text-align: center;
 }
 [data-look='night'] .tile {
-  box-sizing: content-box;
   padding: 1.5vmin;
   border-radius: 2.6vmin;
   background: var(--lk-primary);
 }
 :where([data-orientation='portrait'])[data-look='night'] .stage {
   grid-template-rows: min-content min-content minmax(34%, 1fr) min-content min-content min-content;
+}
+/* In portrait the headline and the facts take the width and the code stands beside the body (row 5). */
+:where([data-orientation='portrait'])[data-look='night'] :is(.headline-box, .facts) {
+  grid-column: 1 / -1;
+}
+:where([data-orientation='portrait'])[data-look='night'] .qr {
+  grid-row: 5 / 6;
+  margin-top: 2.2vmin;
 }
 :where([data-orientation='portrait'])[data-look='night']:where([data-photo='off']) .stage {
   grid-template-rows: min-content min-content minmax(0, 1fr) min-content min-content min-content;
@@ -623,7 +655,6 @@ body {
   color: var(--lk-muted);
 }
 [data-look='corporate'] .tile {
-  --qr: 18vmin;
   border: var(--lk-rule) solid var(--lk-rule-color);
 }
 [data-look='corporate'] .qr-label {

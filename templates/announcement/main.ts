@@ -15,6 +15,7 @@ const BODY_STEPS = [1, 0.9, 0.8, 0.72, 0.64];
 defineTemplate({
   async prepare(ctx) {
     const { data, assets } = ctx;
+    // The contract has checked the list against the field before a template sees it: the check here only tells TypeScript.
     const facts: Fact[] = Array.isArray(data.facts) ? data.facts : [];
     const url = String(data.qrUrl);
     // Unpainted until prepare returns: a frame that paints the photo has it decoded for the screen
@@ -57,32 +58,43 @@ defineTemplate({
 });
 
 /**
- * The largest step at which the headline fits its lines and nothing falls below the copy: the
- * headline's size and the body's and facts' step down together, so long copy at a field's
- * `maxLength` ends in its clamp's ellipsis at the smallest step, never past its box. Each step
- * tried is a style and layout pass, which on a Pi costs tens of milliseconds: short copy takes one,
- * anything else a binary search of the rest.
+ * The largest step at which the headline fits its lines and the copy fits the screen, nothing
+ * below the copy and no two of its blocks overlapping: the headline's size and the body's and
+ * facts' step down together, so long copy at a field's `maxLength` ends in its clamp's ellipsis at
+ * the smallest step, never past its box. Each step tried is a style and layout pass, which on a Pi
+ * costs tens of milliseconds: the defaults take one (a test holds them to it), anything else a
+ * binary search of the rest.
  */
 function fit(): void {
   const copy = document.querySelector<HTMLElement>('.copy')!;
   const headline = document.querySelector<HTMLElement>('.headline')!;
   // Glyphs overhang a tight leading by a few pixels; clamped text hides at least a line.
   const clamped = (el: HTMLElement) => el.scrollHeight - el.clientHeight > Number.parseFloat(getComputedStyle(el).fontSize) / 2;
-  // By layout, not by painted boxes: the intros' transforms are not where the copy rests.
-  const overflows = () =>
-    [...copy.children].some((el) => {
-      if (!(el instanceof HTMLElement) || !(el.offsetParent instanceof HTMLElement)) return false;
-      const box = el.offsetParent;
+  // By layout, not by painted boxes: the intros' transforms are not where the copy rests. Overlaps
+  // too: a block spanning the copy's flexible row (the QR code beside the body) is left out of the
+  // rows' sizing, so when the row has no room left it rises over the headline instead of overflowing.
+  const crowded = () => {
+    const blocks = [...copy.children].flatMap((el) => (el instanceof HTMLElement && el.offsetParent instanceof HTMLElement && el.offsetHeight ? [el] : []));
+    return blocks.some((el, i) => {
+      const box = el.offsetParent!;
       // The margin box: a mask's padding for descenders is taken back by its negative margin.
       const bottom = el.offsetTop + el.offsetHeight + Number.parseFloat(getComputedStyle(el).marginBottom);
-      return bottom > box.clientHeight - Number.parseFloat(getComputedStyle(box).paddingBottom) + 1;
+      if (bottom > box.clientHeight - Number.parseFloat(getComputedStyle(box).paddingBottom) + 1) return true;
+      return blocks
+        .slice(i + 1)
+        .some(
+          (o) =>
+            Math.min(el.offsetLeft + el.offsetWidth, o.offsetLeft + o.offsetWidth) - Math.max(el.offsetLeft, o.offsetLeft) > 1 &&
+            Math.min(el.offsetTop + el.offsetHeight, o.offsetTop + o.offsetHeight) - Math.max(el.offsetTop, o.offsetTop) > 1,
+        );
     });
+  };
   // On the copy, not the root: a custom property set on the root restyles the whole document.
   const set = (k: number) => {
     copy.style.setProperty('--fit-headline', String(HEADLINE_STEPS[k]));
     copy.style.setProperty('--fit-body', String(BODY_STEPS[Math.min(k, BODY_STEPS.length - 1)]));
   };
-  const fits = (k: number) => (set(k), !clamped(headline) && !overflows());
+  const fits = (k: number) => (set(k), !clamped(headline) && !crowded());
   if (fits(0)) return;
   let [lo, hi] = [1, HEADLINE_STEPS.length - 1];
   while (lo < hi) {

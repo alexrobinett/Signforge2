@@ -106,8 +106,8 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "bd8c0e3ecf210d7e1b8e2b838f71c5c8c4af3e79b966ff1e31353b9794d5f86d": {
-      "size": 397258,
+    "f69dedcbd97fc31f338a5fe1feba800af9768c73e660af2759bddba60683bb9d": {
+      "size": 398022,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
@@ -115,7 +115,7 @@
       "type": "font/woff2"
     }
   },
-  "id": "419311808e29709da18377ea9e33ff1ddf2f4a1dc1d74f6f29be23218788155d",
+  "id": "98f6d7d024ad08b85068c5f81fec741870f7d86db8e0c25d378ab429d782f9ba",
   "playlists": {
     "all-day": {
       "id": "all-day",
@@ -218,20 +218,7 @@
       "data": {
         "body": "Come for coffee, a tour and the first look at the roof terrace.",
         "eyebrow": "Company news",
-        "facts": [
-          {
-            "label": "Date",
-            "value": "Monday 7 December"
-          },
-          {
-            "label": "Tours",
-            "value": "9 to 11 am"
-          },
-          {
-            "label": "Where",
-            "value": "Pier 9, lobby"
-          }
-        ],
+        "facts": [],
         "headline": "Pier 9 opens on Monday",
         "look": "pop",
         "meta": "From the People Team · 20 November",
@@ -304,7 +291,7 @@
   },
   "templates": {
     "base/announcement@1.0.0": {
-      "html": "bd8c0e3ecf210d7e1b8e2b838f71c5c8c4af3e79b966ff1e31353b9794d5f86d",
+      "html": "f69dedcbd97fc31f338a5fe1feba800af9768c73e660af2759bddba60683bb9d",
       "manifest": {
         "background": "#000000",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
@@ -327,20 +314,7 @@
             "type": "text"
           },
           "facts": {
-            "default": [
-              {
-                "label": "Date",
-                "value": "Monday 7 December"
-              },
-              {
-                "label": "Tours",
-                "value": "9 to 11 am"
-              },
-              {
-                "label": "Where",
-                "value": "Pier 9, lobby"
-              }
-            ],
+            "default": [],
             "item": {
               "label": {
                 "label": "Label",

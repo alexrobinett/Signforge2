@@ -22,11 +22,7 @@
         "label": { "type": "text", "label": "Label", "maxLength": 16 },
         "value": { "type": "text", "label": "Value", "maxLength": 32 }
       },
-      "default": [
-        { "label": "Date", "value": "Monday 7 December" },
-        { "label": "Tours", "value": "9 to 11 am" },
-        { "label": "Where", "value": "Pier 9, lobby" }
-      ]
+      "default": []
     },
     "photo": { "type": "image", "label": "Photo" },
     "qrUrl": { "type": "url", "label": "QR code link", "default": "", "maxLength": 100 },
