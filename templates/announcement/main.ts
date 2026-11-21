@@ -9,8 +9,8 @@ interface Fact {
 
 /** The headline's size at each step, from the look's own down to where 80 characters fit its lines. */
 const HEADLINE_STEPS = [1, 0.86, 0.74, 0.64, 0.56, 0.49, 0.43];
-/** The body's, which needs less room to give: 280 characters at the smallest still clamp to its lines. */
-const BODY_STEPS = [1, 0.9, 0.8, 0.72];
+/** The body's and the facts' (and Poster's signature's), which have less room to give. */
+const BODY_STEPS = [1, 0.9, 0.8, 0.72, 0.64];
 
 defineTemplate({
   async prepare(ctx) {

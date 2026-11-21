@@ -1133,7 +1133,11 @@ describe('announcement (#197)', () => {
       for (const el of document.querySelectorAll<HTMLElement>('.stage :is(.pill, .headline, .body, dt, dd, .qr-label, .meta-in)')) {
         const s = getComputedStyle(el);
         const name = el.className || el.tagName;
-        if (el.scrollWidth > el.clientWidth + 1 && s.textOverflow !== 'ellipsis') out.push(`${name} is cut sideways`);
+        // By the glyphs' boxes: a space hanging past a right-aligned line's end widens scrollWidth but shows nothing.
+        const text = document.createRange();
+        text.selectNodeContents(el);
+        const [g, box] = [text.getBoundingClientRect(), el.getBoundingClientRect()];
+        if ((g.left < box.left - 1 || g.right > box.right + 1) && s.textOverflow !== 'ellipsis') out.push(`${name} is cut sideways`);
         const clamp = Number(s.getPropertyValue('-webkit-line-clamp'));
         const room = clamp * Number.parseFloat(s.lineHeight) + Number.parseFloat(s.paddingTop) + Number.parseFloat(s.paddingBottom);
         if (clamp && el.clientHeight > room + 1) out.push(`${name} shows more than its ${clamp} lines`);
@@ -1248,8 +1252,9 @@ describe('announcement (#197)', () => {
         for (const a of document.getAnimations())
           for (const k of (a.effect as KeyframeEffect).getKeyframes())
             for (const p of Object.keys(k)) if (!['offset', 'computedOffset', 'easing', 'composite'].includes(p)) props.add(p);
+        // Shown, and given a motion by the look: Poster's photo is uncovered by its ink block instead.
         const moving = [...document.querySelectorAll<HTMLElement>('.lk-text, .lk-fade, .lk-badge, .lk-photo, .lk-draw, .lk-cover')].filter(
-          (el) => el.getClientRects().length,
+          (el) => el.getClientRects().length && getComputedStyle(el).getPropertyValue('--lk-motion').trim() !== 'none',
         );
         const unmatched = moving.flatMap((el) => {
           const ends = el
@@ -1268,7 +1273,7 @@ describe('announcement (#197)', () => {
       }, durationMs);
       expect(m.props, look).toEqual(['opacity', 'transform']);
       expect(m.unmatched, look).toEqual([]);
-      expect(m.moving, look).toBeGreaterThan(10);
+      expect(m.moving, look).toBeGreaterThanOrEqual(10);
       expect(m.animated, look).toBeLessThanOrEqual(50);
     }
   });

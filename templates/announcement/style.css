@@ -92,7 +92,7 @@ body {
   line-height: var(--lk-display-leading);
   letter-spacing: var(--lk-display-tracking);
   text-wrap: balance;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
@@ -107,7 +107,7 @@ body {
   line-height: 1.4;
   color: var(--lk-muted);
   text-wrap: pretty;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -137,9 +137,9 @@ body {
   text-overflow: ellipsis;
 }
 .fact dd {
-  font-size: var(--lk-size-title);
+  font-size: calc(var(--lk-size-title) * var(--fit-body));
   line-height: 1.15;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -166,7 +166,7 @@ body {
 .qr-label {
   min-width: 0;
   max-width: 13em;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -180,7 +180,7 @@ body {
   font-size: var(--lk-size-label);
   line-height: 1.45;
   color: var(--lk-muted);
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -250,7 +250,7 @@ body {
 [data-look='pop'] .fact dd {
   font-family: var(--lk-font-display);
   font-weight: 800;
-  font-size: 3.3vmin;
+  font-size: calc(3.3vmin * var(--fit-body));
 }
 [data-look='pop'] .qr,
 [data-look='pop'] .meta {
@@ -361,7 +361,7 @@ body {
 }
 [data-look='poster'] .fact dd {
   font-family: var(--lk-font-display);
-  font-size: 4.6vmin;
+  font-size: calc(4.6vmin * var(--fit-body));
   line-height: 1;
 }
 [data-look='poster'] .foot-rule {
@@ -374,7 +374,7 @@ body {
 [data-look='poster'] .meta-in {
   font-family: var(--lk-font-display);
   font-style: italic;
-  font-size: 4.3vmin;
+  font-size: calc(4.3vmin * var(--fit-body));
   line-height: 1.1;
   color: var(--lk-text);
 }
@@ -421,6 +421,10 @@ body {
     'headline qr'
     'body qr'
     'facts facts';
+}
+/* Without the code, the copy takes its column. */
+[data-look='night']:where([data-qr='off']) :is(.headline-box, .body) {
+  grid-column: 1 / -1;
 }
 [data-look='night']:where([data-logo='off']) .stage {
   grid-template-areas:
@@ -501,7 +505,7 @@ body {
 [data-look='night'] .fact dd {
   font-family: var(--lk-font-display);
   font-weight: 700;
-  font-size: 3vmin;
+  font-size: calc(3vmin * var(--fit-body));
 }
 [data-look='night'] .qr {
   align-self: end;
