@@ -621,7 +621,13 @@ describe('validateTemplateManifest', () => {
     m.live = {
       sources: {
         home: { label: 'Home', source: 'open-meteo', fields: { temp: 'current.temperature_2m' }, place: 'city', units: { temperature: 'unit' } },
-        away: { label: 'Away', source: 'open-meteo', fields: { away: 'current.temperature_2m' }, place: 'city', units: { temperature: 'unit', wind: 'windUnit' } },
+        away: {
+          label: 'Away',
+          source: 'open-meteo',
+          fields: { away: 'current.temperature_2m' },
+          place: 'city',
+          units: { temperature: 'unit', wind: 'windUnit' },
+        },
       },
     };
     expect(validateTemplateManifest(m)).toEqual([
