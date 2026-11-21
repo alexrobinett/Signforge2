@@ -205,11 +205,9 @@ export function pairFix(colors: BrandColors, fg: BrandColor, bg: BrandColor): { 
   return { hex, ratio: ratioText(contrastRatio(hex, colors[bg])) };
 }
 
-/** A few names, then how many more. */
-export function fewNames(list: readonly string[]): string {
-  if (list.length <= 3) return list.join(', ');
-  return `${list.slice(0, 3).join(', ')} and ${list.length - 3} more`;
+/** The screens with these ids, by name as a list of them reads, an id no screen has by itself: a few, then how many more. A kit's reach and its conflicts. */
+export function screensText(ids: readonly string[], screens: readonly { id: string; name: string }[]): string {
+  const names = namesOf(ids, screens);
+  if (names.length <= 3) return names.join(', ');
+  return `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
 }
-
-/** The screens a kit's edits reach (`reach`, by id), named by name: a few, then how many more. */
-export const reachText = (reach: readonly string[], screens: readonly { id: string; name: string }[]) => fewNames(namesOf(reach, screens));

@@ -160,3 +160,66 @@ test('add three selected screens to a group at once, rename a group, refuse to d
   await axe(page);
   await shots(page, '93-phone-screens-needs-attention');
 });
+
+test('groups and screens in name order wherever they are listed, though their ids run the other way (#180)', async ({ page }) => {
+  test.setTimeout(120_000);
+  await signInAs(page, `e2e-group-order-${Date.now()}@example.com`, '192.0.2.76');
+  await createOrg(page, 'Order Deli');
+  // Names given after the ids are known, so each list's id order is the reverse of its name order, and plain string
+  // order puts Screen 10 before Screen 2.
+  const pairs = [await pairScreen(page, 'First', '192.0.2.77'), await pairScreen(page, 'Second', '192.0.2.78')].map((s) => s.id).sort();
+  await tool(page, 'rename_screen', { screenId: pairs[0], name: 'Screen 10' });
+  await tool(page, 'rename_screen', { screenId: pairs[1], name: 'Screen 2' });
+  const made = [];
+  for (const name of ['One', 'Two']) made.push(((await tool(page, 'create_group', { name, screenIds: pairs })) as { group: { id: string } }).group.id);
+  const [zeta, alpha] = made.sort();
+  await tool(page, 'rename_group', { groupId: zeta, name: 'Zeta' });
+  await tool(page, 'rename_group', { groupId: alpha, name: 'Alpha' });
+  const colors = { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' };
+  const kits = [];
+  for (const name of ['Kit A', 'Kit B'])
+    kits.push(
+      ((await tool(page, 'create_brand_kit', { name, colors, idempotencyKey: `${name.replace(' ', '-')}-${Date.now()}` })) as { brandKit: { id: string } })
+        .brandKit.id,
+    );
+  await tool(page, 'assign_brand_kit', { brandKitId: kits[0], groupId: alpha });
+  await tool(page, 'assign_brand_kit', { brandKitId: kits[1], groupId: zeta });
+  const labels = (boxes: ReturnType<Page['getByRole']>) => boxes.evaluateAll((els) => els.map((el) => el.closest('label')?.textContent.trim()));
+
+  // The pair form's groups.
+  await page.goto('/screens');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Pair a screen' }).click();
+  const pair = page.getByRole('dialog', { name: 'Pair a screen' });
+  await expect(pair.getByRole('group', { name: 'Groups' }).getByRole('checkbox')).toHaveCount(2);
+  expect(await labels(pair.getByRole('group', { name: 'Groups' }).getByRole('checkbox'))).toEqual(['Alpha', 'Zeta']);
+  await page.keyboard.press('Escape');
+
+  // A screen's page: its groups in the header, and in its settings.
+  await page.goto(`/screens/${pairs[0]}`);
+  await hydrated(page);
+  await expect(page.getByText('group Alpha, Zeta')).toBeVisible();
+  await page.getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('menuitem', { name: 'Settings and groups…' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings.getByRole('checkbox', { name: 'Alpha' })).toBeVisible();
+  expect(await labels(settings.getByRole('checkbox'))).toEqual(['Alpha', 'Zeta']);
+  await page.keyboard.press('Escape');
+
+  // Settings: the Groups table, and a group's members, Screen 2 before Screen 10.
+  await page.goto('/settings/screens');
+  await hydrated(page);
+  const groups = page.getByRole('region', { name: 'Groups' });
+  await expect(groups.getByRole('rowheader')).toHaveText(['Alpha', 'Zeta']);
+  await groups.getByRole('button', { name: 'Change Alpha' }).click();
+  await page.getByRole('menuitem', { name: 'Members…' }).click();
+  const members = page.getByRole('dialog', { name: 'Screens in Alpha' });
+  await expect(members.getByRole('checkbox')).toHaveCount(2);
+  expect(await labels(members.getByRole('checkbox'))).toEqual(['Screen 2', 'Screen 10']);
+  await page.keyboard.press('Escape');
+
+  // A brand kit's conflict alert: both screens are in groups that chose different kits.
+  await page.goto(`/settings/brand-kits/${kits[0]}`);
+  await hydrated(page);
+  await expect(page.getByText('Screen 2, Screen 10 are in groups that chose different kits')).toBeVisible();
+});

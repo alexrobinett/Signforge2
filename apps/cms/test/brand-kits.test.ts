@@ -8,7 +8,7 @@ import {
   kitDraftOf,
   kitPairs,
   pairFix,
-  reachText,
+  screensText,
   shownColors,
   updateInput,
   withDraftKit,
@@ -175,7 +175,7 @@ describe('withDraftKit', () => {
   });
 });
 
-describe("a kit's reach (#180)", () => {
+describe("a kit's screens, its reach and its conflicts (#180)", () => {
   const screens = [
     { id: 'scr_1', name: 'Window' },
     { id: 'scr_2', name: 'Counter' },
@@ -184,7 +184,7 @@ describe("a kit's reach (#180)", () => {
   ];
 
   it('names the screens it reaches by name, not in the id order the tool lists them, then how many more', () => {
-    expect(reachText(['scr_1', 'scr_2', 'scr_3'], screens)).toBe('Annex, Counter, Window');
-    expect(reachText(['scr_1', 'scr_2', 'scr_3', 'scr_4'], screens)).toBe('Annex, Counter, Lobby and 1 more');
+    expect(screensText(['scr_1', 'scr_2', 'scr_3'], screens)).toBe('Annex, Counter, Window');
+    expect(screensText(['scr_1', 'scr_2', 'scr_3', 'scr_4'], screens)).toBe('Annex, Counter, Lobby and 1 more');
   });
 });
