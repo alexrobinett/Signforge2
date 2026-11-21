@@ -47,6 +47,12 @@ export interface PublishingSlice {
    * their changed playlists and those playlists' changed spots.
    */
   publishSchedule: (orgId: string, entryIds?: string[]) => Promise<void>;
+  /**
+   * Publishes one schedule entry alone, pinned (#181): nobody else's drafts go with it. Its playlist
+   * and that playlist's spots go too only when they have never been published, as the entry cannot
+   * play without them; a published playlist's unpublished edits stay drafts.
+   */
+  publishEntry: (orgId: string, entryId: string) => Promise<void>;
   /** Ends a takeover now: deleted and published alone, in one call (`end_takeover`). */
   endTakeover: (orgId: string, entryId: string) => Promise<void>;
 }
@@ -102,6 +108,19 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
       // One publish toast at a time: the next replaces it.
       id: TOAST_ID,
     });
+  }
+
+  /**
+   * The schedule, playlists and spots, read now, not from the cache: a draft edited in another tab,
+   * or an entry just saved, is pinned at its version now.
+   */
+  async function readDrafts(orgId: string) {
+    const [{ entries }, { playlists }, { spots }] = await Promise.all([
+      queryClient.query({ ...scheduleQuery(orgId), staleTime: 0 }),
+      queryClient.query({ ...playlistsQuery(orgId), staleTime: 0 }),
+      queryClient.query({ ...spotsQuery(orgId), staleTime: 0 }),
+    ]);
+    return { entries, playlists, spots };
   }
 
   async function publish(orgId: string, pins: Pin[], undo = true) {
@@ -175,12 +194,7 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
     },
 
     async publishSchedule(orgId, entryIds) {
-      // Read now, not from the cache: something edited in another tab is pinned at its version now.
-      const [{ entries }, { playlists }, { spots }] = await Promise.all([
-        queryClient.query({ ...scheduleQuery(orgId), staleTime: 0 }),
-        queryClient.query({ ...playlistsQuery(orgId), staleTime: 0 }),
-        queryClient.query({ ...spotsQuery(orgId), staleTime: 0 }),
-      ]);
+      const { entries, playlists, spots } = await readDrafts(orgId);
       const chosen = entries.filter((e) => (entryIds ? entryIds.includes(e.id) : e.draftChanged));
       const needed = new Set(chosen.filter((e) => !e.deleted).map((e) => e.playlistId));
       const lists = playlists.filter((p) => needed.has(p.id));
@@ -194,6 +208,23 @@ export const createPublishingSlice: SliceCreator<PublishingSlice> = (set, get, {
         ],
         !chosen.some((e) => e.takeover),
       );
+    },
+
+    async publishEntry(orgId, entryId) {
+      const { entries, playlists, spots } = await readDrafts(orgId);
+      const entry = entries.find((e) => e.id === entryId);
+      if (!entry) {
+        toast.error('Not published', { description: 'The entry is no longer there: someone may have removed it.' });
+        return;
+      }
+      const playlist = playlists.find((p) => p.id === entry.playlistId);
+      const first = playlist && !playlist.published ? playlist : null;
+      const inIt = new Set(first?.spotIds ?? []);
+      await publish(orgId, [
+        { kind: 'schedule_entry', id: entry.id, version: entry.version },
+        ...(first ? [{ kind: 'playlist', id: first.id, version: first.version } satisfies Pin] : []),
+        ...spots.filter((s) => inIt.has(s.id) && !s.published).map((s): Pin => ({ kind: 'spot', id: s.id, version: s.version })),
+      ]);
     },
 
     async endTakeover(orgId, entryId) {

@@ -66,6 +66,8 @@ export interface ScheduleSlice {
   editEntry: (patch: Partial<EntryDraft>) => void;
   /** Saves the entry as a draft. */
   saveEntry: (orgId: string) => Promise<void>;
+  /** Saves the entry, then publishes it alone (`publishEntry`, #181). */
+  saveAndPublishEntry: (orgId: string) => Promise<void>;
   /** After a conflict: reads the schedule again and opens the entry as it is now, to make the change again. */
   reloadEntry: (orgId: string) => Promise<void>;
   /** Removes an entry: at once if it was never published, else at the next publish. */
@@ -96,7 +98,7 @@ const aim = (d: { target: Target; groupId: string; screenId: string }) => ({
 });
 
 /** The entry's when, as the tools take it: a field left out is null, every day is no days. */
-const entryWhen = (d: EntryDraft) => ({
+export const entryWhen = (d: EntryDraft) => ({
   priority: d.priority,
   days: d.days.length === 7 ? null : d.days,
   from: d.from || null,
@@ -158,6 +160,16 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
     },
   });
 
+  /** Saves the dialog's entry in `orgId`: its id once saved, else null (refused, or the dialog is another org's). The dialog closes once saved, unless another has opened. */
+  async function saveDialogEntry(orgId: string): Promise<string | null> {
+    if (get().schedule.entries[DIALOG]?.orgId !== orgId) return null;
+    // This draft's outcome, though its dialog may have been closed, or opened on another, meanwhile.
+    const saved = await entries.save(DIALOG);
+    if (saved?.status !== 'saved' || saved.record === null) return null;
+    if (get().schedule.entries[DIALOG]?.id === saved.id) entries.drop(DIALOG);
+    return saved.record;
+  }
+
   /** Opens one dialog: the other's draft goes. */
   const close = () => {
     entries.drop(DIALOG);
@@ -214,12 +226,13 @@ export const createScheduleSlice: SliceCreator<ScheduleSlice> = (set, get, { rou
 
     async saveEntry(orgId) {
       const d = get().schedule.entries[DIALOG];
-      if (d?.orgId !== orgId) return;
-      // This draft's outcome, though its dialog may have been closed, or opened on another, meanwhile.
-      const saved = await entries.save(DIALOG);
-      if (saved?.status !== 'saved') return;
-      if (get().schedule.entries[DIALOG]?.id === saved.id) entries.drop(DIALOG);
-      toast.success(d.record === null ? 'Scheduled, as a draft' : 'Saved, as a draft', { description: 'Publish to send it to screens.' });
+      if (await saveDialogEntry(orgId))
+        toast.success(d?.record === null ? 'Scheduled, as a draft' : 'Saved, as a draft', { description: 'Publish to send it to screens.' });
+    },
+
+    async saveAndPublishEntry(orgId) {
+      const record = await saveDialogEntry(orgId);
+      if (record) await get().publishEntry(orgId, record);
     },
 
     async reloadEntry(orgId) {

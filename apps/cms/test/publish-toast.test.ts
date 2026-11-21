@@ -1,7 +1,8 @@
 // The publish toast (M3-19 review): each publish's toast replaces the last one, under one id, and
 // sonner merges what it is given into the toast it replaces. So a takeover's toast, which offers no
 // Undo, must still clear the Undo of the publish before it, whenever it comes. Read from sonner's
-// own store, two publishes in a row, nothing on a timer.
+// own store, two publishes in a row, nothing on a timer. And one entry published alone (#181):
+// what it pins.
 import { QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -99,5 +100,45 @@ describe('the publish toast', () => {
     await s.publishSchedule(ORG, ['sch_flash']);
     expect(publishToast()?.title).toBe('Published v3 to 1 screen');
     expect(undoOf()).toBeUndefined();
+  });
+});
+
+describe('one entry published alone (#181)', () => {
+  const list = (id: string, over: object) => ({ id, name: id, spotIds: [], version: 1, isDefault: false, published: true, draftChanged: false, ...over });
+  const mine = { ...entry('sch_mine', false), playlistId: 'pls_holiday', target: 'screen' as const, screenId: 'scr_1', version: 4 };
+  const theirs = { ...entry('sch_theirs', false), playlistId: 'pls_main' };
+
+  it("pins the entry, with its playlist and the spots in it never published, and nobody else's drafts", async () => {
+    vi.mocked(getPlaylists).mockResolvedValue({
+      playlists: [
+        list('pls_holiday', { published: false, draftChanged: true, version: 3, spotIds: ['spt_new', 'spt_old'] }),
+        list('pls_main', { draftChanged: true }),
+      ],
+    } as never);
+    vi.mocked(getSpots).mockResolvedValue({
+      spots: [
+        list('spt_new', { published: false, draftChanged: true, version: 2 }),
+        list('spt_old', { draftChanged: true, version: 5 }),
+        list('spt_else', { published: false }),
+      ],
+    } as never);
+    const s = setup([mine, theirs]);
+    await s.publishEntry(ORG, 'sch_mine');
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', {
+      drafts: [
+        { kind: 'schedule_entry', id: 'sch_mine', version: 4 },
+        { kind: 'playlist', id: 'pls_holiday', version: 3 },
+        { kind: 'spot', id: 'spt_new', version: 2 },
+      ],
+    });
+    expect(undoOf()).toMatchObject({ label: 'Undo' });
+  });
+
+  it('pins the entry alone when its playlist was published: its edits since stay a draft', async () => {
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [list('pls_holiday', { draftChanged: true, spotIds: ['spt_new'] })] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [list('spt_new', { published: false })] } as never);
+    const s = setup([mine]);
+    await s.publishEntry(ORG, 'sch_mine');
+    expect(vi.mocked(callTool)).toHaveBeenLastCalledWith('publish', { drafts: [{ kind: 'schedule_entry', id: 'sch_mine', version: 4 }] });
   });
 });
