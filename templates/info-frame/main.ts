@@ -1,6 +1,6 @@
 import { applyLook, crawl, LOOKS } from '@signforge/template-looks';
 import { BRAND_LOGO, dayKey, defineTemplate, formatter, now as clockNow, type TemplateContext } from '@signforge/template-sdk';
-import { painted, readableOn } from '@signforge/template-sdk/contrast';
+import { readableOn } from '@signforge/template-sdk/contrast';
 
 type Look = (typeof LOOKS)[number];
 
@@ -77,9 +77,10 @@ defineTemplate({
     const { data, assets, root } = ctx;
     const look = LOOKS.find((l) => l === data.look)!;
     const stage = document.querySelector<HTMLElement>('.stage')!;
-    // Unpainted until prepare returns: a frame that paints the photo has it decoded for the screen
-    // first, and the SDK's decode before ready then waits behind that one (photo-promo, #168).
-    // Poster's, which its ink block covers as play starts, stays unpainted until play.
+    // Unpainted until play: a frame that paints the photo, on a layer of its own while it drifts,
+    // has it decoded for the screen first, and the SDK's decode before ready then waits behind that
+    // one (photo-promo, #168; Announcement, #197). Every look's panel comes in from nothing (Poster's
+    // under its ink block), so no frame shows the change.
     const photo = document.querySelector<HTMLElement>('.photo')!;
     photo.style.visibility = 'hidden';
 
@@ -176,7 +177,6 @@ defineTemplate({
     const title = document.querySelector<HTMLElement>('.title');
     if (caption && title) fitTitle(caption, title);
     inkCards();
-    if (look !== 'poster') photo.style.visibility = '';
   },
   play({ root }) {
     document.querySelector<HTMLElement>('.photo')!.style.visibility = '';
@@ -246,8 +246,9 @@ function fitTitle(caption: HTMLElement, title: HTMLElement): void {
  * Text on a card (the rail, the caption, the chip, the ticker) in the colour the look asks for
  * (`--ink`, `--ink-muted`, `--ink-accent`, `--ink-primary`) where that reads on the card, else
  * black or white, as `--card-text`, `--card-muted`, `--card-accent` and `--card-primary`. An ink
- * may be a mix of tokens: a probe's computed colour resolves it for `painted`. Cards share a few
- * fills, so each is read once.
+ * may be a mix of tokens: probes resolve every ink at once, in one style pass, and the computed
+ * colours are read as they are, with no canvas: on the Pi each forced style pass and each canvas
+ * read cost a prepare milliseconds. Every card's fill is opaque.
  */
 function inkCards(): void {
   const wants = [
@@ -256,23 +257,19 @@ function inkCards(): void {
     ['--ink-accent', '--card-accent'],
     ['--ink-primary', '--card-primary'],
   ] as const;
-  const probe = document.body.appendChild(document.createElement('i'));
-  const seen = new Map<string, string[]>();
-  for (const card of document.querySelectorAll<HTMLElement>('.card')) {
+  const cards = [...document.querySelectorAll<HTMLElement>('.card')].flatMap((card) => {
     const s = getComputedStyle(card);
     // A card that paints nothing keeps the inks of the card under it.
-    if (s.backgroundColor === 'rgba(0, 0, 0, 0)') continue;
-    const asked = wants.map(([ink]) => s.getPropertyValue(ink).trim());
-    const key = `${s.backgroundColor} ${asked.join(' ')}`;
-    if (!seen.has(key)) {
-      const fill = painted(s.backgroundColor);
-      const hex = (ink: string) => ((probe.style.color = ink), painted(getComputedStyle(probe).color));
-      seen.set(
-        key,
-        asked.map((ink) => readableOn(fill, hex(ink))),
-      );
-    }
-    seen.get(key)!.forEach((ink, i) => card.style.setProperty(wants[i]![1], ink));
-  }
-  probe.remove();
+    return s.backgroundColor === 'rgba(0, 0, 0, 0)' ? [] : [{ card, fill: s.backgroundColor, asked: wants.map(([ink]) => s.getPropertyValue(ink).trim()) }];
+  });
+  const probes = new Map([...new Set(cards.flatMap((c) => c.asked))].map((ink) => [ink, document.createElement('i')]));
+  for (const [ink, probe] of probes) probe.style.color = ink;
+  document.body.append(...probes.values());
+  const hex = (computed: string) => {
+    const [r = 0, g = 0, b = 0] = (computed.match(/[\d.]+/g) ?? []).map((v) => (computed.startsWith('color(') ? Number(v) * 255 : Number(v)));
+    return `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+  };
+  const resolved = new Map([...probes].map(([ink, probe]) => [ink, hex(getComputedStyle(probe).color)]));
+  for (const probe of probes.values()) probe.remove();
+  for (const { card, fill, asked } of cards) asked.forEach((ink, i) => card.style.setProperty(wants[i]![1], readableOn(hex(fill), resolved.get(ink)!)));
 }

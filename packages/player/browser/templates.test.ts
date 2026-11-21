@@ -1986,13 +1986,14 @@ describe('info frame (#201)', () => {
     expect((await read(await r.show({ look: 'poster', ...news, crawlSpeed: 'fast' }))).s / normal.s).toBeCloseTo(1 / 1.4, 2);
   });
 
-  it("keeps Poster's photo unpainted until play, under its ink block, and every other look's painted at ready", async () => {
+  it("keeps the photo unpainted until play, under each look's intro", async () => {
     const r = await frame();
-    const hidden = (f: Frame) => f.evaluate(() => getComputedStyle(document.querySelector('.photo')!).visibility === 'hidden');
-    for (const look of looks) expect(await hidden(await r.show({ look })), look).toBe(look === 'poster');
-    const f = await r.show({ look: 'poster' });
-    await r.hst.post('fresh', 'play');
-    await f.waitForFunction(() => getComputedStyle(document.querySelector('.photo')!).visibility === 'visible');
+    for (const look of looks) {
+      const f = await r.show({ look });
+      expect(await f.evaluate(() => getComputedStyle(document.querySelector('.photo')!).visibility), look).toBe('hidden');
+      await r.hst.post('fresh', 'play');
+      await f.waitForFunction(() => getComputedStyle(document.querySelector('.photo')!).visibility === 'visible');
+    }
   });
 
   for (const orientation of ['landscape', 'portrait'] as const)
