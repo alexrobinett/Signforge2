@@ -1285,6 +1285,11 @@ describe('room status (#199)', () => {
       ['in a meeting, the organiser left off', { events: [booking('Design review', -0.25, 0.75, 'Priya Shah')] }],
       // Busy until the last of meetings that follow straight on.
       ['in back-to-back meetings', { events: [booking('Design review', -0.25, 0.75), booking('Hiring sync', 0.75, 1.5), booking('Retro', 3, 3.5)] }],
+      // With the next meeting not shown, the time left still says where it runs to.
+      [
+        'in back-to-back meetings, the next one off',
+        { events: [booking('Design review', -0.25, 0.75), booking('Hiring sync', 0.75, 1.5), booking('Retro', 3, 3.5)], showNext: false },
+      ],
       ['after the last meeting', { events: [booking('Stand-up', -5, -4.5)] }],
       ['with no events', { events: [] }],
       ['with only tomorrow booked', { events: [booking('Retro', 20, 21)] }],
@@ -1313,7 +1318,7 @@ describe('room status (#199)', () => {
       'in a meeting': {
         state: 'busy',
         word: 'In use',
-        for: 'Time left 45 min',
+        for: 'Left, until 3:45 PM 45 min',
         line: 'Until 3:45 PM · Design review',
         org: 'Booked by Priya Shah',
         next: 'Next at 5:00 PM: Hiring sync',
@@ -1323,7 +1328,7 @@ describe('room status (#199)', () => {
       'in a meeting, the organiser left off': {
         state: 'busy',
         word: 'In use',
-        for: 'Time left 45 min',
+        for: 'Left, until 3:45 PM 45 min',
         line: 'Until 3:45 PM · Design review',
         org: null,
         next: null,
@@ -1333,10 +1338,20 @@ describe('room status (#199)', () => {
       'in back-to-back meetings': {
         state: 'busy',
         word: 'In use',
-        for: 'Time left 1 hr 30 min',
+        for: 'Left, until 4:30 PM 1 hr 30 min',
         line: 'Until 3:45 PM · Design review',
         org: null,
         next: 'Next at 3:45 PM: Hiring sync',
+        freeDay: null,
+        allDay: null,
+      },
+      'in back-to-back meetings, the next one off': {
+        state: 'busy',
+        word: 'In use',
+        for: 'Left, until 4:30 PM 1 hr 30 min',
+        line: 'Until 3:45 PM · Design review',
+        org: null,
+        next: null,
         freeDay: null,
         allDay: null,
       },
@@ -1417,8 +1432,8 @@ describe('room status (#199)', () => {
     expect(seen).toEqual({
       'the clocks going back': { line: 'Free until 1:15 AM, then Night shift', left: 'Free for 45 min' },
       'the clocks going forward': { line: 'Free until 3:10 AM, then Early start', left: 'Free for 20 min' },
-      'a meeting into tomorrow': { line: 'Until 1:00 AM · Late shift', left: 'Time left 1 hr 30 min' },
-      'a meeting from yesterday': { line: 'Until 1:30 AM · Late shift', left: 'Time left 1 hr' },
+      'a meeting into tomorrow': { line: 'Until 1:00 AM · Late shift', left: 'Left, until 1:00 AM 1 hr 30 min' },
+      'a meeting from yesterday': { line: 'Until 1:30 AM · Late shift', left: 'Left, until 1:30 AM 1 hr' },
     });
   });
 

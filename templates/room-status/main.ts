@@ -133,7 +133,9 @@ defineTemplate({
     if (current) {
       const until = at(current.end);
       say(look === 'poster' ? `Now, until ${until}` : look === 'night' ? '' : `Until ${until} · `, current.title);
-      put('.for .k', 'Time left');
+      // Where the time left runs to: the end of the meetings that follow on, which the line above, about
+      // the meeting on now alone, does not say.
+      put('.for .k', `Left, until ${at(freeAt!)}`);
       put('.until', `left, until ${at(freeAt!)}`);
     } else if (next) {
       const until = at(next.start);
