@@ -15,6 +15,8 @@ const asleep: ScreenView = {
   orientation: 'landscape',
   kind: 'device',
   displayHours: { weekly: [{ days: [1, 2, 3, 4, 5], from: '12:00', to: '20:00' }] },
+  labels: {},
+  systemLabels: { orientation: 'landscape', kind: 'device', timezone: 'UTC' },
   status: 'active',
   desiredManifestId: 'm1',
   previousManifestId: null,

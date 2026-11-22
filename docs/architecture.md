@@ -35,6 +35,7 @@ SignForge 2 is a ground-up rebuild of a digital signage platform: a CMS, a playe
 - **Playlist**: an ordered, reusable list of spots.
 - **Screen**: one paired device. Has a time zone and an orientation.
 - **Screen group**: a named set of screens.
+- **Label**: a `key=value` fact about a screen (`region=north`, `store=0142`), so a fleet is described by facets rather than a group per facet. Each screen also has read-only system labels from its settings (orientation, kind, timezone, locale). A selector (`region=north, type=drive-thru`) picks screens by both. Labels live on the server: screens never see them.
 - **Schedule**: assigns a playlist to screens, groups or the whole org for a time window.
 - **Data source**: a feed polled by the server. JSON passes through; iCal calendars and RSS or Atom news feeds are converted to fixed shapes (`CalendarFeed`, `NewsFeed`). Any non-image template field, lists included, can bind to a path in one. A template's `live` declares the feed its live fields come from, or several by name (weather and headlines in one frame, #193); a spot binds each field to its own source, and each source's snapshot is kept, checked and goes stale on its own.
 - **Asset**: an uploaded image or video, stored by content hash.

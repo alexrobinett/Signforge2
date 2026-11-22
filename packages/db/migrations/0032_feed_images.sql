@@ -16,6 +16,5 @@ CREATE TABLE `feed_images` (
 	FOREIGN KEY (`org_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE INDEX `feed_images_org_source_sha_idx` ON `feed_images` (`org_id`,`source_sha256`);
---> statement-breakpoint
+CREATE INDEX `feed_images_org_source_sha_idx` ON `feed_images` (`org_id`,`source_sha256`);--> statement-breakpoint
 ALTER TABLE `data_sources` ADD `photos` integer DEFAULT true NOT NULL;

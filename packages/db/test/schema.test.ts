@@ -55,6 +55,7 @@ describe('schema', () => {
       'screen_group_members',
       'screen_groups',
       'screen_incidents',
+      'screen_labels',
       'screens',
       'spots',
       'sync_epochs',

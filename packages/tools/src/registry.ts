@@ -13,6 +13,7 @@ import { brandTools } from './brand';
 import { connectionTools } from './connections';
 import { dataSourceTools } from './data-sources';
 import { groupTools } from './groups';
+import { labelTools } from './labels';
 import { pairingTools } from './pairing';
 import { playlistTools } from './playlists';
 import { publishTools } from './publish';
@@ -28,6 +29,7 @@ export const TOOLS: readonly AnyTool[] = [
   ...screenTools,
   ...pairingTools,
   ...groupTools,
+  ...labelTools,
   ...publishTools,
   ...templateTools,
   ...assetTools,

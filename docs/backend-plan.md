@@ -37,6 +37,7 @@ Text IDs and integer-millisecond timestamps. Every tenant table has `org_id NOT 
 | `alert_deliveries` | one alert on its way to one channel: the event JSON, status, attempts, next attempt, give-up time, last HTTP status and error; kept 7 days. Its due index leads with the next attempt, not the org, as the delivery run looks across orgs (#88) |
 | `screens` | name, timezone, locale, orientation, `display_hours_json`, `desired_manifest_id`, `previous_manifest_id` (whose files stay servable while a screen switches), `reported_manifest_id` and when the screen observed it (`reported_manifest_at`), last seen, player version, status |
 | `screen_groups`, `screen_group_members` | |
+| `screen_labels` | screen, key, value as typed, created at; keyed `(org_id, screen_id, key)`, indexed `(org_id, key, value)`. Values are compared case-insensitively in `@signforge/compiler/selector`, not in SQL (SQLite's `lower()` folds ASCII only). At most 32 per screen and 100 keys per org, checked by the tools and again in the batch (#184) |
 | `screen_credentials` | screen, secret hash, last used, revoked at |
 | `pairing_codes` | code, poll-token hash, expires at, claimed org and screen, collected credential |
 | `assets`, `asset_renditions` | kind, sha256, type, size, width, height, duration, status (pending, verified, rejected); landscape and portrait renditions, each with its sample's sha256 and size (null for SVG, an image with transparency, or an upload from before 0028) |

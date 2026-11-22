@@ -49,6 +49,8 @@ export interface QueuedAlert {
   channels: readonly AlertDelivery['channel'][];
   giveUpAt: number;
 }
+/** The most labels a screen has, and the most label keys an org's screens use between them. */
+export const LABEL_LIMITS = { perScreen: 32, keys: 100 } as const;
 type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
 
 /** Writing a row that refers to something the org cannot see. */
@@ -478,6 +480,7 @@ export function scoped(d1: D1Database, orgId: string) {
     ).length > 0;
 
   const m = s.screenGroupMembers;
+  const sl = s.screenLabels;
   const os = s.orgSettings;
   const ac = s.alertChannels;
   /**
@@ -770,6 +773,71 @@ export function scoped(d1: D1Database, orgId: string) {
         const row = results.at(-1)!.results[0] as { ack_seq: number } | undefined;
         if (!row) return undefined;
         return { ackSeq: row.ack_seq, rowsWritten: results.reduce((n, r) => n + (r.meta.rows_written ?? 0), 0) };
+      },
+      /** Screens' `key=value` labels (`screen_labels`). The only code that touches the table. */
+      labels: {
+        /** The org's labels, or one screen's, by screen then key. */
+        list: (screenId?: string) =>
+          db
+            .select({ screenId: sl.screenId, key: sl.key, value: sl.value })
+            .from(sl)
+            .where(and(eq(sl.orgId, orgId), screenId === undefined ? undefined : eq(sl.screenId, screenId)))
+            .orderBy(asc(sl.screenId), asc(sl.key))
+            .all(),
+        stage: {
+          /**
+           * A merge into each screen's labels: a key in `set` takes that value, a key in `remove`
+           * goes, the rest stay. Pass `newScreen` for a screen staged in the same batch (a claim),
+           * not stored yet. The batch fails, writing nothing, if a screen then has more labels or
+           * the org more keys than `LABEL_LIMITS`, so two changes made at once cannot pass a limit
+           * each was checked against alone. Throws `NotInOrgError` if a screen is not the org's.
+           * 1,000 screens are one statement each way: the ids go as one JSON value.
+           */
+          update: async (
+            screenIds: readonly string[],
+            change: { set: Readonly<Record<string, string>>; remove: readonly string[] },
+            { newScreen = false } = {},
+          ): Promise<Staged> => {
+            const ids = newScreen ? [...new Set(screenIds)] : await orgScreens(screenIds);
+            const idsJson = JSON.stringify(ids);
+            const sc = s.screens;
+            const now = Date.now();
+            const queries: unknown[] = [];
+            if (change.remove.length)
+              queries.push(
+                db
+                  .delete(sl)
+                  .where(
+                    and(
+                      eq(sl.orgId, orgId),
+                      sql`${sl.screenId} IN (SELECT value FROM json_each(${idsJson}))`,
+                      sql`${sl.key} IN (SELECT value FROM json_each(${JSON.stringify(change.remove)}))`,
+                    ),
+                  ),
+              );
+            if (Object.keys(change.set).length)
+              queries.push(
+                db
+                  .insert(sl)
+                  // The table's columns in order: org, screen, key, value, created_at. Only the org's screens are joined.
+                  .select(
+                    sql`SELECT ${sc.orgId}, ${sc.id}, k.key, k.value, ${now} FROM ${sc}, json_each(${JSON.stringify(change.set)}) AS k
+                        WHERE ${sc.orgId} = ${orgId} AND ${sc.id} IN (SELECT value FROM json_each(${idsJson}))`,
+                  )
+                  .onConflictDoUpdate({ target: [sl.orgId, sl.screenId, sl.key], set: { value: sql`excluded.value` } }),
+              );
+            const crowded = sql`EXISTS (SELECT 1 FROM ${sl} WHERE ${sl.orgId} = ${orgId} AND ${sl.screenId} IN (SELECT value FROM json_each(${idsJson})) GROUP BY ${sl.screenId} HAVING count(*) > ${LABEL_LIMITS.perScreen})`;
+            const keys = sql`(SELECT count(DISTINCT ${sl.key}) FROM ${sl} WHERE ${sl.orgId} = ${orgId})`;
+            // json() of text that is not JSON raises an error, which aborts the batch.
+            queries.push(
+              db
+                .select({ ok: sql`json(CASE WHEN ${crowded} OR ${keys} > ${LABEL_LIMITS.keys} THEN 'over a label limit' ELSE '1' END)` })
+                .from(s.organization)
+                .where(eq(s.organization.id, orgId)),
+            );
+            return staged(undefined, ...queries);
+          },
+        },
       },
       /** Ids of the groups a screen belongs to. */
       groupsOf: async (screenId: string) =>

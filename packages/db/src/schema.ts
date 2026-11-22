@@ -271,6 +271,28 @@ export const screenGroupMembers = sqliteTable(
   ],
 );
 
+/**
+ * A screen's `key=value` labels, one value per key. The value is stored as typed (trimmed);
+ * selectors compare it case-insensitively in `@signforge/compiler/selector`, not in SQL, whose
+ * `lower()` folds ASCII only. System labels (orientation, kind, ...) come from the screen's
+ * settings and are never rows here.
+ */
+export const screenLabels = sqliteTable(
+  'screen_labels',
+  {
+    orgId: orgId(),
+    screenId: text('screen_id').notNull(),
+    key: text('key').notNull(),
+    value: text('value').notNull(),
+    createdAt: created(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.screenId, t.key] }),
+    index('screen_labels_key_value_idx').on(t.orgId, t.key, t.value),
+    foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
+  ],
+);
+
 export const screenCredentials = sqliteTable(
   'screen_credentials',
   {

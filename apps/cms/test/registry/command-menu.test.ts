@@ -51,7 +51,7 @@ describe('command menu entries', () => {
     expect(byName.get('claim_screen')).toBe('Pair a screen');
     expect(byName.get('restart_screen')).toBe("Restart the screen's player now");
     expect(byName.get('revoke_screen_credential')).toBe("Revoke one of a screen's credentials");
-    expect(byName.get('list_screens')).toBe('List the screens in the organization with their settings, status and manifests');
+    expect(byName.get('list_screens')).toBe('List the screens in the organization with their settings, labels, status and manifests');
   });
 });
 

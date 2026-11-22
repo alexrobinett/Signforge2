@@ -99,6 +99,7 @@ describe('the registry', () => {
       'list_data_sources',
       'list_fonts',
       'list_groups',
+      'list_label_keys',
       'list_playlists',
       'list_publishes',
       'list_schedule_entries',
@@ -134,6 +135,7 @@ describe('the registry', () => {
       'update_org_settings',
       'update_playlist',
       'update_schedule_entry',
+      'update_screen_labels',
       'update_screen_settings',
       'update_spot',
     ]);
@@ -235,6 +237,7 @@ describe('roles and scopes', () => {
       'list_data_sources',
       'list_fonts',
       'list_groups',
+      'list_label_keys',
       'list_playlists',
       'list_publishes',
       'list_schedule_entries',
