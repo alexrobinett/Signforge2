@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { FEED_IMAGE_DELETE_GRACE_MS, findMembership, NotInOrgError, organizationExists, platform, scoped } from '../src/index';
+import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS, findMembership, NotInOrgError, organizationExists, platform, scoped } from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 let s: Seeded;
@@ -570,14 +570,15 @@ describe('feed images', () => {
     await b.save(urls[0]!, { fileSha256: sha('1'), nextCheckAt: 1 });
 
     // Forgetting alone, shared, and shown deletes alone + shared (shown stays), queueing their hashes durably.
-    expect(await a.forget(urls.slice(0, 2).concat(urls[3]!), 100)).toBe(2);
+    const forgetAt = 100 + FEED_IMAGE_TTL_MS;
+    expect(await a.forget(urls.slice(0, 2).concat(urls[3]!), forgetAt)).toBe(2);
     expect((await a.get(urls)).map((r) => r.url).sort()).toEqual([urls[2], urls[3]].sort());
     expect(await b.get([urls[0]!])).toHaveLength(1);
     expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('1'), sha('2'), sha('5'), sha('d')].sort());
     expect(await b.pendingDeletes()).toEqual([]);
 
     // Claiming deletes drops sha('5') (still referenced by twin), leases sha('1'), sha('2'), sha('d').
-    const claimAt = 100 + FEED_IMAGE_DELETE_GRACE_MS;
+    const claimAt = forgetAt + FEED_IMAGE_DELETE_GRACE_MS;
     const claimed = (await a.claimDeletes([sha('1'), sha('2'), sha('5'), sha('d')], { now: claimAt, leaseMs: 1_000 })).sort();
     expect(claimed).toEqual([sha('1'), sha('2'), sha('d')].sort());
     // While leased, claimForWrite returns false so a consumer retries rather than racing R2 delete.

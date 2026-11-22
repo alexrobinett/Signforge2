@@ -1046,7 +1046,7 @@ describe('budgets, resilience and cleanup', () => {
       const sha = [requeued, referenced][i]!;
       await env.BLOBS.put(feedBlobKey(o.orgId, sha), bytes[i]!);
       await scope.hold([url], { until: NOW, now: NOW, sourceId: id });
-      await scope.save(url, { fileSha256: sha, thumbSha256: sha, nextCheckAt: at + DAY_MS });
+      await scope.save(url, { fileSha256: sha, thumbSha256: sha, nextCheckAt: NOW - FEED_IMAGE_TTL_MS - 1 });
       await scope.forget([url], NOW);
     }
 
@@ -1078,6 +1078,59 @@ describe('budgets, resilience and cleanup', () => {
       expect(await env.BLOBS.head(feedBlobKey(o.orgId, sha))).not.toBeNull();
       expect(await scope.pendingDeletes()).toContainEqual(expect.objectContaining({ sha256: sha, deletingUntil: 0 }));
     }
+  });
+
+  it('keeps a refreshed replacement and a newly snapshot-referenced row when expiry already scanned them', async () => {
+    const id = await news('https://expiry-race.test/rss', { bind: false });
+    const url = 'https://expiry-race.test/replaced.jpg';
+    const shown = 'https://expiry-race.test/shown.jpg';
+    const jobs = [url, shown].map((photo) => ({ orgId: o.orgId, sourceId: id, url: photo }));
+    const initial = 0;
+    const scope = o.scope.feedImages;
+    await scope.hold([url, shown], { until: initial + HOLD_MS, now: initial, sourceId: id });
+    const a = jpeg(320, 180, 'expiry old');
+    const b = jpeg(320, 180, 'expiry replacement');
+    const c = jpeg(320, 180, 'expiry new snapshot');
+    const [oldSha, newSha, shownSha] = await Promise.all([a, b, c].map(sha256Hex));
+    const { images } = imagesStub();
+    await consume(jobs, { guards: web({ [url]: { body: a }, [shown]: { body: c } }).guards, images }, initial);
+
+    let raced = false;
+    const counter = countingDb(env.DB, {
+      beforeBatch: async (queries) => {
+        if (!raced && queries.some((q) => q.startsWith('delete from "feed_images"'))) {
+          raced = true;
+          expect(
+            await scope.holdWithinBudget(id, {
+              again: [url],
+              fresh: [],
+              until: NOW + HOLD_MS,
+              now: NOW,
+              since: NOW - DAY_MS,
+              maxSource: 10,
+              maxOrg: 20,
+            }),
+          ).toEqual([url]);
+          const result = await consume([jobs[0]!], { guards: web({ [url]: { body: b } }).guards, images }, NOW);
+          expect(result).toEqual({ acked: [url], retried: [] });
+          await o.scope.dataSources.putSnapshot(id, {
+            version: 'expiry-race',
+            checkedAt: NOW,
+            fetchedAt: NOW,
+            dataJson: JSON.stringify({ items: [{ image: { file: shownSha, thumb: shownSha } }] }),
+          });
+        }
+      },
+    });
+    await forgetFeedImages({ DB: counter.db, BLOBS: env.BLOBS }, NOW);
+    expect(raced).toBe(true);
+    expect(await row(url)).toMatchObject({ fileSha256: newSha, nextCheckAt: NOW + RECHECK_MS });
+    expect(await row(shown)).toMatchObject({ fileSha256: shownSha });
+    expect((await scope.pendingDeletes()).map((d) => d.sha256)).toContain(oldSha);
+    await forgetFeedImages(env, NOW + FEED_IMAGE_DELETE_GRACE_MS);
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, oldSha!))).toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, newSha!))).not.toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, shownSha!))).not.toBeNull();
   });
 
   it('keeps both polling (5 sources × 10 photos) and cleanup (25 expired rows × 2 hashes) well under Free D1 50-query limits', async () => {
@@ -1201,8 +1254,12 @@ describe('budgets, resilience and cleanup', () => {
       );
       if (i < 3) {
         const url = `https://midnight-gc.test/${i}.jpg`;
-        await org.scope.feedImages.hold([url], { until: expiredAt, now: expiredAt, sourceId: org.dataSource });
-        await org.scope.feedImages.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'a'.repeat(64), nextCheckAt: expiredAt });
+        const pending = `https://midnight-gc.test/pending-${i}.jpg`;
+        const gc = org.scope.feedImages;
+        await gc.hold([url, pending], { until: expiredAt, now: expiredAt, sourceId: org.dataSource });
+        await gc.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'a'.repeat(64), nextCheckAt: expiredAt });
+        await gc.save(pending, { fileSha256: 'b'.repeat(64), thumbSha256: 'b'.repeat(64), nextCheckAt: expiredAt });
+        await gc.forget([pending], expiredAt + FEED_IMAGE_TTL_MS + 1);
       }
     }
     await env.DB.batch([
@@ -1233,8 +1290,11 @@ describe('budgets, resilience and cleanup', () => {
 
     counter.reset();
     await runCron('* * * * *', midnight + 60 * MIN);
-    expect(counter.counts().apiCalls).toBeLessThanOrEqual(14);
-    expect(await orgs[0]!.scope.feedImages.get(['https://midnight-gc.test/0.jpg'])).toHaveLength(0);
+    expect(counter.counts().apiCalls).toBe(11);
+    for (const [i, org] of orgs.slice(0, 3).entries()) {
+      expect(await org.scope.feedImages.get([`https://midnight-gc.test/${i}.jpg`])).toHaveLength(0);
+      expect((await org.scope.feedImages.pendingDeletes()).map((row) => row.sha256)).toEqual(['a'.repeat(64)]);
+    }
   });
 });
 

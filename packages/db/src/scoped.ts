@@ -35,7 +35,7 @@ import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
-import { FEED_IMAGE_DELETE_GRACE_MS } from './retention';
+import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS } from './retention';
 import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
@@ -1791,32 +1791,24 @@ export function scoped(d1: D1Database, orgId: string) {
        */
       forget: async (urls: readonly string[], now: number): Promise<number> => {
         if (!urls.length) return 0;
-        const shasOf = (r: typeof fi.$inferSelect) => [r.fileSha256, r.thumbSha256].filter((x): x is string => x !== null);
-        const [rows, snapshotRows] = await db.batch([
-          db
-            .select()
-            .from(fi)
-            .where(and(eq(fi.orgId, orgId), sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify([...urls])}))`)),
-          db.select({ json: snap.dataJson }).from(snap).where(eq(snap.orgId, orgId)),
-        ]);
-        const snapshots = snapshotRows.map((r) => r.json);
-        const named = (sha: string) => snapshots.some((json) => json.includes(sha));
-        const gone = rows.filter((r) => !shasOf(r).some(named));
-        if (!gone.length) return 0;
-        const goneUrls = gone.map((r) => r.url);
-        const candidates = [...new Set(gone.flatMap(shasOf))];
-        const deleteRows = db.delete(fi).where(and(eq(fi.orgId, orgId), sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify(goneUrls)}))`));
-        const queueDeletes = chunk(
-          candidates.map((sha256) => ({ orgId, sha256, queuedAt: now, deletingUntil: 0 })),
-          4,
-        ).map((part) =>
+        // The candidate scan may predate a new hold, replacement or snapshot.
+        const expired = and(
+          eq(fi.orgId, orgId),
+          lt(fi.nextCheckAt, now - FEED_IMAGE_TTL_MS),
+          sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify(urls)}))`,
+          sql`NOT EXISTS (SELECT 1 FROM ${snap} WHERE ${snap.orgId} = ${orgId}
+            AND (instr(${snap.dataJson}, ${fi.fileSha256}) > 0 OR instr(${snap.dataJson}, ${fi.thumbSha256}) > 0))`,
+        );
+        const [, deleted] = await db.batch([
           db
             .insert(fid)
-            .values(part)
-            .onConflictDoUpdate({ target: [fid.orgId, fid.sha256], set: { queuedAt: now, deletingUntil: 0 } }),
-        );
-        await db.batch([deleteRows, ...queueDeletes]);
-        return gone.length;
+            .select(sql`SELECT DISTINCT ${orgId}, copy.value, ${now}, 0
+              FROM ${fi}, json_each(json_array(${fi.fileSha256}, ${fi.thumbSha256})) AS copy
+              WHERE ${expired} AND copy.value IS NOT NULL`)
+            .onConflictDoUpdate({ target: [fid.orgId, fid.sha256], set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` } }),
+          db.delete(fi).where(expired).returning({ url: fi.url }),
+        ]);
+        return deleted.length;
       },
       /**
        * Check pending delete candidates against snapshots and `feed_images` in batched SQL:
