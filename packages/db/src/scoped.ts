@@ -1644,7 +1644,7 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * What one poll found, in one batch: the source's patch (next poll, failures, validators),
        * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
-       * Returns false if a Photos setting change made the result stale. Throws `NotInOrgError`
+       * Returns false if an RSS source edit made the result stale. Throws `NotInOrgError`
        * if the source does not belong to this org without an extra read.
        */
       savePoll: async (
@@ -1653,14 +1653,15 @@ export function scoped(d1: D1Database, orgId: string) {
           source: RowPatch<typeof s.dataSources> & { nextPollAt: number };
           snapshot?: Snapshot;
           checkedAt?: number;
-          photoRead?: { photos: boolean; generation: number; now: number };
+          photoRead?: { rowVersion: number; generation: number; now: number };
         },
       ) => {
         const ds = s.dataSources;
         const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
         const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
-        const photosMatch = poll.photoRead && eq(ds.photos, poll.photoRead.photos);
-        const current = photosMatch && sql`EXISTS (SELECT 1 FROM ${ds} WHERE ${mine} AND ${photosMatch})`;
+        // The version advances even when two edits restore the original Photos setting.
+        const sameVersion = poll.photoRead && eq(ds.rowVersion, poll.photoRead.rowVersion);
+        const current = sameVersion && sql`EXISTS (SELECT 1 FROM ${ds} WHERE ${mine} AND ${sameVersion})`;
         const check = db
           .select({
             ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${ds} WHERE ${ds.orgId} = ${orgId} AND ${ds.id} = ${dataSourceId}) THEN '1' ELSE 'not in org' END)`,
@@ -1674,7 +1675,7 @@ export function scoped(d1: D1Database, orgId: string) {
           db
             .update(ds)
             .set(updateSet(ds, strip(poll.source)))
-            .where(and(mine, photosMatch)),
+            .where(and(mine, sameVersion)),
         ).writes;
         if (poll.snapshot) {
           const { version, fetchedAt, checkedAt, dataJson } = poll.snapshot;
@@ -1708,14 +1709,14 @@ export function scoped(d1: D1Database, orgId: string) {
               db
                 .update(ds)
                 .set({ etag: null, lastModified: null, nextPollAt: sql`MIN(${ds.nextPollAt}, ${poll.photoRead.now})` })
-                .where(and(mine, or(ne(ds.photos, poll.photoRead.photos), ne(ds.photoGeneration, poll.photoRead.generation), changedCopy))),
+                .where(and(mine, or(ne(ds.rowVersion, poll.photoRead.rowVersion), ne(ds.photoGeneration, poll.photoRead.generation), changedCopy))),
             ).writes,
           );
         }
         try {
           const changes = await commit(db, writes);
           const updated = changes[1];
-          // A settings mismatch skips the poll writes and leaves a reread due via the final update.
+          // A version mismatch skips the poll writes and leaves a reread due via the final update.
           if (!updated && !(poll.photoRead && changes.at(-1))) throw new NotInOrgError('data source', dataSourceId);
           return Boolean(updated);
         } catch (err) {

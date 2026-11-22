@@ -1526,6 +1526,20 @@ describe('a photo that may not be stored', () => {
 });
 
 describe('photos switched off', () => {
+  const setPhotos = (dataSourceId: string, photos: boolean) =>
+    dispatch(
+      registry,
+      'update_data_source',
+      { dataSourceId, photos },
+      {
+        org: o.scope,
+        role: 'owner',
+        actor: { kind: 'user', id: 'photos-switch-test', clientId: 'cms' },
+        blobs: env.BLOBS,
+        services: { feedUrls: feedUrlSealer(env) },
+      },
+    );
+
   it('looks for no photo, queues none, and stores the feed as text', async () => {
     const id = await news('https://quiet.test/rss', { photos: false });
     await pollDataSources(pollEnv, {
@@ -1568,20 +1582,7 @@ describe('photos switched off', () => {
     });
     await fetching.promise;
     try {
-      expect(
-        await dispatch(
-          registry,
-          'update_data_source',
-          { dataSourceId: id, photos: false },
-          {
-            org: o.scope,
-            role: 'owner',
-            actor: { kind: 'user', id: 'photos-switch-test', clientId: 'cms' },
-            blobs: env.BLOBS,
-            services: { feedUrls: feedUrlSealer(env) },
-          },
-        ),
-      ).toMatchObject({ ok: true });
+      expect(await setPhotos(id, false)).toMatchObject({ ok: true });
     } finally {
       resume.resolve();
       await inFlight;
@@ -1598,6 +1599,61 @@ describe('photos switched off', () => {
     expect(rss.requests[2]?.headers.get('if-none-match')).toBeNull();
     expect(rss.requests[2]?.headers.get('if-modified-since')).toBeNull();
     expect((await o.scope.dataSources.snapshots([id]))[0]?.checkedAt).toBe(at + 5 * MIN);
+  });
+
+  it('keeps the forced reread after Photos changes off, on, and off during a disabled poll', async () => {
+    const feed = 'https://photos-switch-twice.test/rss';
+    const url = 'https://photos-switch-twice.test/photo.jpg';
+    const id = await news(feed, { photos: false });
+    const sha = await sha256Hex(jpeg(320, 180, 'switch twice'));
+    await o.scope.feedImages.hold([url], { until: NOW + HOLD_MS, now: NOW, sourceId: id });
+    await o.scope.feedImages.save(url, { fileSha256: sha, thumbSha256: sha, nextCheckAt: NOW + RECHECK_MS });
+    const body = feedOf(1, () => url);
+    await pollDataSources(pollEnv, { now: NOW, guards: web({ [feed]: { body, headers: { etag: '"previous"' } } }).guards });
+    expect((await snapshot(id)).items[0]?.image).toBeUndefined();
+
+    const rss = web({
+      [feed]: (req) =>
+        req.headers.get('if-none-match') === '"story"'
+          ? { status: 304 }
+          : { body, headers: { etag: '"story"', 'last-modified': 'Fri, 20 Nov 2026 23:00:00 GMT' } },
+    });
+    const at = NOW + 5 * MIN;
+    const fetching = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const inFlight = pollDataSources(pollEnv, {
+      now: at,
+      guards: {
+        ...rss.guards,
+        fetch: async (input, init) => {
+          fetching.resolve();
+          await resume.promise;
+          return rss.guards.fetch(input, init);
+        },
+      },
+    });
+    await fetching.promise;
+    try {
+      expect(await setPhotos(id, true)).toMatchObject({ ok: true });
+      await pollDataSources(pollEnv, { now: at + MIN, guards: rss.guards });
+      expect((await snapshot(id)).items[0]?.image).toEqual({ file: sha, thumb: sha });
+      expect(await setPhotos(id, false)).toMatchObject({ ok: true });
+    } finally {
+      resume.resolve();
+      await inFlight;
+    }
+    const afterRace = await o.scope.dataSources.get(id);
+    const [afterSnapshot] = await o.scope.dataSources.snapshots([id]);
+    await pollDataSources(pollEnv, { now: at + 5 * MIN, guards: rss.guards });
+
+    expect((await snapshot(id)).items[0]?.image).toBeUndefined();
+    expect(afterSnapshot?.checkedAt).toBe(at + MIN);
+    expect(afterRace).toMatchObject({ photos: false, etag: null, lastModified: null, photoUrlsJson: null });
+    expect(afterRace?.nextPollAt).toBeLessThanOrEqual(at);
+    expect(rss.requests).toHaveLength(3);
+    expect(rss.requests[1]?.headers.get('if-none-match')).toBe('"previous"');
+    expect(rss.requests[2]?.headers.get('if-none-match')).toBeNull();
+    expect(rss.requests[2]?.headers.get('if-modified-since')).toBeNull();
   });
 
   it('stores nothing queued before it was switched off', async () => {

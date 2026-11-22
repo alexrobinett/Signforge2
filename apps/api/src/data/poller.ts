@@ -159,7 +159,7 @@ function enqueuePhotos(run: Run, org: OrgScope, sourceId: string, photos: { agai
 async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVersion: string | null, locator: string | undefined): Promise<void> {
   const { now } = run;
   const nextPollAt = now + row.refreshS * 1000;
-  const photoRead = row.format === 'rss' ? { photos: row.photos, generation: row.photoGeneration, now } : undefined;
+  const photoRead = row.format === 'rss' ? { rowVersion: row.rowVersion, generation: row.photoGeneration, now } : undefined;
   try {
     if (!locator) throw new PollFailure('sealed-url');
     const ok = { nextPollAt, failures: 0, lastError: null };
