@@ -2,7 +2,7 @@
 // and stores them. No network and no image service: fetch, DNS and the Images binding are stubs,
 // the queue is a list, and the clock is a parameter.
 import { MAX_SNAPSHOT_BYTES, type NewsFeed } from '@signforge/contract';
-import { FEED_IMAGE_TTL_MS } from '@signforge/db';
+import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS } from '@signforge/db';
 import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
@@ -10,6 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { feedUrlSealer } from '../src/data/cipher';
 import type { FetchGuards } from '../src/data/fetch';
 import {
+  DELETE_LEASE_MS,
   FAIL_WAIT_MS,
   type FeedImageJob,
   forgetFeedImages,
@@ -26,7 +27,7 @@ import {
 } from '../src/data/images';
 import { pollDataSources } from '../src/data/poller';
 import worker from '../src/index';
-import { orgBlobKey } from '../src/r2';
+import { feedBlobKey, orgBlobKey } from '../src/r2';
 
 const DAY_MS = 24 * 3_600_000;
 const MIN = 60_000;
@@ -122,7 +123,7 @@ function imagesStub({ failWith, avifSize = { w: 2400, h: 1600 } }: { failWith?: 
 type Answer = { status?: number; body?: Uint8Array | string | ReadableStream<Uint8Array>; headers?: Record<string, string> };
 
 /** Guards whose fetch answers by URL and records each request; a host resolves to a public address unless `addresses` says otherwise. */
-function web(answers: Record<string, Answer | (() => Answer)>, addresses: Record<string, string[]> = {}) {
+function web(answers: Record<string, Answer | ((req: Request) => Answer)>, addresses: Record<string, string[]> = {}) {
   const requests: Request[] = [];
   const guards: FetchGuards = {
     fetch: async (input, init) => {
@@ -130,12 +131,58 @@ function web(answers: Record<string, Answer | (() => Answer)>, addresses: Record
       requests.push(req);
       const a = answers[req.url];
       if (!a) return new Response('nope', { status: 404 });
-      const { status = 200, body = null, headers } = typeof a === 'function' ? a() : a;
+      const { status = 200, body = null, headers } = typeof a === 'function' ? a(req) : a;
       return new Response(body, { status, headers });
     },
     resolve: async (host) => addresses[host] ?? ['93.184.216.34'],
   };
   return { guards, requests };
+}
+
+/** Count D1 calls (`prepare().first/all/run/raw` and `batch()`) executed through a wrapped D1Database. */
+function countingDb(db: D1Database) {
+  let apiCalls = 0;
+  let statements = 0;
+  const wrapStmt = (stmt: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(stmt, {
+      get(target, prop, receiver) {
+        if (prop === 'bind') {
+          return (...args: unknown[]) => wrapStmt(target.bind(...args));
+        }
+        if (prop === 'first' || prop === 'all' || prop === 'run' || prop === 'raw') {
+          return (...args: unknown[]) => {
+            apiCalls++;
+            statements++;
+            return (target[prop] as (...a: unknown[]) => unknown)(...args);
+          };
+        }
+        if (prop === '__raw') return target;
+        const val = Reflect.get(target, prop, receiver);
+        return typeof val === 'function' ? val.bind(target) : val;
+      },
+    });
+  const wrapped = new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop === 'prepare') return (query: string) => wrapStmt(target.prepare(query));
+      if (prop === 'batch') {
+        return (stmts: D1PreparedStatement[]) => {
+          apiCalls++;
+          statements += stmts.length;
+          return target.batch(stmts.map((s) => (s as unknown as { __raw?: D1PreparedStatement }).__raw ?? s));
+        };
+      }
+      const val = Reflect.get(target, prop, receiver);
+      return typeof val === 'function' ? val.bind(target) : val;
+    },
+  });
+  return {
+    db: wrapped,
+    counts: () => ({ apiCalls, statements }),
+    reset: () => {
+      apiCalls = 0;
+      statements = 0;
+    },
+  };
 }
 
 // ------------------------------------------------------------------- setup
@@ -323,7 +370,7 @@ describe('a news source with photos', () => {
     expect(stored).toMatchObject({ etag: '"p0"', lastError: null, failures: 0, nextCheckAt: NOW + 6 * MIN + RECHECK_MS });
     expect(stored.fileSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(stored.thumbSha256).toBe(stored.fileSha256);
-    expect(await env.BLOBS.head(orgBlobKey(o.orgId, stored.fileSha256!))).not.toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, stored.fileSha256!))).not.toBeNull();
     // Read afresh next time, so a 304 cannot leave the snapshot without them.
     expect(await o.scope.dataSources.get(id)).toMatchObject({ etag: null });
 
@@ -403,11 +450,14 @@ describe('a news source with photos', () => {
     expect(new TextEncoder().encode(json).length).toBeLessThanOrEqual(MAX_SNAPSHOT_BYTES);
   });
 
-  it('asks again a week later with its validators, and keeps the copy when unchanged', async () => {
+  it('asks again a week later with its validators even when RSS returns 304, and keeps the copy when unchanged', async () => {
     const id = await news('https://etag.test/rss');
     const url = 'https://cdn.etag.test/a.png';
     const body = feedOf(1, () => url);
-    await pollDataSources(pollEnv, { now: NOW, guards: web({ 'https://etag.test/rss': { body } }).guards });
+    const rss = web({
+      'https://etag.test/rss': (req) => (req.headers.get('if-none-match') === '"rss-v1"' ? { status: 304 } : { body, headers: { etag: '"rss-v1"' } }),
+    });
+    await pollDataSources(pollEnv, { now: NOW, guards: rss.guards });
     const { images, draws } = imagesStub();
     let answer: Answer = { body: png(800, 600), headers: { etag: '"img1"', 'last-modified': 'Thu, 19 Nov 2026 08:00:00 GMT' } };
     const photos = web({ [url]: () => answer });
@@ -416,23 +466,78 @@ describe('a news source with photos', () => {
     // A PNG becomes a WebP; one larger than NEWS_THUMB_BOX also makes a thumbnail.
     expect(draws).toEqual(['image/webp@800x600', 'image/webp@480x360']);
 
-    // Not due within the week: a poll queues nothing.
+    // Poll once to populate snapshot and restore RSS ETag '"rss-v1"'.
+    await o.scope.dataSources.update(id, { nextPollAt: NOW + 5 * MIN });
+    await pollDataSources(pollEnv, { now: NOW + 5 * MIN, guards: rss.guards });
+    expect((await o.scope.dataSources.get(id))?.etag).toBe('"rss-v1"');
+
+    // Not due within the week: RSS returns 304 and poll queues nothing.
     await o.scope.dataSources.update(id, { nextPollAt: NOW + DAY_MS });
-    await pollDataSources(pollEnv, { now: NOW + DAY_MS, guards: web({ 'https://etag.test/rss': { body } }).guards });
+    await pollDataSources(pollEnv, { now: NOW + DAY_MS, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBe('"rss-v1"');
     expect(take()).toEqual([]);
 
+    // A week later, RSS STILL returns 304 (etag never manually cleared!), yet photo revalidation is queued.
     const later = NOW + RECHECK_MS;
     await o.scope.dataSources.update(id, { nextPollAt: later });
-    await pollDataSources(pollEnv, { now: later, guards: web({ 'https://etag.test/rss': { body } }).guards });
+    await pollDataSources(pollEnv, { now: later, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBe('"rss-v1"');
     const jobs = take();
     expect(jobs.map((j) => j.url)).toEqual([url]);
     answer = { status: 304 };
     await consume(jobs, { guards: photos.guards, images }, later);
     expect(photos.requests.at(-1)?.headers.get('if-none-match')).toBe('"img1"');
     expect(photos.requests.at(-1)?.headers.get('if-modified-since')).toBe('Thu, 19 Nov 2026 08:00:00 GMT');
-    // Nothing drawn again, the copy kept, and the source not read afresh for it.
+    // Nothing drawn again, the copy kept, and the source's RSS ETag kept intact.
     expect(draws).toHaveLength(2);
     expect(await row(url)).toMatchObject({ fileSha256: first.fileSha256, nextCheckAt: later + RECHECK_MS, lastError: null });
+    expect((await o.scope.dataSources.get(id))?.etag).toBe('"rss-v1"');
+  });
+
+  it('retries failed enqueues and failed photo fetches when due even when RSS keeps returning 304', async () => {
+    const id = await news('https://retry304.test/rss');
+    const url = 'https://cdn.retry304.test/a.jpg';
+    const body = feedOf(1, () => url);
+    const rss = web({
+      'https://retry304.test/rss': (req) => (req.headers.get('if-none-match') === '"r304"' ? { status: 304 } : { body, headers: { etag: '"r304"' } }),
+    });
+    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // 1. Initial 200 poll saves snapshot + ETag + photoUrlsJson, but queue sendBatch fails.
+    const brokenQueueEnv = { ...env, FEED_IMAGES: { sendBatch: async () => Promise.reject(new Error('queue down')) } } as unknown as Env;
+    await pollDataSources(brokenQueueEnv, { now: NOW, guards: rss.guards });
+    expect((await o.scope.dataSources.get(id))?.etag).toBe('"r304"');
+    expect(consoleErr).toHaveBeenCalled();
+
+    // 2. Once the hold expires, RSS returns 304 and the poller still retries enqueueing the photo.
+    const t1 = NOW + HOLD_MS;
+    await o.scope.dataSources.update(id, { nextPollAt: t1 });
+    await pollDataSources(pollEnv, { now: t1, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBe('"r304"');
+    const retryJobs = take();
+    expect(retryJobs.map((j) => j.url)).toEqual([url]);
+
+    // 3. Consumer gets 503 -> backs off RETRY_MS (1h). Before 1h, 304 poll queues nothing.
+    const { images } = imagesStub();
+    await consume(retryJobs, { guards: web({ [url]: { status: 503 } }).guards, images }, t1);
+    await o.scope.dataSources.update(id, { nextPollAt: t1 + 10 * MIN });
+    await pollDataSources(pollEnv, { now: t1 + 10 * MIN, guards: rss.guards });
+    expect(take()).toEqual([]);
+
+    // 4. At 1h backoff, RSS STILL returns 304 and the poller queues the retry; consumer succeeds and marks source readAfresh.
+    const t2 = t1 + RETRY_MS;
+    await o.scope.dataSources.update(id, { nextPollAt: t2 });
+    await pollDataSources(pollEnv, { now: t2, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBe('"r304"');
+    const secondTry = take();
+    expect(secondTry.map((j) => j.url)).toEqual([url]);
+    await consume(secondTry, { guards: web({ [url]: { body: jpeg(320, 180, 'recovered') } }).guards, images }, t2);
+    expect((await o.scope.dataSources.get(id))?.etag).toBeNull();
+
+    // 5. Next poll fetches 200 and writes the recovered photo into the snapshot.
+    await o.scope.dataSources.update(id, { nextPollAt: t2 + 5 * MIN });
+    await pollDataSources(pollEnv, { now: t2 + 5 * MIN, guards: rss.guards });
+    expect((await snapshot(id)).items[0]?.image?.file).toBe((await row(url))!.fileSha256);
   });
 
   it('dedupes by content hash across URLs in the same org with no transform or new blob', async () => {
@@ -474,20 +579,25 @@ describe('a news source with photos', () => {
 });
 
 describe('only fetching for sources something will show', () => {
-  it('skips photo work for an unbound source, a draft-only spot, and a text-only template, and re-checks at poll time', async () => {
+  it('skips photo work for an unbound source, a draft-only spot, and a text-only template, and recovers from a 304 feed when newly bound', async () => {
     const photo = 'https://cdn.bound.test/hero.jpg';
     const body = feedOf(1, () => photo);
+    const rss = web({
+      'https://unbound.test/rss': (req) => (req.headers.get('if-none-match') === '"b1"' ? { status: 304 } : { body, headers: { etag: '"b1"' } }),
+    });
 
-    // 1. Unbound source (photos: true, no published spot): no image rows, nothing queued.
+    // 1. Unbound source (photos: true, no published spot): stores ETag '"b1"', no image rows, nothing queued.
     const unboundId = await news('https://unbound.test/rss', { bind: false });
-    await pollDataSources(pollEnv, { now: NOW, guards: web({ 'https://unbound.test/rss': { body } }).guards });
+    await pollDataSources(pollEnv, { now: NOW, guards: rss.guards });
+    expect((await o.scope.dataSources.get(unboundId))?.etag).toBe('"b1"');
     expect(take()).toEqual([]);
     expect(await row(photo)).toBeUndefined();
 
-    // 2. Draft spot binding a photo template, not published: still skipped.
+    // 2. Draft spot binding a photo template, not published: RSS returns 304, still skipped.
     const draftSpotId = await bindSpot(o, unboundId, { publish: false });
-    await o.scope.dataSources.update(unboundId, { nextPollAt: NOW + 5 * MIN, etag: null });
-    await pollDataSources(pollEnv, { now: NOW + 5 * MIN, guards: web({ 'https://unbound.test/rss': { body } }).guards });
+    await o.scope.dataSources.update(unboundId, { nextPollAt: NOW + 5 * MIN });
+    await pollDataSources(pollEnv, { now: NOW + 5 * MIN, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBe('"b1"');
     expect(take()).toEqual([]);
 
     // 3. Published template with a static image field (like Info frame) whose RSS binding is text-only: skipped.
@@ -500,15 +610,16 @@ describe('only fetching for sources something will show', () => {
       bindings: { items: { source: unboundId, path: 'items' } },
       publish: true,
     });
-    await o.scope.dataSources.update(unboundId, { nextPollAt: NOW + 10 * MIN, etag: null });
-    await pollDataSources(pollEnv, { now: NOW + 10 * MIN, guards: web({ 'https://unbound.test/rss': { body } }).guards });
+    await o.scope.dataSources.update(unboundId, { nextPollAt: NOW + 10 * MIN });
+    await pollDataSources(pollEnv, { now: NOW + 10 * MIN, guards: rss.guards });
     expect(take()).toEqual([]);
 
-    // 4. Publishing the photo-capable spot makes the next poll queue the photo.
+    // 4. Publishing the photo-capable spot without clearing the RSS ETag: poller omits validators once (photoUrlsJson is null) and queues the photo.
     const draftSpot = (await o.scope.spots.get(draftSpotId))!;
     await o.scope.commit(o.scope.spots.stage.publish(draftSpot).writes);
-    await o.scope.dataSources.update(unboundId, { nextPollAt: NOW + 15 * MIN, etag: null });
-    await pollDataSources(pollEnv, { now: NOW + 15 * MIN, guards: web({ 'https://unbound.test/rss': { body } }).guards });
+    await o.scope.dataSources.update(unboundId, { nextPollAt: NOW + 15 * MIN });
+    await pollDataSources(pollEnv, { now: NOW + 15 * MIN, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBeNull();
     expect(take().map((j) => j.url)).toEqual([photo]);
 
     // 5. Removing the photo spot (leaving only the text-only spot) stops photo work again at the next poll.
@@ -635,9 +746,11 @@ describe('budgets, resilience and cleanup', () => {
     expect(await row(gone)).toMatchObject({ lastError: 'http-status', failures: 1, nextCheckAt: NOW + FAIL_WAIT_MS });
     expect(await row(blocked)).toMatchObject({ lastError: 'blocked-address', failures: 1, nextCheckAt: NOW + FAIL_WAIT_MS });
 
-    // Images 9422 -> images-quota (1h backoff); transient Images error -> images-unavailable (1h backoff); 9412 -> undecodable (24h).
+    // Images 9422 -> images-quota (1h backoff); transient & ambiguous 9523 -> images-unavailable (1h backoff); 9413 -> too-large (24h); 9412 -> undecodable (24h).
     const quota = 'https://err.test/quota.jpg';
     const unavail = 'https://err.test/unavail.jpg';
+    const resizeAmbiguous = 'https://err.test/9523.jpg';
+    const tooLargeImg = 'https://err.test/9413.jpg';
     const decodeErr = 'https://err.test/decode.jpg';
     const bigJpeg = jpeg(3000, 2000);
     await consume(
@@ -651,12 +764,27 @@ describe('budgets, resilience and cleanup', () => {
       NOW,
     );
     await consume(
+      await queueOne(resizeAmbiguous),
+      {
+        guards: web({ [resizeAmbiguous]: { body: bigJpeg } }).guards,
+        images: imagesStub({ failWith: () => new Error('ERROR 9523: could not resize') }).images,
+      },
+      NOW,
+    );
+    await consume(
+      await queueOne(tooLargeImg),
+      { guards: web({ [tooLargeImg]: { body: bigJpeg } }).guards, images: imagesStub({ failWith: () => new Error('ERROR 9413: too large') }).images },
+      NOW,
+    );
+    await consume(
       await queueOne(decodeErr),
       { guards: web({ [decodeErr]: { body: bigJpeg } }).guards, images: imagesStub({ failWith: () => new Error('ERROR 9412: corrupt') }).images },
       NOW,
     );
     expect(await row(quota)).toMatchObject({ lastError: 'images-quota', nextCheckAt: NOW + RETRY_MS });
     expect(await row(unavail)).toMatchObject({ lastError: 'images-unavailable', nextCheckAt: NOW + RETRY_MS });
+    expect(await row(resizeAmbiguous)).toMatchObject({ lastError: 'images-unavailable', nextCheckAt: NOW + RETRY_MS });
+    expect(await row(tooLargeImg)).toMatchObject({ lastError: 'too-large', nextCheckAt: NOW + FAIL_WAIT_MS });
     expect(await row(decodeErr)).toMatchObject({ lastError: 'undecodable', nextCheckAt: NOW + FAIL_WAIT_MS });
   });
 
@@ -680,37 +808,156 @@ describe('budgets, resilience and cleanup', () => {
     expect(consoleErr).toHaveBeenCalled();
   });
 
-  it('forgets expired unreferenced rows and deletes their R2 blobs on the daily run, keeping blobs still in a snapshot', async () => {
+  it('forgets expired unreferenced rows, deletes feed blobs after the grace window, and never touches an /admin manifest blob with the same hash', async () => {
     const id = await news('https://gc.test/rss');
     const dropUrl = 'https://cdn.gc.test/drop.jpg';
     const keepUrl = 'https://cdn.gc.test/keep.jpg';
+    const dropBytes = jpeg(320, 180, 'drop-shared-with-manifest');
     await pollDataSources(pollEnv, {
       now: NOW,
       guards: web({ 'https://gc.test/rss': { body: feedOf(2, (i) => (i === 0 ? dropUrl : keepUrl)) } }).guards,
     });
     const jobs = take();
     const { images } = imagesStub();
-    await consume(jobs, { guards: web({ [dropUrl]: { body: jpeg(320, 180, 'drop') }, [keepUrl]: { body: jpeg(320, 180, 'keep') } }).guards, images }, NOW);
+    await consume(jobs, { guards: web({ [dropUrl]: { body: dropBytes }, [keepUrl]: { body: jpeg(320, 180, 'keep') } }).guards, images }, NOW);
     const dropSha = (await row(dropUrl))!.fileSha256!;
     const keepSha = (await row(keepUrl))!.fileSha256!;
+    // Simulate a published /admin manifest holding the exact same content hash at orgBlobKey (no assets row).
+    await env.BLOBS.put(orgBlobKey(o.orgId, dropSha), dropBytes, { sha256: dropSha, httpMetadata: { contentType: 'image/jpeg' } });
+
     // Next poll writes a snapshot naming only keepUrl (dropUrl has dropped off the feed).
     await o.scope.dataSources.update(id, { nextPollAt: NOW + 5 * MIN, etag: null });
     await pollDataSources(pollEnv, { now: NOW + 5 * MIN, guards: web({ 'https://gc.test/rss': { body: feedOf(1, () => keepUrl) } }).guards });
     expect((await snapshot(id)).items[0]?.image?.file).toBe(keepSha);
 
-    // Past RECHECK_MS + FEED_IMAGE_TTL_MS, forgetFeedImages deletes dropUrl and its R2 blob, while keepUrl (in snapshot) stays.
+    // Phase 1 at cleanupAt: forgets dropUrl and queues dropSha durably in feed_image_deletes (kept in R2 during grace window).
     const cleanupAt = NOW + RECHECK_MS + FEED_IMAGE_TTL_MS + 1;
-    expect(await forgetFeedImages(env, cleanupAt)).toBeGreaterThanOrEqual(2);
+    expect(await forgetFeedImages(env, cleanupAt)).toBeGreaterThanOrEqual(1);
     expect(await row(dropUrl)).toBeUndefined();
-    expect(await env.BLOBS.head(orgBlobKey(o.orgId, dropSha))).toBeNull();
+    expect((await o.scope.feedImages.pendingDeletes()).map((d) => d.sha256)).toContain(dropSha);
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, dropSha))).not.toBeNull();
+
+    // Phase 2 after FEED_IMAGE_DELETE_GRACE_MS: deletes feed blob o/<org>/f/<dropSha>, keeps snapshot-referenced keepSha AND keeps /admin manifest blob o/<org>/b/<dropSha>.
+    const drainAt = cleanupAt + FEED_IMAGE_DELETE_GRACE_MS;
+    await forgetFeedImages(env, drainAt);
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, dropSha))).toBeNull();
+    expect(await env.BLOBS.head(orgBlobKey(o.orgId, dropSha))).not.toBeNull();
+    expect((await o.scope.feedImages.pendingDeletes()).map((d) => d.sha256)).not.toContain(dropSha);
     expect(await row(keepUrl)).toBeDefined();
-    expect(await env.BLOBS.head(orgBlobKey(o.orgId, keepSha))).not.toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, keepSha))).not.toBeNull();
 
     // Daily cron at 00:00 UTC runs forgetFeedImages too.
-    const midnight = Math.ceil((cleanupAt + DAY_MS) / DAY_MS) * DAY_MS;
+    const midnight = Math.ceil((drainAt + DAY_MS) / DAY_MS) * DAY_MS;
     const ctx = createExecutionContext();
     await worker.scheduled(createScheduledController({ scheduledTime: midnight, cron: '*/5 * * * *' }), env, ctx);
     await waitOnExecutionContext(ctx);
+  });
+
+  it('queues replaced blobs for cleanup when a recheck replaces a photo at the same URL, and retries failed R2 deletes cleanly', async () => {
+    const id = await news('https://replace.test/rss');
+    const url = 'https://cdn.replace.test/hero.jpg';
+    const body = feedOf(1, () => url);
+    let photoBody = jpeg(800, 600, 'version-1');
+    const photos = web({ [url]: () => ({ body: photoBody }) });
+    const { images } = imagesStub();
+
+    // 1. Fetch and store version 1 (800x600 -> distinct file and thumb blobs).
+    await pollDataSources(pollEnv, { now: NOW, guards: web({ 'https://replace.test/rss': { body } }).guards });
+    await consume(take(), { guards: photos.guards, images }, NOW);
+    const v1 = (await row(url))!;
+    expect(v1.fileSha256).not.toBe(v1.thumbSha256);
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, v1.fileSha256!))).not.toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, v1.thumbSha256!))).not.toBeNull();
+
+    // 2. Recheck a week later serves version 2 (different aspect ratio so both file and thumb hashes change): old file & thumb are queued durably in feed_image_deletes.
+    const later = NOW + RECHECK_MS;
+    photoBody = jpeg(900, 500, 'version-2');
+    await o.scope.dataSources.update(id, { nextPollAt: later });
+    await pollDataSources(pollEnv, { now: later, guards: web({ 'https://replace.test/rss': { body } }).guards });
+    await consume(take(), { guards: photos.guards, images }, later);
+    const v2 = (await row(url))!;
+    expect(v2.fileSha256).not.toBe(v1.fileSha256);
+    expect(v2.thumbSha256).not.toBe(v1.thumbSha256);
+    expect((await o.scope.feedImages.pendingDeletes()).map((d) => d.sha256)).toEqual(expect.arrayContaining([v1.fileSha256!, v1.thumbSha256!]));
+
+    // While the snapshot still references v1 (before the next poll refreshes it to v2), cleanup keeps both v1 blobs AND keeps them durably queued.
+    const beforeRefreshAt = later + FEED_IMAGE_DELETE_GRACE_MS;
+    await forgetFeedImages(env, beforeRefreshAt);
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, v1.fileSha256!))).not.toBeNull();
+    expect((await o.scope.feedImages.pendingDeletes()).map((d) => d.sha256)).toEqual(expect.arrayContaining([v1.fileSha256!, v1.thumbSha256!]));
+
+    // Next poll updates the snapshot to v2, dropping v1 from snapshots.
+    await o.scope.dataSources.update(id, { nextPollAt: beforeRefreshAt + 5 * MIN });
+    await pollDataSources(pollEnv, { now: beforeRefreshAt + 5 * MIN, guards: web({ 'https://replace.test/rss': { body } }).guards });
+    expect((await snapshot(id)).items[0]?.image?.file).toBe(v2.fileSha256);
+
+    // 3. Failing R2 delete keeps the durable delete record intact, and after DELETE_LEASE_MS the next cleanup retries and succeeds.
+    const drainAt = beforeRefreshAt + FEED_IMAGE_DELETE_GRACE_MS;
+    const failingBlobsEnv = {
+      ...env,
+      BLOBS: { ...env.BLOBS, delete: async () => Promise.reject(new Error('R2 delete failed')) },
+    } as unknown as Env;
+    await expect(forgetFeedImages(failingBlobsEnv, drainAt)).rejects.toThrow('R2 delete failed');
+    // Old blobs and their durable delete records survive the failed R2 delete.
+    expect((await o.scope.feedImages.pendingDeletes()).map((d) => d.sha256)).toEqual(expect.arrayContaining([v1.fileSha256!, v1.thumbSha256!]));
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, v1.fileSha256!))).not.toBeNull();
+
+    // While leased, a consumer writing the same hash retries rather than racing R2 delete.
+    const racingUrl = 'https://cdn.replace.test/racing.jpg';
+    await o.scope.feedImages.hold([racingUrl], { until: drainAt + HOLD_MS, now: drainAt, sourceId: id });
+    const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const race = await consume(
+      [{ orgId: o.orgId, sourceId: id, url: racingUrl }],
+      { guards: web({ [racingUrl]: { body: jpeg(800, 600, 'version-1') } }).guards, images },
+      drainAt + 1_000,
+    );
+    expect(race).toEqual({ acked: [], retried: [racingUrl] });
+    expect(consoleErr).toHaveBeenCalled();
+
+    // Once DELETE_LEASE_MS passes, cleanup retries R2 delete cleanly and removes old blobs + durable records while keeping v2.
+    await forgetFeedImages(env, drainAt + DELETE_LEASE_MS);
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, v1.fileSha256!))).toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, v1.thumbSha256!))).toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, v2.fileSha256!))).not.toBeNull();
+    expect((await o.scope.feedImages.pendingDeletes()).map((d) => d.sha256)).not.toContain(v1.fileSha256);
+  });
+
+  it('keeps both polling (5 sources × 10 photos) and cleanup (25 expired rows × 2 hashes) well under Free D1 50-query limits', async () => {
+    // 1. Poll 5 RSS sources in one org, each with 10 distinct photo URLs (50 URLs total).
+    const answers: Record<string, Answer> = {};
+    for (let s = 0; s < 5; s++) {
+      const feedUrl = `https://d1-budget-${s}.test/rss`;
+      await news(feedUrl);
+      answers[feedUrl] = { body: feedOf(10, (i) => `https://cdn.d1-budget-${s}.test/${i}.jpg`) };
+    }
+    const counter = countingDb(env.DB);
+    const countedPollEnv = { ...pollEnv, DB: counter.db } as unknown as Env;
+    await pollDataSources(countedPollEnv, { now: NOW, guards: web(answers).guards });
+    const pollCounts = counter.counts();
+    expect(pollCounts.apiCalls).toBeLessThan(25);
+    expect(pollCounts.statements).toBeLessThan(40);
+    // All 5 sources saved their snapshots and queued within the org's daily budget.
+    expect(take()).toHaveLength(NEW_PER_ORG_PER_DAY);
+
+    // 2. Cleanup of 25 expired rows with 2 distinct hashes each (50 hashes) stays well under 50 D1 queries.
+    const expiredUrls = Array.from({ length: 25 }, (_, i) => `https://gc-bulk.test/${i}.jpg`);
+    await o.scope.feedImages.hold(expiredUrls, { until: NOW, now: NOW, sourceId: 'bulk' });
+    for (let i = 0; i < expiredUrls.length; i++) {
+      const f = `${String(i).padStart(2, '0')}f`.padEnd(64, 'a');
+      const t = `${String(i).padStart(2, '0')}t`.padEnd(64, 'b');
+      await o.scope.feedImages.save(expiredUrls[i]!, { fileSha256: f, thumbSha256: t, nextCheckAt: NOW });
+    }
+    counter.reset();
+    const countedCleanupEnv = { DB: counter.db, BLOBS: env.BLOBS };
+    const expireAt = NOW + FEED_IMAGE_TTL_MS + 1;
+    await forgetFeedImages(countedCleanupEnv, expireAt);
+    expect(counter.counts().apiCalls).toBeLessThan(15);
+    expect(counter.counts().statements).toBeLessThan(20);
+
+    counter.reset();
+    await forgetFeedImages(countedCleanupEnv, expireAt + FEED_IMAGE_DELETE_GRACE_MS);
+    expect(counter.counts().apiCalls).toBeLessThan(15);
+    expect(counter.counts().statements).toBeLessThan(20);
   });
 });
 
@@ -866,10 +1113,10 @@ describe('two orgs naming the same photo', () => {
     );
     const copy = (await row(url, other))!;
     expect(copy.fileSha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(await env.BLOBS.head(orgBlobKey(other.orgId, copy.fileSha256!))).not.toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(other.orgId, copy.fileSha256!))).not.toBeNull();
     // This org fetched nothing yet: it holds no copy, and sees none of the other's.
     expect(await row(url)).toMatchObject({ fileSha256: null });
-    expect(await env.BLOBS.head(orgBlobKey(o.orgId, copy.fileSha256!))).toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, copy.fileSha256!))).toBeNull();
     for (const [org, id] of [
       [o, mine],
       [other, theirs],

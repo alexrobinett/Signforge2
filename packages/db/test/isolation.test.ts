@@ -536,14 +536,15 @@ describe('feed images', () => {
     expect(await b.bySourceSha(sha('a'))).toBeUndefined();
   });
 
-  it('forgets rows and gives the hashes nothing else of the org names, keeping a row a snapshot still names', async () => {
+  it('forgets rows, queues orphaned hashes durably, guards concurrent writes with leases, and stays isolated per org', async () => {
     const a = s.a.scope.feedImages;
+    const b = s.b.scope.feedImages;
     const sha = (c: string) => c.repeat(64);
     const urls = ['https://gc.example/alone.jpg', 'https://gc.example/shared.jpg', 'https://gc.example/twin.jpg', 'https://gc.example/shown.jpg'];
     await a.hold(urls, { until: 1, now: 1, sourceId: 'news' });
     await a.save(urls[0]!, { fileSha256: sha('1'), thumbSha256: sha('2'), nextCheckAt: 1 });
-    // Its file is also an asset's, and its thumbnail also another row's.
-    await a.save(urls[1]!, { fileSha256: (await s.a.scope.assets.get(s.a.asset))!.sha256, thumbSha256: sha('5'), nextCheckAt: 1 });
+    // Its file is a distinct hash not held by other rows, and its thumbnail is shared with twin.
+    await a.save(urls[1]!, { fileSha256: sha('d'), thumbSha256: sha('5'), nextCheckAt: 1 });
     await a.save(urls[2]!, { fileSha256: sha('6'), thumbSha256: sha('5'), nextCheckAt: 1 });
     // The source's latest snapshot still names this one.
     await a.save(urls[3]!, { fileSha256: sha('7'), thumbSha256: sha('8'), nextCheckAt: 1 });
@@ -553,14 +554,33 @@ describe('feed images', () => {
       checkedAt: 1,
       dataJson: JSON.stringify({ items: [{ image: { file: sha('7') } }] }),
     });
-    // Org B holds the same hash: not org A's to keep or give.
-    await s.b.scope.feedImages.hold([urls[0]!], { until: 1, now: 1, sourceId: 'news' });
-    await s.b.scope.feedImages.save(urls[0]!, { fileSha256: sha('1'), nextCheckAt: 1 });
+    // Org B holds the same hash: not org A's to keep or delete.
+    await b.hold([urls[0]!], { until: 1, now: 1, sourceId: 'news' });
+    await b.save(urls[0]!, { fileSha256: sha('1'), nextCheckAt: 1 });
 
-    expect((await a.forget(urls.slice(0, 2).concat(urls[3]!))).sort()).toEqual([sha('1'), sha('2')]);
+    // Forgetting alone, shared, and shown deletes alone + shared (shown stays), queueing their hashes durably.
+    expect(await a.forget(urls.slice(0, 2).concat(urls[3]!), 100)).toBe(2);
     expect((await a.get(urls)).map((r) => r.url).sort()).toEqual([urls[2], urls[3]].sort());
-    expect(await s.b.scope.feedImages.get([urls[0]!])).toHaveLength(1);
-    // Once the twin goes too, the thumbnail both named is free.
-    expect((await a.forget([urls[2]!])).sort()).toEqual([sha('5'), sha('6')]);
+    expect(await b.get([urls[0]!])).toHaveLength(1);
+    expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('1'), sha('2'), sha('5'), sha('d')].sort());
+    expect(await b.pendingDeletes()).toEqual([]);
+
+    // Claiming deletes drops sha('5') (still referenced by twin), leases sha('1'), sha('2'), sha('d').
+    const claimed = (await a.claimDeletes([sha('1'), sha('2'), sha('5'), sha('d')], { now: 200, leaseMs: 1_000 })).sort();
+    expect(claimed).toEqual([sha('1'), sha('2'), sha('d')].sort());
+    // While leased, claimForWrite returns false so a consumer retries rather than racing R2 delete.
+    expect(await a.claimForWrite([sha('1')], 500)).toBe(false);
+    // Org B's claimForWrite is unaffected by org A's lease.
+    expect(await b.claimForWrite([sha('1')], 500)).toBe(true);
+    // Once finished, the durable records are gone.
+    await a.finishDeletes(claimed);
+    expect(await a.pendingDeletes()).toEqual([]);
+
+    // Replacing hashes at the same URL durably queues the old ones and cancels active ones.
+    await a.save(urls[2]!, { fileSha256: sha('9'), thumbSha256: sha('9'), nextCheckAt: 300 }, { replaced: [sha('6'), sha('5')], now: 300 });
+    expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('5'), sha('6')]);
+    // Unleased pending delete is cancelled by claimForWrite when the hash is reused.
+    expect(await a.claimForWrite([sha('6')], 300)).toBe(true);
+    expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('5')]);
   });
 });

@@ -41,7 +41,7 @@ export { setOutputChecks } from './output';
 export { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
 export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
 export { platformRegistry, PLATFORM_TOOLS, registry, TOOLS } from './registry';
-export { baseBlobKey, manifestKey, orgBlobKey, uploadKey } from './r2';
+export { baseBlobKey, feedBlobKey, manifestKey, orgBlobKey, uploadKey } from './r2';
 export { r2Presigner, type R2PresignConfig, type UploadSigner } from './upload';
 export { MAX_RENDITION_BYTES, UPLOAD_URL_SECONDS } from './assets';
 export { IDENTIFY_SECONDS, liveOverride, OVERRIDE_LIMIT_MS } from './screens';

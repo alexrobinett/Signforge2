@@ -252,7 +252,7 @@ const updateDataSource = defineTool({
     // A new feed, or new rows in it, starts clean: the old one's validators and failures say nothing about it.
     // Photos switched on or off are read afresh too: the feed may answer 304 to a poll that would now add or drop them.
     const locator = input.feedUrl ?? input.resource;
-    const clean = { etag: null, lastModified: null, failures: 0, lastError: null, nextPollAt: 0 };
+    const clean = { etag: null, lastModified: null, photoUrlsJson: null, failures: 0, lastError: null, nextPollAt: 0 };
     const fresh = {
       ...(locator ? { urlEncrypted: await feedUrls.seal({ orgId: org.orgId, id: row.id }, locator), ...clean } : {}),
       ...(input.rowsPath !== undefined || (input.photos !== undefined && input.photos !== row.photos) ? clean : {}),

@@ -55,8 +55,8 @@ type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
 
 /** Writing a row that refers to something the org cannot see. */
 export class NotInOrgError extends Error {
-  constructor(what: string, id: string) {
-    super(`${what} ${id} not found`);
+  constructor(what: string, id: string, options?: ErrorOptions) {
+    super(`${what} ${id} not found`, options);
     this.name = 'NotInOrgError';
   }
 }
@@ -621,6 +621,7 @@ export function scoped(d1: D1Database, orgId: string) {
   const ps = s.publishScreens;
   const snap = s.dataSnapshots;
   const fi = s.feedImages;
+  const fid = s.feedImageDeletes;
   const pc = s.playCounts;
   const pcodes = s.pairingCodes;
 
@@ -1557,14 +1558,52 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * Read whole at the next poll, whatever the feed's validators would say: its stories' photos
        * changed (apps/api src/data/images.ts), and a 304 would leave its snapshot without them.
-       * Its version, failures and backoff stay, as with a poll.
+       * When `photoUrl` is given, any other RSS source in this org whose last-seen photo URLs name
+       * it is also marked to read afresh in the same statement.
        */
-      readAfresh: async (dataSourceId: string) => {
+      readAfresh: async (dataSourceId: string, photoUrl?: string) => {
+        const ds = s.dataSources;
+        const match = photoUrl
+          ? or(
+              eq(ds.id, dataSourceId),
+              and(eq(ds.format, 'rss'), eq(ds.photos, true), sql`instr(coalesce(${ds.photoUrlsJson}, ''), ${JSON.stringify(photoUrl)}) > 0`),
+            )
+          : eq(ds.id, dataSourceId);
         await db
-          .update(s.dataSources)
-          .set(updateSet(s.dataSources, { etag: null, lastModified: null }))
-          .where(and(eq(s.dataSources.orgId, orgId), eq(s.dataSources.id, dataSourceId)))
+          .update(ds)
+          .set(updateSet(ds, { etag: null, lastModified: null }))
+          .where(and(eq(ds.orgId, orgId), match))
           .run();
+      },
+      /**
+       * Everything the poller needs once per org: the claimed sources with their latest snapshot
+       * versions, plus published spots (with template manifests) and screen/org locales for bound
+       * field checks — all in one D1 batch.
+       */
+      pollInit: async (ids: readonly string[]) => {
+        if (!ids.length) return { rows: [], spots: [], locales: [null as string | null] };
+        const ds = s.dataSources;
+        const sp = s.spots;
+        const tv = s.templateVersions;
+        const [rows, spots, screenLocales, settings] = await db.batch([
+          db
+            .select({ source: ds, snapshotVersion: snap.version })
+            .from(ds)
+            .leftJoin(snap, and(eq(snap.orgId, ds.orgId), eq(snap.dataSourceId, ds.id)))
+            .where(and(eq(ds.orgId, orgId), sql`${ds.id} IN (SELECT value FROM json_each(${JSON.stringify([...ids])}))`)),
+          db
+            .select({ id: sp.id, publishedJson: sp.publishedJson, manifestJson: tv.manifestJson })
+            .from(sp)
+            .leftJoin(tv, sql`${tv.id} = json_extract(${sp.publishedJson}, '$.templateVersionId') AND (${tv.orgId} IS NULL OR ${tv.orgId} = ${sp.orgId})`)
+            .where(and(eq(sp.orgId, orgId), isNotNull(sp.publishedJson))),
+          db.selectDistinct({ locale: s.screens.locale }).from(s.screens).where(eq(s.screens.orgId, orgId)),
+          db.select({ locale: s.orgSettings.locale }).from(s.orgSettings).where(eq(s.orgSettings.orgId, orgId)).limit(1),
+        ]);
+        return {
+          rows: rows.map((r) => ({ source: r.source, snapshotVersion: r.snapshotVersion ?? null })),
+          spots: spots.filter((r): r is { id: string; publishedJson: string; manifestJson: string | null } => r.publishedJson !== null),
+          locales: screenLocales.length ? screenLocales.map((r) => r.locale) : [settings[0]?.locale ?? null],
+        };
       },
       /** The sources that read through `connectionId`. */
       usingConnection: (connectionId: string) =>
@@ -1610,22 +1649,30 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * What one poll found, in one batch: the source's patch (next poll, failures, validators),
        * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
+       * Throws `NotInOrgError` if the source does not belong to this org without an extra read.
        */
       savePoll: async (
         dataSourceId: string,
         poll: { source: RowPatch<typeof s.dataSources> & { nextPollAt: number }; snapshot?: Snapshot; checkedAt?: number },
       ) => {
-        if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId);
         const ds = s.dataSources;
+        const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
         const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
+        const check = db
+          .select({
+            ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${ds} WHERE ${ds.orgId} = ${orgId} AND ${ds.id} = ${dataSourceId}) THEN '1' ELSE 'not in org' END)`,
+          })
+          .from(s.organization)
+          .where(eq(s.organization.id, orgId));
         // Not `stage.update`: a poll leaves the row's version alone, so it never makes a person's edit stale.
         const writes: Write[] = [
           ...staged(
             undefined,
+            check,
             db
               .update(ds)
               .set(updateSet(ds, strip(poll.source)))
-              .where(and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId))),
+              .where(mine),
           ).writes,
         ];
         if (poll.snapshot) {
@@ -1640,25 +1687,28 @@ export function scoped(d1: D1Database, orgId: string) {
             ).writes,
           );
         } else if (poll.checkedAt !== undefined) writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(mineSnap)).writes);
-        await commit(db, writes);
+        try {
+          const [, updated] = await commit(db, writes);
+          if (!updated) throw new NotInOrgError('data source', dataSourceId);
+        } catch (err) {
+          if (err instanceof NotInOrgError) throw err;
+          // biome-ignore lint/style/useErrorCause: the cause is passed in the options argument.
+          if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId, { cause: err });
+          throw err;
+        }
       },
     },
 
     /** The photos the org's news sources name, by URL (`feed_images` in ./schema.ts). Written by the poller, not by tools. */
     feedImages: {
+      /** Look up any number of photo URLs in this org in a single D1 query. */
       get: async (urls: readonly string[]) =>
         urls.length
-          ? (
-              await Promise.all(
-                chunk([...urls], 1).map((part) =>
-                  db
-                    .select()
-                    .from(fi)
-                    .where(and(eq(fi.orgId, orgId), inArray(fi.url, part)))
-                    .all(),
-                ),
-              )
-            ).flat()
+          ? db
+              .select()
+              .from(fi)
+              .where(and(eq(fi.orgId, orgId), sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify([...urls])}))`))
+              .all()
           : [],
       /**
        * Held until `until`: queued to be fetched, so a poll before then does not queue them again. A
@@ -1669,13 +1719,52 @@ export function scoped(d1: D1Database, orgId: string) {
         const values = urls.map((url) => ({ orgId, url, sourceId, nextCheckAt: until, createdAt: now }));
         if (values.length)
           await db.batch(
-            chunk(values, 6).map((part) =>
+            chunk(values, 9).map((part) =>
               db
                 .insert(fi)
                 .values(part)
                 .onConflictDoUpdate({ target: [fi.orgId, fi.url], set: updateSet(fi, { nextCheckAt: until }) }),
             ) as [never, ...never[]],
           );
+      },
+      /**
+       * Atomically hold `again` (due rechecks) plus as many of `fresh` as fit within `maxSource`
+       * and `maxOrg` rows made since `since`, in one D1 statement. Returns the exact URLs held.
+       */
+      holdWithinBudget: async (
+        sourceId: string,
+        {
+          again,
+          fresh,
+          until,
+          now,
+          since,
+          maxSource,
+          maxOrg,
+        }: { again: readonly string[]; fresh: readonly string[]; until: number; now: number; since: number; maxSource: number; maxOrg: number },
+      ): Promise<string[]> => {
+        if (!again.length && !fresh.length) return [];
+        const updatedAt = Date.now();
+        const rows = await db.all<{ url: string }>(sql`
+          WITH counts AS (
+            SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${sourceId}), 0) AS src_n
+            FROM ${fi}
+            WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${since}
+          ),
+          chosen(url) AS (
+            SELECT value FROM json_each(${JSON.stringify([...again])})
+            UNION ALL
+            SELECT f.value
+            FROM json_each(${JSON.stringify([...fresh])}) AS f
+            CROSS JOIN counts
+            WHERE CAST(f.key AS INTEGER) < MAX(0, MIN(${maxSource} - counts.src_n, ${maxOrg} - counts.org_n))
+          )
+          INSERT INTO ${fi} (org_id, url, source_id, next_check_at, created_at, updated_at)
+          SELECT ${orgId}, url, ${sourceId}, ${until}, ${now}, ${updatedAt} FROM chosen
+          WHERE true
+          ON CONFLICT (org_id, url) DO UPDATE SET next_check_at = excluded.next_check_at, updated_at = excluded.updated_at
+          RETURNING url`);
+        return rows.map((r) => r.url);
       },
       /** How many rows were made at or after `since`: the org's, and of those, the ones `sourceId` made. */
       madeSince: async (since: number, sourceId: string) => {
@@ -1695,69 +1784,150 @@ export function scoped(d1: D1Database, orgId: string) {
           .limit(1)
           .get(),
       /**
-       * Delete these rows, but not one whose copy the org's latest snapshots still name (a source
-       * whose polls fail keeps playing its last good one). Returns the hashes of the deleted rows'
-       * files that nothing of the org names any more: no other row, no asset, no snapshot. Those
-       * blobs may go.
+       * Cancel any unleased pending deletes for `shas` before writing or reusing those blobs in
+       * `o/<org>/f/`. Returns `false` if a cleanup run currently holds an active `deleting_until`
+       * lease on any of `shas` (so the consumer retries rather than racing R2 put against delete).
        */
-      forget: async (urls: readonly string[]): Promise<string[]> => {
+      claimForWrite: async (shas: readonly string[], now: number): Promise<boolean> => {
+        const unique = [...new Set(shas)];
+        if (!unique.length) return true;
+        const inList = sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(unique)}))`;
+        const [, active] = await db.batch([
+          db.delete(fid).where(and(eq(fid.orgId, orgId), inList, lte(fid.deletingUntil, now))),
+          db
+            .select({ sha256: fid.sha256 })
+            .from(fid)
+            .where(and(eq(fid.orgId, orgId), inList)),
+        ]);
+        return active.length === 0;
+      },
+      /**
+       * Expire these rows, keeping any whose copy the org's latest snapshots still name (a source
+       * whose polls fail keeps playing its last good one). Deleted rows' hashes are durably queued
+       * in `feed_image_deletes` in the same batch; R2 deletion runs after the grace window via
+       * `claimDeletes` and `finishDeletes`. Returns how many rows were deleted.
+       */
+      forget: async (urls: readonly string[], now: number): Promise<number> => {
+        if (!urls.length) return 0;
         const shasOf = (r: typeof fi.$inferSelect) => [r.fileSha256, r.thumbSha256].filter((x): x is string => x !== null);
-        const rows = urls.length
-          ? (
-              await Promise.all(
-                chunk([...urls], 1).map((part) =>
-                  db
-                    .select()
-                    .from(fi)
-                    .where(and(eq(fi.orgId, orgId), inArray(fi.url, part)))
-                    .all(),
-                ),
-              )
-            ).flat()
-          : [];
-        const snapshots = (await db.select({ json: snap.dataJson }).from(snap).where(eq(snap.orgId, orgId)).all()).map((r) => r.json);
+        const [rows, snapshotRows] = await db.batch([
+          db
+            .select()
+            .from(fi)
+            .where(and(eq(fi.orgId, orgId), sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify([...urls])}))`)),
+          db.select({ json: snap.dataJson }).from(snap).where(eq(snap.orgId, orgId)),
+        ]);
+        const snapshots = snapshotRows.map((r) => r.json);
         const named = (sha: string) => snapshots.some((json) => json.includes(sha));
         const gone = rows.filter((r) => !shasOf(r).some(named));
-        if (!gone.length) return [];
-        await db.batch(
-          chunk(
-            gone.map((r) => r.url),
-            1,
-          ).map((part) => db.delete(fi).where(and(eq(fi.orgId, orgId), inArray(fi.url, part)))) as [never, ...never[]],
-        );
+        if (!gone.length) return 0;
+        const goneUrls = gone.map((r) => r.url);
         const candidates = [...new Set(gone.flatMap(shasOf))];
-        const kept = new Set<string>();
-        const ar = s.assetRenditions;
-        for (const part of chunk(candidates, 3)) {
-          const [photos, assetRows, renditions] = await Promise.all([
-            db
-              .select()
-              .from(fi)
-              .where(and(eq(fi.orgId, orgId), or(inArray(fi.fileSha256, part), inArray(fi.thumbSha256, part))))
-              .all(),
-            db
-              .select({ sha256: s.assets.sha256 })
-              .from(s.assets)
-              .where(and(eq(s.assets.orgId, orgId), inArray(s.assets.sha256, part)))
-              .all(),
-            db
-              .select({ sha256: ar.sha256, sampleSha256: ar.sampleSha256 })
-              .from(ar)
-              .where(and(eq(ar.orgId, orgId), or(inArray(ar.sha256, part), inArray(ar.sampleSha256, part))))
-              .all(),
-          ]);
-          for (const sha of [...photos.flatMap(shasOf), ...assetRows.map((a) => a.sha256), ...renditions.flatMap((r) => [r.sha256, r.sampleSha256])])
-            if (sha) kept.add(sha);
-        }
-        return candidates.filter((sha) => !kept.has(sha));
+        const deleteRows = db.delete(fi).where(and(eq(fi.orgId, orgId), sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify(goneUrls)}))`));
+        const queueDeletes = chunk(
+          candidates.map((sha256) => ({ orgId, sha256, queuedAt: now, deletingUntil: 0 })),
+          4,
+        ).map((part) =>
+          db
+            .insert(fid)
+            .values(part)
+            .onConflictDoUpdate({ target: [fid.orgId, fid.sha256], set: { queuedAt: now, deletingUntil: 0 } }),
+        );
+        await db.batch([deleteRows, ...queueDeletes]);
+        return gone.length;
       },
-      /** What fetching `url` found: on success its hashes and validators, on a failure its category, the hashes kept. */
-      save: async (url: string, found: RowPatch<typeof s.feedImages> & { nextCheckAt: number }) => {
+      /**
+       * Check pending delete candidates against snapshots and `feed_images` in batched SQL:
+       * - Hashes still referenced by `feed_images` are removed from `feed_image_deletes` (that row owns them).
+       * - Hashes still named by a `data_snapshots` row (and no `feed_images` row) stay in
+       *   `feed_image_deletes` with `queued_at = now` so they wait for the snapshot to move on without
+       *   being lost or starving other deletes.
+       * - Remaining unreferenced hashes are atomically leased (`deleting_until = now + leaseMs`) for
+       *   R2 deletion. Returns the exact hashes claimed.
+       */
+      claimDeletes: async (shas: readonly string[], { now, leaseMs }: { now: number; leaseMs: number }): Promise<string[]> => {
+        const unique = [...new Set(shas)];
+        if (!unique.length) return [];
+        const snapshots = (await db.select({ json: snap.dataJson }).from(snap).where(eq(snap.orgId, orgId)).all()).map((r) => r.json);
+        const inSnap = unique.filter((sha) => snapshots.some((json) => json.includes(sha)));
+        const candidates = unique.filter((sha) => !snapshots.some((json) => json.includes(sha)));
+        const refExists = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND (${fi.fileSha256} = ${fid.sha256} OR ${fi.thumbSha256} = ${fid.sha256}))`;
+        const inAll = sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(unique)}))`;
+        const clearReferenced = db.delete(fid).where(and(eq(fid.orgId, orgId), inAll, refExists));
+        if (!candidates.length) {
+          await db.batch([
+            clearReferenced,
+            db
+              .update(fid)
+              .set({ queuedAt: now, deletingUntil: 0 })
+              .where(and(eq(fid.orgId, orgId), sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(inSnap)}))`)),
+          ]);
+          return [];
+        }
+        const inCandidates = sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(candidates)}))`;
+        const claim = db
+          .update(fid)
+          .set({ deletingUntil: now + leaseMs })
+          .where(and(eq(fid.orgId, orgId), inCandidates, lte(fid.deletingUntil, now), sql`NOT ${refExists}`))
+          .returning({ sha256: fid.sha256 });
+        if (inSnap.length) {
+          const [, , claimed] = await db.batch([
+            clearReferenced,
+            db
+              .update(fid)
+              .set({ queuedAt: now, deletingUntil: 0 })
+              .where(and(eq(fid.orgId, orgId), sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(inSnap)}))`)),
+            claim,
+          ]);
+          return claimed.map((r) => r.sha256);
+        }
+        const [, claimed] = await db.batch([clearReferenced, claim]);
+        return claimed.map((r) => r.sha256);
+      },
+      /** Remove claimed delete records once R2 deletion succeeded. */
+      finishDeletes: async (shas: readonly string[]): Promise<void> => {
+        if (!shas.length) return;
         await db
+          .delete(fid)
+          .where(and(eq(fid.orgId, orgId), sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify([...shas])}))`))
+          .run();
+      },
+      /** Pending delete records for this org, ordered by hash. */
+      pendingDeletes: () => db.select().from(fid).where(eq(fid.orgId, orgId)).orderBy(asc(fid.sha256)).all(),
+      /**
+       * What fetching `url` found: on success its hashes and validators (atomically queuing any
+       * replaced hashes into `feed_image_deletes` and clearing active hashes from it), on a failure
+       * its category, the hashes kept.
+       */
+      save: async (
+        url: string,
+        found: RowPatch<typeof s.feedImages> & { nextCheckAt: number },
+        { replaced, now }: { replaced?: readonly string[]; now?: number } = {},
+      ) => {
+        const updateRow = db
           .update(fi)
           .set(updateSet(fi, strip(found)))
-          .where(and(eq(fi.orgId, orgId), eq(fi.url, url)))
-          .run();
+          .where(and(eq(fi.orgId, orgId), eq(fi.url, url)));
+        const active = [...new Set([found.fileSha256, found.thumbSha256].filter((x): x is string => typeof x === 'string'))];
+        const stale = [...new Set((replaced ?? []).filter((sha) => !active.includes(sha)))];
+        if (!active.length && !stale.length) {
+          await updateRow.run();
+          return;
+        }
+        const stmts: Parameters<Db['batch']>[0][number][] = [updateRow];
+        if (stale.length) {
+          const queuedAt = now ?? Date.now();
+          stmts.push(
+            db
+              .insert(fid)
+              .values(stale.map((sha256) => ({ orgId, sha256, queuedAt, deletingUntil: 0 })))
+              .onConflictDoUpdate({ target: [fid.orgId, fid.sha256], set: { queuedAt, deletingUntil: 0 } }),
+          );
+        }
+        if (active.length) {
+          stmts.push(db.delete(fid).where(and(eq(fid.orgId, orgId), sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(active)}))`)));
+        }
+        await db.batch(stmts as [never, ...never[]]);
       },
     },
 

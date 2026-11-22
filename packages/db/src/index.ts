@@ -23,7 +23,9 @@ export {
   expireAuditRows,
   expiredFeedImages,
   expireIdempotencyKeys,
+  FEED_IMAGE_DELETE_GRACE_MS,
   FEED_IMAGE_TTL_MS,
+  pendingFeedImageDeletes,
 } from './retention';
 export { alertChannelsOf, claimDueAlertDeliveries, settleAlertDeliveries, type AttemptResult } from './deliveries';
 

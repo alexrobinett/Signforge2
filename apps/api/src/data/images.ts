@@ -5,13 +5,15 @@
  *
  * Two halves, so a poll stays cheap whatever the photos cost:
  *
- * - **The poll** (`newsWithPhotos`, from ./poller.ts, for an `rss` source with `photos` on and at
- *   least one published spot whose bound template has an image property) looks up the first
- *   PHOTOS_PER_SOURCE stories' photo URLs in the org's `feed_images` and gives each story the copy
- *   held for it. Once the snapshot is saved, it queues (`queuePhotos`) the URLs due to be asked
- *   again and the new ones within the day's budget (NEW_PER_SOURCE_PER_DAY and NEW_PER_ORG_PER_DAY)
- *   to FEED_IMAGES, holding them so the next poll does not queue them twice. A queue that refuses
- *   is logged and the snapshot stands: photos never hold up the headlines.
+ * - **The poll** (`newsWithPhotos` / `planPhotos`, from ./poller.ts, for an `rss` source with
+ *   `photos` on and at least one published spot whose bound template has an image property) looks
+ *   up the first PHOTOS_PER_SOURCE stories' photo URLs in the org's `feed_images` in one batched
+ *   query and gives each story the copy held for it. Even on an unchanged RSS `304`, `planPhotos`
+ *   checks the source's last-seen photo URLs so retries, budget-deferred URLs and weekly rechecks
+ *   still run. Once the snapshot is saved, `queuePhotos` queues due rechecks and new URLs within
+ *   the day's budget (NEW_PER_SOURCE_PER_DAY and NEW_PER_ORG_PER_DAY) to FEED_IMAGES, holding them
+ *   so the next poll does not queue them twice. A queue that refuses is logged and the snapshot
+ *   stands: photos never hold up the headlines.
  * - **The queue's consumer** (`storeFeedImages`), one photo an invocation and one at a time,
  *   fetches each through the feed guards (./fetch.ts: https only, every redirect and every resolved
  *   address checked, 8 MB), an `http:` URL once as https; hashes the fetched bytes and reuses any
@@ -21,8 +23,10 @@
  *   PASS_THROUGH_MAX_BYTES, otherwise has the Images binding decode and scale it to cover a
  *   landscape screen; makes a separate thumbnail only when the photo is larger than NEWS_THUMB_BOX
  *   (otherwise reuses `file` as `thumb`); makes no contrast sample (templates use a scrim over feed
- *   photos); and stores the files in R2 under the org's blob keys. A source whose copies changed is
- *   read afresh at its next poll, so its snapshot names them.
+ *   photos); and stores the files in R2 under the feed-owned prefix `o/<org>/f/<sha256>`
+ *   (`feedBlobKey`, isolated from assets and `/admin` manifest blobs under `o/<org>/b/`). A source
+ *   whose copies changed is read afresh at its next poll, so its snapshot names them, and any
+ *   replaced hashes are durably queued in `feed_image_deletes`.
  *
  * Costs, on the Free plan's limits (docs/backend-plan.md, Limits): 0 Images transformations for a
  * duplicate photo or a JPEG/WebP already fitting NEWS_THUMB_BOX; 1 for a typical web JPEG/WebP
@@ -30,15 +34,16 @@
  * PNG/AVIF photos. About three queue operations and up to 12 fetches (DNS and redirects) per photo.
  * A photo is asked for again, conditionally, a week after it was fetched. A failure keeps the last
  * good copy; one that may pass is tried again after an hour, doubling up to a day, and one that
- * will not after a day. A photo no poll has named for a week is forgotten with the files nothing
- * else names (`forgetFeedImages`, daily).
+ * will not after a day. A photo no poll has named for a week is forgotten daily (`forgetFeedImages`),
+ * queueing its hashes in `feed_image_deletes` and deleting unreferenced R2 blobs after the grace
+ * window (`FEED_IMAGE_DELETE_GRACE_MS`) with retry on R2 failure.
  */
 import { coverSize, fitsScreenBox, NEWS_THUMB_BOX, type NewsFeed, type NewsImage, SCREEN_BOX } from '@signforge/contract';
-import { expiredFeedImages, type FeedImageRow, type OrgScope, scoped } from '@signforge/db';
+import { expiredFeedImages, type FeedImageRow, type OrgScope, pendingFeedImageDeletes, scoped } from '@signforge/db';
 import type { ParsedNews } from '@signforge/feeds';
 import { readImageInfo } from '@signforge/media/image-info';
 import { workerFetch } from '../connectors';
-import { orgBlobKey } from '../r2';
+import { feedBlobKey } from '../r2';
 import { FetchError, type FetchErrorCode, type FetchGuards, feedGuards, guardedImageFetch } from './fetch';
 
 const HOUR_MS = 3_600_000;
@@ -61,6 +66,8 @@ export const RETRY_MS = HOUR_MS;
 export const FAIL_WAIT_MS = DAY_MS;
 /** How long a queued URL is held: past the consumer's tries, so polls meanwhile do not queue it again. */
 export const HOLD_MS = 15 * 60_000;
+/** Lease held on `feed_image_deletes` rows while deleting from R2, so a failed R2 delete retries cleanly on the next run. */
+export const DELETE_LEASE_MS = 2 * 60_000;
 /**
  * Byte cap for storing a fetched JPEG or WebP untouched as `file` without calling Images: web
  * photos up to 1.25× SCREEN_BOX.landscape (2400×1350) are typically 100–600 kB, while bloated or
@@ -71,8 +78,10 @@ export const PASS_THROUGH_MAX_BYTES = 1_000_000;
 const PASS_THROUGH_BOX = { w: Math.round(SCREEN_BOX.landscape.w * 1.25), h: Math.round(SCREEN_BOX.landscape.h * 1.25) } as const;
 /** Deliveries of one message: wrangler.jsonc's `max_retries` (2) and the first. The last records its failure. */
 const ATTEMPTS = 3;
-/** Rows forgotten per daily run, oldest first; the rest go the next day. */
-const FORGET_PER_RUN = 500;
+/** Rows expired and delete candidates scanned per daily run; capped per org so midnight D1 queries stay well under Free's 50-query limit. */
+const FORGET_PER_RUN = 100;
+const DELETE_PER_RUN = 100;
+const CLEANUP_ORGS_PER_RUN = 3;
 /** Encoder quality for a copy, as `sf build` and the CMS's uploads use. */
 const QUALITY = 85;
 
@@ -83,20 +92,31 @@ export interface FeedImageJob {
   url: string;
 }
 
+/** Look up `urls` in one batched query and split into due rechecks (`again`) and unseen URLs (`fresh`). */
+export async function planPhotos(
+  org: OrgScope,
+  urls: readonly string[],
+  now: number,
+): Promise<{ held: Map<string, FeedImageRow>; again: string[]; fresh: string[] }> {
+  const held = new Map((await org.feedImages.get(urls)).map((r) => [r.url, r]));
+  const fresh = urls.filter((url) => !held.has(url));
+  const again = urls.filter((url) => (held.get(url)?.nextCheckAt ?? Number.POSITIVE_INFINITY) <= now);
+  return { held, again, fresh };
+}
+
 /**
  * A news feed as a snapshot holds it: the parsed feed without its URLs, each of the first
- * PHOTOS_PER_SOURCE stories with the copy the org holds of its photo, if any. `again` are URLs due
- * for a recheck and `fresh` are URLs new to the org, queued once the snapshot is saved.
+ * PHOTOS_PER_SOURCE stories with the copy the org holds of its photo, if any. `urls` are the
+ * deduplicated top photo URLs (persisted on the source so 304 polls still schedule photo work);
+ * `again` are URLs due for a recheck and `fresh` are URLs new to the org, queued once saved.
  */
 export async function newsWithPhotos(
   org: OrgScope,
   { logo: _logo, items, ...feed }: ParsedNews,
   now: number,
-): Promise<{ data: NewsFeed; again: string[]; fresh: string[] }> {
+): Promise<{ data: NewsFeed; urls: string[]; again: string[]; fresh: string[] }> {
   const urls = [...new Set(items.slice(0, PHOTOS_PER_SOURCE).flatMap((i) => (i.image ? [i.image.url] : [])))];
-  const held = new Map((await org.feedImages.get(urls)).map((r) => [r.url, r]));
-  const fresh = urls.filter((url) => !held.has(url));
-  const again = urls.filter((url) => (held.get(url)?.nextCheckAt ?? Number.POSITIVE_INFINITY) <= now);
+  const { held, again, fresh } = await planPhotos(org, urls, now);
   const data = {
     ...feed,
     items: items.map(({ image, ...item }, i) => {
@@ -104,7 +124,7 @@ export async function newsWithPhotos(
       return copy ? { ...item, image: copy } : item;
     }),
   };
-  return { data, again, fresh };
+  return { data, urls, again, fresh };
 }
 
 /**
@@ -119,14 +139,16 @@ export async function queuePhotos(
   now: number,
 ): Promise<void> {
   try {
-    let allowed = 0;
-    if (fresh.length) {
-      const made = await org.feedImages.madeSince(now - DAY_MS, sourceId);
-      allowed = Math.max(0, Math.min(NEW_PER_SOURCE_PER_DAY - made.source, NEW_PER_ORG_PER_DAY - made.org));
-    }
-    const urls = [...again, ...fresh.slice(0, allowed)];
+    const urls = await org.feedImages.holdWithinBudget(sourceId, {
+      again,
+      fresh,
+      until: now + HOLD_MS,
+      now,
+      since: now - DAY_MS,
+      maxSource: NEW_PER_SOURCE_PER_DAY,
+      maxOrg: NEW_PER_ORG_PER_DAY,
+    });
     if (!urls.length) return;
-    await org.feedImages.hold(urls, { until: now + HOLD_MS, now, sourceId });
     await env.FEED_IMAGES.sendBatch(urls.map((url): { body: FeedImageJob } => ({ body: { orgId: org.orgId, sourceId, url } })));
   } catch (e) {
     console.error(`[feed images] could not queue photos of ${org.orgId}/${sourceId}`, e);
@@ -158,8 +180,10 @@ const PASSING = new Set<PhotoError>(['dns', 'timeout', 'network', 'images-quota'
 const mayPass = (e: FetchError | PhotoFailure) =>
   PASSING.has(e.code) || (e instanceof FetchError && e.code === 'http-status' && (e.status === 429 || (e.status ?? 0) >= 500));
 
-/** The Images binding's codes for bytes it cannot decode: not an image, over 100 megapixels, a format it does not read, or a damaged one. */
-const UNDECODABLE = new Set([9412, 9413, 9520, 9523]);
+/** The Images binding's codes for bytes it cannot decode: not an image (9412) or unsupported format (9520). Ambiguous resize errors like 9523 fall through to retryable `images-unavailable`. */
+const UNDECODABLE = new Set([9412, 9520]);
+/** The image exceeds Cloudflare Images' maximum dimensions or area (9413). */
+const IMAGES_TOO_LARGE = 9413;
 /** The account's transformations are used up for the month. */
 const OVER_QUOTA = 9422;
 
@@ -193,7 +217,7 @@ export async function storeFeedImages(
     const { orgId, sourceId, url } = message.body;
     const org = scoped(env.DB, orgId);
     try {
-      if (await storeOne(env, deps, org, sourceId, url)) await org.dataSources.readAfresh(sourceId);
+      if (await storeOne(env, deps, org, sourceId, url)) await org.dataSources.readAfresh(sourceId, url);
       message.ack();
     } catch (e) {
       console.error(`[feed images] a photo of ${orgId}/${sourceId} could not be stored (try ${message.attempts} of ${ATTEMPTS})`, e);
@@ -219,6 +243,11 @@ function failed(org: OrgScope, row: FeedImageRow, code: PhotoError, passing: boo
   return org.feedImages.save(row.url, { lastError: code, failures, nextCheckAt: now + wait });
 }
 
+/** Hashes `row` previously pointed to that are no longer named by the replacement copy. */
+function replacedShas(row: FeedImageRow, fileSha: string, thumbSha: string): string[] {
+  return [row.fileSha256, row.thumbSha256].filter((sha): sha is string => sha !== null && sha !== fileSha && sha !== thumbSha);
+}
+
 /** Fetch and store one photo; true when the copy it names changed. */
 async function storeOne(env: Pick<Env, 'BLOBS'>, { now, guards, images }: PhotoDeps, org: OrgScope, sourceId: string, url: string): Promise<boolean> {
   const source = await org.dataSources.get(sourceId);
@@ -241,23 +270,34 @@ async function storeOne(env: Pick<Env, 'BLOBS'>, { now, guards, images }: PhotoD
     // Same photo bytes already processed for another URL in this org (query string, http/https, mirror): reuse its copies with no transform or R2 write.
     const existing = await org.feedImages.bySourceSha(sourceSha256);
     if (existing?.fileSha256 && existing.thumbSha256) {
-      await org.feedImages.save(url, {
+      if (!(await org.feedImages.claimForWrite([existing.fileSha256, existing.thumbSha256], now))) {
+        throw new Error('feed photo blob deletion in flight; retrying');
+      }
+      await org.feedImages.save(
+        url,
+        {
+          ...kept,
+          ...validators,
+          sourceSha256,
+          fileSha256: existing.fileSha256,
+          thumbSha256: existing.thumbSha256,
+        },
+        { replaced: replacedShas(row, existing.fileSha256, existing.thumbSha256), now },
+      );
+      return existing.fileSha256 !== row.fileSha256 || existing.thumbSha256 !== row.thumbSha256;
+    }
+    const copy = await stored(env, images, org, fetched.body, sourceSha256, now);
+    await org.feedImages.save(
+      url,
+      {
         ...kept,
         ...validators,
         sourceSha256,
-        fileSha256: existing.fileSha256,
-        thumbSha256: existing.thumbSha256,
-      });
-      return existing.fileSha256 !== row.fileSha256 || existing.thumbSha256 !== row.thumbSha256;
-    }
-    const copy = await stored(env, images, org.orgId, fetched.body, sourceSha256);
-    await org.feedImages.save(url, {
-      ...kept,
-      ...validators,
-      sourceSha256,
-      fileSha256: copy.file,
-      thumbSha256: copy.thumb,
-    });
+        fileSha256: copy.file,
+        thumbSha256: copy.thumb,
+      },
+      { replaced: replacedShas(row, copy.file, copy.thumb), now },
+    );
     return copy.file !== row.fileSha256 || copy.thumb !== row.thumbSha256;
   } catch (e) {
     if (!(e instanceof FetchError || e instanceof PhotoFailure)) throw e;
@@ -291,14 +331,29 @@ function sniffed(bytes: Uint8Array): { type: Raster; width?: number; height?: nu
   throw new PhotoFailure('not-an-image');
 }
 
-/** The checked copies of a photo, stored in the org's blobs: by hash, so one photo named by several stories or sources is stored once. */
-async function stored(env: Pick<Env, 'BLOBS'>, images: PhotoDeps['images'], orgId: string, bytes: Uint8Array, sourceSha256: string): Promise<NewsImage> {
+/**
+ * The checked copies of a photo, stored in the org's feed-owned blob prefix (`o/<org>/f/<sha256>`):
+ * cancels any unleased pending delete for these hashes before writing, and retries via the queue if
+ * a cleanup run is actively deleting the exact same hash from R2.
+ */
+async function stored(
+  env: Pick<Env, 'BLOBS'>,
+  images: PhotoDeps['images'],
+  org: OrgScope,
+  bytes: Uint8Array,
+  sourceSha256: string,
+  now: number,
+): Promise<NewsImage> {
   const { file, thumb } = await copies(images, bytes);
   const fileSha = file.bytes === bytes ? sourceSha256 : await sha256Hex(file.bytes);
-  await env.BLOBS.put(orgBlobKey(orgId, fileSha), file.bytes, { sha256: fileSha, httpMetadata: { contentType: file.type } });
-  if (thumb.bytes === file.bytes) return { file: fileSha, thumb: fileSha };
-  const thumbSha = await sha256Hex(thumb.bytes);
-  if (thumbSha !== fileSha) await env.BLOBS.put(orgBlobKey(orgId, thumbSha), thumb.bytes, { sha256: thumbSha, httpMetadata: { contentType: thumb.type } });
+  const thumbSha = thumb.bytes === file.bytes ? fileSha : await sha256Hex(thumb.bytes);
+  if (!(await org.feedImages.claimForWrite([fileSha, thumbSha], now))) {
+    throw new Error('feed photo blob deletion in flight; retrying');
+  }
+  await env.BLOBS.put(feedBlobKey(org.orgId, fileSha), file.bytes, { sha256: fileSha, httpMetadata: { contentType: file.type } });
+  if (thumbSha !== fileSha) {
+    await env.BLOBS.put(feedBlobKey(org.orgId, thumbSha), thumb.bytes, { sha256: thumbSha, httpMetadata: { contentType: thumb.type } });
+  }
   return { file: fileSha, thumb: thumbSha };
 }
 
@@ -332,6 +387,7 @@ async function copies(
   } catch (e) {
     if (e instanceof PhotoFailure) throw e;
     const code = imagesCode(e);
+    if (code === IMAGES_TOO_LARGE) throw new PhotoFailure('too-large', { cause: e });
     if (code !== undefined && UNDECODABLE.has(code)) throw new PhotoFailure('undecodable', { cause: e });
     throw new PhotoFailure(code === OVER_QUOTA ? 'images-quota' : 'images-unavailable', { cause: e });
   }
@@ -351,19 +407,54 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Group items by org, keeping at most `maxOrgs` orgs so a daily run stays well inside Free D1's 50-query limit. */
+function groupByOrg<T>(items: readonly ({ orgId: string } & T)[], pick: (item: T) => string, maxOrgs: number): Map<string, string[]> {
+  const byOrg = new Map<string, string[]>();
+  for (const item of items) {
+    let list = byOrg.get(item.orgId);
+    if (!list) {
+      if (byOrg.size >= maxOrgs) continue;
+      list = [];
+      byOrg.set(item.orgId, list);
+    }
+    list.push(pick(item));
+  }
+  return byOrg;
+}
+
 /**
- * The daily clean-up: every org's photos no poll has named for a week (`expiredFeedImages`),
- * forgotten through each org's scope, and the files nothing of the org names any more deleted
- * from R2. A row a snapshot still names stays. Returns how many rows it looked at.
+ * The daily clean-up, bounded for Free D1's 50-query limit:
+ * 1. Expire `feed_images` rows unnamed for a week past their check (`expiredFeedImages`), keeping
+ *    any still named by a snapshot, and durably queue their hashes into `feed_image_deletes`.
+ * 2. Drain `feed_image_deletes` rows whose grace window has elapsed (`pendingFeedImageDeletes`),
+ *    re-checking references in batched SQL, leasing claimed hashes while deleting from R2 under
+ *    `o/<org>/f/`, and clearing the delete records only after R2 delete succeeds so failures retry.
+ * Returns how many expired rows were forgotten in phase 1 plus how many blobs were deleted in phase 2.
  */
 export async function forgetFeedImages(env: Pick<Env, 'DB' | 'BLOBS'>, now: number): Promise<number> {
   const expired = await expiredFeedImages(env.DB, now, FORGET_PER_RUN);
-  const byOrg = new Map<string, string[]>();
-  for (const { orgId, url } of expired) byOrg.set(orgId, [...(byOrg.get(orgId) ?? []), url]);
-  for (const [orgId, urls] of byOrg) {
-    const keys = (await scoped(env.DB, orgId).feedImages.forget(urls)).map((sha) => orgBlobKey(orgId, sha));
-    // R2 deletes at most 1,000 keys a call.
-    for (let i = 0; i < keys.length; i += 1000) await env.BLOBS.delete(keys.slice(i, i + 1000));
+  let forgotten = 0;
+  for (const [orgId, urls] of groupByOrg(expired, (r) => r.url, CLEANUP_ORGS_PER_RUN)) {
+    forgotten += await scoped(env.DB, orgId).feedImages.forget(urls, now);
   }
-  return expired.length;
+  const pending = await pendingFeedImageDeletes(env.DB, now, DELETE_PER_RUN);
+  let deleted = 0;
+  const errors: unknown[] = [];
+  for (const [orgId, shas] of groupByOrg(pending, (r) => r.sha256, CLEANUP_ORGS_PER_RUN)) {
+    const org = scoped(env.DB, orgId);
+    const claimed = await org.feedImages.claimDeletes(shas, { now, leaseMs: DELETE_LEASE_MS });
+    if (!claimed.length) continue;
+    const keys = claimed.map((sha) => feedBlobKey(orgId, sha));
+    try {
+      // R2 deletes at most 1,000 keys a call. Keep the durable delete record until R2 delete succeeds.
+      for (let i = 0; i < keys.length; i += 1000) await env.BLOBS.delete(keys.slice(i, i + 1000));
+      await org.feedImages.finishDeletes(claimed);
+      deleted += claimed.length;
+    } catch (e) {
+      errors.push(e);
+    }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, 'feed image blob deletion failed');
+  return forgotten + deleted;
 }

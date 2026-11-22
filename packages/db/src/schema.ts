@@ -858,6 +858,8 @@ export const dataSources = sqliteTable(
     rowsPath: text('rows_path'),
     /** `rss`: whether the poller fetches and stores its stories' photos (apps/api src/data/images.ts). On unless a person turns it off. */
     photos: integer('photos', { mode: 'boolean' }).notNull().default(true),
+    /** `rss`: JSON array of the top photo URLs last seen while photo work was active, so a 304 still schedules retries and rechecks; null until polled with photos active. */
+    photoUrlsJson: text('photo_urls_json'),
     nextPollAt: integer('next_poll_at').notNull().default(0),
     etag: text('etag'),
     lastModified: text('last_modified'),
@@ -895,8 +897,9 @@ export const dataSnapshots = sqliteTable(
  * The photos the org's news sources name, by the URL a feed gives (apps/api src/data/images.ts):
  * the stored copy's hashes once one was fetched and checked, the validators it came with, and when
  * to look at the URL again. One row per URL however many of the org's sources name it. A failed
- * fetch keeps the last good hashes. The files are the org's blobs in R2, by hash. A row no poll has
- * named for a week goes, with the files nothing else names (`expiredFeedImages`, ./retention.ts).
+ * fetch keeps the last good hashes. The files live in the feed-owned R2 prefix `o/<org>/f/<sha256>`.
+ * A row no poll has named for a week goes (`expiredFeedImages`, ./retention.ts), queueing its
+ * hashes into `feed_image_deletes` so R2 deletes retry cleanly and never race concurrent writes.
  */
 export const feedImages = sqliteTable(
   'feed_images',
@@ -924,6 +927,23 @@ export const feedImages = sqliteTable(
     updatedAt: updated(),
   },
   (t) => [primaryKey({ columns: [t.orgId, t.url] }), index('feed_images_org_source_sha_idx').on(t.orgId, t.sourceSha256)],
+);
+
+/**
+ * Feed photo blobs (`o/<org>/f/<sha256>`) queued for R2 deletion when a `feed_images` row expires
+ * or replaces its hashes at the same URL. Kept until R2 delete succeeds so failures retry on the
+ * next cleanup run; a grace window (`FEED_IMAGE_DELETE_GRACE_MS`) plus `deleting_until` lease keep
+ * cleanup from racing a concurrent consumer putting or reusing the same hash.
+ */
+export const feedImageDeletes = sqliteTable(
+  'feed_image_deletes',
+  {
+    orgId: orgId(),
+    sha256: text('sha256').notNull(),
+    queuedAt: integer('queued_at').notNull(),
+    deletingUntil: integer('deleting_until').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
 );
 
 // --------------------------------------------------------------- connections

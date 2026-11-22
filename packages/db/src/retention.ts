@@ -3,7 +3,7 @@
  * read no row and name no org: idempotency keys and alert deliveries (the delivery log, #88) go
  * after 7 days, audit rows after each org's `org_settings.audit_retention_days`.
  */
-import { lt, type SQL, sql } from 'drizzle-orm';
+import { and, lt, lte, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as s from './schema';
 
@@ -83,13 +83,16 @@ async function deleteInBatches(db: ReturnType<typeof drizzle>, batch: SQL): Prom
 /** A feed photo no poll has named for this long after it was due is forgotten: past any screen's stale snapshot (`SNAPSHOT_STALE_MS`, a day). */
 export const FEED_IMAGE_TTL_MS = 7 * DAY_MS;
 
+/** Grace period between queueing a feed photo blob for deletion and deleting it from R2: longer than any in-flight poll or consumer invocation. */
+export const FEED_IMAGE_DELETE_GRACE_MS = 15 * 60_000;
+
 /**
  * Every org's feed photos (`feed_images`) due a check more than FEED_IMAGE_TTL_MS before `now`:
  * a poll that still named one would have queued it, moving its check on. Returns each one's org
  * and URL, the oldest first, at most `limit`; the delete goes through the org's scope
- * (`feedImages.forget`), which keeps any a snapshot still names. It reads every org's rows (no
- * index leads with the check time, as tenant indexes lead with the org): a few hundred per org,
- * once a day.
+ * (`feedImages.forget`), which keeps any a snapshot still names and records orphaned hashes in
+ * `feed_image_deletes`. It reads every org's rows (no index leads with the check time, as tenant
+ * indexes lead with the org): a few hundred per org, once a day.
  */
 export async function expiredFeedImages(d1: D1Database, now: number, limit: number): Promise<{ orgId: string; url: string }[]> {
   const fi = s.feedImages;
@@ -98,6 +101,22 @@ export async function expiredFeedImages(d1: D1Database, now: number, limit: numb
     .from(fi)
     .where(lt(fi.nextCheckAt, now - FEED_IMAGE_TTL_MS))
     .orderBy(fi.nextCheckAt)
+    .limit(limit)
+    .all();
+}
+
+/**
+ * Every org's feed photo blob hashes in `feed_image_deletes` whose grace window has elapsed
+ * (`queued_at <= now - FEED_IMAGE_DELETE_GRACE_MS`) and whose delete lease is free
+ * (`deleting_until <= now`), oldest first, at most `limit`.
+ */
+export async function pendingFeedImageDeletes(d1: D1Database, now: number, limit: number): Promise<{ orgId: string; sha256: string }[]> {
+  const fid = s.feedImageDeletes;
+  return drizzle(d1)
+    .select({ orgId: fid.orgId, sha256: fid.sha256 })
+    .from(fid)
+    .where(and(lte(fid.queuedAt, now - FEED_IMAGE_DELETE_GRACE_MS), lte(fid.deletingUntil, now)))
+    .orderBy(fid.queuedAt)
     .limit(limit)
     .all();
 }
