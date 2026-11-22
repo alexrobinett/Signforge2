@@ -36,13 +36,11 @@ import { FetchError, type FetchGuards, feedGuards, guardedFetch } from './fetch'
 import { newsWithPhotos, planPhotos, queuePhotos, sha256Hex } from './images';
 
 /**
- * Sources polled per run. Each takes three external fetches (two DNS lookups and the feed), more
- * with redirects, and a news source with photos one more (the queue send); batched D1 reads and
- * atomic `holdWithinBudget` keep all 12 under Free D1's 50-query invocation limit (even across 12
- * distinct orgs all with new RSS photos: 1 claim + 12 × 4 = 49 D1 queries). A source not claimed
- * this minute is claimed the next.
+ * Free D1 allows 50 queries per invocation. Allow one claim and at most seven calls per source:
+ * an org load, a connection read, a grant save, two calls for a refused second refresh, a poll
+ * save and its error-path lookup. An RSS source with photos needs at most five.
  */
-const POLLS_PER_RUN = 12;
+const POLLS_PER_RUN = 6;
 /** How long a claimed source is held for its run at least: past the fetch's 5 seconds, with redirects. The claim holds it for its next backoff when that is longer. */
 const LEASE_MS = 2 * 60_000;
 export const BACKOFF_MAX_MS = 6 * 3_600_000;

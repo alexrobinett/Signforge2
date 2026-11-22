@@ -92,7 +92,7 @@ async function orAlone<T>(withAlert: () => Promise<T>, alone: () => Promise<T>):
   }
 }
 
-export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email: EmailSender, now: number): Promise<void> {
+export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email: EmailSender, now: number, limit = Infinity): Promise<void> {
   const work = await findAlertWork(env.DB, now, UNREACHABLE_AFTER_MS);
   const contextFor = contexts(env.DB, 'screen_offline');
   // Without CMS_ORIGIN the API does not know where the CMS is (dev, or one origin for both), so alerts carry no link.
@@ -102,7 +102,8 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, ema
     url: env.CMS_ORIGIN ? `${env.CMS_ORIGIN}/screens/${s.screenId}` : null,
   });
 
-  for (const s of work.offline) {
+  const offlineWork = work.offline.slice(0, limit);
+  for (const s of offlineWork) {
     const org = scoped(env.DB, s.orgId);
     const { recipients, channels, time } = await contextFor(s.orgId);
     const offline = (incidentId: string): AlertEvent => ({
@@ -125,7 +126,7 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, ema
         `You will get one more email when it is back. Who gets these is in Settings, Notifications.`,
     });
   }
-  for (const s of work.back) {
+  for (const s of work.back.slice(0, limit - offlineWork.length)) {
     const org = scoped(env.DB, s.orgId);
     const { recipients, channels, time } = await contextFor(s.orgId);
     const back = alertOf(now, channels, {
@@ -155,11 +156,13 @@ export async function checkScreenAlerts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, ema
  * check saw a screen report it, which includes one played and replaced between two checks) is
  * marked with no alert.
  */
-export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email: EmailSender, now: number): Promise<void> {
+export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email: EmailSender, now: number, limit = Infinity): Promise<void> {
   const contextFor = contexts(env.DB, 'publish_finished');
+  let remaining = limit;
   for (const p of await findUnfinishedRollouts(env.DB)) {
     const { screens, playing, replaced, revoked, open } = tally(p.rollout);
     if (open) continue;
+    if (remaining-- <= 0) break;
     const org = scoped(env.DB, p.orgId);
     if (!playing) {
       await org.publishes.finish(p.id, now, playing);

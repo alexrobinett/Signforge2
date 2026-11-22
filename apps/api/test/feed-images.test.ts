@@ -7,6 +7,8 @@ import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ProviderError } from '../src/connectors/adapter';
+import { sealGrant } from '../src/connectors/vault';
 import { feedUrlSealer } from '../src/data/cipher';
 import type { FetchGuards } from '../src/data/fetch';
 import {
@@ -28,6 +30,8 @@ import {
 import { pollDataSources } from '../src/data/poller';
 import worker from '../src/index';
 import { feedBlobKey, orgBlobKey } from '../src/r2';
+
+import { fakeProvider } from './fake-provider';
 
 const DAY_MS = 24 * 3_600_000;
 const MIN = 60_000;
@@ -197,6 +201,7 @@ let o: SeededOrg;
 let n = 0;
 const photoVersions = new Map<string, string>();
 const createdSpots: { orgId: string; id: string }[] = [];
+const extraPollOrgs = new Set<string>();
 const sent: FeedImageJob[] = [];
 /** The poller's env, with the photos queue a list. */
 const pollEnv = {
@@ -337,12 +342,13 @@ beforeEach(() => {
   take();
 });
 
-// Only a test's own sources and spots are active in it: a run claims at most 12, and spots stay tiny.
+// Only a test's own sources and spots are active in it.
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const org of [o.orgId, 'photos-other'])
+  for (const org of [o.orgId, 'photos-other', ...extraPollOrgs])
     for (const d of await testScope(env.DB, org).dataSources.list())
       await testScope(env.DB, org).dataSources.update(d.id, { nextPollAt: Number.MAX_SAFE_INTEGER });
+  extraPollOrgs.clear();
   for (const s of createdSpots.splice(0)) await testScope(env.DB, s.orgId).spots.delete(s.id);
 });
 
@@ -851,12 +857,6 @@ describe('budgets, resilience and cleanup', () => {
     expect((await o.scope.feedImages.pendingDeletes()).map((d) => d.sha256)).not.toContain(dropSha);
     expect(await row(keepUrl)).toBeDefined();
     expect(await env.BLOBS.head(feedBlobKey(o.orgId, keepSha))).not.toBeNull();
-
-    // Daily cron at 00:00 UTC runs forgetFeedImages too.
-    const midnight = Math.ceil((drainAt + DAY_MS) / DAY_MS) * DAY_MS;
-    const ctx = createExecutionContext();
-    await worker.scheduled(createScheduledController({ scheduledTime: midnight, cron: '*/5 * * * *' }), env, ctx);
-    await waitOnExecutionContext(ctx);
   });
 
   it('queues replaced blobs for cleanup when a recheck replaces a photo at the same URL, and retries failed R2 deletes cleanly', async () => {
@@ -1060,6 +1060,125 @@ describe('budgets, resilience and cleanup', () => {
     await forgetFeedImages(countedCleanupEnv, expireAt + FEED_IMAGE_DELETE_GRACE_MS);
     expect(counter.counts().apiCalls).toBeLessThan(15);
     expect(counter.counts().statements).toBeLessThan(20);
+  });
+
+  it('keeps a full mixed-source poll within the D1 budget when provider refreshes fail', async () => {
+    const fake = fakeProvider();
+    const refresh = vi.fn(async () => {
+      throw new ProviderError('invalid_grant', 'The provider refused the grant');
+    });
+    const providers = [];
+    for (let i = 0; i < 2; i++) {
+      const org = await seedOrg(env.DB, `budget-provider-${i}`);
+      extraPollOrgs.add(org.orgId);
+      const expiresAt = NOW - 1;
+      const credentialsSealed = await sealGrant(
+        env,
+        { orgId: org.orgId, id: org.connection },
+        {
+          accessToken: 'access',
+          refreshToken: 'refresh',
+          expiresAt,
+        },
+      );
+      await org.scope.connections.update(org.connection, { credentialsSealed, expiresAt });
+      await org.scope.dataSources.update(org.dataSource, {
+        format: 'provider',
+        connectionId: org.connection,
+        urlEncrypted: await feedUrlSealer(env).seal({ orgId: org.orgId, id: org.dataSource }, 'rooms'),
+        nextPollAt: NOW - 1,
+      });
+      providers.push(org);
+    }
+
+    const answers: Record<string, Answer> = {};
+    for (let i = 0; i < 10; i++) {
+      const org = await seedOrg(env.DB, `budget-rss-${i}`);
+      extraPollOrgs.add(org.orgId);
+      await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+      const feed = `https://d1-mixed-${i}.test/rss`;
+      await news(feed, { org });
+      answers[feed] = { body: feedOf(1, () => `https://d1-mixed-${i}.test/photo.jpg`) };
+    }
+    const counter = countingDb(env.DB);
+    await pollDataSources(
+      { ...pollEnv, DB: counter.db },
+      {
+        now: NOW,
+        guards: web(answers).guards,
+        connectors: { adapters: [{ ...fake.adapter, refresh }], fetch: fake.fetch },
+      },
+    );
+    expect(counter.counts().apiCalls).toBeLessThan(50);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    for (const org of providers) expect(await org.scope.dataSources.get(org.dataSource)).toMatchObject({ failures: 1, lastError: 'needs-reconnect' });
+    expect(take()).toHaveLength(4);
+  });
+
+  it('keeps the full midnight cron and the separate feed cleanup within the D1 budget under load', async () => {
+    const midnight = Math.ceil(NOW / DAY_MS) * DAY_MS;
+    vi.spyOn(Date, 'now').mockReturnValue(midnight);
+    const orgs = [];
+    const expiredAt = 0;
+    for (let i = 0; i < 12; i++) {
+      const org = await seedOrg(env.DB, `budget-midnight-${i}`);
+      extraPollOrgs.add(org.orgId);
+      orgs.push(org);
+      await org.scope.dataSources.update(org.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+      await org.scope.screens.update(org.screen, { lastSeenAt: midnight - 60 * MIN, reportedManifestId: 'd'.repeat(64) });
+      const event = {
+        id: `test-${i}`,
+        type: 'test',
+        occurredAt: new Date(midnight).toISOString(),
+        org: { id: org.orgId, name: org.orgId },
+        data: { message: 'test' },
+      };
+      await org.scope.commit(
+        org.scope.alertDeliveries.stage.insert({
+          channel: 'email',
+          eventId: event.id,
+          eventType: event.type,
+          eventJson: JSON.stringify(event),
+          nextAttemptAt: midnight - 1,
+          giveUpAt: midnight,
+        }).writes,
+      );
+      if (i < 3) {
+        const url = `https://midnight-gc.test/${i}.jpg`;
+        await org.scope.feedImages.hold([url], { until: expiredAt, now: expiredAt, sourceId: org.dataSource });
+        await org.scope.feedImages.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'a'.repeat(64), nextCheckAt: expiredAt });
+      }
+    }
+    await env.DB.batch([
+      env.DB.prepare(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<9000)
+        INSERT INTO audit_log (id, org_id, at, actor_kind, actor_id, action) SELECT 'old-audit-'||x, ?, ?, 'system', 'test', 'test' FROM n`).bind(
+        o.orgId,
+        midnight - 366 * DAY_MS,
+      ),
+      env.DB.prepare(`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<9000)
+        INSERT INTO alert_deliveries (id, org_id, channel, event_id, event_type, event_json, status, next_attempt_at, give_up_at, created_at, updated_at)
+        SELECT 'old-delivery-'||x, ?, 'email', 'old-event-'||x, 'test', '{}', 'delivered', 0, 0, ?, 0 FROM n`).bind(o.orgId, midnight - 8 * DAY_MS),
+    ]);
+
+    const counter = countingDb(env.DB);
+    const runCron = async (cron: string, scheduledTime: number) => {
+      const ctx = createExecutionContext();
+      await worker.scheduled(createScheduledController({ scheduledTime, cron }), { ...env, DB: counter.db }, ctx);
+      await waitOnExecutionContext(ctx);
+    };
+    await runCron('*/5 * * * *', midnight);
+    expect(counter.counts().apiCalls).toBeLessThan(50);
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM audit_log WHERE id LIKE 'old-audit-%'").first('n')).toBe(0);
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM alert_deliveries WHERE id LIKE 'old-delivery-%'").first('n')).toBe(0);
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM alert_deliveries WHERE event_id LIKE 'test-%' AND attempts = 1").first('n')).toBe(12);
+    expect((await Promise.all(orgs.map((org) => org.scope.publishes.get(org.publish)))).filter((p) => p?.finishedAt === midnight)).toHaveLength(1);
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM screen_incidents WHERE opened_at = ?').bind(midnight).first('n')).toBe(1);
+    expect(await orgs[0]!.scope.feedImages.get(['https://midnight-gc.test/0.jpg'])).toHaveLength(1);
+
+    counter.reset();
+    await runCron('* * * * *', midnight + 60 * MIN);
+    expect(counter.counts().apiCalls).toBeLessThanOrEqual(14);
+    expect(await orgs[0]!.scope.feedImages.get(['https://midnight-gc.test/0.jpg'])).toHaveLength(0);
   });
 });
 

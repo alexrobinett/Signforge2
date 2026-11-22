@@ -78,7 +78,7 @@ export const PASS_THROUGH_MAX_BYTES = 1_000_000;
 const PASS_THROUGH_BOX = { w: Math.round(SCREEN_BOX.landscape.w * 1.25), h: Math.round(SCREEN_BOX.landscape.h * 1.25) } as const;
 /** Deliveries of one message: wrangler.jsonc's `max_retries` (2) and the first. The last records its failure. */
 const ATTEMPTS = 3;
-/** Rows expired and delete candidates scanned per daily run; capped per org so midnight D1 queries stay well under Free's 50-query limit. */
+/** Rows expired and delete candidates scanned per daily run; the org cap bounds the run to 14 D1 calls. */
 const FORGET_PER_RUN = 100;
 const DELETE_PER_RUN = 100;
 const CLEANUP_ORGS_PER_RUN = 3;

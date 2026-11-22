@@ -6,7 +6,7 @@ import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { feedUrlSealer, openFeedUrl } from '../src/data/cipher';
 import type { FetchGuards } from '../src/data/fetch';
 import { BACKOFF_MAX_MS, pollDataSources } from '../src/data/poller';
@@ -60,6 +60,12 @@ beforeAll(async () => {
   o = await seedOrg(env.DB, 'poller-org');
   // The seeded source is not due in these tests.
   await o.scope.dataSources.update(o.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+});
+
+afterEach(async () => {
+  for (const row of await o.scope.dataSources.list()) {
+    if (row.nextPollAt !== Number.MAX_SAFE_INTEGER) await o.scope.dataSources.update(row.id, { nextPollAt: Number.MAX_SAFE_INTEGER });
+  }
 });
 
 describe('the feed URL at rest', () => {
