@@ -190,24 +190,52 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
   await page.setViewportSize(size);
   await page.addScriptTag({ content: sampler });
   await page.evaluate(() => {
-    const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]> };
+    const w = window as unknown as { frames_: Record<string, HTMLIFrameElement>; msgs: Record<string, string[]>; onMsg: Array<() => void> };
     w.frames_ = {};
     w.msgs = {};
+    w.onMsg = [];
     addEventListener('message', (e) => {
       const name = Object.keys(w.frames_).find((k) => w.frames_[k]!.contentWindow === e.source);
-      if (name) w.msgs[name]!.push(e.data?.type === 'error' ? `error:${e.data.message}` : String(e.data?.type));
+      if (!name) return;
+      w.msgs[name]!.push(e.data?.type === 'error' ? `error:${e.data.message}` : String(e.data?.type));
+      for (const fn of [...w.onMsg]) fn();
     });
   });
   const sf = PROTOCOL_VERSION;
   const waitFor = async (frame: string, type: string, count: number) => {
-    const deadline = Date.now() + 10_000;
-    for (;;) {
-      const m = await page.evaluate((frame) => (window as unknown as { msgs: Record<string, string[]> }).msgs[frame] ?? [], frame);
-      const err = m.find((x) => x.startsWith('error:'));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(async () => {
+        const m = await page.evaluate((f) => (window as unknown as { msgs: Record<string, string[]> }).msgs[f] ?? [], frame).catch(() => []);
+        reject(new Error(`${frame} sent ${JSON.stringify(m)}, not ${count} × ${type}`));
+      }, 10_000);
+    });
+    try {
+      const err = await Promise.race([
+        page.evaluate(
+          ({ frame, type, count }) =>
+            new Promise<string | null>((resolve) => {
+              const w = window as unknown as { msgs: Record<string, string[]>; onMsg: Array<() => void> };
+              const check = () => {
+                const m = w.msgs[frame] ?? [];
+                const e = m.find((x) => x.startsWith('error:'));
+                if (e) return (resolve(e), true);
+                if (m.filter((x) => x === type).length >= count) return (resolve(null), true);
+                return false;
+              };
+              if (check()) return;
+              const on = () => {
+                if (check()) w.onMsg = w.onMsg.filter((fn) => fn !== on);
+              };
+              w.onMsg.push(on);
+            }),
+          { frame, type, count },
+        ),
+        timeout,
+      ]);
       if (err) throw new Error(`${frame}: ${err}`);
-      if (m.filter((x) => x === type).length >= count) return;
-      if (Date.now() > deadline) throw new Error(`${frame} sent ${JSON.stringify(m)}, not ${count} × ${type}`);
-      await page.waitForTimeout(50);
+    } finally {
+      clearTimeout(timer);
     }
   };
   return {
@@ -237,10 +265,18 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
           const w = window as unknown as {
             frames_: Record<string, HTMLIFrameElement>;
             SFSample: typeof import('@signforge/media/sample');
+            blobCache?: Map<string, Blob>;
           };
+          const cache = (w.blobCache ??= new Map());
           const png = (c: HTMLCanvasElement) => new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
           const blobs: Record<string, Blob> = {};
           for (const [field, spec] of Object.entries(assets)) {
+            const key = samples[field];
+            const cached = cache.get(spec);
+            if (cached && !key) {
+              blobs[field] = cached;
+              continue;
+            }
             const [, width = '8', height = '8', drawn = spec] = /^(\d+)x(\d+): (.*)$/.exec(spec) ?? [];
             const [colours = '', block] = drawn.split('; ');
             const c = document.createElement('canvas');
@@ -258,8 +294,9 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
               g.fillStyle = colour!;
               g.fillRect(x, y, bw, bh);
             }
-            blobs[field] = await png(c);
-            const key = samples[field];
+            const blob = cached ?? (await png(c));
+            cache.set(spec, blob);
+            blobs[field] = blob;
             if (!key) continue;
             if (broken) {
               blobs[key] = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])], { type: 'image/png' });
@@ -275,12 +312,17 @@ async function host(orientation: Orientation = 'landscape', full = false): Promi
           const { '$brand.logo': assetLogo, ...images } = blobs;
           let logoPng: Blob | undefined = assetLogo;
           if (logo) {
-            const c = document.createElement('canvas');
-            [c.width, c.height] = [4, 1];
-            const g = c.getContext('2d')!;
-            g.fillStyle = logo;
-            g.fillRect(0, 0, 4, 1);
-            logoPng = await png(c);
+            const logoKey = `logo:${logo}`;
+            logoPng = cache.get(logoKey);
+            if (!logoPng) {
+              const c = document.createElement('canvas');
+              [c.width, c.height] = [4, 1];
+              const g = c.getContext('2d')!;
+              g.fillStyle = logo;
+              g.fillRect(0, 0, 4, 1);
+              logoPng = await png(c);
+              cache.set(logoKey, logoPng);
+            }
           }
           const init = {
             sf,
@@ -1580,11 +1622,13 @@ const layoutFaults = (f: Frame, also = '', crosses = '', inside = '') =>
         if (!own.length || el.closest('.lk-crawl')) continue;
         const s = getComputedStyle(el);
         const em = Number.parseFloat(s.fontSize);
-        // A clamp or an ellipsis is a cut the layout means; any other box that clips cuts the text.
-        const meant = (p: Element) => getComputedStyle(p).webkitLineClamp !== 'none' || getComputedStyle(p).textOverflow === 'ellipsis';
-        if (s.display !== 'inline' && clips(el) && !meant(el)) {
-          if (el.scrollHeight > el.clientHeight + em / 2) found.push(`${name(el)} runs ${el.scrollHeight - el.clientHeight}px past its box`);
-          if (el.scrollWidth > el.clientWidth + 1) found.push(`${name(el)} runs ${el.scrollWidth - el.clientWidth}px wide`);
+        // A clamp cuts vertically; a single-line ellipsis cuts horizontally. A clamped box still must not clip sideways.
+        const clamped = (p: Element) => getComputedStyle(p).webkitLineClamp !== 'none';
+        const ellipsised = (p: Element) => getComputedStyle(p).textOverflow === 'ellipsis' && getComputedStyle(p).whiteSpace === 'nowrap';
+        if (s.display !== 'inline' && clips(el)) {
+          if (!clamped(el) && !ellipsised(el) && el.scrollHeight > el.clientHeight + em / 2)
+            found.push(`${name(el)} runs ${el.scrollHeight - el.clientHeight}px past its box`);
+          if (!ellipsised(el) && el.scrollWidth > el.clientWidth + 1) found.push(`${name(el)} runs ${el.scrollWidth - el.clientWidth}px wide`);
         }
         // A line's box, not its glyphs' font box: display type set solid has glyph boxes that overlap the lines around them.
         const lineHeight = Number.parseFloat(s.lineHeight) || Number.POSITIVE_INFINITY;
@@ -1601,7 +1645,8 @@ const layoutFaults = (f: Frame, also = '', crosses = '', inside = '') =>
           for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
             if (!clips(p)) continue;
             const c = cut(b, box(p.getBoundingClientRect()));
-            if (!meant(p) && (b.b - c.b > em / 2 || c.t - b.t > em / 2 || b.r - c.r > 1 || c.l - b.l > 1)) found.push(`${name(el)} is cut by ${name(p)}`);
+            if (!clamped(p) && !ellipsised(p) && (b.b - c.b > em / 2 || c.t - b.t > em / 2)) found.push(`${name(el)} is cut by ${name(p)}`);
+            if (!ellipsised(p) && (b.r - c.r > 1 || c.l - b.l > 1)) found.push(`${name(el)} is cut by ${name(p)}`);
             b = c;
           }
           if (b.r - b.l < 1 || b.b - b.t < 1) continue;
@@ -2453,14 +2498,96 @@ describe('info frame (#201)', () => {
   /** Faults of the layout: the logo and the weather glyphs count as text, and every text stays on its card. */
   const faults = (f: Frame) => layoutFaults(f, '.logo, .glyph', '', '.card');
 
+  /**
+   * Fast opaque-card contrast check for the full 288-state cross-product: verifies every text node
+   * sits on an opaque card (never on the photo), with full opacity at rest, and that its computed
+   * colour meets WCAG 4.5:1 (3:1 large) against that card's computed fill.
+   */
+  const cardContrast = (f: Frame) =>
+    f.evaluate(() => {
+      const intros = document
+        .getAnimations()
+        .map((a) => a.effect!.getComputedTiming())
+        .filter((t) => t.direction !== 'reverse' && Number.isFinite(Number(t.endTime)));
+      const rest = Math.max(0, ...intros.map((t) => Number(t.endTime)));
+      for (const a of document.getAnimations()) a.currentTime = rest;
+      const rgba = (c: string): [number, number, number, number] => {
+        const nums = (c.match(/[\d.]+/g) ?? []).map(Number);
+        const scale = c.startsWith('color(') ? 255 : 1;
+        return [(nums[0] ?? 0) * scale, (nums[1] ?? 0) * scale, (nums[2] ?? 0) * scale, nums[3] ?? 1];
+      };
+      const lum = ([r, g, b]: [number, number, number, number]) => {
+        const lin = (v: number) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+        return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      };
+      const out: string[] = [];
+      for (const el of document.querySelectorAll<HTMLElement>('.stage *')) {
+        const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
+        if (!own.length) continue;
+        const s = getComputedStyle(el);
+        const fg = rgba(s.color);
+        if (fg[3] < 0.99) out.push(`${el.className || el.tagName}: translucent text (${fg[3]})`);
+        let bg: [number, number, number, number] | undefined;
+        for (let p: HTMLElement | null = el; p && p !== document.body; p = p.parentElement) {
+          const ps = getComputedStyle(p);
+          if (!p.classList.contains('colon') && Number.parseFloat(ps.opacity) < 0.99) out.push(`${el.className || el.tagName}: faded by ${p.className}`);
+          const c = rgba(ps.backgroundColor);
+          if (c[3] > 0) {
+            bg = c;
+            break;
+          }
+        }
+        if (!bg || bg[3] < 0.99) {
+          out.push(`${el.className || el.tagName}: no opaque card fill`);
+          continue;
+        }
+        const size = Number.parseFloat(s.fontSize);
+        const min = size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700) ? 3 : 4.5;
+        const [hi, lo] = [lum(fg), lum(bg)].sort((a, b) => b - a);
+        const ratio = (hi! + 0.05) / (lo! + 0.05);
+        if (ratio < min) out.push(`${el.className || el.tagName}: ${ratio.toFixed(2)}:1, below ${min}:1`);
+      }
+      return [...new Set(out)];
+    });
+
   for (const orientation of ['landscape', 'portrait'] as const)
     for (const look of looks)
-      it(`${look}, ${orientation}: in every rail, crawl and toggle setting, at the longest copy, every text fits and nothing overlaps`, async () => {
+      it(`${look}, ${orientation}: in every rail, crawl and toggle setting, at the longest copy, every text fits, reads and nothing overlaps`, async () => {
         const r = await frame(orientation);
         const found: string[] = [];
-        for (const set of settings) for (const fault of await faults(await r.show({ look, ...longest, ...set }))) found.push(`${named(set)}: ${fault}`);
+        for (const set of settings) {
+          const f = await r.show({ look, ...longest, ...set });
+          for (const fault of [...(await faults(f)), ...(await cardContrast(f))]) found.push(`${named(set)}: ${fault}`);
+        }
         expect(found).toEqual([]);
       }, 600_000);
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`an unbroken word at each field's maxLength wraps or truncates without sideways clipping, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const unbroken: Data = {
+        ...news,
+        captionTitle: 'W'.repeat(64),
+        captionLine: 'W'.repeat(80),
+        city: 'W'.repeat(24),
+      };
+      const found: string[] = [];
+      for (const look of looks) {
+        const f = await r.show({ look, ...unbroken });
+        for (const fault of await faults(f)) found.push(`${look}: ${fault}`);
+        const check = await f.evaluate(() => {
+          const title = document.querySelector<HTMLElement>('.title')!;
+          const caption = document.querySelector<HTMLElement>('.caption')!;
+          return {
+            overflowX: title.scrollWidth - title.clientWidth,
+            fit: Number(caption.style.getPropertyValue('--if-title-fit') || 1),
+          };
+        });
+        if (check.overflowX > 1) found.push(`${look}: .title overflows horizontally by ${check.overflowX}px`);
+        if (check.fit >= 1) found.push(`${look}: .title stayed at scale ${check.fit} for 64 unbroken W's`);
+      }
+      expect(found).toEqual([]);
+    }, 120_000);
 
   for (const orientation of ['landscape', 'portrait'] as const)
     it(`the defaults fit at the look's own size, nothing shrunk, ${orientation}`, async () => {
@@ -2479,11 +2606,18 @@ describe('info frame (#201)', () => {
       expect(found).toEqual([]);
     }, 120_000);
 
-  /** Each rail and crawl place with everything on, the chip and the corner logo, each toggle off alone, and all off. */
+  /**
+   * Pixel-painted contrast states: every rail (`right`, `left`, `off`) and crawl (`bottom`, `top`,
+   * `off`) placement, chip-only combinations (clock without weather, weather without clock), each
+   * toggle off alone, and all off.
+   */
   const contrastSets: Data[] = [
     { rail: 'right', ticker: 'bottom' },
     { rail: 'left', ticker: 'top' },
+    { rail: 'right', ticker: 'off' },
     { rail: 'off', ticker: 'bottom' },
+    { rail: 'off', ticker: 'off', showWeather: false },
+    { rail: 'off', ticker: 'top', showClock: false },
     ...toggles.map((k) => ({ rail: 'right', ticker: 'bottom', [k]: false })),
     { rail: 'right', ticker: 'bottom', ...Object.fromEntries(toggles.map((k) => [k, false])) },
   ];
@@ -2497,6 +2631,22 @@ describe('info frame (#201)', () => {
             const f = await r.show({ look, ...news, ...set }, theme ?? null);
             for (const l of await paintedContrast(r.hst.page, f, '.stage'))
               found.push(`${look}, ${kit}, ${named({ ...Object.fromEntries(toggles.map((k) => [k, true])), ...set })}: ${l}`);
+          }
+      expect(found).toEqual([]);
+    }, 600_000);
+
+  for (const orientation of ['landscape', 'portrait'] as const)
+    it(`every one of the 288 rail × crawl × toggle settings reads on an opaque card in every look, with no kit and a light kit, ${orientation}`, async () => {
+      const r = await frame(orientation);
+      const found: string[] = [];
+      for (const [kit, theme] of [
+        ['no kit', null],
+        ['light kit', { colors: LIGHT_KIT, shape: 'soft', fonts: {} } satisfies FrameTheme],
+      ] as const)
+        for (const look of looks)
+          for (const set of settings) {
+            const f = await r.show({ look, ...news, ...set }, theme);
+            for (const l of await cardContrast(f)) found.push(`${look}, ${kit}, ${named(set)}: ${l}`);
           }
       expect(found).toEqual([]);
     }, 600_000);
@@ -2604,10 +2754,49 @@ describe('info frame (#201)', () => {
       days: ['Wed', 'Thu', 'Fri'],
     });
     expect(await read(await r.show({ look: 'night', hour24: true }))).toEqual({ time: '15:00', ap: null, date: 'Tue, Nov 17', days: ['Wed', 'Thu', 'Fri'] });
-    // 22:30 on Tuesday in New York, then 0:30 on Wednesday: the days follow the screen's zone, not UTC's.
+    // 22:30 on Tuesday in New York, then 0:30 on Wednesday: static fallback days follow the screen's zone, not UTC's.
     const ny = (at: string) => r.show({ look: 'pop', hour24: true }, demo, Date.parse(at), 'America/New_York');
     expect(await read(await ny('2026-11-18T03:30:00Z'))).toEqual({ time: '22:30', ap: null, date: 'Tuesday, November 17', days: ['Wed', 'Thu', 'Fri'] });
     expect(await read(await ny('2026-11-18T05:30:00Z'))).toEqual({ time: '00:30', ap: null, date: 'Wednesday, November 18', days: ['Thu', 'Fri', 'Sat'] });
+    // Cross-timezone live forecast: LA screen (Tue Nov 17 22:00) bound to NY weather (already Wed Nov 18 01:00;
+    // daily.time.1..3 are Thu Nov 19, Fri Nov 20, Sat Nov 21 at 00:00 EST). Forecast days keep NY's dates.
+    const at = Date.parse('2026-11-18T06:00:00Z');
+    const nyFresh: Data = {
+      look: 'pop',
+      hour24: true,
+      weatherTimezone: 'America/New_York',
+      day1Time: Date.parse('2026-11-19T05:00:00Z') / 1000,
+      day2Time: Date.parse('2026-11-20T05:00:00Z') / 1000,
+      day3Time: Date.parse('2026-11-21T05:00:00Z') / 1000,
+    };
+    expect(await read(await r.show(nyFresh, demo, at, 'America/Los_Angeles'))).toEqual({
+      time: '22:00',
+      ap: null,
+      date: 'Tuesday, November 17',
+      days: ['Thu', 'Fri', 'Sat'],
+    });
+    // Cached snapshot across midnight: NY screen at Wed 01:00 holding Tuesday's snapshot (daily.time.1..3 = Wed..Fri).
+    const nyCached: Data = {
+      look: 'pop',
+      hour24: true,
+      weatherTimezone: 'America/New_York',
+      day1Time: Date.parse('2026-11-18T05:00:00Z') / 1000,
+      day2Time: Date.parse('2026-11-19T05:00:00Z') / 1000,
+      day3Time: Date.parse('2026-11-20T05:00:00Z') / 1000,
+    };
+    expect(await read(await r.show(nyCached, demo, at, 'America/New_York'))).toEqual({
+      time: '01:00',
+      ap: null,
+      date: 'Wednesday, November 18',
+      days: ['Wed', 'Thu', 'Fri'],
+    });
+    // An unrecognised fallback timezone string falls back cleanly to the screen's zone without failing prepare.
+    expect(await read(await r.show({ ...nyCached, weatherTimezone: 'Not/A_Zone' }, demo, at, 'America/New_York'))).toEqual({
+      time: '01:00',
+      ap: null,
+      date: 'Wednesday, November 18',
+      days: ['Wed', 'Thu', 'Fri'],
+    });
   });
 
   it('turns the minute with the screen clock, writing the time at most once a second', async () => {

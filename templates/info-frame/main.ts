@@ -200,17 +200,37 @@ defineTemplate({
   },
 });
 
-/** The next three days, named from the screen's today, each as the look draws it. */
+/** A weekday formatter in `zone`, or the screen's zone if `zone` is empty or not an IANA name. */
+function weekdayFormatter(ctx: TemplateContext, zone: string): Intl.DateTimeFormat {
+  if (zone) {
+    try {
+      return new Intl.DateTimeFormat(ctx.locale, { weekday: 'short', timeZone: zone });
+    } catch {
+      // Unrecognised time zone in a manual fallback: use the screen's zone.
+    }
+  }
+  return formatter(ctx, { weekday: 'short' });
+}
+
+/**
+ * The next three days, each named from its live Open-Meteo timestamp (`daily.time.1`–`.3`) in the
+ * feed's own time zone so cross-timezone screens and snapshots cached across midnight keep every
+ * temperature under its own weekday. Static fallbacks (`0`) name the next three days from the
+ * screen's today.
+ */
 function forecast(ctx: TemplateContext, look: Look, days: Element): void {
   const row = document.querySelector<HTMLTemplateElement>('#day')!.content.firstElementChild!;
   const [y, m, d] = dayKey(ctx, clockNow()).split('-').map(Number);
-  const weekday = new Intl.DateTimeFormat(ctx.locale, { weekday: 'short', timeZone: 'UTC' });
+  const utcDay = new Intl.DateTimeFormat(ctx.locale, { weekday: 'short', timeZone: 'UTC' });
+  const liveDay = weekdayFormatter(ctx, String(ctx.data.weatherTimezone ?? '').trim());
   for (const i of [1, 2, 3]) {
     const day = row.cloneNode(true);
     if (!(day instanceof HTMLElement)) continue;
     const n = (k: string) => Math.round(Number(ctx.data[`day${i}${k}`]));
+    const unix = Number(ctx.data[`day${i}Time`]);
     day.style.setProperty('--lk-i', String(5 + i));
-    day.querySelector('.dname')!.textContent = weekday.format(new Date(Date.UTC(y!, m! - 1, d! + i, 12)));
+    day.querySelector('.dname')!.textContent =
+      Number.isFinite(unix) && unix > 0 ? liveDay.format(new Date(unix * 1000)) : utcDay.format(new Date(Date.UTC(y!, m! - 1, d! + i, 12)));
     day.querySelector('.hi')!.textContent = look === 'poster' ? `${n('High')}° / ${n('Low')}°` : `${n('High')}°`;
     const lo = day.querySelector('.lo');
     if (lo) lo.textContent = `${n('Low')}°`;
@@ -222,23 +242,33 @@ function forecast(ctx: TemplateContext, look: Look, days: Element): void {
   for (const el of days.querySelectorAll(UNUSED[look])) el.remove();
 }
 
-/** A figure (the clock, the temperature) at its look's size, or smaller where it would run past its box. */
+/**
+ * A figure (the clock, the temperature) at its look's size, or smaller where it would run past its
+ * box. Measures subpixel child edges as well as `scrollWidth` and leaves a small margin when
+ * shrinking so tighter Linux font metrics never clip against `.lk-mask`.
+ */
 function shrink(el: HTMLElement): void {
-  for (let i = 0; i < 4 && el.scrollWidth > el.clientWidth + 1; i++) {
+  for (let i = 0; i < 6; i++) {
+    const box = el.getBoundingClientRect();
+    const childRight = Math.max(0, ...[...el.children].map((c) => c.getBoundingClientRect().right - box.left));
+    const right = Math.max(childRight, el.scrollWidth > el.clientWidth ? el.scrollWidth : 0);
+    if (right <= box.width - 0.5) return;
     const fit = Number(el.style.getPropertyValue('--if-fit') || 1);
-    el.style.setProperty('--if-fit', ((fit * el.clientWidth) / el.scrollWidth).toFixed(3));
+    el.style.setProperty('--if-fit', ((fit * Math.max(1, box.width - 4)) / right).toFixed(3));
   }
 }
 
 /**
- * The caption's title at the largest step whose two lines hold it, so long copy ends in the clamp's
- * ellipsis only at the smallest. A clamped line runs a whole line past the box; display type set
- * solid only runs its glyphs' overhang past it.
+ * The caption's title at the largest step whose two lines hold it without horizontal overflow, so
+ * long copy — including an unbroken 64-character word — wraps and ends in the clamp's ellipsis only
+ * at the smallest step. A clamped line runs a whole line past the box; display type set solid only
+ * runs its glyphs' overhang past it.
  */
 function fitTitle(caption: HTMLElement, title: HTMLElement): void {
   for (const step of TITLE_STEPS) {
     caption.style.setProperty('--if-title-fit', String(step));
-    if (title.scrollHeight <= title.clientHeight + Number.parseFloat(getComputedStyle(title).fontSize) / 2) return;
+    if (title.scrollHeight <= title.clientHeight + Number.parseFloat(getComputedStyle(title).fontSize) / 2 && title.scrollWidth <= title.clientWidth + 1)
+      return;
   }
 }
 

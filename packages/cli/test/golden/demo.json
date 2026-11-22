@@ -165,8 +165,8 @@
       "size": 401771,
       "type": "text/html"
     },
-    "b253345bff2933998060f91b9313009cbf40ca90156d1e0c62b418516870d2a5": {
-      "size": 402658,
+    "c677c828d7360043afae135ed594a8202245f4a74710caec915d6ee406aadd62": {
+      "size": 403207,
       "type": "text/html"
     },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
@@ -661,6 +661,17 @@
             ],
             "default": "°F"
           },
+          "weatherTimezone": {
+            "type": "text",
+            "label": "Weather time zone (empty for screen)",
+            "default": "",
+            "maxLength": 64
+          },
+          "day1Time": {
+            "type": "number",
+            "label": "Day 1 Unix time (0: from screen clock)",
+            "default": 0
+          },
           "day1High": {
             "type": "number",
             "label": "Day 1 high",
@@ -676,6 +687,11 @@
             "label": "Day 1 WMO weather code",
             "default": 1
           },
+          "day2Time": {
+            "type": "number",
+            "label": "Day 2 Unix time (0: from screen clock)",
+            "default": 0
+          },
           "day2High": {
             "type": "number",
             "label": "Day 2 high",
@@ -690,6 +706,11 @@
             "type": "number",
             "label": "Day 2 WMO weather code",
             "default": 61
+          },
+          "day3Time": {
+            "type": "number",
+            "label": "Day 3 Unix time (0: from screen clock)",
+            "default": 0
           },
           "day3High": {
             "type": "number",
@@ -824,17 +845,21 @@
               "label": "Weather",
               "source": "open-meteo",
               "fields": {
+                "weatherTimezone": "timezone",
                 "temp": "current.temperature_2m",
                 "code": "current.weather_code",
                 "isDay": "current.is_day",
                 "high": "daily.temperature_2m_max.0",
                 "low": "daily.temperature_2m_min.0",
+                "day1Time": "daily.time.1",
                 "day1High": "daily.temperature_2m_max.1",
                 "day1Low": "daily.temperature_2m_min.1",
                 "day1Code": "daily.weather_code.1",
+                "day2Time": "daily.time.2",
                 "day2High": "daily.temperature_2m_max.2",
                 "day2Low": "daily.temperature_2m_min.2",
                 "day2Code": "daily.weather_code.2",
+                "day3Time": "daily.time.3",
                 "day3High": "daily.temperature_2m_max.3",
                 "day3Low": "daily.temperature_2m_min.3",
                 "day3Code": "daily.weather_code.3"
@@ -855,7 +880,7 @@
         },
         "protocol": 2
       },
-      "html": "b253345bff2933998060f91b9313009cbf40ca90156d1e0c62b418516870d2a5"
+      "html": "c677c828d7360043afae135ed594a8202245f4a74710caec915d6ee406aadd62"
     },
     "base/room-status@1.0.0": {
       "manifest": {
@@ -1105,12 +1130,16 @@
         "code": 2,
         "isDay": 1,
         "unit": "°F",
+        "weatherTimezone": "",
+        "day1Time": 0,
         "day1High": 75,
         "day1Low": 60,
         "day1Code": 1,
+        "day2Time": 0,
         "day2High": 70,
         "day2Low": 57,
         "day2Code": 61,
+        "day3Time": 0,
         "day3High": 73,
         "day3Low": 58,
         "day3Code": 3,
@@ -1255,5 +1284,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "fc12ebae6cbdd1143fd5edb5047caaa56a4375d4da07f9594ba8a5b91dd2ab65"
+  "id": "290232c9e58a2217a6e9e3cd58058875240e3abcab26c6755bc219bdc12dbe2c"
 }

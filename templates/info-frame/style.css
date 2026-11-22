@@ -145,6 +145,7 @@ h1 {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
 .line {
   color: var(--card-muted, var(--ink-muted));
@@ -191,11 +192,12 @@ h1 {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
 .now {
   display: flex;
   align-items: center;
-  gap: 1.85vmin;
+  gap: calc(1.85vmin * var(--if-fit, 1));
   white-space: nowrap;
 }
 .now .glyph {
@@ -214,6 +216,7 @@ h1 {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
 .place {
   -webkit-line-clamp: 1;
@@ -612,7 +615,7 @@ h1 {
   --if-inset: 2.59vmin;
   --if-rail-w: 40.7vmin;
   --if-rail-gap: 2.22vmin;
-  --if-clock: 10.1vmin;
+  --if-clock: 9.8vmin;
   --if-temp: 8.89vmin;
   --if-icon: 8.15vmin;
   --if-title: 5.93vmin;

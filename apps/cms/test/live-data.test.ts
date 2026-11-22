@@ -58,6 +58,32 @@ describe('madeByEditor', () => {
     // A feed or calendar added by its address gets the server's id, or one a person or agent chose.
     for (const id of ['src_8f2k3j4h5g6f7d8s', 'weather', 'news-bbc', 'weather-atlanta', 'weather-4180439-f-mph']) expect(madeByEditor(id), id).toBe(false);
   });
+
+  it('omits daily.time, current.time and top-level timezone from Open-Meteo query variables while keeping forecast_days', async () => {
+    const live = {
+      source: 'open-meteo' as const,
+      fields: {
+        weatherTimezone: 'timezone',
+        temp: 'current.temperature_2m',
+        day1Time: 'daily.time.1',
+        day1High: 'daily.temperature_2m_max.1',
+        day3Time: 'daily.time.3',
+      },
+    };
+    const place = {
+      id: 4180439,
+      name: 'Atlanta',
+      region: 'Georgia',
+      country: 'United States',
+      latitude: 33.749,
+      longitude: -84.38798,
+      timezone: 'America/New_York',
+    };
+    const url = new URL((await weatherSource(live, place, { temperature: '°F', wind: 'mph' })).feedUrl);
+    expect(url.searchParams.get('current')).toBe('temperature_2m');
+    expect(url.searchParams.get('daily')).toBe('temperature_2m_max');
+    expect(url.searchParams.get('forecast_days')).toBe('4');
+  });
 });
 
 describe('a table template (issue #84)', () => {

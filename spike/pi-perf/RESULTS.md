@@ -991,33 +991,33 @@ Switch modes with `wlr-randr --output HDMI-A-1 --mode 1920x1080@60` (set `XDG_RU
 
 ## Info frame (issue #201, 2026-11-21)
 
-`templates/info-frame` at `ab9802e0`, each look a 10 s spot played on its own over the stress set's 4K kitchen photo (`sf build` scales it to 1920x1080 for landscape and 3413x1920 for portrait), with everything on: the rail on the right with the clock, the weather and the three-day forecast, the caption with a price, the demo brand kit's logo, and the crawl of five headlines running along the bottom. The branch's player was at `http://localhost:8090/cp201/<orientation>/`, content built per orientation; portrait was set with `wlr-randr --transform 90` and restored. Method as for Room status: 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed before each spec, the supervisor stopped, `__sf.prepares` read after each spec. The first of a spec's five prepares follows a cold load.
+`templates/info-frame` (bundle sha256 `c677c828d7360043afae135ed594a8202245f4a74710caec915d6ee406aadd62`, 403,207 bytes, after the review fixes for unbroken-word wrapping, live `daily.time` / `timezone` forecast dates, and subpixel `shrink`), each look a 10 s spot played on its own over the stress set's 4K kitchen photo (`sf build` scales it to 1920x1080 for landscape and 3413x1920 for portrait), with everything on: the rail on the right with the clock, the weather and the three-day forecast, the caption with a price, the demo brand kit's logo, and the crawl of five headlines running along the bottom. The branch's player was at `http://localhost:8090/cp201/<orientation>/`, content built per orientation; portrait was set with `wlr-randr --transform 90` and restored. Method as for Room status: 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared and the service worker bypassed before each spec, the supervisor stopped, `__sf.prepares` read after each spec. The first of a spec's five prepares follows a cold load.
 
 | Orientation | Transition | Look | Overall | Playing | Loading next | Transition | Worst frame | Prepares (ms) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| landscape | cut | Pop | 0.72% | 0.12% | 13.3% | 0.0% | 83 ms | 702, 414, 461, 457, 456 |
-| | | Poster | 0.44% | 0.00% | 10.0% | 0.0% | 67 ms | 797, 584, 519, 402, 384 |
-| | | Night | 0.67% | 0.17% | 10.7% | | 67 ms | 742, 449, 464, 461, 463 |
-| | | Corporate | 0.50% | 0.12% | 9.5% | | 50 ms | 730, 448, 413, 413, 392 |
-| | fade | Pop | **1.72%** | 0.19% | 15.6% | 15.2% | 67 ms | 722, 469, 443, 444, 591 |
-| | | Poster | 0.44% | 0.00% | 11.1% | 0.0% | 67 ms | 737, 394, 393, 394, 391 |
-| | | Night | **1.44%** | 0.19% | 13.6% | 11.8% | 67 ms | 846, 661, 535, 459, 456 |
-| | | Corporate | 0.78% | 0.00% | 8.9% | 7.5% | 67 ms | 784, 586, 429, 439, 426 |
-| portrait | cut | Pop | **1.44%** | 0.59% | 13.8% | 0.0% | 67 ms | 853, 630, 608, 653, 688 |
-| | | Poster | 0.72% | 0.00% | 10.0% | | 67 ms | 869, 650, 650, 672, 827 |
-| | | Night | 1.00% | 0.18% | 10.1% | 0.0% | 67 ms | 943, 783, 883, 871, 702 |
-| | | Corporate | 0.67% | 0.06% | 9.3% | 0.0% | 67 ms | 837, 626, 689, 645, 654 |
-| | fade | Pop | **3.50%** | 0.95% | 16.7% | 28.3% | 67 ms | 863, 645, 631, 924, 635 |
-| | | Poster | **1.39%** | 0.00% | 12.7% | 10.0% | 83 ms | 843, 667, 651, 650, 792 |
-| | | Night | **2.33%** | 0.44% | 11.4% | 22.0% | 83 ms | 861, 663, 780, 784, 628 |
-| | | Corporate | **1.94%** | 0.50% | 7.9% | 18.7% | 67 ms | 1019, 922, 656, 659, 668 |
+| landscape | cut | Pop | **1.44%** | 0.18% | 20.9% | 0.0% | **100 ms** | 918, 607, 658, 610, 577 |
+| | | Poster | 0.72% | 0.00% | 14.6% | | **83 ms** | 772, 495, 590, 456, 405 |
+| | | Night | 0.67% | 0.12% | 12.3% | | **83 ms** | 763, 449, 447, 443, 444 |
+| | | Corporate | 0.50% | 0.06% | 10.3% | | **67 ms** | 698, 413, 414, 426, 442 |
+| | fade | Pop | **1.94%** | 0.31% | 16.1% | 16.3% | **83 ms** | 742, 448, 436, 468, 647 |
+| | | Poster | 0.44% | 0.00% | 10.8% | 0.0% | **67 ms** | 764, 395, 410, 393, 409 |
+| | | Night | **1.33%** | 0.25% | 10.9% | 10.9% | **67 ms** | 844, 561, 601, 458, 458 |
+| | | Corporate | **1.11%** | 0.06% | 12.2% | 8.6% | **83 ms** | 855, 578, 581, 446, 457 |
+| portrait | cut | Pop | **2.33%** | 1.27% | 14.8% | 0.0% | **83 ms** | 907, 795, 857, 855, 665 |
+| | | Poster | 0.50% | 0.00% | 7.8% | | **67 ms** | 873, 652, 647, 611, 643 |
+| | | Night | 1.00% | 0.18% | 11.7% | | **67 ms** | 860, 649, 644, 690, 795 |
+| | | Corporate | **1.39%** | 0.18% | 14.8% | | **100 ms** | 950, 743, 853, 928, 706 |
+| | fade | Pop | **3.33%** | 1.19% | 13.7% | 28.1% | **67 ms** | 838, 647, 618, 568, 762 |
+| | | Poster | **1.33%** | 0.00% | 9.6% | 11.8% | **67 ms** | 889, 617, 665, 865, 740 |
+| | | Night | **2.33%** | 0.51% | 11.0% | 22.0% | **100 ms** | 994, 757, 799, 688, 649 |
+| | | Corporate | **2.22%** | 0.44% | 12.8% | 19.1% | **67 ms** | 851, 665, 656, 641, 800 |
 
-Over budget, stated plainly:
+Over budget, stated plainly (nothing skipped in any spec):
 
-- **Dropped frames over 1%** in 7 of 16 specs: every portrait fade (1.39 to 3.50%), the landscape fades of Pop (1.72%) and Night (1.44%), and Pop's portrait cut (1.44%). While playing, every spec stayed at or under 0.95%; the drops come while the next spot loads and during the fade, with two frames on screen, each a full-screen photo under a crawl.
-- **Prepares over 500 ms**: every portrait prepare (608 to 1,019 ms; medians after the first: Pop 640, Poster 659, Night 781, Corporate 657 ms), every first prepare after a cold load (702 to 1,019 ms, the four-look bundle's cold start as for Room status and the kit), and 6 of 32 later landscape prepares (519 to 661 ms). Landscape medians after the first: Pop 457, Poster 394, Night 462, Corporate 428 ms. The portrait photo is 6.6 megapixels against 2.1 in landscape, and the SDK waits for it to decode before `ready`.
-- **Frames over 50 ms**: 67 or 83 ms (83 in three) in every spec but Corporate's landscape cut (50 ms), all while the next spot loaded, as for every template measured since the kit.
+- **Dropped frames over 1%** in 10 of 16 specs: all four portrait fades (1.33 to 3.33%), Pop (2.33%) and Corporate (1.39%) portrait cuts, Pop (1.94%), Night (1.33%) and Corporate (1.11%) landscape fades, and Pop landscape cut (1.44%; Poster, Night and Corporate landscape cuts were 0.50 to 0.72%, Poster landscape fade 0.44%, Poster portrait cut 0.50%, Night portrait cut 1.00%). While playing, 14 of 16 specs stayed at or under 0.51%, while Pop portrait cut (1.27%) and Pop portrait fade (1.19%) also exceeded 1%; the bulk of the drops come while the next spot loads and during crossfades with two full-screen photo-and-crawl frames on screen.
+- **Prepares over 500 ms**: 58 of 80 prepares — all 40 portrait prepares (568 to 994 ms; medians after the first: Pop 714, Poster 650, Night 689, Corporate 725 ms), all 8 landscape first prepares after a cold load (698 to 855 ms, the four-look bundle's cold start as for Room status and the kit), and 10 of 32 later landscape prepares (561 to 658 ms; landscape medians after the first: Pop 592, Poster 410, Night 454, Corporate 444 ms). The portrait photo is 6.6 megapixels against 2.1 in landscape, and the SDK waits for it to decode before `ready`.
+- **Frames over 50 ms**: all 16 specs (67 to 100 ms; 100 ms in Pop landscape cut, Corporate portrait cut and Night portrait fade), occurring while the next spot loaded except for one 83 ms play frame in Pop portrait cut and one 67 ms play frame in Pop portrait fade.
 
-What the template changed between two sessions (the first at `b2270523`, the same spots): card inks were each resolved with a 1x1 canvas read and a forced style pass, about 40 of each per prepare, and the photo, a drifting layer of its own, was painted before `ready` in every look but Poster. Batching the inks into one style pass with no canvas, and keeping the photo unpainted until play in every look, took Pop's landscape cut from 2.11% (1.37% while playing) and prepares of 988 to 1,117 ms to the figures above, Night's from 733 to 858 ms and Corporate's from 572 to 786 ms; Poster, whose photo already waited, was 491 to 544 ms after the first. In the first session, portrait cuts were 0.72 to 2.83% and prepares 726 to 1,339 ms.
+What the template changed across earlier sessions (first at `b2270523`, second at `ab9802e0`, the same spots): card inks were each resolved with a 1x1 canvas read and a forced style pass, about 40 of each per prepare, and the photo, a drifting layer of its own, was painted before `ready` in every look but Poster. Batching the inks into one style pass with no canvas, and keeping the photo unpainted until play in every look, took Pop's landscape cut from 2.11% (1.37% while playing) and prepares of 988 to 1,117 ms down to 0.72% (414 to 461 ms after the first) in the second session (before landing in Chromium's slower prepare mode at 1.44% / 577 to 658 ms on the re-measure above; Pop's landscape fade prepares remained 436 to 468 ms except one 647 ms), Night's from 733 to 858 ms to 443 to 464 ms, and Corporate's from 572 to 786 ms to 392 to 448 ms; Poster, whose photo already waited, was 491 to 544 ms after the first. In the first session, portrait cuts were 0.72 to 2.83% and prepares 726 to 1,339 ms.
 
 Ablations in the second session, as variant templates built beside it: Pop without its looping sticker wobble and glyph bob, and Pop and Night without any rounded clip (the panel's corners painted over it in the ground colour, cards not clipping). Neither moved the numbers past the run-to-run spread, which was 0.72 to 1.33% for the same landscape layout and 0.83 to 2.67% in portrait, so the canvas's wobble and rounded corners stay. The rail-off layout (the clock and the weather as a chip on the photo) was measured only in the first session, before the fixes: 0.33 to 1.83% landscape, as its rail-on spec.

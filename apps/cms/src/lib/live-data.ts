@@ -185,9 +185,10 @@ export async function weatherSource(live: LiveSourceDef, place: PlaceView, units
   for (const path of Object.values(live.fields)) {
     const [block, variable, index] = path.split('.');
     if (!variable) continue;
-    if (block === 'current') current.add(variable);
+    // Open-Meteo always includes `current.time` and `daily.time` and rejects `time` in the query list.
+    if (block === 'current' && variable !== 'time') current.add(variable);
     if (block === 'daily') {
-      daily.add(variable);
+      if (variable !== 'time') daily.add(variable);
       days = Math.max(days, Number(index ?? 0) + 1);
     }
   }
