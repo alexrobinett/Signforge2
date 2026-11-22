@@ -622,6 +622,16 @@ export function scoped(d1: D1Database, orgId: string) {
   const snap = s.dataSnapshots;
   const fi = s.feedImages;
   const fid = s.feedImageDeletes;
+  const holdFeedImages = async (sourceId: string, chosen: SQL, now: number, until: number): Promise<string[]> => {
+    const rows = await db.all<{ url: string }>(sql`
+      INSERT INTO ${fi} (org_id, url, source_id, next_check_at, created_at, updated_at)
+      SELECT ${orgId}, url, ${sourceId}, ${until}, ${now}, ${now} FROM (${chosen})
+      WHERE true
+      ON CONFLICT (org_id, url) DO UPDATE SET next_check_at = excluded.next_check_at, updated_at = excluded.updated_at
+      WHERE ${fi.nextCheckAt} <= ${now}
+      RETURNING url`);
+    return rows.map((r) => r.url);
+  };
   const pc = s.playCounts;
   const pcodes = s.pairingCodes;
 
@@ -1713,20 +1723,10 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * Held until `until`: queued to be fetched, so a poll before then does not queue them again. A
        * URL new to the org gets its row, with no image yet, made `now` and counted against
-       * `sourceId`'s daily budget (`madeSince`).
+       * `sourceId`'s daily budget (`madeSince`). Returns only URLs newly held by this call.
        */
-      hold: async (urls: readonly string[], { until, now, sourceId }: { until: number; now: number; sourceId: string }) => {
-        const values = urls.map((url) => ({ orgId, url, sourceId, nextCheckAt: until, createdAt: now }));
-        if (values.length)
-          await db.batch(
-            chunk(values, 9).map((part) =>
-              db
-                .insert(fi)
-                .values(part)
-                .onConflictDoUpdate({ target: [fi.orgId, fi.url], set: updateSet(fi, { nextCheckAt: until }) }),
-            ) as [never, ...never[]],
-          );
-      },
+      hold: (urls: readonly string[], { until, now, sourceId }: { until: number; now: number; sourceId: string }) =>
+        urls.length ? holdFeedImages(sourceId, sql`SELECT value AS url FROM json_each(${JSON.stringify(urls)})`, now, until) : Promise.resolve([]),
       /**
        * Atomically hold `again` (due rechecks) plus as many of `fresh` as fit within `maxSource`
        * and `maxOrg` rows made since `since`, in one D1 statement. Returns the exact URLs held.
@@ -1744,27 +1744,22 @@ export function scoped(d1: D1Database, orgId: string) {
         }: { again: readonly string[]; fresh: readonly string[]; until: number; now: number; since: number; maxSource: number; maxOrg: number },
       ): Promise<string[]> => {
         if (!again.length && !fresh.length) return [];
-        const updatedAt = Date.now();
-        const rows = await db.all<{ url: string }>(sql`
+        const alreadyKnown = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = jobs.value)`;
+        const chosen = sql`
           WITH counts AS (
             SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${sourceId}), 0) AS src_n
             FROM ${fi}
             WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${since}
-          ),
-          chosen(url) AS (
-            SELECT value FROM json_each(${JSON.stringify([...again])})
-            UNION ALL
-            SELECT f.value
-            FROM json_each(${JSON.stringify([...fresh])}) AS f
-            CROSS JOIN counts
-            WHERE CAST(f.key AS INTEGER) < MAX(0, MIN(${maxSource} - counts.src_n, ${maxOrg} - counts.org_n))
           )
-          INSERT INTO ${fi} (org_id, url, source_id, next_check_at, created_at, updated_at)
-          SELECT ${orgId}, url, ${sourceId}, ${until}, ${now}, ${updatedAt} FROM chosen
-          WHERE true
-          ON CONFLICT (org_id, url) DO UPDATE SET next_check_at = excluded.next_check_at, updated_at = excluded.updated_at
-          RETURNING url`);
-        return rows.map((r) => r.url);
+          SELECT jobs.value AS url FROM json_each(${JSON.stringify([...again, ...fresh])}) AS jobs WHERE ${alreadyKnown}
+          UNION ALL
+          SELECT value FROM (
+            SELECT jobs.value FROM json_each(${JSON.stringify(fresh)}) AS jobs
+            WHERE NOT ${alreadyKnown}
+            ORDER BY jobs.key
+            LIMIT (SELECT MAX(0, MIN(${maxSource} - src_n, ${maxOrg} - org_n)) FROM counts)
+          )`;
+        return holdFeedImages(sourceId, chosen, now, until);
       },
       /** How many rows were made at or after `since`: the org's, and of those, the ones `sourceId` made. */
       madeSince: async (since: number, sourceId: string) => {
@@ -1895,39 +1890,40 @@ export function scoped(d1: D1Database, orgId: string) {
       /** Pending delete records for this org, ordered by hash. */
       pendingDeletes: () => db.select().from(fid).where(eq(fid.orgId, orgId)).orderBy(asc(fid.sha256)).all(),
       /**
-       * What fetching `url` found: on success its hashes and validators (atomically queuing any
-       * replaced hashes into `feed_image_deletes` and clearing active hashes from it), on a failure
-       * its category, the hashes kept.
+       * What fetching `url` found: on success its hashes and validators, atomically queuing the
+       * hashes it displaces. On failure the metadata changes and the last good hashes are kept.
        */
-      save: async (
-        url: string,
-        found: RowPatch<typeof s.feedImages> & { nextCheckAt: number },
-        { replaced, now }: { replaced?: readonly string[]; now?: number } = {},
-      ) => {
+      save: async (url: string, found: RowPatch<typeof s.feedImages> & { nextCheckAt: number }, { now = Date.now() }: { now?: number } = {}) => {
+        const mine = and(eq(fi.orgId, orgId), eq(fi.url, url));
         const updateRow = db
           .update(fi)
           .set(updateSet(fi, strip(found)))
-          .where(and(eq(fi.orgId, orgId), eq(fi.url, url)));
-        const active = [...new Set([found.fileSha256, found.thumbSha256].filter((x): x is string => typeof x === 'string'))];
-        const stale = [...new Set((replaced ?? []).filter((sha) => !active.includes(sha)))];
-        if (!active.length && !stale.length) {
+          .where(mine);
+        if (found.fileSha256 === undefined && found.thumbSha256 === undefined) {
           await updateRow.run();
           return;
         }
-        const stmts: Parameters<Db['batch']>[0][number][] = [updateRow];
-        if (stale.length) {
-          const queuedAt = now ?? Date.now();
-          stmts.push(
-            db
-              .insert(fid)
-              .values(stale.map((sha256) => ({ orgId, sha256, queuedAt, deletingUntil: 0 })))
-              .onConflictDoUpdate({ target: [fid.orgId, fid.sha256], set: { queuedAt, deletingUntil: 0 } }),
-          );
-        }
-        if (active.length) {
-          stmts.push(db.delete(fid).where(and(eq(fid.orgId, orgId), sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(active)}))`)));
-        }
-        await db.batch(stmts as [never, ...never[]]);
+        const file = found.fileSha256 === undefined ? fi.fileSha256 : found.fileSha256;
+        const thumb = found.thumbSha256 === undefined ? fi.thumbSha256 : found.thumbSha256;
+        const queueDisplaced = db
+          .insert(fid)
+          .select(sql`SELECT DISTINCT ${orgId}, old.value, ${now}, 0
+                FROM ${fi}, json_each(json_array(${fi.fileSha256}, ${fi.thumbSha256})) AS old
+                WHERE ${mine} AND old.value IS NOT NULL AND old.value IS NOT ${file} AND old.value IS NOT ${thumb}`)
+          .onConflictDoUpdate({
+            target: [fid.orgId, fid.sha256],
+            set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` },
+          });
+        const clearActive = db.delete(fid).where(
+          and(
+            eq(fid.orgId, orgId),
+            lte(fid.deletingUntil, now),
+            sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = ${url}
+                AND (${fid.sha256} = ${fi.fileSha256} OR ${fid.sha256} = ${fi.thumbSha256}))`,
+          ),
+        );
+        // A concurrent delivery may have stored a copy during this fetch.
+        await db.batch([queueDisplaced, updateRow, clearActive]);
       },
     },
 

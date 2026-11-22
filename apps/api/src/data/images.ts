@@ -243,11 +243,6 @@ function failed(org: OrgScope, row: FeedImageRow, code: PhotoError, passing: boo
   return org.feedImages.save(row.url, { lastError: code, failures, nextCheckAt: now + wait });
 }
 
-/** Hashes `row` previously pointed to that are no longer named by the replacement copy. */
-function replacedShas(row: FeedImageRow, fileSha: string, thumbSha: string): string[] {
-  return [row.fileSha256, row.thumbSha256].filter((sha): sha is string => sha !== null && sha !== fileSha && sha !== thumbSha);
-}
-
 /** Fetch and store one photo; true when the copy it names changed. */
 async function storeOne(env: Pick<Env, 'BLOBS'>, { now, guards, images }: PhotoDeps, org: OrgScope, sourceId: string, url: string): Promise<boolean> {
   const source = await org.dataSources.get(sourceId);
@@ -282,7 +277,7 @@ async function storeOne(env: Pick<Env, 'BLOBS'>, { now, guards, images }: PhotoD
           fileSha256: existing.fileSha256,
           thumbSha256: existing.thumbSha256,
         },
-        { replaced: replacedShas(row, existing.fileSha256, existing.thumbSha256), now },
+        { now },
       );
       return existing.fileSha256 !== row.fileSha256 || existing.thumbSha256 !== row.thumbSha256;
     }
@@ -296,7 +291,7 @@ async function storeOne(env: Pick<Env, 'BLOBS'>, { now, guards, images }: PhotoD
         fileSha256: copy.file,
         thumbSha256: copy.thumb,
       },
-      { replaced: replacedShas(row, copy.file, copy.thumb), now },
+      { now },
     );
     return copy.file !== row.fileSha256 || copy.thumb !== row.thumbSha256;
   } catch (e) {

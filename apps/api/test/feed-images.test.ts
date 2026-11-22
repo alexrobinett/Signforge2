@@ -922,6 +922,57 @@ describe('budgets, resilience and cleanup', () => {
     expect((await o.scope.feedImages.pendingDeletes()).map((d) => d.sha256)).not.toContain(v1.fileSha256);
   });
 
+  it('queues the copy displaced by overlapping deliveries and keeps duplicate deliveries idempotent', async () => {
+    const id = await news('https://overlap.test/rss', { bind: false });
+    const url = 'https://overlap.test/photo.jpg';
+    const jobs = [{ orgId: o.orgId, sourceId: id, url }];
+    await o.scope.feedImages.hold([url], { until: NOW + HOLD_MS, now: NOW, sourceId: id });
+    const a = jpeg(320, 180, 'overlap-a');
+    const b = jpeg(320, 180, 'overlap-b');
+    const c = jpeg(320, 180, 'overlap-c');
+    const { images } = imagesStub();
+    await consume(jobs, { guards: web({ [url]: { body: a } }).guards, images });
+
+    const fetchingC = Promise.withResolvers<void>();
+    const canStoreC = Promise.withResolvers<void>();
+    const guards = web({ [url]: { body: c } }).guards;
+    const deliveryC = consume(
+      jobs,
+      {
+        images,
+        guards: {
+          ...guards,
+          fetch: async (...args) => {
+            fetchingC.resolve();
+            await canStoreC.promise;
+            return guards.fetch(...args);
+          },
+        },
+      },
+      NOW + RECHECK_MS,
+    );
+    try {
+      await fetchingC.promise;
+      expect(await consume(jobs, { guards: web({ [url]: { body: b } }).guards, images }, NOW + RECHECK_MS)).toEqual({ acked: [url], retried: [] });
+      expect((await row(url))?.fileSha256).toBe(await sha256Hex(b));
+    } finally {
+      canStoreC.resolve();
+      await deliveryC;
+    }
+    expect(await deliveryC).toEqual({ acked: [url], retried: [] });
+    const shas = await Promise.all([a, b, c].map(sha256Hex));
+    expect((await row(url))?.fileSha256).toBe(shas[2]);
+    const pending = () => o.scope.feedImages.pendingDeletes();
+    const deletions = await pending();
+    expect(deletions.map((d) => d.sha256)).toEqual(expect.arrayContaining(shas.slice(0, 2)));
+    expect(deletions.map((d) => d.sha256)).not.toContain(shas[2]);
+    expect(await consume(jobs, { guards: web({ [url]: { body: c } }).guards, images }, NOW + RECHECK_MS + 1)).toEqual({ acked: [url], retried: [] });
+    expect(await pending()).toEqual(deletions);
+    await forgetFeedImages(env, NOW + RECHECK_MS + FEED_IMAGE_DELETE_GRACE_MS);
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, shas[1]!))).toBeNull();
+    expect(await env.BLOBS.head(feedBlobKey(o.orgId, shas[2]!))).not.toBeNull();
+  });
+
   it('keeps both polling (5 sources × 10 photos) and cleanup (25 expired rows × 2 hashes) well under Free D1 50-query limits', async () => {
     // 1. Poll 5 RSS sources in one org, each with 10 distinct photo URLs (50 URLs total).
     const answers: Record<string, Answer> = {};

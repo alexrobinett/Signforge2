@@ -501,13 +501,24 @@ describe('feed images', () => {
     const a = s.a.scope.feedImages;
     await a.hold([url], { until: 10, now: 1, sourceId: 'news' });
     await a.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64), nextCheckAt: 20 });
-    await a.hold([url, 'https://news.example/new.jpg'], { until: 30, now: 2, sourceId: 'other' });
+    await a.hold([url, 'https://news.example/new.jpg'], { until: 30, now: 20, sourceId: 'other' });
     expect((await a.get([url, 'https://news.example/new.jpg'])).map((r) => [r.url, r.fileSha256, r.nextCheckAt])).toEqual(
       expect.arrayContaining([
         [url, 'a'.repeat(64), 30],
         ['https://news.example/new.jpg', null, 30],
       ]),
     );
+  });
+
+  it('holds a fresh URL only once, including when two polls both planned it as fresh', async () => {
+    const photos = s.a.scope.feedImages;
+    const url = 'https://news.example/hold-once.jpg';
+    expect(await photos.hold([url], { until: 30, now: 20, sourceId: 'news' })).toEqual([url]);
+    expect(await photos.hold([url], { until: 31, now: 21, sourceId: 'other' })).toEqual([]);
+    const budget = { again: [], fresh: [url], until: 32, now: 22, since: 0, maxSource: 100, maxOrg: 100 };
+    expect(await photos.holdWithinBudget('other', budget)).toEqual([]);
+    expect(await photos.holdWithinBudget('other', { ...budget, now: 30 })).toEqual([url]);
+    expect(await photos.get([url])).toEqual([expect.objectContaining({ sourceId: 'news', createdAt: 20, nextCheckAt: 32 })]);
   });
 
   it("counts the rows a day's polls made, the org's and one source's, in its own org only", async () => {
@@ -577,7 +588,7 @@ describe('feed images', () => {
     expect(await a.pendingDeletes()).toEqual([]);
 
     // Replacing hashes at the same URL durably queues the old ones and cancels active ones.
-    await a.save(urls[2]!, { fileSha256: sha('9'), thumbSha256: sha('9'), nextCheckAt: 300 }, { replaced: [sha('6'), sha('5')], now: 300 });
+    await a.save(urls[2]!, { fileSha256: sha('9'), thumbSha256: sha('9'), nextCheckAt: 300 }, { now: 300 });
     expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('5'), sha('6')]);
     // Unleased pending delete is cancelled by claimForWrite when the hash is reused.
     expect(await a.claimForWrite([sha('6')], 300)).toBe(true);
