@@ -32,6 +32,7 @@
     "@signforge/template-clock": "workspace:*",
     "@signforge/template-countdown": "workspace:*",
     "@signforge/template-cstore-promo": "workspace:*",
+    "@signforge/template-info-frame": "workspace:*",
     "@signforge/template-looks": "workspace:*",
     "@signforge/template-menu-board": "workspace:*",
     "@signforge/template-news": "workspace:*",

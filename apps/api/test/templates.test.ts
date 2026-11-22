@@ -68,7 +68,7 @@ beforeAll(async () => {
 });
 
 describe('sf template seed', () => {
-  it('builds all eleven templates cleanly', () => {
+  it('builds all twelve templates cleanly', () => {
     expect(BUILDS.map((b) => b.dir)).toEqual([
       'agenda',
       'alert',
@@ -76,6 +76,7 @@ describe('sf template seed', () => {
       'clock',
       'countdown',
       'cstore-promo',
+      'info-frame',
       'menu-board',
       'news',
       'photo-promo',

@@ -1,0 +1,29 @@
+{
+  "name": "Info frame, 4K photo, live weather and news",
+  "kind": "template",
+  "template": "info-frame",
+  "durationMs": 15000,
+  "data": { "look": "night", "city": "Atlanta", "captionTitle": "Fresh from the kitchen", "captionLine": "Hot meals until 9 pm", "price": "$8.49" },
+  "assets": { "photo": "kitchen-4k.jpg" },
+  "bindings": {
+    "weatherTimezone": { "source": "weather", "path": "timezone" },
+    "temp": { "source": "weather", "path": "current.temperature_2m" },
+    "code": { "source": "weather", "path": "current.weather_code" },
+    "isDay": { "source": "weather", "path": "current.is_day" },
+    "high": { "source": "weather", "path": "daily.temperature_2m_max.0" },
+    "low": { "source": "weather", "path": "daily.temperature_2m_min.0" },
+    "day1Time": { "source": "weather", "path": "daily.time.1" },
+    "day1High": { "source": "weather", "path": "daily.temperature_2m_max.1" },
+    "day1Low": { "source": "weather", "path": "daily.temperature_2m_min.1" },
+    "day1Code": { "source": "weather", "path": "daily.weather_code.1" },
+    "day2Time": { "source": "weather", "path": "daily.time.2" },
+    "day2High": { "source": "weather", "path": "daily.temperature_2m_max.2" },
+    "day2Low": { "source": "weather", "path": "daily.temperature_2m_min.2" },
+    "day2Code": { "source": "weather", "path": "daily.weather_code.2" },
+    "day3Time": { "source": "weather", "path": "daily.time.3" },
+    "day3High": { "source": "weather", "path": "daily.temperature_2m_max.3" },
+    "day3Low": { "source": "weather", "path": "daily.temperature_2m_min.3" },
+    "day3Code": { "source": "weather", "path": "daily.weather_code.3" },
+    "items": { "source": "news", "path": "items" }
+  }
+}

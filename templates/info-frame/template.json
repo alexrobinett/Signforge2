@@ -1,0 +1,89 @@
+{
+  "id": "info-frame",
+  "version": "1.0.0",
+  "name": "Info frame",
+  "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
+  "fields": {
+    "photo": { "type": "image", "label": "Photo" },
+    "captionTitle": { "type": "text", "label": "Caption", "default": "Large coffee and a pastry", "maxLength": 64 },
+    "captionLine": { "type": "text", "label": "Caption line", "default": "Every weekday until 11 am", "maxLength": 80 },
+    "price": { "type": "text", "label": "Price (optional)", "default": "$5.99", "maxLength": 8 },
+    "city": { "type": "text", "label": "Place", "default": "Atlanta", "maxLength": 24 },
+    "temp": { "type": "number", "label": "Temperature", "default": 72 },
+    "high": { "type": "number", "label": "Today's high", "default": 78 },
+    "low": { "type": "number", "label": "Today's low", "default": 61 },
+    "code": { "type": "number", "label": "WMO weather code", "default": 2 },
+    "isDay": { "type": "number", "label": "Daytime (1) or night (0)", "default": 1 },
+    "unit": { "type": "select", "label": "Temperature unit", "options": ["°F", "°C"], "default": "°F" },
+    "weatherTimezone": { "type": "text", "label": "Weather time zone (empty for screen)", "default": "", "maxLength": 64 },
+    "day1Time": { "type": "number", "label": "Day 1 Unix time (0: from screen clock)", "default": 0 },
+    "day1High": { "type": "number", "label": "Day 1 high", "default": 75 },
+    "day1Low": { "type": "number", "label": "Day 1 low", "default": 60 },
+    "day1Code": { "type": "number", "label": "Day 1 WMO weather code", "default": 1 },
+    "day2Time": { "type": "number", "label": "Day 2 Unix time (0: from screen clock)", "default": 0 },
+    "day2High": { "type": "number", "label": "Day 2 high", "default": 70 },
+    "day2Low": { "type": "number", "label": "Day 2 low", "default": 57 },
+    "day2Code": { "type": "number", "label": "Day 2 WMO weather code", "default": 61 },
+    "day3Time": { "type": "number", "label": "Day 3 Unix time (0: from screen clock)", "default": 0 },
+    "day3High": { "type": "number", "label": "Day 3 high", "default": 73 },
+    "day3Low": { "type": "number", "label": "Day 3 low", "default": 58 },
+    "day3Code": { "type": "number", "label": "Day 3 WMO weather code", "default": 3 },
+    "items": {
+      "type": "list",
+      "label": "Headlines",
+      "maxItems": 30,
+      "default": [],
+      "item": {
+        "title": { "type": "text", "label": "Headline", "maxLength": 200 },
+        "published": { "type": "text", "label": "Published (ISO time)", "default": "" },
+        "source": { "type": "text", "label": "Source", "default": "" }
+      }
+    },
+    "crawlLabel": { "type": "text", "label": "Crawl label", "default": "Latest", "maxLength": 12 },
+    "crawlSpeed": { "type": "select", "label": "Crawl speed", "options": ["slow", "normal", "fast"], "default": "normal" },
+    "hour24": { "type": "boolean", "label": "24-hour time", "default": false },
+    "rail": { "type": "select", "label": "Rail", "options": ["right", "left", "off"], "default": "right" },
+    "ticker": { "type": "select", "label": "Crawl", "options": ["bottom", "top", "off"], "default": "bottom" },
+    "look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" },
+    "showClock": { "type": "boolean", "label": "Show the clock", "default": true },
+    "showWeather": { "type": "boolean", "label": "Show the weather", "default": true },
+    "showForecast": { "type": "boolean", "label": "Show the three-day forecast", "default": true },
+    "showCaption": { "type": "boolean", "label": "Show the caption", "default": true },
+    "showLogo": { "type": "boolean", "label": "Show the logo", "default": true }
+  },
+  "duration": { "defaultMs": 15000, "minMs": 6000, "maxMs": 300000 },
+  "orientations": ["landscape", "portrait"],
+  "uses": [],
+  "background": "#000000",
+  "live": {
+    "sources": {
+      "weather": {
+        "label": "Weather",
+        "source": "open-meteo",
+        "fields": {
+          "weatherTimezone": "timezone",
+          "temp": "current.temperature_2m",
+          "code": "current.weather_code",
+          "isDay": "current.is_day",
+          "high": "daily.temperature_2m_max.0",
+          "low": "daily.temperature_2m_min.0",
+          "day1Time": "daily.time.1",
+          "day1High": "daily.temperature_2m_max.1",
+          "day1Low": "daily.temperature_2m_min.1",
+          "day1Code": "daily.weather_code.1",
+          "day2Time": "daily.time.2",
+          "day2High": "daily.temperature_2m_max.2",
+          "day2Low": "daily.temperature_2m_min.2",
+          "day2Code": "daily.weather_code.2",
+          "day3Time": "daily.time.3",
+          "day3High": "daily.temperature_2m_max.3",
+          "day3Low": "daily.temperature_2m_min.3",
+          "day3Code": "daily.weather_code.3"
+        },
+        "place": "city",
+        "units": { "temperature": "unit" }
+      },
+      "headlines": { "label": "Headlines", "source": "rss", "fields": { "items": "items" } }
+    }
+  }
+}
