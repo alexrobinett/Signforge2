@@ -1644,7 +1644,8 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * What one poll found, in one batch: the source's patch (next poll, failures, validators),
        * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
-       * Throws `NotInOrgError` if the source does not belong to this org without an extra read.
+       * Returns false if a Photos setting change made the result stale. Throws `NotInOrgError`
+       * if the source does not belong to this org without an extra read.
        */
       savePoll: async (
         dataSourceId: string,
@@ -1652,12 +1653,14 @@ export function scoped(d1: D1Database, orgId: string) {
           source: RowPatch<typeof s.dataSources> & { nextPollAt: number };
           snapshot?: Snapshot;
           checkedAt?: number;
-          photoRead?: { generation: number; now: number };
+          photoRead?: { photos: boolean; generation: number; now: number };
         },
       ) => {
         const ds = s.dataSources;
         const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
         const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
+        const photosMatch = poll.photoRead && eq(ds.photos, poll.photoRead.photos);
+        const current = photosMatch && sql`EXISTS (SELECT 1 FROM ${ds} WHERE ${mine} AND ${photosMatch})`;
         const check = db
           .select({
             ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${ds} WHERE ${ds.orgId} = ${orgId} AND ${ds.id} = ${dataSourceId}) THEN '1' ELSE 'not in org' END)`,
@@ -1671,20 +1674,23 @@ export function scoped(d1: D1Database, orgId: string) {
           db
             .update(ds)
             .set(updateSet(ds, strip(poll.source)))
-            .where(mine),
+            .where(and(mine, photosMatch)),
         ).writes;
         if (poll.snapshot) {
-          const fields = snapshotFields(poll.snapshot);
+          const { version, fetchedAt, checkedAt, dataJson } = poll.snapshot;
+          const fields = { version, fetchedAt, checkedAt, dataJson };
           writes.push(
             ...staged(
               undefined,
               db
                 .insert(snap)
-                .values({ ...fields, orgId, dataSourceId })
+                .select(sql`SELECT ${orgId}, ${dataSourceId}, ${version}, ${fetchedAt}, ${checkedAt}, ${dataJson} WHERE ${current ?? sql`1`}`)
                 .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: fields }),
             ).writes,
           );
-        } else if (poll.checkedAt !== undefined) writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(mineSnap)).writes);
+        } else if (poll.checkedAt !== undefined) {
+          writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(and(mineSnap, current))).writes);
+        }
         if (poll.photoRead) {
           // A first-seen URL can change before a delivery knows this source uses it.
           const changedCopy = poll.source.photoUrlsJson
@@ -1701,14 +1707,17 @@ export function scoped(d1: D1Database, orgId: string) {
               undefined,
               db
                 .update(ds)
-                .set({ etag: null, lastModified: null, nextPollAt: poll.photoRead.now })
-                .where(and(mine, or(ne(ds.photoGeneration, poll.photoRead.generation), changedCopy))),
+                .set({ etag: null, lastModified: null, nextPollAt: sql`MIN(${ds.nextPollAt}, ${poll.photoRead.now})` })
+                .where(and(mine, or(ne(ds.photos, poll.photoRead.photos), ne(ds.photoGeneration, poll.photoRead.generation), changedCopy))),
             ).writes,
           );
         }
         try {
-          const [, updated] = await commit(db, writes);
-          if (!updated) throw new NotInOrgError('data source', dataSourceId);
+          const changes = await commit(db, writes);
+          const updated = changes[1];
+          // A settings mismatch skips the poll writes and leaves a reread due via the final update.
+          if (!updated && !(poll.photoRead && changes.at(-1))) throw new NotInOrgError('data source', dataSourceId);
+          return Boolean(updated);
         } catch (err) {
           if (err instanceof NotInOrgError) throw err;
           // biome-ignore lint/style/useErrorCause: the cause is passed in the options argument.

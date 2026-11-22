@@ -4,6 +4,7 @@
 import { MAX_SNAPSHOT_BYTES, type NewsFeed } from '@signforge/contract';
 import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS } from '@signforge/db';
 import { seedOrg, seedOrganization, type SeededOrg, testScope } from '@signforge/db/testing';
+import { dispatch, registry } from '@signforge/tools';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1534,6 +1535,69 @@ describe('photos switched off', () => {
     expect(take()).toEqual([]);
     expect(await o.scope.feedImages.get(['https://cdn.quiet.test/0.jpg'])).toEqual([]);
     expect(JSON.stringify(await snapshot(id))).not.toMatch(/image|cdn\.quiet/);
+  });
+
+  it('keeps the Photos switch reread when an enabled poll was already fetching RSS', async () => {
+    const feed = 'https://photos-switch.test/rss';
+    const url = 'https://photos-switch.test/photo.jpg';
+    const id = await news(feed);
+    const rss = web({
+      [feed]: (req) =>
+        req.headers.get('if-none-match') === '"story"'
+          ? { status: 304 }
+          : { body: feedOf(1, () => url), headers: { etag: '"story"', 'last-modified': 'Fri, 20 Nov 2026 23:00:00 GMT' } },
+    });
+    await pollDataSources(pollEnv, { now: NOW, guards: rss.guards });
+    const initial = await o.scope.dataSources.snapshots([id]);
+    await consume(take(), { guards: web({ [url]: { body: jpeg(320, 180, 'switch race') } }).guards, images: imagesStub().images });
+    expect((await row(url))?.fileSha256).toBeTruthy();
+
+    const at = NOW + 5 * MIN;
+    const fetching = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const inFlight = pollDataSources(pollEnv, {
+      now: at,
+      guards: {
+        ...rss.guards,
+        fetch: async (input, init) => {
+          fetching.resolve();
+          await resume.promise;
+          return rss.guards.fetch(input, init);
+        },
+      },
+    });
+    await fetching.promise;
+    try {
+      expect(
+        await dispatch(
+          registry,
+          'update_data_source',
+          { dataSourceId: id, photos: false },
+          {
+            org: o.scope,
+            role: 'owner',
+            actor: { kind: 'user', id: 'photos-switch-test', clientId: 'cms' },
+            blobs: env.BLOBS,
+            services: { feedUrls: feedUrlSealer(env) },
+          },
+        ),
+      ).toMatchObject({ ok: true });
+    } finally {
+      resume.resolve();
+      await inFlight;
+    }
+    const afterRace = await o.scope.dataSources.get(id);
+    const afterSnapshot = await o.scope.dataSources.snapshots([id]);
+    await pollDataSources(pollEnv, { now: at + 5 * MIN, guards: rss.guards });
+
+    expect((await snapshot(id)).items[0]?.image).toBeUndefined();
+    expect(afterSnapshot).toEqual(initial);
+    expect(afterRace).toMatchObject({ photos: false, etag: null, lastModified: null, photoUrlsJson: null });
+    expect(afterRace?.nextPollAt).toBeLessThanOrEqual(at);
+    expect(rss.requests).toHaveLength(3);
+    expect(rss.requests[2]?.headers.get('if-none-match')).toBeNull();
+    expect(rss.requests[2]?.headers.get('if-modified-since')).toBeNull();
+    expect((await o.scope.dataSources.snapshots([id]))[0]?.checkedAt).toBe(at + 5 * MIN);
   });
 
   it('stores nothing queued before it was switched off', async () => {
