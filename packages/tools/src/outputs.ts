@@ -34,6 +34,10 @@ export const screenOutput = z.object({
   orientation,
   kind: z.enum(SCREEN_KINDS).describe('device, or browser: a test screen in a browser tab, which has no panel to power'),
   displayHours: displayHours.nullable().describe('Null means always on'),
+  labels: z.record(z.string(), z.string()).describe('Its key=value labels, values as typed; set them with update_screen_labels'),
+  systemLabels: z
+    .record(z.string(), z.string())
+    .describe('Labels from its settings, read-only: orientation, kind, timezone and locale (absent with no locale). Selectors match them as labels'),
   status: z.enum(['active', 'revoked']).describe('Revoked once every credential the screen had is revoked'),
   desiredManifestId: z.string().nullable().describe('The manifest the screen should play'),
   previousManifestId: z.string().nullable().describe('The one before it, kept while the screen switches'),
@@ -617,6 +621,20 @@ export const outputs = {
   restart_screen: z.object({ screenId: z.string() }),
   revoke_screen_credential: z.object({ credential: credentialOutput }),
   claim_screen: z.object({ screen: screenOutput }),
+  update_screen_labels: z.object({
+    screens: z.array(z.object({ id: z.string(), labels: z.record(z.string(), z.string()).describe('Its labels after the change') })),
+  }),
+  list_label_keys: z.object({
+    keys: z.array(
+      z.object({
+        key: z.string(),
+        system: z.boolean().describe("A system label, from each screen's settings: read-only"),
+        screens: z.number().int().describe('Screens with the key'),
+        values: z.array(z.object({ value: z.string().describe('As most screens spell it'), screens: z.number().int() })),
+      }),
+    ),
+    next: nextOutput,
+  }),
   list_groups: z.object({ groups: z.array(groupOutput), next: nextOutput }),
   create_group: groupResult,
   rename_group: groupResult,

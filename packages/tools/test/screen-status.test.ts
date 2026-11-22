@@ -135,7 +135,7 @@ describe('list_screen_status', () => {
     expect(await rowsRead('list_screen_status', 20)).toBe(3 * (20 + 1) + 1);
     // A page after a cursor starts at it in the index (id > ?), past another org's screens between this org's.
     expect(await rowsRead('list_screen_status', 2, next)).toBe(3 * (2 + 1) + 1);
-    // list_screens reads every screen and credential of the org (40 of each) and the settings, whatever the page.
-    expect(await rowsRead('list_screens', 2)).toBe(81);
+    // list_screens reads every screen and credential of the org (40 of each), the settings and its labels (none here), whatever the page.
+    expect(await rowsRead('list_screens', 2)).toBe(82);
   });
 });

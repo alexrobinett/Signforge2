@@ -192,6 +192,7 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   const screen = await o.screens.insert({ id: id('screen'), name: `${orgId} lobby`, timezone: 'Europe/London', orientation: 'landscape' });
   const group = await o.screenGroups.insert({ id: id('group'), name: `${orgId} group` });
   await o.screenGroups.addMember(group.id, screen.id);
+  await o.commit((await o.screens.labels.stage.update([screen.id], { set: { region: orgId }, remove: [] })).writes);
   const credential = await o.screens.credentials.insert({ id: id('credential'), screenId: screen.id, secretHash: '0'.repeat(64) });
 
   const asset = await o.assets.insert({
