@@ -56,7 +56,8 @@ describe('every registered tool', () => {
 
   it('accepts ifVersion if it updates a row, and returns the version to pass', () => {
     // An update tool is named for the change (update_*, rename_*) or replaces a list (set_*_members).
-    const updates = all.filter((t) => /^(update|rename)_|^set_\w+_members$/.test(t.name));
+    // update_screen_labels merges, as add_group_members does, so it drops nothing it did not read and needs no version.
+    const updates = all.filter((t) => /^(update|rename)_|^set_\w+_members$/.test(t.name) && t.name !== 'update_screen_labels');
     expect(updates.map((t) => t.name)).toEqual(expect.arrayContaining(['rename_screen', 'update_screen_settings', 'set_group_members']));
     for (const t of updates) {
       expect(t.mutates, t.name).toBe(true);

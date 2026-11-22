@@ -4,7 +4,8 @@
  * the code to it. The screen's next poll collects its credential. The CMS form is M3-11.
  */
 import { z } from 'zod';
-import { displayHours, idempotencyKey, locale, name, orientation, timezone } from './fields';
+import { displayHours, idempotencyKey, labels, locale, name, orientation, timezone } from './fields';
+import { overLimit } from './labels';
 import { screenView } from './screens';
 import { defineTool, ToolError } from './tool';
 import { outputs } from './outputs';
@@ -38,6 +39,7 @@ const claimScreen = defineTool({
     orientation,
     locale: locale.optional(),
     displayHours: displayHours.optional().describe('Omit for always on'),
+    labels: labels.optional().describe('Its first labels, by key, such as { "region": "north" }; as update_screen_labels sets them'),
     idempotencyKey,
   }),
   output: outputs.claim_screen,
@@ -62,10 +64,21 @@ const claimScreen = defineTool({
     );
     // After the screen: the code references it. Fails the whole batch if another claim won the code.
     write(org.pairing.stage.claim(input.code, screen.id, now));
-    return { screen: await screenView(org, screen, blobs, Date.now(), []) };
+    const labels = input.labels ?? {};
+    if (Object.keys(labels).length) {
+      const change = { set: labels, remove: [] };
+      const over = overLimit(await org.screens.labels.list(), [screen.id], change);
+      if (over) throw over;
+      write(await org.screens.labels.stage.update([screen.id], change, { newScreen: true }));
+    }
+    return { screen: await screenView(org, screen, blobs, Date.now(), [], undefined, labels) };
   },
-  // The claim's guard failed the batch: another claim took the code (or it expired) since `open`.
-  refuseFailedCommit: async ({ org, input }) => ((await org.pairing.open(input.code, Date.now())) ? undefined : notOpen(input.code)),
+  // A guard failed the batch: another claim took the code (or it expired) since `open`, or another change took the org past its label keys.
+  refuseFailedCommit: async ({ org, input }) =>
+    (await org.pairing.open(input.code, Date.now()))
+      ? // Only the org's keys can have moved: no other change reaches the new screen. Any id not stored stands for it.
+        input.labels && overLimit(await org.screens.labels.list(), ['scr_claimed'], { set: input.labels, remove: [] })
+      : notOpen(input.code),
 });
 
 export const pairingTools = [claimScreen];
