@@ -3,10 +3,12 @@
  * on another's tree: `/api` for CMS users (session cookie), `/v1/device` for screens (bearer
  * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. `/admin` takes
  * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
- * A queue consumer tells the screens a publish switched (src/publish.ts).
+ * Two queue consumers: one tells the screens a publish switched (src/publish.ts), the other stores
+ * the photos of news feeds' stories that the poller queues (src/data/images.ts).
  * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
  * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
- * keys, audit rows and alert deliveries (packages/db retention.ts).
+ * keys, audit rows and alert deliveries (packages/db retention.ts). The poller's 01:00 UTC run
+ * forgets unneeded feed photos (src/data/images.ts).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.
@@ -19,6 +21,7 @@ import { createApi } from './api';
 import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
+import { type FeedImageJob, forgetFeedImages, storeFeedImages } from './data/images';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
 import { emailSenderFor } from './email';
@@ -42,21 +45,24 @@ app.route('/admin', admin);
 
 const FIVE_MIN_MS = 5 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
+const FEED_IMAGE_CLEANUP_MS = 60 * 60_000;
 
 /** Each Cron Trigger's job, by its schedule as written in wrangler.jsonc `triggers`. */
 const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
-  // The data-source poller, every minute.
-  '* * * * *': (env, now) => pollDataSources(env, { now }),
+  // Give feed cleanup its own invocation without exceeding the account's five Free Cron Triggers.
+  '* * * * *': (env, now) => (now % DAY_MS === FEED_IMAGE_CLEANUP_MS ? forgetFeedImages(env, now) : pollDataSources(env, { now })),
   // The offline alert check and the finished rollouts (src/alerts.ts), every 5 minutes: screens sync that
   // often, so a shorter period finds nothing new. Then the alert deliveries to Slack and webhooks (src/deliveries.ts), the new ones and the retries due,
   // started once the check has queued its alerts and whether or not it failed, so neither holds up the other.
-  // The 00:00 UTC run also expires idempotency keys, audit rows and the delivery log: a daily job with no
-  // trigger of its own, since the Free plan allows five Cron Triggers per account and demo and prod use four.
+  // The midnight run spends up to 21 D1 calls on retention, 14 on deliveries, and 4 on finding
+  // alerts and rollouts. One write per check leaves room for their context reads and fallback writes
+  // (up to 5 calls each, 49 total). The remaining work is due again at 00:05.
   // Settled, not raced: a failed retention delete must not end the run before an alert's email goes.
   '*/5 * * * *': async (env, now) => {
     const daily = now % DAY_MS < FIVE_MIN_MS;
     const email = emailSenderFor(env);
-    const checks = [checkScreenAlerts(env, email, now), finishRollouts(env, email, now)];
+    const limit = daily ? 1 : undefined;
+    const checks = [checkScreenAlerts(env, email, now, limit), finishRollouts(env, email, now, limit)];
     const results = await Promise.allSettled([
       ...checks,
       // Claimed at the time it claims: the checks may have taken minutes, and a lease counted from the
@@ -72,15 +78,25 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   },
 };
 
+/** Whether a batch is the photos queue's: each environment names its queues with its own suffix (wrangler.jsonc). */
+const isFeedImages = (batch: MessageBatch<PublishNotice | FeedImageJob>): batch is MessageBatch<FeedImageJob> =>
+  batch.queue.startsWith('signforge-feed-images');
+const isNotices = (batch: MessageBatch<PublishNotice | FeedImageJob>): batch is MessageBatch<PublishNotice> =>
+  batch.queue.startsWith('signforge-publish-notices');
+
 export default {
   fetch: app.fetch,
-  queue: (batch, env) => deliverNotices(batch, env),
+  queue: async (batch, env) => {
+    if (isFeedImages(batch)) return storeFeedImages(batch, env);
+    if (isNotices(batch)) return deliverNotices(batch, env);
+    throw new Error(`No consumer for queue "${batch.queue}"`);
+  },
   scheduled(controller, env, ctx) {
     const job = CRON_JOBS[controller.cron];
     if (!job) throw new Error(`No job for cron "${controller.cron}"`);
     ctx.waitUntil(job(env, controller.scheduledTime));
   },
-} satisfies ExportedHandler<Env, PublishNotice>;
+} satisfies ExportedHandler<Env, PublishNotice | FeedImageJob>;
 
 // Durable Object classes are exported from the Worker's entry point.
 export { ScreenObject } from './device/screen-object';

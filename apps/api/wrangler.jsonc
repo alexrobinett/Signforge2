@@ -49,12 +49,19 @@
         { "tag": "v2", "new_sqlite_classes": ["AgentGrantObject"] },
         { "tag": "v3", "new_sqlite_classes": ["OrgObject"] }
       ],
-      // A publish tells its screens through this queue, 50 a message (src/publish.ts).
+      // A publish tells its screens through this queue, 50 a message (src/publish.ts). The poller queues the
+      // stories' photos it has not fetched to the other (src/data/images.ts): one a batch, so an invocation's
+      // memory, CPU and subrequests (up to 12 fetches, at most two Images calls, R2) are one photo's, within the Free plan's.
       "queues": {
-        "producers": [{ "binding": "PUBLISH_NOTICES", "queue": "signforge-publish-notices" }],
-        "consumers": [{ "queue": "signforge-publish-notices", "max_batch_size": 10, "max_retries": 3 }]
+        "producers": [{ "binding": "PUBLISH_NOTICES", "queue": "signforge-publish-notices" }, { "binding": "FEED_IMAGES", "queue": "signforge-feed-images" }],
+        "consumers": [
+          { "queue": "signforge-publish-notices", "max_batch_size": 10, "max_retries": 3 },
+          { "queue": "signforge-feed-images", "max_batch_size": 1, "max_retries": 2 }
+        ]
       },
-      // The data-source poller (src/data/poller.ts) every minute and the offline alert check (src/alerts.ts) every 5;
+      // Decodes and scales the stories' photos off the Worker's CPU (src/data/images.ts).
+      "images": { "binding": "IMAGES" },
+      // The data-source poller every minute (feed-photo cleanup takes its 01:00 UTC invocation) and the offline alert check every 5;
       // src/index.ts routes on the schedule. Locally: `wrangler dev --env dev --test-scheduled`, then GET /__scheduled?cron=*/5+*+*+*+*.
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       // A placeholder id: dev only ever runs locally.
@@ -107,9 +114,16 @@
         { "tag": "v3", "new_sqlite_classes": ["OrgObject"] }
       ],
       "queues": {
-        "producers": [{ "binding": "PUBLISH_NOTICES", "queue": "signforge-publish-notices-demo" }],
-        "consumers": [{ "queue": "signforge-publish-notices-demo", "max_batch_size": 10, "max_retries": 3 }]
+        "producers": [
+          { "binding": "PUBLISH_NOTICES", "queue": "signforge-publish-notices-demo" },
+          { "binding": "FEED_IMAGES", "queue": "signforge-feed-images-demo" }
+        ],
+        "consumers": [
+          { "queue": "signforge-publish-notices-demo", "max_batch_size": 10, "max_retries": 3 },
+          { "queue": "signforge-feed-images-demo", "max_batch_size": 1, "max_retries": 2 }
+        ]
       },
+      "images": { "binding": "IMAGES" },
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       "d1_databases": [
         {
@@ -152,9 +166,16 @@
         { "tag": "v3", "new_sqlite_classes": ["OrgObject"] }
       ],
       "queues": {
-        "producers": [{ "binding": "PUBLISH_NOTICES", "queue": "signforge-publish-notices-prod" }],
-        "consumers": [{ "queue": "signforge-publish-notices-prod", "max_batch_size": 10, "max_retries": 3 }]
+        "producers": [
+          { "binding": "PUBLISH_NOTICES", "queue": "signforge-publish-notices-prod" },
+          { "binding": "FEED_IMAGES", "queue": "signforge-feed-images-prod" }
+        ],
+        "consumers": [
+          { "queue": "signforge-publish-notices-prod", "max_batch_size": 10, "max_retries": 3 },
+          { "queue": "signforge-feed-images-prod", "max_batch_size": 1, "max_retries": 2 }
+        ]
       },
+      "images": { "binding": "IMAGES" },
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       "d1_databases": [
         {

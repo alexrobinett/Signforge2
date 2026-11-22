@@ -77,6 +77,37 @@ describe('data sources', () => {
     });
   });
 
+  it("shows a news feed's photos unless they are switched off, and reads the feed afresh when they are", async () => {
+    const { dataSource } = await call('create_data_source', { id: 'headlines', name: 'Headlines', format: 'rss', feedUrl: 'https://news.example.com/rss' });
+    expect(dataSource).toMatchObject({ photos: true });
+    await o.scope.dataSources.update('headlines', { etag: '"old"', nextPollAt: 99 });
+    // Unchanged, it is no reason to read the feed again.
+    await call('update_data_source', { dataSourceId: 'headlines', photos: true });
+    expect(await owner.org.dataSources.get('headlines')).toMatchObject({ etag: '"old"', nextPollAt: 99 });
+    const off = await call('update_data_source', { dataSourceId: 'headlines', photos: false });
+    expect(off.dataSource).toMatchObject({ photos: false });
+    expect(await owner.org.dataSources.get('headlines')).toMatchObject({ photos: false, etag: null, nextPollAt: 0 });
+    expect((await call('create_data_source', { name: 'Quiet', format: 'rss', feedUrl: 'https://news.example.com/q', photos: false })).dataSource).toMatchObject(
+      {
+        photos: false,
+      },
+    );
+    for (const id of ['headlines', (await owner.org.dataSources.list()).find((d) => d.name === 'Quiet')!.id])
+      await call('delete_data_source', { dataSourceId: id });
+  });
+
+  it('refuses the photos switch on anything but a news feed', async () => {
+    expect(await refusal('create_data_source', { name: 'x', format: 'ical', feedUrl: 'https://a.example.com/c.ics', photos: false })).toMatchObject({
+      error: 'invalid_input',
+    });
+    await call('create_data_source', { id: 'cal', name: 'Cal', format: 'ical', feedUrl: 'https://a.example.com/c.ics' });
+    expect(await refusal('update_data_source', { dataSourceId: 'cal', photos: true })).toMatchObject({
+      error: 'invalid_input',
+      message: 'photos is for rss sources only',
+    });
+    await call('delete_data_source', { dataSourceId: 'cal' });
+  });
+
   it('refuses a feed URL the poller would refuse, before storing it', async () => {
     for (const feedUrl of ['http://feed.example.com/a', 'https://feed.example.com:8443/a', 'https://10.0.0.1/a', 'https://printer.local/a', 'nope'])
       expect(await refusal('create_data_source', { name: 'x', format: 'rss', feedUrl }), feedUrl).toMatchObject({ ok: false, error: 'invalid_input' });

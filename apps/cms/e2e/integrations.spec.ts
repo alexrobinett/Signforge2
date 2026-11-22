@@ -80,7 +80,16 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   await feeds.getByLabel('Name').fill('Northside blog');
   await feeds.getByRole('button', { name: 'Add feed' }).click();
   await expect(feeds.getByText('Northside blog')).toBeVisible();
+  // Its stories' photos are on until someone turns them off.
+  const photos = feeds.getByRole('checkbox', { name: 'Show story photos' });
+  await expect(photos).toBeChecked();
+  await photos.uncheck();
+  await expect(feeds.getByText('Screens show headlines only.')).toBeVisible();
+  await expect(photos).not.toBeChecked();
+  // Enabled again once the change is saved.
+  await expect(photos).toBeEnabled();
   await owner.keyboard.press('Escape');
+  expect((await tool(owner, 'list_data_sources', {})).dataSources.find((d: { name: string }) => d.name === 'Northside blog')).toMatchObject({ photos: false });
 
   const { dataSources } = await tool(owner, 'list_data_sources', {});
   calendar = dataSources.find((d: { name: string }) => d.name === 'Break room').id;

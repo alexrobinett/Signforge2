@@ -1,7 +1,7 @@
 // Audit retention (#41): each org's audit rows go once older than its retention, in bounded batches.
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { expireAuditRows, scoped } from '../src/index';
+import { expireAuditRows, expiredFeedImages, FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS, pendingFeedImageDeletes, scoped } from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 const DAY = 24 * 60 * 60_000;
@@ -55,5 +55,45 @@ describe('expireAuditRows', () => {
     expect(await bulkLeft()).toBe(0);
     expect(await expireAuditRows(env.DB, now)).toBe(0);
     expect(await actions(s.b.orgId)).toContain('other-31');
+  });
+});
+
+describe('expiredFeedImages', () => {
+  it("finds every org's photos no poll has named for a week past their check, the oldest first, at most the limit", async () => {
+    const cutoff = now - FEED_IMAGE_TTL_MS;
+    const hold = (orgId: string, url: string, until: number) => scoped(env.DB, orgId).feedImages.hold([url], { until, now: until, sourceId: 'news' });
+    await hold(s.a.orgId, 'https://old.example/a.jpg', cutoff - 2);
+    await hold(s.b.orgId, 'https://old.example/b.jpg', cutoff - 1);
+    await hold(s.a.orgId, 'https://old.example/just-in-time.jpg', cutoff);
+    await hold(s.b.orgId, 'https://new.example/b.jpg', now);
+    expect(await expiredFeedImages(env.DB, now, 10)).toEqual([
+      { orgId: s.a.orgId, url: 'https://old.example/a.jpg' },
+      { orgId: s.b.orgId, url: 'https://old.example/b.jpg' },
+    ]);
+    expect(await expiredFeedImages(env.DB, now, 1)).toEqual([{ orgId: s.a.orgId, url: 'https://old.example/a.jpg' }]);
+  });
+});
+
+describe('pendingFeedImageDeletes', () => {
+  it('returns queued feed photo deletes only after the grace window and when no delete lease is active', async () => {
+    const a = scoped(env.DB, s.a.orgId).feedImages;
+    const shaA = 'a'.repeat(64);
+    const shaB = 'b'.repeat(64);
+    await a.hold(['https://del.example/a.jpg', 'https://del.example/b.jpg'], { until: 1, now: 1, sourceId: 'news' });
+    await a.save('https://del.example/a.jpg', { fileSha256: shaA, nextCheckAt: 1 });
+    await a.save('https://del.example/b.jpg', { fileSha256: shaB, nextCheckAt: 1 });
+    await a.forget(['https://del.example/a.jpg'], now - FEED_IMAGE_DELETE_GRACE_MS);
+    await a.forget(['https://del.example/b.jpg'], now - FEED_IMAGE_DELETE_GRACE_MS + 1);
+
+    // Only shaA is past the grace window at `now`.
+    expect(await pendingFeedImageDeletes(env.DB, now, 10)).toEqual([{ orgId: s.a.orgId, sha256: shaA }]);
+    // Claiming shaA puts a lease on it so it is skipped until the lease expires.
+    expect(await a.claimDeletes([shaA], { now, leaseMs: 60_000 })).toEqual([shaA]);
+    expect(await pendingFeedImageDeletes(env.DB, now + 30_000, 10)).toEqual([{ orgId: s.a.orgId, sha256: shaB }]);
+    expect(await pendingFeedImageDeletes(env.DB, now + 60_000, 10)).toEqual([
+      { orgId: s.a.orgId, sha256: shaA },
+      { orgId: s.a.orgId, sha256: shaB },
+    ]);
+    await a.finishDeletes([shaA, shaB]);
   });
 });

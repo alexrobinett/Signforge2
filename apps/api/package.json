@@ -19,6 +19,7 @@
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
     "@signforge/feeds": "workspace:*",
+    "@signforge/media": "workspace:*",
     "@signforge/player-core": "workspace:*",
     "@signforge/tools": "workspace:*",
     "better-auth": "^1.7.25",

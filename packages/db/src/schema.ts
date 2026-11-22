@@ -856,6 +856,12 @@ export const dataSources = sqliteTable(
     horizonDays: integer('horizon_days'),
     /** `json-table`: the dot path to the list of objects. Null: the document is the list. */
     rowsPath: text('rows_path'),
+    /** `rss`: whether the poller fetches and stores its stories' photos (apps/api src/data/images.ts). On unless a person turns it off. */
+    photos: integer('photos', { mode: 'boolean' }).notNull().default(true),
+    /** `rss`: { stories: (URL | null)[] } in snapshot order. Older rows held a flat list of URLs. Null until polled with photos active. */
+    photoUrlsJson: text('photo_urls_json'),
+    /** Moves on when a photo delivery invalidates RSS validators, even if they were already clear. */
+    photoGeneration: integer('photo_generation').notNull().default(0),
     nextPollAt: integer('next_poll_at').notNull().default(0),
     etag: text('etag'),
     lastModified: text('last_modified'),
@@ -887,6 +893,59 @@ export const dataSnapshots = sqliteTable(
     primaryKey({ columns: [t.orgId, t.dataSourceId] }),
     foreignKey({ columns: [t.orgId, t.dataSourceId], foreignColumns: [dataSources.orgId, dataSources.id] }).onDelete('cascade'),
   ],
+);
+
+/**
+ * The photos the org's news sources name, by the URL a feed gives (apps/api src/data/images.ts):
+ * the stored copy's hashes once one was fetched and checked, the validators it came with, and when
+ * to look at the URL again. One row per URL however many of the org's sources name it. A failed
+ * fetch keeps the last good hashes. The files live in the feed-owned R2 prefix `o/<org>/f/<sha256>`.
+ * A row no poll has named for a week goes (`expiredFeedImages`, ./retention.ts), queueing its
+ * hashes into `feed_image_deletes` so R2 deletes retry cleanly and never race concurrent writes.
+ */
+export const feedImages = sqliteTable(
+  'feed_images',
+  {
+    orgId: orgId(),
+    /** As the feed names it, http or https: what a poll looks it up by. */
+    url: text('url').notNull(),
+    /** The source whose poll first named it: what a source's daily budget of new photos counts. No foreign key: the row may outlive the source until it expires. */
+    sourceId: text('source_id').notNull(),
+    /** The fetched bytes' hash: another URL in the org bringing the same bytes reuses its copies. */
+    sourceSha256: text('source_sha256'),
+    /** `NewsImage.file` and `.thumb`; null until a fetch succeeds. */
+    fileSha256: text('file_sha256'),
+    thumbSha256: text('thumb_sha256'),
+    etag: text('etag'),
+    lastModified: text('last_modified'),
+    /** When a poll that finds this URL queues it to be fetched again; moved on when it is queued, so the next poll does not queue it twice. */
+    nextCheckAt: integer('next_check_at').notNull(),
+    /** Why the last fetch failed, as a category; null once one succeeds. */
+    lastError: text('last_error'),
+    /** Fetches in a row that failed: each waits longer, up to a day. */
+    failures: integer('failures').notNull().default(0),
+    /** When a poll first named it, on the poller's clock: the daily budgets count rows made in the last day. */
+    createdAt: integer('created_at').notNull(),
+    updatedAt: updated(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.url] }), index('feed_images_org_source_sha_idx').on(t.orgId, t.sourceSha256)],
+);
+
+/**
+ * Feed photo blobs (`o/<org>/f/<sha256>`) queued for R2 deletion when a `feed_images` row expires
+ * or replaces its hashes at the same URL. Kept until R2 delete succeeds so failures retry on the
+ * next cleanup run; a grace window (`FEED_IMAGE_DELETE_GRACE_MS`) plus `deleting_until` lease keep
+ * cleanup from racing a concurrent consumer putting or reusing the same hash.
+ */
+export const feedImageDeletes = sqliteTable(
+  'feed_image_deletes',
+  {
+    orgId: orgId(),
+    sha256: text('sha256').notNull(),
+    queuedAt: integer('queued_at').notNull(),
+    deletingUntil: integer('deleting_until').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
 );
 
 // --------------------------------------------------------------- connections

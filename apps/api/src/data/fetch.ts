@@ -3,8 +3,9 @@
  * is checked before it is requested: https on the default port, a hostname rather than an IP
  * address, and a name that does not resolve to a private or reserved address. Redirects are
  * followed by hand, at most 3, each checked again. The whole fetch has 5 seconds, under one
- * signal: every DNS lookup, every hop and the body read. The body may be 1 MB. A failure is a
- * `FetchError` with a category; the upstream body is never echoed.
+ * signal: every DNS lookup, every hop and the body read. A feed's body may be 1 MB, a story's
+ * photo's (`guardedImageFetch`) 8 MB. A failure is a `FetchError` with a category; the upstream
+ * body is never echoed.
  *
  * A Worker cannot pin the address it resolved, so the DNS check is a first filter and not the
  * defence against rebinding: that is Workers' outbound requests, which cannot reach private
@@ -38,15 +39,42 @@ export interface FetchGuards {
   timeoutMs?: number;
 }
 
-export type FetchResult = { status: 'not-modified' } | { status: 'ok'; body: string; etag: string | null; lastModified: string | null };
+export type FetchResult<Body = string> = { status: 'not-modified' } | { status: 'ok'; body: Body; etag: string | null; lastModified: string | null };
+
+/** The validators the last answer gave, for a conditional request. */
+type Validators = { etag?: string | null; lastModified?: string | null };
+
+/** The most a story's photo may be. A larger one is refused by its `Content-Length` before any of it is read, or as it is read past this. */
+const IMAGE_MAX_BYTES = 8_000_000;
 
 /** Fetch `url` with the guards, asking conditionally with the validators the last answer gave. */
-export async function guardedFetch(url: string, last: { etag?: string | null; lastModified?: string | null }, guards: FetchGuards): Promise<FetchResult> {
-  const signal = AbortSignal.timeout(guards.timeoutMs ?? FETCH_TIMEOUT_MS);
-  const headers = new Headers({
-    accept: 'application/json, application/rss+xml, application/atom+xml, text/calendar, */*;q=0.5',
-    'user-agent': 'SignForge feed poller',
+export function guardedFetch(url: string, last: Validators, guards: FetchGuards): Promise<FetchResult> {
+  return guardedGet(url, last, guards, 'application/json, application/rss+xml, application/atom+xml, text/calendar, */*;q=0.5', async (res) =>
+    new TextDecoder().decode(await capped(res, LIMITS.maxBytes)),
+  );
+}
+
+/** Fetch a story's photo with the guards, as bytes: what they are is read from them, never from the headers. */
+export function guardedImageFetch(url: string, last: Validators, guards: FetchGuards): Promise<FetchResult<Uint8Array>> {
+  return guardedGet(url, last, guards, 'image/avif, image/webp, image/png, image/jpeg, */*;q=0.5', async (res) => {
+    if (Number(res.headers.get('content-length')) > IMAGE_MAX_BYTES) {
+      await res.body?.cancel();
+      throw new FetchError(`the image is over ${IMAGE_MAX_BYTES} bytes`, { code: 'too-large' });
+    }
+    return capped(res, IMAGE_MAX_BYTES);
   });
+}
+
+/** A GET of `url` through the guards, every hop checked, its 2xx body read by `read` within the deadline. */
+async function guardedGet<Body>(
+  url: string,
+  last: Validators,
+  guards: FetchGuards,
+  accept: string,
+  read: (res: Response) => Promise<Body>,
+): Promise<FetchResult<Body>> {
+  const signal = AbortSignal.timeout(guards.timeoutMs ?? FETCH_TIMEOUT_MS);
+  const headers = new Headers({ accept, 'user-agent': 'SignForge feed poller' });
   if (last.etag) headers.set('if-none-match', last.etag);
   if (last.lastModified) headers.set('if-modified-since', last.lastModified);
   try {
@@ -63,17 +91,16 @@ export async function guardedFetch(url: string, last: { etag?: string | null; la
       }
       if (res.status === 304) return { status: 'not-modified' };
       if (!res.ok) {
-        const text = await capped(res, 256).catch(() => '');
-        if (/^error code: 10(03|16)\b/.test(text))
+        if (/^error code: 10(03|16)\b/.test(await answered(res)))
           throw new FetchError('Cloudflare refused to reach the address', { code: 'blocked-address', status: res.status });
-        throw new FetchError(`the feed answered ${res.status}`, { code: 'http-status', status: res.status });
+        throw new FetchError(`it answered ${res.status}`, { code: 'http-status', status: res.status });
       }
-      return { status: 'ok', body: await capped(res, LIMITS.maxBytes), etag: res.headers.get('etag'), lastModified: res.headers.get('last-modified') };
+      return { status: 'ok', body: await read(res), etag: res.headers.get('etag'), lastModified: res.headers.get('last-modified') };
     }
   } catch (e) {
     if (e instanceof FetchError) throw e;
     if (signal.aborted) throw new FetchError(`no answer in ${(guards.timeoutMs ?? FETCH_TIMEOUT_MS) / 1000} seconds`, { code: 'timeout', cause: e });
-    throw new FetchError('the feed could not be reached', { code: 'network', cause: e });
+    throw new FetchError('it could not be reached', { code: 'network', cause: e });
   }
 }
 
@@ -92,8 +119,8 @@ export async function guardedPost(url: string, body: string, headers: Headers, g
       await res.body?.cancel();
       return res.status;
     }
-    const text = await capped(res, 256).catch(() => '');
-    if (/^error code: 10(03|16)\b/.test(text)) throw new FetchError('Cloudflare refused to reach the address', { code: 'blocked-address', status: res.status });
+    if (/^error code: 10(03|16)\b/.test(await answered(res)))
+      throw new FetchError('Cloudflare refused to reach the address', { code: 'blocked-address', status: res.status });
     throw new FetchError(`the receiver answered ${res.status}`, { code: 'http-status', status: res.status });
   } catch (e) {
     if (e instanceof FetchError) throw e;
@@ -116,9 +143,12 @@ async function checkedUrl(url: string, guards: FetchGuards, signal: AbortSignal)
   return href;
 }
 
-/** Read at most `max` bytes of the body as UTF-8; a longer one is a `too-large` refusal. */
-async function capped(res: Response, max: number): Promise<string> {
-  if (!res.body) return '';
+/** The start of a refusal's body, for Cloudflare's own error codes; '' if it is longer or cannot be read. */
+const answered = async (res: Response) => new TextDecoder().decode(await capped(res, 256).catch(() => new Uint8Array()));
+
+/** Read at most `max` bytes of the body; a longer one is a `too-large` refusal. */
+async function capped(res: Response, max: number): Promise<Uint8Array> {
+  if (!res.body) return new Uint8Array();
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -128,7 +158,7 @@ async function capped(res: Response, max: number): Promise<string> {
     size += value.byteLength;
     if (size > max) {
       await reader.cancel();
-      throw new FetchError(`the feed is over ${max} bytes`, { code: 'too-large' });
+      throw new FetchError(`the body is over ${max} bytes`, { code: 'too-large' });
     }
     chunks.push(value);
   }
@@ -138,7 +168,7 @@ async function capped(res: Response, max: number): Promise<string> {
     all.set(c, at);
     at += c.byteLength;
   }
-  return new TextDecoder().decode(all);
+  return all;
 }
 
 const isIpv4 = (host: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(host);

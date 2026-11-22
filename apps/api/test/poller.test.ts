@@ -6,7 +6,7 @@ import { scoped } from '@signforge/db';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { feedUrlSealer, openFeedUrl } from '../src/data/cipher';
 import type { FetchGuards } from '../src/data/fetch';
 import { BACKOFF_MAX_MS, pollDataSources } from '../src/data/poller';
@@ -53,13 +53,19 @@ async function source(format: 'json' | 'ical' | 'rss', url: string, extra: { ref
   return id;
 }
 
-/** Run the poller at `at`, on this org's due sources only. */
-const poll = (guards: FetchGuards, at = NOW) => pollDataSources(env, { now: at, guards });
+/** Run the poller at `at`, on this org's due sources only. A news source's photos go nowhere: test/feed-images.test.ts follows them. */
+const poll = (guards: FetchGuards, at = NOW) => pollDataSources({ ...env, FEED_IMAGES: { sendBatch: async () => {} } } as unknown as Env, { now: at, guards });
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'poller-org');
   // The seeded source is not due in these tests.
   await o.scope.dataSources.update(o.dataSource, { nextPollAt: Number.MAX_SAFE_INTEGER });
+});
+
+afterEach(async () => {
+  for (const row of await o.scope.dataSources.list()) {
+    if (row.nextPollAt !== Number.MAX_SAFE_INTEGER) await o.scope.dataSources.update(row.id, { nextPollAt: Number.MAX_SAFE_INTEGER });
+  }
 });
 
 describe('the feed URL at rest', () => {

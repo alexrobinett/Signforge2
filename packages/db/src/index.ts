@@ -16,7 +16,17 @@ export { claimDueDataSources } from './poller';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
 export { findMembership, memberOrgNames, organizationExists, orgMembers, startingOrg } from './members';
 export { findAlertWork, findUnfinishedRollouts, type AlertWork } from './alerts';
-export { AUDIT_ROWS_PER_RUN, DEFAULT_AUDIT_RETENTION_DAYS, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from './retention';
+export {
+  AUDIT_ROWS_PER_RUN,
+  DEFAULT_AUDIT_RETENTION_DAYS,
+  expireAlertDeliveries,
+  expireAuditRows,
+  expiredFeedImages,
+  expireIdempotencyKeys,
+  FEED_IMAGE_DELETE_GRACE_MS,
+  FEED_IMAGE_TTL_MS,
+  pendingFeedImageDeletes,
+} from './retention';
 export { alertChannelsOf, claimDueAlertDeliveries, settleAlertDeliveries, type AttemptResult } from './deliveries';
 
 // Row shapes, as types only.
@@ -33,6 +43,7 @@ export type ScheduleEntryRow = typeof s.scheduleEntries.$inferSelect;
 export type Publish = typeof s.publishes.$inferSelect;
 export type DataSourceRow = typeof s.dataSources.$inferSelect;
 export type DataSnapshotRow = typeof s.dataSnapshots.$inferSelect;
+export type FeedImageRow = typeof s.feedImages.$inferSelect;
 export type AuditEntry = typeof s.auditLog.$inferSelect;
 export type PlatformAuditEntry = typeof s.platformAuditLog.$inferSelect;
 export type PlayCountRow = typeof s.playCounts.$inferSelect;

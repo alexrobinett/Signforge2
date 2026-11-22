@@ -42,6 +42,8 @@ describe('schema', () => {
       'data_snapshots',
       'data_sources',
       'draft_tombstones',
+      'feed_image_deletes',
+      'feed_images',
       'idempotency_keys',
       'org_settings',
       'play_counts',

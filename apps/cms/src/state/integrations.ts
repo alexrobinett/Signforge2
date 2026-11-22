@@ -1,6 +1,6 @@
 /**
  * The Integrations page (issue #80): the sources dialog of one kind (add a feed, change a
- * source's URL, delete one) and connecting accounts at a provider. The sources and connections
+ * source's URL, switch a news feed's photos off or on, delete one) and connecting accounts at a provider. The sources and connections
  * themselves are Query data (src/queries/integrations.ts); each action invalidates what it changed.
  * The page's filter and search are in its URL.
  */
@@ -34,6 +34,8 @@ interface IntegrationsState {
   feedUrl: string;
   pending: boolean;
   error: string | null;
+  /** A news feed's photos switch as it was just set, shown until the saved source comes back (or the save is refused). */
+  settingPhotos: { id: string; photos: boolean } | null;
   /** The source whose deletion is being confirmed: its address is sealed, so it cannot be had back. */
   deleting: ListedSource | null;
   /** The connection whose disconnection is being confirmed: getting it back needs the provider's consent again. */
@@ -55,6 +57,8 @@ export interface IntegrationsSlice {
   typeSourceUrl: (feedUrl: string) => void;
   /** Sends the new URL with the version the page read; the poller reads it afresh within a minute. */
   changeSourceUrl: (orgId: string, source: ListedSource) => Promise<void>;
+  /** Whether screens get a news feed's story photos, sent with the version the page read. */
+  setSourcePhotos: (orgId: string, source: ListedSource, photos: boolean) => Promise<void>;
   /** Opens the confirmation for one source; null closes it. */
   askToDeleteSource: (source: ListedSource | null) => void;
   /** Deletes the source being confirmed. Refused while a spot binds it: the refusal says which. */
@@ -77,6 +81,7 @@ const initial: IntegrationsState = {
   feedUrl: '',
   pending: false,
   error: null,
+  settingPhotos: null,
   deleting: null,
   disconnecting: null,
   connecting: null,
@@ -143,6 +148,19 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
         },
         (err) => (isStale(err) ? 'This changed since you opened it. Close this and open it again to see it.' : toolMessage(err)),
       ),
+
+    async setSourcePhotos(orgId, source, photos) {
+      integrations((s) => ({ ...s, settingPhotos: { id: source.id, photos } }));
+      await attempt(
+        async () => {
+          await callTool('update_data_source', { dataSourceId: source.id, photos, ifVersion: source.version });
+          await refresh(orgId);
+          integrations((s) => ({ ...s, pending: false }));
+        },
+        (err) => (isStale(err) ? 'This changed since you opened it. Close this and open it again to see it.' : toolMessage(err)),
+      );
+      integrations((s) => ({ ...s, settingPhotos: null }));
+    },
 
     askToDeleteSource: (deleting) => integrations((s) => ({ ...s, deleting, error: null })),
 

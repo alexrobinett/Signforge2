@@ -1,4 +1,4 @@
-import type { NewsFeed } from '@signforge/contract';
+import { type NewsFeed, SCREEN_BOX } from '@signforge/contract';
 import { XMLParser } from 'fast-xml-parser';
 import { checkSize, FeedError, LIMITS } from './errors';
 import { isoInstant } from './time';
@@ -23,7 +23,7 @@ export interface FeedImage {
 
 /** A `NewsFeed` with each item's image and the feed's logo, for the server to fetch and store. */
 export interface ParsedNews extends Omit<NewsFeed, 'items'> {
-  items: (NewsFeed['items'][number] & { image?: FeedImage })[];
+  items: (Omit<NewsFeed['items'][number], 'image'> & { image?: FeedImage })[];
   logo?: string;
 }
 
@@ -245,13 +245,31 @@ function sized(url: string, width: number | undefined, height: number | undefine
   return { url, ...(width ? { width } : {}), ...(height ? { height } : {}) };
 }
 
-/** The widest of `candidates` whose `key` attribute is an image URL; the first, when none gives a width. */
-function widest(candidates: El[], key: 'url' | 'href', search: Search): FeedImage | undefined {
+/** The screen box a feed photo aims to cover: choosing a candidate close to this avoids downloading and scaling 4K copies. */
+const TARGET_BOX = SCREEN_BOX.landscape;
+
+const coversTarget = (width: number | undefined, height: number | undefined): boolean =>
+  width !== undefined && width >= TARGET_BOX.w && (height === undefined || height >= TARGET_BOX.h);
+
+/** Whether `next` is a better fit for `TARGET_BOX` than `best`: the smallest candidate that covers it, else the widest. */
+function betterSize(next: { width?: number; height?: number }, best: { width?: number; height?: number }): boolean {
+  const nc = coversTarget(next.width, next.height);
+  const bc = coversTarget(best.width, best.height);
+  if (nc !== bc) return nc;
+  const nw = next.width ?? 0;
+  const bw = best.width ?? 0;
+  if (nc) return nw < bw || (nw === bw && (next.height ?? Infinity) < (best.height ?? Infinity));
+  return nw > bw || (nw === bw && (next.height ?? 0) > (best.height ?? 0));
+}
+
+/** The best-fitting of `candidates` whose `key` attribute is an image URL: smallest covering `TARGET_BOX`, else widest, else first. */
+function bestFit(candidates: El[], key: 'url' | 'href', search: Search): FeedImage | undefined {
   let best: FeedImage | undefined;
   for (const e of candidates) {
     const url = imageUrl(e.attr(key), e.base(search), search);
-    const width = pixels(e.attr('width'));
-    if (url && (!best || (width ?? 0) > (best.width ?? 0))) best = sized(url.href, width, pixels(e.attr('height')));
+    if (!url) continue;
+    const next = sized(url.href, pixels(e.attr('width')), pixels(e.attr('height')));
+    if (!best || betterSize(next, best)) best = next;
   }
   return best;
 }
@@ -312,11 +330,12 @@ function photoUrl(raw: string, base: string | undefined, search: Search): string
 const isSpace = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f';
 
 /**
- * An `srcset`'s largest candidate that may be the photo: the widest by `w`, else the densest by
- * `x`. Read forward once, as HTML does: a candidate's URL runs to whitespace (so a CDN URL keeps
- * its commas), and a comma ends its descriptors.
+ * An `srcset`'s best-fitting candidate that may be the photo: the smallest by `w` that covers
+ * `TARGET_BOX`, else the widest by `w`, else the densest by `x`. Read forward once, as HTML does:
+ * a candidate's URL runs to whitespace (so a CDN URL keeps its commas), and a comma ends its
+ * descriptors.
  */
-function largestCandidate(srcset: string, base: string | undefined, search: Search): FeedImage | undefined {
+function bestSrcsetCandidate(srcset: string, base: string | undefined, search: Search): FeedImage | undefined {
   let best: { url: string; w: number; x: number } | undefined;
   let i = 0;
   while (i < srcset.length) {
@@ -337,7 +356,7 @@ function largestCandidate(srcset: string, base: string | undefined, search: Sear
     const url = photoUrl(srcset.slice(start, end), base, search);
     const w = Number(/^(\d+)w$/.exec(descriptor)?.[1] ?? 0);
     const x = Number(/^([\d.]+)x$/.exec(descriptor)?.[1] ?? 1) || 1;
-    if (url && (!best || w > best.w || (w === best.w && x > best.x))) best = { url, w, x };
+    if (url && (!best || (w || best.w ? betterSize({ width: w || undefined }, { width: best.w || undefined }) : x > best.x))) best = { url, w, x };
   }
   return best && sized(best.url, best.w || undefined, undefined);
 }
@@ -348,7 +367,7 @@ function imgImage(get: (name: string) => string, base: string | undefined, searc
   const height = get('height');
   const tiny = (v: string) => /^\d+$/.test(v) && Number(v) <= 2;
   if (tiny(width) || tiny(height) || NOT_A_PHOTO_CLASS.test(get('class'))) return undefined;
-  const fromSrcset = largestCandidate(get('srcset'), base, search);
+  const fromSrcset = bestSrcsetCandidate(get('srcset'), base, search);
   if (fromSrcset) return fromSrcset;
   const src = get('src');
   const url = src === 'undefined' ? undefined : photoUrl(src, base, search);
@@ -457,28 +476,28 @@ function xhtmlImage(content: El, search: Search): FeedImage | undefined {
 }
 
 /**
- * An item's image, from the first of these that has one: Media RSS content (the widest image),
- * Media RSS thumbnails (the widest), an RSS enclosure or an Atom enclosure link of an image type,
- * `itunes:image`, and the first real picture in its `bodies` (RSS `content:encoded` then
- * `description`, Atom `content` then `summary`).
+ * An item's image, from the first of these that has one: Media RSS content (best fit for
+ * `TARGET_BOX`), Media RSS thumbnails (best fit), an RSS enclosure or an Atom enclosure link of an
+ * image type, `itunes:image`, and the first real picture in its `bodies` (RSS `content:encoded`
+ * then `description`, Atom `content` then `summary`).
  */
 function itemImage(it: El, ns: { rss: string; atom: string }, bodies: El[], search: Search): FeedImage | undefined {
   const groups = it.kids(NS.media, 'group');
   const media = [it, ...groups].flatMap((e) => e.kids(NS.media, 'content'));
   const image =
-    widest(media.filter(mediaImage), 'url', search) ??
-    widest(
+    bestFit(media.filter(mediaImage), 'url', search) ??
+    bestFit(
       [it, ...groups, ...media].flatMap((e) => e.kids(NS.media, 'thumbnail')),
       'url',
       search,
     ) ??
-    widest(it.kids(ns.rss, 'enclosure').filter(imageType), 'url', search) ??
-    widest(
+    bestFit(it.kids(ns.rss, 'enclosure').filter(imageType), 'url', search) ??
+    bestFit(
       it.kids(ns.atom, 'link').filter((e) => e.attr('rel') === 'enclosure' && imageType(e)),
       'href',
       search,
     ) ??
-    widest(it.kids(NS.itunes, 'image'), 'href', search);
+    bestFit(it.kids(NS.itunes, 'image'), 'href', search);
   if (image) return image;
   for (const b of bodies) {
     const found = b.attr('type').toLowerCase() === 'xhtml' ? xhtmlImage(b, search) : bodyImage(text(b.v), b.base(search), search);
@@ -503,7 +522,7 @@ function root(doc: El, local: string, namespaces: string[]): { ns: string; el: E
 }
 
 interface Story {
-  item: NewsFeed['items'][number];
+  item: Omit<NewsFeed['items'][number], 'image'>;
   image: (search: Search) => FeedImage | undefined;
 }
 
