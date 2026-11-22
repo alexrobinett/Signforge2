@@ -35,6 +35,7 @@ import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
+import { FEED_IMAGE_DELETE_GRACE_MS } from './retention';
 import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
@@ -1843,40 +1844,25 @@ export function scoped(d1: D1Database, orgId: string) {
       claimDeletes: async (shas: readonly string[], { now, leaseMs }: { now: number; leaseMs: number }): Promise<string[]> => {
         const unique = [...new Set(shas)];
         if (!unique.length) return [];
-        const snapshots = (await db.select({ json: snap.dataJson }).from(snap).where(eq(snap.orgId, orgId)).all()).map((r) => r.json);
-        const inSnap = unique.filter((sha) => snapshots.some((json) => json.includes(sha)));
-        const candidates = unique.filter((sha) => !snapshots.some((json) => json.includes(sha)));
-        const refExists = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND (${fi.fileSha256} = ${fid.sha256} OR ${fi.thumbSha256} = ${fid.sha256}))`;
-        const inAll = sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(unique)}))`;
-        const clearReferenced = db.delete(fid).where(and(eq(fid.orgId, orgId), inAll, refExists));
-        if (!candidates.length) {
-          await db.batch([
-            clearReferenced,
-            db
-              .update(fid)
-              .set({ queuedAt: now, deletingUntil: 0 })
-              .where(and(eq(fid.orgId, orgId), sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(inSnap)}))`)),
-          ]);
-          return [];
-        }
-        const inCandidates = sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(candidates)}))`;
+        const due = and(
+          eq(fid.orgId, orgId),
+          sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(unique)}))`,
+          lte(fid.queuedAt, now - FEED_IMAGE_DELETE_GRACE_MS),
+          lte(fid.deletingUntil, now),
+        );
+        const feedRef = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId}
+          AND (${fi.fileSha256} = ${fid.sha256} OR ${fi.thumbSha256} = ${fid.sha256}))`;
+        const snapshotRef = sql`EXISTS (SELECT 1 FROM ${snap} WHERE ${snap.orgId} = ${orgId} AND instr(${snap.dataJson}, ${fid.sha256}) > 0)`;
         const claim = db
           .update(fid)
           .set({ deletingUntil: now + leaseMs })
-          .where(and(eq(fid.orgId, orgId), inCandidates, lte(fid.deletingUntil, now), sql`NOT ${refExists}`))
+          .where(and(due, sql`NOT ${feedRef}`, sql`NOT ${snapshotRef}`))
           .returning({ sha256: fid.sha256 });
-        if (inSnap.length) {
-          const [, , claimed] = await db.batch([
-            clearReferenced,
-            db
-              .update(fid)
-              .set({ queuedAt: now, deletingUntil: 0 })
-              .where(and(eq(fid.orgId, orgId), sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(inSnap)}))`)),
-            claim,
-          ]);
-          return claimed.map((r) => r.sha256);
-        }
-        const [, claimed] = await db.batch([clearReferenced, claim]);
+        const [claimed] = await db.batch([
+          claim,
+          db.delete(fid).where(and(due, feedRef)),
+          db.update(fid).set({ queuedAt: now, deletingUntil: 0 }).where(and(due, snapshotRef)),
+        ]);
         return claimed.map((r) => r.sha256);
       },
       /** Remove claimed delete records once R2 deletion succeeded. */

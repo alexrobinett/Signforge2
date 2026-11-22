@@ -140,35 +140,41 @@ function web(answers: Record<string, Answer | ((req: Request) => Answer)>, addre
 }
 
 /** Count D1 calls (`prepare().first/all/run/raw` and `batch()`) executed through a wrapped D1Database. */
-function countingDb(db: D1Database) {
+function countingDb(db: D1Database, hooks: { afterRead?: (query: string) => Promise<void>; beforeBatch?: (queries: string[]) => Promise<void> } = {}) {
   let apiCalls = 0;
   let statements = 0;
-  const wrapStmt = (stmt: D1PreparedStatement): D1PreparedStatement =>
-    new Proxy(stmt, {
+  const prepared = new WeakMap<D1PreparedStatement, { stmt: D1PreparedStatement; query: string }>();
+  const wrapStmt = (stmt: D1PreparedStatement, query: string): D1PreparedStatement => {
+    const proxy = new Proxy(stmt, {
       get(target, prop, receiver) {
         if (prop === 'bind') {
-          return (...args: unknown[]) => wrapStmt(target.bind(...args));
+          return (...args: unknown[]) => wrapStmt(target.bind(...args), query);
         }
         if (prop === 'first' || prop === 'all' || prop === 'run' || prop === 'raw') {
-          return (...args: unknown[]) => {
+          return async (...args: unknown[]) => {
             apiCalls++;
             statements++;
-            return (target[prop] as (...a: unknown[]) => unknown)(...args);
+            const result = await (target[prop] as (...a: unknown[]) => unknown)(...args);
+            if (prop !== 'run') await hooks.afterRead?.(query);
+            return result;
           };
         }
-        if (prop === '__raw') return target;
         const val = Reflect.get(target, prop, receiver);
         return typeof val === 'function' ? val.bind(target) : val;
       },
     });
+    prepared.set(proxy, { stmt, query });
+    return proxy;
+  };
   const wrapped = new Proxy(db, {
     get(target, prop, receiver) {
-      if (prop === 'prepare') return (query: string) => wrapStmt(target.prepare(query));
+      if (prop === 'prepare') return (query: string) => wrapStmt(target.prepare(query), query);
       if (prop === 'batch') {
-        return (stmts: D1PreparedStatement[]) => {
+        return async (stmts: D1PreparedStatement[]) => {
           apiCalls++;
           statements += stmts.length;
-          return target.batch(stmts.map((s) => (s as unknown as { __raw?: D1PreparedStatement }).__raw ?? s));
+          await hooks.beforeBatch?.(stmts.map((s) => prepared.get(s)?.query ?? ''));
+          return target.batch(stmts.map((s) => prepared.get(s)?.stmt ?? s));
         };
       }
       const val = Reflect.get(target, prop, receiver);
@@ -971,6 +977,51 @@ describe('budgets, resilience and cleanup', () => {
     await forgetFeedImages(env, NOW + RECHECK_MS + FEED_IMAGE_DELETE_GRACE_MS);
     expect(await env.BLOBS.head(feedBlobKey(o.orgId, shas[1]!))).toBeNull();
     expect(await env.BLOBS.head(feedBlobKey(o.orgId, shas[2]!))).not.toBeNull();
+  });
+
+  it('leaves freshly requeued and newly snapshot-referenced blobs in R2 when cleanup already scanned them', async () => {
+    const id = await news('https://claim-race.test/rss', { bind: false });
+    const urls = ['https://claim-race.test/requeued.jpg', 'https://claim-race.test/snapshot.jpg'];
+    const bytes = urls.map((url) => jpeg(320, 180, url));
+    const [requeued, referenced] = await Promise.all(bytes.map(sha256Hex));
+    const scope = o.scope.feedImages;
+    const at = NOW + FEED_IMAGE_DELETE_GRACE_MS;
+    for (const [i, url] of urls.entries()) {
+      const sha = [requeued, referenced][i]!;
+      await env.BLOBS.put(feedBlobKey(o.orgId, sha), bytes[i]!);
+      await scope.hold([url], { until: NOW, now: NOW, sourceId: id });
+      await scope.save(url, { fileSha256: sha, thumbSha256: sha, nextCheckAt: at + DAY_MS });
+      await scope.forget([url], NOW);
+    }
+
+    let requeuedAfterScan = false;
+    let wroteSnapshot = false;
+    const counter = countingDb(env.DB, {
+      afterRead: async (query) => {
+        if (!requeuedAfterScan && query.includes('from "feed_image_deletes"')) {
+          requeuedAfterScan = true;
+          await env.DB.prepare('UPDATE feed_image_deletes SET queued_at = ? WHERE org_id = ? AND sha256 = ?').bind(at, o.orgId, requeued).run();
+        }
+      },
+      beforeBatch: async (queries) => {
+        if (!wroteSnapshot && queries.some((q) => q.startsWith('update "feed_image_deletes"') && q.includes('returning'))) {
+          wroteSnapshot = true;
+          await o.scope.dataSources.putSnapshot(id, {
+            version: 'claim-race',
+            checkedAt: at,
+            fetchedAt: at,
+            dataJson: JSON.stringify({ items: [{ image: { file: referenced, thumb: referenced } }] }),
+          });
+        }
+      },
+    });
+    await forgetFeedImages({ DB: counter.db, BLOBS: env.BLOBS }, at);
+    expect(requeuedAfterScan).toBe(true);
+    expect(wroteSnapshot).toBe(true);
+    for (const sha of [requeued!, referenced!]) {
+      expect(await env.BLOBS.head(feedBlobKey(o.orgId, sha))).not.toBeNull();
+      expect(await scope.pendingDeletes()).toContainEqual(expect.objectContaining({ sha256: sha, deletingUntil: 0 }));
+    }
   });
 
   it('keeps both polling (5 sources × 10 photos) and cleanup (25 expired rows × 2 hashes) well under Free D1 50-query limits', async () => {

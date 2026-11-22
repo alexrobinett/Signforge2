@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { findMembership, NotInOrgError, organizationExists, platform, scoped } from '../src/index';
+import { FEED_IMAGE_DELETE_GRACE_MS, findMembership, NotInOrgError, organizationExists, platform, scoped } from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 let s: Seeded;
@@ -577,12 +577,13 @@ describe('feed images', () => {
     expect(await b.pendingDeletes()).toEqual([]);
 
     // Claiming deletes drops sha('5') (still referenced by twin), leases sha('1'), sha('2'), sha('d').
-    const claimed = (await a.claimDeletes([sha('1'), sha('2'), sha('5'), sha('d')], { now: 200, leaseMs: 1_000 })).sort();
+    const claimAt = 100 + FEED_IMAGE_DELETE_GRACE_MS;
+    const claimed = (await a.claimDeletes([sha('1'), sha('2'), sha('5'), sha('d')], { now: claimAt, leaseMs: 1_000 })).sort();
     expect(claimed).toEqual([sha('1'), sha('2'), sha('d')].sort());
     // While leased, claimForWrite returns false so a consumer retries rather than racing R2 delete.
-    expect(await a.claimForWrite([sha('1')], 500)).toBe(false);
+    expect(await a.claimForWrite([sha('1')], claimAt + 300)).toBe(false);
     // Org B's claimForWrite is unaffected by org A's lease.
-    expect(await b.claimForWrite([sha('1')], 500)).toBe(true);
+    expect(await b.claimForWrite([sha('1')], claimAt + 300)).toBe(true);
     // Once finished, the durable records are gone.
     await a.finishDeletes(claimed);
     expect(await a.pendingDeletes()).toEqual([]);
