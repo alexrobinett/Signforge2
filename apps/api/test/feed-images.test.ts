@@ -584,6 +584,47 @@ describe('a news source with photos', () => {
     expect((await snapshot(id)).items[0]?.image).toEqual({ file: sha, thumb: sha });
   });
 
+  it('attaches a first-seen photo stored by another source while the RSS poll was in flight', async () => {
+    const feedA = 'https://first-shared.test/owner.rss';
+    const feedB = 'https://first-shared.test/reader.rss';
+    const url = 'https://first-shared.test/photo.jpg';
+    const owner = await news(feedA);
+    const body = feedOf(1, () => url);
+    await pollDataSources(pollEnv, { now: NOW, guards: web({ [feedA]: { body } }).guards });
+    const jobs = take();
+    expect(jobs).toEqual([{ orgId: o.orgId, sourceId: owner, url }]);
+
+    const at = NOW + MIN;
+    const reader = await news(feedB, { at });
+    const rss = web({
+      [feedA]: { body },
+      [feedB]: (req) => (req.headers.has('if-none-match') ? { status: 304 } : { body, headers: { etag: '"first-shared"' } }),
+    });
+    const bytes = jpeg(320, 180, 'shared first appearance');
+    const sha = await sha256Hex(bytes);
+    let delivered = false;
+    const counter = countingDb(env.DB, {
+      afterRead: async (query) => {
+        if (!delivered && query.startsWith('select ') && query.includes('from "feed_images"')) {
+          const result = await consume(jobs, { guards: web({ [url]: { body: bytes } }).guards, images: imagesStub().images }, at);
+          delivered = result.acked.includes(url);
+        }
+      },
+    });
+    await pollDataSources({ ...pollEnv, DB: counter.db }, { now: at, guards: rss.guards });
+    expect(delivered).toBe(true);
+    expect((await snapshot(reader)).items[0]?.image).toBeUndefined();
+    const saved = await o.scope.dataSources.get(reader);
+    expect(saved?.photoGeneration).toBe(0);
+
+    await pollDataSources(pollEnv, { now: at + 5 * MIN, guards: rss.guards });
+    const readerRequests = rss.requests.filter((req) => req.url === feedB);
+    expect(readerRequests).toHaveLength(2);
+    expect(readerRequests.at(-1)?.headers.get('if-none-match')).toBeNull();
+    expect(saved?.nextPollAt).toBeLessThanOrEqual(at);
+    expect((await snapshot(reader)).items[0]?.image).toEqual({ file: sha, thumb: sha });
+  });
+
   it('repairs a snapshot missing an already-stored photo when its weekly recheck returns 304', async () => {
     const feed = 'https://repair-304.test/rss';
     const url = 'https://repair-304.test/photo.jpg';

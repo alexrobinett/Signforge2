@@ -176,7 +176,7 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
     if (snapshotBytes(data) > MAX_SNAPSHOT_BYTES) throw new PollFailure('too-large');
     const dataJson = canonicalJson(data);
     const version = await sha256Hex(new TextEncoder().encode(dataJson));
-    const photoUrls = row.format === 'rss' ? { photoUrlsJson: wantPhotos ? JSON.stringify(res.photoUrls ?? []) : null } : {};
+    const photoUrls = row.format === 'rss' ? { photoUrlsJson: res.storyPhotoUrls ? JSON.stringify({ stories: res.storyPhotoUrls }) : null } : {};
     const source = { ...ok, etag: res.etag, lastModified: res.lastModified, ...photoUrls };
     if (snapshotVersion === version) await org.dataSources.savePoll(row.id, { source, checkedAt: now, photoRead });
     else {
@@ -196,12 +196,20 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
 /** `photos`: a news source's photo URLs to queue once its snapshot is saved (or confirmed on 304). */
 type Read =
   | { status: 'not-modified'; photos?: { again: string[]; fresh: string[] } }
-  | { status: 'ok'; data: unknown; etag: string | null; lastModified: string | null; photoUrls?: string[]; photos?: { again: string[]; fresh: string[] } };
+  | {
+      status: 'ok';
+      data: unknown;
+      etag: string | null;
+      lastModified: string | null;
+      storyPhotoUrls?: (string | null)[];
+      photos?: { again: string[]; fresh: string[] };
+    };
 
 function parsePhotoUrls(raw: string): string[] {
   try {
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === 'string') : [];
+    const urls = parsed && typeof parsed === 'object' && 'stories' in parsed ? parsed.stories : parsed;
+    return Array.isArray(urls) ? [...new Set(urls.filter((u): u is string => typeof u === 'string'))] : [];
   } catch {
     return [];
   }
@@ -232,8 +240,8 @@ async function read(run: Run, org: OrgScope, row: DataSourceRow, locator: string
   const validated = { etag: res.etag, lastModified: res.lastModified };
   if (format === 'rss' && wantPhotos) {
     // The feed's URL, which a photo's relative link resolves against last.
-    const { data, urls, again, fresh } = await newsWithPhotos(org, parseNews(res.body, { url: locator }), run.now);
-    return { status: 'ok', data, ...validated, photoUrls: urls, photos: { again, fresh } };
+    const { data, storyPhotoUrls, again, fresh } = await newsWithPhotos(org, parseNews(res.body, { url: locator }), run.now);
+    return { status: 'ok', data, ...validated, storyPhotoUrls, photos: { again, fresh } };
   }
   return { status: 'ok', data: convert(format, row, res.body, run.now), ...validated };
 }

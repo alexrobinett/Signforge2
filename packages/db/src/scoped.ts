@@ -623,6 +623,10 @@ export function scoped(d1: D1Database, orgId: string) {
   const snap = s.dataSnapshots;
   const fi = s.feedImages;
   const fid = s.feedImageDeletes;
+  const storyCopyDiffers = (index: SQL, file: SQLiteColumn | string | null, thumb: SQLiteColumn | string | null) => sql`(
+    json_extract(${snap.dataJson}, '$.items[' || ${index} || '].image.file') IS NOT ${file}
+    OR json_extract(${snap.dataJson}, '$.items[' || ${index} || '].image.thumb') IS NOT ${thumb}
+  )`;
   const holdFeedImages = async (sourceId: string, chosen: SQL, now: number, until: number): Promise<string[]> => {
     const rows = await db.all<{ url: string }>(sql`
       INSERT INTO ${fi} (org_id, url, source_id, next_check_at, created_at, updated_at)
@@ -1661,17 +1665,14 @@ export function scoped(d1: D1Database, orgId: string) {
           .from(s.organization)
           .where(eq(s.organization.id, orgId));
         // Not `stage.update`: a poll leaves the row's version alone, so it never makes a person's edit stale.
-        const patch = strip(poll.source);
-        const { photoRead } = poll;
-        // The poll may have built its snapshot before a queued photo delivery finished.
-        const source = updateSet(ds, patch);
-        if (photoRead) {
-          const changed = sql`${ds.photoGeneration} <> ${photoRead.generation}`;
-          source.etag = sql`CASE WHEN ${changed} THEN NULL ELSE ${patch.etag === undefined ? ds.etag : patch.etag} END`;
-          source.lastModified = sql`CASE WHEN ${changed} THEN NULL ELSE ${patch.lastModified === undefined ? ds.lastModified : patch.lastModified} END`;
-          source.nextPollAt = sql`CASE WHEN ${changed} THEN ${photoRead.now} ELSE ${patch.nextPollAt} END`;
-        }
-        const writes = staged(undefined, check, db.update(ds).set(source).where(mine)).writes;
+        const writes = staged(
+          undefined,
+          check,
+          db
+            .update(ds)
+            .set(updateSet(ds, strip(poll.source)))
+            .where(mine),
+        ).writes;
         if (poll.snapshot) {
           const fields = snapshotFields(poll.snapshot);
           writes.push(
@@ -1684,6 +1685,27 @@ export function scoped(d1: D1Database, orgId: string) {
             ).writes,
           );
         } else if (poll.checkedAt !== undefined) writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(mineSnap)).writes);
+        if (poll.photoRead) {
+          // A first-seen URL can change before a delivery knows this source uses it.
+          const changedCopy = poll.source.photoUrlsJson
+            ? sql`EXISTS (
+                SELECT 1 FROM json_each(${ds.photoUrlsJson}, '$.stories') AS story
+                JOIN ${fi} ON ${fi.orgId} = ${orgId} AND ${fi.url} = story.value
+                JOIN ${snap} ON ${mineSnap}
+                WHERE ${fi.fileSha256} IS NOT NULL AND ${fi.thumbSha256} IS NOT NULL
+                AND ${storyCopyDiffers(sql`story.key`, fi.fileSha256, fi.thumbSha256)}
+              )`
+            : undefined;
+          writes.push(
+            ...staged(
+              undefined,
+              db
+                .update(ds)
+                .set({ etag: null, lastModified: null, nextPollAt: poll.photoRead.now })
+                .where(and(mine, or(ne(ds.photoGeneration, poll.photoRead.generation), changedCopy))),
+            ).writes,
+          );
+        }
         try {
           const [, updated] = await commit(db, writes);
           if (!updated) throw new NotInOrgError('data source', dataSourceId);

@@ -106,16 +106,16 @@ export async function planPhotos(
 
 /**
  * A news feed as a snapshot holds it: the parsed feed without its URLs, each of the first
- * PHOTOS_PER_SOURCE stories with the copy the org holds of its photo, if any. `urls` are the
- * deduplicated top photo URLs (persisted on the source so 304 polls still schedule photo work);
- * `again` are URLs due for a recheck and `fresh` are URLs new to the org, queued once saved.
+ * PHOTOS_PER_SOURCE stories with the copy the org holds of its photo, if any. The source keeps
+ * `storyPhotoUrls` in snapshot order so a recheck can find the story even when two copies match.
  */
 export async function newsWithPhotos(
   org: OrgScope,
   { logo: _logo, items, ...feed }: ParsedNews,
   now: number,
-): Promise<{ data: NewsFeed; urls: string[]; again: string[]; fresh: string[] }> {
-  const urls = [...new Set(items.slice(0, PHOTOS_PER_SOURCE).flatMap((i) => (i.image ? [i.image.url] : [])))];
+): Promise<{ data: NewsFeed; storyPhotoUrls: (string | null)[]; again: string[]; fresh: string[] }> {
+  const storyPhotoUrls = items.slice(0, PHOTOS_PER_SOURCE).map((item) => item.image?.url ?? null);
+  const urls = [...new Set(storyPhotoUrls.filter((url): url is string => url !== null))];
   const { held, again, fresh } = await planPhotos(org, urls, now);
   const data = {
     ...feed,
@@ -124,7 +124,7 @@ export async function newsWithPhotos(
       return copy ? { ...item, image: copy } : item;
     }),
   };
-  return { data, urls, again, fresh };
+  return { data, storyPhotoUrls, again, fresh };
 }
 
 /**
