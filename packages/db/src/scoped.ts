@@ -1909,13 +1909,16 @@ export function scoped(d1: D1Database, orgId: string) {
         const thumb = found.thumbSha256 === undefined ? fi.thumbSha256 : found.thumbSha256;
         const ds = s.dataSources;
         const changed = sql`${fi.fileSha256} IS NOT ${file} OR ${fi.thumbSha256} IS NOT ${thumb}`;
-        const hasCopy = sql`EXISTS (
-          SELECT 1 FROM ${snap}, json_each(${snap.dataJson}, '$.items') AS story
-          WHERE ${snap.orgId} = ${orgId} AND ${snap.dataSourceId} = ${ds.id}
-          AND CASE WHEN story.type = 'object'
-            THEN json_extract(story.value, '$.image.file') = ${file} AND json_extract(story.value, '$.image.thumb') = ${thumb}
-            ELSE false END
-        )`;
+        const namesPhoto = sql`instr(coalesce(${ds.photoUrlsJson}, ''), ${JSON.stringify(url)}) > 0`;
+        // A flat URL list can't identify the story. One full read upgrades it to snapshot order.
+        const missingCopy = or(
+          and(sql`json_type(${ds.photoUrlsJson}) = 'array'`, namesPhoto),
+          sql`EXISTS (
+            SELECT 1 FROM json_each(${ds.photoUrlsJson}, '$.stories') AS story
+            LEFT JOIN ${snap} ON ${snap.orgId} = ${orgId} AND ${snap.dataSourceId} = ${ds.id}
+            WHERE story.value = ${url} AND ${storyCopyDiffers(sql`story.key`, file, thumb)}
+          )`,
+        );
         const readAfresh = sourceId
           ? db
               .update(ds)
@@ -1925,9 +1928,9 @@ export function scoped(d1: D1Database, orgId: string) {
                   eq(ds.orgId, orgId),
                   eq(ds.format, 'rss'),
                   eq(ds.photos, true),
-                  or(eq(ds.id, sourceId), sql`instr(coalesce(${ds.photoUrlsJson}, ''), ${JSON.stringify(url)}) > 0`),
+                  or(eq(ds.id, sourceId), namesPhoto),
                   sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${mine} AND ${file} IS NOT NULL AND ${thumb} IS NOT NULL
-                  AND ((${changed}) OR ((${ds.etag} IS NOT NULL OR ${ds.lastModified} IS NOT NULL) AND NOT ${hasCopy})))`,
+                  AND ((${changed}) OR ((${ds.etag} IS NOT NULL OR ${ds.lastModified} IS NOT NULL) AND ${missingCopy})))`,
                 ),
               )
           : undefined;

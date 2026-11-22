@@ -636,7 +636,7 @@ describe('a news source with photos', () => {
     await consume(take(), { guards: web({ [url]: { body: bytes, headers: { etag: '"photo"' } } }).guards, images: imagesStub().images });
     // An older poller could leave an RSS validator on a snapshot that never got the stored copy.
     const at = NOW + RECHECK_MS;
-    await o.scope.dataSources.update(id, { etag: '"rss"', nextPollAt: at });
+    await o.scope.dataSources.update(id, { etag: '"rss"', nextPollAt: at, photoUrlsJson: JSON.stringify([url]) });
     expect((await snapshot(id)).items[0]?.image).toBeUndefined();
     await pollDataSources(pollEnv, { now: at, guards: rss.guards });
     const photo = web({ [url]: { status: 304 } });
@@ -647,6 +647,44 @@ describe('a news source with photos', () => {
     await pollDataSources(pollEnv, { now: at + 5 * MIN, guards: rss.guards });
     const sha = await sha256Hex(bytes);
     expect((await snapshot(id)).items[0]?.image).toEqual({ file: sha, thumb: sha });
+  });
+
+  it('repairs the story missing its photo even when another story already has the same copy', async () => {
+    const feed = 'https://identical-304.test/rss';
+    const urls = ['https://identical-304.test/a.jpg', 'https://identical-304.test/b.jpg'];
+    const id = await news(feed);
+    const body = feedOf(2, (i) => urls[i]);
+    const rss = web({ [feed]: (req) => (req.headers.has('if-none-match') ? { status: 304 } : { body, headers: { etag: '"rss"' } }) });
+    const bytes = jpeg(320, 180, 'same bytes, different stories');
+    const sha = await sha256Hex(bytes);
+    const copy = { file: sha, thumb: sha };
+    const { images } = imagesStub();
+    await pollDataSources(pollEnv, { now: NOW, guards: rss.guards });
+    const photos = web(
+      Object.fromEntries(
+        urls.map((url) => [
+          url,
+          (req: Request): Answer => (req.headers.get('if-none-match') === '"photo"' ? { status: 304 } : { body: bytes, headers: { etag: '"photo"' } }),
+        ]),
+      ),
+    );
+    await consume(take(), { guards: photos.guards, images }, NOW);
+    const fullAt = NOW + 5 * MIN;
+    await pollDataSources(pollEnv, { now: fullAt, guards: rss.guards });
+    const stale = await snapshot(id);
+    expect(stale.items.map((item) => item.image)).toEqual([copy, copy]);
+    delete stale.items[1]?.image;
+    await o.scope.dataSources.putSnapshot(id, { version: 'stale', fetchedAt: fullAt, checkedAt: fullAt, dataJson: JSON.stringify(stale) });
+
+    const at = NOW + RECHECK_MS;
+    await pollDataSources(pollEnv, { now: at, guards: rss.guards });
+    expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBe('"rss"');
+    const jobs = take();
+    expect(jobs.map((job) => job.url).sort()).toEqual(urls);
+    await consume(jobs, { guards: photos.guards, images }, at);
+    expect(photos.requests.slice(-2).map((req) => req.headers.get('if-none-match'))).toEqual(['"photo"', '"photo"']);
+    await pollDataSources(pollEnv, { now: at + 5 * MIN, guards: rss.guards });
+    expect((await snapshot(id)).items.map((item) => item.image)).toEqual([copy, copy]);
   });
 
   it('dedupes by content hash across URLs in the same org with no transform or new blob', async () => {
