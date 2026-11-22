@@ -7,6 +7,9 @@ import { and, lt, lte, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as s from './schema';
 
+const fi = s.feedImages;
+const snap = s.dataSnapshots;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** A retry this long after the call gets no stored answer: about 7 days, as the review asked. */
@@ -86,20 +89,20 @@ export const FEED_IMAGE_TTL_MS = 7 * DAY_MS;
 /** Grace period between queueing a feed photo blob for deletion and deleting it from R2: longer than any in-flight poll or consumer invocation. */
 export const FEED_IMAGE_DELETE_GRACE_MS = 15 * 60_000;
 
+/** Match a feed image only when no snapshot in its org names either copy. */
+export const unreferencedFeedImage = sql`NOT EXISTS (SELECT 1 FROM ${snap} WHERE ${snap.orgId} = ${fi.orgId}
+  AND (instr(${snap.dataJson}, ${fi.fileSha256}) > 0 OR instr(${snap.dataJson}, ${fi.thumbSha256}) > 0))`;
+
 /**
- * Every org's feed photos (`feed_images`) due a check more than FEED_IMAGE_TTL_MS before `now`:
- * a poll that still named one would have queued it, moving its check on. Returns each one's org
- * and URL, the oldest first, at most `limit`; the delete goes through the org's scope
- * (`feedImages.forget`), which keeps any a snapshot still names and records orphaned hashes in
- * `feed_image_deletes`. It reads every org's rows (no index leads with the check time, as tenant
- * indexes lead with the org): a few hundred per org, once a day.
+ * Each org's unreferenced feed photos due a check more than FEED_IMAGE_TTL_MS before `now`,
+ * oldest first, at most `limit`. Protected rows are excluded before the limit so they cannot
+ * starve expiry in other orgs. `feedImages.forget` rechecks eligibility and queues the hashes.
  */
 export async function expiredFeedImages(d1: D1Database, now: number, limit: number): Promise<{ orgId: string; url: string }[]> {
-  const fi = s.feedImages;
   return drizzle(d1)
     .select({ orgId: fi.orgId, url: fi.url })
     .from(fi)
-    .where(lt(fi.nextCheckAt, now - FEED_IMAGE_TTL_MS))
+    .where(and(lt(fi.nextCheckAt, now - FEED_IMAGE_TTL_MS), unreferencedFeedImage))
     .orderBy(fi.nextCheckAt)
     .limit(limit)
     .all();

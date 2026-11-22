@@ -3,7 +3,7 @@
 // the queue is a list, and the clock is a parameter.
 import { MAX_SNAPSHOT_BYTES, type NewsFeed } from '@signforge/contract';
 import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS } from '@signforge/db';
-import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
+import { seedOrg, seedOrganization, type SeededOrg, testScope } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1210,6 +1210,45 @@ describe('budgets, resilience and cleanup', () => {
     expect(await env.BLOBS.head(feedBlobKey(o.orgId, oldSha!))).toBeNull();
     expect(await env.BLOBS.head(feedBlobKey(o.orgId, newSha!))).not.toBeNull();
     expect(await env.BLOBS.head(feedBlobKey(o.orgId, shownSha!))).not.toBeNull();
+  });
+
+  it('expires an eligible photo in another org when protected rows would fill the scan', async () => {
+    const protectedSha = '1'.repeat(64);
+    for (let i = 0; i < 10; i++) {
+      const orgId = `expiry-protected-${i}`;
+      await seedOrganization(env.DB, orgId);
+      const scope = testScope(env.DB, orgId);
+      const sourceId = 'news';
+      await scope.dataSources.insert({
+        id: sourceId,
+        name: sourceId,
+        format: 'rss',
+        urlEncrypted: 'unused',
+        refreshS: 300,
+        nextPollAt: Number.MAX_SAFE_INTEGER,
+      });
+      const urls = Array.from({ length: 11 }, (_, j) => `https://expiry-protected.test/${i}/${j}.jpg`);
+      await scope.feedImages.hold(urls, { until: 0, now: 0, sourceId });
+      for (const url of urls) await scope.feedImages.save(url, { fileSha256: protectedSha, thumbSha256: protectedSha, nextCheckAt: 0 });
+      await scope.dataSources.putSnapshot(sourceId, {
+        version: 'expiry-protected',
+        checkedAt: NOW,
+        fetchedAt: NOW,
+        dataJson: JSON.stringify({ items: [{ image: { file: protectedSha, thumb: protectedSha } }] }),
+      });
+    }
+
+    const url = 'https://expiry-eligible.test/photo.jpg';
+    const sha = '2'.repeat(64);
+    const scope = o.scope.feedImages;
+    await scope.hold([url], { until: 1, now: 1, sourceId: 'eligible' });
+    await scope.save(url, { fileSha256: sha, thumbSha256: sha, nextCheckAt: 1 });
+
+    await forgetFeedImages(env, NOW);
+
+    expect(await scope.get([url])).toEqual([]);
+    expect(await scope.pendingDeletes()).toContainEqual(expect.objectContaining({ sha256: sha, queuedAt: NOW }));
+    expect(await testScope(env.DB, 'expiry-protected-0').feedImages.get(['https://expiry-protected.test/0/0.jpg'])).toHaveLength(1);
   });
 
   it('keeps both polling (5 sources × 10 photos) and cleanup (25 expired rows × 2 hashes) well under Free D1 50-query limits', async () => {
