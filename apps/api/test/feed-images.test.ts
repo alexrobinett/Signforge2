@@ -30,7 +30,6 @@ import {
 import { pollDataSources } from '../src/data/poller';
 import worker from '../src/index';
 import { feedBlobKey, orgBlobKey } from '../src/r2';
-
 import { fakeProvider } from './fake-provider';
 
 const DAY_MS = 24 * 3_600_000;
@@ -550,6 +549,63 @@ describe('a news source with photos', () => {
     await o.scope.dataSources.update(id, { nextPollAt: t2 + 5 * MIN });
     await pollDataSources(pollEnv, { now: t2 + 5 * MIN, guards: rss.guards });
     expect((await snapshot(id)).items[0]?.image?.file).toBe((await row(url))!.fileSha256);
+  });
+
+  it('keeps photo invalidation when an in-flight RSS poll saves a snapshot built without the photo', async () => {
+    const feed = 'https://in-flight.test/rss';
+    const url = 'https://in-flight.test/photo.jpg';
+    const id = await news(feed);
+    const body = feedOf(1, () => url);
+    const rss = web({
+      [feed]: (req) => (req.headers.has('if-none-match') && rss.requests.length > 2 ? { status: 304 } : { body, headers: { etag: '"rss"' } }),
+    });
+    await pollDataSources(pollEnv, { now: NOW, guards: rss.guards });
+    const jobs = take();
+    const at = NOW + 5 * MIN;
+    const bytes = jpeg(320, 180, 'in-flight');
+    const sha = await sha256Hex(bytes);
+    const counter = countingDb(env.DB, {
+      afterRead: async (query) => {
+        if (query.startsWith('select ') && query.includes('from "feed_images"')) {
+          expect(await consume(jobs, { guards: web({ [url]: { body: bytes } }).guards, images: imagesStub().images }, at)).toEqual({
+            acked: [url],
+            retried: [],
+          });
+          expect((await o.scope.dataSources.get(id))?.etag).toBeNull();
+        }
+      },
+    });
+    await pollDataSources({ ...pollEnv, DB: counter.db }, { now: at, guards: rss.guards });
+    expect((await snapshot(id)).items[0]?.image).toBeUndefined();
+    expect(await o.scope.dataSources.get(id)).toMatchObject({ etag: null, lastModified: null, nextPollAt: at });
+    await pollDataSources(pollEnv, { now: at + MIN, guards: rss.guards });
+    expect(rss.requests).toHaveLength(3);
+    expect(rss.requests.at(-1)?.headers.get('if-none-match')).toBeNull();
+    expect((await snapshot(id)).items[0]?.image).toEqual({ file: sha, thumb: sha });
+  });
+
+  it('repairs a snapshot missing an already-stored photo when its weekly recheck returns 304', async () => {
+    const feed = 'https://repair-304.test/rss';
+    const url = 'https://repair-304.test/photo.jpg';
+    const id = await news(feed);
+    const body = feedOf(1, () => url);
+    const rss = web({ [feed]: (req) => (req.headers.has('if-none-match') ? { status: 304 } : { body, headers: { etag: '"rss"' } }) });
+    await pollDataSources(pollEnv, { now: NOW, guards: rss.guards });
+    const bytes = jpeg(320, 180, 'repair');
+    await consume(take(), { guards: web({ [url]: { body: bytes, headers: { etag: '"photo"' } } }).guards, images: imagesStub().images });
+    // An older poller could leave an RSS validator on a snapshot that never got the stored copy.
+    const at = NOW + RECHECK_MS;
+    await o.scope.dataSources.update(id, { etag: '"rss"', nextPollAt: at });
+    expect((await snapshot(id)).items[0]?.image).toBeUndefined();
+    await pollDataSources(pollEnv, { now: at, guards: rss.guards });
+    const photo = web({ [url]: { status: 304 } });
+    const jobs = take();
+    expect(jobs.map((job) => job.url)).toEqual([url]);
+    await consume(jobs, { guards: photo.guards, images: imagesStub().images }, at);
+    expect(photo.requests[0]?.headers.get('if-none-match')).toBe('"photo"');
+    await pollDataSources(pollEnv, { now: at + 5 * MIN, guards: rss.guards });
+    const sha = await sha256Hex(bytes);
+    expect((await snapshot(id)).items[0]?.image).toEqual({ file: sha, thumb: sha });
   });
 
   it('dedupes by content hash across URLs in the same org with no transform or new blob', async () => {

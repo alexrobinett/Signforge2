@@ -83,19 +83,23 @@ describe('a poll saved', () => {
   });
 });
 
-describe('dataSources.readAfresh', () => {
+describe('storing a feed photo', () => {
   it("drops the source's validators in its own org only, leaving its schedule, failures and version", async () => {
-    await a.scope.dataSources.update(a.dataSource, { etag: '"a"', lastModified: 'Mon', nextPollAt: NOW + 5, failures: 2 });
-    await b.scope.dataSources.update(b.dataSource, { etag: '"b"', lastModified: 'Tue' });
+    const url = 'https://photo.example/test.jpg';
+    const hash = 'a'.repeat(64);
+    const photoUrlsJson = JSON.stringify([url]);
+    await a.scope.dataSources.update(a.dataSource, { format: 'rss', etag: '"a"', lastModified: 'Mon', nextPollAt: NOW + 5, failures: 2 });
+    await b.scope.dataSources.update(b.dataSource, { format: 'rss', etag: '"b"', lastModified: 'Tue', photoUrlsJson });
     const before = (await a.scope.dataSources.get(a.dataSource))!;
-    await a.scope.dataSources.readAfresh(a.dataSource);
-    await a.scope.dataSources.readAfresh(b.dataSource);
+    await a.scope.feedImages.hold([url], { until: NOW + 1, now: NOW, sourceId: a.dataSource });
+    await a.scope.feedImages.save(url, { fileSha256: hash, thumbSha256: hash, nextCheckAt: NOW + 20 }, { sourceId: a.dataSource, now: NOW });
     expect(await a.scope.dataSources.get(a.dataSource)).toMatchObject({
       etag: null,
       lastModified: null,
       nextPollAt: NOW + 5,
       failures: 2,
       rowVersion: before.rowVersion,
+      photoGeneration: before.photoGeneration + 1,
     });
     expect(await b.scope.dataSources.get(b.dataSource)).toMatchObject({ etag: '"b"', lastModified: 'Tue' });
   });

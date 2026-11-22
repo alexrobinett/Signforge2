@@ -27,4 +27,5 @@ CREATE TABLE `feed_images` (
 --> statement-breakpoint
 CREATE INDEX `feed_images_org_source_sha_idx` ON `feed_images` (`org_id`,`source_sha256`);--> statement-breakpoint
 ALTER TABLE `data_sources` ADD `photos` integer DEFAULT true NOT NULL;--> statement-breakpoint
-ALTER TABLE `data_sources` ADD `photo_urls_json` text;
+ALTER TABLE `data_sources` ADD `photo_urls_json` text;--> statement-breakpoint
+ALTER TABLE `data_sources` ADD `photo_generation` integer DEFAULT 0 NOT NULL;

@@ -1567,26 +1567,6 @@ export function scoped(d1: D1Database, orgId: string) {
           ),
       },
       /**
-       * Read whole at the next poll, whatever the feed's validators would say: its stories' photos
-       * changed (apps/api src/data/images.ts), and a 304 would leave its snapshot without them.
-       * When `photoUrl` is given, any other RSS source in this org whose last-seen photo URLs name
-       * it is also marked to read afresh in the same statement.
-       */
-      readAfresh: async (dataSourceId: string, photoUrl?: string) => {
-        const ds = s.dataSources;
-        const match = photoUrl
-          ? or(
-              eq(ds.id, dataSourceId),
-              and(eq(ds.format, 'rss'), eq(ds.photos, true), sql`instr(coalesce(${ds.photoUrlsJson}, ''), ${JSON.stringify(photoUrl)}) > 0`),
-            )
-          : eq(ds.id, dataSourceId);
-        await db
-          .update(ds)
-          .set(updateSet(ds, { etag: null, lastModified: null }))
-          .where(and(eq(ds.orgId, orgId), match))
-          .run();
-      },
-      /**
        * Everything the poller needs once per org: the claimed sources with their latest snapshot
        * versions, plus published spots (with template manifests) and screen/org locales for bound
        * field checks — all in one D1 batch.
@@ -1664,7 +1644,12 @@ export function scoped(d1: D1Database, orgId: string) {
        */
       savePoll: async (
         dataSourceId: string,
-        poll: { source: RowPatch<typeof s.dataSources> & { nextPollAt: number }; snapshot?: Snapshot; checkedAt?: number },
+        poll: {
+          source: RowPatch<typeof s.dataSources> & { nextPollAt: number };
+          snapshot?: Snapshot;
+          checkedAt?: number;
+          photoRead?: { generation: number; now: number };
+        },
       ) => {
         const ds = s.dataSources;
         const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
@@ -1676,16 +1661,17 @@ export function scoped(d1: D1Database, orgId: string) {
           .from(s.organization)
           .where(eq(s.organization.id, orgId));
         // Not `stage.update`: a poll leaves the row's version alone, so it never makes a person's edit stale.
-        const writes: Write[] = [
-          ...staged(
-            undefined,
-            check,
-            db
-              .update(ds)
-              .set(updateSet(ds, strip(poll.source)))
-              .where(mine),
-          ).writes,
-        ];
+        const patch = strip(poll.source);
+        const { photoRead } = poll;
+        // The poll may have built its snapshot before a queued photo delivery finished.
+        const source = updateSet(ds, patch);
+        if (photoRead) {
+          const changed = sql`${ds.photoGeneration} <> ${photoRead.generation}`;
+          source.etag = sql`CASE WHEN ${changed} THEN NULL ELSE ${patch.etag === undefined ? ds.etag : patch.etag} END`;
+          source.lastModified = sql`CASE WHEN ${changed} THEN NULL ELSE ${patch.lastModified === undefined ? ds.lastModified : patch.lastModified} END`;
+          source.nextPollAt = sql`CASE WHEN ${changed} THEN ${photoRead.now} ELSE ${patch.nextPollAt} END`;
+        }
+        const writes = staged(undefined, check, db.update(ds).set(source).where(mine)).writes;
         if (poll.snapshot) {
           const fields = snapshotFields(poll.snapshot);
           writes.push(
@@ -1876,40 +1862,85 @@ export function scoped(d1: D1Database, orgId: string) {
       /** Pending delete records for this org, ordered by hash. */
       pendingDeletes: () => db.select().from(fid).where(eq(fid.orgId, orgId)).orderBy(asc(fid.sha256)).all(),
       /**
-       * What fetching `url` found: on success its hashes and validators, atomically queuing the
-       * hashes it displaces. On failure the metadata changes and the last good hashes are kept.
+       * What fetching `url` found: on success its hashes and validators (atomically queuing any
+       * replaced hashes into `feed_image_deletes` and invalidating RSS sources that need the copy).
+       * A fetch that did not store a new copy updates metadata only over the row it checked.
        */
-      save: async (url: string, found: RowPatch<typeof s.feedImages> & { nextCheckAt: number }, { now = Date.now() }: { now?: number } = {}) => {
-        const mine = and(eq(fi.orgId, orgId), eq(fi.url, url));
+      save: async (
+        url: string,
+        found: RowPatch<typeof s.feedImages> & { nextCheckAt: number },
+        {
+          now = Date.now(),
+          sourceId,
+          checked,
+        }: { now?: number; sourceId?: string; checked?: Pick<typeof fi.$inferSelect, 'sourceSha256' | 'etag' | 'lastModified' | 'nextCheckAt'> } = {},
+      ) => {
+        const mine = and(
+          eq(fi.orgId, orgId),
+          eq(fi.url, url),
+          checked && sql`${fi.sourceSha256} IS ${checked.sourceSha256}`,
+          checked && sql`${fi.etag} IS ${checked.etag} AND ${fi.lastModified} IS ${checked.lastModified}`,
+          checked && eq(fi.nextCheckAt, checked.nextCheckAt),
+        );
         const updateRow = db
           .update(fi)
           .set(updateSet(fi, strip(found)))
           .where(mine);
-        if (found.fileSha256 === undefined && found.thumbSha256 === undefined) {
+        const replacesHashes = found.fileSha256 !== undefined || found.thumbSha256 !== undefined;
+        if (!sourceId && !replacesHashes) {
           await updateRow.run();
           return;
         }
         const file = found.fileSha256 === undefined ? fi.fileSha256 : found.fileSha256;
         const thumb = found.thumbSha256 === undefined ? fi.thumbSha256 : found.thumbSha256;
-        const queueDisplaced = db
-          .insert(fid)
-          .select(sql`SELECT DISTINCT ${orgId}, old.value, ${now}, 0
+        const ds = s.dataSources;
+        const changed = sql`${fi.fileSha256} IS NOT ${file} OR ${fi.thumbSha256} IS NOT ${thumb}`;
+        const hasCopy = sql`EXISTS (
+          SELECT 1 FROM ${snap}, json_each(${snap.dataJson}, '$.items') AS story
+          WHERE ${snap.orgId} = ${orgId} AND ${snap.dataSourceId} = ${ds.id}
+          AND CASE WHEN story.type = 'object'
+            THEN json_extract(story.value, '$.image.file') = ${file} AND json_extract(story.value, '$.image.thumb') = ${thumb}
+            ELSE false END
+        )`;
+        const readAfresh = sourceId
+          ? db
+              .update(ds)
+              .set(updateSet(ds, { etag: null, lastModified: null, photoGeneration: sql`${ds.photoGeneration} + 1` }))
+              .where(
+                and(
+                  eq(ds.orgId, orgId),
+                  eq(ds.format, 'rss'),
+                  eq(ds.photos, true),
+                  or(eq(ds.id, sourceId), sql`instr(coalesce(${ds.photoUrlsJson}, ''), ${JSON.stringify(url)}) > 0`),
+                  sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${mine} AND ${file} IS NOT NULL AND ${thumb} IS NOT NULL
+                  AND ((${changed}) OR ((${ds.etag} IS NOT NULL OR ${ds.lastModified} IS NOT NULL) AND NOT ${hasCopy})))`,
+                ),
+              )
+          : undefined;
+        const queueDisplaced = replacesHashes
+          ? db
+              .insert(fid)
+              .select(sql`SELECT DISTINCT ${orgId}, old.value, ${now}, 0
                 FROM ${fi}, json_each(json_array(${fi.fileSha256}, ${fi.thumbSha256})) AS old
                 WHERE ${mine} AND old.value IS NOT NULL AND old.value IS NOT ${file} AND old.value IS NOT ${thumb}`)
-          .onConflictDoUpdate({
-            target: [fid.orgId, fid.sha256],
-            set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` },
-          });
-        const clearActive = db.delete(fid).where(
-          and(
-            eq(fid.orgId, orgId),
-            lte(fid.deletingUntil, now),
-            sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = ${url}
+              .onConflictDoUpdate({
+                target: [fid.orgId, fid.sha256],
+                set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` },
+              })
+          : undefined;
+        const clearActive = replacesHashes
+          ? db.delete(fid).where(
+              and(
+                eq(fid.orgId, orgId),
+                lte(fid.deletingUntil, now),
+                sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = ${url}
                 AND (${fid.sha256} = ${fi.fileSha256} OR ${fid.sha256} = ${fi.thumbSha256}))`,
-          ),
-        );
-        // A concurrent delivery may have stored a copy during this fetch.
-        await db.batch([queueDisplaced, updateRow, clearActive]);
+              ),
+            )
+          : undefined;
+        // Use the hashes in D1 immediately before the update: another delivery may have stored a copy during this fetch.
+        const statements = [readAfresh, queueDisplaced, updateRow, clearActive].filter((q) => q !== undefined);
+        await commit(db, staged(undefined, ...statements).writes);
       },
     },
 

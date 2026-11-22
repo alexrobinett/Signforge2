@@ -860,6 +860,8 @@ export const dataSources = sqliteTable(
     photos: integer('photos', { mode: 'boolean' }).notNull().default(true),
     /** `rss`: JSON array of the top photo URLs last seen while photo work was active, so a 304 still schedules retries and rechecks; null until polled with photos active. */
     photoUrlsJson: text('photo_urls_json'),
+    /** Moves on when a photo delivery invalidates RSS validators, even if they were already clear. */
+    photoGeneration: integer('photo_generation').notNull().default(0),
     nextPollAt: integer('next_poll_at').notNull().default(0),
     etag: text('etag'),
     lastModified: text('last_modified'),

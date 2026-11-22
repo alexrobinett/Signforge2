@@ -217,7 +217,7 @@ export async function storeFeedImages(
     const { orgId, sourceId, url } = message.body;
     const org = scoped(env.DB, orgId);
     try {
-      if (await storeOne(env, deps, org, sourceId, url)) await org.dataSources.readAfresh(sourceId, url);
+      await storeOne(env, deps, org, sourceId, url);
       message.ack();
     } catch (e) {
       console.error(`[feed images] a photo of ${orgId}/${sourceId} could not be stored (try ${message.attempts} of ${ATTEMPTS})`, e);
@@ -240,27 +240,26 @@ export async function storeFeedImages(
 function failed(org: OrgScope, row: FeedImageRow, code: PhotoError, passing: boolean, now: number) {
   const failures = row.failures + 1;
   const wait = passing ? Math.min(RETRY_MS * 2 ** (failures - 1), FAIL_WAIT_MS) : FAIL_WAIT_MS;
-  return org.feedImages.save(row.url, { lastError: code, failures, nextCheckAt: now + wait });
+  return org.feedImages.save(row.url, { lastError: code, failures, nextCheckAt: now + wait }, { checked: row });
 }
 
-/** Fetch and store one photo; true when the copy it names changed. */
-async function storeOne(env: Pick<Env, 'BLOBS'>, { now, guards, images }: PhotoDeps, org: OrgScope, sourceId: string, url: string): Promise<boolean> {
+async function storeOne(env: Pick<Env, 'BLOBS'>, { now, guards, images }: PhotoDeps, org: OrgScope, sourceId: string, url: string): Promise<void> {
   const source = await org.dataSources.get(sourceId);
   const [row] = await org.feedImages.get([url]);
   // Deleted, or its photos switched off, since the poll queued it; or forgotten since (rows are made before they are queued).
-  if (!source?.photos || !row) return false;
+  if (!source?.photos || !row) return;
   const kept = { nextCheckAt: now + RECHECK_MS, lastError: null, failures: 0 };
   try {
     const fetched = await guardedImageFetch(httpsOf(url), row, guards);
     if (fetched.status === 'not-modified') {
-      await org.feedImages.save(url, kept);
-      return false;
+      await org.feedImages.save(url, kept, { now, sourceId, checked: row });
+      return;
     }
     const validators = { etag: fetched.etag, lastModified: fetched.lastModified };
     const sourceSha256 = await sha256Hex(fetched.body);
     if (sourceSha256 === row.sourceSha256 && row.fileSha256 && row.thumbSha256) {
-      await org.feedImages.save(url, { ...kept, ...validators });
-      return false;
+      await org.feedImages.save(url, { ...kept, ...validators }, { now, sourceId, checked: row });
+      return;
     }
     // Same photo bytes already processed for another URL in this org (query string, http/https, mirror): reuse its copies with no transform or R2 write.
     const existing = await org.feedImages.bySourceSha(sourceSha256);
@@ -277,9 +276,9 @@ async function storeOne(env: Pick<Env, 'BLOBS'>, { now, guards, images }: PhotoD
           fileSha256: existing.fileSha256,
           thumbSha256: existing.thumbSha256,
         },
-        { now },
+        { now, sourceId },
       );
-      return existing.fileSha256 !== row.fileSha256 || existing.thumbSha256 !== row.thumbSha256;
+      return;
     }
     const copy = await stored(env, images, org, fetched.body, sourceSha256, now);
     await org.feedImages.save(
@@ -291,13 +290,11 @@ async function storeOne(env: Pick<Env, 'BLOBS'>, { now, guards, images }: PhotoD
         fileSha256: copy.file,
         thumbSha256: copy.thumb,
       },
-      { now },
+      { now, sourceId },
     );
-    return copy.file !== row.fileSha256 || copy.thumb !== row.thumbSha256;
   } catch (e) {
     if (!(e instanceof FetchError || e instanceof PhotoFailure)) throw e;
     await failed(org, row, e.code, mayPass(e), now);
-    return false;
   }
 }
 

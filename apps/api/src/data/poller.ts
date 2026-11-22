@@ -159,6 +159,7 @@ function enqueuePhotos(run: Run, org: OrgScope, sourceId: string, photos: { agai
 async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVersion: string | null, locator: string | undefined): Promise<void> {
   const { now } = run;
   const nextPollAt = now + row.refreshS * 1000;
+  const photoRead = row.format === 'rss' ? { generation: row.photoGeneration, now } : undefined;
   try {
     if (!locator) throw new PollFailure('sealed-url');
     const ok = { nextPollAt, failures: 0, lastError: null };
@@ -167,7 +168,7 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
     const wantPhotos = row.format === 'rss' && row.photos ? usesPhotos(bound) : false;
     const res = await read(run, org, row, locator, wantPhotos);
     if (res.status === 'not-modified') {
-      await org.dataSources.savePoll(row.id, { source: ok, checkedAt: now });
+      await org.dataSources.savePoll(row.id, { source: ok, checkedAt: now, photoRead });
       if (res.photos) await enqueuePhotos(run, org, row.id, res.photos);
       return;
     }
@@ -177,18 +178,18 @@ async function pollOne(run: Run, org: OrgScope, row: DataSourceRow, snapshotVers
     const version = await sha256Hex(new TextEncoder().encode(dataJson));
     const photoUrls = row.format === 'rss' ? { photoUrlsJson: wantPhotos ? JSON.stringify(res.photoUrls ?? []) : null } : {};
     const source = { ...ok, etag: res.etag, lastModified: res.lastModified, ...photoUrls };
-    if (snapshotVersion === version) await org.dataSources.savePoll(row.id, { source, checkedAt: now });
+    if (snapshotVersion === version) await org.dataSources.savePoll(row.id, { source, checkedAt: now, photoRead });
     else {
       const { refused } = snapshotFit(bound, data);
       if (refused) throw new PollFailure(refused);
-      await org.dataSources.savePoll(row.id, { source, snapshot: { version, fetchedAt: now, checkedAt: now, dataJson } });
+      await org.dataSources.savePoll(row.id, { source, snapshot: { version, fetchedAt: now, checkedAt: now, dataJson }, photoRead });
     }
     if (photos) await enqueuePhotos(run, org, row.id, photos);
   } catch (e) {
     if (!(e instanceof PollFailure || e instanceof FetchError || e instanceof FeedError || e instanceof ProviderError)) throw e;
     const failures = row.failures + 1;
     const backoff = Math.min(row.refreshS * 1000 * 2 ** failures, BACKOFF_MAX_MS);
-    await org.dataSources.savePoll(row.id, { source: { nextPollAt: now + backoff, failures, lastError: e.code } });
+    await org.dataSources.savePoll(row.id, { source: { nextPollAt: now + backoff, failures, lastError: e.code }, photoRead });
   }
 }
 
