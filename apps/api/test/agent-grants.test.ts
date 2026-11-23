@@ -478,46 +478,122 @@ describe('a membership ending', () => {
 });
 
 describe('client registration', () => {
-  it("refuses a name that poses as SignForge's own apps, however it is spelled", async () => {
+  /** Each refusal's words, by why the name is refused. */
+  const REFUSED = {
+    names: 'client_name must not name SignForge or its apps',
+    mixes: 'client_name must be written in one script (Latin may go with Chinese, Japanese or Korean)',
+    hides: 'client_name must not contain control, format, bidirectional or invisible characters, or spaces other than U+0020',
+    blank: 'client_name must not be blank',
+    long: 'client_name must be at most 80 characters',
+  };
+  /** What registering under `name` is refused for, or its status if it is not refused. */
+  const refusalOf = async (t: ReturnType<typeof testApp>, name: string) => {
+    const res = await registration(t, { client_name: name });
+    if (res.status !== 400) return res.status;
+    const { error, error_description: why } = (await res.json()) as { error: string; error_description: string };
+    expect(error, JSON.stringify(name)).toBe('invalid_client_metadata');
+    return Object.entries(REFUSED).find(([, words]) => words === why)?.[0] ?? why;
+  };
+  const expectRefusals = async (cases: [string, keyof typeof REFUSED][]) => {
     const t = testApp();
-    for (const name of [
-      'SignForge CLI',
-      'signforge',
-      'My SignForge helper',
-      'Sign Forge',
-      'S-I-G-N-F-O-R-G-E',
-      'ＳｉｇｎＦｏｒｇｅ',
-      'S1gnF0rge',
-      'ѕignforge',
-      'Ѕіgnfоrgе',
-      'sf-cli',
-      'SF CLI',
-      'sf_cli tools',
-    ]) {
-      const res = await registration(t, { client_name: name });
-      expect(res.status, name).toBe(400);
-      expect(((await res.json()) as { error_description: string }).error_description, name).toBe('client_name must not name SignForge or its apps');
-    }
+    for (const [name, why] of cases) expect(await refusalOf(t, name), JSON.stringify(name)).toBe(why);
+  };
+
+  it("refuses a name that poses as SignForge's own apps, however it is spelled", async () => {
+    await expectRefusals([
+      ['SignForge CLI', 'names'],
+      ['signforge', 'names'],
+      ['My SignForge helper', 'names'],
+      ['Sign Forge', 'names'],
+      ['S-I-G-N-F-O-R-G-E', 'names'],
+      ['SIGNF0RGE', 'names'],
+      ['S1gnF0rge', 'names'],
+      ['5ignForge', 'names'],
+      ['sf-cli', 'names'],
+      ['SF CLI', 'names'],
+      ['sf_cli tools', 'names'],
+      ['SF-CL1', 'names'],
+      // Accents, as NFKD and dropping the marks read them (the re-check of #299).
+      ['SígnForge', 'names'],
+      ['SignForgé', 'names'],
+      ['S̶ignForge', 'names'],
+      ['S⃝ignForge', 'names'],
+      // Full-width, mathematical, superscript and small-capital Latin, and Latin lookalikes in Latin.
+      ['ＳｉｇｎＦｏｒｇｅ', 'names'],
+      ['ＳＦ－ＣＬＩ', 'names'],
+      ['𝐒𝐢𝐠𝐧𝐅𝐨𝐫𝐠𝐞', 'names'],
+      ['𝓈𝒾𝑔𝓃𝒻ℴ𝓇𝑔ℯ', 'names'],
+      ['ˢⁱᵍⁿᶠᵒʳᵍᵉ', 'names'],
+      ['ꜱɪɢɴꜰᴏʀɢᴇ', 'names'],
+      ['ꜱғ-ᴄʟɪ', 'mixes'],
+      ['SıgnForge', 'names'],
+      ['SiɡnForge', 'names'],
+      ['ꜱignforge', 'names'],
+      // Another script's letters among Latin: Greek, Cyrillic, Cherokee.
+      ['SIGΝFORGE', 'mixes'],
+      ['ΣignForge', 'mixes'],
+      ['ѕignforge', 'mixes'],
+      ['Ѕіgnfоrgе', 'mixes'],
+      ['SignFоrge', 'mixes'],
+      ['ᏚignᏀorge', 'mixes'],
+      ['ᏚIGNFORGE', 'mixes'],
+      ['SᎥgnForge', 'mixes'],
+      ['Signհorge', 'mixes'],
+    ]);
   });
 
-  it('refuses a name with characters that reorder or hide text, and one too long for the heading', async () => {
+  it('refuses a name with characters that reorder or hide text, and a blank one or one too long for the heading', async () => {
+    await expectRefusals([
+      ['Claude‮edoc', 'hides'],
+      ['Claude⁦x⁩', 'hides'],
+      ['Clau​de', 'hides'],
+      ['Claude\nCode', 'hides'],
+      ['Claude\u0000', 'hides'],
+      ['Claude­Code', 'hides'],
+      ['Claude⁠Code', 'hides'],
+      ['Claude️Code', 'hides'],
+      ['Claude\u{E0041}Code', 'hides'],
+      ['Claude', 'hides'],
+      // Hangul fillers are letters, but blank; and the blank Braille pattern.
+      ['SignㅤForge', 'hides'],
+      ['SignᅟForge', 'hides'],
+      ['SignᅠForge', 'hides'],
+      ['SignﾠForge', 'hides'],
+      ['Sign⠀Forge', 'hides'],
+      // Spaces but U+0020.
+      ['Sign Forge', 'hides'],
+      ['Claude Code', 'hides'],
+      ['Claude　Code', 'hides'],
+      ['Claude\tCode', 'hides'],
+      ['', 'blank'],
+      [' ', 'blank'],
+      ['   ', 'blank'],
+      [' ', 'blank'],
+      ['   ', 'blank'],
+      ['　', 'blank'],
+      ['ㅤ', 'blank'],
+      ['​', 'blank'],
+      ['A'.repeat(81), 'long'],
+    ]);
+  });
+
+  it('refuses a name mixing Latin with another script, but not one script alone, or Latin with Chinese, Japanese or Korean', async () => {
+    await expectRefusals([
+      ['Café Ελλάδα', 'mixes'],
+      ['Bot Привет', 'mixes'],
+      ['Hello ᏣᎳᎩ', 'mixes'],
+      ['Ελλάδα Привет', 'mixes'],
+    ]);
     const t = testApp();
-    for (const name of ['Claude\u202Eedoc', 'Claude\u2066x\u2069', 'Clau\u200Bde', 'Claude\nCode', 'Claude\u0000']) {
-      const res = await registration(t, { client_name: name });
-      expect(res.status, JSON.stringify(name)).toBe(400);
-      expect(((await res.json()) as { error_description: string }).error_description).toBe(
-        'client_name must not contain control, format or bidirectional characters',
-      );
+    for (const name of ['Ελληνικός βοηθός', 'Помощник', '東京 Screens', 'ソニー Agent', '서울 Bot', '台北 ㄅㄆ Agent']) {
+      expect(await refusalOf(t, name), name).toBe(201);
     }
-    const long = await registration(t, { client_name: 'A'.repeat(81) });
-    expect(long.status).toBe(400);
-    expect(((await long.json()) as { error_description: string }).error_description).toBe('client_name must be at most 80 characters');
   });
 
   it('accepts an ordinary name, accents and all, up to 80 characters', async () => {
     const t = testApp();
-    for (const name of ['Claude Code', 'Cursor', 'Café Assistant', 'Script for screens', 'A'.repeat(80)]) {
-      expect((await registration(t, { client_name: name })).status, name).toBe(201);
+    for (const name of ['Claude Code', 'Cursor', 'Café Assistant', 'Zürich 2', "O'Brien's helper", 'Script for screens', 'Signs & forms', 'A'.repeat(80)]) {
+      expect(await refusalOf(t, name), name).toBe(201);
     }
   });
 
