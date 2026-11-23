@@ -9,7 +9,20 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ADMIN_TOKEN, ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, API_LOG, API_PORT, CMS_PORT, CMS_URL, FEEDS_DIR, PLACES, RUN_DIR } from './servers';
+import {
+  ADMIN_TOKEN,
+  ANTHROPIC_STUB_KEY,
+  ANTHROPIC_STUB_MODELS,
+  API_LOG,
+  ENDPOINT_STUB_KEY,
+  ENDPOINT_STUB_MODELS,
+  API_PORT,
+  CMS_PORT,
+  CMS_URL,
+  FEEDS_DIR,
+  PLACES,
+  RUN_DIR,
+} from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
 const cmsDir = fileURLToPath(new URL('../', import.meta.url));
@@ -72,11 +85,22 @@ async function anthropicStub(): Promise<{ url: string; close: () => void }> {
 /**
  * A file server for the links table sources read (issue #84): the dev API sends every feed fetch
  * here (`FEED_STUB_URL`), and it answers with the file in FEEDS_DIR named by the URL's last path
- * segment, which a test writes and edits. On a free port.
+ * segment, which a test writes and edits; and, for any host's /v1/models, an OpenAI-compatible
+ * endpoint's model list to the stub key (#262). On a free port.
  */
 async function feedServer(): Promise<{ url: string; close: () => void }> {
   const server = createServer((req, res) => {
-    const file = join(FEEDS_DIR, basename(new URL(req.url ?? '/', 'http://stub').pathname));
+    const path = new URL(req.url ?? '/', 'http://stub').pathname;
+    // An OpenAI-compatible endpoint's model list (#262): every host's fetch lands here in dev, so its key is checked here.
+    if (path.endsWith('/v1/models')) {
+      const known = req.headers.authorization === `Bearer ${ENDPOINT_STUB_KEY}`;
+      res.writeHead(known ? 200 : 401, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify(known ? { object: 'list', data: ENDPOINT_STUB_MODELS.map((id) => ({ id, object: 'model' })) } : { error: { message: 'invalid key' } }),
+      );
+      return;
+    }
+    const file = join(FEEDS_DIR, basename(path));
     if (!existsSync(file)) {
       res.writeHead(404).end();
       return;

@@ -18,12 +18,19 @@ export type AlertChannel = NonNullable<ToolOutput<'get_alert_channels'>['slack']
 export type AlertDelivery = ToolOutput<'list_alert_deliveries'>['deliveries'][number];
 /** The org's own model provider (#261), or null while it uses the demo model. */
 export type AiProvider = NonNullable<ToolOutput<'get_ai_provider'>['provider']>;
+/** What the page calls each provider. */
+const AI_PROVIDER_NAMES: Record<AiProvider['provider'], string> = { anthropic: 'Anthropic', 'openai-compatible': 'The endpoint' };
+
 /** Why a test of the key could not reach the provider, in words. */
-export const AI_TEST_PROBLEMS: Record<NonNullable<ToolOutput<'test_ai_provider'>['problem']>, string> = {
-  refused: 'Anthropic refused the key. It may have been revoked or rotated: replace it.',
-  busy: 'Anthropic is busy. Try again in a minute.',
-  unreachable: 'Anthropic did not answer. Try again.',
-};
+export function aiTestProblem(problem: NonNullable<ToolOutput<'test_ai_provider'>['problem']>, provider: AiProvider['provider']): string {
+  const name = AI_PROVIDER_NAMES[provider];
+  if (problem === 'refused') return `${name} refused the key. It may have been revoked or rotated: replace it.`;
+  if (problem === 'busy') return `${name} is busy. Try again in a minute.`;
+  if (problem === 'blocked') return 'SignForge cannot reach that address: it must be public https, and must not redirect to another one.';
+  return provider === 'anthropic'
+    ? 'Anthropic did not answer. Try again.'
+    : 'The endpoint did not answer as an OpenAI-style API. Check its address, and try again.';
+}
 
 export const CHANNEL_LABELS: Record<AlertDelivery['channel'], string> = { email: 'Email', slack: 'Slack', webhook: 'Webhook' };
 
