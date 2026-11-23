@@ -245,7 +245,7 @@ pnpm and Turborepo, with packages for:
 2. **Player core**: template SDK, the C-Store template, manifest loading, offline cache, two-slot playback.
 3. **CMS and API**: orgs, assets, spots, playlists, schedules, publish, screen pairing.
 4. **Agents**: MCP server, WebMCP, the template submission and review pipeline.
-5. **Polish**: public demo org, Pi image, more base templates, archive the four SignForge 1 repos with a pointer here.
+5. **Polish**: the public demo (a sandbox org per visitor), Pi image, more base templates, archive the four SignForge 1 repos with a pointer here.
 
 ### Milestone 3 so far
 
