@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { axe, createOrg, d1, disabledOnServer, fillUntilEnabled, hydrated, publishImage, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, d1, disabledOnServer, hydrated, publishImage, shots, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -56,10 +56,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await axe(page);
   await shots(page, '10-sign-in');
   await signInAs(page, `e2e-screens-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Arcade', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Northside Arcade', level: 1 })).toBeVisible();
+  await createOrg(page, 'Northside Arcade');
 
   // Empty: one path, pairing, with the code input on the page.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
@@ -206,10 +203,7 @@ test('an edit keeps a change someone else made while the form was open, and refu
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-versions-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Eastside Deli', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Eastside Deli', level: 1 })).toBeVisible();
+  await createOrg(page, 'Eastside Deli');
 
   // The page's own session stands in for an agent: what matters is that its changes land in between.
   const tool = async (name: string, input: unknown) => {
@@ -254,10 +248,7 @@ test('a screen that stops syncing turns unreachable on the open Screens page, wi
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-fleet-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Westside Bakery', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Westside Bakery', level: 1 })).toBeVisible();
+  await createOrg(page, 'Westside Bakery');
 
   // A screen paired, published to and playing it.
   const pairing = await startPairing(request);
@@ -298,10 +289,7 @@ test('the Screens page says when its poll fails, until a good one, and an expire
   await hydrated(page);
   // Its own address: this spec's other tests use up ADDRESS's sign-in budget.
   await signInAs(page, `e2e-poll-${Date.now()}@example.com`, '192.0.2.15');
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Eastside Deli', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Eastside Deli', level: 1 })).toBeVisible();
+  await createOrg(page, 'Eastside Deli');
   const pairing = await startPairing(request);
   const claimed = await page.request.post('/api/tools/claim_screen', {
     data: { code: pairing.code, name: 'Counter', timezone: 'UTC', orientation: 'landscape' },
@@ -311,7 +299,12 @@ test('the Screens page says when its poll fails, until a good one, and an expire
 
   // The API does not answer the page's polls (every server function, which only the poll calls
   // while the page sits open), from the first: the notice comes, and holds through the next tries.
-  const refuse = () => page.route('**/_serverFn/**', (route) => route.abort('connectionrefused'));
+  let refused = 0;
+  const refuse = () =>
+    page.route('**/_serverFn/**', (route) => {
+      refused += 1;
+      return route.abort('connectionrefused');
+    });
   await refuse();
   await page.goto('/screens');
   await hydrated(page);
@@ -326,7 +319,9 @@ test('the Screens page says when its poll fails, until a good one, and an expire
       if (!document.body.textContent.includes('Status is not current.')) document.body.dataset.noticeGone = String(++gone);
     }, 100);
   });
-  await page.waitForTimeout(17_000);
+  // Until the next poll (every 15 s) and its retry are refused too.
+  const before = refused;
+  await expect.poll(() => refused, { timeout: 40_000 }).toBeGreaterThanOrEqual(before + 2);
   expect(await page.evaluate(() => document.body.dataset.noticeGone)).toBeUndefined();
   await axe(page);
   await shots(page, '20-screens-status-not-current');

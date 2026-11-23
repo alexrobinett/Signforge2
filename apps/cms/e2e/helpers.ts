@@ -1,8 +1,9 @@
 import AxeBuilder from '@axe-core/playwright';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { expect, request as playwrightRequest, type Page, type Route } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
+import { slugify } from '../src/lib/paths';
 import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor } from './servers';
 
 /**
@@ -169,8 +170,9 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
  * Run axe on the page as it is, in the light theme and the dark, and fail on any violation
  * (results axe cannot decide, such as text over a gradient, are not failures). Transitions and
  * animations are off in the top document while it runs: else it reads colours halfway through the
- * theme change, or a dialog's fade. The spot editor's preview is checked too: the real player
- * showing a template, so every base template's text must read on its colours (#57). Its template
+ * theme change, or a dialog's fade. The spot editor's preview is checked too, in the light pass: the
+ * real player showing a template, so every base template's text must read on its colours (#57). The
+ * dark pass leaves the player's frames out, as the CMS's `.dark` never reaches them. Its template
  * frames keep playing, so each is held at rest, after its intro and before its outro (which starts
  * at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70). The next play
  * restarts them. The player's own slots fade between spots, and an analysis during that fade reads
@@ -180,8 +182,10 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
   const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
-  for (const dark of [false, true]) {
-    await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), dark);
+  const report = (theme: string, violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violations']) =>
+    violations.flatMap((v) => v.nodes.map((n) => `${theme} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`));
+  try {
+    await page.evaluate(() => document.documentElement.classList.remove('dark'));
     // A play or slot fade that began during an analysis may have shown it a spot mid-intro or half
     // faded: settle, hold, analyse again. A stage looping 4 s spots can do that several times.
     let found: string[] = [];
@@ -192,17 +196,18 @@ export async function axe(page: Page) {
       const fades = await slotFades(page);
       if (fades === undefined) continue;
       await holdTemplates(page);
-      const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-      found = violations.flatMap((v) =>
-        v.nodes.map((n) => `${dark ? 'dark' : 'light'} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`),
-      );
+      found = report('light', (await new AxeBuilder({ page }).withTags(WCAG).analyze()).violations);
       held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
     }
     expect(held, 'a template frame started a play, or a player slot a fade, during each of 5 analyses').toBe(true);
     expect(found, page.url()).toEqual([]);
+    await page.evaluate(() => document.documentElement.classList.add('dark'));
+    expect(report('dark', (await new AxeBuilder({ page }).withTags(WCAG).exclude('iframe').analyze()).violations), page.url()).toEqual([]);
+  } finally {
+    // Also after a failure, so the test's own teardown and screenshots see the page as it was.
+    await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
+    await still.evaluate((el) => el.parentNode?.removeChild(el));
   }
-  await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
-  await still.evaluate((el) => el.parentNode?.removeChild(el));
 }
 
 /**
@@ -314,11 +319,16 @@ export async function d1(sql: string) {
   expect(JSON.parse(body), body).toMatchObject({ success: true });
 }
 
-/** As a member with no org yet: make one called `name`, as the first page asks, and land on it. */
+/**
+ * Make an org called `name` through the API, as the CMS does (it becomes the active org), and land
+ * on it. Only sign-in-and-orgs.spec.ts makes one through the page. Slugs are global and a spec may
+ * make two orgs of one name, so each gets its own.
+ */
 export async function createOrg(page: Page, name: string) {
+  const slug = `${slugify(name)}-${randomUUID().slice(0, 8)}`;
+  const res = await page.request.post('/api/auth/organization/create', { headers: { origin: CMS_URL }, data: { name, slug } });
+  expect(res.status(), await res.text()).toBe(200);
   await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', name, 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
 }
 

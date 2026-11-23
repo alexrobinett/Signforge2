@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { axe, fillUntilEnabled, fromAddress, orgSwitcher, screenshot, signIn } from './helpers';
+import { axe, createOrg, fromAddress, orgSwitcher, screenshot, signIn } from './helpers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
 const ADDRESS = '192.0.2.124';
@@ -9,9 +9,7 @@ test('at phone width, navigation is a drawer and the dashboard works', async ({ 
   await fromAddress(page, ADDRESS);
   await page.goto('/sign-in');
   await signIn(page, email);
-  await fillUntilEnabled(page, 'Organization name', 'Pocket Signs', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Pocket Signs', level: 1 })).toBeVisible();
+  await createOrg(page, 'Pocket Signs');
 
   // No horizontal scroll at phone width.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

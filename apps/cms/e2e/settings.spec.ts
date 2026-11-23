@@ -300,8 +300,8 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await axe(page);
   await shots(page, '46-settings-members-phone');
+  // Scrolled, not changed: the axe run above covered it.
   await toTop(page.getByRole('region', { name: 'Who publishes' }));
-  await axe(page);
   await shots(page, '50-settings-who-publishes-phone');
   await page.goto('/settings/notifications');
   await axe(page);

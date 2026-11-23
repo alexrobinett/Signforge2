@@ -1,5 +1,5 @@
 import { expect, type Request, test } from '@playwright/test';
-import { fillUntilEnabled, hydrated, signInAs } from './helpers';
+import { createOrg, hydrated, signInAs } from './helpers';
 import { CMS_URL } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
@@ -23,10 +23,7 @@ test('a session that ends while the app is open goes to sign-in and back, from a
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-ended-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Harbour Books', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Harbour Books', level: 1 })).toBeVisible();
+  await createOrg(page, 'Harbour Books');
 
   await page.context().clearCookies();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
@@ -38,10 +35,7 @@ test('a session that ends on Spots or in the spot editor goes to sign-in at once
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-ended-spots-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Quay Florist', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Quay Florist', level: 1 })).toBeVisible();
+  await createOrg(page, 'Quay Florist');
   const spotsLink = page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' });
   await spotsLink.click();
   await hydrated(page);

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
+import { axe, createOrg, hydrated, publishImage, shots, signInAs } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.131';
@@ -34,10 +34,7 @@ test('a new org opens a test screen, pairs it, publishes to it and sees it play 
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-test-screen-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Test Kitchen', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Test Kitchen', level: 1 })).toBeVisible();
+  await createOrg(page, 'Test Kitchen');
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
   await hydrated(page);
   await axe(page);

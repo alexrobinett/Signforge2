@@ -1,5 +1,5 @@
 import { expect, test, type Request } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, screenshot, signInAs, tool } from './helpers';
+import { axe, createOrg, hydrated, screenshot, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
@@ -11,10 +11,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-command-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Riverside Deli', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Riverside Deli', level: 1 })).toBeVisible();
+  await createOrg(page, 'Riverside Deli');
   await hydrated(page);
 
   const menu = page.getByRole('dialog', { name: 'Command menu' });

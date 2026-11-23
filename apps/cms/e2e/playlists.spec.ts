@@ -258,8 +258,9 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
     )
     .toBe(true);
   await axe(page);
-  const scans = (await stage!.evaluate(() => document.documentElement.dataset.scans ?? '')).split(' ');
-  expect(scans.length).toBeGreaterThanOrEqual(2);
+  // The light pass reads the stage; the dark leaves the player's frames out.
+  const scans = (await stage!.evaluate(() => document.documentElement.dataset.scans ?? '')).split(' ').filter(Boolean);
+  expect(scans.length).toBeGreaterThanOrEqual(1);
   // Every scan saw each slot fully shown or fully hidden, and one shown.
   for (const scan of scans) {
     const opacities = scan.split('/').map(Number);

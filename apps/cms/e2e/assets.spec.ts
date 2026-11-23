@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { png, rotatedPhoto } from '@signforge/media/testing';
-import { axe, disabledOnServer, fillUntilEnabled, hydrated, shots, signInAs } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.21';
@@ -8,9 +8,7 @@ const ADDRESS = '192.0.2.21';
 test('upload images, search them by name, see which are in use, and delete one no spot uses', async ({ page }) => {
   test.setTimeout(120_000);
   await signInAs(page, `e2e-assets-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Studio', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
+  await createOrg(page, 'Northside Studio');
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
   await expect(page.getByRole('heading', { name: 'No images yet' })).toBeVisible();
   // In the server's HTML the file input is disabled: files chosen before the page hydrated were never uploaded (#140).
