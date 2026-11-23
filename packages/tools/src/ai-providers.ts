@@ -6,7 +6,7 @@
  * a Milestone 4 grant and the in-CMS agent alike: a key decides who pays and what data leaves
  * SignForge, so only a person sets it.
  */
-import type { AiProviderRow } from '@signforge/db';
+import { type AiProviderRow, StaleVersionError } from '@signforge/db';
 import { z } from 'zod';
 import { ifVersion } from './fields';
 import { AI_PROVIDERS, type aiProviderView, outputs } from './outputs';
@@ -110,7 +110,7 @@ const saveAiProvider = defineTool({
 const testAiProvider = defineTool({
   name: 'test_ai_provider',
   description:
-    "Test the organization's saved model key, owners only, and only a person: a minimal request to the provider, which costs no tokens, that lists the models the key may use. A key that works is marked verified. Returns { ok, models, problem, provider }.",
+    "Test the organization's saved model key, owners only, and only a person: a minimal request to the provider, which costs no tokens, that lists the models the key may use. A key that works is marked verified, and one the provider refuses is no longer, unless the key was replaced while it ran. Returns { ok, models, problem, provider }: the provider as stored now.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
@@ -124,28 +124,39 @@ const testAiProvider = defineTool({
     const current = await org.aiProvider.get();
     if (!current) throw new ToolError('not_found', 'no model key is saved: save one first');
     const result = await aiProviders.test({ orgId: org.orgId, provider: current.provider }, current.keySealed);
-    if (!result.ok) return { ok: false, models: [], problem: result.problem, provider: viewOf(current) };
-    const row = write(await org.aiProvider.stage.put({ verifiedAt: Date.now() }));
-    return { ok: true, models: result.models, problem: null, provider: viewOf(row) };
+    const answer = result.ok ? { ok: true, models: result.models, problem: null } : { ok: false, models: [], problem: result.problem };
+    // The mark is for the key tested: only while the row is still the version read, so a key replaced while the test ran is not marked.
+    const verifiedAt = result.ok ? Date.now() : result.problem === 'refused' ? null : current.verifiedAt;
+    if (verifiedAt === current.verifiedAt) return { ...answer, provider: viewOf(current) };
+    try {
+      return { ...answer, provider: viewOf(write(await org.aiProvider.stage.put({ verifiedAt }, current.rowVersion))) };
+    } catch (err) {
+      if (!(err instanceof StaleVersionError)) throw err;
+      const now = await org.aiProvider.get();
+      // Removed while it was tested: a conflict, as any change to what was read.
+      if (!now) throw err;
+      return { ...answer, provider: viewOf(now) };
+    }
   },
 });
 
 const removeAiProvider = defineTool({
   name: 'remove_ai_provider',
   description:
-    "Forget the organization's own model key, its models and ceiling, owners only, and only a person: the agent goes back to SignForge's demo model. Returns { removed }: false if none was saved.",
+    "Forget the organization's own model key, its models and ceiling, owners only, and only a person: the agent goes back to SignForge's demo model. Returns { removed, provider }: false and null if none was saved.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
   input: z.object({}),
   output: outputs.remove_ai_provider,
   example: {},
-  target: () => target('provider'),
+  target: (_input, output) => (output.provider ? target(output.provider) : undefined),
   handler: async ({ org, actor, write }) => {
     refuseAgents(actor);
-    if (!(await org.aiProvider.get())) return { removed: false };
+    const current = await org.aiProvider.get();
+    if (!current) return { removed: false, provider: null };
     write(org.aiProvider.stage.remove());
-    return { removed: true };
+    return { removed: true, provider: current.provider };
   },
 });
 

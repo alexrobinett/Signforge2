@@ -42,6 +42,18 @@ describe('the AI provider service', () => {
     expect(asked).toEqual([{ url: 'https://api.anthropic.com/v1/models?limit=100', key: `Bearer ${KEY}` }]);
   });
 
+  it("sends a deployed API's key to Anthropic even with ANTHROPIC_BASE_URL in process.env, where the SDK would read it (review of #280)", async () => {
+    const { fetch, asked } = anthropic(200);
+    process.env.ANTHROPIC_BASE_URL = 'https://elsewhere.test';
+    try {
+      const service = aiProviders(PROD, fetch);
+      await service.test(ORG, await service.seal(ORG, KEY));
+    } finally {
+      delete process.env.ANTHROPIC_BASE_URL;
+    }
+    expect(asked.map((a) => a.url)).toEqual(['https://api.anthropic.com/v1/models?limit=100']);
+  });
+
   it('opens a key only for the org and provider it was sealed for', async () => {
     const { fetch, asked } = anthropic(200);
     const service = aiProviders(DEV, fetch);

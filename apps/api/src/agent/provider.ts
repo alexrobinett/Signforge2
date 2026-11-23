@@ -24,8 +24,13 @@ type Problem = Extract<AiProviderTest, { ok: false }>['problem'];
 /** How long a provider has to answer a test. */
 const TEST_TIMEOUT_MS = 10_000;
 
-function anthropicProvider(apiKey: string, options: { baseURL?: string; fetch: typeof fetch }): ModelProvider {
+/** Where a deployed API sends an org's key: Anthropic's API and nowhere else. */
+const ANTHROPIC_API = 'https://api.anthropic.com';
+
+function anthropicProvider(apiKey: string, options: { baseURL: string; fetch: typeof fetch }): ModelProvider {
   // No retries (the person presses Test again), and no SDK logging: nothing it could log reaches the Worker's logs.
+  // Every setting is passed: the SDK reads what it is not given from process.env (ANTHROPIC_BASE_URL,
+  // ANTHROPIC_CUSTOM_HEADERS), where Workers puts the deployment's vars and secrets.
   const client = new Anthropic({ apiKey, baseURL: options.baseURL, fetch: options.fetch, maxRetries: 0, timeout: TEST_TIMEOUT_MS, logLevel: 'off' });
   return {
     listModels: async () => (await client.models.list({ limit: 100 })).data.map((m) => m.id),
@@ -45,7 +50,7 @@ function problemOf(err: unknown): Problem {
  * e2e's stub), as `GEOCODING_URL` does for places; a deployed API never sends a key elsewhere.
  */
 export function aiProviders(env: Pick<Env, 'CONNECTION_KEY' | 'ENVIRONMENT' | 'ANTHROPIC_BASE_URL'>, fetcher: typeof fetch = workerFetch): AiProviders {
-  const baseURL = (env.ENVIRONMENT === 'dev' && env.ANTHROPIC_BASE_URL) || undefined;
+  const baseURL = env.ENVIRONMENT === 'dev' && env.ANTHROPIC_BASE_URL ? env.ANTHROPIC_BASE_URL : ANTHROPIC_API;
   return {
     seal: (key, apiKey) => sealAiKey(env, key, apiKey),
     test: async (key, sealed) => {

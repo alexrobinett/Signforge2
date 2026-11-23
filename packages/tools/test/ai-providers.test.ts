@@ -95,6 +95,37 @@ describe('the AI provider tools', () => {
     expect(tested.at(-1)).toBe(`${o.orgId}/anthropic:sealed:${o.orgId}/anthropic:${KEY_2.length}`);
   });
 
+  it('marks a key verified only if it is still the key tested: one replaced while the test ran is not (review of #280)', async () => {
+    const org = scoped(env.DB, o.orgId);
+    const before = await org.aiProvider.get();
+    const racing: AiProviders = {
+      ...aiProviders,
+      test: async () => {
+        // The owner replaces the key in another tab while the old one is being tested.
+        await org.commit((await org.aiProvider.stage.put({ keySealed: 'sealed:new', keyLast4: 'NeW1', verifiedAt: null })).writes);
+        return { ok: true, models: ['claude-haiku-5-5'] };
+      },
+    };
+    const raced = await call('test_ai_provider', {}, { ...as('owner'), services: { ...fakeServices, aiProviders: racing } });
+    expect(raced).toMatchObject({ ok: true, output: { ok: true, provider: { keyLast4: 'NeW1', verifiedAt: null, version: before!.rowVersion + 1 } } });
+    expect(await org.aiProvider.get()).toMatchObject({ keyLast4: 'NeW1', verifiedAt: null });
+    // Put the key the other tests expect back.
+    await org.commit((await org.aiProvider.stage.put({ keySealed: before!.keySealed, keyLast4: before!.keyLast4 })).writes);
+  });
+
+  it('takes away the verified mark when the provider refuses the key, and keeps it while the provider is only busy (review of #280)', async () => {
+    const org = scoped(env.DB, o.orgId);
+    answer = { ok: true, models: ['claude-haiku-5-5'] };
+    await call('test_ai_provider', {});
+    const verified = (await org.aiProvider.get())!.verifiedAt;
+    expect(verified).not.toBeNull();
+    answer = { ok: false, problem: 'busy' };
+    expect(await call('test_ai_provider', {})).toMatchObject({ ok: true, output: { ok: false, problem: 'busy', provider: { verifiedAt: verified } } });
+    answer = { ok: false, problem: 'refused' };
+    expect(await call('test_ai_provider', {})).toMatchObject({ ok: true, output: { ok: false, problem: 'refused', provider: { verifiedAt: null } } });
+    expect((await org.aiProvider.get())!.verifiedAt).toBeNull();
+  });
+
   it('takes only exact-looking model ids, and changes only the version read', async () => {
     expect(await call('save_ai_provider', { provider: 'anthropic', fastModel: 'haiku please' })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await call('save_ai_provider', { provider: 'anthropic', dailyTurnCeiling: 0 })).toMatchObject({ ok: false, error: 'invalid_input' });
@@ -132,10 +163,15 @@ describe('the AI provider tools', () => {
   });
 
   it('remove the sealed key, and the org goes back to the demo model', async () => {
-    expect(await call('remove_ai_provider', {})).toEqual({ ok: true, output: { removed: true } });
+    expect(await call('remove_ai_provider', {})).toEqual({ ok: true, output: { removed: true, provider: 'anthropic' } });
+    // Its audit row names the same target as save and test.
+    const rows = await scoped(env.DB, o.orgId).auditLog.list({ limit: 100 });
+    const targets = new Set(rows.filter((r) => r.action.endsWith('_ai_provider')).map((r) => `${r.targetKind}/${r.targetId}`));
+    expect(targets).toEqual(new Set(['ai_provider/anthropic']));
+    expect(rows.some((r) => r.action === 'remove_ai_provider')).toBe(true);
     expect(await scoped(env.DB, o.orgId).aiProvider.get()).toBeUndefined();
     expect(await call('get_ai_provider', {}, as('viewer'))).toEqual({ ok: true, output: { provider: null } });
-    expect(await call('remove_ai_provider', {})).toEqual({ ok: true, output: { removed: false } });
+    expect(await call('remove_ai_provider', {})).toEqual({ ok: true, output: { removed: false, provider: null } });
     expect(await call('test_ai_provider', {})).toMatchObject({ ok: false, error: 'not_found' });
     expect(await call('save_ai_provider', { provider: 'anthropic', fastModel: null })).toMatchObject({ ok: false, error: 'invalid_input' });
   });

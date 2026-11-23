@@ -749,7 +749,10 @@ export const outputs = {
     problem: z.enum(['refused', 'busy', 'unreachable']).nullable().describe('Why not: the provider refused the key, was busy, or did not answer'),
     provider: aiProviderView,
   }),
-  remove_ai_provider: z.object({ removed: z.boolean() }),
+  remove_ai_provider: z.object({
+    removed: z.boolean(),
+    provider: z.enum(AI_PROVIDERS).nullable().describe('The provider whose key was removed; null if none was saved'),
+  }),
   test_alert_channel: z.object({ delivery: deliveryView }),
   list_alert_deliveries: z.object({ deliveries: z.array(deliveryView), next: nextOutput }),
   retry_alert_delivery: z.object({ delivery: deliveryView }),
