@@ -1,7 +1,9 @@
 /**
  * The org's own model provider for its built-in agent (#261, docs/proposals/cms-agent.md): an owner
  * saves, tests and removes its key and chooses its models; every member reads which provider and
- * models it uses, never the key. The key is sealed by the API before it is stored (`AiProviders`)
+ * models it uses, never the key. The provider is Anthropic, or an OpenAI-compatible endpoint at an
+ * https address the owner gives (#262): checked here as a feed URL is, and by the API's fetch guards
+ * on every request; its key is sealed for that address, so a new address needs the key again. The key is sealed by the API before it is stored (`AiProviders`)
  * and only the API opens it, to call the provider. Saving, testing and removing it refuse an agent,
  * a Milestone 4 grant and the in-CMS agent alike: a key decides who pays and what data leaves
  * SignForge, so only a person sets it.
@@ -10,10 +12,13 @@ import { type AiProviderRow, StaleVersionError } from '@signforge/db';
 import { z } from 'zod';
 import { ifVersion } from './fields';
 import { AI_PROVIDERS, type aiProviderView, outputs } from './outputs';
+import { feedUrlProblem, type FeedUrlProblem } from '@signforge/feeds';
 import { type Actor, defineTool, isAgent, ToolError } from './tool';
 
 const viewOf = (p: AiProviderRow): z.infer<typeof aiProviderView> => ({
   provider: p.provider,
+  baseUrl: p.baseUrl,
+  supports: p.provider === 'anthropic' ? { images: true, jsonSchema: true } : { images: p.acceptsImages, jsonSchema: p.jsonSchemaOutput },
   keyLast4: p.keyLast4,
   keySavedBy: p.keySavedBy,
   keySavedAt: p.keySavedAt,
@@ -48,6 +53,29 @@ const modelId = z
   .nullable()
   .describe("An exact model id from the provider's list (test_ai_provider), never an alias; null to unset");
 
+const URL_PROBLEMS: Record<FeedUrlProblem, string> = {
+  'bad-url': 'not a URL',
+  'not-https': 'the endpoint must be https',
+  port: 'the endpoint must use the default https port',
+  'ip-literal': 'the endpoint must name a host, not an IP address',
+  'private-address': 'the host is a local name',
+};
+
+/** An endpoint's base address: the fetch-safety rules of feed URLs, no query or fragment, kept without a trailing slash. */
+const baseUrl = z
+  .string()
+  .trim()
+  .max(2048)
+  .superRefine((url, ctx) => {
+    const problem = feedUrlProblem(url);
+    if (problem) ctx.addIssue({ code: 'custom', message: URL_PROBLEMS[problem] });
+    else if (/[?#]/.test(url)) ctx.addIssue({ code: 'custom', message: 'the endpoint is a base address, with no query or fragment' });
+  })
+  .transform((url) => url.replace(/\/+$/, ''))
+  .describe(
+    "An OpenAI-compatible endpoint's base address, such as https://api.openai.com/v1 or https://generativelanguage.googleapis.com/v1beta/openai: https, the default port, a public host. Its models are at <base>/models",
+  );
+
 const getAiProvider = defineTool({
   name: 'get_ai_provider',
   description:
@@ -67,7 +95,7 @@ const getAiProvider = defineTool({
 const saveAiProvider = defineTool({
   name: 'save_ai_provider',
   description:
-    "Set the organization's own model provider for its agent, owners only, and only a person: its API key (stored encrypted, never shown again), the fast and capable models, and a daily ceiling of agent turns. The first save needs apiKey; afterwards give only what changes. Pass the version you read as ifVersion to change only that one. Returns { provider }.",
+    "Set the organization's own model provider for its agent, owners only, and only a person: Anthropic, or an OpenAI-compatible endpoint at baseUrl, its API key (stored encrypted, never shown again), the fast and capable models, a daily ceiling of agent turns, and for an endpoint whether it takes images and returns JSON-schema output. The first save of a provider, and a new baseUrl, need apiKey; afterwards give only what changes. Pass the version you read as ifVersion to change only that one. Returns { provider }.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
@@ -78,6 +106,9 @@ const saveAiProvider = defineTool({
     fastModel: modelId.optional(),
     capableModel: modelId.optional(),
     dailyTurnCeiling: z.number().int().min(1).max(100_000).nullable().optional().describe('Agent turns a day across the org; null for none'),
+    baseUrl: baseUrl.optional(),
+    acceptsImages: z.boolean().optional().describe('An endpoint: whether its models take images (Fill from a flyer needs it)'),
+    jsonSchemaOutput: z.boolean().optional().describe('An endpoint: whether it returns output to a JSON schema (response_format json_schema; Fill needs it)'),
     ifVersion,
   }),
   output: outputs.save_ai_provider,
@@ -86,23 +117,35 @@ const saveAiProvider = defineTool({
   handler: async ({ org, actor, input, write, services: { aiProviders } }) => {
     refuseAgents(actor);
     const current = await org.aiProvider.get();
-    if (!input.apiKey && current?.provider !== input.provider) throw new ToolError('invalid_input', `saving ${input.provider} the first time needs its apiKey`);
+    const endpoint = input.provider === 'openai-compatible';
+    if (!endpoint && (input.baseUrl !== undefined || input.acceptsImages !== undefined || input.jsonSchemaOutput !== undefined))
+      throw new ToolError('invalid_input', "Anthropic's address and features are fixed: baseUrl, acceptsImages and jsonSchemaOutput are for an OpenAI-compatible endpoint");
+    const switching = current?.provider !== input.provider;
+    // The key goes only to the address it was saved for: one at a new address is given again.
+    const address = endpoint ? (input.baseUrl ?? (switching ? null : (current?.baseUrl ?? null))) : null;
+    if (endpoint && !address) throw new ToolError('invalid_input', 'an OpenAI-compatible endpoint needs its baseUrl');
+    const moved = !switching && address !== (current?.baseUrl ?? null);
+    if (!input.apiKey && (switching || moved))
+      throw new ToolError('invalid_input', switching ? `saving ${input.provider} the first time needs its apiKey` : 'a new baseUrl needs the apiKey again: a key is sent only to the address it was saved for');
     const key = input.apiKey && {
-      keySealed: await aiProviders.seal({ orgId: org.orgId, provider: input.provider }, input.apiKey),
+      keySealed: await aiProviders.seal({ orgId: org.orgId, provider: input.provider, baseUrl: address }, input.apiKey),
       keyLast4: input.apiKey.slice(-4),
       keySavedBy: actor.id,
       keySavedAt: Date.now(),
       // A new key has not reached the provider yet.
       verifiedAt: null,
     };
-    // Only what was given: a field left out keeps its value.
-    const { fastModel, capableModel, dailyTurnCeiling } = input;
+    // Only what was given: a field left out keeps its value. Another provider's models and features do not carry over.
+    const { fastModel, capableModel, dailyTurnCeiling, acceptsImages, jsonSchemaOutput } = input;
     const choices = {
+      ...(switching && { fastModel: null, capableModel: null, acceptsImages: false, jsonSchemaOutput: false }),
       ...(fastModel !== undefined && { fastModel }),
       ...(capableModel !== undefined && { capableModel }),
       ...(dailyTurnCeiling !== undefined && { dailyTurnCeiling }),
+      ...(acceptsImages !== undefined && { acceptsImages }),
+      ...(jsonSchemaOutput !== undefined && { jsonSchemaOutput }),
     };
-    const row = write(await org.aiProvider.stage.put({ provider: input.provider, ...key, ...choices }, input.ifVersion));
+    const row = write(await org.aiProvider.stage.put({ provider: input.provider, baseUrl: address, ...key, ...choices }, input.ifVersion));
     return { provider: viewOf(row) };
   },
 });
@@ -123,7 +166,7 @@ const testAiProvider = defineTool({
     refuseAgents(actor);
     const current = await org.aiProvider.get();
     if (!current) throw new ToolError('not_found', 'no model key is saved: save one first');
-    const result = await aiProviders.test({ orgId: org.orgId, provider: current.provider }, current.keySealed);
+    const result = await aiProviders.test({ orgId: org.orgId, provider: current.provider, baseUrl: current.baseUrl }, current.keySealed);
     const answer = result.ok ? { ok: true, models: result.models, problem: null } : { ok: false, models: [], problem: result.problem };
     // The mark is for the key tested: only while the row is still the version read and holds that key, so a key
     // replaced while the test ran, or removed and saved again (whose version starts over), is not marked.

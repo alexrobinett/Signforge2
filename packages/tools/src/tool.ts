@@ -175,7 +175,15 @@ export interface Connectors {
 }
 
 /** What a test of an org's key came to: the models the provider offers it, or why it could not be reached, in a word. */
-export type AiProviderTest = { ok: true; models: string[] } | { ok: false; problem: 'refused' | 'busy' | 'unreachable' };
+export type AiProviderTest = { ok: true; models: string[] } | { ok: false; problem: 'refused' | 'busy' | 'unreachable' | 'blocked' };
+
+/** Which key a sealed value is: the org's, for a provider, and for an OpenAI-compatible endpoint the address it was saved for. */
+export interface AiKey {
+  orgId: string;
+  provider: AiProviderName;
+  /** An OpenAI-compatible endpoint's base address; null for Anthropic. A key opens only for the address it was sealed with. */
+  baseUrl: string | null;
+}
 
 /**
  * What the AI provider tools need from the API (apps/api/src/agent): sealing an org's key, and
@@ -183,10 +191,13 @@ export type AiProviderTest = { ok: true; models: string[] } | { ok: false; probl
  * response, audit row or log line holds it.
  */
 export interface AiProviders {
-  /** The key, sealed for the org and provider (the connectors' vault, `ai-key:<org>/<provider>`). */
-  seal(key: { orgId: string; provider: AiProviderName }, apiKey: string): Promise<string>;
-  /** A minimal request with the sealed key: the provider's model list, which costs no tokens. */
-  test(key: { orgId: string; provider: AiProviderName }, sealed: string): Promise<AiProviderTest>;
+  /** The key, sealed for the org, the provider and an endpoint's address (the connectors' vault, `ai-key:`). */
+  seal(key: AiKey, apiKey: string): Promise<string>;
+  /**
+   * A minimal request with the sealed key: the provider's model list, which costs no tokens. An
+   * endpoint's address goes through the fetch guards on every hop (`blocked` when it may not be reached).
+   */
+  test(key: AiKey, sealed: string): Promise<AiProviderTest>;
 }
 
 /**
