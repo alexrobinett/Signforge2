@@ -29,20 +29,21 @@ describe('the status', () => {
 });
 
 describe('tokens', () => {
-  it.each([['no token', ''], ['an unknown token', 'Bearer test-write-tokenx'], ['a token without Bearer', 'test-write-token']])(
-    'refuses %s on every route',
-    async (_, auth) => {
-      for (const [path, method] of [
-        ['/status', 'GET'],
-        ['/0123abcd?slug=signforge', 'GET'],
-        ['/0123abcd?slug=signforge', 'HEAD'],
-        ['/0123abcd?slug=signforge', 'PUT'],
-      ] as const) {
-        const res = await call(path, { method, auth, body: method === 'PUT' ? 'x' : undefined });
-        expect(res.status, `${method} ${path}`).toBe(401);
-      }
-    },
-  );
+  it.each([
+    ['no token', ''],
+    ['an unknown token', 'Bearer test-write-tokenx'],
+    ['a token without Bearer', 'test-write-token'],
+  ])('refuses %s on every route', async (_, auth) => {
+    for (const [path, method] of [
+      ['/status', 'GET'],
+      ['/0123abcd?slug=signforge', 'GET'],
+      ['/0123abcd?slug=signforge', 'HEAD'],
+      ['/0123abcd?slug=signforge', 'PUT'],
+    ] as const) {
+      const res = await call(path, { method, auth, body: method === 'PUT' ? 'x' : undefined });
+      expect(res.status, `${method} ${path}`).toBe(401);
+    }
+  });
 
   it('lets the read token read but not write, with the error turbo reads on a 403', async () => {
     await upload('aa01', 'from CI');
@@ -104,7 +105,10 @@ describe('teams', () => {
     expect(await bytes(await call('/cc01?teamId=signforge'))).toBe('signforge’s');
   });
 
-  it.each([['no team', ''], ['a team with a slash', '?slug=a/b']])('refuses %s', async (_, query) => {
+  it.each([
+    ['no team', ''],
+    ['a team with a slash', '?slug=a/b'],
+  ])('refuses %s', async (_, query) => {
     const res = await call(`/cc02${query}`);
     expect(res.status).toBe(400);
   });
