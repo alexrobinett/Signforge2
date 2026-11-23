@@ -8,9 +8,8 @@ const ADDRESS = '192.0.2.41';
 const SCREEN_ADDRESS = '192.0.2.42';
 
 test('a change shows in the audit log, filters to it, pages and exports, with the pairing code redacted', async ({ page, request }) => {
-  test.setTimeout(120_000);
   await signInAs(page, `e2e-audit-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Clinic');
+  await createOrg(page, 'Northside Clinic', ADDRESS);
 
   // A change in the CMS: the org's time zone.
   await page.goto('/settings/general');
@@ -137,7 +136,7 @@ test("the audit log's filters, search and Export CSV are disabled in the server'
   // The page hydrates after the app (body[data-hydrated]): a filter chosen in between was set back
   // by React, the browser's own submit put the search in the URL, and Export CSV made no file.
   await signInAs(page, `e2e-audit-server-${Date.now()}@example.com`, '192.0.2.49');
-  await createOrg(page, 'Northside Clinic');
+  await createOrg(page, 'Northside Clinic', '192.0.2.49');
   const names = ['Who', 'What', 'Target', 'When', 'Search', 'Export CSV'];
   expect(await disabledOnServer(page, '/audit', names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   expect(await disabledOnServer(page, '/audit?when=day', ['Clear filters'])).toEqual({ 'Clear filters': [true] });
@@ -150,7 +149,7 @@ test("the audit log's filters, search and Export CSV are disabled in the server'
 test("searching the audit log for an invitee's email keeps it out of the page's URL and every request's (#140)", async ({ page }) => {
   // A search can be an email or a name: in a URL it reaches history, a Referer and the Worker's request logs.
   await signInAs(page, `e2e-audit-search-${Date.now()}@example.com`, '192.0.2.50');
-  await createOrg(page, 'Northside Clinic');
+  await createOrg(page, 'Northside Clinic', '192.0.2.50');
   const invitee = `e2e-audit-invitee-${Date.now()}@example.com`;
   await page.goto('/settings/members');
   await hydrated(page);

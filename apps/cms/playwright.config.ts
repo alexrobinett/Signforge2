@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import { CMS_URL } from './e2e/servers';
 
-// `pnpm test:e2e`: starts the API (`wrangler dev`) and the CMS (`vite dev`) on their own ports,
+// `pnpm test:e2e`: starts the API (`wrangler dev`) and the built CMS (`vite preview`) on their own ports,
 // with a fresh local database and dev registry, then signs in, creates and switches orgs.
 // Better Auth's rate limits apply, per address: each spec that signs in comes from its own
 // (`fromAddress`, `signInAs` in e2e/helpers.ts), so their sign-ins never add up. Org slugs are
@@ -10,15 +10,15 @@ import { CMS_URL } from './e2e/servers';
 export default defineConfig({
   testDir: 'e2e',
   globalSetup: './e2e/global-setup.ts',
-  // A spec's tests run in order, in one worker; specs run side by side. Three workers take the
-  // run from 13.7 to 5.6 min on a laptop. CI's runner has 2 cores, which the API, the CMS and one
-  // browser already keep 67% busy: 2 or 3 workers there saved 10-30% but failed 7 runs of 8 on
-  // timeouts and fades that never settled (#249, docs/ci.md).
+  // A spec's tests run in order, in one worker; specs run side by side. Three workers, on a laptop
+  // and on CI's 4-core runner: there they take the run from 15-16 min to about 7, against the built
+  // CMS (#283, docs/ci.md). On a 2-core runner they failed on timeouts and fades (#249).
   fullyParallel: false,
-  workers: process.env.CI ? 1 : 3,
+  workers: 3,
   timeout: 60_000,
   expect: { timeout: 10_000 },
-  reporter: [['list']],
+  // The HTML report has each test's time and, on a failure, its trace; CI uploads it then.
+  reporter: [['list'], ['html', { open: 'never' }]],
   use: { baseURL: CMS_URL, trace: 'retain-on-failure' },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'] }, testIgnore: /phone|table-sources/ },

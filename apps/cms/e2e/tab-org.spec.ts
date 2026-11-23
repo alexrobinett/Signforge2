@@ -14,7 +14,7 @@ const refusal = 'This tab is on Northside Florist; you switched to Southside Del
 /** A member in Northside Florist (active) and Southside Deli, with `stale` open on `path` in Northside. */
 async function twoOrgs(page: Page, address: string, path: string) {
   await signInAs(page, `e2e-tab-org-${address}-${Date.now()}@example.com`, address);
-  await createOrg(page, 'Northside Florist');
+  await createOrg(page, 'Northside Florist', address);
   const south = await page.request.post('/api/auth/organization/create', {
     data: { name: 'Southside Deli', slug: `southside-${Date.now()}`, keepCurrentActiveOrganization: true },
     headers: { origin: CMS_URL },
