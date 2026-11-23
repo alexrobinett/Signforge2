@@ -57,6 +57,9 @@ describe('an OpenAI-compatible endpoint', () => {
       'https://api.openai.com@evil.example.net/v1',
       // A password would be stored in clear, shown to every member and kept in the audit log.
       'https://user:pw@api.example.com/v1',
+      // U+2044 FRACTION SLASH: reads as api.openai.com/v1…, goes to a host under evil.example.net (re-check of #302).
+      'https://api.openai.com\u2044v1.evil.example.net',
+      'https://ＡＰＩ.openai.com/v1',
       'https://api.example.com/v1?key=x',
       'https://api.example.com/v1#frag',
       'not a url',
@@ -64,6 +67,15 @@ describe('an OpenAI-compatible endpoint', () => {
       expect(await call('save_ai_provider', endpoint({ baseUrl, apiKey: KEY })), baseUrl).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await org.aiProvider.get()).toBeUndefined();
     expect(sealed).toEqual([]);
+  });
+
+  it('keeps the address as the URL parser writes it, so an empty user name is not kept', async () => {
+    const { orgId, call, sealed } = await fresh();
+    for (const typed of ['https://@models.example.com/v1/', 'https://:@models.example.com/v1']) {
+      const result = await call('save_ai_provider', endpoint({ baseUrl: typed, apiKey: KEY }));
+      expect(result, typed).toMatchObject({ ok: true, output: { provider: { baseUrl: 'https://models.example.com/v1' } } });
+    }
+    expect(sealed.at(-1)).toEqual({ orgId, provider: 'openai-compatible', baseUrl: 'https://models.example.com/v1' });
   });
 
   it('needs its address and its key, seals the key for the address, and says what the owner said it supports', async () => {
