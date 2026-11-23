@@ -79,7 +79,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
  * An unverified app's scheme and host are a name it chose, so they are shown only when plain (`plainName`):
  * `signforge://SignForge-CLI/cb` is not (target null: the page says an app on this device).
  */
-function destinationOf(redirectUri: string, verified: boolean): { kind: 'web'; host: string } | { kind: 'app'; target: string | null } {
+export function destinationOf(redirectUri: string, verified: boolean): { kind: 'web'; host: string } | { kind: 'app'; target: string | null } {
   const url = new URL(redirectUri);
   if (url.protocol === 'http:' || url.protocol === 'https:') return { kind: 'web', host: url.host };
   const scheme = url.protocol.slice(0, -1);

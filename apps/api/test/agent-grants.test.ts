@@ -379,39 +379,15 @@ describe("the consent page's request", () => {
     ]);
   });
 
-  it("names an app's own scheme as where its code goes, not as a web host", async () => {
+  it("withholds an unverified app's scheme that reads as SignForge's (the lists: client-names.test.ts)", async () => {
     const { t, owner } = await team();
-    for (const [redirect, target] of [
-      ['com.example.app:/oauth/callback', 'com.example.app:'],
-      ['cursor://anysphere.cursor-retrieval/oauth/callback', 'cursor://anysphere.cursor-retrieval'],
-    ] as const) {
-      const clientId = await register(t, { redirect_uris: [redirect] });
-      const { oauthQuery } = await consentPage(owner, clientId, ALL_SCOPES, redirect);
-      const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
-        client: { redirect: unknown };
-      }>();
-      expect(body.client.redirect, redirect).toEqual({ kind: 'app', target });
-    }
-  });
-
-  it("withholds an unverified app's scheme that reads as SignForge's: the page says an app on this device", async () => {
-    const { t, owner } = await team();
-    for (const redirect of [
-      'signforge://SignForge-CLI/callback',
-      'com.signforge.cli:/callback',
-      'com.example.app://SignForge/callback',
-      // Scheme and host as they read together (the provider wants a path after a custom scheme's host).
-      'sign://forge/cb',
-      'sf://cli/cb',
-      'sign://Forge-CLI/cb',
-    ]) {
-      const clientId = await register(t, { client_name: 'SignForge CLI', redirect_uris: [redirect] });
-      const { oauthQuery } = await consentPage(owner, clientId, ALL_SCOPES, redirect);
-      const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
-        client: { name: string | null; redirect: unknown };
-      }>();
-      expect(body.client, redirect).toMatchObject({ name: null, redirect: { kind: 'app', target: null } });
-    }
+    const redirect = 'signforge://SignForge-CLI/callback';
+    const clientId = await register(t, { client_name: 'Test agent', redirect_uris: [redirect] });
+    const { oauthQuery } = await consentPage(owner, clientId, ALL_SCOPES, redirect);
+    const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
+      client: { name: string | null; redirect: unknown };
+    }>();
+    expect(body.client).toMatchObject({ name: 'Test agent', redirect: { kind: 'app', target: null } });
   });
 
   it('marks the first-party CLI as verified', async () => {
@@ -513,41 +489,21 @@ describe('client registration', () => {
     return Object.entries(REFUSED).find(([, words]) => words === why)?.[0] ?? why;
   };
 
-  it('refuses only a blank name, one too long for the heading, and characters that hide or reorder text', async () => {
+  it('refuses a blank name, one too long for the heading, and characters that hide text (the lists: client-names.test.ts)', async () => {
     const t = testApp();
     for (const [name, why] of [
-      ['Claude‮edoc', 'hides'],
-      ['Claude⁦x⁩', 'hides'],
-      ['Clau​de', 'hides'],
-      ['Claude\nCode', 'hides'],
-      ['Claude\u0000', 'hides'],
-      ['Claude­Code', 'hides'],
-      ['Claude⁠Code', 'hides'],
-      ['Claude\u{E0041}Code', 'hides'],
-      // The Hangul fillers are letters, but blank (the second re-check of #299).
-      ['SignㅤForge', 'hides'],
-      ['SignᅟForge', 'hides'],
-      ['SignᅠForge', 'hides'],
-      ['SignﾠForge', 'hides'],
-      ['', 'blank'],
-      ['   ', 'blank'],
-      [' ', 'blank'],
-      ['   ', 'blank'],
-      ['　', 'blank'],
-      ['ㅤ', 'blank'],
-      ['​', 'blank'],
+      ['\u00A0', 'blank'],
       ['A'.repeat(81), 'long'],
+      ['Sign\u3164Forge', 'hides'],
     ] as const) {
       expect(await refusalOf(t, name), JSON.stringify(name)).toBe(why);
     }
   });
 
-  it("registers a name that reads as SignForge's, or any other the page will not show: registration is not the place", async () => {
-    const t = testApp();
-    for (const name of ['SignForge CLI', 'Claude Code (signforge)', '🆂🅸🅶🅽🅵🅾🆁🅶🅴', 'Ελληνικός βοηθός', 'Sign\u2800Forge', 'Bot 🤖']) {
-      expect(await refusalOf(t, name), name).toBe(201);
-    }
+  it("registers a name that reads as SignForge's: registration is not the place", async () => {
+    expect(await refusalOf(testApp(), 'SignForge CLI')).toBe(201);
   });
+
   it('refuses a confidential client, or one that names no method', async () => {
     const t = testApp();
     for (const method of ['client_secret_post', 'client_secret_basic', undefined]) {
@@ -603,170 +559,17 @@ describe('client registration', () => {
 });
 
 describe("the consent page's name for a client", () => {
-  /**
-   * The name the consent page gets for a client registered under each of `names`: null where it gets
-   * none, and shows an unverified app.
-   */
-  const shownAs = async (names: readonly string[]) => {
-    const t = testApp();
-    const shown: Record<string, string | null> = {};
-    let person = new Client(t);
-    for (const [i, name] of names.entries()) {
-      // Another person every 20, from another address: authorize is rate-limited per address.
-      if (i % 20 === 0) {
-        person = new Client(t);
-        await person.signIn(email('namer'));
-      }
-      const { oauthQuery } = await consentPage(person, await register(t, { client_name: name }));
-      const body = await (await person.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
+  it('withholds a name that reads as SignForge, and shows Claude Code with its server named after it (the lists: client-names.test.ts)', async () => {
+    const { t, owner } = await team();
+    for (const [name, shown] of [
+      ['SI6NFOR6E', null],
+      ['Claude Code (signforge)', 'Claude Code (signforge)'],
+    ] as const) {
+      const { oauthQuery } = await consentPage(owner, await register(t, { client_name: name }));
+      const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
         client: { name: string | null; verified: boolean };
       }>();
-      expect(body.client.verified, name).toBe(false);
-      shown[name] = body.client.name;
+      expect(body.client, name).toMatchObject({ name: shown, verified: false });
     }
-    return shown;
-  };
-  const withheld = (names: string[]) => Object.fromEntries(names.map((name) => [name, null]));
-  const kept = (names: string[]) => Object.fromEntries(names.map((name) => [name, name]));
-
-  it('withholds every name from the reviews of #299 that reads as SignForge, so the page shows an unverified app', async () => {
-    const names = [
-      // The first review, and the tests written for it.
-      'SignForge CLI',
-      'signforge',
-      'SIGNFORGE',
-      'My SignForge helper',
-      'TheSignForge',
-      'Sign Forge',
-      'S-I-G-N-F-O-R-G-E',
-      'ＳｉｇｎＦｏｒｇｅ',
-      'S1gnF0rge',
-      'SIGNF0RGE',
-      '5ignForge',
-      'ѕignforge',
-      'Ѕіgnfоrgе',
-      'sf-cli',
-      'SF CLI',
-      'SF-CL1',
-      'sf_cli tools',
-      '(SignForge)',
-      'SignForge CLI (helper)',
-      // The second: accents, small capitals, Greek, Cyrillic and Cherokee letters.
-      'SIGΝFORGE',
-      'SIԌNFORGE',
-      'SIGNϜORGE',
-      'SígnForge',
-      'SignForgé',
-      'ꜱɪɢɴꜰᴏʀɢᴇ',
-      'ᏚᎥᏀΝFᎾᏒᏀᎬ',
-      '𝐒𝐢𝐠𝐧𝐅𝐨𝐫𝐠𝐞',
-      'ˢⁱᵍⁿᶠᵒʳᵍᵉ',
-      'ꜱғ-ᴄʟɪ',
-      'ΣignForge',
-      'ᏚIGNFORGE',
-      'SᎥgnForge',
-      'Signհorge',
-      // The third: enclosed letters and regional indicators, Hangul and Han letters, CJK dashes,
-      // modifier letters, digits and signs, letters with strokes, and spaced and dotted forms.
-      '🆂🅸🅶🅽🅵🅾🆁🅶🅴',
-      '🅢🅘🅖🅝🅕🅞🅡🅖🅔',
-      '🇸🇮🇬🇳🇫🇴🇷🇬🇪',
-      '🆂🅵 🅲🅻🅸',
-      'SㅣGNFORGE',
-      'S丨GNFORGE',
-      'SIGNF口RGE',
-      'SIGNFロRGE',
-      'Sign一Forge',
-      'SignーForge',
-      'SignㅡForge',
-      'SF一CLI',
-      'SignʼForge',
-      'SignˈForge',
-      'SignˌForge',
-      'SignˍForge',
-      'S!gnForge',
-      'SI6NFOR6E',
-      'SignForg€',
-      'Sign Forg£',
-      'SF CL!',
-      'SignFørge',
-      'SIGNFØRGE',
-      'SigƞForge',
-      'SiǥnForǥe',
-      'SignForɠe',
-      'S.i.g.n Forge',
-      'Sign-Forge',
-      'Sign_Forge',
-      'S·F CLI',
-      'Sign\u2800Forge',
-      // The final re-check: a label that is not after a name, or that a reserved word starts before,
-      // and 9, q, () and ( read as letters.
-      'SignForg(e)',
-      'Sign(Forge)',
-      'S(ignForge)',
-      'SF (CLI)',
-      'SF(CLI)',
-      'SF CL(I)',
-      '- (SignForge CLI)',
-      '. (SignForge)',
-      "' (SignForge CLI)",
-      'Si9nForge',
-      'SI9NFOR9E',
-      'SiqnForqe',
-      'SignF()rge',
-      'SF (LI',
-      // The fifth: a word starting after a dropped sign or at a capital, or after a lookalike letter.
-      'Docs-Sign Forge',
-      'My.Sign Forge',
-      'A&Sign Forge',
-      "It's.Sign Forge",
-      'Get_SF CLI',
-      'Use.SF CLI',
-      'MySign Forge',
-      'OpenSign Forge',
-      'GetSF CLI',
-      'GETSign Forge',
-      '7Sign Forge',
-      '1Sign Forge',
-      'lSign Forge',
-      '5Sign Forge',
-      'qSign Forge',
-      '0SF CLI',
-    ];
-    expect(await shownAs(names)).toEqual(withheld(names));
-  });
-
-  it('withholds a name that is not plain ASCII, international ones and a non-plain label included', async () => {
-    const names = ['Café Assistant', 'Ελληνικός βοηθός', '東京 Screens', 'Bot 🤖', 'Claude Code (сервер)', 'Agent #1', 'Agent: two'];
-    expect(await shownAs(names)).toEqual(withheld(names));
-  });
-
-  it("shows the major clients' names, a label after them, and names that only run into a reserved word", async () => {
-    const names = [
-      'Claude Code (signforge)',
-      'Claude Code (SignForge)',
-      'Claude Code (screens)',
-      'Cursor',
-      'Visual Studio Code',
-      'Visual Studio Code - Insiders',
-      'ChatGPT',
-      'Windsurf',
-      'Codex',
-      'MCP Inspector',
-      'Gemini CLI MCP Client',
-      'Zed',
-      'Goose',
-      'Cline',
-      'mcp-remote',
-      'VS Code',
-      'Design Forge',
-      'DesignForge',
-      'Docs FC Lite',
-      'Mrs F. Clive',
-      "O'Brien's helper",
-      'Signs & forms',
-      'W'.repeat(80),
-    ];
-    expect(await shownAs(names)).toEqual(kept(names));
   });
 });
