@@ -39,8 +39,11 @@ describe.each(templates)('template %s', (name) => {
     if (!html.includes('data:font/woff2;')) return;
     expect(html).toContain('SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007');
     expect(html).toContain('5) The Font Software, modified or unmodified, in part or in whole,');
-    if (readFileSync(join(dir, name, 'style.css'), 'utf8').includes('@fontsource-variable/inter/'))
-      expect(html).toContain('Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)');
+    const css = readFileSync(join(dir, name, 'style.css'), 'utf8');
+    for (const [, pkg] of css.matchAll(/node_modules\/(@fontsource(?:-variable)?\/[a-z0-9-]+)\//g)) {
+      const licence = readFileSync(join(dir, name, 'node_modules', pkg, 'LICENSE'), 'utf8');
+      expect(html, pkg).toContain(licence.slice(0, licence.indexOf(')') + 1));
+    }
   });
 
   it('reads the time from the SDK, not the device clock', () => {

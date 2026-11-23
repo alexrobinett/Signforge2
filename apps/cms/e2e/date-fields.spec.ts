@@ -54,9 +54,10 @@ test('a new spot leaves a datetime with no default for the editor to pick, says 
   await expect(target).toHaveValue('');
   await expect(target).toHaveAttribute('aria-invalid', 'true');
   await expect(page.locator('#field-target-error')).toHaveText('field "target" has no date and time yet');
-  expect((await tool(page, 'get_spot', { spotId })).spot.data).toEqual({ target: '' });
+  // Its text starts empty too, not with the template's sample copy (#253).
+  expect((await tool(page, 'get_spot', { spotId })).spot.data).toEqual({ target: '', title: '' });
 
   await target.fill('2026-12-24T18:00');
   await expect(page.locator('#field-target-error')).toHaveCount(0);
-  await expect.poll(async () => (await tool(page, 'get_spot', { spotId })).spot.data, { timeout: 10_000 }).toEqual({ target: '2026-12-24T18:00' });
+  await expect.poll(async () => (await tool(page, 'get_spot', { spotId })).spot.data, { timeout: 10_000 }).toEqual({ target: '2026-12-24T18:00', title: '' });
 });

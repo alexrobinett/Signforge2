@@ -128,7 +128,9 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await screenshot(page, '32-command-menu-screen');
   await page.keyboard.press('Enter');
   await expect(actionsSearch).toBeFocused();
-  await expect(actions).toHaveText(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)', 'Restart player']);
+  // Paired and not heard from yet: no restart could reach it, so it offers none, and says why (#253).
+  await expect(actions).toHaveText(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)']);
+  await expect(menu.getByRole('status')).toHaveText('Restart is off: Deli counter cannot be reached now, and a restart only reaches a screen in touch.');
   await axe(page);
   await screenshot(page, '33-command-menu-screen-actions');
   await page.keyboard.type('identify');
@@ -159,6 +161,17 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
     // ⌘K closed as it opened: focus goes to the page's main region, not nowhere.
     await expect(page.locator('#main')).toBeFocused();
   }
+
+  // The takeover tool opens the same dialog, which sends it at once: ⌘K never calls a takeover a draft (#253).
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('take over screens now');
+  await expect(selected).toContainText('Take over screens now…');
+  await page.keyboard.press('Enter');
+  const takeover = page.getByRole('dialog', { name: 'Take over screens' });
+  await expect(takeover.getByText(/^Sent now:/)).toBeVisible();
+  await takeover.getByRole('button', { name: 'Cancel' }).click();
+  await expect(takeover).toBeHidden();
 
   // Enter on Back goes back, to what was found, and does not run the selected action; Open goes to the screen's page.
   await page.keyboard.press('ControlOrMeta+k');

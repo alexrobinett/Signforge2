@@ -252,7 +252,7 @@ describe('a date not picked yet (review of #192)', () => {
     store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, title: 'Doors open' } }));
     await vi.advanceTimersByTimeAsync(1000);
     expect(calls).toMatchObject([{ name: 'update_spot', input: { spotId: launch.id, data: { target: '', title: 'Doors open' }, ifVersion: 1 } }]);
-    expect(fieldProblems(countdown.fields, { data: { target: '', title: 'Doors open' }, assets: {} })).toEqual(
+    expect(fieldProblems(countdown.fields, { data: { target: '', title: 'Doors open' }, assets: {}, bindings: {} })).toEqual(
       new Map([['target', ['field "target" has no date and time yet']]]),
     );
 

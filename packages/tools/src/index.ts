@@ -17,6 +17,7 @@ export {
   type AgentLimit,
   type AgentLimiter,
   type AgentLimitWindow,
+  type AiKey,
   type AiProviders,
   type AiProviderTest,
   type AlertDeliverer,

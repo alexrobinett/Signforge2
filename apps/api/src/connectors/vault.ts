@@ -14,14 +14,15 @@ const DEV_KEY = 'signforge-dev-connection-key-not-for-deployed-environments';
 type KeyEnv = Pick<Env, 'CONNECTION_KEY' | 'ENVIRONMENT'>;
 type Connection = { orgId: string; id: string };
 type Authorization = { orgId: string; stateHash: string };
-type AiKey = { orgId: string; provider: string };
+type AiKey = { orgId: string; provider: string; baseUrl: string | null };
 
 const key = (env: KeyEnv) =>
   sealingKey({ secret: env.CONNECTION_KEY, devSecret: DEV_KEY, name: 'CONNECTION_KEY', info: 'sf-connection.v1', environment: env.ENVIRONMENT });
 // The kind leads, so a sealed verifier copied into a connection's row does not open as its grant.
 const grantAad = (c: Connection) => `grant:${c.orgId}/${c.id}`;
 const verifierAad = (a: Authorization) => `pkce:${a.orgId}/${a.stateHash}`;
-const aiKeyAad = (k: AiKey) => `ai-key:${k.orgId}/${k.provider}`;
+// An endpoint's key is bound to its address too (#262), so a row whose address changed does not open it; Anthropic's has none.
+const aiKeyAad = (k: AiKey) => `ai-key:${k.orgId}/${k.provider}${k.baseUrl === null ? '' : `/${encodeURIComponent(k.baseUrl)}`}`;
 
 export const sealGrant = async (env: KeyEnv, connection: Connection, grant: Grant) => seal(await key(env), grantAad(connection), JSON.stringify(grant));
 

@@ -291,8 +291,20 @@ test('a template with two sources: a place for the weather and a feed for the ne
   await expect.poll(() => stageShows(page, 'Atlanta 72°F'), { timeout: 30_000 }).toBe(true);
   await expect.poll(() => stageShows(page, 'Night market opens on the square'), { timeout: 10_000 }).toBe(true);
 
-  // With neither, the stage plays both fallbacks.
+  // With neither, the stage plays both fallbacks: the spot's own values, never the template's sample (#253), so no headline.
   await stage.getByRole('button', { name: 'Fallback' }).click();
-  await expect.poll(() => stageShows(page, 'Fallback headline'), { timeout: 10_000 }).toBe(true);
+  // The headlines in the stage's frame (stageShows would also find the one the form lists).
+  const stageHeadlines = async () => {
+    for (const frame of page.frames())
+      if (
+        await frame
+          .locator('#weather')
+          .count()
+          .catch(() => 0)
+      )
+        return frame.locator('#headlines li').count();
+    return -1;
+  };
+  await expect.poll(stageHeadlines, { timeout: 10_000 }).toBe(0);
   await expect.poll(() => stageShows(page, 'Atlanta 72°F'), { timeout: 10_000 }).toBe(true);
 });

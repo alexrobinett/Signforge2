@@ -1,6 +1,6 @@
 // A rollout in words: the parts of the bar, in order, each with why its screens wait.
 import { describe, expect, it } from 'vitest';
-import { rolloutComplete, rolloutLabel, segments, standing, type RolloutScreen } from '../src/lib/publishes';
+import { byWord, type PublishView, rolloutComplete, rolloutLabel, segments, standing, type RolloutScreen } from '../src/lib/publishes';
 
 const NOW = Date.parse('2026-11-19T12:00:00Z');
 const screen = (name: string, outcome: RolloutScreen['outcome'], more: Partial<RolloutScreen> = {}): RolloutScreen => ({
@@ -75,5 +75,15 @@ describe('a rollout', () => {
     expect(standing({ ...p, finishedAt: null, reached: null, playing: 0, replaced: 2 })).toBe('moved on');
     expect(standing({ ...p, finishedAt: null, reached: null, playing: 1, replaced: 0, open: 1 })).toBe('1 of 2');
     expect(standing({ ...p, screens: 0, finishedAt: 10, reached: 0, playing: 0, replaced: 0 })).toBe('reached no screen');
+  });
+});
+
+describe('who made a publish (#253)', () => {
+  const by = (by: PublishView['by']) => ({ by });
+  it('says you for your own, a name for a member, and "a member" only for one the API could not name', () => {
+    expect(byWord(by({ kind: 'user', id: 'usr_me', name: 'Sam Ortiz' }), 'usr_me')).toBe('you');
+    expect(byWord(by({ kind: 'user', id: 'usr_kim', name: 'kim' }), 'usr_me')).toBe('kim');
+    expect(byWord(by({ kind: 'user', id: 'usr_gone', name: null }), 'usr_me')).toBe('a member');
+    expect(byWord(by({ kind: 'agent', id: 'agt_1', name: null }), 'usr_me')).toBe('an agent');
   });
 });

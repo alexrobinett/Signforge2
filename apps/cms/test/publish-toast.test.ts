@@ -11,7 +11,8 @@ import type { ScheduleEntryView } from '../src/lib/schedule';
 import { callTool, Refusal } from '../src/lib/tools';
 import { getPlaylists } from '../src/server/playlists.functions';
 import { getSchedule } from '../src/server/schedule.functions';
-import { getSpots } from '../src/server/spots.functions';
+import { getAssets } from '../src/server/assets.functions';
+import { getBrandKits, getSpots, getTemplates } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
@@ -161,5 +162,134 @@ describe('one entry published alone (#181)', () => {
     await store.getState().publishEntry(ORG, 'sch_mine');
     expect(said()).toContainEqual({ title: 'Saved as a draft, not published', description: 'Could not reach SignForge. Check your connection and try again.' });
     expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+  });
+});
+
+describe('a held publish (#253)', () => {
+  const spot = { id: 'spt_6r26', name: 'Breakfast board', templateVersionId: 'tv_promo', published: false, draftChanged: true, version: 2 };
+  const playlist = { id: 'pls_main', name: 'All day', spotIds: ['spt_6r26'], version: 1, isDefault: true, published: false, draftChanged: true };
+  const promo = {
+    key: 'photo-promo',
+    name: 'Photo Promo',
+    versions: [
+      {
+        id: 'tv_promo',
+        version: '1.4.0',
+        manifest: { fields: { photo: { type: 'image', label: 'Photo' }, showPhoto: { type: 'boolean', label: 'Show the photo', default: true } } },
+      },
+    ],
+  };
+  const held = (problem: string) => ({
+    ...published(2),
+    publish: null,
+    held: [
+      { kind: 'playlist', id: 'pls_main', problems: ['spot spt_6r26 is not published'] },
+      { kind: 'spot', id: 'spt_6r26', problems: [`spot spt_6r26: ${problem}`] },
+    ],
+    screens: [],
+  });
+  /** The publish toast's title, description and action, as sonner holds them. */
+  const heldToast = () => {
+    const t = toast.getToasts().findLast((t) => 'title' in t && t.title === 'Not published');
+    return t && 'title' in t ? { description: t.description, action: t.action, duration: t.duration } : undefined;
+  };
+
+  function setupHeld(problem: string) {
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [playlist] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [spot] } as never);
+    vi.mocked(getTemplates).mockResolvedValue({ templates: [promo] } as never);
+    vi.mocked(callTool).mockResolvedValueOnce(held(problem) as never);
+    const navigate = vi.fn();
+    const store = createStore<PublishingSlice>()((set, get) =>
+      createPublishingSlice(set as never, get as never, { router: { navigate }, queryClient: new QueryClient() } as never),
+    );
+    return { s: store.getState(), navigate };
+  }
+
+  it('names the spot that holds it back, says how to fix its photo, and links to it', async () => {
+    const { s, navigate } = setupHeld('image field "photo" has no asset');
+    await s.publishSchedule(ORG);
+    const t = heldToast();
+    expect(t?.description).toBe('Breakfast board has no image for Photo: choose one, or untick Show the photo.');
+    expect(t?.action).toMatchObject({ label: 'Open Breakfast board' });
+    const action = t?.action;
+    if (action && typeof action === 'object' && 'onClick' in action) action.onClick({} as never);
+    expect(navigate).toHaveBeenCalledWith({ to: '/spots/$spotId', params: { spotId: 'spt_6r26' } });
+  });
+
+  it("puts any other check in the spot's name, with no id", async () => {
+    const { s } = setupHeld("duration 1000 ms is outside the template's range 4000 to 60000");
+    await s.publishSchedule(ORG);
+    expect(heldToast()?.description).toBe("Breakfast board does not pass its checks: duration 1000 ms is outside the template's range 4000 to 60000.");
+  });
+
+  it('stays 10 s, as the success toast does: it carries a button (#253 review)', async () => {
+    const { s } = setupHeld('image field "photo" has no asset');
+    await s.publishSchedule(ORG);
+    expect(heldToast()?.duration).toBe(10_000);
+  });
+
+  it('names the brand kit, the template version and the image a problem is about', async () => {
+    vi.mocked(getBrandKits).mockResolvedValue({ brandKits: [{ id: 'bk_9', name: 'Harbor house style' }] } as never);
+    const { s } = setupHeld('brand: brand kit bk_9 is not available');
+    await s.publishSchedule(ORG);
+    expect(heldToast()?.description).toBe('Breakfast board does not pass its checks: Harbor house style is not available.');
+
+    vi.mocked(getAssets).mockResolvedValue({ assets: [{ id: 'ast_7', name: 'pumpkin-latte.png' }] } as never);
+    const again = setupHeld('asset ast_7 does not exist');
+    await again.s.publishSchedule(ORG);
+    expect(heldToast()?.description).toBe('Breakfast board does not pass its checks: pumpkin-latte.png does not exist.');
+
+    const third = setupHeld('template version tv_promo does not exist');
+    await third.s.publishSchedule(ORG);
+    expect(heldToast()?.description).toBe('Breakfast board does not pass its checks: Photo Promo 1.4.0 does not exist.');
+  });
+
+  /** The store over a Query client that retries, as a browser's does (with no delay: no clock): the name reads must turn that off themselves. */
+  function namesFail() {
+    const down = new Refusal('network', 'Could not reach SignForge. Check your connection and try again.');
+    for (const read of [getSpots, getPlaylists, getTemplates, getBrandKits, getAssets])
+      vi.mocked(read)
+        .mockClear()
+        .mockRejectedValue(down as never);
+    const store = createStore<PublishingSlice>()((set, get) =>
+      createPublishingSlice(
+        set as never,
+        get as never,
+        {
+          router: { navigate: vi.fn() },
+          queryClient: new QueryClient({ defaultOptions: { queries: { retry: 3, retryDelay: 0 } } }),
+        } as never,
+      ),
+    );
+    return store.getState();
+  }
+
+  it('says it in plain words, with no id, when the names cannot be read, and reads each once, not again', async () => {
+    const s = namesFail();
+    vi.mocked(callTool).mockResolvedValueOnce(held('brand: brand kit bk_9 is not available') as never);
+    await s.endTakeover(ORG, 'sch_flash');
+    expect(heldToast()?.description).toBe('This spot does not pass its checks: its brand kit is not available.');
+    expect(vi.mocked(getSpots)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getBrandKits)).toHaveBeenCalledTimes(1);
+  });
+
+  it('says a publish that went through was published, and what it held back, when the names cannot be read', async () => {
+    const s = namesFail();
+    vi.mocked(callTool).mockResolvedValueOnce({
+      ...held('image field "photo" has no asset'),
+      publish: published(4).publish,
+      screens: published(4).screens,
+    } as never);
+    const refusals = () => toast.getToasts().filter((x) => 'title' in x && x.title === 'Not published').length;
+    const before = refusals();
+    await s.endTakeover(ORG, 'sch_flash');
+    const t = publishToast();
+    expect(t?.title).toBe('Published v4 to 1 screen');
+    expect(t?.description).toBe(
+      'Each screen switches as it hears of it; the rollout says why any wait. Held back: This spot has no image for photo: choose one.',
+    );
+    expect(refusals()).toBe(before);
   });
 });
