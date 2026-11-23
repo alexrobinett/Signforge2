@@ -101,8 +101,8 @@
     }
   },
   "files": {
-    "1a4020bbad33d42b78a5bc6a531ef7115d4295c59317935eff06618f7fe384e7": {
-      "size": 77514,
+    "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f": {
+      "size": 82306,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
@@ -430,10 +430,10 @@
       },
       "html": "86db477d83c1112ac2dbc301a5f073252e0d4f0d8e110b002785e3cd6a3adb59"
     },
-    "base/cstore-promo@1.2.4": {
+    "base/cstore-promo@1.2.5": {
       "manifest": {
         "id": "cstore-promo",
-        "version": "1.2.4",
+        "version": "1.2.5",
         "name": "C-Store Promo",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
         "fields": {
@@ -505,7 +505,7 @@
         "background": "#06122b",
         "protocol": 2
       },
-      "html": "1a4020bbad33d42b78a5bc6a531ef7115d4295c59317935eff06618f7fe384e7"
+      "html": "a74e3d95579d7fa2322a421a22aa1857ac006af47c1b1349ec88c7a48c2b3d3f"
     },
     "base/alert@1.0.0": {
       "manifest": {
@@ -1077,7 +1077,7 @@
       "id": "energy",
       "name": "Energy drinks 3 for $7",
       "kind": "template",
-      "template": "base/cstore-promo@1.2.4",
+      "template": "base/cstore-promo@1.2.5",
       "data": {
         "quantity": "3",
         "price": "7",
@@ -1203,7 +1203,7 @@
       "id": "sport-drinks",
       "name": "Sport drinks 2 for $4",
       "kind": "template",
-      "template": "base/cstore-promo@1.2.4",
+      "template": "base/cstore-promo@1.2.5",
       "data": {
         "quantity": "2",
         "price": "4",
@@ -1284,5 +1284,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "290232c9e58a2217a6e9e3cd58058875240e3abcab26c6755bc219bdc12dbe2c"
+  "id": "604e4046f63617448148c07d6b4f5d22b2fa0896e94461dba8ac2cbb9a5b9e7c"
 }
