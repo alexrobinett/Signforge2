@@ -16,7 +16,8 @@ export function feedUrlProblem(url: string): FeedUrlProblem | undefined {
   if (u.protocol !== 'https:') return 'not-https';
   // The URL parser drops the default port, and writes 2130706433 and 0x7f.1 as 127.0.0.1.
   if (u.port !== '') return 'port';
-  const host = u.hostname.toLowerCase();
+  // Trailing dots name the same host (`localhost.` and `localhost..` are `localhost`).
+  const host = u.hostname.toLowerCase().replace(/\.+$/, '');
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith('[')) return 'ip-literal';
   if (!host.includes('.') || /\.(localhost|local|internal|home\.arpa|lan)$/.test(host)) return 'private-address';
   return undefined;

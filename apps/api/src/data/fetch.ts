@@ -269,8 +269,10 @@ function isPrivate(address: string): boolean {
   const n = v6Number(address);
   // The resolver's answer is untrusted: one that is no address is refused, not fetched.
   if (n === null) return true;
-  // IPv4-compatible (::/96, which holds :: and ::1) and IPv4-mapped (::ffff:0:0/96) reach the IPv4 address they carry.
-  if (n >> 32n === 0n || n >> 32n === 0xffffn) return isPrivateV4(Number(n & 0xffff_ffffn));
+  // IPv4-mapped (::ffff:0:0/96) reaches the IPv4 address it carries. IPv4-compatible (::/96, with
+  // :: and ::1) is deprecated and routed nowhere (RFC 4291 §2.5.5.1), so it is refused below with
+  // the rest outside 2000::/3.
+  if (n >> 32n === 0xffffn) return isPrivateV4(Number(n & 0xffff_ffffn));
   if (n >> 125n !== 1n) return true;
   return V6_RESERVED.some(([base, bits]) => n >> BigInt(128 - bits) === base >> BigInt(128 - bits));
 }

@@ -51,5 +51,15 @@ function playerBuild(): Plugin {
 export default defineConfig({
   server: { port: 3000, strictPort: true },
   resolve: { tsconfigPaths: true },
-  plugins: [playerBuild(), cloudflare({ viteEnvironment: { name: 'ssr' } }), tailwindcss(), tanstackStart(), react()],
+  plugins: [
+    playerBuild(),
+    cloudflare({ viteEnvironment: { name: 'ssr' } }),
+    tailwindcss(),
+    tanstackStart({
+      // The dev environment's build (the e2e's CMS) names each server function in its URL, as
+      // `vite dev` does, so a test can hold or fail one read by name. Deployed builds keep hashes.
+      serverFns: { generateFunctionId: process.env.CLOUDFLARE_ENV === 'dev' ? ({ functionName }) => functionName : undefined },
+    }),
+    react(),
+  ],
 });

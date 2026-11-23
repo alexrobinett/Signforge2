@@ -1,9 +1,8 @@
 /**
- * Start the API and the CMS as a developer would (two processes, joined by the dev registry),
+ * Start the API (`wrangler dev`) and the built CMS (`vite preview`), joined by the dev registry,
  * but on their own ports, with their own local database and their own registry, so a dev server
  * already running on this machine is neither used nor disturbed.
  */
-import { chromium } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -14,13 +13,14 @@ import {
   ANTHROPIC_STUB_KEY,
   ANTHROPIC_STUB_MODELS,
   API_LOG,
-  ENDPOINT_STUB_KEY,
-  ENDPOINT_STUB_MODELS,
   API_PORT,
   CMS_PORT,
   CMS_URL,
+  ENDPOINT_STUB_KEY,
+  ENDPOINT_STUB_MODELS,
   FEEDS_DIR,
   PLACES,
+  portTaken,
   RUN_DIR,
 } from './servers';
 
@@ -114,43 +114,33 @@ async function feedServer(): Promise<{ url: string; close: () => void }> {
   return { url: `http://127.0.0.1:${address.port}`, close: () => server.close() };
 }
 
-/** True if something already answers on the port: another checkout's run, whose servers this run would otherwise use. */
-async function answers(url: string) {
-  try {
-    await fetch(url, { signal: AbortSignal.timeout(2_000) });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export default async function globalSetup() {
-  for (const [name, url] of [
-    ['E2E_API_PORT', `http://127.0.0.1:${API_PORT}/health`],
-    ['E2E_CMS_PORT', `http://127.0.0.1:${CMS_PORT}/`],
+  for (const [name, port] of [
+    ['E2E_API_PORT', API_PORT],
+    ['E2E_CMS_PORT', CMS_PORT],
   ] as const) {
-    if (await answers(url)) throw new Error(`${url} is already in use (another e2e run?): set ${name} to a free port`);
+    if (await portTaken(port)) throw new Error(`port ${port} is already in use (another e2e run?): set ${name} to a free port`);
   }
   rmSync(RUN_DIR, { recursive: true, force: true });
   mkdirSync(FEEDS_DIR, { recursive: true });
   const env = { ...process.env, CLOUDFLARE_DEV_REGISTRY_PATH: `${RUN_DIR}registry`, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' };
   const state = `${RUN_DIR}state`;
 
-  const migrate = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--env', 'dev', '--persist-to', state], {
-    cwd: apiDir,
-    env,
-    encoding: 'utf8',
-  });
-  if (migrate.status !== 0) throw new Error(`migrations failed:\n${migrate.stdout}\n${migrate.stderr}`);
-  // The CMS serves the player build as its test screen and the spot editor's stage (vite.config.ts).
-  // Built for this host: no CMS_ORIGIN.
-  const player = spawnSync('pnpm', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' }, encoding: 'utf8' });
-  if (player.status !== 0) throw new Error(`player build failed:\n${player.stdout}\n${player.stderr}`);
+  // The migrations beside the builds. The player build is the CMS's test screen and stage
+  // (vite.config.ts), built for this host: no CMS_ORIGIN. The CMS is built, as it deploys, for
+  // `vite preview`: `vite dev` compiled each module on its first request, which took seconds.
+  await Promise.all([
+    run('migrations', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--env', 'dev', '--persist-to', state], { cwd: apiDir, env }),
+    run('player build', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' } }).then(() =>
+      run('CMS build', ['exec', 'vite', 'build'], { cwd: cmsDir, env }),
+    ),
+  ]);
 
   const geocoding = await geocodingStub();
   const feeds = await feedServer();
   const anthropic = await anthropicStub();
   const log = openSync(API_LOG, 'a');
+  const cmsLog = openSync(`${RUN_DIR}cms.log`, 'a');
   const children: ChildProcess[] = [
     spawn(
       'pnpm',
@@ -186,10 +176,10 @@ export default async function globalSetup() {
         detached: true,
       },
     ),
-    spawn('pnpm', ['exec', 'vite', 'dev', '--port', String(CMS_PORT)], {
+    spawn('pnpm', ['exec', 'vite', 'preview', '--port', String(CMS_PORT), '--strictPort'], {
       cwd: cmsDir,
       env,
-      stdio: ['ignore', openSync(`${RUN_DIR}cms.log`, 'a'), openSync(`${RUN_DIR}cms.log`, 'a')],
+      stdio: ['ignore', cmsLog, cmsLog],
       detached: true,
     }),
   ];
@@ -216,28 +206,40 @@ export default async function globalSetup() {
   await waitFor(`${CMS_URL}/sign-in`);
   // The CMS reaches the API through the registry; wait until the binding answers.
   await waitFor(`${CMS_URL}/api/sign-in-options`);
-  // Vite optimises dependencies on the first browser load and may reload the page; do that now,
-  // not in the middle of a test.
-  const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage();
-    await page.goto(`${CMS_URL}/sign-in`);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1_000);
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-  } finally {
-    await browser.close();
-  }
 
   return async () => {
     geocoding.close();
     feeds.close();
     anthropic.close();
-    for (const child of children) {
-      try {
-        if (child.pid) process.kill(-child.pid, 'SIGTERM');
-      } catch {}
-    }
+    // Each server is its own process group (pnpm, wrangler or vite, workerd): asked to stop, then
+    // killed, so no workerd is left holding a port for the next run.
+    await Promise.all(
+      children.map(async (child) => {
+        if (!child.pid) return;
+        const exited = new Promise((resolve) => child.once('exit', resolve));
+        signal(child.pid, 'SIGTERM');
+        await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
+        signal(child.pid, 'SIGKILL');
+      }),
+    );
   };
+}
+
+/** Signal a process group that may already be gone. */
+function signal(pid: number, name: NodeJS.Signals) {
+  try {
+    process.kill(-pid, name);
+  } catch {}
+}
+
+/** Run `pnpm <args>` to its end, its output kept for the error if it fails. */
+function run(what: string, args: string[], options: { cwd?: string; env: NodeJS.ProcessEnv }) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn('pnpm', args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.on('data', (chunk) => (output += chunk));
+    child.stderr.on('data', (chunk) => (output += chunk));
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`${what} failed:\n${output}`))));
+  });
 }

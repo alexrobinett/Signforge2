@@ -14,7 +14,7 @@ let playlistId = '';
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-playlists-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Cinema');
+  await createOrg(page, 'Northside Cinema', ADDRESS);
   // Spots to put in order: three short clocks, and a photo promo with no photo yet.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const version = (key: string) => templates.find((t: { key: string }) => t.key.endsWith(`/${key}`) || t.key === key).versions.at(-1).id;
@@ -34,7 +34,6 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(() => page.context().close());
 
 test('make a playlist, add spots, and see the real player play the loop', async () => {
-  test.setTimeout(120_000);
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Playlists' }).click();
   await hydrated(page);
   await expect(page.getByRole('heading', { name: 'No playlists yet' })).toBeVisible();
@@ -75,7 +74,6 @@ test('make a playlist, add spots, and see the real player play the loop', async 
 });
 
 test('reorder by dragging and with the move buttons, remove and undo, and choose the transition', async () => {
-  test.setTimeout(60_000);
   const list = page.getByRole('list', { name: 'Spots in play order' });
   const names = () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent));
 
@@ -184,7 +182,6 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
 });
 
 test('axe reads the stage only once a fade between spots is over (#95)', async () => {
-  test.setTimeout(150_000);
   // A loop of its own: a 4 s clock, then a 4 s fade into a 60 s one. After the fade the stage is
   // still for most of a minute, however slow the machine: no play, fade or prepare comes sooner.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
@@ -258,8 +255,9 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
     )
     .toBe(true);
   await axe(page);
-  const scans = (await stage!.evaluate(() => document.documentElement.dataset.scans ?? '')).split(' ');
-  expect(scans.length).toBeGreaterThanOrEqual(2);
+  // The light pass reads the stage; the dark leaves the player's frames out.
+  const scans = (await stage!.evaluate(() => document.documentElement.dataset.scans ?? '')).split(' ').filter(Boolean);
+  expect(scans.length).toBeGreaterThanOrEqual(1);
   // Every scan saw each slot fully shown or fully hidden, and one shown.
   for (const scan of scans) {
     const opacities = scan.split('/').map(Number);

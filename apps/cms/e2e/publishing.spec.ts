@@ -22,7 +22,7 @@ const playing = (tab: Page) =>
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-publishing-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Gallery');
+  await createOrg(page, 'Northside Gallery', ADDRESS);
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   ({
@@ -50,7 +50,6 @@ test.afterAll(async () => {
 const toastSays = (title: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: title });
 
 test('a playlist reaches no screen until it is the default, then publishes from its editor and plays', async () => {
-  test.setTimeout(120_000);
   await page.goto(`/playlists/${playlistId}`);
   await hydrated(page);
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
@@ -74,7 +73,6 @@ test('a playlist reaches no screen until it is the default, then publishes from 
 });
 
 test('an edit to a spot, published from the spot editor, is on the screen in seconds, offers Undo, and a roll back takes it back', async () => {
-  test.setTimeout(120_000);
   const before = (await playing(screen))!.manifestId;
   await page.goto(`/spots/${spotId}`);
   await hydrated(page);
@@ -140,7 +138,6 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
 });
 
 test('Publish pressed while an autosave is on its way waits for it, and publishes the latest edit (#150)', async () => {
-  test.setTimeout(120_000);
   await page.goto(`/spots/${spotId}`);
   await hydrated(page);
   // The first save's answer is held: the server has it, the page does not yet.

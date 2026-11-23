@@ -1,13 +1,14 @@
 import AxeBuilder from '@axe-core/playwright';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { expect, request as playwrightRequest, type Page, type Route } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
+import { slugify } from '../src/lib/paths';
 import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor } from './servers';
 
 /**
  * Fill the email step and ask for a code. Retried until the page has hydrated: before that the
- * input takes text but React has not seen it, and the button stays disabled.
+ * input takes text but React has not seen it, and the button stays disabled. Bounded by the test.
  */
 export async function requestCode(page: Page, email: string) {
   const button = page.getByRole('button', { name: 'Email me a code' });
@@ -15,7 +16,7 @@ export async function requestCode(page: Page, email: string) {
     await page.getByLabel('Email').fill('');
     await page.getByLabel('Email').fill(email);
     await expect(button).toBeEnabled({ timeout: 1_000 });
-  }).toPass({ timeout: 30_000 });
+  }).toPass();
   await button.click();
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
 }
@@ -52,19 +53,19 @@ export async function screenshot(page: Page, name: string) {
 
 /**
  * Fill a field and wait until `button` is enabled, retrying until the page has hydrated: before
- * that the input takes text but React has not seen it.
+ * that the input takes text but React has not seen it. Bounded by the test.
  */
 export async function fillUntilEnabled(page: Page, label: string, value: string, button: string) {
   await expect(async () => {
     await page.getByLabel(label).fill('');
     await page.getByLabel(label).fill(value);
     await expect(page.getByRole('button', { name: button })).toBeEnabled({ timeout: 1_000 });
-  }).toPass({ timeout: 30_000 });
+  }).toPass();
 }
 
 /** Wait until React has hydrated the page (`data-hydrated` on body), so clicks reach handlers. */
 export async function hydrated(page: Page) {
-  await expect(page.locator('body[data-hydrated]')).toBeAttached({ timeout: 30_000 });
+  await expect(page.locator('body[data-hydrated]')).toBeAttached();
 }
 
 /**
@@ -169,40 +170,49 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
  * Run axe on the page as it is, in the light theme and the dark, and fail on any violation
  * (results axe cannot decide, such as text over a gradient, are not failures). Transitions and
  * animations are off in the top document while it runs: else it reads colours halfway through the
- * theme change, or a dialog's fade. The spot editor's preview is checked too: the real player
- * showing a template, so every base template's text must read on its colours (#57). Its template
- * frames keep playing, so each is held at rest, after its intro and before its outro (which starts
- * at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70). The next play
- * restarts them. The player's own slots fade between spots, and an analysis during that fade reads
- * a spot half shown: each analysis waits for the slots to settle and is repeated if a fade began
- * during it (#95).
+ * theme change, or a dialog's fade. The players' frames (the spot editor's preview and the like) are
+ * checked on their own, in the light theme: the real player showing a template, so every base
+ * template's text must read on its colours (#57). The CMS's `.dark` never reaches them. Their
+ * template frames keep playing, so each is held at rest, after its intro and before its outro
+ * (which starts at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70).
+ * The next play restarts them. The player's own slots fade between spots, and an analysis during
+ * that fade reads a spot half shown: each analysis waits for the slots to settle and is repeated if
+ * a fade began during it (#95).
  */
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
   const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
-  for (const dark of [false, true]) {
-    await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), dark);
-    // A play or slot fade that began during an analysis may have shown it a spot mid-intro or half
-    // faded: settle, hold, analyse again. A stage looping 4 s spots can do that several times.
-    let found: string[] = [];
-    let held = false;
-    for (let tries = 0; tries < 5 && !held; tries++) {
-      // Often: between 4 s spots with a long fade, the stage is still for about a second.
-      await expect.poll(() => slotFades(page), { message: 'a player slot is still fading', intervals: [50], timeout: 15_000 }).not.toBeUndefined();
-      const fades = await slotFades(page);
-      if (fades === undefined) continue;
-      await holdTemplates(page);
-      const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-      found = violations.flatMap((v) =>
-        v.nodes.map((n) => `${dark ? 'dark' : 'light'} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`),
-      );
-      held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
+  const report = (theme: string, violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violations']) =>
+    violations.flatMap((v) => v.nodes.map((n) => `${theme} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`));
+  try {
+    await page.evaluate(() => document.documentElement.classList.remove('dark'));
+    // The CMS's own document first, its transitions off: nothing in it moves, so one analysis.
+    expect(report('light', (await new AxeBuilder({ page }).withTags(WCAG).exclude('iframe').analyze()).violations), page.url()).toEqual([]);
+    // Then the players' frames alone, so each analysis is short beside the spots' 4 s. A play or slot
+    // fade that began during one may have shown it a spot mid-intro or half faded: settle, hold,
+    // analyse again.
+    if ((await page.locator('iframe').count()) > 0) {
+      let found: string[] = [];
+      let held = false;
+      for (let tries = 0; tries < 5 && !held; tries++) {
+        // Often: between 4 s spots with a long fade, the stage is still for about a second.
+        await expect.poll(() => slotFades(page), { message: 'a player slot is still fading', intervals: [50], timeout: 15_000 }).not.toBeUndefined();
+        const fades = await slotFades(page);
+        if (fades === undefined) continue;
+        await holdTemplates(page);
+        found = report('light', (await new AxeBuilder({ page }).withTags(WCAG).include('iframe').analyze()).violations);
+        held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
+      }
+      expect(held, 'a template frame started a play, or a player slot a fade, during each of 5 analyses').toBe(true);
+      expect(found, page.url()).toEqual([]);
     }
-    expect(held, 'a template frame started a play, or a player slot a fade, during each of 5 analyses').toBe(true);
-    expect(found, page.url()).toEqual([]);
+    await page.evaluate(() => document.documentElement.classList.add('dark'));
+    expect(report('dark', (await new AxeBuilder({ page }).withTags(WCAG).exclude('iframe').analyze()).violations), page.url()).toEqual([]);
+  } finally {
+    // Also after a failure, so the test's own teardown and screenshots see the page as it was.
+    await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
+    await still.evaluate((el) => el.parentNode?.removeChild(el));
   }
-  await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
-  await still.evaluate((el) => el.parentNode?.removeChild(el));
 }
 
 /**
@@ -314,12 +324,21 @@ export async function d1(sql: string) {
   expect(JSON.parse(body), body).toMatchObject({ success: true });
 }
 
-/** As a member with no org yet: make one called `name`, as the first page asks, and land on it. */
-export async function createOrg(page: Page, name: string) {
+/**
+ * Make an org called `name` through the API, as the CMS does (it becomes the active org), and land
+ * on it, hydrated, from the spec's own `address` (as `fromAddress`, whose route `page.request` does
+ * not go through). Only sign-in-and-orgs.spec.ts makes one through the page. Slugs are global and a spec may
+ * make two orgs of one name, so each gets its own.
+ */
+export async function createOrg(page: Page, name: string, address: string) {
+  const slug = `${slugify(name)}-${randomUUID().slice(0, 8)}`;
+  const headers = { origin: CMS_URL, 'cf-connecting-ip': address };
+  const res = await page.request.post('/api/auth/organization/create', { headers, data: { name, slug } });
+  expect(res.status(), await res.text()).toBe(200);
   await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', name, 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+  // A fresh load, as the page's own create was not: a click before this would go nowhere.
+  await hydrated(page);
 }
 
 /** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */
