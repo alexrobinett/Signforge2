@@ -13,7 +13,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { templateKey } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { buildTemplate } from '../src/template';
+import { buildTemplate } from '@signforge/template-build';
 
 const dir = join(import.meta.dirname, '../../../templates');
 const templates = readdirSync(dir, { withFileTypes: true })

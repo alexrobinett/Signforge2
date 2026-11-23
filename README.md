@@ -57,6 +57,7 @@ packages/contract   every shape a screen sees: manifest, template protocol, budg
 packages/player     the web player; packages/player-core holds its pure logic
 packages/template-sdk  what a template imports to talk to the player
 packages/template-looks  the four looks a template can offer: type, fonts, motion and toggles
+packages/template-build  builds a template directory into the one HTML file a screen loads (`sf build`'s builder)
 packages/compiler   org data and a screen into a manifest
 packages/cli        `sf`: build, push and seed templates and content
 packages/db, tools, media, feeds   tenancy-scoped data access, the tool registry, image handling, feed normalising

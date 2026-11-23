@@ -239,6 +239,9 @@ importers:
       '@signforge/template-announcement':
         specifier: workspace:*
         version: link:../../templates/announcement
+      '@signforge/template-build':
+        specifier: workspace:*
+        version: link:../../packages/template-build
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -484,9 +487,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20261117.1
         version: 5.20261117.1
-      '@signforge/cli':
-        specifier: workspace:*
-        version: link:../../packages/cli
       '@signforge/template-agenda':
         specifier: workspace:*
         version: link:../../templates/agenda
@@ -496,6 +496,9 @@ importers:
       '@signforge/template-announcement':
         specifier: workspace:*
         version: link:../../templates/announcement
+      '@signforge/template-build':
+        specifier: workspace:*
+        version: link:../../packages/template-build
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -556,9 +559,9 @@ importers:
       '@signforge/media-check':
         specifier: workspace:*
         version: link:../media-check
-      esbuild:
-        specifier: ^0.28.2
-        version: 0.28.2
+      '@signforge/template-build':
+        specifier: workspace:*
+        version: link:../template-build
       sharp:
         specifier: ^0.35.5
         version: 0.35.5(@types/node@26.6.6)
@@ -732,9 +735,6 @@ importers:
         specifier: workspace:*
         version: link:../player-core
     devDependencies:
-      '@signforge/cli':
-        specifier: workspace:*
-        version: link:../cli
       '@signforge/media':
         specifier: workspace:*
         version: link:../media
@@ -747,6 +747,9 @@ importers:
       '@signforge/template-announcement':
         specifier: workspace:*
         version: link:../../templates/announcement
+      '@signforge/template-build':
+        specifier: workspace:*
+        version: link:../template-build
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -811,6 +814,19 @@ importers:
       vitest:
         specifier: ^5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/template-build:
+    dependencies:
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../contract
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
 
   packages/template-looks:
     dependencies:

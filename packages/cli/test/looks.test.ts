@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { TEMPLATE_BUDGET } from '@signforge/contract';
 import { LOOKS } from '@signforge/template-looks';
 import { expect, it } from 'vitest';
-import { buildTemplate } from '../src/template';
+import { buildTemplate } from '@signforge/template-build';
 
 /** The look kit's package (packages/template-looks). Here, not there: the kit's templates build with the CLI, which builds them all. */
 const dir = join(import.meta.dirname, '../../template-looks');

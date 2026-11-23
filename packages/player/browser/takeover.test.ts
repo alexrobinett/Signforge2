@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { type FieldDef, type ScheduleEntry, type TemplateManifest, templateKey } from '@signforge/contract';
-import { buildTemplate } from '@signforge/cli/template';
+import { buildTemplate } from '@signforge/template-build';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { useHarness } from './harness';
 

@@ -14,11 +14,11 @@
     "@signforge/player-core": "workspace:*"
   },
   "devDependencies": {
-    "@signforge/cli": "workspace:*",
     "@signforge/media": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
     "@signforge/template-alert": "workspace:*",
     "@signforge/template-announcement": "workspace:*",
+    "@signforge/template-build": "workspace:*",
     "@signforge/template-clock": "workspace:*",
     "@signforge/template-countdown": "workspace:*",
     "@signforge/template-cstore-promo": "workspace:*",

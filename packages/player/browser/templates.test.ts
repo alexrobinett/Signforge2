@@ -25,7 +25,7 @@ import {
   type Orientation,
   type TemplateManifest,
 } from '@signforge/contract';
-import { buildTemplate } from '@signforge/cli/template';
+import { buildTemplate } from '@signforge/template-build';
 import { useHarness } from './harness';
 
 const h = useHarness();
