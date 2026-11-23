@@ -1,0 +1,24 @@
+{
+  "name": "@signforge/spike-m4-oauth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler d1 migrations apply DB --local && wrangler dev --port 8787",
+    "typecheck": "wrangler types --strict-vars=false >/dev/null && tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@better-auth/oauth-provider": "1.7.25",
+    "@modelcontextprotocol/server": "2.4.0",
+    "better-auth": "1.7.25",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.4",
+    "@modelcontextprotocol/client": "2.4.0",
+    "auth": "1.7.25",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.164.0"
+  }
+}

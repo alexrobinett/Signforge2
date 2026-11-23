@@ -1,8 +1,9 @@
 // Dead code: `pnpm knip` (CI runs it). Each entry below is something knip cannot see for itself.
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  // A throwaway platform spike; its Vitest config reads a migrations folder that is not there.
-  "ignoreWorkspaces": ["spike/m3-platform"],
+  // Throwaway platform spikes: M3-00's Vitest config reads a migrations folder that is not there,
+  // and M4-01's scripts are run by hand against `wrangler dev`.
+  "ignoreWorkspaces": ["spike/m3-platform", "spike/m4-oauth"],
   // A system binary the CLI runs for video probes, not a package.
   "ignoreBinaries": ["ffprobe"],
   "workspaces": {
