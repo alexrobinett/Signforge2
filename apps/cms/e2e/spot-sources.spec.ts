@@ -295,7 +295,14 @@ test('a template with two sources: a place for the weather and a feed for the ne
   await stage.getByRole('button', { name: 'Fallback' }).click();
   // The headlines in the stage's frame (stageShows would also find the one the form lists).
   const stageHeadlines = async () => {
-    for (const frame of page.frames()) if (await frame.locator('#weather').count().catch(() => 0)) return frame.locator('#headlines li').count();
+    for (const frame of page.frames())
+      if (
+        await frame
+          .locator('#weather')
+          .count()
+          .catch(() => 0)
+      )
+        return frame.locator('#headlines li').count();
     return -1;
   };
   await expect.poll(stageHeadlines, { timeout: 10_000 }).toBe(0);
