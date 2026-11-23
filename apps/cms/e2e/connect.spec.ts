@@ -64,19 +64,12 @@ async function callbackOf(page: Page, act: () => Promise<void>): Promise<URL> {
 }
 
 test('an agent connects: sign in and back, pick an org and scopes, Allow gives the stub a code; Cancel gives access_denied', async ({ page, browser }) => {
-  test.setTimeout(120_000);
   const email = `e2e-connect-${Date.now()}@example.com`;
   // The person, with two orgs: set up in their own browser first.
   const setup = await browser.newPage();
   await signInAs(setup, email, ADDRESS.person);
-  await createOrg(setup, 'Quayside Market');
-  await setup.goto('/');
-  // Better Auth's own calls need this site's Origin, as a browser sends it.
-  const second = await setup.request.post('/api/auth/organization/create', {
-    headers: { origin: CMS_URL },
-    data: { name: 'Harbour Café', slug: `harbour-${Date.now()}` },
-  });
-  expect(second.status()).toBe(200);
+  await createOrg(setup, 'Quayside Market', ADDRESS.person);
+  await createOrg(setup, 'Harbour Café', ADDRESS.person);
   await setup.close();
 
   const stub = await stubClient();
@@ -140,13 +133,12 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
 });
 
 test('an editor in an org where only owners publish is not offered publishing', async ({ page, browser }) => {
-  test.setTimeout(120_000);
   const stamp = Date.now();
   const ownerEmail = `e2e-connect-owner-${stamp}@example.com`;
   const editorEmail = `e2e-connect-editor-${stamp}@example.com`;
   const owner = await browser.newPage();
   await signInAs(owner, ownerEmail, ADDRESS.owner);
-  await createOrg(owner, 'Owners Publish');
+  await createOrg(owner, 'Owners Publish', ADDRESS.owner);
   await tool(owner, 'update_org_settings', { editorsPublish: false });
   const invited = await owner.request.post('/api/auth/organization/invite-member', {
     headers: { origin: CMS_URL },
