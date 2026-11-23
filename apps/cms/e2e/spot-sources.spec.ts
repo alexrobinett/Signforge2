@@ -1,10 +1,10 @@
 // Spots whose data comes from a source (issue #79): people pick where it comes from, never the
 // values. The geocoder is a stub (global-setup.ts); the poller does not run under `wrangler dev`, so
 // a test writes the snapshot it would have fetched into the run's local D1.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 import { canonicalJson } from '@signforge/contract';
 import { normaliseFeed } from '@signforge/feeds';
-import { axe, d1, fillUntilEnabled, hydrated, newSpot, orgOf, shots, signInAs, spotIdOf, stageShows, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, newSpot, orgOf, shots, signInAs, spotIdOf, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit. */
 const ADDRESS = '192.0.2.33';
@@ -37,16 +37,12 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext({ viewport: { width: 1920, height: 1200 } })).newPage();
   await signInAs(page, `e2e-sources-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Garden', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Northside Garden', level: 1 })).toBeVisible();
+  await createOrg(page, 'Northside Garden', ADDRESS);
 });
 
 test.afterAll(() => page.context().close());
 
 test('a weather spot: pick a place and units, see live weather on the stage, and type no temperature', async () => {
-  test.setTimeout(120_000);
   const spotId = await newSpot(page, 'Weather Now', 'Lobby weather');
   const form = page.getByRole('form', { name: 'Spot fields' });
   const stage = page.getByRole('region', { name: 'Live preview' });
@@ -114,7 +110,6 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
 });
 
 test('a second spot for the same place and units shares the source; moving it leaves the first where it was', async () => {
-  test.setTimeout(120_000);
   const first = spotIdOf(page);
   const spotId = await newSpot(page, 'Weather Now', 'Front door weather');
   const form = page.getByRole('form', { name: 'Spot fields' });
@@ -162,7 +157,6 @@ test('a second spot for the same place and units shares the source; moving it le
 });
 
 test('a news spot: add a feed by its address, see the headlines live, and edit none of them', async () => {
-  test.setTimeout(120_000);
   const spotId = await newSpot(page, 'News', 'World news');
   const form = page.getByRole('form', { name: 'Spot fields' });
   await expect(form.getByRole('button', { name: 'Add a row' })).toBeHidden();
@@ -224,13 +218,17 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
   await form.getByRole('button', { name: 'Add feed' }).click();
   await expect(form.getByText('Local desk')).toBeVisible();
   await expect(page.getByText(/Saved \d/)).toBeVisible();
+  // A save sends its cleanup's deletes before it says Saved (`dropUnbound`, src/state/spot-editor.ts).
+  const deletes: string[] = [];
+  const sent = (r: Request) => void (r.url().endsWith('/api/tools/delete_data_source') && deletes.push(r.url()));
+  page.on('request', sent);
   await form.getByRole('button', { name: 'Change source' }).click();
   await form.getByLabel('News feed').selectOption({ label: 'World desk' });
   await form.getByRole('button', { name: 'Use this feed' }).click();
   await expect(form.getByRole('listitem').filter({ hasText: 'Harbour bridge reopens after repairs' })).toBeVisible();
   await expect(page.getByText(/Saved \d/)).toBeVisible();
-  // Long enough for a cleanup after the save to have run.
-  await page.waitForTimeout(2_000);
+  page.off('request', sent);
+  expect(deletes).toEqual([]);
   const names = async () => ((await tool(page, 'list_data_sources', {})).dataSources as { name: string }[]).map((d) => d.name);
   expect(await names()).toContain('Local desk');
 
@@ -240,7 +238,6 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
 });
 
 test('a template with two sources: a place for the weather and a feed for the news, each bound, fresh or stale, on its own', async () => {
-  test.setTimeout(120_000);
   await page.setViewportSize({ width: 1920, height: 1200 });
   const first = (await tool(page, 'list_spots', {})).spots.find((s: { name: string }) => s.name === 'Lobby weather').id;
   const spotId = await newSpot(page, 'Weather and headlines (test)', 'Lobby frame');

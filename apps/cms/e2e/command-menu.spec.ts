@@ -1,31 +1,24 @@
 import { expect, test, type Request } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, screenshot, signInAs, tool } from './helpers';
+import { axe, createOrg, hydrated, screenshot, signInAs, tool } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
 const ADDRESS = '192.0.2.13';
 
 test('the command menu, keyboard only: open, filter, run a tool with and without a form, see a refusal, go to a page, close', async ({ page, request }) => {
-  // 60.2 s on CI with every step passed (run 44976726090), against 14 s on a laptop.
-  test.setTimeout(120_000);
+  // 34-39 s on CI at 3 workers (runs 45146239608, 45147142350, 45147984299), over half the 60 s default.
+  test.setTimeout(90_000);
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-command-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Riverside Deli', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Riverside Deli', level: 1 })).toBeVisible();
+  await createOrg(page, 'Riverside Deli', ADDRESS);
   await hydrated(page);
 
   const menu = page.getByRole('dialog', { name: 'Command menu' });
   const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
   const toast = (text: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: text });
   /** The screens list's read (`getScreens`), which a test holds or fails by its route. */
-  const listRead = (url: URL) =>
-    url.pathname.startsWith('/_serverFn/') &&
-    Buffer.from(url.pathname.split('/')[2] ?? '', 'base64url')
-      .toString()
-      .includes('getScreens_');
+  const listRead = (url: URL) => url.pathname.startsWith('/_serverFn/getScreens_');
   // An opening joins a list read already on its way (begun leaving Screens, say), so a test that routes the next read
   // first waits for those to finish, by their own events.
   const reading = new Set<Request>();
@@ -318,11 +311,7 @@ test('the command menu tells a screen reader the row that is selected, after eac
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-command-pointer-${Date.now()}@example.com`, '192.0.2.19');
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Lantern Lane Pointer', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Lantern Lane Pointer', level: 1 })).toBeVisible();
-  await hydrated(page);
+  await createOrg(page, 'Lantern Lane Pointer', '192.0.2.19');
 
   const menu = page.getByRole('dialog', { name: 'Command menu' });
   const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
