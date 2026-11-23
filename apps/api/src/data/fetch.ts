@@ -171,7 +171,7 @@ async function capped(res: Response, max: number): Promise<Uint8Array> {
   return all;
 }
 
-const isIpv4 = (host: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+const isIpv4 = (host: string) => /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(host);
 
 /** IPv4 ranges that are not the public internet, as [network, prefix length]. */
 const V4_RESERVED: [string, number][] = [
@@ -194,16 +194,48 @@ const V4_RESERVED: [string, number][] = [
 
 const v4Number = (ip: string) => ip.split('.').reduce((n, part) => n * 256 + Number(part), 0);
 
-function isPrivate(address: string): boolean {
-  if (isIpv4(address)) {
-    const n = v4Number(address);
-    return V4_RESERVED.some(([base, bits]) => Math.floor(n / 2 ** (32 - bits)) === Math.floor(v4Number(base) / 2 ** (32 - bits)));
+const isPrivateV4 = (n: number) => V4_RESERVED.some(([base, bits]) => Math.floor(n / 2 ** (32 - bits)) === Math.floor(v4Number(base) / 2 ** (32 - bits)));
+
+/**
+ * Ranges inside global unicast (2000::/3) that are not the public internet, as [network, prefix
+ * length]. Everything outside 2000::/3 is refused whole: unique local, link-local, site-local,
+ * multicast, NAT64, discard and the unassigned rest.
+ */
+const V6_RESERVED: [bigint, number][] = [
+  [0x2001n << 112n, 23], // IETF protocol assignments: Teredo (2001::/32), benchmarking, ORCHID
+  [0x2001_0db8n << 96n, 32], // documentation
+  [0x2002n << 112n, 16], // 6to4, which carries an IPv4 address of any kind
+  [0x3fffn << 112n, 20], // documentation (RFC 9637)
+];
+
+/** The 128 bits an IPv6 address names, in any of its text forms; null if `text` is not one. */
+function v6Number(text: string): bigint | null {
+  let hex = text;
+  const dotted = /^(.*:)([^:]*)$/.exec(text);
+  if (dotted?.[2]?.includes('.')) {
+    if (!isIpv4(dotted[2])) return null;
+    const n = v4Number(dotted[2]);
+    hex = `${dotted[1]}${Math.floor(n / 0x10000).toString(16)}:${(n % 0x10000).toString(16)}`;
   }
-  const a = address.toLowerCase();
-  const mapped = /^::ffff:(\d{1,3}(\.\d{1,3}){3})$/.exec(a);
-  if (mapped) return isPrivate(mapped[1] ?? '');
-  // Unspecified, loopback, NAT64, documentation, unique local (fc00::/7), link-local (fe80::/10), multicast.
-  return a === '::' || a === '::1' || a.startsWith('64:ff9b:') || a.startsWith('2001:db8:') || /^f[cd]/.test(a) || /^fe[89ab]/.test(a) || a.startsWith('ff');
+  const halves = hex.split('::');
+  if (halves.length > 2) return null;
+  const [left, right] = halves.map((half) => (half ? half.split(':') : []));
+  const gap = 8 - (left?.length ?? 0) - (right?.length ?? 0);
+  if (right ? gap < 1 : gap !== 0) return null;
+  const groups = [...(left ?? []), ...Array<string>(gap).fill('0'), ...(right ?? [])];
+  if (!groups.every((g) => /^[0-9a-f]{1,4}$/i.test(g))) return null;
+  return groups.reduce((n, g) => (n << 16n) | BigInt(Number.parseInt(g, 16)), 0n);
+}
+
+function isPrivate(address: string): boolean {
+  if (isIpv4(address)) return isPrivateV4(v4Number(address));
+  const n = v6Number(address);
+  // The resolver's answer is untrusted: one that is no address is refused, not fetched.
+  if (n === null) return true;
+  // IPv4-compatible (::/96, which holds :: and ::1) and IPv4-mapped (::ffff:0:0/96) reach the IPv4 address they carry.
+  if (n >> 32n === 0n || n >> 32n === 0xffffn) return isPrivateV4(Number(n & 0xffff_ffffn));
+  if (n >> 125n !== 1n) return true;
+  return V6_RESERVED.some(([base, bits]) => n >> BigInt(128 - bits) === base >> BigInt(128 - bits));
 }
 
 /**
