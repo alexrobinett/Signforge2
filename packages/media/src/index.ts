@@ -6,6 +6,6 @@
  * `uploadVideo` checks a video with `@signforge/media-check` and uploads it in parts.
  */
 export { readImageInfo, RENDITION_TYPES, type ImageInfo, type RasterInfo, type RenditionType, type SvgInfo } from './image-info';
-export { makeRenditions, MediaError, ORIENTATIONS, sha256Hex, type Orientation, type Rendition, type RenditionOptions, type Renditions } from './renditions';
+export { makeRenditions, MediaError, ORIENTATIONS, scaledPhoto, sha256Hex, type Orientation, type Rendition, type RenditionOptions, type Renditions } from './renditions';
 export { assetUploadInput, uploadImage, type CallTool, type UploadOptions, type UploadTarget } from './upload';
 export { uploadVideo, VideoRejectedError, type VideoUploadOptions } from './video-upload';

@@ -7,15 +7,20 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { expect } from 'vitest';
+import type { AgentDeps } from '../src/agent/inline';
 import { createApi } from '../src/api';
 import type { ConnectorDeps } from '../src/connectors';
 import { RecordingEmailSender } from '../src/email';
 
 export const ORIGIN = 'https://api.test';
 
-/** A fresh `/api` app, as a new isolate would build it; with `connectors`, reaching those providers (test/fake-provider.ts). */
-export function testApp({ outbox = new RecordingEmailSender(), connectors }: { outbox?: RecordingEmailSender; connectors?: ConnectorDeps } = {}) {
-  const api = createApi({ email: outbox, connectors });
+/** A fresh `/api` app, as a new isolate would build it; with `connectors`, reaching those providers (test/fake-provider.ts), and with `agent`, a stub model. */
+export function testApp({
+  outbox = new RecordingEmailSender(),
+  connectors,
+  agent,
+}: { outbox?: RecordingEmailSender; connectors?: ConnectorDeps; agent?: AgentDeps } = {}) {
+  const api = createApi({ email: outbox, connectors, agent });
   const app = new Hono<{ Bindings: Env }>().route('/api', api);
   return { app, outbox };
 }

@@ -3,6 +3,7 @@
  * page. It is made as a draft and opens in the editor. Templates are chosen from thumbnails the
  * player drew ahead of time (scripts/template-thumbnails.ts); an org's own template is a named tile.
  */
+import { startData } from '@signforge/compiler/draft';
 import { safeUrl } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { PlusIcon } from 'lucide-react';
@@ -12,7 +13,7 @@ import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { startData, usableVersions, type TemplateView } from '~/lib/spots';
+import { usableVersions, type TemplateView } from '~/lib/spots';
 import thumbnails from '~/lib/template-thumbnails.json';
 import { assetsQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';

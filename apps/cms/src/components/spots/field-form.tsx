@@ -6,13 +6,14 @@
  * (`validateSpotData`) sits under it. Values a spot leaves out show the template's default.
  */
 import { BRAND_COLORS, type FieldDef, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
+import { startValue } from '@signforge/compiler/draft';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import type { AssetView } from '~/lib/assets';
-import { fieldProblems, startValue, type SpotDraft } from '~/lib/spots';
+import { fieldProblems, type SpotDraft } from '~/lib/spots';
 import { useAppStore } from '~/state/provider';
 
 /** A change to the draft, as the editor's `editSpot` takes it. */

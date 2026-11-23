@@ -16,7 +16,7 @@ import { publishLock } from '../publish';
 import { toolServices } from '../tool-services';
 import type { ApiEnv } from './index';
 
-const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = {
+export const STATUS: Record<ToolErrorCode, 400 | 403 | 404 | 409 | 429 | 503> = {
   invalid_input: 400,
   forbidden: 403,
   unknown_tool: 404,

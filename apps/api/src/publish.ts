@@ -7,6 +7,8 @@
  *   publish. A holder that dies leaves it to run out. The lock saves overlapping publishes the
  *   work of compiling twice and retrying; their order does not depend on it, since the publish
  *   revision's guard commits them in order anyway. M3-20's timed publish will keep its alarm here.
+ *   It also counts the org's agent turns against its daily ceiling (#263), one call per turn, so
+ *   turns taken at once cannot pass it, and a turn costs no D1 write.
  * - **The fan-out**: a publish's switched screens go to the `PUBLISH_NOTICES` queue, 50 screens a
  *   message, and the consumer tells each screen's Durable Object, all of a message's at once. A
  *   batch of 10 messages is at most 500 calls, under even the Free plan's 1,000 per invocation.
@@ -22,6 +24,12 @@ const LEASE_MS = 60_000;
 interface Lease {
   token: string;
   until: number;
+}
+
+/** The org's agent turns on one day, by the date in its time zone. */
+interface Turns {
+  day: string;
+  count: number;
 }
 
 export class OrgObject extends DurableObject<Env> {
@@ -44,6 +52,20 @@ export class OrgObject extends DurableObject<Env> {
         setTimeout(resolve, held.until - now);
       });
     }
+  }
+
+  /**
+   * Take one of the org's agent turns on `day` (YYYY-MM-DD in its time zone): true and counted while
+   * fewer than `ceiling` were taken that day, or with no ceiling; false, counting nothing, once
+   * `ceiling` were. A new day starts from none.
+   */
+  async takeTurn(day: string, ceiling: number | null): Promise<boolean> {
+    // Read and written with no other await between: the input gate lets no other call in.
+    const now = await this.ctx.storage.get<Turns>('turns');
+    const count = now?.day === day ? now.count : 0;
+    if (ceiling !== null && count >= ceiling) return false;
+    await this.ctx.storage.put('turns', { day, count: count + 1 } satisfies Turns);
+    return true;
   }
 
   /** Give the lock back. A token whose lease ran out and was taken releases nothing. */
