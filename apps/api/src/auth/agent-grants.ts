@@ -25,9 +25,16 @@ export const OAUTH_SCOPES = [...SCOPES, 'offline_access'] as const;
 export interface GrantDeps {
   /**
    * Writes a grant and its audit row, as the member, with `scopes` capped by their role in the
-   * org now. Undefined if the user is not a member of the org.
+   * org now, and returns the scopes it holds. Writes nothing for a user who is not a member of the
+   * org, or when no scope is left once capped.
    */
-  create(grant: { orgId: string; userId: string; clientId: string; clientName: string | null; scopes: Scope[] }): Promise<{ grantId: string } | undefined>;
+  create(grant: {
+    orgId: string;
+    userId: string;
+    clientId: string;
+    clientName: string | null;
+    scopes: Scope[];
+  }): Promise<{ ok: true; grantId: string; scopes: Scope[] } | { ok: false; refused: 'not_a_member' | 'no_scopes' }>;
   /** Revokes the user's grants in the org, and their tokens, audited as `by`. */
   revokeMember(orgId: string, userId: string, by: string): Promise<void>;
 }
@@ -37,11 +44,11 @@ type ConsentBody = { accept: boolean; oauth_query: string; scope?: string };
 /**
  * The consent endpoint's link to the provider in the same instance: the grant id the provider's
  * `consentReferenceId` returns while this request completes its consent, and the provider's own
- * consent endpoint, set once the instance exists (`createAuth`).
+ * consent (`auth.api.oauth2Consent`, which `createAuth` passes; its route is disabled).
  */
 export interface ConsentLink {
   grantId?: string;
-  complete?: (call: { headers: Headers; body: ConsentBody }) => Promise<{ redirect: boolean; url: string }>;
+  complete: (call: { headers: Headers; body: ConsentBody }) => Promise<{ redirect: boolean; url: string }>;
 }
 
 const consentBody = z.object({
@@ -50,8 +57,6 @@ const consentBody = z.object({
   organizationId: z.string().min(1).optional(),
   scopes: z.array(z.enum(SCOPES)).max(SCOPES.length).optional(),
 });
-
-const isScope = (s: string): s is Scope => SCOPES.some((scope) => scope === s);
 
 /** Membership changes after which the member's grants in the org end. */
 const ENDS_MEMBERSHIP: Record<string, (returned: Record<string, unknown>) => unknown> = {
@@ -65,32 +70,32 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
   return {
     id: 'agent-grants',
     endpoints: {
-      agentGrantConsent: createAuthEndpoint('/agent-grants/consent', { method: 'POST', body: consentBody, use: [sessionMiddleware] }, async (ctx) => {
-        if (!link.complete) throw new Error('the consent link was not set: createAuth sets it');
-        const { session } = ctx.context;
-        const query = new URLSearchParams(ctx.body.oauth_query);
-        const clientId = query.get('client_id');
-        if (!clientId) throw new APIError('BAD_REQUEST', { message: 'the query names no client' });
-        if (!ctx.body.accept) {
-          return ctx.json(await link.complete({ headers: ctx.headers ?? new Headers(), body: { accept: false, oauth_query: ctx.body.oauth_query } }));
-        }
-        if (!ctx.body.organizationId) throw new APIError('BAD_REQUEST', { message: 'choose the organization the connection works in' });
-        const requested = (query.get('scope') ?? '').split(' ');
-        const chosen = (ctx.body.scopes ?? []).filter((s) => requested.includes(s));
-        const client = await ctx.context.adapter.findOne<{ name: string | null }>({ model: 'oauthClient', where: [{ field: 'clientId', value: clientId }] });
-        if (!client) throw new APIError('BAD_REQUEST', { message: 'no such client' });
-        const made = await grants.create({ orgId: ctx.body.organizationId, userId: session.user.id, clientId, clientName: client.name, scopes: chosen });
-        if (!made) throw new APIError('FORBIDDEN', { message: 'you are not a member of that organization' });
-        link.grantId = made.grantId;
-        // The provider refuses scopes the client did not ask for; offline_access passes when it asked.
-        const scope = [...chosen.filter(isScope), ...(requested.includes('offline_access') ? ['offline_access'] : [])].join(' ');
-        return ctx.json(
-          await link.complete({
-            headers: ctx.headers ?? new Headers(),
-            body: { accept: true, oauth_query: ctx.body.oauth_query, ...(scope ? { scope } : {}) },
-          }),
-        );
-      }),
+      agentGrantConsent: createAuthEndpoint(
+        '/agent-grants/consent',
+        { method: 'POST', body: consentBody, requireHeaders: true, use: [sessionMiddleware] },
+        async (ctx) => {
+          const { session } = ctx.context;
+          const query = new URLSearchParams(ctx.body.oauth_query);
+          const clientId = query.get('client_id');
+          if (!clientId) throw new APIError('BAD_REQUEST', { message: 'the query names no client' });
+          if (!ctx.body.accept) {
+            return ctx.json(await link.complete({ headers: ctx.headers, body: { accept: false, oauth_query: ctx.body.oauth_query } }));
+          }
+          if (!ctx.body.organizationId) throw new APIError('BAD_REQUEST', { message: 'choose the organization the connection works in' });
+          const requested = (query.get('scope') ?? '').split(' ');
+          const chosen = (ctx.body.scopes ?? []).filter((s) => requested.includes(s));
+          const client = await ctx.context.adapter.findOne<{ name: string | null }>({ model: 'oauthClient', where: [{ field: 'clientId', value: clientId }] });
+          if (!client) throw new APIError('BAD_REQUEST', { message: 'no such client' });
+          const made = await grants.create({ orgId: ctx.body.organizationId, userId: session.user.id, clientId, clientName: client.name, scopes: chosen });
+          if (!made.ok && made.refused === 'not_a_member') throw new APIError('FORBIDDEN', { message: 'you are not a member of that organization' });
+          if (!made.ok) throw new APIError('BAD_REQUEST', { message: 'choose at least one scope this client asked for and your role allows' });
+          link.grantId = made.grantId;
+          // Always the grant's own scopes: the provider would otherwise keep every scope the client asked
+          // for. offline_access, for a refresh token, when it asked.
+          const scope = [...made.scopes, ...(requested.includes('offline_access') ? ['offline_access'] : [])].join(' ');
+          return ctx.json(await link.complete({ headers: ctx.headers, body: { accept: true, oauth_query: ctx.body.oauth_query, scope } }));
+        },
+      ),
     },
     hooks: {
       after: [

@@ -111,6 +111,33 @@ describe('revoking a grant', () => {
     expect(org.agentGrants.stage.revoke((await org.agentGrants.get(g.id))!, a.userId, NOW + 1).writes).toEqual([]);
   });
 
+  it("deletes the grant's authorization codes not yet exchanged, and no other verification row", async () => {
+    const org = scoped(env.DB, 'grants-a');
+    const clientId = await client();
+    const g = await grant('grants-a', a.userId, clientId);
+    const other = await grant('grants-a', a.userId, clientId);
+    const code = (id: string, referenceId: string) =>
+      env.DB.prepare('INSERT INTO verification (id, identifier, value, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(
+          id,
+          `code-${id}`,
+          JSON.stringify({ type: 'authorization_code', query: {}, userId: a.userId, referenceId }),
+          iso(NOW + 600_000),
+          iso(NOW),
+          iso(NOW),
+        )
+        .run();
+    await code('ver-revoked', g.id);
+    await code('ver-other', other.id);
+    // A sign-in code's row holds no JSON.
+    await env.DB.prepare('INSERT INTO verification (id, identifier, value, expiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind('ver-otp', 'sign-in-otp-someone', '123456:0', iso(NOW + 600_000), iso(NOW), iso(NOW))
+      .run();
+    await org.commit(org.agentGrants.stage.revoke(g, a.userId, NOW).writes);
+    const left = (await env.DB.prepare("SELECT id FROM verification WHERE id LIKE 'ver-%'").all<{ id: string }>()).results.map((r) => r.id).sort();
+    expect(left).toEqual(['ver-other', 'ver-otp']);
+  });
+
   it("from another org's scope, deletes nothing of the grant's", async () => {
     const clientId = await client();
     const g = await grant('grants-a', a.userId, clientId);

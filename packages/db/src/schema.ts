@@ -71,7 +71,7 @@ const incarnation = () => text('incarnation').$defaultFn(() => newId('inc'));
 /*
  * Better Auth's tables (M3-09), as `auth generate` in apps/api writes them for its options:
  * camelCase columns, `date` columns holding ISO strings. Better Auth reads and writes them
- * itself; apps/api/test/auth-schema.test.ts checks it finds nothing missing. Not tenant tables.
+ * itself; apps/api/test/auth-platform.test.ts checks it finds nothing missing. Not tenant tables.
  */
 const date = customType<{ data: string }>({ dataType: () => 'date' });
 const bigint = customType<{ data: number }>({ dataType: () => 'bigint' });

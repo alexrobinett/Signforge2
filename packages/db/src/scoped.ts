@@ -2050,8 +2050,8 @@ export function scoped(d1: D1Database, orgId: string) {
       stage: {
         ...grants.stage,
         /**
-         * Revoked by `by` at `now`, and in the same batch the provider's access and refresh tokens
-         * and consents for it deleted, so its client's next refresh is refused too (M4-01's RESULTS,
+         * Revoked by `by` at `now`, and in the same batch the provider's access and refresh tokens,
+         * consents and unexchanged authorization codes for it deleted, so its client's next refresh is refused too (M4-01's RESULTS,
          * limitation 3). Only this org's grant's: the deletes find it here first. Already revoked: nothing.
          */
         revoke: (grant: typeof ag.$inferSelect, by: string, now: number): Staged<typeof ag.$inferSelect> => {
@@ -2066,6 +2066,12 @@ export function scoped(d1: D1Database, orgId: string) {
             db.delete(s.oauthAccessToken).where(inArray(s.oauthAccessToken.referenceId, ours)),
             db.delete(s.oauthRefreshToken).where(inArray(s.oauthRefreshToken.referenceId, ours)),
             db.delete(s.oauthConsent).where(inArray(s.oauthConsent.referenceId, ours)),
+            // Its authorization codes not yet exchanged: verification rows whose JSON value names it
+            // (the provider's `{ type: 'authorization_code', referenceId, ... }`). Other rows (sign-in
+            // codes) hold no JSON, so the value is read only where it is valid.
+            db
+              .delete(s.verification)
+              .where(inArray(sql`CASE WHEN json_valid(${s.verification.value}) THEN json_extract(${s.verification.value}, '$.referenceId') END`, ours)),
           );
           return { row: revoked.row, writes: [...revoked.writes, ...tokens.writes] };
         },

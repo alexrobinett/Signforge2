@@ -181,6 +181,9 @@ const DAY_S = 24 * HOUR_S;
 export function authOptions({ email, appUrl, audit, startingOrg, mcpResource, grants, consent }: AuthDeps) {
   return {
     basePath: '/api/auth',
+    // The provider's own consent would issue a code with no grant behind it; consent is ours
+    // (./agent-grants.ts), which calls it through `auth.api`, which these paths do not stop.
+    disabledPaths: ['/oauth2/consent'],
     // Password hashing does not fit the free plan's CPU limit; sign-in is passwordless.
     emailAndPassword: { enabled: false },
     session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
@@ -207,7 +210,7 @@ export function authOptions({ email, appUrl, audit, startingOrg, mcpResource, gr
         generateId: ({ model }: { model: string }) => newId(ID_PREFIX[model] ?? model.slice(0, 3).toLowerCase()),
         // On by default since 1.7: about 19 statements of table introspection once per instance, and the
         // instance is built per request (M4-01's RESULTS, section 1). The migrations own the schema, and
-        // test/auth-schema.test.ts checks it against Better Auth's.
+        // test/auth-platform.test.ts checks it against Better Auth's.
         validateSchema: false,
       },
     },

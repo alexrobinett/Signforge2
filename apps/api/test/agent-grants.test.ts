@@ -60,26 +60,30 @@ async function register(t: App) {
 
 const ALL_SCOPES = 'content:read content:draft content:publish screens:manage org:manage offline_access';
 
-/** The person, signed in as `c`, authorizes `clientId` and consents with an org and scopes. Returns the code, or the error redirect. */
-async function authorize(c: Client, clientId: string, consent: { organizationId?: string; scopes?: string[]; accept?: boolean }, scope = ALL_SCOPES) {
+/** The person, signed in as `c`, opens `clientId`'s authorize URL: the provider sends them to the consent page with its signed query. */
+async function consentPage(c: Client, clientId: string, scope = ALL_SCOPES) {
   const verifier = crypto.randomUUID() + crypto.randomUUID();
-  const challenge = await sha256Base64Url(verifier);
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: clientId,
     redirect_uri: REDIRECT,
     scope,
     state: 'st',
-    code_challenge: challenge,
+    code_challenge: await sha256Base64Url(verifier),
     code_challenge_method: 'S256',
     resource: RESOURCE,
   });
   const res = await c.get(`/api/auth/oauth2/authorize?${params}`, { accept: 'text/html' });
-  const location = res.headers.get('location') ?? (await res.json<{ url: string }>()).url;
-  const consentPage = new URL(location, ORIGIN);
-  expect(consentPage.pathname).toBe('/connect');
+  const page = new URL(res.headers.get('location') ?? (await res.json<{ url: string }>()).url, ORIGIN);
+  expect(page.pathname).toBe('/connect');
+  return { oauthQuery: page.search.slice(1), verifier };
+}
+
+/** As `consentPage`, then the person consents with an org and scopes. Returns the code, or the error redirect. */
+async function authorize(c: Client, clientId: string, consent: { organizationId?: string; scopes?: string[]; accept?: boolean }, scope = ALL_SCOPES) {
+  const { oauthQuery, verifier } = await consentPage(c, clientId, scope);
   const decided = await c.post('/api/auth/agent-grants/consent', {
-    oauth_query: consentPage.search.slice(1),
+    oauth_query: oauthQuery,
     accept: consent.accept ?? true,
     ...(consent.organizationId ? { organizationId: consent.organizationId } : {}),
     ...(consent.scopes ? { scopes: consent.scopes } : {}),
@@ -197,13 +201,15 @@ describe("a grant's org and scopes", () => {
     const { t, owner, editor, org } = await team();
     expect((await owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
     const asked = ['content:read', 'content:draft', 'content:publish'];
+    /** The grant's scopes, and the scope the provider's token response states: always the same. */
     const scopesOf = async (c: Client) => {
       const clientId = await register(t);
       const { back, verifier } = await authorize(c, clientId, { organizationId: org.id, scopes: asked });
-      return JSON.parse((await check((await exchange(t, clientId, back!.searchParams.get('code')!, verifier)).access_token))!.scopesJson);
+      const tokens = await exchange(t, clientId, back!.searchParams.get('code')!, verifier);
+      return { grant: JSON.parse((await check(tokens.access_token))!.scopesJson), token: tokens.scope.split(' ').sort() };
     };
-    expect(await scopesOf(owner)).toEqual(asked);
-    expect(await scopesOf(editor)).toEqual(['content:read', 'content:draft']);
+    expect(await scopesOf(owner)).toEqual({ grant: asked, token: [...asked, 'offline_access'].sort() });
+    expect(await scopesOf(editor)).toEqual({ grant: ['content:read', 'content:draft'], token: ['content:draft', 'content:read', 'offline_access'] });
   });
 
   it('keeps only the scopes the client asked for', async () => {
@@ -219,6 +225,65 @@ describe("a grant's org and scopes", () => {
     const tokens = await exchange(t, clientId, back!.searchParams.get('code')!, verifier);
     expect(tokens.scope.split(' ').sort()).toEqual(['content:read', 'offline_access']);
     expect(JSON.parse((await check(tokens.access_token))!.scopesJson)).toEqual(['content:read']);
+  });
+});
+
+describe('consent that grants nothing', () => {
+  it('is refused with 400, writes no grant, and gives the client no code', async () => {
+    const { t, owner, editor, org } = await team();
+    expect((await owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
+    const cases: [Client, string[], string][] = [
+      // No scope chosen: the provider would otherwise fall back to everything the client asked for.
+      [owner, [], ALL_SCOPES],
+      // Only scopes the client did not ask for.
+      [owner, ['org:manage'], 'content:read offline_access'],
+      // Only one the role does not allow now.
+      [editor, ['content:publish'], ALL_SCOPES],
+    ];
+    for (const [c, scopes, asked] of cases) {
+      const clientId = await register(t);
+      expect(await authorize(c, clientId, { organizationId: org.id, scopes }, asked), JSON.stringify(scopes)).toMatchObject({ status: 400, back: undefined });
+    }
+    expect(await scoped(env.DB, org.id).agentGrants.list()).toEqual([]);
+  });
+});
+
+describe("the provider's own consent route", () => {
+  it('is refused, and leaves no consent, code or token behind', async () => {
+    const { t, owner } = await team();
+    const clientId = await register(t);
+    const { oauthQuery } = await consentPage(owner, clientId);
+    const res = await owner.post('/api/auth/oauth2/consent', { accept: true, oauth_query: oauthQuery });
+    expect(res.status).toBe(404);
+    const rows = await env.DB.prepare(
+      "SELECT (SELECT count(*) FROM oauthConsent WHERE clientId = ?1) + (SELECT count(*) FROM oauthAccessToken WHERE clientId = ?1) + (SELECT count(*) FROM verification WHERE value LIKE '%authorization_code%' AND value LIKE '%' || ?1 || '%') AS n",
+    )
+      .bind(clientId)
+      .first<{ n: number }>();
+    expect(rows!.n).toBe(0);
+  });
+});
+
+describe('consent from another site', () => {
+  it('is refused with a foreign Origin or none, and writes no grant (CSRF, limitation 15)', async () => {
+    const { t, owner, org } = await team();
+    const clientId = await register(t);
+    const { oauthQuery } = await consentPage(owner, clientId);
+    const body = JSON.stringify({ oauth_query: oauthQuery, accept: true, organizationId: org.id, scopes: ['content:read'] });
+    for (const origin of ['https://evil.test', undefined]) {
+      const res = await t.app.request(
+        `${ORIGIN}/api/auth/agent-grants/consent`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie: owner.cookie, 'cf-connecting-ip': owner.ip, ...(origin ? { origin } : {}) },
+          body,
+        },
+        env,
+        createExecutionContext(),
+      );
+      expect(res.status, String(origin)).toBe(403);
+    }
+    expect(await scoped(env.DB, org.id).agentGrants.list()).toEqual([]);
   });
 });
 
@@ -244,6 +309,22 @@ describe('a membership ending', () => {
     expect(refreshed.status).toBe(400);
     const [audit] = (await scoped(env.DB, org.id).auditLog.list({ limit: 50 })).filter((e) => e.action === 'revoke_agent_grant');
     expect(audit).toMatchObject({ actorKind: 'user', actorId: ownerId, targetKind: 'agent_grant', targetId: live!.grantId });
+  });
+
+  it('refuses a code the member was given before the removal, once removed', async () => {
+    const { t, owner, editor, editorMemberId, org } = await team();
+    const clientId = await register(t);
+    const { back, verifier } = await authorize(editor, clientId, { organizationId: org.id, scopes: ['content:read'] });
+    await owner.ok('/api/auth/organization/remove-member', { memberIdOrEmail: editorMemberId });
+    const res = await form(t, '/api/auth/oauth2/token', {
+      grant_type: 'authorization_code',
+      code: back!.searchParams.get('code')!,
+      code_verifier: verifier,
+      redirect_uri: REDIRECT,
+      client_id: clientId,
+      resource: RESOURCE,
+    });
+    expect(res.status).toBe(400);
   });
 
   it('revokes them when the member leaves, too', async () => {

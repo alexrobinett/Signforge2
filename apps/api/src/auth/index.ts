@@ -26,7 +26,8 @@ export function createAuth(env: Env, request: Request, email: EmailSender) {
   const secret = authSecret(env);
   const appUrl = env.CMS_ORIGIN ?? origin;
   const github = env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET ? { github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } } : {};
-  const consent: ConsentLink = {};
+  // Called only once a request runs, after `auth` exists.
+  const consent: ConsentLink = { complete: (call) => auth.api.oauth2Consent(call) };
   const auth = betterAuth({
     ...authOptions({
       email,
@@ -44,7 +45,6 @@ export function createAuth(env: Env, request: Request, email: EmailSender) {
     trustedOrigins: env.CMS_ORIGIN ? [origin, env.CMS_ORIGIN] : [origin],
     socialProviders: github,
   });
-  consent.complete = (call) => auth.api.oauth2Consent(call);
   return auth;
 }
 

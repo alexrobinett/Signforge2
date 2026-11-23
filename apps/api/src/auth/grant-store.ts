@@ -15,10 +15,11 @@ export function grantStore(d1: D1Database): GrantDeps {
   return {
     create: async ({ orgId, userId, clientId, clientName, scopes }) => {
       const membership = await findMembership(d1, orgId, userId);
-      if (!membership || !isRole(membership.role)) return undefined;
+      if (!membership || !isRole(membership.role)) return { ok: false, refused: 'not_a_member' };
       const org = scoped(d1, orgId);
       // Within the member's role as the org has it now (editorsPublish); the dispatcher caps again on every call.
       const granted = effectiveScopes(await grantOf({ org, role: membership.role, scopes }));
+      if (!granted.length) return { ok: false, refused: 'no_scopes' };
       const made = org.agentGrants.stage.insert({
         userId,
         clientId,
@@ -36,7 +37,7 @@ export function grantStore(d1: D1Database): GrantDeps {
         detailJson: JSON.stringify({ clientId, clientName, scopes: granted }),
       });
       await org.commit([...made.writes, ...audit.writes]);
-      return { grantId: made.row.id };
+      return { ok: true, grantId: made.row.id, scopes: granted };
     },
     revokeMember: async (orgId, userId, by) => {
       const org = scoped(d1, orgId);
