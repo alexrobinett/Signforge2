@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, FEEDS_DIR, PLACES, RUN_DIR } from './servers';
+import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, FEEDS_DIR, PLACES, portTaken, RUN_DIR } from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
 const cmsDir = fileURLToPath(new URL('../', import.meta.url));
@@ -64,22 +64,12 @@ async function feedServer(): Promise<{ url: string; close: () => void }> {
   return { url: `http://127.0.0.1:${address.port}`, close: () => server.close() };
 }
 
-/** True if something already answers on the port: another checkout's run, whose servers this run would otherwise use. */
-async function answers(url: string) {
-  try {
-    await fetch(url, { signal: AbortSignal.timeout(2_000) });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export default async function globalSetup() {
-  for (const [name, url] of [
-    ['E2E_API_PORT', `http://127.0.0.1:${API_PORT}/health`],
-    ['E2E_CMS_PORT', `http://127.0.0.1:${CMS_PORT}/`],
+  for (const [name, port] of [
+    ['E2E_API_PORT', API_PORT],
+    ['E2E_CMS_PORT', CMS_PORT],
   ] as const) {
-    if (await answers(url)) throw new Error(`${url} is already in use (another e2e run?): set ${name} to a free port`);
+    if (await portTaken(port)) throw new Error(`port ${port} is already in use (another e2e run?): set ${name} to a free port`);
   }
   rmSync(RUN_DIR, { recursive: true, force: true });
   mkdirSync(FEEDS_DIR, { recursive: true });
