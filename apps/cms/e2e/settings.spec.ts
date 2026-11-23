@@ -763,7 +763,7 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
 
 test('an owner saves an Anthropic key, tests it against the stub, chooses models and a ceiling; the key never comes back (#261)', async ({ page }) => {
   await signInAs(page, `e2e-settings-ai-${Date.now()}@example.com`, '192.0.2.151');
-  await createOrg(page, 'Harbor Coffee');
+  await createOrg(page, 'Quay Street Bakery');
   await page.goto('/settings/ai');
   await hydrated(page);
   await expect(page.getByText('the agent uses SignForge’s demo model', { exact: false })).toBeVisible();
