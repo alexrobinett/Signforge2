@@ -13,7 +13,7 @@ import mediaRss from './fixtures/media-rss.xml?raw';
 import npr from './fixtures/npr-news.xml?raw';
 import userland from './fixtures/rss-userland.xml?raw';
 import wordpress from './fixtures/wordpress.xml?raw';
-import { inLinearTime, linearMs } from './linear';
+import { inLinearTime } from './linear';
 
 const images = (body: string, url?: string) => parseNews(body, url ? { url } : {}).items.map((i) => i.image);
 const rss = (items: string, head = '') => `<?xml version="1.0"?>${head}<rss version="2.0"><channel><title>Test</title>${items}</channel></rss>`;
@@ -529,13 +529,12 @@ describe('what screens get', () => {
 });
 describe('image search cost', () => {
   // 1.8 s on CI for the first five bodies (run 44880983452), against 0.3 s on a laptop; each body may
-  // be tried three times, and the later ones make about as much work again.
+  // be tried five times, each after a pass of its own, and the later ones make about as much work again.
   it('finds images in linear time in bodies built to make a scanner backtrack, and finds the right ones', { timeout: 120_000 }, () => {
-    const base = linearMs();
     const timed = (feed: string, expected: (FeedImage | undefined)[]) => {
       expect(feed.length).toBeLessThanOrEqual(LIMITS.maxBytes);
       expect(images(feed)).toEqual(expected);
-      return inLinearTime(() => parseNews(feed), base);
+      return inLinearTime(() => parseNews(feed));
     };
     const body = (html: string, attrs = '') =>
       rss(`<item${attrs}><title>x</title><link>https://example.com/</link><description><![CDATA[${html}<img src="last.jpg">]]></description></item>`);
