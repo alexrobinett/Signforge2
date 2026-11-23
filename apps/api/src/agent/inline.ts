@@ -72,6 +72,8 @@ const STATUSES: Record<InlineProblem, 400 | 403 | 409 | 422 | 429 | 502 | 503> =
   no_model: 409,
   cannot_fill: 409,
   out_of_turns: 429,
+  rate_limited: 429,
+  conflict: 409,
   blocked: 422,
   page_refused: 422,
   unreadable: 422,
@@ -340,8 +342,12 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
     // call spent. Its marks were in the lost answer: the spot opens unmarked.
     const prior = await org.idempotency.get(idempotencyKey);
     if (prior) {
-      if (prior.action !== 'create_spot') return refuse(c, 'invalid_input', 'That idempotency key was used for something else: use a new one.');
-      return c.json({ spot: outputs.create_spot.parse(JSON.parse(prior.outputJson)).spot, marks: {} } satisfies InlineAnswer);
+      // As the dispatcher refuses a key used for another call: another action, or another template picked (#314).
+      const made = prior.action === 'create_spot' ? outputs.create_spot.parse(JSON.parse(prior.outputJson)).spot : undefined;
+      if (!made) return refuse(c, 'conflict', 'That idempotency key was used for something else: use a new one.');
+      if (templateVersionId !== undefined && made.templateVersionId !== templateVersionId)
+        return refuse(c, 'conflict', 'That idempotency key made a spot with another template: use a new one to fill this one.');
+      return c.json({ spot: made, marks: {} } satisfies InlineAnswer);
     }
 
     const now = (deps.now ?? Date.now)();
@@ -353,6 +359,12 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
     // Asked before the link is fetched, so an org with none left makes no request to a third party; taken after, so a
     // link that cannot be read costs none.
     if (!(await turns.hasTurn(day, provider.dailyTurnCeiling))) return refuse(c, 'out_of_turns', spent);
+
+    // A link that cannot be read costs no turn, so its fetches are limited per member and address instead (#314).
+    const { rateLimit } = caller.services;
+    // The CMS's caller always has a limiter; one without would read no links.
+    const reads: Promise<boolean> = source.kind !== 'link' ? Promise.resolve(true) : rateLimit ? rateLimit('page_read') : Promise.resolve(false);
+    if (!(await reads)) return refuse(c, 'rate_limited', 'Too many links read in a minute: wait a minute and try again.');
 
     const reach = deps.reach ?? { fetch: workerFetch, guards: feedGuards(c.env, workerFetch) };
     const page = source.kind === 'link' ? await readPage(source.url, reach.guards) : undefined;

@@ -44,6 +44,8 @@ export type InlineProblem =
   | 'no_model'
   | 'cannot_fill'
   | 'out_of_turns'
+  | 'rate_limited'
+  | 'conflict'
   | 'blocked'
   | 'page_refused'
   | 'unreachable'

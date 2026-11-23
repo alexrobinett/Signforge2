@@ -30,6 +30,7 @@
         { "name": "TEMPLATE_CHECK_LIMIT", "namespace_id": "804", "simple": { "limit": 10, "period": 60 } },
         { "name": "PLACE_SEARCH_LIMIT", "namespace_id": "805", "simple": { "limit": 30, "period": 60 } },
         { "name": "TABLE_READ_LIMIT", "namespace_id": "806", "simple": { "limit": 30, "period": 60 } },
+        { "name": "PAGE_READ_LIMIT", "namespace_id": "808", "simple": { "limit": 30, "period": 60 } },
         { "name": "AGENT_CALL_LIMIT", "namespace_id": "807", "simple": { "limit": 120, "period": 60 } }
       ],
       "send_email": [{ "name": "EMAIL" }],
@@ -101,6 +102,7 @@
         { "name": "TEMPLATE_CHECK_LIMIT", "namespace_id": "814", "simple": { "limit": 10, "period": 60 } },
         { "name": "PLACE_SEARCH_LIMIT", "namespace_id": "815", "simple": { "limit": 30, "period": 60 } },
         { "name": "TABLE_READ_LIMIT", "namespace_id": "816", "simple": { "limit": 30, "period": 60 } },
+        { "name": "PAGE_READ_LIMIT", "namespace_id": "818", "simple": { "limit": 30, "period": 60 } },
         { "name": "AGENT_CALL_LIMIT", "namespace_id": "817", "simple": { "limit": 120, "period": 60 } }
       ],
       "send_email": [{ "name": "EMAIL" }],
@@ -155,6 +157,7 @@
         { "name": "TEMPLATE_CHECK_LIMIT", "namespace_id": "824", "simple": { "limit": 10, "period": 60 } },
         { "name": "PLACE_SEARCH_LIMIT", "namespace_id": "825", "simple": { "limit": 30, "period": 60 } },
         { "name": "TABLE_READ_LIMIT", "namespace_id": "826", "simple": { "limit": 30, "period": 60 } },
+        { "name": "PAGE_READ_LIMIT", "namespace_id": "828", "simple": { "limit": 30, "period": 60 } },
         { "name": "AGENT_CALL_LIMIT", "namespace_id": "827", "simple": { "limit": 120, "period": 60 } }
       ],
       "send_email": [{ "name": "EMAIL" }],

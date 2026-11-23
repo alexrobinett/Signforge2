@@ -299,9 +299,11 @@ export interface ToolContext<I, D extends DataScope = OrgScope, N extends Servic
  * member and the address). `pairing_claim`: every claim of a pairing code, right or wrong.
  * `place_search`: every `find_places`, each a request to a third party's free service.
  * `table_read`: every `read_table`, each a fetch of a URL the caller typed.
+ * `page_read`: every link the agent's fill reads (#263, #314), a fetch of a URL the caller pasted, which
+ * costs no turn when the page cannot be read.
  * `template_check`: every runtime check of an org's template, keyed by the org, whose container it uses.
  */
-export type RateLimitBucket = 'pairing_claim' | 'place_search' | 'table_read' | 'template_check';
+export type RateLimitBucket = 'pairing_claim' | 'place_search' | 'table_read' | 'page_read' | 'template_check';
 /** Counts one attempt in `bucket`; false once the caller is over its limit. */
 export type RateLimiter = (bucket: RateLimitBucket) => Promise<boolean>;
 
