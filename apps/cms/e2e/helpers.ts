@@ -1,11 +1,9 @@
 import AxeBuilder from '@axe-core/playwright';
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { expect, request as playwrightRequest, type Page, type Route } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
-import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor, RUN_DIR } from './servers';
+import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor } from './servers';
 
 /**
  * Fill the email step and ask for a code. Retried until the page has hydrated: before that the
@@ -296,18 +294,24 @@ export async function tool(page: Page, name: string, input: unknown) {
   return res.json();
 }
 
-/** Runs SQL on the run's local D1, which the dev API reads (`e2e/global-setup.ts`): for what the test cannot wait for. */
-export function d1(command: string) {
-  const run = spawnSync(
-    'pnpm',
-    ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'dev', '--persist-to', `${RUN_DIR}state`, '--command', command],
-    {
-      cwd: fileURLToPath(new URL('../../api/', import.meta.url)),
-      env: { ...process.env, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' },
-      encoding: 'utf8',
-    },
-  );
-  expect(run.status, run.stderr).toBe(0);
+/** The dev API's D1, by the placeholder id `env.dev` gives it in apps/api/wrangler.jsonc. */
+const DEV_DB_ID = '00000000-0000-0000-0000-000000000000';
+
+/**
+ * Runs SQL on the run's local D1, which the dev API reads (`e2e/global-setup.ts`): for what the
+ * test cannot wait for. It goes through the dev API's own Local Explorer, so the process that
+ * holds the database runs it. `wrangler d1 execute`, a second process on the same file, found it
+ * locked (SQLITE_BUSY) once specs ran side by side, and could lock the API's own writes out (#249).
+ */
+export async function d1(sql: string) {
+  const res = await fetch(`http://127.0.0.1:${API_PORT}/cdn-cgi/local/explorer/api/d1/database/${DEV_DB_ID}/raw`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sql }),
+  });
+  const body = await res.text();
+  expect(res.status, body).toBe(200);
+  expect(JSON.parse(body), body).toMatchObject({ success: true });
 }
 
 /** As a member with no org yet: make one called `name`, as the first page asks, and land on it. */

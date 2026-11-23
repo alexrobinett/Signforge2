@@ -9,7 +9,7 @@ test('upload images, search them by name, see which are in use, and delete one n
   test.setTimeout(120_000);
   await signInAs(page, `e2e-assets-${Date.now()}@example.com`, ADDRESS);
   await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
+  await fillUntilEnabled(page, 'Organization name', 'Northside Studio', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
   await expect(page.getByRole('heading', { name: 'No images yet' })).toBeVisible();
