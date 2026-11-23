@@ -2032,12 +2032,12 @@ export function scoped(d1: D1Database, orgId: string) {
      */
     agentGrants: {
       ...grants,
-      /** The user's grants here that are neither revoked nor expired at `now`. */
-      liveFor: (userId: string, now: number) =>
+      /** The user's grants here not yet revoked, expired ones included: their tokens are still stored. */
+      unrevokedFor: (userId: string) =>
         db
           .select()
           .from(ag)
-          .where(and(eq(ag.orgId, orgId), eq(ag.userId, userId), isNull(ag.revokedAt), gt(ag.expiresAt, now)))
+          .where(and(eq(ag.orgId, orgId), eq(ag.userId, userId), isNull(ag.revokedAt)))
           .orderBy(asc(ag.id))
           .all(),
       /** Used now: its 90 days unused start again. Bookkeeping, not audited; a revoked grant stays revoked. */

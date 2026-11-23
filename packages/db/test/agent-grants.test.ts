@@ -81,15 +81,15 @@ describe('the scoped repository', () => {
     expect((await scoped(env.DB, 'grants-b').agentGrants.list()).map((r) => r.id)).not.toContain(g.id);
   });
 
-  it('lists a user’s live grants, not revoked or expired ones', async () => {
+  it('lists a user’s unrevoked grants, expired ones included', async () => {
     const org = scoped(env.DB, 'grants-a');
     const live = await grant('grants-a', a.userId, await client());
     const revoked = await grant('grants-a', a.userId, await client());
     await org.commit(org.agentGrants.stage.revoke(revoked, a.userId, NOW).writes);
-    const ids = (await org.agentGrants.liveFor(a.userId, NOW)).map((g) => g.id);
+    const ids = (await org.agentGrants.unrevokedFor(a.userId)).map((g) => g.id);
     expect(ids).toContain(live.id);
     expect(ids).not.toContain(revoked.id);
-    expect(await org.agentGrants.liveFor(a.userId, NOW + AGENT_GRANT_IDLE_MS)).toEqual([]);
+    expect((await scoped(env.DB, 'grants-b').agentGrants.unrevokedFor(a.userId)).map((g) => g.id)).not.toContain(live.id);
   });
 });
 
