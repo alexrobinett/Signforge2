@@ -3,15 +3,18 @@
  * from the template's fields (or the image, video or web page settings); every change goes to the
  * stage at once and to the spot's draft a moment later (src/state/spot-editor.ts). A template
  * with live fields gets a Source section instead of those fields (src/components/spots/source-section.tsx).
+ * A spot the agent just filled (#263) opens with its marks and a banner (src/components/spots/fill-marks.tsx).
  * The stage's orientation, scale, brand kit and data are in the URL:
  * `?o=portrait&scale=actual&kit=<id>&data=fallback`.
  */
+import { startData } from '@signforge/compiler/draft';
 import { liveSources, safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, notFound } from '@tanstack/react-router';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
 import { FieldForm } from '~/components/spots/field-form';
+import { FillBanner } from '~/components/spots/fill-marks';
 import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
 import { Button } from '~/components/ui/button';
@@ -81,6 +84,12 @@ function SpotEditor() {
   const pick = useAppStore((s) => s.pickImageFor);
   const publishing = useAppStore((s) => s.publishing.pending);
   const publish = useAppStore((s) => s.publishSpot);
+  const filled = useAppStore((s) => s.agent.filled[spotId]);
+  const clearMark = useAppStore((s) => s.clearFillMark);
+  const finishFill = useAppStore((s) => s.finishFill);
+  const undoFill = useAppStore((s) => s.undoFill);
+  const fillWithAnother = useAppStore((s) => s.fillWithAnother);
+  const takePhoto = useAppStore((s) => s.usePhotoFor);
 
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
@@ -104,6 +113,15 @@ function SpotEditor() {
         {canPublish && <PublishButton pending={publishing} disabled={stale} onPublish={() => void publish(orgId, spotId)} />}
       </EditorHeader>
       <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} />
+      {filled && version && (
+        <FillBanner
+          marks={filled.marks}
+          from={filled.photo ? 'photo' : 'link'}
+          onUndo={() => undoFill(orgId, spotId, { name: version.manifest.name, data: startData(version.manifest.fields) })}
+          onAnother={() => void fillWithAnother(spotId)}
+          onDone={() => finishFill(spotId)}
+        />
+      )}
       <div className="flex flex-1 flex-wrap items-stretch">
         <form
           aria-label="Spot fields"
@@ -140,7 +158,20 @@ function SpotEditor() {
             {spot.kind === 'template' &&
               (version ? (
                 <EditorSection title="Content">
-                  <FieldForm fields={typedFields(version.manifest, draft.bindings)} draft={draft} assets={assets} onChange={change} />
+                  <FieldForm
+                    fields={version.manifest.fields}
+                    shown={typedFields(version.manifest, draft.bindings)}
+                    draft={draft}
+                    assets={assets}
+                    marks={filled?.marks}
+                    flyer={
+                      filled?.photo
+                        ? { onUse: (field) => void takePhoto(orgId, spotId, field), uploading: filled.uploading, error: filled.uploadError }
+                        : undefined
+                    }
+                    onChange={change}
+                    onEdited={(field) => clearMark(spotId, field)}
+                  />
                 </EditorSection>
               ) : (
                 <p className="text-sm text-muted-foreground">This spot's template is not available to this organization.</p>

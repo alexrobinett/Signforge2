@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from 'playwright';
 import type { Orientation } from '@signforge/contract';
-import { LIGHT_KIT, noDemoAndLight, paintedContrast, screenFrame, useTemplate } from '@signforge/template-test';
+import { host, LIGHT_KIT, noDemoAndLight, paintedContrast, screenFrame, spotData, useTemplate } from '@signforge/template-test';
 
 const photo = { photo: '#808080' };
 const t = useTemplate(new URL('../looks-test', import.meta.url), {
@@ -193,6 +193,56 @@ describe('the look kit (#190)', () => {
       expect(c.shift, look).toBeCloseTo(-c.copyWidth, 0);
       // The frame is 1920x1080: 1vmin is 10.8 px.
       expect(c.copyWidth / c.seconds, look).toBeCloseTo(c.speed * 10.8, 1);
+    }
+  });
+  // The SDK restores the document and inits again on new data, while the old prepare may still be
+  // waiting in applyLook for the faces. Here the first prepare is held there until the new data has
+  // played its own prepare: resuming must not touch the document that replaced it (#233).
+  it('a prepare that new data replaced, resuming in applyLook, leaves the new document as a fresh load', async () => {
+    const hst = await host('landscape', true);
+    const a = spotData(t().manifest, { look: 'pop', crawl: 'The old crawl' });
+    const b = spotData(t().manifest, { look: 'night', crawl: 'The new crawl' });
+    await hst.open('fresh', t().html);
+    await hst.init('fresh', b, photo);
+    await hst.waitFor('fresh', 'ready', 1);
+    const fresh = await hst.dom('fresh');
+    for (const [name, index] of [
+      ['reset', 1],
+      ['again', 2],
+    ] as const) {
+      await hst.open(name, t().html);
+      const f = hst.page.mainFrame().childFrames()[index]!;
+      // The first read of `document.fonts.ready` is applyLook's, in the first prepare: it waits
+      // there until the test lets it go, and says when it has got there.
+      await f.evaluate(() => {
+        const w = window as unknown as { held: Promise<void>; release: () => void };
+        const ready = Object.getOwnPropertyDescriptor(FontFaceSet.prototype, 'ready')!.get!;
+        const gate = new Promise<void>((r) => (w.release = r));
+        let arrived: () => void = () => {};
+        w.held = new Promise((r) => (arrived = r));
+        let reads = 0;
+        Object.defineProperty(document.fonts, 'ready', {
+          get(this: FontFaceSet) {
+            if (reads++) return ready.call(this);
+            arrived();
+            return gate.then(() => ready.call(this));
+          },
+        });
+      });
+      await hst.init(name, a, photo);
+      await f.evaluate(() => (window as unknown as { held: Promise<void> }).held);
+      if (name === 'reset') {
+        await hst.post(name, 'reset');
+        await hst.waitFor(name, 'loaded', 2);
+      }
+      await hst.init(name, b, photo);
+      await hst.waitFor(name, 'ready', 1);
+      // Let the first prepare go, then wait a task: what it does next runs in microtasks before it.
+      await f.evaluate(async () => {
+        (window as unknown as { release: () => void }).release();
+        await new Promise((r) => setTimeout(r));
+      });
+      expect(await hst.dom(name), name).toBe(fresh);
     }
   });
 });

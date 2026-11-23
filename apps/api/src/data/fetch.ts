@@ -76,11 +76,11 @@ export function guardedImageFetch(url: string, last: Validators, guards: FetchGu
 }
 
 /**
- * GET JSON from an org's model endpoint with its key (#262): the guards on every hop, a redirect
+ * GET JSON from an org's model endpoint with its key (#262), or POST `body` as JSON (#263): the guards on every hop, a redirect
  * followed only within the endpoint's own origin, and no hop with a user name or password in its URL,
  * since the request carries the key. The body is parsed, not trusted: the caller reads what it needs.
  */
-export async function guardedKeyedJson(url: string, apiKey: string, guards: FetchGuards): Promise<unknown> {
+export async function guardedKeyedJson(url: string, apiKey: string, guards: FetchGuards, body?: unknown): Promise<unknown> {
   const result = await guardedGet(
     url,
     {},
@@ -88,8 +88,9 @@ export async function guardedKeyedJson(url: string, apiKey: string, guards: Fetc
     'application/json',
     async (res) => JSON.parse(new TextDecoder().decode(await capped(res, LIMITS.maxBytes))),
     {
-      headers: { authorization: `Bearer ${apiKey}`, 'user-agent': 'SignForge agent' },
+      headers: { authorization: `Bearer ${apiKey}`, 'user-agent': 'SignForge agent', ...(body !== undefined && { 'content-type': 'application/json' }) },
       sameOrigin: true,
+      ...(body !== undefined && { body: JSON.stringify(body) }),
     },
   );
   if (result.status !== 'ok') throw new FetchError('it answered 304 to a request with no validators', { code: 'http-status', status: 304 });
@@ -107,7 +108,7 @@ async function guardedGet<Body>(
   guards: FetchGuards,
   accept: string,
   read: (res: Response) => Promise<Body>,
-  options: { headers?: Record<string, string>; sameOrigin?: boolean } = {},
+  options: { headers?: Record<string, string>; sameOrigin?: boolean; body?: string } = {},
 ): Promise<FetchResult<Body>> {
   const signal = AbortSignal.timeout(guards.timeoutMs ?? FETCH_TIMEOUT_MS);
   const headers = new Headers({ accept, 'user-agent': 'SignForge feed poller', ...options.headers });
@@ -123,7 +124,8 @@ async function guardedGet<Body>(
     };
     let next = await checkedUrl(keyed(url), guards, signal);
     for (let hop = 0; ; hop++) {
-      const res = await guards.fetch(next, { headers, redirect: 'manual', signal });
+      // A body (a keyed request to an endpoint's API) is a POST, sent again to a same-origin redirect.
+      const res = await guards.fetch(next, { headers, redirect: 'manual', signal, ...(options.body !== undefined && { method: 'POST', body: options.body }) });
       if (res.status >= 300 && res.status < 400 && res.status !== 304) {
         await res.body?.cancel();
         const location = res.headers.get('location');

@@ -1,9 +1,13 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { png } from '@signforge/media/testing';
 import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.130';
+const TEMPLATES_DIR = fileURLToPath(new URL('../../../templates/', import.meta.url));
 
 test.describe.configure({ mode: 'serial' });
 
@@ -24,17 +28,20 @@ test('choose a template by its thumbnail, by keyboard alone, in two columns on a
   const dialog = page.getByRole('dialog', { name: 'New spot' });
   const radios = dialog.getByRole('group', { name: 'Template' }).getByRole('radio');
 
-  // Every base template shows the thumbnail the player drew, from the CMS's own assets.
+  // Every base template in templates/ shows the thumbnail the player drew, from the CMS's own assets.
   await opener.click();
   await expect(radios.first()).toBeChecked();
-  const images = await dialog.locator('img').evaluateAll((imgs) =>
-    imgs.map((i) => ({
-      src: new URL((i as HTMLImageElement).src).pathname,
-      ok: (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0,
-    })),
-  );
-  expect(images.length).toBeGreaterThanOrEqual(7);
-  for (const i of images) expect(i, i.src).toEqual({ src: expect.stringMatching(/^\/template-thumbnails\/[a-z-]+\.webp$/), ok: true });
+  const base = readdirSync(TEMPLATES_DIR, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d): { id: string; name: string } => JSON.parse(readFileSync(join(TEMPLATES_DIR, d.name, 'template.json'), 'utf8')));
+  expect(base.length).toBeGreaterThan(0);
+  for (const t of base) {
+    const tile = dialog.locator('label').filter({ has: page.getByRole('radio', { name: t.name, exact: true }) });
+    const image = tile.locator('img');
+    await expect(image, t.name).toHaveAttribute('src', `/template-thumbnails/${t.id}.webp`);
+    await expect(image, t.name).toHaveJSProperty('complete', true);
+    expect(await image.evaluate((i) => i instanceof HTMLImageElement && i.naturalWidth > 0), t.name).toBe(true);
+  }
   await axe(page);
   await shots(page, '29-new-spot-thumbnails');
   // Escape closes it, and focus goes back to what opened it.

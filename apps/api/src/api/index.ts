@@ -10,16 +10,18 @@
  * - A CMS tab names the org it shows in `TAB_ORG_HEADER` (#129). `/api/session`, `requireOrg`
  *   and Better Auth's org calls refuse a call from a tab whose org is no longer the session's:
  *   the member switched org in another tab. Callers with no tab (agents, scripts) send none.
- * - `/api/tools` serves the tool registry (./tools.ts). It is the only route here that changes
- *   data, but for the OAuth callback (./connections.ts), a GET because a provider redirects the
- *   browser to it, which changes data only by running `finish_connection` through the
- *   dispatcher; test/routes.test.ts fails if another one does.
+ * - `/api/tools` serves the tool registry (./tools.ts). It and the agent's inline fill
+ *   (`/api/agent/inline`, ../agent/inline.ts) are the only routes here that change data, both only
+ *   through the dispatcher, but for the OAuth callback (./connections.ts), a GET because a provider
+ *   redirects the browser to it, which changes data only by running `finish_connection` through
+ *   the dispatcher; test/routes.test.ts fails if another one does.
  */
 import { type Context, Hono, type MiddlewareHandler } from 'hono';
 import { findMembership, memberOrgNames, scoped, type OrgScope } from '@signforge/db';
 import { createAuth, ROLES, type Auth, type AuthSession, type Role } from '../auth';
 import { emailSenderFor, type EmailSender } from '../email';
 import type { ConnectorDeps } from '../connectors';
+import { type AgentDeps, mountInline } from '../agent/inline';
 import { mountBlobs } from './blobs';
 import { mountConnectionCallback, mountSignedOutCallback } from './connections';
 import { ORG_CHANGED, TAB_ORG_HEADER } from './tab-org';
@@ -40,6 +42,8 @@ export interface ApiDeps {
   email?: EmailSender;
   /** Defaults to `connectorDeps(env)`, this deployment's providers. Tests pass a fake provider. */
   connectors?: ConnectorDeps;
+  /** Defaults to the Worker's fetch and the fetch guards, and the real clock. Tests pass a stub model. */
+  agent?: AgentDeps;
 }
 
 const error = (code: string) => ({ error: code });
@@ -143,6 +147,7 @@ export function createApi(deps: ApiDeps = {}) {
   mountSignedOutCallback(api);
   api.use('*', requireSession, requireOrg);
   mountTools(api, deps.connectors, deps.email);
+  mountInline(api, deps.connectors, deps.agent);
   mountConnectionCallback(api, deps.connectors);
   mountBlobs(api);
   return api;

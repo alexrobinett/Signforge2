@@ -7,6 +7,7 @@
  * either side, and a server function's reaches the browser as one (`refusalAdapter`).
  */
 import { createSerializationAdapter } from '@tanstack/react-router';
+import type { InlineProblem } from '@signforge/api/agent-inline';
 import { ORG_CHANGED } from '@signforge/api/tab-org';
 import type { ToolErrorCode, ToolName, ToolOutput } from '@signforge/tools/outputs';
 import { tabOrgHeaders } from './tab-org';
@@ -14,8 +15,11 @@ import { tabOrgHeaders } from './tab-org';
 /** The API's own refusals, made before any tool runs (apps/api/src/api/index.ts). */
 type ApiRefusalCode = typeof ORG_CHANGED | 'unauthenticated' | 'no_active_organization' | 'not_a_member';
 
-/** Why a call failed: a tool's code, the API's, `network` when no answer came, or `error` for an answer that holds no refusal. */
-type RefusalCode = ToolErrorCode | ApiRefusalCode | 'network' | 'error';
+/**
+ * Why a call failed: a tool's code, the API's, the agent's fill's (`POST /api/agent/inline`), `network` when no answer
+ * came, or `error` for an answer that holds no refusal.
+ */
+type RefusalCode = ToolErrorCode | ApiRefusalCode | InlineProblem | 'network' | 'error';
 
 /** A refused call, with its code, the sentence it was refused with (written to be shown as it is), and the tool's details. */
 export class Refusal extends Error {

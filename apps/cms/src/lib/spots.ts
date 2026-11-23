@@ -8,7 +8,7 @@
  */
 import { spotProblems, type CompileInput } from '@signforge/compiler';
 import { compileProbe, DEFAULT_FIT, spotFromDraft, type DraftReads, type Probe, type SpotDraft as SavedDraft } from '@signforge/compiler/draft';
-import { validateSpotField, type FieldDef, type Orientation, type ScalarFieldDef, type ScreenManifest, type Transition } from '@signforge/contract';
+import { validateSpotField, type FieldDef, type Orientation, type ScreenManifest, type Transition } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import type { AssetView } from './assets';
 import type { BindingInput } from './live-data';
@@ -64,57 +64,22 @@ export const usableVersions = (templates: TemplateView[]) =>
 /**
  * The contract's messages for each field, from the check a publish runs on it (`validateSpotField`),
  * so a message sits by the field it is about and the editor agrees with the publish: an image is
- * checked with its toggle (#252), and a bound toggle never counts as off (#285).
+ * checked with its toggle (#252), and a bound toggle never counts as off (#285). `fields` are the
+ * spot's, every one, as a publish sees them: an image's toggle may be a live field the form does
+ * not draw (#304). `names` are the fields to report on.
  */
-export function fieldProblems(fields: Record<string, FieldDef>, draft: Pick<SpotDraft, 'data' | 'assets' | 'bindings'>): Map<string, string[]> {
+export function fieldProblems(
+  fields: Record<string, FieldDef>,
+  draft: Pick<SpotDraft, 'data' | 'assets' | 'bindings'>,
+  names: string[] = Object.keys(fields),
+): Map<string, string[]> {
   const out = new Map<string, string[]>();
-  for (const name of Object.keys(fields)) {
+  for (const name of names) {
     const problems = validateSpotField(fields, draft.data, draft.assets, draft.bindings, name);
     if (problems.length) out.set(name, problems);
   }
   return out;
 }
-
-/** A value for a field with no default yet: a new list row's, or a new spot's. */
-export function startValue(d: ScalarFieldDef): unknown {
-  if (d.default !== undefined) return d.default;
-  switch (d.type) {
-    case 'text':
-    case 'url':
-      return '';
-    case 'number':
-      return d.min ?? 0;
-    case 'boolean':
-      return false;
-    case 'color':
-      return '#ffffff';
-    case 'select':
-      return d.options[0];
-    case 'date':
-    case 'datetime':
-      // No day is right for every template (a countdown's target, an event's start): without a `min`, the editor asks for one.
-      return d.min ?? '';
-  }
-}
-
-/**
- * A new spot's data: a value for each field the template gives no default, so the draft starts valid
- * but for a date to pick. Text and lists start empty whatever their default (#253): a template's
- * defaults are sample copy for its preview ("Pier 9 opens on Monday"), and a missed one would ship
- * someone else's words. Other defaults are settings, and stand.
- */
-export const startData = (fields: Record<string, FieldDef>) =>
-  Object.fromEntries(
-    Object.entries(fields).flatMap(([name, def]) =>
-      def.type === 'list'
-        ? [[name, []]]
-        : def.type === 'text'
-          ? [[name, '']]
-          : def.type === 'image' || def.default !== undefined
-            ? []
-            : [[name, startValue(def)]],
-    ),
-  );
 
 /**
  * The asset and template views as the draft-to-spot module reads them. A template is the one

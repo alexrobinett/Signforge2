@@ -7,7 +7,9 @@
 import type { DeviceCommand, TableFeed, TemplateManifest, TemplateRuntimeReport } from '@signforge/contract';
 import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
-import type { AiProviderName, ToolErrorCode } from './outputs';
+import { type AiProviderName, CMS_AGENT_CLIENT_ID, type ToolErrorCode } from './outputs';
+
+export { CMS_AGENT_CLIENT_ID };
 import type { UploadSigner } from './upload';
 
 /** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
@@ -359,9 +361,6 @@ export class ToolError extends Error {
 }
 
 export const notFound = (what: string, id: string) => new ToolError('not_found', `${what} ${id} not found`);
-
-/** The client id of the agent built into the CMS, which acts as the signed-in member (docs/proposals/cms-agent.md). */
-export const CMS_AGENT_CLIENT_ID = 'cms-agent';
 
 /** An agent is calling: a Milestone 4 grant, or the in-CMS agent acting as its member. A tool only a person may run refuses both. */
 export const isAgent = (actor: Actor) => actor.kind === 'agent' || actor.clientId === CMS_AGENT_CLIENT_ID;

@@ -73,11 +73,12 @@ src/routes/connect.tsx    connecting an agent (M4-05): the OAuth provider's logi
 src/components/screens/   status shapes and pills, thumbnails, pairing, display hours
 src/components/assets/    asset tiles, search, uploading images, and AssetPicker (the library in a dialog)
 src/components/integrations/  the sources dialog: one kind's sources, add a feed or calendar, change a URL, delete
-src/components/spots/     FieldForm (a template's fields as a form), SourceSection (where a template's live fields come from; TableSource for a CSV or JSON link), PlayerStage (the real player in an iframe, for a spot or a playlist), the new-spot dialog
+src/components/spots/     FieldForm (a template's fields as a form), SourceSection (where a template's live fields come from; TableSource for a CSV or JSON link), PlayerStage (the real player in an iframe, for a spot or a playlist), the new-spot dialog (which starts from a flyer, photo or link), and the agent's field marks and banner (fill-marks.tsx)
 src/components/playlists/ the new-playlist dialog, and SpotPicker (the org's spots in a dialog, to add to a playlist)
 src/components/schedule/  the schedule entry and takeover dialogs (ScheduleDialogs, in the shell, so any page or ⌘K opens them with `openNewEntry` and `openTakeover`; aimed at one screen, the entry dialog says what it will play this week as drafted, `entryPreview` in src/lib/schedule.ts, and, where Save and publish is offered, after it, over what screens have (`publishedEntries`), with the priority that wins there; they give focus back to what opened them, or the main region after ⌘K), Save and publish (a refused publish says the entry is saved as a draft), TargetPicker (whom one plays on: every screen, a group or a screen, found by typing part of a name; full-screen on a phone), and WeekView (`weekOf` in src/lib/schedule.ts, which asks player-core's resolvePlaylist as the screen does)
 src/components/publishes/ RolloutBar and RolloutLegend: where a publish's screens stand, and why (the Screens page's latest publish, and Publishes)
 src/lib/publishes.ts      the publish tools' outputs, and a rollout in words
+src/state/agent.ts        the agent's fill (#263): the New spot dialog's photo or link, `POST /api/agent/inline`, the filled spot's marks until each field is edited or Done, Undo the fill, Try another template, Use as the photo
 src/state/publishing.ts   Publish from the editors (the draft saved first, then published pinned at that version), Undo, roll back, the default playlist, the schedule's entries with the playlists and spots they need, and one entry alone (`publishEntry`, #181: pinned, with its playlist and spots only if never published)
 src/state/groups.ts       the Groups list's dialogs: rename (a versioned draft), delete (a refusal names the schedule entries that block it), members (added and removed, never replaced); Cancel waits while a delete or save runs, so a save is all or nothing
 src/state/schedule.ts     the Schedule page's dialogs, removing an entry, starting and ending a takeover (each published at once), the week view's screen
@@ -97,6 +98,8 @@ src/lib/fleet-status.ts   how the Screens page's poll joins the list it loaded, 
 src/lib/groups.ts         the groups that need attention, and what targets a group (schedule entries as `delete_group` counts them, brand kits)
 src/server/screens.functions.ts  the Screens loaders: tools called as the member, through one helper
 public/sign-in/           spots the player rendered (scripts/spot-shots.ts), for the sign-in wall
+public/template-thumbnails/  the New spot dialog's base template thumbnails, drawn by the player (scripts/template-thumbnails.ts)
+src/lib/template-thumbnails.json  the template versions those thumbnails were drawn from
 src/routes/api/$.ts       `/api/*` handed to the API Worker
 src/routes/v1/device/$.ts `/v1/device/*` handed to the API Worker, for the test screen
 src/server/               server-only: the API binding, the shell's server functions

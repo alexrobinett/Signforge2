@@ -102,7 +102,7 @@ describe('spot drafts', () => {
   it('creates a spot whose datetime is not picked yet, as one whose photo is not, and holds a picked one to the contract', async () => {
     const { org, call } = await setup('spots-date');
     const version = await addCountdown(org);
-    // What the New spot dialog sends for a field with no default or min (apps/cms startData), and what an agent may leave out.
+    // What the New spot dialog sends for a field with no default or min (`startData` in @signforge/compiler/draft), and what an agent may leave out.
     const { spot } = await ok(call('create_spot', { name: 'Launch', kind: 'template', templateVersionId: version, data: { target: '' } }));
     expect(spot).toMatchObject({ data: { target: '' }, version: 1 });
     await ok(call('create_spot', { name: 'Launch too', kind: 'template', templateVersionId: version }));

@@ -3,20 +3,31 @@
  * lists them: text, number, boolean, colour (a brand colour or a custom one), select, url (an https
  * address), date and datetime (the browser's pickers, held to `min` and `max`), image (the asset
  * picker) and list (repeating rows, up to `maxItems`). The contract's message for a field
- * (`validateSpotData`) sits under it. Values a spot leaves out show the template's default.
+ * (`validateSpotData`) sits under it. Values a spot leaves out show the template's default. A spot
+ * the agent just filled (#263) shows its marks (./fill-marks.tsx) until each field is edited.
  */
+import type { FieldMark } from '@signforge/api/agent-inline';
 import { BRAND_COLORS, type FieldDef, type ScalarFieldDef, sessionBlobPath } from '@signforge/contract';
+import { startValue } from '@signforge/compiler/draft';
 import { PlusIcon, Trash2Icon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
+import { MarkNote, MarkPill } from '~/components/spots/fill-marks';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import type { AssetView } from '~/lib/assets';
-import { fieldProblems, startValue, type SpotDraft } from '~/lib/spots';
+import { fieldProblems, type SpotDraft } from '~/lib/spots';
 import { useAppStore } from '~/state/provider';
 
 /** A change to the draft, as the editor's `editSpot` takes it. */
 type Edit = (change: (d: SpotDraft) => SpotDraft) => void;
+
+/** The photo a spot was filled from, offered for its image fields ("Use as the photo"). */
+interface Flyer {
+  onUse: (field: string) => void;
+  uploading: boolean;
+  error: string | null;
+}
 
 const BRAND_WORD: Record<string, string> = {
   primary: 'Brand primary',
@@ -159,6 +170,8 @@ function ImageField({
   assetId,
   assets,
   problems,
+  mark,
+  flyer,
   onChange,
 }: {
   name: string;
@@ -166,6 +179,8 @@ function ImageField({
   assetId: string | undefined;
   assets: AssetView[];
   problems: string[] | undefined;
+  mark: FieldMark | undefined;
+  flyer: Flyer | undefined;
   onChange: Edit;
 }) {
   const picking = useAppStore((s) => s.spotEditor.picking === name);
@@ -174,8 +189,11 @@ function ImageField({
   const errorId = `field-${name}-error`;
   return (
     <div className={fieldClass}>
-      <span className="font-medium" id={`field-${name}-label`}>
-        {def.label}
+      <span className="flex items-center justify-between gap-2">
+        <span className="font-medium" id={`field-${name}-label`}>
+          {def.label}
+        </span>
+        {mark && <MarkPill mark={mark} />}
       </span>
       <div className="flex items-center gap-3">
         <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-[#0e0f12]">
@@ -187,6 +205,17 @@ function ImageField({
           <span className="sr-only"> for {def.label}</span>
         </Button>
       </div>
+      {mark && <MarkNote id={`field-${name}-mark`} mark={mark} />}
+      {mark && flyer && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" size="sm" disabled={flyer.uploading} onClick={() => flyer.onUse(name)}>
+            {flyer.uploading ? 'Uploading the photo…' : 'Use as the photo'}
+          </Button>
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {flyer.error}
+          </p>
+        </div>
+      )}
       <Problems id={errorId} problems={problems} />
       <AssetPicker
         assets={assets}
@@ -203,12 +232,14 @@ function ListField({
   def,
   rows,
   problems,
+  mark,
   onChange,
 }: {
   name: string;
   def: Extract<FieldDef, { type: 'list' }>;
   rows: Record<string, unknown>[];
   problems: string[] | undefined;
+  mark: FieldMark | undefined;
   onChange: Edit;
 }) {
   const setRows = (next: Record<string, unknown>[]) => onChange((d) => ({ ...d, data: { ...d.data, [name]: next } }));
@@ -223,7 +254,13 @@ function ListField({
             {rows.length}/{def.maxItems}
           </span>
         )}
+        {mark && (
+          <span className="ml-2">
+            <MarkPill mark={mark} />
+          </span>
+        )}
       </legend>
+      {mark && <MarkNote id={`field-${name}-mark`} mark={mark} />}
       {rows.map((row, i) => (
         // Rows have no ids of their own; their place is who they are.
         // biome-ignore lint/suspicious/noArrayIndexKey: a row is its position in the list.
@@ -268,35 +305,69 @@ function ListField({
   );
 }
 
-export function FieldForm({ fields, draft, assets, onChange }: { fields: Record<string, FieldDef>; draft: SpotDraft; assets: AssetView[]; onChange: Edit }) {
-  const problems = fieldProblems(fields, draft);
+/** Draws the `shown` fields, each checked against all of the template's `fields`, as a publish checks it (#304). */
+export function FieldForm({
+  fields,
+  shown,
+  draft,
+  assets,
+  marks = {},
+  flyer,
+  onChange,
+  onEdited,
+}: {
+  fields: Record<string, FieldDef>;
+  shown: Record<string, FieldDef>;
+  draft: SpotDraft;
+  assets: AssetView[];
+  /** The agent's marks, by field, on a spot it just filled. */
+  marks?: Record<string, FieldMark>;
+  flyer?: Flyer;
+  onChange: Edit;
+  /** Told which field changed, to take its mark away. */
+  onEdited?: (name: string) => void;
+}) {
+  const problems = fieldProblems(fields, draft, Object.keys(shown));
   return (
     <div className="flex flex-col gap-5">
-      {Object.entries(fields).map(([name, def]) => {
+      {Object.entries(shown).map(([name, def]) => {
         const p = problems.get(name);
+        const mark = marks[name];
+        const edit: Edit = (change) => {
+          onChange(change);
+          onEdited?.(name);
+        };
         if (def.type === 'image')
-          return <ImageField key={name} name={name} def={def} assetId={draft.assets[name]} assets={assets} problems={p} onChange={onChange} />;
+          return (
+            <ImageField key={name} name={name} def={def} assetId={draft.assets[name]} assets={assets} problems={p} mark={mark} flyer={flyer} onChange={edit} />
+          );
         const value = draft.data[name] ?? def.default;
         if (def.type === 'list') {
           const rows = Array.isArray(value) ? value.filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null) : [];
-          return <ListField key={name} name={name} def={def} rows={rows} problems={p} onChange={onChange} />;
+          return <ListField key={name} name={name} def={def} rows={rows} problems={p} mark={mark} onChange={edit} />;
         }
         const id = `field-${name}`;
         const errorId = `${id}-error`;
-        const set = (v: unknown) => onChange((d) => ({ ...d, data: { ...d.data, [name]: v } }));
+        const markId = `${id}-mark`;
+        const describedBy = [p && errorId, mark && markId].filter(Boolean).join(' ') || undefined;
+        const set = (v: unknown) => edit((d) => ({ ...d, data: { ...d.data, [name]: v } }));
         return (
           <div key={name} className={def.type === 'boolean' ? 'flex flex-wrap items-center gap-x-3 gap-y-1.5' : fieldClass}>
             <span className="flex justify-between gap-2">
               <label htmlFor={id} className="font-medium">
                 {def.label}
               </label>
-              {def.type === 'text' && def.maxLength !== undefined && (
-                <span className={p ? 'font-mono text-xs font-semibold text-destructive' : 'font-mono text-xs text-muted-foreground'}>
-                  {typeof value === 'string' ? value.length : 0}/{def.maxLength}
-                </span>
-              )}
+              <span className="flex items-center gap-2">
+                {mark && <MarkPill mark={mark} />}
+                {def.type === 'text' && def.maxLength !== undefined && (
+                  <span className={p ? 'font-mono text-xs font-semibold text-destructive' : 'font-mono text-xs text-muted-foreground'}>
+                    {typeof value === 'string' ? value.length : 0}/{def.maxLength}
+                  </span>
+                )}
+              </span>
             </span>
-            <ScalarInput id={id} def={def} value={value} invalid={p !== undefined} describedBy={p ? errorId : undefined} onChange={set} />
+            <ScalarInput id={id} def={def} value={value} invalid={p !== undefined} describedBy={describedBy} onChange={set} />
+            {mark && <MarkNote id={markId} mark={mark} />}
             <Problems id={errorId} problems={p} />
           </div>
         );
