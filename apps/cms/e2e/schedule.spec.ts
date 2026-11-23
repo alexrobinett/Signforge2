@@ -276,6 +276,14 @@ test('pick one screen by typing part of its name, keyboard only; the picker fill
   await expect(plays).toHaveText('Front window');
   // The dialog is taller than a phone: its actions stay in view as its fields scroll (#253).
   for (const name of ['Cancel', 'Save draft']) await expect(dialog.getByRole('button', { name })).toBeInViewport({ ratio: 1 });
+  // And a field focused under them scrolls clear of them, not behind (WCAG 2.4.11).
+  const priority = dialog.getByLabel('Priority');
+  await priority.focus();
+  await expect(priority).toBeFocused();
+  const footerTop = async () => await dialog.getByRole('button', { name: 'Cancel' }).evaluate((b) => b.parentElement!.getBoundingClientRect().top);
+  await expect
+    .poll(async () => ((await priority.boundingBox())?.y ?? Infinity) + ((await priority.boundingBox())?.height ?? 0) <= (await footerTop()))
+    .toBe(true);
   await shots(page, '57-schedule-dialog-phone');
   await page.setViewportSize({ width: 1280, height: 720 });
 
