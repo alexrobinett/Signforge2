@@ -86,7 +86,8 @@ describe('sf template seed', () => {
     for (const b of BUILDS) expect(b.problems, b.dir).toEqual([]);
   });
 
-  it('pushes every template as an approved base template, and again changes nothing', async () => {
+  // Each template pushed twice, so it grows with every template: 5.6 s on CI for twelve (run 45070332774), against 1 s on a laptop.
+  it('pushes every template as an approved base template, and again changes nothing', { timeout: 30_000 }, async () => {
     for (const b of BUILDS) {
       const r = await push(b, { approve: true });
       expect(r, b.dir).toMatchObject({ key: `base/${b.manifest.id}@${b.manifest.version}`, status: 'approved', changed: true });
