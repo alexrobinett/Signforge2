@@ -217,13 +217,14 @@ Uploaded video must match one strict profile (1080p H.264, capped bitrate). The 
 - Both are generated from one set of tool definitions.
 - Agents can create and edit drafts by default. Publishing to live screens is a separate scope granted explicitly.
 - Every agent action is written to an audit log.
+- A built-in agent in the CMS (#244, `docs/proposals/cms-agent.md`) calls the same tools as the signed-in member (`clientId: 'cms-agent'`), with its own turn quota and no grant: it fills spots from a flyer, photo or link, and later answers and drafts from a drawer. Publish, takeover, revoke and delete stop at a confirmation the person presses. The model is the org's own key or SignForge's demo model.
 
 ## Public demo
 
-- A demo org anyone can enter without signing up.
+- Each visitor gets a sandbox org of their own, made from a seed without signing up, and deleted 24 hours later (`docs/proposals/cms-agent.md`, The demo). One visitor never sees another's content.
 - A virtual screen in the browser runs the real player build.
 - The visitor edits a spot, publishes and watches the screen update.
-- The org resets on a timer. Agent template submission is disabled.
+- Members, keys and integrations are hidden. Agent template submission is disabled.
 
 ## Monorepo
 
@@ -244,7 +245,7 @@ pnpm and Turborepo, with packages for:
 2. **Player core**: template SDK, the C-Store template, manifest loading, offline cache, two-slot playback.
 3. **CMS and API**: orgs, assets, spots, playlists, schedules, publish, screen pairing.
 4. **Agents**: MCP server, WebMCP, the template submission and review pipeline.
-5. **Polish**: public demo org, Pi image, more base templates, archive the four SignForge 1 repos with a pointer here.
+5. **Polish**: the public demo (a sandbox org per visitor), Pi image, more base templates, archive the four SignForge 1 repos with a pointer here.
 
 ### Milestone 3 so far
 
