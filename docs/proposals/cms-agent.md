@@ -84,7 +84,7 @@ Why: these are the changes a person cannot take back by editing a draft, or that
 
 ### Untrusted content
 
-Flyer images, fetched pages, feed text, screen names and every other piece of org content reach the model as fenced data, never mixed into our instructions. Links are fetched only through the fetch guards. What the model may do is decided in code, outside the prompt. The inline route (#263, #264) writes only the one template spot it was called for, and only its template version, `data` and `assets`: never a spot of `kind: 'url'` and never a `url`, which would make the stage and screens open an address (tested in #263 and #264). The drawer is offered only the tools the member's role allows (read-only ones first), less those below.
+Flyer images, fetched pages, feed text, screen names and every other piece of org content reach the model as fenced data, never mixed into our instructions. Links are fetched only through the fetch guards. What the model may do is decided in code, outside the prompt. The inline route (#263, #264) writes only the one template spot it was called for, and only its template version and `data`: never a spot of `kind: 'url'` and never a `url`, which would make the stage and screens open an address (tested in #263 and #264). A `url` field the model fills is shown, in full, for the person to check and type, and is never written. The flyer's photo goes into an image field only when the person presses "Use as the photo", as their own upload. The drawer is offered only the tools the member's role allows (read-only ones first), less those below.
 
 ### Tools that reach an address
 
@@ -118,6 +118,8 @@ An org with no key of its own uses SignForge's demo model: a platform key in a W
 
 An org with its own key has an org-wide daily ceiling of turns, which its owner sets.
 
+Until #265 lands there is no demo model: a fill in an org with no key of its own, or with no fast model chosen, is refused before anything is fetched or counted ("No model is set up for the agent yet"), with a link to Settings, AI & agents. An org with its own key has only the ceiling its owner set. Turns are counted in the org's `OrgObject` (`takeTurn`), per day in the org's time zone (UTC when it has none set); #265 adds the demo model's own counts beside it.
+
 **The model is chosen by measurement, never from remembered prices.** On a fixed set of about 30 real flyers, menu photos and links, each candidate is measured for:
 
 - the `validateSpotData` pass rate on the first try;
@@ -136,7 +138,7 @@ They are not saved. They live in the CMS's store and are gone on reload. The aud
 
 The agent's mark is `--actor-agent` (`apps/cms/src/styles.css`), the colour the audit log gives `kind: 'agent'` actors, checked by the tokens test. Fields the agent filled carry it until edited or Done.
 
-Two pieces are new, in #263: a muted pill in the agent's colour, and the audit log showing a `kind: 'user'` change made with `clientId: 'cms-agent'` as "<member> via agent" in that colour. Today the audit log shows every user as acting through the CMS (`viaText` in `apps/cms/src/lib/audit.ts`, whose comment says only the CMS has a session), and that changes with it.
+#263 added a muted pill in the agent's colour (`--actor-agent-muted`), and the audit log names a `kind: 'user'` change made with `clientId: 'cms-agent'` as "<member> via agent" in that colour (`whoText` in `apps/cms/src/lib/audit.ts`). A field to check is amber and one not filled grey, the status colours for updating and offline.
 
 ### The Free plan
 
@@ -163,7 +165,9 @@ packages/tools              the same tools, role and scope checks, audit rows
 
 The agent routes are on `/api`, behind `requireOrg`, so the org and role come from the session alone. They change data only through the dispatcher.
 
-The API's route guard changes with them. Today `apps/api/test/routes.test.ts` holds that the only `/api` routes that change data are Better Auth's and the tool route, and `apps/api/src/api/index.ts` says so in its header. The agent routes join those two as reasoned exceptions in `WRITERS`, as routes that write only through the dispatcher, with a test that every write they make is paired with its `audit_log` row, as the tool route's test does; #263 changes the test and the comment for `/api/agent/inline`, #267 for `/api/agent/chat`.
+The API's route guard changes with them. `apps/api/test/routes.test.ts` holds that the only `/api` routes that change data are Better Auth's, the tool route and the agent's routes, and `apps/api/src/api/index.ts` says so in its header. Each agent route is a reasoned exception in `WRITERS`, as a route that writes only through the dispatcher, with a test that every write it makes is paired with its `audit_log` row, as the tool route's test does: `/api/agent/inline` since #263, `/api/agent/chat` with #267.
+
+The fill (#263, `apps/api/src/agent/inline.ts`) is one structured call to the org's fast model: the approved templates' fields (less images, colours, switches and live fields), and the photo or the linked page's text fenced as data. The model answers with a template and its values as JSON text; the route parses it against that template's fields, asks once more when values do not fit, then keeps the ones that do and marks the rest. It counts one turn, then makes the spot with `create_spot` through the dispatcher. Its budget per call is 14 D1 statements and, with Anthropic, 14 fetches (two model calls and a link's 4 hops of 2 DNS lookups and a request); an endpoint's calls go through the guards too, 36 in all. The editor opens with each field marked and a banner: Undo the fill puts the draft back to a new spot's start, Try another template fills a new draft with the template the person picks (no tool deletes a spot yet, so the first draft stays in Spots), and Done takes the marks away. Marks are page state: a reload drops them.
 
 They accept only `application/json`, with their own 415 check as the tool route has (`apps/api/src/api/tools.ts`; it is a check in that route, not middleware), and never multipart or a form: a photo travels base64 in the JSON. A cross-site form cannot send JSON without a CORS preflight, which the API never grants.
 

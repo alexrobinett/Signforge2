@@ -5,7 +5,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { FieldForm } from '../src/components/spots/field-form';
-import { fieldProblems, type SpotDraft, startData } from '../src/lib/spots';
+import { startData } from '@signforge/compiler/draft';
+import { fieldProblems, type SpotDraft } from '../src/lib/spots';
 
 const fields: Record<string, FieldDef> = {
   qrUrl: { type: 'url', label: 'QR link', maxLength: 60 },

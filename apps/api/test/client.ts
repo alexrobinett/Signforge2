@@ -19,7 +19,11 @@ export function testApp({
   outbox = new RecordingEmailSender(),
   connectors,
   agent,
-}: { outbox?: RecordingEmailSender; connectors?: ConnectorDeps; agent?: AgentDeps } = {}) {
+}: {
+  outbox?: RecordingEmailSender;
+  connectors?: ConnectorDeps;
+  agent?: AgentDeps;
+} = {}) {
   const api = createApi({ email: outbox, connectors, agent });
   const app = new Hono<{ Bindings: Env }>().route('/api', api);
   return { app, outbox };

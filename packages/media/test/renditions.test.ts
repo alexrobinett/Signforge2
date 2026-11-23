@@ -162,10 +162,13 @@ describe('makeRenditions', () => {
 
 describe('scaledPhoto', () => {
   it("turns a phone photo upright and scales its longer edge down to the model's, as a JPEG", async () => {
-    const made = await page.evaluate(async (b64) => {
-      const file = new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'IMG_0042.jpg', { type: 'image/jpeg' });
-      return (globalThis as any).SFMedia.scaledPhoto(file, 1568);
-    }, (await rotatedPhoto()).toString('base64'));
+    const made = await page.evaluate(
+      async (b64) => {
+        const file = new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'IMG_0042.jpg', { type: 'image/jpeg' });
+        return (globalThis as any).SFMedia.scaledPhoto(file, 1568);
+      },
+      (await rotatedPhoto()).toString('base64'),
+    );
     expect(made.mediaType).toBe('image/jpeg');
     const bytes = Buffer.from(made.data, 'base64');
     expect(readImageInfo(new Uint8Array(bytes))).toEqual({ type: 'image/jpeg', width: 1568, height: 882, orientation: 1 });

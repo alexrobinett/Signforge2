@@ -27,6 +27,7 @@ import {
   TARGET_KINDS,
   targetLabel,
   viaText,
+  CMS_AGENT,
   whatText,
   WHENS,
   WHO_OPTIONS,
@@ -195,8 +196,9 @@ function AuditLogPage() {
   );
 }
 
-/** Agents and screens apart from people, as on the board; a person and the system in the text colour. */
+/** Agents and screens apart from people, as on the board, the built-in agent too; a person and the system in the text colour. */
 const ACTOR_COLOR: Record<AuditEntry['actor']['kind'], string> = { user: '', system: '', agent: 'text-actor-agent', device: 'text-actor-device' };
+const actorColor = (e: AuditEntry) => (e.actor.clientId === CMS_AGENT ? 'text-actor-agent' : ACTOR_COLOR[e.actor.kind]);
 
 function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; time: string }) {
   const detail = detailText(e);
@@ -205,7 +207,7 @@ function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; tim
       <td className="px-3 py-2 font-mono text-[13px] whitespace-nowrap text-muted-foreground">
         <time dateTime={new Date(e.at).toISOString()}>{time}</time>
       </td>
-      <td className={cn('px-3 py-2 font-semibold whitespace-nowrap', ACTOR_COLOR[e.actor.kind])}>{who}</td>
+      <td className={cn('px-3 py-2 font-semibold whitespace-nowrap', actorColor(e))}>{who}</td>
       <td className="px-3 py-2">
         {whatText(e)}
         {detail && <span className="mt-0.5 block font-mono text-[13px] break-all text-muted-foreground">{detail}</span>}

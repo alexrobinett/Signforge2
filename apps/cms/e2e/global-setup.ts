@@ -22,6 +22,7 @@ import {
   PLACES,
   portTaken,
   RUN_DIR,
+  STUB_FILL,
 } from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
@@ -58,14 +59,43 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
 }
 
 /**
- * Anthropic's Models API as the agent's adapter asks it (`ANTHROPIC_BASE_URL`, apps/api src/agent):
- * the stub key gets `ANTHROPIC_STUB_MODELS`, any other key Anthropic's 401. On a free port, so the
- * run never reaches the internet or spends a token.
+ * Anthropic's API as the agent's adapter asks it (`ANTHROPIC_BASE_URL`, apps/api src/agent): the
+ * Models API, where the stub key gets `ANTHROPIC_STUB_MODELS` and any other key Anthropic's 401; and
+ * the Messages API for the fill (#263), which answers every call with `STUB_FILL` for the Photo
+ * Promo template. On a free port, so the run never reaches the internet or spends a token.
  */
 async function anthropicStub(): Promise<{ url: string; close: () => void }> {
   const server = createServer((req, res) => {
     const known = req.headers.authorization === `Bearer ${ANTHROPIC_STUB_KEY}` || req.headers['x-api-key'] === ANTHROPIC_STUB_KEY;
-    if (new URL(req.url ?? '/', 'http://stub').pathname !== '/v1/models') return void res.writeHead(404).end();
+    const path = new URL(req.url ?? '/', 'http://stub').pathname;
+    if (path === '/v1/messages' && known) {
+      let body = '';
+      req.on('data', (chunk: Buffer) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        const asked = JSON.parse(body);
+        const keys: string[] = asked.output_config.format.schema.properties.template.enum;
+        const template = keys.find((k) => k.startsWith('base/photo-promo@')) ?? keys[0];
+        const { name, ...data } = STUB_FILL;
+        const text = JSON.stringify({ template, name, data_json: JSON.stringify(data), unsure: ['price'] });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: 'msg_stub',
+            type: 'message',
+            role: 'assistant',
+            model: asked.model,
+            content: [{ type: 'text', text }],
+            stop_reason: 'end_turn',
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        );
+      });
+      return;
+    }
+    if (path !== '/v1/models') return void res.writeHead(404).end();
     res.writeHead(known ? 200 : 401, { 'content-type': 'application/json' });
     const models = ANTHROPIC_STUB_MODELS.map((id) => ({ type: 'model', id, display_name: id, created_at: '2026-10-01T00:00:00Z' }));
     res.end(
@@ -105,7 +135,7 @@ async function feedServer(): Promise<{ url: string; close: () => void }> {
       res.writeHead(404).end();
       return;
     }
-    res.writeHead(200, { 'content-type': file.endsWith('.json') ? 'application/json' : 'text/csv' });
+    res.writeHead(200, { 'content-type': file.endsWith('.json') ? 'application/json' : file.endsWith('.html') ? 'text/html' : 'text/csv' });
     res.end(readFileSync(file));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

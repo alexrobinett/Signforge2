@@ -5,7 +5,7 @@
  * the same phrases (`eventText`).
  */
 
-import type { ToolOutput } from '@signforge/tools/outputs';
+import type { CmsAgentClientId, ToolOutput } from '@signforge/tools/outputs';
 
 /** A `list_audit_log` page. */
 export type AuditPage = ToolOutput<'list_audit_log'>;
@@ -230,10 +230,16 @@ function short(v: unknown): string {
 }
 
 /** Who did it: "You" (given `me`), a member's name, an agent, a screen or the system. A user no longer a member is named by id. */
+/** The built-in agent's client id (`CMS_AGENT_CLIENT_ID` in packages/tools): it acts as the member who asked it. */
+export const CMS_AGENT: CmsAgentClientId = 'cms-agent';
+
 export function whoText(e: AuditEntry, names: ReadonlyMap<string, string>, me?: string): string {
   switch (e.actor.kind) {
-    case 'user':
-      return e.actor.id === me ? 'You' : (names.get(e.actor.id) ?? `Former member ${e.actor.id}`);
+    case 'user': {
+      const who = e.actor.id === me ? 'You' : (names.get(e.actor.id) ?? `Former member ${e.actor.id}`);
+      // The built-in agent acts as the member who asked it (#263): their name, and that it was the agent.
+      return e.actor.clientId === CMS_AGENT ? `${who} via agent` : who;
+    }
     case 'agent':
       return `Agent ${e.actor.clientId ?? e.actor.id}`;
     case 'device':

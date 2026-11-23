@@ -44,7 +44,9 @@ type Answer = { template?: string; name?: string; data?: Record<string, unknown>
 function model(answers: Answer[], key: () => string) {
   const asked: { url: string; body: any }[] = [];
   const text = (a: Answer) =>
-    typeof a === 'string' ? a : JSON.stringify({ template: a.template ?? key(), name: a.name ?? 'Bake sale', data_json: JSON.stringify(a.data ?? {}), unsure: a.unsure ?? [] });
+    typeof a === 'string'
+      ? a
+      : JSON.stringify({ template: a.template ?? key(), name: a.name ?? 'Bake sale', data_json: JSON.stringify(a.data ?? {}), unsure: a.unsure ?? [] });
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     const body = await request.json<any>();
@@ -180,12 +182,10 @@ describe('POST /api/agent/inline', () => {
     expect(sent.output_config.format).toMatchObject({ type: 'json_schema', schema: { properties: { template: { enum: [s.key()] } } } });
   });
 
-  it('never writes a link: a url field, a list row\'s link, or a url the answer adds, and never a URL spot (#263, Untrusted content)', async () => {
+  it("never writes a link: a url field, a list row's link, or a url the answer adds, and never a URL spot (#263, Untrusted content)", async () => {
     const evil = 'https://evil.example/pay';
     const s = await setup({
-      answers: [
-        { data: { headline: 'Scan to pay', qr: evil, url: evil, kind: 'url', items: [{ name: 'Scones', link: evil }] } },
-      ],
+      answers: [{ data: { headline: 'Scan to pay', qr: evil, url: evil, kind: 'url', items: [{ name: 'Scones', link: evil }] } }],
     });
     const res = await s.fill({ kind: 'link', url: LINK });
     const body = await res.json<any>();
@@ -297,9 +297,17 @@ describe('POST /api/agent/inline', () => {
   });
 
   it("reads an endpoint's capability flags: no fill without JSON-schema output, no photo without images", async () => {
-    const endpoint = { provider: 'openai-compatible', baseUrl: 'https://models.example.com/v1', apiKey: 'sk-endpoint-FILLKEYFILLKEY-0001', fastModel: 'model-a' };
+    const endpoint = {
+      provider: 'openai-compatible',
+      baseUrl: 'https://models.example.com/v1',
+      apiKey: 'sk-endpoint-FILLKEYFILLKEY-0001',
+      fastModel: 'model-a',
+    };
     const plain = await setup({ save: { ...endpoint, acceptsImages: true, jsonSchemaOutput: false } });
-    expect(await (await plain.fill({ kind: 'link', url: LINK })).json()).toMatchObject({ error: 'cannot_fill', message: expect.stringContaining('JSON-schema') });
+    expect(await (await plain.fill({ kind: 'link', url: LINK })).json()).toMatchObject({
+      error: 'cannot_fill',
+      message: expect.stringContaining('JSON-schema'),
+    });
     const textOnly = await setup({ save: { ...endpoint, acceptsImages: false, jsonSchemaOutput: true } });
     expect(await (await textOnly.fill({ kind: 'image', mediaType: 'image/jpeg', data: JPEG })).json()).toMatchObject({
       error: 'cannot_fill',

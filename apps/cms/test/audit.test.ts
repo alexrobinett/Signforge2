@@ -47,6 +47,9 @@ describe('the audit log in words', () => {
     expect(whoText(entry({}), names, 'usr_me')).toBe('Jun Takahashi');
     expect(whoText(entry({}), names, 'usr_jun')).toBe('You');
     expect(whoText(entry({ actor: { kind: 'user', id: 'usr_gone', clientId: 'cms' } }), names, 'usr_me')).toBe('Former member usr_gone');
+    // The built-in agent acts as the member who asked it (#263).
+    const filled = entry({ actor: { kind: 'user', id: 'usr_jun', clientId: 'cms-agent' }, action: 'create_spot' });
+    expect([whoText(filled, names, 'usr_me'), whoText(filled, names, 'usr_jun')]).toEqual(['Jun Takahashi via agent', 'You via agent']);
     // The file is read by others: the exporter's own rows by name, even when a caller says who is exporting.
     // @ts-expect-error: csvRow takes no exporter; a CSV never says "You".
     expect(csvRow(entry({}), names, 'usr_jun')[1]).toBe('Jun Takahashi');

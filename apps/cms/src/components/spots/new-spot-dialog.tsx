@@ -1,12 +1,14 @@
 /**
- * Making a spot: a template (its newest approved version), an image from the library, or a web
- * page. It is made as a draft and opens in the editor. Templates are chosen from thumbnails the
+ * Making a spot: from a flyer, a photo or a link, which the agent reads to fill a template (#263,
+ * src/state/agent.ts); or a template (its newest approved version), an image from the library, or
+ * a web page. It is made as a draft and opens in the editor. Templates are chosen from thumbnails the
  * player drew ahead of time (scripts/template-thumbnails.ts); an org's own template is a named tile.
  */
 import { startData } from '@signforge/compiler/draft';
 import { safeUrl } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { PlusIcon } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
+import { PlusIcon, SparklesIcon } from 'lucide-react';
 import type { KeyboardEvent, SubmitEvent } from 'react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { Button } from '~/components/ui/button';
@@ -31,10 +33,17 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
   const edit = useAppStore((s) => s.editNewSpot);
   const pick = useAppStore((s) => s.pickImageFor);
   const create = useAppStore((s) => s.createSpot);
+  const fill = useAppStore((s) => s.agent.fill);
+  const editFill = useAppStore((s) => s.editFill);
+  const fillSpot = useAppStore((s) => s.fillNewSpot);
+  const forgetFill = useAppStore((s) => s.forgetFill);
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
   const usable = usableVersions(templates);
   const chosen = usable.find((u) => u.version.id === d.templateVersionId) ?? usable[0];
   const image = assets.find((a) => a.id === d.assetId);
+  // Try another template fills the template picked below; a first fill lets the agent choose.
+  const pinned = fill.again ? chosen : undefined;
+  const fillReady = (fill.photo !== null || safeUrl(fill.link.trim())) && !fill.pending && (!fill.again || pinned !== undefined);
 
   const ready =
     d.name.trim() !== '' && (d.kind === 'template' ? chosen !== undefined : d.kind === 'url' ? safeUrl(d.url.trim()) : image !== undefined) && !d.pending;
@@ -55,7 +64,13 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
   };
 
   return (
-    <Dialog open={d.open} onOpenChange={open}>
+    <Dialog
+      open={d.open}
+      onOpenChange={(o) => {
+        open(o);
+        if (!o) forgetFill();
+      }}
+    >
       <DialogTrigger asChild>
         <Button>
           <PlusIcon aria-hidden />
@@ -67,6 +82,48 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
           <DialogTitle>New spot</DialogTitle>
           <DialogDescription>It starts as a draft. No screen shows it until you publish.</DialogDescription>
         </DialogHeader>
+        <section aria-labelledby="fill-title" className="space-y-3 rounded-lg border bg-actor-agent-muted p-3">
+          <h3 id="fill-title" className="flex items-center gap-2 text-sm font-medium text-actor-agent">
+            <SparklesIcon aria-hidden className="size-4" />
+            Start from a flyer, photo or link
+          </h3>
+          <p id="fill-help" className="text-sm text-foreground">
+            The agent reads it and fills a template for you to check. A photo is not kept unless you use it.
+          </p>
+          <label className="relative flex min-h-16 cursor-pointer items-center justify-center rounded-md border border-dashed border-input bg-card px-3 py-2 text-center text-sm has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50">
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              aria-describedby="fill-help"
+              onChange={(e) => editFill({ photo: e.target.files?.[0] ?? null })}
+              className="absolute inset-0 size-full cursor-pointer opacity-0"
+            />
+            {fill.photo ? fill.photo.name : 'Drop a flyer or a photo here, or take or choose one'}
+          </label>
+          <div className="space-y-1.5">
+            <Label htmlFor="fill-link">Or a link</Label>
+            <Input id="fill-link" type="url" inputMode="url" placeholder="https://" value={fill.link} onChange={(e) => editFill({ link: e.target.value })} />
+          </div>
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {fill.error}
+            {fill.error && fill.inSettings && (
+              <>
+                {' '}
+                <Link to="/settings/ai" className="underline underline-offset-4">
+                  Open Settings, AI & agents
+                </Link>
+              </>
+            )}
+          </p>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {fill.again && (
+              <span className="text-sm text-foreground">{pinned ? `Fills ${pinned.template.name}, picked below.` : 'Pick a template below.'}</span>
+            )}
+            <Button type="button" disabled={!fillReady} onClick={() => void fillSpot(orgId, pinned?.version.id)}>
+              {fill.pending ? 'Reading…' : pinned ? `Fill ${pinned.template.name}` : 'Fill a new spot'}
+            </Button>
+          </div>
+        </section>
         <form onSubmit={submit} className="space-y-4">
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">What it shows</legend>
