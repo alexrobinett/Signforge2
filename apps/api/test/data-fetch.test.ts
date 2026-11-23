@@ -82,7 +82,7 @@ describe('guardedFetch', () => {
       expect(await refusal(guardedFetch(`https://${host}/a`, {}, stub({}, dns).guards)), host).toBe('private-address');
   });
 
-  it.each(['localhost.', 'printer.local.', 'nas.'])('refuses the local name %s, written with a trailing dot, without a lookup', async (host) => {
+  it.each(['localhost.', 'printer.local.', 'nas.', 'localhost..'])('refuses the local name %s, written with trailing dots, without a lookup', async (host) => {
     const asked: string[] = [];
     const { guards } = stub({});
     const resolve: FetchGuards['resolve'] = (name, signal) => {
