@@ -20,7 +20,7 @@ One Worker plays both hosts. The CMS origin, which holds the issuer and the sess
 | Question | Answer |
 | --- | --- |
 | The provider plugin on Workers and D1 with transactions off | **Yes.** It adds 7 tables (below). |
-| Authorization code with S256 PKCE | **Yes.** PKCE is required for public clients, and `plain` is refused. A code is used once, expires after 10 minutes, and is bound to its client, its `redirect_uri`, its verifier and its resource. A `redirect_uri` that is not registered exactly is refused without a redirect to it. |
+| Authorization code with S256 PKCE | **Yes.** PKCE is required for public clients, and `plain` is refused. A code is used once, expires after 10 minutes, and is bound to its client, its `redirect_uri` and its verifier; an unregistered `resource` is refused (limitation 16). A `redirect_uri` that is not registered exactly is refused without a redirect to it. |
 | Refresh token rotation | **Yes**, with replay detection: replaying a rotated refresh token revokes the whole family. |
 | Revocation (RFC 7009) | **Yes.** One deviation: it answers 400, not 200, for a token it does not know or has already revoked. |
 | Tokens stored hashed | **Yes.** Access and refresh tokens and codes are stored as SHA-256, base64url. |
@@ -67,7 +67,7 @@ All of this is in `test/round-trip.test.ts`, "registers, signs in, consents…",
 - **Authorization codes** ("authorization codes" tests):
   - **Used once.** The exchange consumes the code. A replay gets `400 invalid_grant` and revokes the tokens the first exchange issued: the access token gets 401 and the refresh token is refused (RFC 6749 §4.1.2).
   - **Its verifier.** A wrong `code_verifier` gets `invalid_grant`, and a missing one `invalid_request`. Neither consumes the code, so the right verifier still works.
-  - **Its client, redirect URI and resource.** The code with another registered client's `client_id` (and the right verifier) gets `invalid_grant`. So does another `redirect_uri`, while a missing one gets `invalid_request`. Another `resource` gets `invalid_target`.
+  - **Its client and redirect URI.** The code with another registered client's `client_id` (and the right verifier) gets `invalid_grant`. So does another `redirect_uri`, while a missing one gets `invalid_request`. An unregistered `resource` gets `invalid_target`, from the server's resource list, before the code's own resource check runs: the test passes with that check removed, so it does not show that a code is bound to its resource (limitation 16).
   - **Its lifetime.** It expires 10 minutes after it is issued (`codeExpiresIn`, default 600 s). The test fakes the clock: exchanged at 9:59 it works, at 10:01 it gets `invalid_grant`. Three checks enforce the expiry: the plugin's own, Better Auth's cleanup of expired verification rows, and its consume step. Only removing all three lets a late code through.
   - **The person's session.** It must still exist at the exchange: the plugin refuses a code whose session was signed out ("session no longer exists").
 - **Redirect URIs at authorize** ("redirect URIs at authorize" tests). The URI must match a registered one exactly. An unregistered host, a longer path, an added query, or `localhost` for a registered `127.0.0.1` each send the person to the server's own error page, on the CMS origin, with `error` and no code, never to the URI. That is the open-redirect check. The one allowed difference is the port of a registered loopback URI (RFC 8252 §7.3). Native clients such as Claude Code pick a free port each run, so M4-04 keeps it.
@@ -201,6 +201,8 @@ Both clients spoke the 2025 protocol, which the SDK handler serves on its statel
 13. **Validate before writing the grant.** The spike's Allow writes the grant row before the plugin checks the signed `oauth_query`, and keeps the person's chosen scopes without narrowing them to the ones requested. A forged or stale query, or an unrequested scope, leaves a grant row with no tokens. That's harmless, since `/mcp` needs a token, but M4-04 should verify the query and narrow the scopes first.
 14. **The `/mcp` cookie guard must match our cookie prefix.** The spike's guard (`src/mcp.ts`) matches Better Auth's default `better-auth.` cookies. apps/api sets `cookiePrefix: 'sf'` (`apps/api/src/auth/options.ts`), so M4-06 must refuse `sf.*` and `__Secure-sf.*`, as `refuseSession` in `apps/api/src/auth/guards.ts` does.
 15. **CSRF on consent.** Allow is our route, not one of Better Auth's, so it must check `Origin` itself, as Better Auth does for its own endpoints. The signed `oauth_query` stops a forged query, and SameSite=Lax cookies stop a cross-site POST from carrying the session. M4-05 should add the origin check, and M4-17 test it.
+
+16. **A code's resource binding is untested.** The spike serves one resource, so a code cannot be exchanged for another registered one, and the test above only shows an unregistered `resource` refused. If M4-04 ever serves a second resource, it must test that a code issued for one cannot be exchanged for the other.
 
 ## Resources created and deleted
 

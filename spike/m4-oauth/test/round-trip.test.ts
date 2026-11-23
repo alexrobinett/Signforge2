@@ -433,7 +433,7 @@ describe('authorization codes', () => {
     expect((await exchange(provider, code)).status).toBe(200);
   });
 
-  it('is bound to its client, its redirect URI and its resource', async () => {
+  it('is bound to its client and its redirect URI, and refuses an unregistered resource', async () => {
     const { provider, code } = await authorizedCode();
     const other = await authorizedCode();
     // Another registered client, with this code's own verifier: only the client binding refuses it.
