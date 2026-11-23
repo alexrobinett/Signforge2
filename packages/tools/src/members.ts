@@ -38,11 +38,6 @@ async function requireMember(org: OrgScope, memberId: string) {
   return row;
 }
 
-async function requirePending(org: OrgScope, invitationId: string) {
-  const row = await org.invitations.get(invitationId);
-  if (row?.status !== 'pending') throw notFound('pending invitation', invitationId);
-}
-
 const refuseAgent = (actor: Actor, what: string) => {
   // The in-CMS agent acts as its member, but a member's role and place are a person's choice too (docs/proposals/cms-agent.md).
   if (isAgent(actor)) throw new ToolError('forbidden', `an agent cannot ${what}: ask an owner to do it in the CMS`);
@@ -108,7 +103,8 @@ const cancelInvitation = defineTool({
   output: outputs.cancel_invitation,
   example: { invitationId: 'inv_0123456789abcdef' },
   handler: async ({ org, input, services: { members } }) => {
-    await requirePending(org, input.invitationId);
+    // The only org guard on this path: Better Auth cancels in the invitation's own org.
+    if ((await org.invitations.get(input.invitationId))?.status !== 'pending') throw notFound('pending invitation', input.invitationId);
     await members.cancelInvitation(input.invitationId);
     return { canceled: input.invitationId };
   },
