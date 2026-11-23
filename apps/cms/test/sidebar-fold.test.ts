@@ -1,0 +1,78 @@
+// The sidebar's fold in the store (#260): the person's choice, kept per browser as a convenience,
+// and a panel on the right that folds it until it closes or the person unfolds it. Storage that is
+// missing or blocked changes nothing but the default.
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createStore } from 'zustand/vanilla';
+import { connectUi, createUiSlice, isFolded, type UiSlice } from '../src/state/ui';
+
+vi.mock('~/lib/theme', () => ({ applyTheme: vi.fn(), onSystemThemeChange: vi.fn(), readStoredTheme: () => 'system', storeTheme: vi.fn() }));
+
+const router = { subscribe: vi.fn() };
+function uiStore() {
+  const store = createStore<UiSlice>()((set, get) => createUiSlice(set as never, get as never, { router } as never));
+  return { store, folded: () => isFolded(store.getState().ui) };
+}
+
+/** A browser's localStorage, as a Map. */
+function storage(saved: Record<string, string> = {}) {
+  const map = new Map(Object.entries(saved));
+  vi.stubGlobal('localStorage', { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => map.set(k, v) });
+  return map;
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('the sidebar fold', () => {
+  it('is the person’s choice, kept for the next visit', () => {
+    const saved = storage();
+    const { store, folded } = uiStore();
+    connectUi(store as never, { router } as never);
+    expect(folded()).toBe(false);
+    store.getState().toggleSidebar();
+    expect(folded()).toBe(true);
+    expect(saved.get('sf-sidebar-folded')).toBe('true');
+
+    const next = uiStore();
+    connectUi(next.store as never, { router } as never);
+    expect(next.folded()).toBe(true);
+  });
+
+  it('without storage, or with it blocked, starts unfolded and still folds for this page', () => {
+    for (const blocked of [
+      undefined,
+      {
+        getItem: () => {
+          throw new Error('blocked');
+        },
+        setItem: () => {
+          throw new Error('blocked');
+        },
+      },
+    ]) {
+      vi.stubGlobal('localStorage', blocked);
+      const { store, folded } = uiStore();
+      connectUi(store as never, { router } as never);
+      expect(folded()).toBe(false);
+      store.getState().toggleSidebar();
+      expect(folded()).toBe(true);
+    }
+  });
+
+  it('folds while a panel on the right is open, and the person can unfold it anyway', () => {
+    const saved = storage();
+    const { store, folded } = uiStore();
+    store.getState().setRightPanel(true);
+    expect(folded()).toBe(true);
+    store.getState().setRightPanel(false);
+    expect(folded()).toBe(false);
+
+    store.getState().setRightPanel(true);
+    store.getState().toggleSidebar();
+    expect(folded()).toBe(false);
+    expect(saved.get('sf-sidebar-folded')).toBe('false');
+    // A panel never changes the saved choice.
+    store.getState().setRightPanel(false);
+    store.getState().setRightPanel(true);
+    expect(saved.get('sf-sidebar-folded')).toBe('false');
+  });
+});

@@ -186,9 +186,9 @@ export function PlayerStage({
         </svg>
         The draft, as a screen would show it. Screens play what is published.
       </p>
-      {/* The room is sized by the page, never by the frame in it, so Fit can measure it. */}
+      {/* The room is sized by the page, never by the frame in it, so Fit can measure it. The frame sits at its top, in the first viewport. */}
       <div ref={roomRef} className={cn('relative min-h-[420px] flex-1', scale === 'actual' ? 'overflow-auto' : 'overflow-hidden')}>
-        <div className={scale === 'actual' ? undefined : 'absolute inset-0 flex items-center justify-center'}>
+        <div className={scale === 'actual' ? undefined : 'absolute inset-0 flex items-start justify-center'}>
           <div className="shrink-0 overflow-hidden rounded-sm bg-black ring-1 ring-[#3a3a3d]" style={{ width: size.w * shown, height: size.h * shown }}>
             {/* A new frame per orientation: the player sizes itself to its window when it starts. */}
             {hydrated && (
