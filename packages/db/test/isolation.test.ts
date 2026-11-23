@@ -260,6 +260,17 @@ describe('rows a scope writes', () => {
     expect(await b.alertChannels.get('slack')).toMatchObject({ orgId: 'org-b', kind: 'slack', host: 'moved.test', rowVersion: 2 });
     expect(await ra.alertChannels.get('webhook')).toBeUndefined();
 
+    const key = { provider: 'anthropic' as const, keySealed: 'sealed:key', keyLast4: 'abcd', keySavedBy: 'u', keySavedAt: 1 };
+    await b.commit((await b.aiProvider.stage.put(key)).writes);
+    await b.commit((await b.aiProvider.stage.put({ ...key, fastModel: 'moved', orgId: a.orgId } as never)).writes);
+    expect(await b.aiProvider.get()).toMatchObject({ orgId: 'org-b', fastModel: 'moved', rowVersion: 2 });
+    expect(await ra.aiProvider.get()).toBeUndefined();
+    // Removing one org's provider leaves another's.
+    await ra.commit((await ra.aiProvider.stage.put(key)).writes);
+    await b.commit(b.aiProvider.stage.remove().writes);
+    expect(await b.aiProvider.get()).toBeUndefined();
+    expect(await ra.aiProvider.get()).toMatchObject({ orgId: a.orgId });
+
     await b.commit((await b.settings.stage.set({ locale: 'en-GB', orgId: a.orgId, publishRevision: 99 } as never)).writes);
     expect(await b.settings.get()).toMatchObject({ orgId: 'org-b', locale: 'en-GB', publishRevision: 0 });
     expect(await ra.settings.get()).toBeUndefined();

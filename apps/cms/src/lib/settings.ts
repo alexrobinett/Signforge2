@@ -16,6 +16,14 @@ export type AlertChannel = NonNullable<ToolOutput<'get_alert_channels'>['slack']
 
 /** One row of `list_alert_deliveries`. */
 export type AlertDelivery = ToolOutput<'list_alert_deliveries'>['deliveries'][number];
+/** The org's own model provider (#261), or null while it uses the demo model. */
+export type AiProvider = NonNullable<ToolOutput<'get_ai_provider'>['provider']>;
+/** Why a test of the key could not reach the provider, in words. */
+export const AI_TEST_PROBLEMS: Record<NonNullable<ToolOutput<'test_ai_provider'>['problem']>, string> = {
+  refused: 'Anthropic refused the key. It may have been revoked or rotated: replace it.',
+  busy: 'Anthropic is busy. Try again in a minute.',
+  unreachable: 'Anthropic did not answer. Try again.',
+};
 
 export const CHANNEL_LABELS: Record<AlertDelivery['channel'], string> = { email: 'Email', slack: 'Slack', webhook: 'Webhook' };
 

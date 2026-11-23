@@ -149,6 +149,19 @@ describe("an owner's agent", () => {
     expect(asked).toEqual([]);
   });
 
+  it('refuses the in-CMS agent too, which acts as an owner but is an agent (re-check of #280)', async () => {
+    const { asked, members } = recorder();
+    const cmsAgent: Caller = { ...as('owner', members), actor: { kind: 'user', id: 'user-owner', clientId: 'cms-agent' } };
+    expect(await dispatch(registry, 'invite_member', { email: 'boss@example.com', role: 'owner' }, cmsAgent)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+      message: 'an agent may invite only a viewer or an editor',
+    });
+    expect(await dispatch(registry, 'update_member_role', { memberId: member(), role: 'viewer' }, cmsAgent)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await dispatch(registry, 'remove_member', { memberId: member() }, cmsAgent)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(asked).toEqual([]);
+  });
+
   it('without org:manage, only lists the members', async () => {
     const { asked, members } = recorder();
     const reader = as('owner', members, { scopes: ['content:read'] });

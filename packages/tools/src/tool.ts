@@ -7,7 +7,7 @@
 import type { DeviceCommand, TableFeed, TemplateManifest, TemplateRuntimeReport } from '@signforge/contract';
 import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
-import type { ToolErrorCode } from './outputs';
+import type { AiProviderName, ToolErrorCode } from './outputs';
 import type { UploadSigner } from './upload';
 
 /** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
@@ -174,6 +174,21 @@ export interface Connectors {
   revoke(provider: string, connection: { orgId: string; id: string }, credentialsSealed: string): Promise<void>;
 }
 
+/** What a test of an org's key came to: the models the provider offers it, or why it could not be reached, in a word. */
+export type AiProviderTest = { ok: true; models: string[] } | { ok: false; problem: 'refused' | 'busy' | 'unreachable' };
+
+/**
+ * What the AI provider tools need from the API (apps/api/src/agent): sealing an org's key, and
+ * reaching the provider with it. The key is opened only there, to call the provider: no tool,
+ * response, audit row or log line holds it.
+ */
+export interface AiProviders {
+  /** The key, sealed for the org and provider (the connectors' vault, `ai-key:<org>/<provider>`). */
+  seal(key: { orgId: string; provider: AiProviderName }, apiKey: string): Promise<string>;
+  /** A minimal request with the sealed key: the provider's model list, which costs no tokens. */
+  test(key: { orgId: string; provider: AiProviderName }, sealed: string): Promise<AiProviderTest>;
+}
+
 /**
  * Tool services (GLOSSARY.md): what a tool may use beyond its input and the org's data. A caller
  * carries the ones it can provide; a tool names those it uses in `needs`, and dispatch refuses a
@@ -198,6 +213,8 @@ export interface ToolServices {
   templateCheck?: TemplateChecker;
   /** Providers' OAuth (./connections.ts). */
   connectors?: Connectors;
+  /** The org's own model provider: sealing its key, and testing it (./ai-providers.ts). */
+  aiProviders?: AiProviders;
   /** Better Auth's member and invitation changes (./members.ts). */
   members?: Members;
   /** Counts attempts against the caller's rate limits: a tool that guards a guessable secret or a third party's allowance. */
@@ -225,6 +242,7 @@ export const SERVICE_WORDS: Record<ServiceName, string> = {
   tables: 'a table reader',
   templateCheck: 'the runtime check',
   connectors: 'the connectors',
+  aiProviders: 'the AI providers',
   members: 'member management',
   rateLimit: 'a rate limit',
 };
@@ -330,6 +348,12 @@ export class ToolError extends Error {
 }
 
 export const notFound = (what: string, id: string) => new ToolError('not_found', `${what} ${id} not found`);
+
+/** The client id of the agent built into the CMS, which acts as the signed-in member (docs/proposals/cms-agent.md). */
+export const CMS_AGENT_CLIENT_ID = 'cms-agent';
+
+/** An agent is calling: a Milestone 4 grant, or the in-CMS agent acting as its member. A tool only a person may run refuses both. */
+export const isAgent = (actor: Actor) => actor.kind === 'agent' || actor.clientId === CMS_AGENT_CLIENT_ID;
 
 export interface Tool<S extends z.ZodType = z.ZodType, R extends z.ZodType = z.ZodType, D extends DataScope = OrgScope, N extends ServiceName = never> {
   /** Stable: the CMS, agents and the audit log refer to it. snake_case, as MCP clients expect. */

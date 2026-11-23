@@ -15,6 +15,7 @@ export const fakeServices: Pick<Required<ToolServices>, ServiceName> = {
   // A test that registers an org template passes a check that answers.
   templateCheck: () => Promise.reject(new Error('this test has no runtime check')),
   connectors,
+  aiProviders: { seal: async (_key, apiKey) => `sealed:${apiKey}`, test: async () => ({ ok: true, models: ['model-a'] }) },
   // Better Auth's stand-in: it changes nothing, and invites as Better Auth would answer.
   members: {
     invite: async (email, role) => ({

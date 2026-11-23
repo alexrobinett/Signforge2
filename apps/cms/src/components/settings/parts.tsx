@@ -19,6 +19,7 @@ const ORG_PAGES = [
   { to: '/settings/brand-kits', label: 'Brand kits' },
   { to: '/settings/screens', label: 'Screens & groups' },
   { to: '/settings/notifications', label: 'Notifications' },
+  { to: '/settings/ai', label: 'AI & agents' },
 ] as const;
 
 export function SettingsNav() {
