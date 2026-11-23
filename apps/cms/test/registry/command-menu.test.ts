@@ -27,7 +27,11 @@ describe('command menu entries', () => {
   const PER_SCREEN = ['restart_screen'];
 
   it('lists every tool an owner may use: the whole registry, but for Restart', () => {
-    expect(toolNames('owner').sort()).toEqual(TOOLS.map((t) => t.name).filter((n) => !PER_SCREEN.includes(n)).sort());
+    expect(toolNames('owner').sort()).toEqual(
+      TOOLS.map((t) => t.name)
+        .filter((n) => !PER_SCREEN.includes(n))
+        .sort(),
+    );
   });
 
   it('offers Restart only on a found screen, where it is checked: never as a tool whose form takes any screen id', () => {
