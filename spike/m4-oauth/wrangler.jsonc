@@ -1,0 +1,12 @@
+{
+  // M4-01 throwaway spike: local only (wrangler dev and workerd tests). Never deployed.
+  // One Worker plays both hosts: the CMS origin (issuer, session cookie) on localhost, and the API
+  // host serving /mcp on 127.0.0.1. Cookies are per host, so the two are separate as in production.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "sf-spike-m4-oauth",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "CMS_ORIGIN": "http://localhost:8787", "MCP_ORIGIN": "http://127.0.0.1:8787" },
+  "d1_databases": [{ "binding": "DB", "database_name": "sf-spike-m4", "database_id": "local-only", "migrations_dir": "migrations" }]
+}

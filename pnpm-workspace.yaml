@@ -5,6 +5,7 @@ packages:
   - examples
   - infra/*
   - spike/m3-platform
+  - spike/m4-oauth
 allowBuilds:
   esbuild: true
   workerd: true
