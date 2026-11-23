@@ -59,7 +59,7 @@ The output (`migrations/0001_better_auth.sql`, tables `user`, `session`, `accoun
 
 ## 3. Better Auth OAuth provider: DCR and PKCE (Milestone 4)
 
-**Answer: yes, from source; not run.** `@better-auth/oauth-provider` 1.7.25 has `allowDynamicClientRegistration` (default `false`) and `allowUnauthenticatedClientRegistration` (default `false`). It supports only `S256` for `code_challenge_method`, and PKCE "is always required for public clients" (`requirePKCE` per client, `clientRegistrationRequirePKCE` for registered confidential clients). It was not exercised end to end; that belongs to Milestone 4's first slice.
+**Answer: yes, from source; not run.** `@better-auth/oauth-provider` 1.7.25 has `allowDynamicClientRegistration` (default `false`) and `allowUnauthenticatedClientRegistration` (default `false`). It supports only `S256` for `code_challenge_method`, and PKCE "is always required for public clients" (`requirePKCE` per client, `clientRegistrationRequirePKCE` for registered confidential clients). It was not exercised end to end here; M4-01 ran it end to end on workerd with real MCP clients (`spike/m4-oauth/RESULTS.md`).
 
 ## 4. Durable Object WebSocket hibernation
 

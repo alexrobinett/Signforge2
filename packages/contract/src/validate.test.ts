@@ -102,6 +102,27 @@ describe('validateSpotData', () => {
     expect(validateSpotData(fields, { price: Number.NaN }, {})).toEqual(['field "price" must be a number']);
   });
 
+  it('needs no asset for an image the spot switched off with its toggle, and still needs one switched on (#252)', () => {
+    const photo: Record<string, FieldDef> = {
+      photo: { type: 'image', label: 'Photo' },
+      showPhoto: { type: 'boolean', label: 'Show the photo', default: true },
+    };
+    const missing = ['image field "photo" has no asset'];
+    expect(validateSpotData(photo, { showPhoto: false }, {})).toEqual([]);
+    expect(validateSpotData(photo, { showPhoto: true }, {})).toEqual(missing);
+    expect(validateSpotData(photo, {}, {})).toEqual(missing);
+    expect(validateSpotData(photo, { showPhoto: true }, { photo: 'sha-photo' })).toEqual([]);
+    // Off by default, until the spot turns it on.
+    const offByDefault = { ...photo, showPhoto: { type: 'boolean', label: 'Show the photo', default: false } } satisfies Record<string, FieldDef>;
+    expect(validateSpotData(offByDefault, {}, {})).toEqual([]);
+    expect(validateSpotData(offByDefault, { showPhoto: true }, {})).toEqual(missing);
+    // A toggle bound to live data may turn on with the next snapshot.
+    expect(validateSpotData(photo, { showPhoto: false }, {}, { showPhoto: { source: 'src_1', path: 'show' } })).toEqual([...missing]);
+    // Only a boolean toggle by that name counts; an image without one always needs its asset.
+    expect(validateSpotData({ photo: photo.photo!, showPhoto: { type: 'text', label: 'x', default: '' } }, { showPhoto: '' }, {})).toEqual(missing);
+    expect(validateSpotData({ photo: photo.photo! }, {}, {})).toEqual(missing);
+  });
+
   it('holds a url to an https address within its maxLength, or empty for none', () => {
     const qr: Record<string, FieldDef> = { qrUrl: { type: 'url', label: 'QR link', maxLength: 40 } };
     expect(validateSpotData(qr, { qrUrl: 'https://example.com/plan' }, {})).toEqual([]);
