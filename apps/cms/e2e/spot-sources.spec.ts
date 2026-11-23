@@ -10,11 +10,11 @@ import { axe, d1, fillUntilEnabled, hydrated, newSpot, orgOf, shots, signInAs, s
 const ADDRESS = '192.0.2.33';
 
 /** As if the poller had just fetched `data` for the source. */
-function pollFound(spotId: string, sourceId: string, data: unknown) {
+async function pollFound(spotId: string, sourceId: string, data: unknown) {
   const now = Date.now();
   // As the poller stores it: keys sorted at every level.
   const json = canonicalJson(data).replaceAll("'", "''");
-  d1(
+  await d1(
     `INSERT INTO data_snapshots (org_id, data_source_id, version, fetched_at, checked_at, data_json) VALUES (${orgOf(spotId)}, '${sourceId}', 'e2e-${now}', ${now}, ${now}, '${json}') ` +
       'ON CONFLICT (org_id, data_source_id) DO UPDATE SET version = excluded.version, fetched_at = excluded.fetched_at, checked_at = excluded.checked_at, data_json = excluded.data_json',
   );
@@ -80,7 +80,7 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
   });
 
   // The first poll lands: live values in the form, read-only, and on the stage.
-  pollFound(spotId, atlanta, ATLANTA);
+  await pollFound(spotId, atlanta, ATLANTA);
   await page.reload();
   await hydrated(page);
   await expect(form.getByText('88°F, overcast')).toBeVisible();
@@ -141,7 +141,7 @@ test('a second spot for the same place and units shares the source; moving it le
   expect((await tool(page, 'get_spot', { spotId: first })).spot.bindings.temp.dataSourceId).toMatch(/^weather-4180439-f-mph-/);
 
   // A failing source: the editor says so, and the stage shows the fallback, as a screen would.
-  pollFailed(spotId, reykjavik);
+  await pollFailed(spotId, reykjavik);
   await page.reload();
   await hydrated(page);
   await expect(form.getByText('The first check failed: the feed took too long to answer.', { exact: false })).toBeVisible();
@@ -189,7 +189,7 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
     <item><title>City library extends its weekend hours</title><enclosure url="https://cdn.feeds.example.com/library.jpg" type="image/jpeg"/>
       <content:encoded><![CDATA[<img src="/reading-room.jpg">]]></content:encoded></item>
   </channel></rss>`;
-  pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/world.rss' }));
+  await pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/world.rss' }));
   expect((await tool(page, 'get_data_source', { dataSourceId: feed.id })).snapshot.data).toEqual({
     title: 'World desk',
     language: 'en',
@@ -270,11 +270,11 @@ test('a template with two sources: a place for the weather and a feed for the ne
   expect(spot.bindings).toEqual({ temp: { dataSourceId: weatherId, path: 'current.temperature_2m' }, items: { dataSourceId: feed.id, path: 'items' } });
 
   // Both polls land: each block shows its own source's values, and the stage plays both.
-  pollFound(spotId, weatherId, ATLANTA);
+  await pollFound(spotId, weatherId, ATLANTA);
   const rss = `<?xml version="1.0"?><rss version="2.0"><channel><title>Frame desk</title><language>en</language>
     <item><title>Night market opens on the square</title></item>
   </channel></rss>`;
-  pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/frame.rss' }));
+  await pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/frame.rss' }));
   await page.reload();
   await hydrated(page);
   await expect(weather.getByText('88°F, overcast')).toBeVisible();
@@ -286,7 +286,7 @@ test('a template with two sources: a place for the weather and a feed for the ne
   await shots(page, '94-spot-source-two');
 
   // The forecast goes unconfirmed for a day: the weather falls back, the news stays live.
-  d1(`UPDATE data_snapshots SET checked_at = ${Date.now() - 25 * 3_600_000} WHERE org_id = ${orgOf(spotId)} AND data_source_id = '${weatherId}'`);
+  await d1(`UPDATE data_snapshots SET checked_at = ${Date.now() - 25 * 3_600_000} WHERE org_id = ${orgOf(spotId)} AND data_source_id = '${weatherId}'`);
   await page.reload();
   await hydrated(page);
   await expect(weather.getByText(/Not confirmed for .*: screens show the fallback values\./)).toBeVisible();

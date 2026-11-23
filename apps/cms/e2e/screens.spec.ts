@@ -281,7 +281,7 @@ test('a screen that stops syncing turns unreachable on the open Screens page, wi
   await expect(tile.getByText('Playing Specials · as scheduled')).toBeVisible({ timeout: 30_000 });
 
   // It stops syncing; the page, left open, says so within a poll.
-  stopSyncing(screenId, 20);
+  await stopSyncing(screenId, 20);
   await expect(tile.getByText('Unreachable 20 min · still playing Specials')).toBeVisible({ timeout: 30_000 });
   await expect(tile.getByText('Online')).toBeHidden();
   expect(await page.evaluate(() => 'sfStayed' in window)).toBe(true);
