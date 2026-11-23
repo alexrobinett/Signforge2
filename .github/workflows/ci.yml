@@ -34,19 +34,14 @@ permissions:
   contents: read
   actions: read # the plan finds master's last green run; scripts/ci-summary.sh reads this job's step times
 
-env:
-  TURBO_CACHE_DIR: .turbo/cache
-
 jobs:
   check:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     # A master run with cold caches spends about 16 min on typecheck, test and lint and 20 min on the CMS e2e (runs 44896506918, 44908695033 timed out at 30).
     timeout-minutes: 60
-    # Turbo's remote cache (docs/ci.md, "Remote cache"), on once the owner sets the TURBO_API variable. Until
-    # then all four are empty, Turbo says "Remote caching disabled", and the job carries .turbo/cache
-    # with actions/cache below. The token goes out only with TURBO_API, so it never reaches Turbo's
-    # default server, Vercel's.
+    # Turbo's remote cache (docs/ci.md, "Remote cache"). The token goes out only with TURBO_API, so it
+    # never reaches Turbo's default server, Vercel's.
     env:
       TURBO_API: ${{ vars.TURBO_API }}
       TURBO_TEAM: ${{ vars.TURBO_TEAM }}
@@ -146,11 +141,12 @@ jobs:
               ;;
           esac
           # Turbo puts the root package.json (the TypeScript compiler most packages use, tsx, the root
-          # scripts), the lockfile's root importer (those versions, and pnpm's) and the other workflows in
-          # no package, so --affected would plan nothing for a change to them: run everything instead.
+          # scripts) and the lockfile's root importer (those versions, and pnpm's) in no package, so
+          # --affected would plan nothing for a change to them: run everything instead. ci.yml itself is a
+          # global dependency in turbo.json; the other workflows run no task, so they change nothing here.
           root_deps() { git show "$1:pnpm-lock.yaml" | awk '/^  \.:$/ { f = 1; next } /^[^ ]|^  [^ ]/ { f = 0 } f'; }
-          if [ -n "$base" ] && { ! git diff --quiet "$base" HEAD -- package.json .github/workflows || [ "$(root_deps "$base")" != "$(root_deps HEAD)" ]; }; then
-            echo "The root package.json, the lockfile's root importer or a workflow changed since $base: running everything."
+          if [ -n "$base" ] && { ! git diff --quiet "$base" HEAD -- package.json || [ "$(root_deps "$base")" != "$(root_deps HEAD)" ]; }; then
+            echo "The root package.json or the lockfile's root importer changed since $base: running everything."
             base=
           fi
           browsers=false
@@ -218,30 +214,13 @@ jobs:
           path: examples/stress/media
           key: ${{ steps.stress-media-cache.outputs.cache-primary-key }}
 
-      # Turbo's local cache, carried between runs while there is no remote cache: the newest entry for
-      # this OS, saved under this sha.
-      - name: Restore Turbo cache
-        id: turbo-cache
-        if: steps.plan.outputs.tasks != '' && env.TURBO_API == ''
-        uses: actions/cache/restore@v4
-        with:
-          path: .turbo/cache
-          key: turbo-${{ runner.os }}-${{ github.sha }}
-          restore-keys: turbo-${{ runner.os }}-
       - name: Typecheck, test, e2e, lint
         if: steps.plan.outputs.tasks != ''
-        # One task per core: Turbo's default of 10 starts that many Chromiums on the runner's two cores, and
-        # browser tests then miss their waits (#277).
+        # One task per core: Turbo's default of 10 starts that many Chromiums on the runner's four cores
+        # (two while the repository was private), and browser tests then miss their waits (#277).
         run: pnpm exec turbo run ${{ steps.plan.outputs.tasks }} ${{ steps.plan.outputs.affected }} --summarize --concurrency=100%
         env:
           TURBO_SCM_BASE: ${{ steps.plan.outputs.base }} # what --affected compares against
-      # Also after a failure, so a rerun replays the tasks that passed.
-      - name: Save Turbo cache
-        if: always() && steps.plan.outputs.tasks != '' && env.TURBO_API == '' && steps.turbo-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .turbo/cache
-          key: ${{ steps.turbo-cache.outputs.cache-primary-key }}
 
       - name: Upload e2e results
         if: failure()
