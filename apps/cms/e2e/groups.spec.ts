@@ -22,7 +22,6 @@ async function pairScreen(page: Page, name: string, address: string) {
 }
 
 test('add three selected screens to a group at once, rename a group, refuse to delete one an entry aims at, and retire a screen', async ({ page }) => {
-  test.setTimeout(120_000);
   await signInAs(page, `e2e-groups-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Harbor Coffee');
   const left = await pairScreen(page, 'Drive-thru L', '192.0.2.72');
@@ -162,7 +161,6 @@ test('add three selected screens to a group at once, rename a group, refuse to d
 });
 
 test('groups and screens in name order wherever they are listed, though their ids run the other way (#180)', async ({ page }) => {
-  test.setTimeout(120_000);
   await signInAs(page, `e2e-group-order-${Date.now()}@example.com`, '192.0.2.76');
   await createOrg(page, 'Order Deli');
   // Names given after the ids are known, so each list's id order is the reverse of its name order, and plain string

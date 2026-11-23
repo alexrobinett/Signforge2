@@ -90,7 +90,6 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(() => page.context().close());
 
 test('a menu board fed by a CSV link: read it, map its columns, see its rows; the edited file after the next poll', async () => {
-  test.setTimeout(180_000);
   writeMenu();
   const spotId = await newSpot(page, 'Menu Board', 'Lunch menu');
   const form = page.getByRole('form', { name: 'Spot fields' });

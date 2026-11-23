@@ -318,7 +318,6 @@ test('a role select or an invitation button keeps keyboard focus while its chang
 }) => {
   // A control disabled while its own action ran lost focus to the page (Chromium moves it to body),
   // so the next Tab started from the top. Each answer is held until the test lets it go.
-  test.setTimeout(120_000);
   const stamp = Date.now();
   const editorEmail = `e2e-settings-focus-editor-${stamp}@example.com`;
   const waitingEmail = `e2e-settings-focus-waiting-${stamp}@example.com`;
@@ -500,7 +499,6 @@ test('edits belong to the org they were made in: after a switch, a late answer f
 }) => {
   // Display hours edited while a General save ran in one org followed a switch, and the next org
   // saved them as its own.
-  test.setTimeout(90_000);
   await signInAs(page, `e2e-settings-orgs-${Date.now()}@example.com`, '192.0.2.47');
   await createOrg(page, 'Alpha Market');
   await createOrgFromAccountMenu(page, 'Beta Market');

@@ -8,7 +8,6 @@ const ADDRESS = '192.0.2.41';
 const SCREEN_ADDRESS = '192.0.2.42';
 
 test('a change shows in the audit log, filters to it, pages and exports, with the pairing code redacted', async ({ page, request }) => {
-  test.setTimeout(120_000);
   await signInAs(page, `e2e-audit-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Northside Clinic');
 

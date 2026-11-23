@@ -8,7 +8,7 @@ import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor } from './servers';
 
 /**
  * Fill the email step and ask for a code. Retried until the page has hydrated: before that the
- * input takes text but React has not seen it, and the button stays disabled.
+ * input takes text but React has not seen it, and the button stays disabled. Bounded by the test.
  */
 export async function requestCode(page: Page, email: string) {
   const button = page.getByRole('button', { name: 'Email me a code' });
@@ -16,7 +16,7 @@ export async function requestCode(page: Page, email: string) {
     await page.getByLabel('Email').fill('');
     await page.getByLabel('Email').fill(email);
     await expect(button).toBeEnabled({ timeout: 1_000 });
-  }).toPass({ timeout: 30_000 });
+  }).toPass();
   await button.click();
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
 }
@@ -53,19 +53,19 @@ export async function screenshot(page: Page, name: string) {
 
 /**
  * Fill a field and wait until `button` is enabled, retrying until the page has hydrated: before
- * that the input takes text but React has not seen it.
+ * that the input takes text but React has not seen it. Bounded by the test.
  */
 export async function fillUntilEnabled(page: Page, label: string, value: string, button: string) {
   await expect(async () => {
     await page.getByLabel(label).fill('');
     await page.getByLabel(label).fill(value);
     await expect(page.getByRole('button', { name: button })).toBeEnabled({ timeout: 1_000 });
-  }).toPass({ timeout: 30_000 });
+  }).toPass();
 }
 
 /** Wait until React has hydrated the page (`data-hydrated` on body), so clicks reach handlers. */
 export async function hydrated(page: Page) {
-  await expect(page.locator('body[data-hydrated]')).toBeAttached({ timeout: 30_000 });
+  await expect(page.locator('body[data-hydrated]')).toBeAttached();
 }
 
 /**
@@ -321,7 +321,7 @@ export async function d1(sql: string) {
 
 /**
  * Make an org called `name` through the API, as the CMS does (it becomes the active org), and land
- * on it. Only sign-in-and-orgs.spec.ts makes one through the page. Slugs are global and a spec may
+ * on it, hydrated. Only sign-in-and-orgs.spec.ts makes one through the page. Slugs are global and a spec may
  * make two orgs of one name, so each gets its own.
  */
 export async function createOrg(page: Page, name: string) {
@@ -330,6 +330,8 @@ export async function createOrg(page: Page, name: string) {
   expect(res.status(), await res.text()).toBe(200);
   await page.goto('/');
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+  // A fresh load, as the page's own create was not: a click before this would go nowhere.
+  await hydrated(page);
 }
 
 /** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */

@@ -3,7 +3,7 @@
 // under `wrangler dev` and the feeds are not real, so the test writes into the run's local D1 what
 // a poll would have written.
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { axe, createOrg, d1, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, d1, holdFirst, hydrated, shots, signInAs, tool } from './helpers';
 import { CMS_URL } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
@@ -57,7 +57,6 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(() => owner.context().close());
 
 test('add a calendar and a feed from the catalogue; a failing one says why, what screens show and how to fix it', async () => {
-  test.setTimeout(120_000);
   await owner.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Integrations' }).click();
   await expect(owner.getByRole('heading', { name: 'Integrations', level: 1 })).toBeVisible();
   await hydrated(owner);
@@ -214,15 +213,13 @@ test('connected accounts: reconnect and disconnect, a failing read, and what the
   await expect(accounts.getByText('Needs reconnecting')).toBeVisible();
   await axe(owner);
   await shots(owner, '63-integrations-accounts');
-  // Reconnect asks the API for the provider's page (held here a moment, as a slow answer would be),
-  // saying so on its own button; this deployment connects none, and says so.
-  await owner.route('**/api/tools/start_connection', async (route) => {
-    await new Promise((r) => setTimeout(r, 1_500));
-    await route.continue();
-  });
+  // Reconnect asks the API for the provider's page (held here until the button is seen, as a slow
+  // answer would be), saying so on its own button; this deployment connects none, and says so.
+  const starting = await holdFirst(owner, '/api/tools/start_connection');
   await accounts.getByRole('button', { name: 'Reconnect facilities@example.com' }).click();
   await expect(accounts.getByRole('button', { name: 'Reconnect facilities@example.com' })).toHaveText('Opening…');
   await expect(accounts.getByRole('button', { name: 'Disconnect facilities@example.com' })).toHaveText('Disconnect');
+  await (await starting.arrived).continue();
   await expect(accounts.getByRole('alert')).toContainText('cannot be connected here');
   await owner.unroute('**/api/tools/start_connection');
   // Disconnect asks first, saying what stops working; a refusal is said once, in the confirm.
@@ -237,6 +234,9 @@ test('connected accounts: reconnect and disconnect, a failing read, and what the
   await expect(owner.getByText('The provider did not answer. Try again.')).toHaveCount(1);
   await owner.unroute('**/api/tools/disconnect');
   await confirm.getByRole('button', { name: 'Disconnect' }).click();
+  // The confirm stays open until the disconnect is done, and while it is open the page behind it is
+  // aria-hidden: `accounts` would count 0 at once, before the disconnect landed.
+  await expect(confirm).toBeHidden();
   // Its last account gone and no provider to connect here, the card goes.
   await expect(accounts).toHaveCount(0);
   expect((await tool(owner, 'list_connections', {})).connections).toEqual([]);
@@ -266,7 +266,6 @@ test('connected accounts: reconnect and disconnect, a failing read, and what the
 });
 
 test("a viewer reads the sources and changes nothing; another org's sources never show", async ({ browser }) => {
-  test.setTimeout(120_000);
   const viewerEmail = `e2e-integrations-viewer-${Date.now()}@example.com`;
   const viewer = await memberPage(browser, viewerEmail, VIEWER_ADDRESS);
   // Better Auth's own endpoints, as the Members page calls them (it checks the origin).

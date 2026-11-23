@@ -39,7 +39,6 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(() => page.context().close());
 
 test('a new spot leaves a datetime with no default for the editor to pick, says it needs one, and saves the one picked', async () => {
-  test.setTimeout(60_000);
   await page.goto('/spots');
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();

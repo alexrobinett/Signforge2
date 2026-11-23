@@ -86,24 +86,20 @@ export default async function globalSetup() {
   const env = { ...process.env, CLOUDFLARE_DEV_REGISTRY_PATH: `${RUN_DIR}registry`, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' };
   const state = `${RUN_DIR}state`;
 
-  const migrate = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--env', 'dev', '--persist-to', state], {
-    cwd: apiDir,
-    env,
-    encoding: 'utf8',
-  });
-  if (migrate.status !== 0) throw new Error(`migrations failed:\n${migrate.stdout}\n${migrate.stderr}`);
-  // The CMS serves the player build as its test screen and the spot editor's stage (vite.config.ts).
-  // Built for this host: no CMS_ORIGIN.
-  const player = spawnSync('pnpm', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' }, encoding: 'utf8' });
-  if (player.status !== 0) throw new Error(`player build failed:\n${player.stdout}\n${player.stderr}`);
-  // The CMS as it deploys, served by `vite preview` (the built Worker in workerd): `vite dev`
-  // compiles each module on its first request, so the first visit to each page took seconds.
-  const cms = spawnSync('pnpm', ['exec', 'vite', 'build'], { cwd: cmsDir, env, encoding: 'utf8' });
-  if (cms.status !== 0) throw new Error(`CMS build failed:\n${cms.stdout}\n${cms.stderr}`);
+  // The migrations beside the builds. The player build is the CMS's test screen and stage
+  // (vite.config.ts), built for this host: no CMS_ORIGIN. The CMS is built, as it deploys, for
+  // `vite preview`: `vite dev` compiled each module on its first request, which took seconds.
+  await Promise.all([
+    run('migrations', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--env', 'dev', '--persist-to', state], { cwd: apiDir, env }),
+    run('player build', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' } }).then(() =>
+      run('CMS build', ['exec', 'vite', 'build'], { cwd: cmsDir, env }),
+    ),
+  ]);
 
   const geocoding = await geocodingStub();
   const feeds = await feedServer();
   const log = openSync(API_LOG, 'a');
+  const cmsLog = openSync(`${RUN_DIR}cms.log`, 'a');
   const children: ChildProcess[] = [
     spawn(
       'pnpm',
@@ -140,7 +136,7 @@ export default async function globalSetup() {
     spawn('pnpm', ['exec', 'vite', 'preview', '--port', String(CMS_PORT), '--strictPort'], {
       cwd: cmsDir,
       env,
-      stdio: ['ignore', openSync(`${RUN_DIR}cms.log`, 'a'), openSync(`${RUN_DIR}cms.log`, 'a')],
+      stdio: ['ignore', cmsLog, cmsLog],
       detached: true,
     }),
   ];
@@ -171,10 +167,35 @@ export default async function globalSetup() {
   return async () => {
     geocoding.close();
     feeds.close();
-    for (const child of children) {
-      try {
-        if (child.pid) process.kill(-child.pid, 'SIGTERM');
-      } catch {}
-    }
+    // Each server is its own process group (pnpm, wrangler or vite, workerd): asked to stop, then
+    // killed, so no workerd is left holding a port for the next run.
+    await Promise.all(
+      children.map(async (child) => {
+        if (!child.pid) return;
+        const exited = new Promise((resolve) => child.once('exit', resolve));
+        signal(child.pid, 'SIGTERM');
+        await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
+        signal(child.pid, 'SIGKILL');
+      }),
+    );
   };
+}
+
+/** Signal a process group that may already be gone. */
+function signal(pid: number, name: NodeJS.Signals) {
+  try {
+    process.kill(-pid, name);
+  } catch {}
+}
+
+/** Run `pnpm <args>` to its end, its output kept for the error if it fails. */
+function run(what: string, args: string[], options: { cwd?: string; env: NodeJS.ProcessEnv }) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn('pnpm', args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.on('data', (chunk) => (output += chunk));
+    child.stderr.on('data', (chunk) => (output += chunk));
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`${what} failed:\n${output}`))));
+  });
 }

@@ -37,7 +37,6 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(() => page.context().close());
 
 test('make a kit, see it on the real player as you pick colours, fix a pair that fails, and save it', async () => {
-  test.setTimeout(120_000);
   await page.goto('/settings/general');
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Brand kits' }).click();
   await hydrated(page);
@@ -95,7 +94,6 @@ test('make a kit, see it on the real player as you pick colours, fix a pair that
 });
 
 test('duplicate a kit, give it to a group, make it the default, and see the warnings of a pair below 4.5:1', async () => {
-  test.setTimeout(120_000);
   await page.getByRole('button', { name: 'Duplicate' }).click();
   await expect(page.getByRole('heading', { name: 'Hearth Café copy', level: 1 })).toBeVisible();
   await hydrated(page);
@@ -151,7 +149,6 @@ test('duplicate a kit, give it to a group, make it the default, and see the warn
 });
 
 test('a change someone else made while the kit was open is not overwritten, even after the page reads the kits again', async () => {
-  test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/settings/brand-kits');
   await hydrated(page);
@@ -199,7 +196,6 @@ test("the kit's fields and actions are disabled in the server's HTML, until the 
 test('kit actions run one at a time: Duplicate during a save is ignored, then copies what was saved; New kit waits for Duplicate (review of #143, 3)', async () => {
   // A Duplicate during Save copied the colours from before it; New kit and Duplicate both ran,
   // and both navigate when they finish.
-  test.setTimeout(60_000);
   const { brandKit } = await tool(page, 'create_brand_kit', {
     name: 'Serial kit',
     colors: { primary: '#2563eb', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },

@@ -50,7 +50,6 @@ async function sync(request: APIRequestContext, credential: string, display = { 
 const stopSyncing = (screenId: string, minutes: number) => d1(`UPDATE screens SET last_seen_at = last_seen_at - ${minutes * 60_000} WHERE id = '${screenId}'`);
 
 test('pair a screen from the empty Screens page, watch it come online, wake, identify, set its hours and revoke it', async ({ page, request }) => {
-  test.setTimeout(120_000);
   await page.goto('/sign-in');
   await hydrated(page);
   await axe(page);
@@ -199,7 +198,6 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
 });
 
 test('an edit keeps a change someone else made while the form was open, and refuses one it would overwrite', async ({ page, request }) => {
-  test.setTimeout(90_000);
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-versions-${Date.now()}@example.com`, ADDRESS);

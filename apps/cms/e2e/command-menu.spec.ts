@@ -7,7 +7,6 @@ const ADDRESS = '192.0.2.13';
 
 test('the command menu, keyboard only: open, filter, run a tool with and without a form, see a refusal, go to a page, close', async ({ page, request }) => {
   // 60.2 s on CI with every step passed (run 44976726090), against 14 s on a laptop.
-  test.setTimeout(120_000);
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-command-${Date.now()}@example.com`, ADDRESS);

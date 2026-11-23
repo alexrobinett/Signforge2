@@ -6,7 +6,6 @@ import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs } from './h
 const ADDRESS = '192.0.2.21';
 
 test('upload images, search them by name, see which are in use, and delete one no spot uses', async ({ page }) => {
-  test.setTimeout(120_000);
   await signInAs(page, `e2e-assets-${Date.now()}@example.com`, ADDRESS);
   await createOrg(page, 'Northside Studio');
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();

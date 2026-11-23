@@ -43,7 +43,6 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(() => page.context().close());
 
 test('a weather spot: pick a place and units, see live weather on the stage, and type no temperature', async () => {
-  test.setTimeout(120_000);
   const spotId = await newSpot(page, 'Weather Now', 'Lobby weather');
   const form = page.getByRole('form', { name: 'Spot fields' });
   const stage = page.getByRole('region', { name: 'Live preview' });
@@ -111,7 +110,6 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
 });
 
 test('a second spot for the same place and units shares the source; moving it leaves the first where it was', async () => {
-  test.setTimeout(120_000);
   const first = spotIdOf(page);
   const spotId = await newSpot(page, 'Weather Now', 'Front door weather');
   const form = page.getByRole('form', { name: 'Spot fields' });
@@ -159,7 +157,6 @@ test('a second spot for the same place and units shares the source; moving it le
 });
 
 test('a news spot: add a feed by its address, see the headlines live, and edit none of them', async () => {
-  test.setTimeout(120_000);
   const spotId = await newSpot(page, 'News', 'World news');
   const form = page.getByRole('form', { name: 'Spot fields' });
   await expect(form.getByRole('button', { name: 'Add a row' })).toBeHidden();
@@ -241,7 +238,6 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
 });
 
 test('a template with two sources: a place for the weather and a feed for the news, each bound, fresh or stale, on its own', async () => {
-  test.setTimeout(120_000);
   await page.setViewportSize({ width: 1920, height: 1200 });
   const first = (await tool(page, 'list_spots', {})).spots.find((s: { name: string }) => s.name === 'Lobby weather').id;
   const spotId = await newSpot(page, 'Weather and headlines (test)', 'Lobby frame');

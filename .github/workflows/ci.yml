@@ -229,6 +229,7 @@ jobs:
           name: cms-e2e
           path: |
             apps/cms/test-results
+            apps/cms/playwright-report
             apps/cms/.e2e
           if-no-files-found: ignore
           include-hidden-files: true # apps/cms/.e2e holds the API's and the CMS's logs

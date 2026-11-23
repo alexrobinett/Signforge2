@@ -33,18 +33,27 @@ const codesRead = new Map<string, number>();
 export function codeFor(email: string, log = API_LOG): Promise<string> {
   const pattern = new RegExp(`\\[email\\] to ${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: Your SignForge code: (\\d{6})`, 'g');
   const read = codesRead.get(email) ?? 0;
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let done = false;
     const watcher = watch(log, () => check());
+    // A test that fails or times out leaves its wait behind: the watch never keeps the worker running,
+    // and its email (each test's own) gets no other code to read. An error from the watch closes it.
+    watcher.unref();
+    watcher.on('error', (err) => finish(() => reject(err)));
+    function finish(then = () => {}) {
+      done = true;
+      watcher.close();
+      then();
+    }
     function check() {
       if (done) return;
       const matches = [...readFileSync(log, 'utf8').matchAll(pattern)];
       const code = matches.length > read ? matches.at(-1)?.[1] : undefined;
       if (code === undefined) return;
-      done = true;
-      watcher.close();
-      codesRead.set(email, matches.length);
-      resolve(code);
+      finish(() => {
+        codesRead.set(email, matches.length);
+        resolve(code);
+      });
     }
     check();
     // macOS arms the watch (kqueue) at the loop's next poll; a write before that sends no event.

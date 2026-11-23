@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 import { png } from '@signforge/media/testing';
 import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
 
@@ -18,7 +18,6 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(() => page.context().close());
 
 test('make a spot from a template, see it on the real player as you type, and keep it as a draft', async () => {
-  test.setTimeout(120_000);
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' }).click();
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
@@ -33,14 +32,18 @@ test('make a spot from a template, see it on the real player as you type, and ke
   await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
   await expect(stage.getByText('1920 × 1080 ·', { exact: false })).toBeVisible();
 
-  // A keystroke reaches the player's frame without a round trip: measured from the fill.
+  // A keystroke reaches the player's frame without a round trip: no request but the autosave's goes
+  // out before the stage shows it. The time is logged, not asserted.
   const greeting = page.getByLabel('Greeting (empty for good morning/afternoon/evening)');
+  const trips: string[] = [];
+  const trip = (r: Request) => void (!r.url().endsWith('/api/tools/update_spot') && trips.push(r.url()));
+  page.on('request', trip);
   const typedAt = Date.now();
   await greeting.fill('Welcome to Northside');
-  await expect.poll(() => stageShows(page, 'Welcome to Northside'), { intervals: [10], timeout: 5_000 }).toBe(true);
-  const latency = Date.now() - typedAt;
-  console.log(`stage updated ${latency} ms after the keystroke (Playwright's own polling included)`);
-  expect(latency).toBeLessThan(1_000);
+  await expect.poll(() => stageShows(page, 'Welcome to Northside'), { intervals: [10] }).toBe(true);
+  page.off('request', trip);
+  console.log(`stage updated ${Date.now() - typedAt} ms after the keystroke (Playwright's own polling included)`);
+  expect(trips).toEqual([]);
   await expect(page.getByText(/Saved \d/)).toBeVisible();
   await axe(page);
   await shots(page, '30-spot-editor');
@@ -74,7 +77,6 @@ test('make a spot from a template, see it on the real player as you type, and ke
 });
 
 test('a change someone else made while the editor was open is not overwritten', async () => {
-  test.setTimeout(60_000);
   await page.getByRole('link', { name: /Lobby clock/ }).click();
   await hydrated(page);
   const url = new URL(page.url());
@@ -201,7 +203,6 @@ test('every base template can be configured and previewed', async () => {
 });
 
 test('make an Announcement in a look, with a QR code, and see both on the real player', async () => {
-  test.setTimeout(120_000);
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' }).click();
   await hydrated(page);

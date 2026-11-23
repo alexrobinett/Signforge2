@@ -9,6 +9,8 @@ test('at phone width, navigation is a drawer and the dashboard works', async ({ 
   await fromAddress(page, ADDRESS);
   await page.goto('/sign-in');
   await signIn(page, email);
+  // Signed in once the first page asks for an org: the session cookie is set by then.
+  await expect(page.getByRole('heading', { name: 'Welcome to SignForge' })).toBeVisible();
   await createOrg(page, 'Pocket Signs');
 
   // No horizontal scroll at phone width.

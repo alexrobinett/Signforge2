@@ -76,7 +76,6 @@ test.afterAll(async () => {
 });
 
 test('schedule a playlist for a group, see its week, and publish it to the screen', async () => {
-  test.setTimeout(120_000);
   // The page hydrates after the app (body[data-hydrated]): until then its controls are disabled (#136).
   const names = ['Take over screens', 'Schedule a playlist', 'Publish', 'Screen'];
   expect(await disabledOnServer(page, '/schedule', names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
@@ -141,7 +140,6 @@ test('schedule a playlist for a group, see its week, and publish it to the scree
 });
 
 test('take the screens over: the screen cuts in at once, and goes back when it ends', async () => {
-  test.setTimeout(120_000);
   await page.getByRole('button', { name: 'Take over screens' }).click();
   const dialog = page.getByRole('dialog', { name: 'Take over screens' });
   await dialog.getByLabel('Playlist').selectOption({ label: 'Flash sale' });
@@ -187,7 +185,6 @@ test('remove the entry and publish: the screen goes back to the default; the pag
 });
 
 test('a create whose answer was lost, saved again, makes one entry, and a takeover started again makes one takeover (#149)', async () => {
-  test.setTimeout(120_000);
   await page.goto('/schedule');
   await hydrated(page);
   /** Lets the first call to `tool` reach SignForge, which makes the row, and loses its answer on the way back. */
