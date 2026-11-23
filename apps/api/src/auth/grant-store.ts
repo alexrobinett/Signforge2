@@ -11,6 +11,22 @@ const CMS_CLIENT_ID = 'cms';
 
 const isRole = (r: string): r is Role => ROLES.some((role) => role === r);
 
+type Org = ReturnType<typeof scoped>;
+
+/** A grant revoked by `by` (with the provider's tokens), and its audit row saying why. */
+const revoking = (org: Org, grant: NonNullable<Awaited<ReturnType<Org['agentGrants']['get']>>>, by: string, detail: Record<string, string>) => [
+  ...org.agentGrants.stage.revoke(grant, by, Date.now()).writes,
+  ...org.auditLog.stage({
+    actorKind: 'user',
+    actorId: by,
+    clientId: CMS_CLIENT_ID,
+    action: 'revoke_agent_grant',
+    targetKind: 'agent_grant',
+    targetId: grant.id,
+    detailJson: JSON.stringify(detail),
+  }).writes,
+];
+
 export function grantStore(d1: D1Database): GrantDeps {
   return {
     create: async ({ orgId, userId, clientId, clientName, scopes }) => {
@@ -42,21 +58,12 @@ export function grantStore(d1: D1Database): GrantDeps {
     revokeMember: async (orgId, userId, by) => {
       const org = scoped(d1, orgId);
       const grants = await org.agentGrants.unrevokedFor(userId);
-      if (!grants.length) return;
-      const now = Date.now();
-      const writes = grants.flatMap((g) => [
-        ...org.agentGrants.stage.revoke(g, by, now).writes,
-        ...org.auditLog.stage({
-          actorKind: 'user',
-          actorId: by,
-          clientId: CMS_CLIENT_ID,
-          action: 'revoke_agent_grant',
-          targetKind: 'agent_grant',
-          targetId: g.id,
-          detailJson: JSON.stringify({ reason: 'membership_ended', userId }),
-        }).writes,
-      ]);
-      await org.commit(writes);
+      if (grants.length) await org.commit(grants.flatMap((g) => revoking(org, g, by, { reason: 'membership_ended', userId })));
+    },
+    revokeUnissued: async (orgId, grantId, by) => {
+      const org = scoped(d1, orgId);
+      const grant = await org.agentGrants.get(grantId);
+      if (grant) await org.commit(revoking(org, grant, by, { reason: 'no_code_issued' }));
     },
   };
 }

@@ -264,6 +264,73 @@ describe("the provider's own consent route", () => {
   });
 });
 
+describe("the provider's routes around the grant", () => {
+  it("refuses a signed-in person's client management, so no confidential client exists, and writes nothing", async () => {
+    const { owner } = await team();
+    const clients = async () => (await env.DB.prepare('SELECT count(*) AS n FROM oauthClient').first<{ n: number }>())!.n;
+    const before = await clients();
+    const confidential = { client_name: 'Secretive', redirect_uris: ['https://evil.test/cb'], token_endpoint_auth_method: 'client_secret_post' };
+    for (const [path, body] of [
+      ['/api/auth/oauth2/create-client', confidential],
+      ['/api/auth/oauth2/update-client', { client_id: 'sf-cli', update: { token_endpoint_auth_method: 'client_secret_post' } }],
+      ['/api/auth/oauth2/client/rotate-secret', { client_id: 'sf-cli' }],
+      ['/api/auth/oauth2/delete-client', { client_id: 'sf-cli' }],
+    ] as const) {
+      expect((await owner.post(path, body)).status, path).toBe(404);
+    }
+    expect(await clients()).toBe(before);
+    expect(await env.DB.prepare("SELECT tokenEndpointAuthMethod FROM oauthClient WHERE clientId = 'sf-cli'").first()).toEqual({
+      tokenEndpointAuthMethod: 'none',
+    });
+  });
+
+  it('refuses a person widening their consent past the grant', async () => {
+    const { t, owner, org } = await team();
+    const clientId = await register(t);
+    await authorize(owner, clientId, { organizationId: org.id, scopes: ['content:read'] });
+    const consent = await env.DB.prepare('SELECT id, scopes FROM oauthConsent WHERE clientId = ?').bind(clientId).first<{ id: string; scopes: string }>();
+    const res = await owner.post('/api/auth/oauth2/update-consent', { id: consent!.id, update: { scopes: ['content:read', 'content:publish', 'org:manage'] } });
+    expect(res.status).toBe(404);
+    expect(await env.DB.prepare('SELECT scopes FROM oauthConsent WHERE id = ?').bind(consent!.id).first()).toEqual({ scopes: consent!.scopes });
+  });
+});
+
+describe('a consent the provider gives no code for', () => {
+  it('revokes the grant it wrote, so no grant without tokens is left (prompt=login, signed in before the query)', async () => {
+    const { t, owner, ownerId, org } = await team();
+    const clientId = await register(t);
+    const verifier = crypto.randomUUID() + crypto.randomUUID();
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId,
+      redirect_uri: REDIRECT,
+      scope: ALL_SCOPES,
+      state: 'st',
+      code_challenge: await sha256Base64Url(verifier),
+      code_challenge_method: 'S256',
+      resource: RESOURCE,
+      prompt: 'login',
+    });
+    const res = await owner.get(`/api/auth/oauth2/authorize?${params}`, { accept: 'text/html' });
+    const signIn = new URL(res.headers.get('location') ?? (await res.json<{ url: string }>()).url, ORIGIN);
+    expect(signIn.pathname).toBe('/sign-in');
+    // The page is skipped and the signed query consented to with the old session.
+    const decided = await owner.post('/api/auth/agent-grants/consent', {
+      oauth_query: signIn.search.slice(1),
+      accept: true,
+      organizationId: org.id,
+      scopes: ['content:read'],
+    });
+    const answer = new URL((await decided.json<{ url: string }>()).url, ORIGIN);
+    expect(answer.searchParams.has('code')).toBe(false);
+    const grants = await scoped(env.DB, org.id).agentGrants.list();
+    expect(grants).toHaveLength(1);
+    expect(grants[0]).toMatchObject({ revokedBy: ownerId, revokedAt: expect.any(Number) });
+    const [audit] = (await scoped(env.DB, org.id).auditLog.list({ limit: 50 })).filter((e) => e.action === 'revoke_agent_grant');
+    expect(JSON.parse(audit!.detailJson!)).toEqual({ reason: 'no_code_issued' });
+  });
+});
+
 describe('consent from another site', () => {
   it('is refused with a foreign Origin or none, and writes no grant (CSRF, limitation 15)', async () => {
     const { t, owner, org } = await team();

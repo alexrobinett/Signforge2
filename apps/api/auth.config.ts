@@ -13,7 +13,7 @@ export const auth = betterAuth({
     audit: async () => {},
     startingOrg: async () => null,
     mcpResource: 'http://localhost/mcp',
-    grants: { create: async () => ({ ok: false, refused: 'not_a_member' }), revokeMember: async () => {} },
+    grants: { create: async () => ({ ok: false, refused: 'not_a_member' }), revokeMember: async () => {}, revokeUnissued: async () => {} },
     consent: { complete: async () => ({ redirect: false, url: '' }) },
   }),
   database: new DatabaseSync(':memory:'),

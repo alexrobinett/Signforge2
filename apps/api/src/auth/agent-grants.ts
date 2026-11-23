@@ -37,6 +37,8 @@ export interface GrantDeps {
   }): Promise<{ ok: true; grantId: string; scopes: Scope[] } | { ok: false; refused: 'not_a_member' | 'no_scopes' }>;
   /** Revokes the user's grants in the org, and their tokens, audited as `by`. */
   revokeMember(orgId: string, userId: string, by: string): Promise<void>;
+  /** Revokes one grant the provider issued no code for, audited as `by`. */
+  revokeUnissued(orgId: string, grantId: string, by: string): Promise<void>;
 }
 
 type ConsentBody = { accept: boolean; oauth_query: string; scope?: string };
@@ -93,7 +95,13 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
           // Always the grant's own scopes: the provider would otherwise keep every scope the client asked
           // for. offline_access, for a refresh token, when it asked.
           const scope = [...made.scopes, ...(requested.includes('offline_access') ? ['offline_access'] : [])].join(' ');
-          return ctx.json(await link.complete({ headers: ctx.headers, body: { accept: true, oauth_query: ctx.body.oauth_query, scope } }));
+          const answer = await link.complete({ headers: ctx.headers, body: { accept: true, oauth_query: ctx.body.oauth_query, scope } });
+          // The provider can answer with no code (prompt=login with a session older than the query sends the
+          // person to sign in first): the grant would hold nothing, so it ends now, and the next consent makes one.
+          if (!new URL(answer.url, ctx.context.baseURL).searchParams.has('code')) {
+            await grants.revokeUnissued(ctx.body.organizationId, made.grantId, session.user.id);
+          }
+          return ctx.json(answer);
         },
       ),
     },

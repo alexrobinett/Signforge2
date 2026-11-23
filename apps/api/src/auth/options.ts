@@ -181,9 +181,19 @@ const DAY_S = 24 * HOUR_S;
 export function authOptions({ email, appUrl, audit, startingOrg, mcpResource, grants, consent }: AuthDeps) {
   return {
     basePath: '/api/auth',
-    // The provider's own consent would issue a code with no grant behind it; consent is ours
-    // (./agent-grants.ts), which calls it through `auth.api`, which these paths do not stop.
-    disabledPaths: ['/oauth2/consent'],
+    // The provider's routes that would go around the grant, none of which the CMS uses. Its own consent
+    // would issue a code with no grant behind it: consent is ours (./agent-grants.ts), which calls it
+    // through `auth.api`, which these paths do not stop. Updating a consent would let a person widen
+    // the provider's record past the grant. The session's client management would make a
+    // confidential client, which open registration refuses (refusePublicOnly).
+    disabledPaths: [
+      '/oauth2/consent',
+      '/oauth2/update-consent',
+      '/oauth2/create-client',
+      '/oauth2/update-client',
+      '/oauth2/client/rotate-secret',
+      '/oauth2/delete-client',
+    ],
     // Password hashing does not fit the free plan's CPU limit; sign-in is passwordless.
     emailAndPassword: { enabled: false },
     session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
