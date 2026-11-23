@@ -306,9 +306,9 @@ test('the command menu tells a screen reader the row that is selected, after eac
   await hydrated(page);
   await signInAs(page, `e2e-command-pointer-${Date.now()}@example.com`, '192.0.2.19');
   await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Harbour Books', 'Create organization');
+  await fillUntilEnabled(page, 'Organization name', 'Lantern Lane Pointer', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Harbour Books', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Lantern Lane Pointer', level: 1 })).toBeVisible();
   await hydrated(page);
 
   const menu = page.getByRole('dialog', { name: 'Command menu' });
