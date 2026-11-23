@@ -1,11 +1,17 @@
 // A template's fields as a new spot starts them and as the editor checks and draws them, for url
 // (#191), date and datetime fields (#192).
-import type { FieldDef } from '@signforge/contract';
-import { createElement } from 'react';
+import { type FieldDef, type TemplateManifest, validateSpotData } from '@signforge/contract';
+import { type ComponentProps, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createStore } from 'zustand/vanilla';
 import { FieldForm } from '../src/components/spots/field-form';
+import { typedFields } from '../src/lib/live-data';
 import { fieldProblems, type SpotDraft, startData } from '../src/lib/spots';
+import { StoreProvider } from '../src/state/provider';
+
+// The image field's picker asks the page's router for the member's role, which a static render has none of.
+vi.mock('~/lib/live', async (real) => ({ ...(await real<typeof import('../src/lib/live')>()), useCanManage: () => false }));
 
 const fields: Record<string, FieldDef> = {
   qrUrl: { type: 'url', label: 'QR link', maxLength: 60 },
@@ -55,6 +61,39 @@ describe('a photo with its toggle in the spot editor (#252)', () => {
   });
 });
 
+describe('a photo whose toggle is a live field (#304)', () => {
+  const manifest: Pick<TemplateManifest, 'fields' | 'live'> = {
+    fields: {
+      photo: { type: 'image', label: 'Photo' },
+      showPhoto: { type: 'boolean', label: 'Show the photo', default: true },
+    },
+    live: { source: 'rss', fields: { showPhoto: 'show' } },
+  };
+  it('says nothing about the photo while the unbound toggle is off, as a publish does', () => {
+    const draft: SpotDraft = {
+      name: 'Welcome',
+      durationMs: 10_000,
+      data: { showPhoto: false },
+      assets: {},
+      bindings: {},
+      assetId: null,
+      fit: 'cover',
+      url: '',
+    };
+    expect(validateSpotData(manifest.fields, draft.data, draft.assets, draft.bindings)).toEqual([]);
+    // Only what the image field and its picker read: a static render calls no action.
+    const store = createStore(() => ({ spotEditor: { picking: null }, assets: { pickerQuery: '' }, pickImageFor: () => {}, searchPicker: () => {} }));
+    const form = createElement(FieldForm, { fields: manifest.fields, shown: typedFields(manifest, draft.bindings), draft, assets: [], onChange: () => {} });
+    // StoreProvider's props name its children; built apart, as createElement's arguments cannot satisfy them.
+    const provider: ComponentProps<typeof StoreProvider> = { store: store as never, children: form };
+    const html = renderToStaticMarkup(createElement(StoreProvider, provider));
+    expect(html).toContain('Choose image');
+    // The live toggle is checked but not drawn: before #304 the form drew only what it checked.
+    expect(html).not.toContain('Show the photo');
+    expect(html).not.toContain('has no asset');
+  });
+});
+
 describe('date and datetime fields in the spot editor', () => {
   const fields: Record<string, FieldDef> = {
     opens: { type: 'date', label: 'Opens', min: '2026-12-01', max: '2026-12-31' },
@@ -64,7 +103,7 @@ describe('date and datetime fields in the spot editor', () => {
   /** The `<input>` the form draws for a field, from the spot editor's markup with `data`. */
   const input = (data: Record<string, unknown>, id: string) => {
     const draft: SpotDraft = { name: 'Launch', durationMs: 10_000, data, assets: {}, bindings: {}, assetId: null, fit: 'cover', url: '' };
-    const html = renderToStaticMarkup(createElement(FieldForm, { fields, draft, assets: [], onChange: () => {} }));
+    const html = renderToStaticMarkup(createElement(FieldForm, { fields, shown: fields, draft, assets: [], onChange: () => {} }));
     return new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(html)?.[0] ?? '';
   };
 

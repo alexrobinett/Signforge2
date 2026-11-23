@@ -268,11 +268,24 @@ function ListField({
   );
 }
 
-export function FieldForm({ fields, draft, assets, onChange }: { fields: Record<string, FieldDef>; draft: SpotDraft; assets: AssetView[]; onChange: Edit }) {
-  const problems = fieldProblems(fields, draft);
+/** Draws the `shown` fields, each checked against all of the template's `fields`, as a publish checks it (#304). */
+export function FieldForm({
+  fields,
+  shown,
+  draft,
+  assets,
+  onChange,
+}: {
+  fields: Record<string, FieldDef>;
+  shown: Record<string, FieldDef>;
+  draft: SpotDraft;
+  assets: AssetView[];
+  onChange: Edit;
+}) {
+  const problems = fieldProblems(fields, draft, Object.keys(shown));
   return (
     <div className="flex flex-col gap-5">
-      {Object.entries(fields).map(([name, def]) => {
+      {Object.entries(shown).map(([name, def]) => {
         const p = problems.get(name);
         if (def.type === 'image')
           return <ImageField key={name} name={name} def={def} assetId={draft.assets[name]} assets={assets} problems={p} onChange={onChange} />;
