@@ -49,8 +49,9 @@ describe('the registry', () => {
       expect(t.name).toMatch(/^[a-z][a-z0-9_]*$/);
       expect(t.description.length, t.name).toBeGreaterThan(40);
       expect(t.input.safeParse(t.example).success, `${t.name} example`).toBe(true);
-      // Reads never need more than content:read; changes always do.
-      expect(t.mutates, t.name).toBe(t.scope !== 'content:read');
+      // Reads never need more than content:read, but for the org's pending invitations (invitees' addresses,
+      // owners' to see: M4 plan, Q6); changes always do.
+      expect(t.mutates, t.name).toBe(t.scope !== 'content:read' && t.name !== 'list_invitations');
     }
     expect(new Set(TOOLS.map((t) => t.name)).size).toBe(TOOLS.length);
   });
@@ -59,6 +60,7 @@ describe('the registry', () => {
     expect([...registry.keys()].sort()).toEqual([
       'add_group_members',
       'assign_brand_kit',
+      'cancel_invitation',
       'claim_screen',
       'create_asset_upload',
       'create_brand_kit',
@@ -92,6 +94,7 @@ describe('the registry', () => {
       'get_spot_preview',
       'get_template',
       'identify_screen',
+      'invite_member',
       'list_alert_deliveries',
       'list_assets',
       'list_audit_log',
@@ -100,7 +103,9 @@ describe('the registry', () => {
       'list_data_sources',
       'list_fonts',
       'list_groups',
+      'list_invitations',
       'list_label_keys',
+      'list_members',
       'list_playlists',
       'list_publishes',
       'list_schedule_entries',
@@ -115,6 +120,7 @@ describe('the registry', () => {
       'remove_ai_provider',
       'remove_alert_channel',
       'remove_group_members',
+      'remove_member',
       'rename_group',
       'rename_screen',
       'renew_asset_upload',
@@ -136,6 +142,7 @@ describe('the registry', () => {
       'test_alert_channel',
       'update_brand_kit',
       'update_data_source',
+      'update_member_role',
       'update_org_settings',
       'update_playlist',
       'update_schedule_entry',
@@ -243,6 +250,7 @@ describe('roles and scopes', () => {
       'list_fonts',
       'list_groups',
       'list_label_keys',
+      'list_members',
       'list_playlists',
       'list_publishes',
       'list_schedule_entries',

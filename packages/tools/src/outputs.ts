@@ -617,6 +617,29 @@ const auditEntryOutput = z.object({
 
 // ------------------------------------------------------------------ every tool's output
 
+/**
+ * A member's role: `ROLES` in ./tool.ts, written out because this file reaches no module that
+ * imports `@signforge/db` (the CMS types its calls by it). test/members.test.ts holds the two equal.
+ */
+const roleOutput = z.enum(['viewer', 'editor', 'owner']);
+const memberOutput = z.object({
+  id: z.string().describe("The membership's id: pass it as memberId"),
+  userId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: roleOutput,
+  createdAt: z.string().describe('ISO 8601'),
+});
+const invitationOutput = z.object({
+  id: z.string(),
+  email: z.string(),
+  role: roleOutput,
+  status: z.literal('pending'),
+  expiresAt: z.string().describe('ISO 8601; after it the invitation can no longer be accepted'),
+  inviterId: z.string().describe("The inviting member's user id"),
+  createdAt: z.string().describe('ISO 8601'),
+});
+
 export const outputs = {
   list_screens: z.object({ screens: z.array(screenOutput), next: nextOutput }),
   list_screen_status: z.object({ screens: z.array(screenStatusOutput), next: nextOutput }),
@@ -789,6 +812,12 @@ export const outputs = {
     version: version.nullable().describe("The deletion's version, to pin in a publish; null when it was never published and went at once"),
   }),
   list_audit_log: z.object({ entries: z.array(auditEntryOutput), next: nextOutput }),
+  list_members: z.object({ members: z.array(memberOutput), next: nextOutput }),
+  list_invitations: z.object({ invitations: z.array(invitationOutput), next: nextOutput }),
+  invite_member: z.object({ invitation: invitationOutput }),
+  cancel_invitation: z.object({ canceled: z.string().describe("The canceled invitation's id") }),
+  update_member_role: z.object({ member: memberOutput }),
+  remove_member: z.object({ removed: z.string().describe("The removed membership's id") }),
 };
 
 /** A tool's name. */

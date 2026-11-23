@@ -153,6 +153,35 @@ export async function seedOrganization(db: D1Database, orgId: string) {
     .run();
 }
 
+/** Better Auth's rows for an org's team, as its organization endpoints write them: an owner and a pending invitation. */
+export async function seedTeam(db: D1Database, orgId: string) {
+  const d = drizzle(db);
+  const now = new Date().toISOString();
+  const later = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
+  const userId = `${orgId}-owner`;
+  await d
+    .insert(schema.user)
+    .values({ id: userId, name: `${orgId} owner`, email: `${userId}@signforge.test`, emailVerified: 1, createdAt: now, updatedAt: now })
+    .run();
+  const member = `${orgId}-member`;
+  await d.insert(schema.member).values({ id: member, organizationId: orgId, userId, role: 'owner', createdAt: now }).run();
+  const invitation = `${orgId}-invitation`;
+  await d
+    .insert(schema.invitation)
+    .values({
+      id: invitation,
+      organizationId: orgId,
+      email: `${orgId}-invitee@signforge.test`,
+      role: 'viewer',
+      status: 'pending',
+      expiresAt: later,
+      createdAt: now,
+      inviterId: userId,
+    })
+    .run();
+  return { userId, member, invitation };
+}
+
 /**
  * A screen with an id the test chooses, such as a golden manifest's. The repositories never let a
  * caller choose a screen's id (it must be unique across orgs); a test fixture may, written around them.
