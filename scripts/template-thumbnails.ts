@@ -9,6 +9,8 @@
  *
  * Image fields get one placeholder photo (an SVG drawn here), and fields with no default a wireframe's
  * stand-in (`stand`), so a thumbnail shows the template's layout rather than anyone's content.
+ * The player draws them at a fixed time (`CLOCK`), so a clock, a countdown or an agenda draws the
+ * same on every run, and a run that changes no template changes no file.
  */
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -48,8 +50,10 @@ const stand = (f: Field): unknown =>
         : f.type === 'text'
           ? f.label
           : undefined;
+/** When the player draws every thumbnail: a weekday morning, three days before the stand-in date. */
+const CLOCK = '2026-12-21T09:00:00Z';
 /** Data a label cannot stand in for: an agenda shows only events still to come today or soon. */
-const hence = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
+const hence = (hours: number) => new Date(Date.parse(CLOCK) + hours * 3_600_000).toISOString();
 const OVERRIDES: Record<string, Record<string, unknown>> = {
   agenda: { events: ['Team stand-up', 'Design review', 'All hands'].map((title, i) => ({ title, start: hence(i + 1), end: hence(i + 1.75) })) },
 };
@@ -93,6 +97,8 @@ run('scripts/spot-shots.ts', [
   '0.25',
   '--format',
   'webp',
+  '--clock',
+  CLOCK,
 ]);
 
 const outDir = join(root, 'apps/cms/public/template-thumbnails');
