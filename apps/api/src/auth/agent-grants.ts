@@ -76,10 +76,14 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 /**
  * Where a client's code goes, as the consent page names it: a web callback's host, or for an app's
  * own scheme (`com.example.app:/cb`, `cursor://anysphere.cursor-retrieval/...`) the scheme and what follows it up to the path.
+ * An unverified app's scheme and host are a name it chose, so they are shown only when plain (`plainName`):
+ * `signforge://SignForge-CLI/cb` is not (target null: the page says an app on this device).
  */
-function destinationOf(redirectUri: string): { kind: 'web'; host: string } | { kind: 'app'; target: string } {
+function destinationOf(redirectUri: string, verified: boolean): { kind: 'web'; host: string } | { kind: 'app'; target: string | null } {
   const url = new URL(redirectUri);
   if (url.protocol === 'http:' || url.protocol === 'https:') return { kind: 'web', host: url.host };
+  const chosen = [url.protocol.slice(0, -1), url.host].filter(Boolean);
+  if (!verified && chosen.some((part) => plainName(part) === undefined)) return { kind: 'app', target: null };
   return { kind: 'app', target: url.host ? `${url.protocol}//${url.host}` : url.protocol };
 }
 
@@ -114,7 +118,7 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
               // An unverified client's name only when it is plain (`plainName`); otherwise none reaches the page.
               name: verified ? (client.name ?? clientId) : (plainName(client.name ?? '') ?? null),
               verified,
-              redirect: destinationOf(query.get('redirect_uri') ?? ''),
+              redirect: destinationOf(query.get('redirect_uri') ?? '', verified),
             },
             user: { name: user.name, email: user.email },
             orgs: await grants.offers(user.id, requested),

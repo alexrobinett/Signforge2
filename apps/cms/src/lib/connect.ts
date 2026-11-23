@@ -13,9 +13,14 @@ export interface ConnectRequest {
   /**
    * `name` is null for an unverified client whose name the page may not show (not plain, or reading as
    * SignForge's: the API's `plainName`). `redirect` is where its code goes: a web callback's host, or an
-   * app's own scheme (`com.example.app:`).
+   * app's own scheme (`com.example.app:`), null when an unverified app's is not plain either.
    */
-  client: { id: string; name: string | null; verified: boolean; redirect: { kind: 'web'; host: string } | { kind: 'app'; target: string } };
+  client: {
+    id: string;
+    name: string | null;
+    verified: boolean;
+    redirect: { kind: 'web'; host: string } | { kind: 'app'; target: string | null };
+  };
   user: { name: string; email: string };
   orgs: { orgId: string; name: string; role: 'owner' | 'editor' | 'viewer'; scopes: ConnectScope[] }[];
 }

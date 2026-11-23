@@ -34,6 +34,8 @@ const READS_AS: Record<string, string> = {
   '|': 'i',
   '5': 's',
   '6': 'g',
+  '9': 'g',
+  q: 'g',
   '3': 'e',
   '4': 'a',
   '@': 'a',
@@ -41,33 +43,52 @@ const READS_AS: Record<string, string> = {
   '8': 'b',
 };
 
-/** A word as it reads: lowercase, lookalikes mapped, `rn` as `m`, only a–z kept. */
-const skeleton = (word: string) =>
-  [...word.toLowerCase()]
-    .map((ch) => READS_AS[ch] ?? ch)
+/**
+ * A word as it reads: lowercase, `()` as `o`, lookalikes mapped, `(` as `paren` (a `c`, or nothing: it
+ * may be either), `rn` as `m`, only a–z kept.
+ */
+const skeleton = (word: string, paren: string) =>
+  [...word.toLowerCase().replace(/\(\)/g, 'o')]
+    .map((ch) => (ch === '(' ? paren : (READS_AS[ch] ?? ch)))
     .join('')
     .replace(/rn/g, 'm')
     .replace(/[^a-z]/g, '');
 
-const RESERVED = ['signforge', 'sfcli'].map(skeleton);
+const RESERVED = ['signforge', 'sfcli'].map((word) => skeleton(word, ''));
 
 /**
  * Whether a name reads as SignForge's: a reserved word inside one word, or starting where a word starts
- * (so `SF CL1` and `Sign Forge` do), but not one that runs on from inside a word (`Design Forge`, `Docs FC Lite`).
+ * (so `SF CL1` and `Sign Forge` do), but not one that runs on from inside a word (`Design Forge`, `Docs FC
+ * Lite`). A match that starts inside a trailing `(…)` after a name is the user's own label, and is let be.
  */
 function readsAsOurs(name: string): boolean {
-  const words = name.split(' ').map(skeleton).filter(Boolean);
-  const joined = words.join('');
-  const starts = words.map((_, i) => words.slice(0, i).join('').length);
-  return RESERVED.some((r) => words.some((w) => w.includes(r)) || starts.some((at) => joined.startsWith(r, at)));
+  const prefix = LABELLED.exec(name)?.[1];
+  return ['c', ''].some((paren) => {
+    const words = name
+      .split(' ')
+      .map((w) => skeleton(w, paren))
+      .filter(Boolean);
+    const joined = words.join('');
+    const starts = words.map((_, i) => words.slice(0, i).join('').length);
+    // A label counts only after a name that reads as something (not `- (SignForge CLI)`).
+    const named = prefix === undefined ? 0 : skeleton(prefix, paren).length;
+    const labelAt = named > 0 ? named : joined.length;
+    return RESERVED.some((r) => {
+      for (let at = joined.indexOf(r); at !== -1 && at < labelAt; at = joined.indexOf(r, at + 1)) {
+        if (starts.includes(at) || words.some((w, i) => at >= starts[i] && at + r.length <= starts[i] + w.length)) return true;
+      }
+      return false;
+    });
+  });
 }
 
 /**
  * The name the consent page may show for an unverified client, or undefined when it may show none: the
- * name is plain, and, before a trailing `(…)`, does not read as SignForge's. Anything else, international
- * names included, is shown as an unverified app with where its code goes.
+ * name is plain and does not read as SignForge's. Anything else, international names included, is shown
+ * as an unverified app with where its code goes. Also what an app's own redirect scheme and host must be
+ * for the page to show them.
  */
 export function plainName(name: string): string | undefined {
   if (!PLAIN.test(name)) return undefined;
-  return readsAsOurs(LABELLED.exec(name)?.[1] ?? name) ? undefined : name;
+  return readsAsOurs(name) ? undefined : name;
 }

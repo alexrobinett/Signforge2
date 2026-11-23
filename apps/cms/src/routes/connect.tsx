@@ -110,7 +110,14 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
             <h1 className="text-[22px] font-semibold tracking-tight">
               {client.name === null ? (
                 <>
-                  An unverified app at <span className="font-mono [overflow-wrap:anywhere]">{where}</span>
+                  An unverified app{' '}
+                  {where === null ? (
+                    'on this device'
+                  ) : (
+                    <>
+                      at <span className="font-mono [overflow-wrap:anywhere]">{where}</span>
+                    </>
+                  )}
                 </>
               ) : (
                 <ClientName client={client} />
@@ -136,6 +143,8 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
           {client.verified ? 'A SignForge app.' : 'Unverified: SignForge has not checked who made this app.'} It sends you back to{' '}
           {client.redirect.kind === 'web' ? (
             <span className="font-mono">{client.redirect.host}</span>
+          ) : client.redirect.target === null ? (
+            'an app on this device'
           ) : (
             <>
               the app <span className="font-mono">{client.redirect.target}</span>

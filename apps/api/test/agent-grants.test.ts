@@ -394,6 +394,18 @@ describe("the consent page's request", () => {
     }
   });
 
+  it("withholds an unverified app's scheme that reads as SignForge's: the page says an app on this device", async () => {
+    const { t, owner } = await team();
+    for (const redirect of ['signforge://SignForge-CLI/callback', 'com.signforge.cli:/callback', 'com.example.app://SignForge/callback']) {
+      const clientId = await register(t, { client_name: 'SignForge CLI', redirect_uris: [redirect] });
+      const { oauthQuery } = await consentPage(owner, clientId, ALL_SCOPES, redirect);
+      const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
+        client: { name: string | null; redirect: unknown };
+      }>();
+      expect(body.client, redirect).toMatchObject({ name: null, redirect: { kind: 'app', target: null } });
+    }
+  });
+
   it('marks the first-party CLI as verified', async () => {
     const { owner } = await team();
     // sf-cli's registered loopback callback, on the port this run picked (RFC 8252).
@@ -679,6 +691,22 @@ describe("the consent page's name for a client", () => {
       'Sign_Forge',
       'S·F CLI',
       'Sign\u2800Forge',
+      // The final re-check: a label that is not after a name, or that a reserved word starts before,
+      // and 9, q, () and ( read as letters.
+      'SignForg(e)',
+      'Sign(Forge)',
+      'S(ignForge)',
+      'SF (CLI)',
+      'SF(CLI)',
+      'SF CL(I)',
+      '- (SignForge CLI)',
+      '. (SignForge)',
+      "' (SignForge CLI)",
+      'Si9nForge',
+      'SI9NFOR9E',
+      'SiqnForqe',
+      'SignF()rge',
+      'SF (LI',
     ];
     expect(await shownAs(names)).toEqual(withheld(names));
   });
