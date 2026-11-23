@@ -30,7 +30,7 @@ test.beforeAll(async ({ browser }) => {
   // The form is what this spec is about: the stage never gets the bundle, which is not uploaded.
   const at = Date.now();
   const report = JSON.stringify({ ok: true, bundleBytes: 1000, checks: [], checkedAt: at, sourcesSha256: '0'.repeat(64) });
-  d1(
+  await d1(
     `INSERT INTO templates (id, org_id, key, name, created_at, updated_at) VALUES ('tpl_e2e_${at}', '${orgId}', 'launch-countdown', 'Launch countdown', ${at}, ${at}); ` +
       'INSERT INTO template_versions (id, org_id, template_id, version, manifest_json, bundle_sha256, status, check_report_json, created_at, updated_at) ' +
       `VALUES ('tv_e2e_${at}', '${orgId}', 'tpl_e2e_${at}', '1.0.0', '${JSON.stringify(countdown)}', '${'f'.repeat(64)}', 'approved', '${report}', ${at}, ${at})`,

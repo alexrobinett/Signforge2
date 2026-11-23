@@ -59,7 +59,7 @@ import { FeedError, normaliseFeed } from '@signforge/feeds';
 import { compileScreen, fontById, fontFilePath, onColor, spotProblems, type CompileInput, type TargetedEntry } from '@signforge/compiler';
 import { imageSample } from '@signforge/media/sample';
 import { push, PushError } from './push';
-import { buildTemplate, type BuiltTemplate } from './template';
+import { buildTemplate, type BuiltTemplate } from '@signforge/template-build';
 import { checkVideoFile } from './video';
 import { pushFonts, pushTemplate, TemplatePushError } from './template-push';
 

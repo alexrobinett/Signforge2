@@ -1,0 +1,15 @@
+{
+  // Turborepo's remote cache for CI and laptops. docs/ci.md ("Remote cache") says how to set it up.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "signforge-turbo-cache",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  // Entries expire by the bucket's lifecycle rule (30 days, set with `wrangler r2 bucket lifecycle
+  // add`): the rule lives on the bucket, not in this file.
+  "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "signforge-turbo-cache" }],
+  // TURBO_TOKEN reads and writes (CI); TURBO_READ_TOKEN only reads (laptops). `wrangler secret put` each.
+  "secrets": { "required": ["TURBO_TOKEN", "TURBO_READ_TOKEN"] }
+}
