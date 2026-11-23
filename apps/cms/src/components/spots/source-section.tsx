@@ -374,7 +374,7 @@ function LiveSource({
   const toggleFallback = useAppStore((s) => s.toggleFallback);
   const boundId = boundSource(live, draft.bindings);
   const fallback = liveFields(manifest, live);
-  const fallbackBad = [...fieldProblems(manifest.fields, draft, Object.keys(fallback)).keys()].length > 0;
+  const fallbackBad = fieldProblems(manifest.fields, draft, Object.keys(fallback)).size > 0;
   const fallbackShown = fallbackOpen || fallbackBad;
   const place = live.place ? draft.data[live.place] : undefined;
   return (

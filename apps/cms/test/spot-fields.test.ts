@@ -88,6 +88,8 @@ describe('a photo whose toggle is a live field (#304)', () => {
     const provider: ComponentProps<typeof StoreProvider> = { store: store as never, children: form };
     const html = renderToStaticMarkup(createElement(StoreProvider, provider));
     expect(html).toContain('Choose image');
+    // The live toggle is checked but not drawn: before #304 the form drew only what it checked.
+    expect(html).not.toContain('Show the photo');
     expect(html).not.toContain('has no asset');
   });
 });
