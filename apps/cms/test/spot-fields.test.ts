@@ -1,11 +1,17 @@
 // A template's fields as a new spot starts them and as the editor checks and draws them, for url
 // (#191), date and datetime fields (#192).
-import type { FieldDef } from '@signforge/contract';
-import { createElement } from 'react';
+import { type FieldDef, type TemplateManifest, validateSpotData } from '@signforge/contract';
+import { type ComponentProps, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createStore } from 'zustand/vanilla';
 import { FieldForm } from '../src/components/spots/field-form';
+import { typedFields } from '../src/lib/live-data';
 import { fieldProblems, type SpotDraft, startData } from '../src/lib/spots';
+import { StoreProvider } from '../src/state/provider';
+
+// The image field's picker asks the page's router for the member's role, which a static render has none of.
+vi.mock('~/lib/live', async (real) => ({ ...(await real<typeof import('../src/lib/live')>()), useCanManage: () => false }));
 
 const fields: Record<string, FieldDef> = {
   qrUrl: { type: 'url', label: 'QR link', maxLength: 60 },
@@ -55,6 +61,39 @@ describe('a photo with its toggle in the spot editor (#252)', () => {
   });
 });
 
+describe('a photo whose toggle is a live field (#304)', () => {
+  const manifest: Pick<TemplateManifest, 'fields' | 'live'> = {
+    fields: {
+      photo: { type: 'image', label: 'Photo' },
+      showPhoto: { type: 'boolean', label: 'Show the photo', default: true },
+    },
+    live: { source: 'rss', fields: { showPhoto: 'show' } },
+  };
+  it('says nothing about the photo while the unbound toggle is off, as a publish does', () => {
+    const draft: SpotDraft = {
+      name: 'Welcome',
+      durationMs: 10_000,
+      data: { showPhoto: false },
+      assets: {},
+      bindings: {},
+      assetId: null,
+      fit: 'cover',
+      url: '',
+    };
+    expect(validateSpotData(manifest.fields, draft.data, draft.assets, draft.bindings)).toEqual([]);
+    // Only what the image field and its picker read: a static render calls no action.
+    const store = createStore(() => ({ spotEditor: { picking: null }, assets: { pickerQuery: '' }, pickImageFor: () => {}, searchPicker: () => {} }));
+    const form = createElement(FieldForm, { fields: manifest.fields, shown: typedFields(manifest, draft.bindings), draft, assets: [], onChange: () => {} });
+    // StoreProvider's props name its children; built apart, as createElement's arguments cannot satisfy them.
+    const provider: ComponentProps<typeof StoreProvider> = { store: store as never, children: form };
+    const html = renderToStaticMarkup(createElement(StoreProvider, provider));
+    expect(html).toContain('Choose image');
+    // The live toggle is checked but not drawn: before #304 the form drew only what it checked.
+    expect(html).not.toContain('Show the photo');
+    expect(html).not.toContain('has no asset');
+  });
+});
+
 describe('date and datetime fields in the spot editor', () => {
   const fields: Record<string, FieldDef> = {
     opens: { type: 'date', label: 'Opens', min: '2026-12-01', max: '2026-12-31' },
@@ -64,7 +103,7 @@ describe('date and datetime fields in the spot editor', () => {
   /** The `<input>` the form draws for a field, from the spot editor's markup with `data`. */
   const input = (data: Record<string, unknown>, id: string) => {
     const draft: SpotDraft = { name: 'Launch', durationMs: 10_000, data, assets: {}, bindings: {}, assetId: null, fit: 'cover', url: '' };
-    const html = renderToStaticMarkup(createElement(FieldForm, { fields, draft, assets: [], onChange: () => {} }));
+    const html = renderToStaticMarkup(createElement(FieldForm, { fields, shown: fields, draft, assets: [], onChange: () => {} }));
     return new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(html)?.[0] ?? '';
   };
 
@@ -96,5 +135,20 @@ describe('date and datetime fields in the spot editor', () => {
     expect(at('2026-12-24')).toEqual(new Map());
     expect(at('2026-11-30')).toEqual(new Map([['opens', ['field "opens" must be on or after 2026-12-01']]]));
     expect(at('2027-01-01')).toEqual(new Map([['opens', ['field "opens" must be on or before 2026-12-31']]]));
+  });
+});
+
+describe("a new spot's copy (#253)", () => {
+  const fields: Record<string, FieldDef> = {
+    look: { type: 'select', label: 'Look', options: ['pop', 'calm'], default: 'pop' },
+    headline: { type: 'text', label: 'Headline', maxLength: 80, default: 'Pier 9 opens on Monday' },
+    meta: { type: 'text', label: 'Posted by', maxLength: 48, default: 'From the People Team · 20 November' },
+    facts: { type: 'list', label: 'Facts', maxItems: 3, item: { label: { type: 'text', label: 'Label' } }, default: [{ label: 'Pier 9 roof terrace' }] },
+    showMeta: { type: 'boolean', label: 'Show who posted it', default: true },
+    seconds: { type: 'number', label: 'Seconds', default: 10 },
+  };
+
+  it("starts its text and lists empty, not with the template's sample copy, and keeps its settings' defaults", () => {
+    expect(startData(fields)).toEqual({ headline: '', meta: '', facts: [] });
   });
 });

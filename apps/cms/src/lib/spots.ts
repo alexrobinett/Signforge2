@@ -64,11 +64,17 @@ export const usableVersions = (templates: TemplateView[]) =>
 /**
  * The contract's messages for each field, from the check a publish runs on it (`validateSpotField`),
  * so a message sits by the field it is about and the editor agrees with the publish: an image is
- * checked with its toggle (#252), and a bound toggle never counts as off (#285).
+ * checked with its toggle (#252), and a bound toggle never counts as off (#285). `fields` are the
+ * spot's, every one, as a publish sees them: an image's toggle may be a live field the form does
+ * not draw (#304). `names` are the fields to report on.
  */
-export function fieldProblems(fields: Record<string, FieldDef>, draft: Pick<SpotDraft, 'data' | 'assets' | 'bindings'>): Map<string, string[]> {
+export function fieldProblems(
+  fields: Record<string, FieldDef>,
+  draft: Pick<SpotDraft, 'data' | 'assets' | 'bindings'>,
+  names: string[] = Object.keys(fields),
+): Map<string, string[]> {
   const out = new Map<string, string[]>();
-  for (const name of Object.keys(fields)) {
+  for (const name of names) {
     const problems = validateSpotField(fields, draft.data, draft.assets, draft.bindings, name);
     if (problems.length) out.set(name, problems);
   }
@@ -97,11 +103,22 @@ export function startValue(d: ScalarFieldDef): unknown {
   }
 }
 
-/** A new spot's data: a value for each field the template gives no default, so the draft starts valid but for a date to pick. */
+/**
+ * A new spot's data: a value for each field the template gives no default, so the draft starts valid
+ * but for a date to pick. Text and lists start empty whatever their default (#253): a template's
+ * defaults are sample copy for its preview ("Pier 9 opens on Monday"), and a missed one would ship
+ * someone else's words. Other defaults are settings, and stand.
+ */
 export const startData = (fields: Record<string, FieldDef>) =>
   Object.fromEntries(
     Object.entries(fields).flatMap(([name, def]) =>
-      def.type === 'image' || def.default !== undefined ? [] : [[name, def.type === 'list' ? [] : startValue(def)]],
+      def.type === 'list'
+        ? [[name, []]]
+        : def.type === 'text'
+          ? [[name, '']]
+          : def.type === 'image' || def.default !== undefined
+            ? []
+            : [[name, startValue(def)]],
     ),
   );
 

@@ -140,7 +140,13 @@ function SpotEditor() {
             {spot.kind === 'template' &&
               (version ? (
                 <EditorSection title="Content">
-                  <FieldForm fields={typedFields(version.manifest, draft.bindings)} draft={draft} assets={assets} onChange={change} />
+                  <FieldForm
+                    fields={version.manifest.fields}
+                    shown={typedFields(version.manifest, draft.bindings)}
+                    draft={draft}
+                    assets={assets}
+                    onChange={change}
+                  />
                 </EditorSection>
               ) : (
                 <p className="text-sm text-muted-foreground">This spot's template is not available to this organization.</p>

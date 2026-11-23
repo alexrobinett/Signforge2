@@ -124,6 +124,12 @@ export const createCommandMenuSlice: SliceCreator<CommandMenuSlice> = (set, get,
           set((s) => ({ commandMenu: closed(s.commandMenu) }));
           await router.navigate({ to: entry.to });
           return;
+        case 'takeover': {
+          const orgId = orgOnScreen(router);
+          set((s) => ({ commandMenu: closed(s.commandMenu) }));
+          if (orgId) get().openTakeover(orgId);
+          return;
+        }
         case 'tool':
           if (needsInput(entry.tool)) set((s) => ({ commandMenu: { ...s.commandMenu, form: entry.tool.name, fieldError: null } }));
           else await run(entry.label, entry.tool, {});

@@ -303,6 +303,8 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
     return false;
   };
   expect(await qr()).toBe(false);
+  // Its label starts empty, as all its text does (#253).
+  await page.getByLabel('QR code label').fill('Scan for the floor plan');
   await page.getByLabel('QR code link').fill('https://example.com/pier-9');
   await expect.poll(qr, { timeout: 10_000 }).toBe(true);
   await expect(page.getByText(/Saved \d/)).toBeVisible();

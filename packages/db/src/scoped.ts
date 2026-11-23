@@ -1317,7 +1317,16 @@ export function scoped(d1: D1Database, orgId: string) {
               id: 'AI provider',
               key: { orgId },
               absent: 0,
-              fresh: (at) => ({ verifiedAt: null, fastModel: null, capableModel: null, dailyTurnCeiling: null, createdAt: at }),
+              fresh: (at) => ({
+                baseUrl: null,
+                acceptsImages: false,
+                jsonSchemaOutput: false,
+                verifiedAt: null,
+                fastModel: null,
+                capableModel: null,
+                dailyTurnCeiling: null,
+                createdAt: at,
+              }),
             },
             values,
             ifVersion,
@@ -1506,14 +1515,19 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       /**
        * Publishes newest first, `limit` of them from below `beforeRevision`, each with who made it
-       * (a member's name), for a roll back the revision it went back to, and its rollout's
+       * (a member's name, else their address before the @: every member reads this list, so never
+       * the whole address, #253), for a roll back the revision it went back to, and its rollout's
        * `rolloutCounts`, read after the page: a publish's screens commit with it.
        */
       history: async ({ beforeRevision, limit }: { beforeRevision?: number; limit: number }) => {
         const p = s.publishes;
         const restored = alias(s.publishes, 'restored');
         const page = await db
-          .select({ ...getTableColumns(p), actorName: s.user.name, restoresRevision: restored.revision })
+          .select({
+            ...getTableColumns(p),
+            actorName: sql<string | null>`coalesce(nullif(${s.user.name}, ''), substr(${s.user.email}, 1, instr(${s.user.email}, '@') - 1))`,
+            restoresRevision: restored.revision,
+          })
           .from(p)
           .leftJoin(s.user, and(eq(p.actorKind, 'user'), eq(s.user.id, p.actorId)))
           .leftJoin(restored, and(eq(restored.orgId, p.orgId), eq(restored.id, p.restoresId)))

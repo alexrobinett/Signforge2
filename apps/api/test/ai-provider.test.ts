@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { aiProviders } from '../src/agent/provider';
 
 const KEY = 'sk-ant-api03-SECRETKEYSECRETKEYSECRET-7Q2c';
-const ORG = { orgId: 'org-a', provider: 'anthropic' as const };
+const ORG = { orgId: 'org-a', provider: 'anthropic' as const, baseUrl: null };
 const DEV = { ENVIRONMENT: 'dev', CONNECTION_KEY: undefined, ANTHROPIC_BASE_URL: undefined };
 const PROD = { ENVIRONMENT: 'prod', CONNECTION_KEY: 'k'.repeat(64), ANTHROPIC_BASE_URL: 'https://stub.test' };
 

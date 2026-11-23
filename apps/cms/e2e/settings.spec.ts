@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { axe, createOrg, createOrgFromAccountMenu, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool } from './helpers';
-import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, API_LOG } from './servers';
+import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, API_LOG, ENDPOINT_STUB_KEY, ENDPOINT_STUB_MODELS } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
 const OWNER_ADDRESS = '192.0.2.31';
@@ -224,7 +224,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await invitee.goto('/settings/ai');
   await expect(invitee.getByRole('heading', { name: 'AI & agents' })).toBeVisible();
   await expect(invitee.getByText('Only an owner can add a key.')).toBeVisible();
-  await expect(invitee.getByLabel('Anthropic API key')).toHaveCount(0);
+  await expect(invitee.getByLabel('API key', { exact: true })).toHaveCount(0);
   await invitee.goto('/settings/members');
   await toTop(invitee.getByRole('region', { name: 'Who publishes' }));
   await axe(invitee);
@@ -732,7 +732,7 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
   const forms = [
     { path: '/settings/notifications', field: 'Webhook URL', button: 'Add webhook', value: 'https://example.com/hooks/tok_SECRET136' },
     { path: '/settings/members', field: 'Emails, separated by commas', button: 'Send invites', value: 'sam-secret136@example.com' },
-    { path: '/settings/ai', field: 'Anthropic API key', button: 'Save key', value: 'sk-ant-SECRET136-0000000000000000' },
+    { path: '/settings/ai', field: 'API key', button: 'Save key', value: 'sk-ant-SECRET136-0000000000000000' },
   ];
   for (const { path, field, button, value } of forms) {
     await early.goto(path);
@@ -769,7 +769,7 @@ test('an owner saves an Anthropic key, tests it against the stub, chooses models
   await shots(page, '96-settings-ai-demo');
 
   // A key the provider refuses is saved, and its test says why.
-  const key = page.getByLabel('Anthropic API key');
+  const key = page.getByLabel('API key', { exact: true });
   await key.fill('sk-ant-e2e-not-the-stub-key-0000000000-Zz99');
   await page.getByRole('button', { name: 'Save key' }).click();
   await expect(page.getByText('••••••••Zz99')).toBeVisible();
@@ -778,9 +778,9 @@ test('an owner saves an Anthropic key, tests it against the stub, chooses models
   await expect(page.getByRole('alert').filter({ hasText: 'Anthropic refused the key' })).toBeVisible();
 
   // The right key: the test lists the models, which become the choices.
-  const replace = page.getByLabel('Replace the Anthropic API key');
+  const replace = page.getByLabel('Replace the API key');
   await replace.fill(ANTHROPIC_STUB_KEY);
-  await page.getByRole('button', { name: 'Replace key' }).click();
+  await page.getByRole('button', { name: 'Save provider' }).click();
   await expect(page.getByText(`••••••••${ANTHROPIC_STUB_KEY.slice(-4)}`)).toBeVisible();
   await expect(replace).toHaveValue('');
   await page.getByRole('button', { name: 'Test connection' }).click();
@@ -807,4 +807,58 @@ test('an owner saves an Anthropic key, tests it against the stub, chooses models
   await page.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect(page.getByText('the agent uses SignForge’s demo model', { exact: false })).toBeVisible();
   expect(await tool(page, 'get_ai_provider', {})).toEqual({ provider: null });
+});
+
+test('an owner saves an OpenAI-compatible endpoint, its address checked, tests it against the stub and sees what it supports (#262)', async ({ page }) => {
+  await signInAs(page, `e2e-settings-endpoint-${Date.now()}@example.com`, '192.0.2.152');
+  await createOrg(page, 'Lantern Lane Grocers', '192.0.2.152');
+  await page.goto('/settings/ai');
+  await hydrated(page);
+  await page.getByRole('radio', { name: 'OpenAI-compatible endpoint' }).check();
+  const address = page.getByLabel('Endpoint address');
+  await expect(address).toBeVisible();
+
+  // An address that is not public https is refused where it enters, and nothing is saved.
+  await address.fill('http://models.example.com/v1');
+  await page.getByLabel('API key', { exact: true }).fill(ENDPOINT_STUB_KEY);
+  await page.getByRole('button', { name: 'Save key' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'the endpoint must be https' })).toBeVisible();
+  expect(await tool(page, 'get_ai_provider', {})).toEqual({ provider: null });
+
+  // A public https base: saved with what its owner says it supports. Images only, so Fill says it cannot run.
+  await address.fill('https://models.example.com/v1/');
+  await page.getByLabel('Its models take images').check();
+  await page.getByRole('button', { name: 'Save key' }).click();
+  await expect(page.getByText('https://models.example.com/v1', { exact: true })).toBeVisible();
+  await expect(page.getByText('Images: yes · JSON-schema output: no')).toBeVisible();
+  await expect(page.getByText('Fill from a flyer, photo or link needs both')).toBeVisible();
+
+  // The stub's /v1/models takes the key, and its models become the choices.
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByText(/^Connected, checked/)).toBeVisible();
+  await expect(page.getByLabel('Fast model').locator('option')).toHaveText(['Not chosen', ...ENDPOINT_STUB_MODELS]);
+
+  // Both features: Fill's note goes. The saved key is kept, as the address did not change.
+  await page.getByLabel('It returns output to a JSON schema (response_format json_schema)').check();
+  await page.getByRole('button', { name: 'Save provider' }).click();
+  await expect(page.getByText('Images: yes · JSON-schema output: yes')).toBeVisible();
+  await expect(page.getByText('Fill from a flyer, photo or link needs both')).toHaveCount(0);
+
+  // A new address needs the key again.
+  await page.getByLabel('Endpoint address').fill('https://elsewhere.example.net/v1');
+  await page.getByRole('button', { name: 'Save provider' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'a new baseUrl needs the apiKey again' })).toBeVisible();
+  expect(await tool(page, 'get_ai_provider', {})).toMatchObject({ provider: { baseUrl: 'https://models.example.com/v1' } });
+
+  // A key the endpoint refuses, at a new address, says so in the endpoint's words.
+  await page.getByLabel('Replace the API key').fill('sk-e2e-not-the-endpoint-key-0000000000-Zz99');
+  await page.getByRole('button', { name: 'Save provider' }).click();
+  await expect(page.getByText('https://elsewhere.example.net/v1', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'The endpoint refused the key' })).toBeVisible();
+
+  expect(await page.content()).not.toContain(ENDPOINT_STUB_KEY);
+  expect(JSON.stringify(await tool(page, 'list_audit_log', {}))).not.toContain(ENDPOINT_STUB_KEY);
+  await axe(page);
+  await shots(page, '98-settings-ai-endpoint');
 });

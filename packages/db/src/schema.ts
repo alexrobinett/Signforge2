@@ -853,7 +853,15 @@ export const orgAiProviders = sqliteTable('org_ai_providers', {
   orgId: text('org_id')
     .primaryKey()
     .references(() => organization.id),
-  provider: text('provider', { enum: ['anthropic'] }).notNull(),
+  provider: text('provider', { enum: ['anthropic', 'openai-compatible'] }).notNull(),
+  /** An OpenAI-compatible endpoint's base address (#262), https and public; null for Anthropic, whose address is fixed. */
+  baseUrl: text('base_url'),
+  /**
+   * Whether an OpenAI-compatible endpoint takes images and returns output to a JSON schema, as its owner
+   * says: what Fill from a flyer needs (#262). Not read for Anthropic, which does both.
+   */
+  acceptsImages: integer('accepts_images', { mode: 'boolean' }).notNull().default(false),
+  jsonSchemaOutput: integer('json_schema_output', { mode: 'boolean' }).notNull().default(false),
   keySealed: text('key_sealed').notNull(),
   keyLast4: text('key_last4').notNull(),
   /** The user who saved the key, and when. */

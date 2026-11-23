@@ -425,12 +425,55 @@ describe('AI & agents (#261)', () => {
 
   it('saves the choices as the tool takes them: empty is none, the ceiling a number, with the version read', async () => {
     const store = settingsStore();
-    await store.getState().saveAiChoices(A, { fastModel: 'm-fast', capableModel: '', dailyTurnCeiling: ' 300 ' }, 2);
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'm-fast', capableModel: '', dailyTurnCeiling: ' 300 ' }, 2);
     expect(lastCall()).toEqual({
       name: 'save_ai_provider',
       input: { provider: 'anthropic', fastModel: 'm-fast', capableModel: null, dailyTurnCeiling: 300, ifVersion: 2 },
     });
-    await store.getState().saveAiChoices(A, { fastModel: '', capableModel: '', dailyTurnCeiling: '' }, 3);
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: '', capableModel: '', dailyTurnCeiling: '' }, 3);
     expect(lastCall()?.input).toMatchObject({ fastModel: null, dailyTurnCeiling: null });
+  });
+
+  it('saves an OpenAI-compatible endpoint with its address and features, and keeps the saved key when none is typed (#262)', async () => {
+    const store = settingsStore();
+    const form = {
+      provider: 'openai-compatible' as const,
+      apiKey: ' sk-endpoint-key-0000000000000000 ',
+      baseUrl: ' https://api.openai.com/v1 ',
+      acceptsImages: true,
+      jsonSchemaOutput: false,
+    };
+    await store.getState().saveAiKey(A, form);
+    expect(lastCall()).toEqual({
+      name: 'save_ai_provider',
+      input: {
+        provider: 'openai-compatible',
+        apiKey: 'sk-endpoint-key-0000000000000000',
+        baseUrl: 'https://api.openai.com/v1',
+        acceptsImages: true,
+        jsonSchemaOutput: false,
+      },
+    });
+    await store.getState().saveAiKey(A, { ...form, apiKey: '', acceptsImages: false }, 4);
+    expect(lastCall()?.input).toEqual({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.openai.com/v1',
+      acceptsImages: false,
+      jsonSchemaOutput: false,
+      ifVersion: 4,
+    });
+    // Anthropic sends no address or features, whatever the hidden fields hold.
+    await store.getState().saveAiKey(A, { ...form, provider: 'anthropic' }, 5);
+    expect(lastCall()?.input).toEqual({ provider: 'anthropic', apiKey: 'sk-endpoint-key-0000000000000000', ifVersion: 5 });
+  });
+
+  it("says an endpoint's refusals in its own words, a blocked address among them (#262)", async () => {
+    const store = settingsStore();
+    replies.push({ status: 200, body: { ok: false, models: [], problem: 'blocked', provider: { ...provider, provider: 'openai-compatible' } } });
+    await store.getState().testAiProvider(A);
+    expect(errorOf(store.getState().settings, 'test', A)?.text).toMatch(/^SignForge cannot reach that address: it must be public https/);
+    replies.push({ status: 200, body: { ok: false, models: [], problem: 'refused', provider: { ...provider, provider: 'openai-compatible' } } });
+    await store.getState().testAiProvider(A);
+    expect(errorOf(store.getState().settings, 'test', A)?.text).toMatch(/^The endpoint refused the key/);
   });
 });

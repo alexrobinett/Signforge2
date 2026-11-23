@@ -14,7 +14,16 @@ import type { AnyRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { authClient, authErrorMessage } from '~/lib/auth-client';
 import { orgOnScreen } from '~/lib/live';
-import { AI_TEST_PROBLEMS, type AlertChannel, type AlertDelivery, type AlertKind, type AlertRule, type Member, type OrgSettings } from '~/lib/settings';
+import {
+  aiTestProblem,
+  type AiProvider,
+  type AlertChannel,
+  type AlertDelivery,
+  type AlertKind,
+  type AlertRule,
+  type Member,
+  type OrgSettings,
+} from '~/lib/settings';
 import type { DisplayHours } from '~/lib/screen-types';
 import { callTool, isStale, toolMessage } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
@@ -79,6 +88,18 @@ interface SettingsState {
   removingAiKey: string | null;
 }
 
+/**
+ * The key form, as it sends it: the provider, the key ('' to keep the saved one), and for an
+ * OpenAI-compatible endpoint its address and what it supports.
+ */
+interface AiKeyForm {
+  provider: AiProvider['provider'];
+  apiKey: string;
+  baseUrl: string;
+  acceptsImages: boolean;
+  jsonSchemaOutput: boolean;
+}
+
 /** The AI settings' model choices and daily ceiling, as the form sends them: '' for none. */
 interface AiChoices {
   fastModel: string;
@@ -115,10 +136,10 @@ export interface SettingsSlice {
   testAlertChannel: (orgId: string, channel: AlertDelivery['channel']) => Promise<void>;
   retryAlertDelivery: (orgId: string, deliveryId: string) => Promise<void>;
   /** Save the org's model key, sealed by the API and never shown again; `ifVersion` when replacing one. True once saved, so the form can clear. */
-  saveAiKey: (orgId: string, apiKey: string, ifVersion?: number) => Promise<boolean>;
+  saveAiKey: (orgId: string, key: AiKeyForm, ifVersion?: number) => Promise<boolean>;
   /** Reach the provider with the saved key: the models it offers become the choices, or the page says why not. */
   testAiProvider: (orgId: string) => Promise<void>;
-  saveAiChoices: (orgId: string, choices: AiChoices, ifVersion: number) => Promise<void>;
+  saveAiChoices: (orgId: string, provider: AiProvider['provider'], choices: AiChoices, ifVersion: number) => Promise<void>;
   /** Opens or closes the key's removal confirmation, as `askToRemoveAlertChannel` does. */
   askToRemoveAiKey: (orgId: string, open: boolean) => void;
   removeAiKey: (orgId: string) => Promise<void>;
@@ -350,12 +371,18 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         'Sending it again',
       )),
 
-    saveAiKey: (orgId, apiKey, ifVersion) =>
+    saveAiKey: (orgId, { provider, apiKey, baseUrl, acceptsImages, jsonSchemaOutput }, ifVersion) =>
       run(
         ai(orgId),
         'key',
-        () => callTool('save_ai_provider', { provider: 'anthropic', apiKey: apiKey.trim(), ifVersion }),
-        'Key saved. Test it to choose the models.',
+        () =>
+          callTool('save_ai_provider', {
+            provider,
+            apiKey: apiKey.trim() || undefined,
+            ...(provider === 'openai-compatible' && { baseUrl: baseUrl.trim(), acceptsImages, jsonSchemaOutput }),
+            ifVersion,
+          }),
+        apiKey.trim() ? 'Key saved. Test it to choose the models.' : 'Saved',
       ),
     testAiProvider: async (orgId) =>
       void (await run(
@@ -366,19 +393,19 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
           if (!result.ok) {
             // A refused key lost its verified mark: the page reads the provider again before it says why.
             if (onScreen(router, ai(orgId))) await router.invalidate({ sync: true });
-            throw new Error(AI_TEST_PROBLEMS[result.problem ?? 'unreachable']);
+            throw new Error(aiTestProblem(result.problem ?? 'unreachable', result.provider.provider));
           }
           patch((s) => ({ ...s, aiModels: { orgId, models: result.models } }));
         },
         'Connected',
       )),
-    saveAiChoices: async (orgId, { fastModel, capableModel, dailyTurnCeiling }, ifVersion) =>
+    saveAiChoices: async (orgId, provider, { fastModel, capableModel, dailyTurnCeiling }, ifVersion) =>
       void (await run(
         ai(orgId),
         'choices',
         () =>
           callTool('save_ai_provider', {
-            provider: 'anthropic',
+            provider,
             fastModel: fastModel || null,
             capableModel: capableModel || null,
             dailyTurnCeiling: dailyTurnCeiling.trim() ? Number(dailyTurnCeiling) : null,

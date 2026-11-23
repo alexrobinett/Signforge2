@@ -7,7 +7,7 @@
  * ticked, and the selection added to a group or removed from one.
  */
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -222,8 +222,11 @@ function ScreensPage() {
 }
 
 /** The latest publish and how its rollout stands (board Screens A), linking to its reasons. */
+const app = getRouteApi('/_app');
+
 function LatestPublish({ orgId, now }: { orgId: string; now: number }) {
   const { data } = useQuery(publishQuery(orgId, null));
+  const me = app.useLoaderData().user.id;
   const publish = data?.publish;
   if (!publish || !data.screens.length) return null;
   const at = new Date(publish.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -233,7 +236,7 @@ function LatestPublish({ orgId, now }: { orgId: string; now: number }) {
         <p className="text-[15px]">
           <strong className="font-semibold">{publishTitle(publish)}</strong>{' '}
           <span className="text-muted-foreground">
-            · {publish.restoresId ? 'rolled back' : 'published'} {at} by {byWord(publish)}
+            · {publish.restoresId ? 'rolled back' : 'published'} {at} by {byWord(publish, me)}
           </span>
         </p>
         <Link to="/publishes" className="flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline sm:min-h-0 sm:py-1.5">

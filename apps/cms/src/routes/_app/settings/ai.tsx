@@ -1,8 +1,9 @@
 /**
- * Settings, AI & agents (canvas board Settings-AI, #261): the model the org's built-in agent uses.
- * With no key of its own the org uses SignForge's demo model; an owner saves, tests and removes an
- * Anthropic key, chooses the fast and capable models from the provider's own list, and sets a daily
- * ceiling of turns. Everyone else reads it, never the key (docs/proposals/cms-agent.md, Keys).
+ * Settings, AI & agents (canvas board Settings-AI, #261, #262): the model the org's built-in agent
+ * uses. With no key of its own the org uses SignForge's demo model; an owner saves, tests and removes
+ * a key for Anthropic or an OpenAI-compatible endpoint (its https address, and whether it takes images
+ * and returns JSON-schema output), chooses the fast and capable models from the provider's own list,
+ * and sets a daily ceiling of turns. Everyone else reads it, never the key (docs/proposals/cms-agent.md).
  */
 import { createFileRoute } from '@tanstack/react-router';
 import { KeyRoundIcon, LoaderCircleIcon, PlugZapIcon } from 'lucide-react';
@@ -63,7 +64,19 @@ function Provider({ provider, savedBy, canEdit }: { provider: AiProvider; savedB
   return (
     <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-[10rem_minmax(0,1fr)]">
       <dt className="text-muted-foreground">Provider</dt>
-      <dd className="font-medium">Anthropic</dd>
+      <dd>
+        <span className="font-medium">{provider.provider === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible endpoint'}</span>
+        {provider.baseUrl && <span className="block font-mono text-xs break-all text-muted-foreground">{provider.baseUrl}</span>}
+      </dd>
+      <dt className="text-muted-foreground">Supports</dt>
+      <dd>
+        <span>
+          Images: {provider.supports.images ? 'yes' : 'no'} · JSON-schema output: {provider.supports.jsonSchema ? 'yes' : 'no'}
+        </span>
+        {!(provider.supports.images && provider.supports.jsonSchema) && (
+          <span className="block text-muted-foreground">Fill from a flyer, photo or link needs both, so it does not run with this provider.</span>
+        )}
+      </dd>
       <dt className="text-muted-foreground">API key</dt>
       <dd>
         <span className="font-mono" aria-hidden>
@@ -101,7 +114,11 @@ function TestButton() {
   );
 }
 
-/** Save a key, or replace or remove the saved one. The field clears once saved: the key is never shown again. */
+/**
+ * Choose the provider and save its key, or replace or remove the saved one. The key field clears once
+ * saved: the key is never shown again. The endpoint's fields show only while it is chosen, by CSS on
+ * the radio, so the form keeps no state of its own; left empty, the saved key is kept.
+ */
 function KeyForm({ provider }: { provider: AiProvider | null }) {
   const orgId = useOrgId();
   const id = useId();
@@ -109,23 +126,78 @@ function KeyForm({ provider }: { provider: AiProvider | null }) {
   const running = useRunning(pageOf(orgId));
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const form = new FormData(e.currentTarget);
     const field = e.currentTarget.elements.namedItem('apiKey');
-    const key = String(new FormData(e.currentTarget).get('apiKey') ?? '');
-    void save(orgId, key, provider?.version).then((saved) => {
+    const key = String(form.get('apiKey') ?? '');
+    const chosen: AiProvider['provider'] = form.get('provider') === 'openai-compatible' ? 'openai-compatible' : 'anthropic';
+    const fields = {
+      provider: chosen,
+      apiKey: key,
+      baseUrl: String(form.get('baseUrl') ?? ''),
+      acceptsImages: form.get('acceptsImages') === 'on',
+      jsonSchemaOutput: form.get('jsonSchemaOutput') === 'on',
+    };
+    void save(orgId, fields, provider?.version).then((saved) => {
       if (saved && field instanceof HTMLInputElement && field.value === key) field.value = '';
     });
   };
+  const current = provider?.provider ?? 'anthropic';
   return (
     <EditorFields>
-      <form method="post" onSubmit={submit} className="space-y-2" noValidate>
-        <Label htmlFor={id}>{provider ? 'Replace the Anthropic API key' : 'Anthropic API key'}</Label>
-        <Input id={id} name="apiKey" type="password" autoComplete="off" spellCheck={false} placeholder="sk-ant-…" className="font-mono" required />
-        <p className="text-xs text-muted-foreground">Kept encrypted, and never shown again. Make one in the Anthropic Console.</p>
+      {/* Read afresh after each save: the radio and the endpoint's fields start from what is saved. */}
+      <form key={provider?.version ?? 0} method="post" onSubmit={submit} className="group space-y-4" noValidate>
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">Provider</legend>
+          <div className="flex flex-wrap gap-2">
+            {(['anthropic', 'openai-compatible'] as const).map((p) => (
+              <label key={p} className="flex h-10 items-center gap-2 rounded-lg border px-3 text-sm has-checked:border-primary has-checked:bg-accent">
+                <input type="radio" name="provider" value={p} defaultChecked={current === p} className="accent-primary" />
+                {p === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible endpoint'}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            OpenAI-compatible covers OpenAI, Gemini’s compatible endpoint and others. Its address must be public https: no private, loopback or metadata
+            addresses.
+          </p>
+        </fieldset>
+        <div className="hidden space-y-3 group-has-[input[value=openai-compatible]:checked]:block">
+          <div className="space-y-1.5">
+            <Label htmlFor={`${id}-base`}>Endpoint address</Label>
+            <Input
+              id={`${id}-base`}
+              name="baseUrl"
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://api.openai.com/v1"
+              defaultValue={provider?.baseUrl ?? ''}
+              className="font-mono"
+            />
+            <p className="text-xs text-muted-foreground">Its base address: SignForge lists its models at this address followed by /models.</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="acceptsImages" defaultChecked={provider?.provider === 'openai-compatible' && provider.supports.images} />
+            Its models take images
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="jsonSchemaOutput" defaultChecked={provider?.provider === 'openai-compatible' && provider.supports.jsonSchema} />
+            It returns output to a JSON schema (response_format json_schema)
+          </label>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={id}>{provider ? 'Replace the API key' : 'API key'}</Label>
+          <Input id={id} name="apiKey" type="password" autoComplete="off" spellCheck={false} placeholder="sk-…" className="font-mono" />
+          <p className="text-xs text-muted-foreground">
+            Kept encrypted, and never shown again. Leave it empty to keep the saved key; a new provider or a new address needs the key again.
+          </p>
+        </div>
         <ActionError at="key" />
         <div className="flex flex-wrap gap-2">
           <Button type="submit" aria-disabled={running !== undefined || undefined}>
             {running === 'key' ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <KeyRoundIcon aria-hidden />}{' '}
-            {provider ? 'Replace key' : 'Save key'}
+            {provider ? 'Save provider' : 'Save key'}
           </Button>
           {provider && <RemoveKey />}
         </div>
@@ -195,13 +267,22 @@ function Choices({ provider, canEdit }: { provider: AiProvider; canEdit: boolean
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     const value = (name: string) => String(form.get(name) ?? '');
-    void save(orgId, { fastModel: value('fastModel'), capableModel: value('capableModel'), dailyTurnCeiling: value('dailyTurnCeiling') }, provider.version);
+    void save(
+      orgId,
+      provider.provider,
+      { fastModel: value('fastModel'), capableModel: value('capableModel'), dailyTurnCeiling: value('dailyTurnCeiling') },
+      provider.version,
+    );
   };
   return (
     <SettingsSection
       id={`${id}-models`}
       title="Models and ceiling"
-      description={listed ? 'The models your key may use, as Anthropic lists them.' : 'Test the connection to list the models your key may use.'}
+      description={
+        listed
+          ? `The models your key may use, as ${provider.provider === 'anthropic' ? 'Anthropic' : 'the endpoint'} lists them.`
+          : 'Test the connection to list the models your key may use.'
+      }
     >
       <EditorFields>
         {/* A new list or a new save shows afresh: the selects read what the page has now. */}

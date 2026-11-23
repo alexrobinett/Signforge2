@@ -5,6 +5,7 @@
  * each with its own actions (`targetActions`).
  */
 import type { GroupView, ScreenView } from './screen-types';
+import { reachable } from './screen-status';
 import { SECTIONS, type Section } from './sections';
 import { findTargets } from './targets';
 
@@ -25,6 +26,8 @@ export interface ToolListing {
 export type CommandEntry =
   | { kind: 'go'; id: string; label: string; to: Section['to']; keywords: string[] }
   | { kind: 'tool'; id: string; label: string; tool: ToolListing; keywords: string[] }
+  /** `start_takeover` for a member who may publish: the takeover dialog, which sends it at once, as the Schedule page's does (#253). */
+  | { kind: 'takeover'; id: string; label: string; tool: ToolListing; keywords: string[] }
   | { kind: 'org'; id: string; label: string; action: 'switch' | 'create'; keywords: string[] };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -80,13 +83,25 @@ const labelOf = (description: string) =>
     .replace(/, ordered by id|,? a page at a time|\.$/g, '')
     .trim();
 
-/** Navigation first, in sidebar order, then the tools in registry order. */
+/**
+ * Navigation first, in sidebar order, then the tools in registry order. A takeover is sent at once
+ * wherever the CMS offers it, so `start_takeover`, which only drafts one, opens the takeover dialog
+ * for a member who may publish; one who may not can only draft it, as its own words say. Restart is
+ * left out: a found screen offers it only once it is in touch (`targetActions`), and the tool would
+ * say Sent to one that is not (#253).
+ */
 export function commandEntries(tools: ToolListing[]): CommandEntry[] {
+  const publishes = tools.some((t) => t.name === 'publish');
   return [
     ...SECTIONS.map((s): CommandEntry => ({ kind: 'go', id: `go:${s.to}`, label: `Go to ${s.label}`, to: s.to, keywords: [s.label] })),
-    ...tools.map(
-      (tool): CommandEntry => ({ kind: 'tool', id: `tool:${tool.name}`, label: labelOf(tool.description), tool, keywords: [tool.name, tool.description] }),
-    ),
+    ...tools
+      .filter((t) => t.name !== 'restart_screen')
+      .map((tool): CommandEntry => {
+        const entry = { id: `tool:${tool.name}`, tool, keywords: [tool.name, tool.description] };
+        return tool.name === 'start_takeover' && publishes
+          ? { kind: 'takeover', label: 'Take over screens now…', ...entry }
+          : { kind: 'tool', label: labelOf(tool.description), ...entry };
+      }),
   ];
 }
 
@@ -207,7 +222,7 @@ export type TargetAction =
  * A screen's or a group's actions, those the member's role allows (the tools the shell listed). A
  * screen gets commands only once `checked`, its record read since the menu opened: a cached one
  * may be revoked since. Playing a playlist on it or taking it over opens the schedule's dialogs
- * (#181). A revoked screen can only be opened.
+ * (#181). A revoked screen can only be opened, and one that cannot be reached is not restarted (#253).
  */
 export function targetActions(
   target: { kind: 'screen'; screen: ScreenView } | { kind: 'group'; group: GroupView },
@@ -232,7 +247,7 @@ export function targetActions(
       screenName,
       done: 'Sent. The screen shows its name for 10 seconds, if it is connected.',
     });
-  if (may('restart_screen'))
+  if (may('restart_screen') && reachable(target.screen))
     actions.push({
       kind: 'tool',
       label: 'Restart player',
