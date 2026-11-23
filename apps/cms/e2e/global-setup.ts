@@ -1,9 +1,8 @@
 /**
- * Start the API and the CMS as a developer would (two processes, joined by the dev registry),
+ * Start the API (`wrangler dev`) and the built CMS (`vite preview`), joined by the dev registry,
  * but on their own ports, with their own local database and their own registry, so a dev server
  * already running on this machine is neither used nor disturbed.
  */
-import { chromium } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -97,6 +96,10 @@ export default async function globalSetup() {
   // Built for this host: no CMS_ORIGIN.
   const player = spawnSync('pnpm', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' }, encoding: 'utf8' });
   if (player.status !== 0) throw new Error(`player build failed:\n${player.stdout}\n${player.stderr}`);
+  // The CMS as it deploys, served by `vite preview` (the built Worker in workerd): `vite dev`
+  // compiles each module on its first request, so the first visit to each page took seconds.
+  const cms = spawnSync('pnpm', ['exec', 'vite', 'build'], { cwd: cmsDir, env, encoding: 'utf8' });
+  if (cms.status !== 0) throw new Error(`CMS build failed:\n${cms.stdout}\n${cms.stderr}`);
 
   const geocoding = await geocodingStub();
   const feeds = await feedServer();
@@ -134,7 +137,7 @@ export default async function globalSetup() {
         detached: true,
       },
     ),
-    spawn('pnpm', ['exec', 'vite', 'dev', '--port', String(CMS_PORT)], {
+    spawn('pnpm', ['exec', 'vite', 'preview', '--port', String(CMS_PORT), '--strictPort'], {
       cwd: cmsDir,
       env,
       stdio: ['ignore', openSync(`${RUN_DIR}cms.log`, 'a'), openSync(`${RUN_DIR}cms.log`, 'a')],
@@ -164,19 +167,6 @@ export default async function globalSetup() {
   await waitFor(`${CMS_URL}/sign-in`);
   // The CMS reaches the API through the registry; wait until the binding answers.
   await waitFor(`${CMS_URL}/api/sign-in-options`);
-  // Vite optimises dependencies on the first browser load and may reload the page; do that now,
-  // not in the middle of a test.
-  const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage();
-    await page.goto(`${CMS_URL}/sign-in`);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1_000);
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-  } finally {
-    await browser.close();
-  }
 
   return async () => {
     geocoding.close();

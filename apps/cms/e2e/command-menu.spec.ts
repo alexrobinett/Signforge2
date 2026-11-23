@@ -21,11 +21,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
   const toast = (text: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: text });
   /** The screens list's read (`getScreens`), which a test holds or fails by its route. */
-  const listRead = (url: URL) =>
-    url.pathname.startsWith('/_serverFn/') &&
-    Buffer.from(url.pathname.split('/')[2] ?? '', 'base64url')
-      .toString()
-      .includes('getScreens_');
+  const listRead = (url: URL) => url.pathname.startsWith('/_serverFn/getScreens_');
   // An opening joins a list read already on its way (begun leaving Screens, say), so a test that routes the next read
   // first waits for those to finish, by their own events.
   const reading = new Set<Request>();

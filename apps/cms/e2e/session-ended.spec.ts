@@ -100,10 +100,9 @@ test('a session that ends on Spots or in the spot editor goes to sign-in at once
 
   // Spots left open until its reads are stale, then the tab is shown again (Query refetches on focus).
   // As on CI (run 44575937095), assets is slower and sign-in slow to check the session: reads
-  // ending once the address is sign-in's must not nest sign-in. A function id names its export.
+  // ending once the address is sign-in's must not nest sign-in. A function id is its name (vite.config.ts).
   await page.route('**/_serverFn/**', async (route) => {
-    const id = new URL(route.request().url()).pathname.split('/_serverFn/')[1]!;
-    const fn = Buffer.from(id, 'base64url').toString();
+    const fn = new URL(route.request().url()).pathname;
     const fromSignIn = new URL(route.request().headers().referer ?? CMS_URL).pathname === '/sign-in';
     if (fn.includes('getAssets')) await new Promise((r) => setTimeout(r, 300));
     if (fn.includes('getShell') && fromSignIn) await new Promise((r) => setTimeout(r, 2_500));
