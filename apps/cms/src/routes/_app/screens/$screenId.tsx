@@ -31,7 +31,7 @@ import { Label } from '~/components/ui/label';
 import { NativeSelect } from '~/components/ui/select';
 import { useCanManage, useCanPublish, useNow, useOrgId, useRole } from '~/lib/live';
 import { eventText } from '~/lib/audit';
-import { ago, describeScreen, localClock } from '~/lib/screen-status';
+import { ago, describeScreen, localClock, reachable } from '~/lib/screen-status';
 import type { PlaylistView } from '~/lib/playlists';
 import { describeWhen, howItReaches, runsAfter, stateWord, timeWord, type ScheduleEntryView } from '~/lib/schedule';
 import { isOrientation, type GroupView, type ScreenView } from '~/lib/screen-types';
@@ -100,6 +100,7 @@ function ScreenPage() {
   const d = describeScreen(screen, now);
   const inGroups = groups.filter((g) => groupIds.includes(g.id)).toSorted(byName);
   const revoked = screen.status === 'revoked';
+  const inTouch = reachable(screen);
   const run = (label: string, tool: ScreenAction['tool'], input: Record<string, unknown>, done: string) =>
     void actOnScreen(screen.id, { label, tool, input, done });
 
@@ -149,9 +150,11 @@ function ScreenPage() {
                 >
                   {spinner('identify', <ScanEyeIcon aria-hidden />)} Identify (10 s)
                 </Button>
+                {/* A restart goes only to a screen in touch (#253): off, with the reason by the actions. */}
                 <Button
                   variant="outline"
-                  disabled={!!busy}
+                  disabled={!!busy || !inTouch}
+                  aria-describedby={inTouch ? undefined : 'restart-off'}
                   onClick={() => run('restart', 'restart_screen', {}, 'Sent. The player restarts and plays from its cache at once.')}
                 >
                   {spinner('restart', <RotateCwIcon aria-hidden />)} Restart player
@@ -202,6 +205,11 @@ function ScreenPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </EditorFields>
+              {!inTouch && (
+                <p id="restart-off" className="basis-full text-[13px] text-muted-foreground sm:text-right">
+                  Restart is off: the screen cannot be reached now, and a restart only reaches a screen in touch.
+                </p>
+              )}
             </div>
           )}
         </div>

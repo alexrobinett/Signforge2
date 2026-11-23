@@ -135,7 +135,9 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await screenshot(page, '32-command-menu-screen');
   await page.keyboard.press('Enter');
   await expect(actionsSearch).toBeFocused();
-  await expect(actions).toHaveText(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)', 'Restart player']);
+  // Paired and not heard from yet: no restart could reach it, so it offers none, and says why (#253).
+  await expect(actions).toHaveText(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)']);
+  await expect(menu.getByRole('status')).toHaveText('Restart is off: Deli counter cannot be reached now, and a restart only reaches a screen in touch.');
   await axe(page);
   await screenshot(page, '33-command-menu-screen-actions');
   await page.keyboard.type('identify');

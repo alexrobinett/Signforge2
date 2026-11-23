@@ -365,7 +365,11 @@ test("a screen's actions are disabled in the server's HTML, until the page has h
   // Rendered by the server, they are enabled once the page has hydrated.
   await page.goto(path);
   await hydrated(page);
-  await expect(page.getByRole('button', { name: 'Restart player' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Identify (10 s)' })).toBeEnabled();
+  // But for Restart: a screen not heard from yet cannot be reached, so it stays off, and says why (#253).
+  const restart = page.getByRole('button', { name: 'Restart player' });
+  await expect(restart).toBeDisabled();
+  await expect(restart).toHaveAccessibleDescription('Restart is off: the screen cannot be reached now, and a restart only reaches a screen in touch.');
 });
 
 test("the Screens page's pairing form, and its search and filters, are disabled in the server's HTML, until the page has hydrated (#140)", async ({

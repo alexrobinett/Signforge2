@@ -5,6 +5,7 @@
  * each with its own actions (`targetActions`).
  */
 import type { GroupView, ScreenView } from './screen-types';
+import { reachable } from './screen-status';
 import { SECTIONS, type Section } from './sections';
 import { findTargets } from './targets';
 
@@ -217,7 +218,7 @@ export type TargetAction =
  * A screen's or a group's actions, those the member's role allows (the tools the shell listed). A
  * screen gets commands only once `checked`, its record read since the menu opened: a cached one
  * may be revoked since. Playing a playlist on it or taking it over opens the schedule's dialogs
- * (#181). A revoked screen can only be opened.
+ * (#181). A revoked screen can only be opened, and one that cannot be reached is not restarted (#253).
  */
 export function targetActions(
   target: { kind: 'screen'; screen: ScreenView } | { kind: 'group'; group: GroupView },
@@ -242,7 +243,7 @@ export function targetActions(
       screenName,
       done: 'Sent. The screen shows its name for 10 seconds, if it is connected.',
     });
-  if (may('restart_screen'))
+  if (may('restart_screen') && reachable(target.screen))
     actions.push({
       kind: 'tool',
       label: 'Restart player',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeScreen, summarise, type ScreenLike } from '../src/lib/screen-status';
+import { describeScreen, reachable, summarise, type ScreenLike } from '../src/lib/screen-status';
 
 const NOW = Date.parse('2026-11-18T15:00:00Z'); // Wed 10:00 in New York
 
@@ -67,5 +67,17 @@ describe('summarise', () => {
       '6 screens · 4 playing now · 1 asleep on purpose · 1 unreachable, still playing · 1 needs you',
     );
     expect(summarise([k('online')])).toBe('1 screen · 1 playing now');
+  });
+});
+
+describe('reachable (#253)', () => {
+  const state = (kind: ScreenLike['state']['kind'], reason: ScreenLike['state']['reason'] = null) => ({ state: { kind, reason } });
+  it('is false for a screen that is unreachable, not heard from yet, or unreachable and behind, so Restart is off', () => {
+    expect(reachable(state('unreachable'))).toBe(false);
+    expect(reachable(state('needs_you', 'behind'))).toBe(false);
+  });
+  it('is true for one in touch, asleep included, and for one that needs you for another reason', () => {
+    for (const s of [state('online'), state('updating'), state('asleep'), state('needs_you', 'fallback'), state('needs_you', 'nothing_published')])
+      expect(reachable(s)).toBe(true);
   });
 });

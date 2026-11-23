@@ -6,6 +6,7 @@ import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useCallback } from 'react';
 import { OrgAvatar } from '~/components/org-switcher';
 import { KIND_WORD, StatusGlyph, toneOf } from '~/components/screens/status';
+import { reachable } from '~/lib/screen-status';
 import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
 import { Input } from '~/components/ui/input';
@@ -124,7 +125,9 @@ function TargetView({
               ? `Checking ${name} before Identify and Restart…`
               : waiting && failed
                 ? `Couldn’t check ${name}, so Identify and Restart are off. Close ⌘K and open it again to retry.`
-                : ''}
+                : screen && checked && screen.status !== 'revoked' && !reachable(screen) && tools.some((t) => t.name === 'restart_screen')
+                  ? `Restart is off: ${name} cannot be reached now, and a restart only reaches a screen in touch.`
+                  : ''}
         </p>
       </Command>
     </>

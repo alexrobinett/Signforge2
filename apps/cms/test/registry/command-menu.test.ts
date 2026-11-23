@@ -131,7 +131,7 @@ describe('a result toast', () => {
 });
 
 describe("a found screen's and group's actions (#180)", () => {
-  const screen = { id: 'scr_1', name: '0157 Drive-thru L', status: 'active' } as ScreenView;
+  const screen = { id: 'scr_1', name: '0157 Drive-thru L', status: 'active', state: { kind: 'online', reason: null } } as ScreenView;
   const labels = (role: Role, s: ScreenView = screen, checked = true) =>
     targetActions({ kind: 'screen', screen: s }, listed(role), checked).map((a) => a.label);
 
@@ -140,6 +140,11 @@ describe("a found screen's and group's actions (#180)", () => {
     expect(targetActions({ kind: 'screen', screen }, listed('owner'), true)).toContainEqual(
       expect.objectContaining({ kind: 'tool', tool: 'identify_screen', screenId: 'scr_1', screenName: '0157 Drive-thru L' }),
     );
+  });
+
+  it('offers no Restart for a screen that cannot be reached: the restart would go nowhere (#253)', () => {
+    const away = { ...screen, state: { ...screen.state, kind: 'unreachable' } } as ScreenView;
+    expect(labels('editor', away)).toEqual(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)']);
   });
 
   it('offers no takeover to an editor where only owners publish: it would start, and its publish be refused', () => {
