@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { sha256Hex } from './dispatch';
 import { id } from './fields';
 import { page, pageInput } from './paging';
-import { type Connectors, defineTool, notFound, ToolError } from './tool';
+import { type Connectors, defineTool, isAgent, notFound, ToolError } from './tool';
 import { type connectionOutput, outputs } from './outputs';
 
 /** How long an authorization waits for its callback. */
@@ -87,8 +87,9 @@ const startConnection = defineTool({
   target: (input, output) =>
     input.connectionId ? { kind: 'connection', id: input.connectionId } : { kind: 'connection_authorization', id: output.authorizationId },
   handler: async ({ org, actor, input, write, services: { connectors } }) => {
-    // The provider sends a browser back, and the callback finishes as its session's user: an agent's authorization could never be finished.
-    if (actor.kind !== 'user')
+    // The provider sends a browser back, and the callback finishes as its session's user: an agent's authorization could never be
+    // finished. The in-CMS agent acts as that user, but a connection is a person's choice too (docs/proposals/cms-agent.md).
+    if (actor.kind !== 'user' || isAgent(actor))
       throw new ToolError(
         'forbidden',
         'Only a person signed in to the CMS can connect an account: the provider sends their browser back to SignForge, which finishes it as them. Ask them to connect it on the Integrations page',

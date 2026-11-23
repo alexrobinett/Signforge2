@@ -1299,7 +1299,17 @@ export function scoped(d1: D1Database, orgId: string) {
          * unless it is still that version, checked now and again in the batch, as `stage.update` is.
          */
         put: (values: AiProviderValues, ifVersion?: number): Promise<Staged<AiProvider>> =>
-          upsertVersioned(ai, { id: 'AI provider', key: { orgId }, absent: 0, fresh: (at) => ({ createdAt: at }) }, values, ifVersion),
+          upsertVersioned(
+            ai,
+            {
+              id: 'AI provider',
+              key: { orgId },
+              absent: 0,
+              fresh: (at) => ({ verifiedAt: null, fastModel: null, capableModel: null, dailyTurnCeiling: null, createdAt: at }),
+            },
+            values,
+            ifVersion,
+          ),
         /** Delete the row, and the sealed key with it. */
         remove: (): Staged => staged(undefined, db.delete(ai).where(eq(ai.orgId, orgId))),
       },
