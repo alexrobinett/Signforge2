@@ -1,7 +1,7 @@
 // The dispatcher: role and scope checks, input validation, and the audit log.
 import { seedOrg, type SeededOrg, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
   defineTool,
@@ -589,6 +589,58 @@ describe("an agent grant's limits", () => {
     const [entry] = await audits();
     expect(entry).toMatchObject({ actorId: 'grant-limits', action: 'rate_limited' });
     expect(JSON.parse(entry!.detailJson!)).toMatchObject({ tool: 'drop_tables' });
+  });
+});
+
+describe("the warning when a refusal's audit row is not settled", () => {
+  const agent: Caller['actor'] = { kind: 'agent', id: 'grant-warned', clientId: 'agent-app' };
+  const over = (window: AgentLimitWindow, audited: AgentLimiter['audited']): AgentLimiter => ({
+    take: async () => ({ ok: false, limit: 'writes_per_minute', retryAfterSeconds: 7, audit: window }),
+    audited,
+  });
+  const warnings = () => vi.spyOn(console, 'warn').mockImplementation(() => {});
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('says the refusal was not recorded when its row could not be written', async () => {
+    const warn = warnings();
+    await env.DB.exec("CREATE TRIGGER audit_down BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'audit down'); END");
+    try {
+      const r = await dispatch(
+        registry,
+        'rename_group',
+        { groupId: o.group, name: 'Warned' },
+        {
+          ...caller('editor', undefined, agent),
+          agentLimiter: over({ window: 'minute', start: 5 * 60_000 }, async () => {}),
+        },
+      );
+      expect(r).toMatchObject({ ok: false, error: 'rate_limited' });
+    } finally {
+      await env.DB.exec('DROP TRIGGER audit_down');
+    }
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toBe('[tools] could not record that agent grant grant-warned was refused');
+  });
+
+  it('says only that the window was not marked when the row was written', async () => {
+    const warn = warnings();
+    const r = await dispatch(
+      registry,
+      'rename_group',
+      { groupId: o.group, name: 'Warned' },
+      {
+        ...caller('editor', undefined, agent),
+        agentLimiter: over({ window: 'minute', start: 6 * 60_000 }, async () => Promise.reject(new Error('object unreachable'))),
+      },
+    );
+    expect(r).toMatchObject({ ok: false, error: 'rate_limited' });
+    expect((await testScope(env.DB, o.orgId).auditLog.list({ limit: 1000 })).filter((e) => e.actorId === 'grant-warned')).toHaveLength(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toBe(
+      "[tools] recorded that agent grant grant-warned was refused, but could not tell its limiter: the window's next refusal tries again and writes nothing",
+    );
   });
 });
 

@@ -25,6 +25,23 @@ describe('a url field in the spot editor', () => {
   });
 });
 
+describe('a photo with its toggle in the spot editor (#252)', () => {
+  const fields: Record<string, FieldDef> = {
+    photo: { type: 'image', label: 'Photo' },
+    showPhoto: { type: 'boolean', label: 'Show the photo', default: true },
+  };
+  it('asks for a photo while it is shown, and not once it is switched off, as a publish checks it', () => {
+    expect(fieldProblems(fields, { data: {}, assets: {} })).toEqual(new Map([['photo', ['image field "photo" has no asset']]]));
+    expect(fieldProblems(fields, { data: { showPhoto: false }, assets: {} })).toEqual(new Map());
+    expect(fieldProblems(fields, { data: { showPhoto: true }, assets: { photo: 'ast_1' } })).toEqual(new Map());
+  });
+  it("puts a bad toggle's message by the toggle only", () => {
+    expect(fieldProblems(fields, { data: { showPhoto: 'no' }, assets: { photo: 'ast_1' } })).toEqual(
+      new Map([['showPhoto', ['field "showPhoto" must be true or false']]]),
+    );
+  });
+});
+
 describe('date and datetime fields in the spot editor', () => {
   const fields: Record<string, FieldDef> = {
     opens: { type: 'date', label: 'Opens', min: '2026-12-01', max: '2026-12-31' },

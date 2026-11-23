@@ -1,7 +1,8 @@
 #!/bin/sh
-# The cli's and the API's tests build every template, and the runtime check's tests play every
-# template, so each lists every templates/* package as a devDependency: else a change to that
-# template skips them (docs/ci.md). Each template's own browser tests are its package's `test`
+# The cli's and the API's tests build every template, the runtime check's tests play every
+# template, and the CMS's tests hold the New spot dialog's thumbnails to each template's version,
+# so each lists every templates/* package as a devDependency: else a change to that template skips
+# them (docs/ci.md). Each template's own browser tests are its package's `test`
 # task, on the shared harness, so a change to one template reruns only its own.
 # Usage: sh scripts/check-template-deps.sh
 set -eu
@@ -10,7 +11,7 @@ const { readdirSync, readFileSync } = require("node:fs");
 const read = (p) => JSON.parse(readFileSync(p, "utf8"));
 const templates = readdirSync("templates").map((d) => ({ dir: `templates/${d}`, pkg: read(`templates/${d}/package.json`) }));
 let ok = true;
-for (const pkg of ["apps/api", "packages/cli", "apps/template-check"]) {
+for (const pkg of ["apps/api", "packages/cli", "apps/template-check", "apps/cms"]) {
   const deps = read(`${pkg}/package.json`).devDependencies ?? {};
   const missing = templates.filter((t) => !(t.pkg.name in deps)).map((t) => t.pkg.name);
   if (missing.length) {

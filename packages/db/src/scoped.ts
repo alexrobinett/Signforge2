@@ -2062,12 +2062,15 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * An audit row written at most once for `key` in this org (an agent grant's refusals in one
        * window, which several calls may race to record): another call with the key writes nothing.
-       * Its id is made from the org and the key, so no other org's row can stand in for it.
+       * Its id is a hash of the org and the key, so no other org's row can stand in for it, and of
+       * fixed length (49 characters) under the contract's `ID_PATTERN` however long the key is.
        */
       appendOnce: async (key: string, entry: Omit<NewRow<typeof s.auditLog>, 'id'>): Promise<void> => {
+        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${orgId}\n${key}`)));
+        const hash = [...digest.subarray(0, 20)].map((b) => b.toString(16).padStart(2, '0')).join('');
         await db
           .insert(s.auditLog)
-          .values({ ...strip(entry), id: `aud_once_${orgId}_${key}`, orgId })
+          .values({ ...strip(entry), id: `aud_once_${hash}`, orgId })
           .onConflictDoNothing()
           .run();
       },

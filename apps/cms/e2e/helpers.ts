@@ -332,7 +332,7 @@ export async function newSpot(page: Page, template: string, name: string) {
   await page.goto('/spots');
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
-  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: template });
+  await page.getByRole('radio', { name: template, exact: true }).check();
   await page.getByLabel('Name').fill(name);
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
