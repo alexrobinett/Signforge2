@@ -184,7 +184,7 @@ export const createSpotEditorSlice: SliceCreator<SpotEditorSlice> = (set, get, {
     const { minMs, maxMs } = v.manifest.duration;
     if (d.durationMs < minMs || d.durationMs > maxMs) return true;
     const checked = draftCheck(v.manifest.fields, d);
-    return fieldProblems(checked.fields, { data: checked.data, assets: d.assets }).size > 0;
+    return fieldProblems(checked.fields, { data: checked.data, assets: d.assets, bindings: d.bindings }).size > 0;
   };
 
   /** The spot target's draft, compiled; undefined while what it needs is not loaded. */
