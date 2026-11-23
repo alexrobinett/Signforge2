@@ -83,7 +83,7 @@ Without the cache on disk, the warm list is empty, and each module is fetched on
 
 ## Measured
 
-On GitHub's `ubuntu-24.04` runner, 2026-11-22. For a private repository it has two cores, so Vitest runs one test file at a time unless a config asks for more. Times are the job's, from its start to its end; Turbo is the `turbo run` step.
+On GitHub's `ubuntu-24.04` runner, 2026-11-22. For a private repository it has two cores, so Vitest runs one test file at a time unless a config asks for more, and the `turbo run` step passes `--concurrency=100%`, one task per core: with Turbo's default of 10, the 13 template test tasks each start a Chromium at once and browser tests miss their waits. Times are the job's, from its start to its end; Turbo is the `turbo run` step.
 
 The week before this workflow (2026-11-15 to 22, from the Actions API): 333 pull request runs, 2,602 minutes (2,760 billed, each job rounded up to a minute), and 105 `master` runs, 1,230 minutes (1,284 billed). Setup and the repo-wide checks take about 45 s of each run (checkout 2–6 s, pnpm 8–11 s, Node 4–7 s, store 6–9 s, install 3–6 s, the checks about 10 s). The rest is Turbo's tasks.
 
