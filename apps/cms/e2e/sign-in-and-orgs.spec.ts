@@ -152,7 +152,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
 test('a member of one org signs in on it: Overview, with its name and no menu to switch', async ({ page }) => {
   const email = `e2e-one-org-${Date.now()}@example.com`;
   await signInAs(page, email, ADDRESS.oneOrg);
-  await createOrg(page, 'Solo Bakery');
+  await createOrg(page, 'Solo Bakery', ADDRESS.oneOrg);
   await accountMenu(page).click();
   await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
@@ -170,7 +170,7 @@ test('a member of one org signs in on it: Overview, with its name and no menu to
 test('a member of two orgs signs in on the one they last switched to', async ({ page }) => {
   const email = `e2e-last-org-${Date.now()}@example.com`;
   await signInAs(page, email, ADDRESS.lastOrg);
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Market', ADDRESS.lastOrg);
   await createOrgFromAccountMenu(page, 'Southside Deli');
   await orgSwitcher(page).click();
   await page.getByRole('menuitemradio', { name: 'Northside Market' }).click();

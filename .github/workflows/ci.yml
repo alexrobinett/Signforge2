@@ -38,7 +38,7 @@ jobs:
   check:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
-    # A master run with cold caches spends about 16 min on typecheck, test and lint and 20 min on the CMS e2e (runs 44896506918, 44908695033 timed out at 30).
+    # A master run with cold caches spends about 16 min on typecheck, test and lint; the CMS e2e takes about 6 beside them since #283 (it took 20, and runs 44896506918, 44908695033 timed out at 30).
     timeout-minutes: 60
     # Turbo's remote cache (docs/ci.md, "Remote cache"). The token goes out only with TURBO_API, so it
     # never reaches Turbo's default server, Vercel's.

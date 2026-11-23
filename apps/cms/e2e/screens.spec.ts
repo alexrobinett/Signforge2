@@ -55,7 +55,7 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await axe(page);
   await shots(page, '10-sign-in');
   await signInAs(page, `e2e-screens-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Arcade');
+  await createOrg(page, 'Northside Arcade', ADDRESS);
 
   // Empty: one path, pairing, with the code input on the page.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
@@ -201,7 +201,7 @@ test('an edit keeps a change someone else made while the form was open, and refu
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-versions-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Eastside Deli');
+  await createOrg(page, 'Eastside Deli', ADDRESS);
 
   // The page's own session stands in for an agent: what matters is that its changes land in between.
   const tool = async (name: string, input: unknown) => {
@@ -246,7 +246,7 @@ test('a screen that stops syncing turns unreachable on the open Screens page, wi
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-fleet-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Westside Bakery');
+  await createOrg(page, 'Westside Bakery', ADDRESS);
 
   // A screen paired, published to and playing it.
   const pairing = await startPairing(request);
@@ -287,7 +287,7 @@ test('the Screens page says when its poll fails, until a good one, and an expire
   await hydrated(page);
   // Its own address: this spec's other tests use up ADDRESS's sign-in budget.
   await signInAs(page, `e2e-poll-${Date.now()}@example.com`, '192.0.2.15');
-  await createOrg(page, 'Eastside Deli');
+  await createOrg(page, 'Eastside Deli', '192.0.2.15');
   const pairing = await startPairing(request);
   const claimed = await page.request.post('/api/tools/claim_screen', {
     data: { code: pairing.code, name: 'Counter', timezone: 'UTC', orientation: 'landscape' },
@@ -297,10 +297,11 @@ test('the Screens page says when its poll fails, until a good one, and an expire
 
   // The API does not answer the page's polls (every server function, which only the poll calls
   // while the page sits open), from the first: the notice comes, and holds through the next tries.
-  let refused = 0;
+  // Only the status poll's tries are counted: the latest publish's read retries on its own, sooner.
+  let statusRefused = 0;
   const refuse = () =>
     page.route('**/_serverFn/**', (route) => {
-      refused += 1;
+      if (new URL(route.request().url()).pathname.startsWith('/_serverFn/getScreenStatus_')) statusRefused += 1;
       return route.abort('connectionrefused');
     });
   await refuse();
@@ -317,9 +318,9 @@ test('the Screens page says when its poll fails, until a good one, and an expire
       if (!document.body.textContent.includes('Status is not current.')) document.body.dataset.noticeGone = String(++gone);
     }, 100);
   });
-  // Until the next poll (every 15 s) and its retry are refused too.
-  const before = refused;
-  await expect.poll(() => refused, { timeout: 40_000 }).toBeGreaterThanOrEqual(before + 2);
+  // Until the next status poll (every 15 s after the last try) and its retry are refused too.
+  const before = statusRefused;
+  await expect.poll(() => statusRefused, { timeout: 60_000 }).toBeGreaterThanOrEqual(before + 2);
   expect(await page.evaluate(() => document.body.dataset.noticeGone)).toBeUndefined();
   await axe(page);
   await shots(page, '20-screens-status-not-current');
@@ -349,7 +350,7 @@ test('the Screens page says when its poll fails, until a good one, and an expire
 test("a screen's actions are disabled in the server's HTML, until the page has hydrated (#136)", async ({ page, request }) => {
   // The page hydrates after the app (body[data-hydrated]): a click in between went nowhere.
   await signInAs(page, `e2e-screen-server-${Date.now()}@example.com`, '192.0.2.17');
-  await createOrg(page, 'Northside Arcade');
+  await createOrg(page, 'Northside Arcade', '192.0.2.17');
   const { code } = await startPairing(request);
   const { screen } = await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
   const path = `/screens/${screen.id}`;
@@ -368,7 +369,7 @@ test("the Screens page's pairing form, and its search and filters, are disabled 
   // The page hydrates after the app (body[data-hydrated]): a field changed in between was set back
   // by React, and a filter chosen in between went nowhere.
   await signInAs(page, `e2e-screens-server-${Date.now()}@example.com`, '192.0.2.18');
-  await createOrg(page, 'Northside Arcade');
+  await createOrg(page, 'Northside Arcade', '192.0.2.18');
   // No screens yet: the pairing form is on the page.
   const pairing = [...Array.from({ length: 6 }, (_, i) => `Character ${i + 1} of 6`), 'Name it', 'Time zone', 'Orientation', 'Pair'];
   expect(await disabledOnServer(page, '/screens', pairing)).toEqual(Object.fromEntries(pairing.map((n) => [n, [true]])));

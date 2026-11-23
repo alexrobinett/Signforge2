@@ -1,6 +1,7 @@
 // The e2e refuses ports something already holds (`portTaken` in e2e/servers.ts), or its tests talk to
 // that process instead. The CMS is reached at `localhost`, which may resolve to ::1: a server there
-// alone (as `vite preview` binds) must count, as must one that does not speak HTTP (#214's run).
+// alone (as `vite preview` binds) must count, as must a wildcard holder and one that does not speak HTTP
+// (#214's run).
 import { createServer, type Server } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { portTaken } from '../e2e/servers';
@@ -24,6 +25,12 @@ describe('portTaken', () => {
   });
   it('counts a port held on ::1 alone', async () => {
     expect(await portTaken(await hold('::1'))).toBe(true);
+  });
+  it('counts a port held on 0.0.0.0', async () => {
+    expect(await portTaken(await hold('0.0.0.0'))).toBe(true);
+  });
+  it('counts a port held on ::', async () => {
+    expect(await portTaken(await hold('::'))).toBe(true);
   });
   it('leaves a free port free', async () => {
     const port = await hold('127.0.0.1');

@@ -37,7 +37,7 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext({ viewport: { width: 1920, height: 1200 } })).newPage();
   await signInAs(page, `e2e-sources-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Garden');
+  await createOrg(page, 'Northside Garden', ADDRESS);
 });
 
 test.afterAll(() => page.context().close());

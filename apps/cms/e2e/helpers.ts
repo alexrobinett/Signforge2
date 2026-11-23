@@ -326,12 +326,14 @@ export async function d1(sql: string) {
 
 /**
  * Make an org called `name` through the API, as the CMS does (it becomes the active org), and land
- * on it, hydrated. Only sign-in-and-orgs.spec.ts makes one through the page. Slugs are global and a spec may
+ * on it, hydrated, from the spec's own `address` (as `fromAddress`, whose route `page.request` does
+ * not go through). Only sign-in-and-orgs.spec.ts makes one through the page. Slugs are global and a spec may
  * make two orgs of one name, so each gets its own.
  */
-export async function createOrg(page: Page, name: string) {
+export async function createOrg(page: Page, name: string, address: string) {
   const slug = `${slugify(name)}-${randomUUID().slice(0, 8)}`;
-  const res = await page.request.post('/api/auth/organization/create', { headers: { origin: CMS_URL }, data: { name, slug } });
+  const headers = { origin: CMS_URL, 'cf-connecting-ip': address };
+  const res = await page.request.post('/api/auth/organization/create', { headers, data: { name, slug } });
   expect(res.status(), await res.text()).toBe(200);
   await page.goto('/');
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();

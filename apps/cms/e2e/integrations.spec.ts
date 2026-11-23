@@ -30,8 +30,8 @@ const pollsFailed = (orgId: string, sourceId: string, n: number) =>
   );
 
 /** Make an org and return its id, for SQL on the run's D1. */
-async function newOrg(page: Page, name: string): Promise<string> {
-  await createOrg(page, name);
+async function newOrg(page: Page, name: string, address: string): Promise<string> {
+  await createOrg(page, name, address);
   const session = await page.request.get('/api/session');
   return (await session.json()).organization.id;
 }
@@ -51,7 +51,7 @@ let blog: string;
 
 test.beforeAll(async ({ browser }) => {
   owner = await memberPage(browser, `e2e-integrations-${Date.now()}@example.com`, OWNER_ADDRESS);
-  orgId = await newOrg(owner, 'Northside Hotel');
+  orgId = await newOrg(owner, 'Northside Hotel', OWNER_ADDRESS);
 });
 
 test.afterAll(() => owner.context().close());
@@ -292,7 +292,7 @@ test("a viewer reads the sources and changes nothing; another org's sources neve
   await viewer.context().close();
 
   const stranger = await memberPage(browser, `e2e-integrations-stranger-${Date.now()}@example.com`, STRANGER_ADDRESS);
-  await newOrg(stranger, 'Elsewhere');
+  await newOrg(stranger, 'Elsewhere', STRANGER_ADDRESS);
   await stranger.goto('/integrations');
   await hydrated(stranger);
   await expect(stranger.getByRole('region', { name: 'Feeding screens now' })).toContainText('No data sources yet');

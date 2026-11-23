@@ -6,11 +6,12 @@ import { API_PORT } from './servers';
 const ADDRESS = '192.0.2.13';
 
 test('the command menu, keyboard only: open, filter, run a tool with and without a form, see a refusal, go to a page, close', async ({ page, request }) => {
-  // 60.2 s on CI with every step passed (run 44976726090), against 14 s on a laptop.
+  // 34-39 s on CI at 3 workers (runs 45146239608, 45147142350, 45147984299), over half the 60 s default.
+  test.setTimeout(90_000);
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-command-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Riverside Deli');
+  await createOrg(page, 'Riverside Deli', ADDRESS);
   await hydrated(page);
 
   const menu = page.getByRole('dialog', { name: 'Command menu' });

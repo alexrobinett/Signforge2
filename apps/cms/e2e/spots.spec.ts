@@ -12,7 +12,7 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-spots-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Diner');
+  await createOrg(page, 'Northside Diner', ADDRESS);
 });
 
 test.afterAll(() => page.context().close());

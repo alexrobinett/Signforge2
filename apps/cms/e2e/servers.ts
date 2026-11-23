@@ -102,17 +102,18 @@ export const PLACES = [
 ];
 
 /**
- * Whether anything holds `port` on a loopback address: another checkout's run, or any other server,
- * which this run's tests would otherwise talk to. Found by binding it, not by asking it over HTTP:
- * the CMS is `localhost`, which may resolve to ::1 alone, and a holder need not answer HTTP (#214).
+ * Whether anything holds `port` on a loopback or wildcard address: another checkout's run, or any
+ * other server, which this run's tests would otherwise talk to. Found by binding it, not by asking it
+ * over HTTP: the CMS is `localhost`, which may resolve to ::1 alone, and a holder need not answer
+ * HTTP (#214). macOS lets a loopback bind beside a wildcard holder, so the wildcards are tried too.
  */
 export async function portTaken(port: number) {
-  for (const host of ['127.0.0.1', '::1']) {
+  for (const host of ['127.0.0.1', '::1', '0.0.0.0', '::']) {
     const free = await new Promise<boolean>((resolve, reject) => {
       const probe = createServer();
-      // A host with no IPv6 loopback (EADDRNOTAVAIL) has nothing that could hold the port there.
+      // A host with no IPv6 (EADDRNOTAVAIL, EAFNOSUPPORT) has nothing that could hold the port there.
       probe.once('error', (err: NodeJS.ErrnoException) =>
-        err.code === 'EADDRINUSE' ? resolve(false) : err.code === 'EADDRNOTAVAIL' ? resolve(true) : reject(err),
+        err.code === 'EADDRINUSE' ? resolve(false) : err.code === 'EADDRNOTAVAIL' || err.code === 'EAFNOSUPPORT' ? resolve(true) : reject(err),
       );
       probe.listen(port, host, () => probe.close(() => resolve(true)));
     });

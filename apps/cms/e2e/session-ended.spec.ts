@@ -23,7 +23,7 @@ test('a session that ends while the app is open goes to sign-in and back, from a
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-ended-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Harbour Books');
+  await createOrg(page, 'Harbour Books', ADDRESS);
 
   await page.context().clearCookies();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
@@ -34,7 +34,7 @@ test('a session that ends on Spots or in the spot editor goes to sign-in at once
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-ended-spots-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Quay Florist');
+  await createOrg(page, 'Quay Florist', ADDRESS);
   const spotsLink = page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' });
   await spotsLink.click();
   await hydrated(page);

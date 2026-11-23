@@ -24,7 +24,7 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-dates-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Launch Hall');
+  await createOrg(page, 'Launch Hall', ADDRESS);
   const orgId: string = (await (await page.request.get('/api/session')).json()).organization.id;
   // The org's own approved template, in SQL: registering one runs the runtime check, which the local API has no container for.
   // The form is what this spec is about: the stage never gets the bundle, which is not uploaded.

@@ -29,11 +29,11 @@ const kept = (tab: Page) =>
     return { credential: credential !== undefined, files: (await (await caches.open('sf-blobs-v1')).keys()).length };
   });
 
-test('a new org opens a test screen, pairs it, publishes to it and sees it play in under a minute; a revoke wipes it', async ({ page }) => {
+test('a new org opens a test screen, pairs it, publishes to it and sees it play; a revoke wipes it', async ({ page }) => {
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-test-screen-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Test Kitchen');
+  await createOrg(page, 'Test Kitchen', ADDRESS);
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
   await hydrated(page);
   await axe(page);

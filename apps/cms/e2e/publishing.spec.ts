@@ -22,7 +22,7 @@ const playing = (tab: Page) =>
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-publishing-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Gallery');
+  await createOrg(page, 'Northside Gallery', ADDRESS);
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   ({

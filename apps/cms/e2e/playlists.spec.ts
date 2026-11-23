@@ -14,7 +14,7 @@ let playlistId = '';
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-playlists-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Cinema');
+  await createOrg(page, 'Northside Cinema', ADDRESS);
   // Spots to put in order: three short clocks, and a photo promo with no photo yet.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const version = (key: string) => templates.find((t: { key: string }) => t.key.endsWith(`/${key}`) || t.key === key).versions.at(-1).id;

@@ -31,7 +31,7 @@ const toastSays = (title: string | RegExp) => page.locator('[data-sonner-toast]'
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-schedule-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside School');
+  await createOrg(page, 'Northside School', ADDRESS);
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   // A publish shows at the end of the spot on screen; a takeover cuts in. So the default's spot is

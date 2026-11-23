@@ -53,7 +53,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   const editorEmail = `e2e-settings-editor-${stamp}@example.com`;
 
   await signInAs(page, ownerEmail, OWNER_ADDRESS);
-  await createOrg(page, 'Northside Library');
+  await createOrg(page, 'Northside Library', OWNER_ADDRESS);
 
   // General: from the sidebar, /settings opens General.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click();
@@ -328,7 +328,7 @@ test('a role select or an invitation button keeps keyboard focus while its chang
   const editorEmail = `e2e-settings-focus-editor-${stamp}@example.com`;
   const waitingEmail = `e2e-settings-focus-waiting-${stamp}@example.com`;
   await signInAs(page, `e2e-settings-focus-owner-${stamp}@example.com`, '192.0.2.37');
-  await createOrg(page, 'Northside Library');
+  await createOrg(page, 'Northside Library', '192.0.2.37');
   await page.goto('/settings/members');
   await hydrated(page);
   await page.getByLabel('Emails, separated by commas').fill(`${editorEmail}, ${waitingEmail}`);
@@ -441,7 +441,7 @@ test("an edit typed while its save runs is kept: the next addresses to invite, a
   // either wiped what was typed while the save ran.
   const stamp = Date.now();
   await signInAs(page, `e2e-settings-kept-${stamp}@example.com`, '192.0.2.39');
-  await createOrg(page, 'Northside Library');
+  await createOrg(page, 'Northside Library', '192.0.2.39');
   await page.goto('/settings/members');
   await hydrated(page);
   const emails = page.getByLabel('Emails, separated by commas');
@@ -506,7 +506,7 @@ test('edits belong to the org they were made in: after a switch, a late answer f
   // Display hours edited while a General save ran in one org followed a switch, and the next org
   // saved them as its own.
   await signInAs(page, `e2e-settings-orgs-${Date.now()}@example.com`, '192.0.2.47');
-  await createOrg(page, 'Alpha Market');
+  await createOrg(page, 'Alpha Market', '192.0.2.47');
   await createOrgFromAccountMenu(page, 'Beta Market');
   const switcher = orgSwitcher(page);
   await expect(switcher).toContainText('Beta Market');
@@ -555,7 +555,7 @@ test("an edit left on one settings page still saves after another page saved, an
   // The pages share one settings version. A save moved only its own edits to the version it made,
   // so an edit left on General was refused as changed since, and Reload dropped every page's.
   await signInAs(page, `e2e-settings-pages-${Date.now()}@example.com`, '192.0.2.48');
-  await createOrg(page, 'Northside Library');
+  await createOrg(page, 'Northside Library', '192.0.2.48');
   await page.goto('/settings/general');
   await hydrated(page);
   const retention = page.getByLabel('Keep entries for');
@@ -607,7 +607,7 @@ test("an edit left on one settings page still saves after another page saved, an
 test('Keep it waits for a webhook removal that has been sent, and says so (review of #143, 5)', async ({ page }) => {
   // Keep it closed the confirmation while the removal it could no longer stop went on.
   await signInAs(page, `e2e-settings-keep-${Date.now()}@example.com`, '192.0.2.40');
-  await createOrg(page, 'Northside Library');
+  await createOrg(page, 'Northside Library', '192.0.2.40');
   await page.goto('/settings/notifications');
   await hydrated(page);
   await expect(page.getByLabel('Webhook URL', { exact: true })).toBeEnabled();
@@ -650,7 +650,7 @@ test('Keep it waits for a webhook removal that has been sent, and says so (revie
 test("a refused sign-out of another session says why, on that session's row (review of #143, 6)", async ({ page, browser }) => {
   const email = `e2e-settings-sessions-${Date.now()}@example.com`;
   await signInAs(page, email, '192.0.2.45');
-  await createOrg(page, 'Northside Library');
+  await createOrg(page, 'Northside Library', '192.0.2.45');
   const elsewhere = await browser.newContext();
   await signInAs(await elsewhere.newPage(), email, '192.0.2.46');
   await page.goto('/account');
@@ -681,7 +681,7 @@ test("settings fields that save or show at once, or hold a URL or an email, are 
   // in between was the browser's own submit.
   const email = `e2e-settings-server-${Date.now()}@example.com`;
   await signInAs(page, email, '192.0.2.35');
-  await createOrg(page, 'Northside Library');
+  await createOrg(page, 'Northside Library', '192.0.2.35');
   const pages: [path: string, names: string[]][] = [
     ['/settings/general', ['Name', 'Always on', 'Set hours', 'Save changes']],
     ['/settings/screens', ['From', 'Alert after', 'Save changes']],
@@ -718,7 +718,7 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
   // As a GET, the browser's own submit put a Slack or webhook URL, or invitees' emails, in the
   // page's URL: the address bar, history, a Referer and the Worker's request logs (#139's review).
   await signInAs(page, `e2e-settings-post-${Date.now()}@example.com`, '192.0.2.36');
-  await createOrg(page, 'Northside Library');
+  await createOrg(page, 'Northside Library', '192.0.2.36');
   // Without script the page stays as the server sent it, as before hydration. Its fieldsets' gate
   // is taken off, so the form submits as one would that the gate did not hold.
   const context = await browser.newContext({ javaScriptEnabled: false });
@@ -761,7 +761,7 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
 
 test('an owner saves an Anthropic key, tests it against the stub, chooses models and a ceiling; the key never comes back (#261)', async ({ page }) => {
   await signInAs(page, `e2e-settings-ai-${Date.now()}@example.com`, '192.0.2.151');
-  await createOrg(page, 'Quay Street Bakery');
+  await createOrg(page, 'Quay Street Bakery', '192.0.2.151');
   await page.goto('/settings/ai');
   await hydrated(page);
   await expect(page.getByText('the agent uses SignForge’s demo model', { exact: false })).toBeVisible();

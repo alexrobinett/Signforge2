@@ -22,7 +22,7 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-kits-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Bakery');
+  await createOrg(page, 'Northside Bakery', ADDRESS);
   // A spot to see the kit on, and a screen in a group to give it to.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key.endsWith('clock'));

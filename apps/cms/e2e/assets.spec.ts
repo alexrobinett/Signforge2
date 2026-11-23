@@ -7,7 +7,7 @@ const ADDRESS = '192.0.2.21';
 
 test('upload images, search them by name, see which are in use, and delete one no spot uses', async ({ page }) => {
   await signInAs(page, `e2e-assets-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Studio');
+  await createOrg(page, 'Northside Studio', ADDRESS);
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' }).click();
   await expect(page.getByRole('heading', { name: 'No images yet' })).toBeVisible();
   // In the server's HTML the file input is disabled: files chosen before the page hydrated were never uploaded (#140).
