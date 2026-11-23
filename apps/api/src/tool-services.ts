@@ -31,6 +31,7 @@ const LIMITS: Record<Exclude<RateLimitBucket, 'template_check'>, (env: Env) => R
   pairing_claim: (env) => env.PAIR_CLAIM_LIMIT,
   place_search: (env) => env.PLACE_SEARCH_LIMIT,
   table_read: (env) => env.TABLE_READ_LIMIT,
+  page_read: (env) => env.PAGE_READ_LIMIT,
 };
 
 /** Who a call's services act for. */

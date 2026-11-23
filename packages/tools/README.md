@@ -245,7 +245,7 @@ The adapter passes the counter as `caller.agentLimiter` (`AgentLimiter`); an age
 
 Callers so far:
 
-- `/api/tools`: actor `user` with the session's user id, client `cms`, and every service: a `rateLimit` keyed by user and by address (`pairing_claim` on the `PAIR_CLAIM_LIMIT` binding, `place_search` on `PLACE_SEARCH_LIMIT`, `table_read` on `TABLE_READ_LIMIT`), `places`, Open-Meteo's geocoding, and the rest.
+- `/api/tools`: actor `user` with the session's user id, client `cms`, and every service: a `rateLimit` keyed by user and by address (`pairing_claim` on the `PAIR_CLAIM_LIMIT` binding, `place_search` on `PLACE_SEARCH_LIMIT`, `table_read` on `TABLE_READ_LIMIT`, and `page_read` on `PAGE_READ_LIMIT`, which the agent's fill counts for each link it reads, #314), `places`, Open-Meteo's geocoding, and the rest.
 - `/api/tools` also passes `publishLock` (the org's Durable Object), and its `notify` service's `manifests` queues a publish's screens 50 a message (`apps/api/src/publish.ts`).
 - `/admin`'s manifest upload: actor `system` with id `sf-push`, role owner, scope `content:publish` only, and only the `notify` service.
 - `/admin`'s template registration (`sf template push`): actor `system` with id `sf-push`, role owner, scopes `content:draft` and `content:publish`; the platform registry for base templates, the org registry for an org's.

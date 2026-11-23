@@ -22,8 +22,11 @@ interface FillDraft {
   inSettings: boolean;
   /** Try another template: the template is the one the person picks, not the model's choice. */
   again: boolean;
-  /** The fill's idempotency key, made on the first try and kept for retries of the same material. */
-  key: string | null;
+  /**
+   * The fill's idempotency key, made on the first try and kept for retries of the same material and
+   * template pick: a new pick is a new fill, which the API would refuse under the old key (#314).
+   */
+  key: { id: string; templateVersionId: string | null } | null;
 }
 
 /** A spot just filled: its fields' marks, and what it was filled from. */
@@ -90,7 +93,9 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
     forgetFill: () => fill(() => newFill()),
 
     async fillNewSpot(orgId, templateVersionId) {
-      const key = get().agent.fill.key ?? crypto.randomUUID();
+      const kept = get().agent.fill.key;
+      const pick = templateVersionId ?? null;
+      const key = kept?.templateVersionId === pick ? kept : { id: crypto.randomUUID(), templateVersionId: pick };
       fill((f) => ({ ...f, key, pending: true, error: null, inSettings: false }));
       const { photo, link } = get().agent.fill;
       try {
@@ -103,7 +108,7 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
             throw new Refusal('invalid_input', 'The photo has too much detail to send. Try a closer or plainer one.');
           source = { kind: 'image', ...scaled };
         } else source = { kind: 'link', url: link.trim() };
-        const request: InlineRequest = { source, idempotencyKey: key, ...(templateVersionId && { templateVersionId }) };
+        const request: InlineRequest = { source, idempotencyKey: key.id, ...(templateVersionId && { templateVersionId }) };
         const headers = { 'content-type': 'application/json', ...(await tabOrgHeaders()) };
         const res = await fetch('/api/agent/inline', { method: 'POST', headers, body: JSON.stringify(request) }).catch((cause: unknown) => {
           throw new Refusal('network', 'Could not reach SignForge. Check your connection and try again.', undefined, { cause });

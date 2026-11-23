@@ -4,9 +4,9 @@
 // and the page are stubbed.
 import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { FetchGuards } from '../src/data/fetch';
-import { Client, email, testApp } from './client';
+import { Client, clockLimits, email, testApp } from './client';
 
 const PUBLIC = '93.184.215.14';
 const LINK = 'https://bakery.example/flyer';
@@ -67,7 +67,7 @@ function model(answers: Answer[], key: () => string) {
 }
 
 /** The web as the guards reach it: each URL's page, every host at `address`, each request and lookup recorded. */
-function web(pages: Record<string, () => Response>, address = PUBLIC) {
+function web(pages: Record<string, () => Response | Promise<Response>>, address = PUBLIC) {
   const fetched: string[] = [];
   const resolved: string[] = [];
   const guards: FetchGuards = {
@@ -100,7 +100,7 @@ const PNG = btoa('\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01');
 async function setup(
   options: {
     answers?: Answer[];
-    pages?: Record<string, () => Response>;
+    pages?: Record<string, () => Response | Promise<Response>>;
     address?: string;
     save?: Record<string, unknown> | null;
     role?: 'viewer' | 'editor';
@@ -331,8 +331,78 @@ describe('POST /api/agent/inline', () => {
     // A key used for another call is refused, before anything is spent.
     expect((await s.owner.tool('create_playlist', { name: 'Morning', idempotencyKey: 'used-for-a-playlist' })).status).toBe(200);
     const other = await s.fill({ kind: 'link', url: LINK }, { idempotencyKey: 'used-for-a-playlist' });
-    expect(other.status).toBe(400);
+    expect(other.status).toBe(409);
+    expect(await other.json()).toMatchObject({ error: 'conflict' });
     expect(s.web.fetched).toEqual([]);
+  });
+
+  it('refuses a replay of a fill under the same key with another template picked, as the dispatcher would (#314)', async () => {
+    const s = await setup();
+    const idempotencyKey = crypto.randomUUID();
+    expect((await s.fill({ kind: 'link', url: LINK }, { idempotencyKey })).status).toBe(200);
+    // The same template, picked: the replay.
+    expect((await s.fill({ kind: 'link', url: LINK }, { idempotencyKey, templateVersionId: s.versionId })).status).toBe(200);
+    // Another template picked under the same key: refused, and nothing spent on it.
+    const other = await s.scope.templates.insert({ key: 'other', name: 'Other' });
+    const version = await s.scope.templates.versions.insert({
+      templateId: other.id,
+      version: '1.0.0',
+      manifestJson: JSON.stringify({ ...MANIFEST, id: 'other', name: 'Other' }),
+      bundleSha256: 'e'.repeat(64),
+      status: 'approved',
+    });
+    s.web.fetched.length = 0;
+    const res = await s.fill({ kind: 'link', url: LINK }, { idempotencyKey, templateVersionId: version.id });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'conflict', message: expect.stringContaining('another template') });
+    expect(s.web.fetched).toEqual([]);
+    expect(s.model.asked).toHaveLength(1);
+    expect(await s.spots()).toHaveLength(1);
+  });
+
+  it('refuses a fill that fetched its page and then lost the last turn to another, spending nothing more (#314)', async () => {
+    let orgId = '';
+    const s = await setup({
+      save: { dailyTurnCeiling: 1 },
+      pages: {
+        // While this page is read, another fill takes the org's last turn.
+        [LINK]: async () => {
+          expect(await env.ORGS.get(env.ORGS.idFromName(orgId)).takeTurn('2026-11-23', 1)).toBe(true);
+          return FLYER();
+        },
+      },
+    });
+    orgId = s.org.id;
+    const res = await s.fill({ kind: 'link', url: LINK });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ error: 'out_of_turns' });
+    expect(s.web.fetched).toEqual([LINK]);
+    expect(s.model.asked).toEqual([]);
+    expect(await s.spots()).toEqual([]);
+  });
+
+  it('limits the links read per member and address, which an unreadable one, costing no turn, would not be (#314)', async () => {
+    vi.setSystemTime(NOON);
+    try {
+      const s = await setup({ pages: {} });
+      // The member's session, on rate limits that count on the tests' clock.
+      const member = new Client(s.member.t, s.member.ip, clockLimits());
+      for (const [k, v] of s.member.jar) member.jar.set(k, v);
+      const fill = (source: unknown) => member.post('/api/agent/inline', { source, idempotencyKey: crypto.randomUUID() });
+      for (let i = 0; i < 30; i++) expect((await fill({ kind: 'link', url: LINK })).status, String(i)).toBe(502);
+      const fetched = s.web.fetched.length;
+      const res = await fill({ kind: 'link', url: LINK });
+      expect(res.status).toBe(429);
+      expect(await res.json()).toMatchObject({ error: 'rate_limited' });
+      expect(s.web.fetched).toHaveLength(fetched);
+      // A photo reads no link: it is not counted.
+      expect((await fill({ kind: 'image', mediaType: 'image/jpeg', data: JPEG })).status).toBe(200);
+      // The next minute, links are read again.
+      vi.setSystemTime(NOON + 60_000);
+      expect((await fill({ kind: 'link', url: LINK })).status).toBe(502);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('refuses a fill, unfetched and uncounted, with no model of its own (the demo model is #265), or no fast model chosen', async () => {
