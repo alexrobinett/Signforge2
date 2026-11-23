@@ -8,7 +8,6 @@
   },
   "exports": {
     "./push": "./src/push.ts",
-    "./template": "./src/template.ts",
     "./template-push": "./src/template-push.ts",
     "./golden/stress.json": "./test/golden/stress.json"
   },
@@ -22,10 +21,11 @@
     "@signforge/feeds": "workspace:*",
     "@signforge/media": "workspace:*",
     "@signforge/media-check": "workspace:*",
-    "esbuild": "^0.28.2",
+    "@signforge/template-build": "workspace:*",
     "sharp": "^0.35.5"
   },
   "devDependencies": {
+    "@signforge/examples": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
     "@signforge/template-alert": "workspace:*",
     "@signforge/template-announcement": "workspace:*",

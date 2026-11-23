@@ -1,0 +1,23 @@
+{
+  "name": "@signforge/template-test",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@signforge/contract": "workspace:*",
+    "@signforge/media": "workspace:*",
+    "@signforge/template-build": "workspace:*",
+    "esbuild": "^0.28.2",
+    "playwright": "1.65.1",
+    "vitest": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  }
+}

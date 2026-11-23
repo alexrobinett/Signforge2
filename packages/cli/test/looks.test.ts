@@ -2,15 +2,15 @@
  * A template carrying all four looks builds within the bundle budget, with no problems and no colour
  * warnings, and its bundle carries the fonts' licence. `sf build` lints the stylesheets style.css
  * imports, looks.css among them; that the lint reads them at all is tested by the CLI's import probe
- * (`packages/cli/test/templates.test.ts`). How the kit plays is tested in the player's browser tests
- * (`packages/player/browser/templates.test.ts`, the look kit).
+ * (`packages/cli/test/templates.test.ts`). How the kit plays is tested in the kit's browser tests
+ * (`packages/template-looks/test/looks.test.ts`).
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TEMPLATE_BUDGET } from '@signforge/contract';
 import { LOOKS } from '@signforge/template-looks';
 import { expect, it } from 'vitest';
-import { buildTemplate } from '../src/template';
+import { buildTemplate } from '@signforge/template-build';
 
 /** The look kit's package (packages/template-looks). Here, not there: the kit's templates build with the CLI, which builds them all. */
 const dir = join(import.meta.dirname, '../../template-looks');
