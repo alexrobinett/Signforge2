@@ -73,12 +73,12 @@ jobs:
       # A commit that changes packages/contract changes nothing else (AGENTS.md, "The contract leads").
       - name: Contract commits
         run: sh scripts/check-contract-commits.sh ${{ github.event.pull_request.base.sha || github.event.before }}
-      # Every template is a devDependency of the API, the player and the cli, whose tests use it (docs/ci.md).
+      # Every template is a devDependency of the API, the cli and the runtime check, whose tests use it, and has browser tests of its own (docs/ci.md).
       - name: Template dependencies
         run: sh scripts/check-template-deps.sh
 
       # Which tasks run, whether any of them needs Chromium (the tests of a package that declares a
-      # Playwright dependency launch it), and whether any needs the stress media (the cli's golden
+      # Playwright dependency, or the template harness, launch it), and whether any needs the stress media (the cli's golden
       # test builds examples/stress; the tools' publishing test compares against that golden).
       - name: Plan
         id: plan
@@ -90,7 +90,7 @@ jobs:
           browsers=false
           stress_media=false
           for dir in $(jq -r '.tasks[] | select(.command != "<NONEXISTENT>" and (.task == "test" or .task == "test:e2e")) | .directory' "$RUNNER_TEMP/plan.json" | sort -u); do
-            grep -q playwright "$dir/package.json" && browsers=true
+            grep -qE 'playwright|@signforge/template-test' "$dir/package.json" && browsers=true
             case $dir in packages/cli | packages/tools) stress_media=true ;; esac
           done
           {

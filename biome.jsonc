@@ -48,11 +48,17 @@
       "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } }
     },
     {
+      // A template's own code is no test, though its package depends on Vitest for its browser tests:
+      // its `fit()` calls are no focused tests.
+      "includes": ["templates/*/*.ts"],
+      "linter": { "domains": { "test": "none" } }
+    },
+    {
       "includes": ["examples/**", "templates/**", "apps/cms/public/**"],
       "linter": { "rules": { "a11y": { "noSvgWithoutTitle": "off" } } }
     },
     {
-      // Type assertions belong here: test doubles and fixtures, Drizzle row typing in the db layer,
+      // Type assertions belong here: test doubles, fixtures and the template tests' harness, Drizzle row typing in the db layer,
       // the contract's validators, which read untrusted JSON field by field, the contract's parsers,
       // which own the one cast from a checked value to its shape, and throwaway spikes.
       "includes": [
@@ -61,6 +67,7 @@
         "**/*.test.tsx",
         "**/e2e/**",
         "packages/player/browser/**",
+        "packages/template-test/**",
         "packages/db/src/**",
         "packages/contract/src/parse.ts",
         "packages/contract/src/validate.ts",
