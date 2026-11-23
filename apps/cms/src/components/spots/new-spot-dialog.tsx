@@ -1,18 +1,19 @@
 /**
  * Making a spot: a template (its newest approved version), an image from the library, or a web
- * page. It is made as a draft and opens in the editor.
+ * page. It is made as a draft and opens in the editor. Templates are chosen from thumbnails the
+ * player drew ahead of time (scripts/template-thumbnails.ts); an org's own template is a named tile.
  */
 import { safeUrl } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { PlusIcon } from 'lucide-react';
-import type { SubmitEvent } from 'react';
+import type { KeyboardEvent, SubmitEvent } from 'react';
 import { AssetPicker } from '~/components/assets/asset-picker';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
-import { NativeSelect } from '~/components/ui/select';
 import { startData, usableVersions, type TemplateView } from '~/lib/spots';
+import thumbnails from '~/lib/template-thumbnails.json';
 import { assetsQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 
@@ -38,9 +39,18 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
     d.name.trim() !== '' && (d.kind === 'template' ? chosen !== undefined : d.kind === 'url' ? safeUrl(d.url.trim()) : image !== undefined) && !d.pending;
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!ready) return;
     if (d.kind === 'template' && chosen && d.templateVersionId !== chosen.version.id) edit({ templateVersionId: chosen.version.id });
     const m = chosen?.version.manifest;
     void create(orgId, d.kind === 'template' && m ? { durationMs: m.duration.defaultMs, data: startData(m.fields) } : undefined);
+  };
+
+  /** Enter on a template creates the spot, or goes to its name while it has none. */
+  const createOnEnter = (e: KeyboardEvent<HTMLFieldSetElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (ready) e.currentTarget.form?.requestSubmit();
+    else document.getElementById('new-spot-name')?.focus();
   };
 
   return (
@@ -51,7 +61,7 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
           New spot
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>New spot</DialogTitle>
           <DialogDescription>It starts as a draft. No screen shows it until you publish.</DialogDescription>
@@ -68,27 +78,33 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
               ))}
             </div>
           </fieldset>
-          {d.kind === 'template' && (
-            <div className="space-y-2">
-              <Label htmlFor="new-spot-template">Template</Label>
-              {usable.length ? (
-                <NativeSelect
-                  id="new-spot-template"
-                  className="w-full"
-                  value={chosen?.version.id}
-                  onChange={(e) => edit({ templateVersionId: e.target.value })}
-                >
+          {d.kind === 'template' &&
+            (usable.length ? (
+              <fieldset className="space-y-2" onKeyDown={createOnEnter}>
+                <legend className="text-sm font-medium">Template</legend>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {usable.map((u) => (
-                    <option key={u.version.id} value={u.version.id}>
-                      {u.template.name}
-                    </option>
+                    <label
+                      key={u.version.id}
+                      className="relative flex cursor-pointer flex-col gap-1.5 rounded-lg border p-1.5 text-sm has-checked:border-primary has-checked:bg-accent has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50"
+                    >
+                      <input
+                        type="radio"
+                        name="new-spot-template"
+                        value={u.version.id}
+                        checked={chosen?.version.id === u.version.id}
+                        onChange={() => edit({ templateVersionId: u.version.id })}
+                        className="absolute inset-0 size-full cursor-pointer appearance-none opacity-0"
+                      />
+                      <Thumbnail template={u.template} />
+                      <span className="line-clamp-2 px-0.5">{u.template.name}</span>
+                    </label>
                   ))}
-                </NativeSelect>
-              ) : (
-                <p className="text-sm text-muted-foreground">No templates are approved for use yet.</p>
-              )}
-            </div>
-          )}
+                </div>
+              </fieldset>
+            ) : (
+              <p className="text-sm text-muted-foreground">No templates are approved for use yet.</p>
+            ))}
           {d.kind === 'image' && (
             <div className="flex items-center gap-3">
               <span className="min-w-0 flex-1 truncate text-sm">{image ? image.name : 'No image chosen'}</span>
@@ -120,5 +136,19 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const THUMBNAILS: Record<string, string> = thumbnails;
+
+/** A base template's thumbnail, drawn by the player; an org's template, or one not drawn yet, is its name on a tile. */
+function Thumbnail({ template }: { template: TemplateView }) {
+  const drawn = template.owner === 'base' && template.key in THUMBNAILS;
+  return drawn ? (
+    <img src={`/template-thumbnails/${template.key}.webp`} alt="" width={480} height={270} className="aspect-video w-full rounded-md bg-muted object-cover" />
+  ) : (
+    <span aria-hidden className="grid aspect-video w-full place-items-center rounded-md bg-muted px-2 text-center text-xs font-medium text-muted-foreground">
+      {template.name}
+    </span>
   );
 }

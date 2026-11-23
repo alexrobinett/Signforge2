@@ -43,7 +43,7 @@ test('a new spot leaves a datetime with no default for the editor to pick, says 
   await page.goto('/spots');
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
-  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: 'Launch countdown' });
+  await page.getByRole('radio', { name: 'Launch countdown', exact: true }).check();
   await page.getByLabel('Name').fill('Grand opening');
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name: 'Grand opening', level: 1 })).toBeVisible();
