@@ -1,0 +1,48 @@
+# TEMPORARY (#283): measures the CMS e2e on CI's runner. Removed before the PR is ready.
+name: e2e-measure
+on:
+  push:
+    branches: ['t3/cms-e2e-*']
+permissions:
+  contents: read
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        workers: [1, 2, 3]
+        rep: [1, 2]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: nproc && free -g
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-measure
+      - run: pnpm --filter @signforge/player exec playwright install --with-deps --only-shell chromium
+      - name: e2e
+        run: |
+          start=$(date +%s)
+          set +e
+          pnpm --filter @signforge/cms exec playwright test --workers=${{ matrix.workers }} --reporter=list
+          status=$?
+          echo "E2E_WALL workers=${{ matrix.workers }} rep=${{ matrix.rep }} seconds=$(( $(date +%s) - start )) status=$status"
+          exit $status
+        env:
+          CI: '1'
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.workers }}-${{ matrix.rep }}
+          path: |
+            apps/cms/test-results
+            apps/cms/.e2e
+          if-no-files-found: ignore
+          include-hidden-files: true
