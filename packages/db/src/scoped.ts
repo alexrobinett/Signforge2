@@ -35,6 +35,7 @@ import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
+import { AGENT_GRANT_IDLE_MS } from './agent-grants';
 import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS, unreferencedFeedImage } from './retention';
 import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
@@ -438,6 +439,8 @@ export function scoped(d1: D1Database, orgId: string) {
   const dataSources = entity(db, orgId, s.dataSources, 'src', 'content');
   const connectionRows = entity(db, orgId, s.connections, 'con');
   const authorizations = entity(db, orgId, s.connectionAuthorizations, 'oas');
+  const grants = entity(db, orgId, s.agentGrants, 'agt');
+  const ag = s.agentGrants;
   const audit = entity(db, orgId, s.auditLog, 'aud');
   const brandKitRows = entity(db, orgId, s.brandKits, 'bk');
 
@@ -2064,6 +2067,58 @@ export function scoped(d1: D1Database, orgId: string) {
             ),
           /** The org's authorizations that ran out unfinished. */
           deleteExpired: (now: number): Staged => staged(undefined, db.delete(cna).where(and(eq(cna.orgId, orgId), lte(cna.expiresAt, now)))),
+        },
+      },
+    },
+
+    /**
+     * The org's agent grants (M4-04): what an agent's OAuth client may do here, as one member. The
+     * provider's tokens carry a grant's id as their reference id (`agentGrantForToken`).
+     */
+    agentGrants: {
+      ...grants,
+      /** The user's grants here not yet revoked, expired ones included: their tokens are still stored. */
+      unrevokedFor: (userId: string) =>
+        db
+          .select()
+          .from(ag)
+          .where(and(eq(ag.orgId, orgId), eq(ag.userId, userId), isNull(ag.revokedAt)))
+          .orderBy(asc(ag.id))
+          .all(),
+      /** Used now: its 90 days unused start again. Bookkeeping, not audited; a revoked grant stays revoked. */
+      touch: (grantId: string, now: number) =>
+        db
+          .update(ag)
+          .set({ lastUsedAt: now, expiresAt: now + AGENT_GRANT_IDLE_MS })
+          .where(and(eq(ag.orgId, orgId), eq(ag.id, grantId), isNull(ag.revokedAt)))
+          .run(),
+      stage: {
+        ...grants.stage,
+        /**
+         * Revoked by `by` at `now`, and in the same batch the provider's access and refresh tokens,
+         * consents and unexchanged authorization codes for it deleted, so its client's next refresh is refused too (M4-01's RESULTS,
+         * limitation 3). Only this org's grant's: the deletes find it here first. Already revoked: nothing.
+         */
+        revoke: (grant: typeof ag.$inferSelect, by: string, now: number): Staged<typeof ag.$inferSelect> => {
+          if (grant.revokedAt !== null) return { row: grant, writes: [] };
+          const revoked = grants.stage.update(grant, { revokedAt: now, revokedBy: by });
+          const ours = db
+            .select({ id: ag.id })
+            .from(ag)
+            .where(and(eq(ag.orgId, orgId), eq(ag.id, grant.id)));
+          const tokens = staged(
+            undefined,
+            db.delete(s.oauthAccessToken).where(inArray(s.oauthAccessToken.referenceId, ours)),
+            db.delete(s.oauthRefreshToken).where(inArray(s.oauthRefreshToken.referenceId, ours)),
+            db.delete(s.oauthConsent).where(inArray(s.oauthConsent.referenceId, ours)),
+            // Its authorization codes not yet exchanged: verification rows whose JSON value names it
+            // (the provider's `{ type: 'authorization_code', referenceId, ... }`). Other rows (sign-in
+            // codes) hold no JSON, so the value is read only where it is valid.
+            db
+              .delete(s.verification)
+              .where(inArray(sql`CASE WHEN json_valid(${s.verification.value}) THEN json_extract(${s.verification.value}, '$.referenceId') END`, ours)),
+          );
+          return { row: revoked.row, writes: [...revoked.writes, ...tokens.writes] };
         },
       },
     },

@@ -300,3 +300,50 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await page.keyboard.press('Escape');
   await page.unroute(listRead);
 });
+
+test('the command menu tells a screen reader the row that is selected, after each key that moves or filters (#209)', async ({ page }) => {
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-command-pointer-${Date.now()}@example.com`, '192.0.2.19');
+  await page.goto('/');
+  await fillUntilEnabled(page, 'Organization name', 'Lantern Lane Pointer', 'Create organization');
+  await page.getByRole('button', { name: 'Create organization' }).click();
+  await expect(page.getByRole('heading', { name: 'Lantern Lane Pointer', level: 1 })).toBeVisible();
+  await hydrated(page);
+
+  const menu = page.getByRole('dialog', { name: 'Command menu' });
+  const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
+  const selected = menu.getByRole('option', { selected: true });
+  /** The row the search's `aria-activedescendant` names, as "<selected>:<disabled>:<text>", or why there is none. */
+  const pointedAt = () =>
+    search.evaluate((input) => {
+      const id = input.getAttribute('aria-activedescendant');
+      const row = id ? document.getElementById(id) : null;
+      if (!row) return `no row for ${id}`;
+      return `${row.getAttribute('aria-selected')}:${row.getAttribute('aria-disabled')}:${row.textContent}`;
+    });
+  /** The pointer names the selected row, rendered and enabled: what Enter would run. */
+  const pointsAtSelected = async (text: string) => {
+    await expect(selected).toHaveText(text);
+    await expect.poll(pointedAt).toBe(`true:false:${text}`);
+  };
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await pointsAtSelected('Go to Overview');
+  // Moved by key onto a row, then typing filters that row out: the pointer follows the selection to a row still listed.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await pointsAtSelected('Go to Spots');
+  await page.keyboard.type('playl');
+  await pointsAtSelected('Go to Playlists');
+  await axe(page);
+  // Cleared, the first row is selected again, and named.
+  await search.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await pointsAtSelected('Go to Overview');
+  await page.keyboard.press('End');
+  await page.keyboard.type('spots');
+  await pointsAtSelected('Go to Spots');
+  await axe(page);
+});
