@@ -14,9 +14,9 @@ const STRANGER_ADDRESS = '192.0.2.136';
 const MINUTE = 60_000;
 
 /** As if a poll of the source had just found `data`, last confirmed `checkedAgo` ms ago, and nothing failing since. */
-function pollFound(orgId: string, sourceId: string, checkedAgo = 0) {
+async function pollFound(orgId: string, sourceId: string, checkedAgo = 0) {
   const at = Date.now() - checkedAgo;
-  d1(
+  await d1(
     `INSERT INTO data_snapshots (org_id, data_source_id, version, fetched_at, checked_at, data_json) VALUES ('${orgId}', '${sourceId}', 'e2e-${at}', ${at}, ${at}, '{"items":[]}') ` +
       'ON CONFLICT (org_id, data_source_id) DO UPDATE SET version = excluded.version, fetched_at = excluded.fetched_at, checked_at = excluded.checked_at, data_json = excluded.data_json; ' +
       `UPDATE data_sources SET failures = 0, last_error = NULL, next_poll_at = ${Date.now() + 5 * MINUTE} WHERE org_id = '${orgId}' AND id = '${sourceId}'`,
@@ -51,7 +51,7 @@ let blog: string;
 
 test.beforeAll(async ({ browser }) => {
   owner = await memberPage(browser, `e2e-integrations-${Date.now()}@example.com`, OWNER_ADDRESS);
-  orgId = await newOrg(owner, 'Northside Market');
+  orgId = await newOrg(owner, 'Northside Hotel');
 });
 
 test.afterAll(() => owner.context().close());
@@ -96,12 +96,12 @@ test('add a calendar and a feed from the catalogue; a failing one says why, what
   blog = dataSources.find((d: { name: string }) => d.name === 'Northside blog').id;
   // A spot reads the calendar (no tool binds one yet: the spot editor's sources are #79).
   const { spot } = await tool(owner, 'create_spot', { name: 'Break room agenda', kind: 'url', url: 'https://example.com/agenda' });
-  d1(`UPDATE spots SET bindings_json = '{"events":{"source":"${calendar}","path":"events"}}' WHERE org_id = '${orgId}' AND id = '${spot.id}'`);
+  await d1(`UPDATE spots SET bindings_json = '{"events":{"source":"${calendar}","path":"events"}}' WHERE org_id = '${orgId}' AND id = '${spot.id}'`);
 
   // The feed is fine; the calendar was good two hours ago and its last 2 polls failed.
-  pollFound(orgId, blog);
-  pollFound(orgId, calendar, 120 * MINUTE);
-  pollsFailed(orgId, calendar, 2);
+  await pollFound(orgId, blog);
+  await pollFound(orgId, calendar, 120 * MINUTE);
+  await pollsFailed(orgId, calendar, 2);
   await owner.reload();
   await hydrated(owner);
   await expect(now.getByText('iCal · Break room')).toBeVisible();
@@ -148,7 +148,7 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
   await expect(now.getByText('failed 2×')).toHaveCount(0);
 
   // The next poll succeeds: the open page shows its time within its 30-second refresh.
-  pollFound(orgId, calendar);
+  await pollFound(orgId, calendar);
   await expect(now.getByText('checking')).toHaveCount(0, { timeout: 45_000 });
   await expect(now).not.toContainText('answers with an error');
   await expect(owner.getByText('1 calendar', { exact: true })).toBeVisible();
@@ -181,8 +181,8 @@ test('fixing the URL clears the failing state after the next poll, and a bound s
     feedUrl: 'https://api.open-meteo.com/v1/forecast?latitude=45.52&longitude=-122.68&current=temperature_2m',
     idempotencyKey: crypto.randomUUID(),
   });
-  pollFound(orgId, weather.id, 60 * MINUTE);
-  pollsFailed(orgId, weather.id, 1);
+  await pollFound(orgId, weather.id, 60 * MINUTE);
+  await pollsFailed(orgId, weather.id, 1);
   await owner.reload();
   await hydrated(owner);
   await expect(now).toContainText('The forecast service is not answering. SignForge keeps checking it; there is nothing to change here.');
@@ -203,7 +203,7 @@ test('connected accounts: reconnect and disconnect, a failing read, and what the
   test.setTimeout(150_000);
   // No provider is configured in dev (each connector ticket adds its own), so the account is put in the run's D1.
   const at = Date.now();
-  d1(
+  await d1(
     `INSERT INTO connections (id, org_id, provider, account, scopes_json, status, created_by, created_at, updated_at) ` +
       `VALUES ('con_e2e_${at}', '${orgId}', 'google', 'facilities@example.com', '[]', 'needs_reconnect', 'e2e', ${at}, ${at})`,
   );
