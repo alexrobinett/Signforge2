@@ -4,6 +4,7 @@
  */
 export {
   AGENT_LIMITS,
+  CMS_AGENT_CLIENT_ID,
   SCOPES,
   ROLES,
   ROLE_SCOPES,
@@ -16,10 +17,14 @@ export {
   type AgentLimit,
   type AgentLimiter,
   type AgentLimitWindow,
+  type AiProviders,
+  type AiProviderTest,
   type AlertDeliverer,
   type AlertSecretSealer,
   type AnyTool,
   type Connectors,
+  type Invitation,
+  type Members,
   type DataScope,
   type FeedUrlSealer,
   type Place,
@@ -48,7 +53,9 @@ export { IDENTIFY_SECONDS, liveOverride, OVERRIDE_LIMIT_MS } from './screens';
 export { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from './pairing';
 export { kitColors, type StoredColors } from './brand';
 export type { StoredCheckReport } from './templates';
+export { AI_PROVIDERS } from './outputs';
 export type {
+  AiProviderName,
   AssetView,
   Audience,
   BrandKitView,

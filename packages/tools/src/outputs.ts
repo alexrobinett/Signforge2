@@ -473,6 +473,24 @@ export const channelView = z.object({
   updatedAt: z.number(),
 });
 
+// ------------------------------------------------------------------ AI providers
+
+/** The model providers an org can bring its own key for (#261; OpenAI-compatible is #262). */
+export const AI_PROVIDERS = ['anthropic'] as const;
+export type AiProviderName = (typeof AI_PROVIDERS)[number];
+
+export const aiProviderView = z.object({
+  provider: z.enum(AI_PROVIDERS),
+  keyLast4: z.string().describe("The key's last four characters; the key itself is sealed and never shown"),
+  keySavedBy: z.string().describe('The user who saved the key'),
+  keySavedAt: z.number(),
+  verifiedAt: z.number().nullable().describe('When a test last reached the provider with this key; null until one does'),
+  fastModel: z.string().nullable().describe('The exact model id for fills from a flyer, photo or link'),
+  capableModel: z.string().nullable().describe("The exact model id for the agent's drawer"),
+  dailyTurnCeiling: z.number().nullable().describe('Agent turns a day across the org; null for no ceiling'),
+  version: version.describe('Moves on with every change; pass it as ifVersion to change only what you read'),
+});
+
 export const deliveryView = z.object({
   id: z.string(),
   channel: z.enum(ALERT_CHANNELS),
@@ -599,6 +617,29 @@ const auditEntryOutput = z.object({
 
 // ------------------------------------------------------------------ every tool's output
 
+/**
+ * A member's role: `ROLES` in ./tool.ts, written out because this file reaches no module that
+ * imports `@signforge/db` (the CMS types its calls by it). test/members.test.ts holds the two equal.
+ */
+const roleOutput = z.enum(['viewer', 'editor', 'owner']);
+const memberOutput = z.object({
+  id: z.string().describe("The membership's id: pass it as memberId"),
+  userId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: roleOutput,
+  createdAt: z.string().describe('ISO 8601'),
+});
+const invitationOutput = z.object({
+  id: z.string(),
+  email: z.string(),
+  role: roleOutput,
+  status: z.literal('pending'),
+  expiresAt: z.string().describe('ISO 8601; after it the invitation can no longer be accepted'),
+  inviterId: z.string().describe("The inviting member's user id"),
+  createdAt: z.string().describe('ISO 8601'),
+});
+
 export const outputs = {
   list_screens: z.object({ screens: z.array(screenOutput), next: nextOutput }),
   list_screen_status: z.object({ screens: z.array(screenStatusOutput), next: nextOutput }),
@@ -723,6 +764,18 @@ export const outputs = {
   set_slack_alert_channel: z.object({ channel: channelView }),
   set_webhook_alert_channel: z.object({ channel: channelView }),
   remove_alert_channel: z.object({ removed: z.boolean() }),
+  get_ai_provider: z.object({ provider: aiProviderView.nullable().describe("Null while the org uses SignForge's demo model") }),
+  save_ai_provider: z.object({ provider: aiProviderView }),
+  test_ai_provider: z.object({
+    ok: z.boolean(),
+    models: z.array(z.string()).describe('The exact model ids the provider offers this key, to choose from; empty when it could not be reached'),
+    problem: z.enum(['refused', 'busy', 'unreachable']).nullable().describe('Why not: the provider refused the key, was busy, or did not answer'),
+    provider: aiProviderView,
+  }),
+  remove_ai_provider: z.object({
+    removed: z.boolean(),
+    provider: z.enum(AI_PROVIDERS).nullable().describe('The provider whose key was removed; null if none was saved'),
+  }),
   test_alert_channel: z.object({ delivery: deliveryView }),
   list_alert_deliveries: z.object({ deliveries: z.array(deliveryView), next: nextOutput }),
   retry_alert_delivery: z.object({ delivery: deliveryView }),
@@ -759,6 +812,12 @@ export const outputs = {
     version: version.nullable().describe("The deletion's version, to pin in a publish; null when it was never published and went at once"),
   }),
   list_audit_log: z.object({ entries: z.array(auditEntryOutput), next: nextOutput }),
+  list_members: z.object({ members: z.array(memberOutput), next: nextOutput }),
+  list_invitations: z.object({ invitations: z.array(invitationOutput), next: nextOutput }),
+  invite_member: z.object({ invitation: invitationOutput }),
+  cancel_invitation: z.object({ canceled: z.string().describe("The canceled invitation's id") }),
+  update_member_role: z.object({ member: memberOutput }),
+  remove_member: z.object({ removed: z.string().describe("The removed membership's id") }),
 };
 
 /** A tool's name. */

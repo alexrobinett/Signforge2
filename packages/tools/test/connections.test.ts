@@ -159,6 +159,13 @@ describe('connecting an account', () => {
     expect((await owner.org.connections.authorizations.list()).length).toBe(before);
   });
 
+  it('refuses the in-CMS agent, which acts as the member but must not choose a connection for them (#258)', async () => {
+    const cmsAgent: Caller = { ...owner, actor: { ...owner.actor, clientId: 'cms-agent' } };
+    const before = (await owner.org.connections.authorizations.list()).length;
+    expect(await result('start_connection', { provider: 'fake' }, cmsAgent)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect((await owner.org.connections.authorizations.list()).length).toBe(before);
+  });
+
   it('refuses a provider this deployment cannot connect, and viewers', async () => {
     expect(await result('start_connection', { provider: 'nope' })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await result('start_connection', { provider: 'fake' }, viewer)).toMatchObject({ ok: false, error: 'forbidden' });
