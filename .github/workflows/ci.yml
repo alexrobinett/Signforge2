@@ -1,34 +1,49 @@
-# Typecheck, lint and test on every push to master and every pull request. docs/ci.md says how it
-# stays fast. A pull request runs only the Turbo tasks of the packages its diff affects; a push to
-# master runs all of them. Either way, a task whose inputs are unchanged since an earlier run replays
-# from the Turbo cache. Performance is not checked here: that is measured on the Pi
-# (docs/template-spec.md).
+# Typecheck, lint and test on pull requests that are ready for review, on pushes to master, and
+# nightly. docs/ci.md says how it stays fast. A pull request runs only the Turbo tasks of the
+# packages its diff affects; a push to master runs those affected since master's last green run; the
+# nightly run and a manual run cover everything. Either way, a task whose inputs are unchanged since
+# an earlier run replays from the Turbo cache. Performance is not checked here: that is measured on
+# the Pi (docs/template-spec.md).
 name: CI
 
+# A change to nothing but docs and Markdown starts no run: no package reads them, except fonts/README.md,
+# which the compiler's fonts test checks is there. With no required status check (docs/ci.md), nothing
+# waits for the run that never starts.
 on:
   push:
     branches: [master]
+    paths: &code
+      - "**"
+      - "!docs/**"
+      - "!**/*.md"
+      - fonts/README.md
   pull_request:
+    # ready_for_review: a draft runs nothing, and runs once it is marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: *code
+  schedule:
+    - cron: "30 7 * * *" # nightly, after the evening's merges (UTC)
+  workflow_dispatch:
 
+# By event as well as ref, so a push to master never cancels the nightly or a manual full run.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  actions: read # scripts/ci-summary.sh reads this job's step times
+  actions: read # the plan finds master's last green run; scripts/ci-summary.sh reads this job's step times
 
 env:
   TURBO_CACHE_DIR: .turbo/cache
-  # What --affected compares against: the base the pull request merges into.
-  TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
 
 jobs:
   check:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     # A master run with cold caches spends about 16 min on typecheck, test and lint and 20 min on the CMS e2e (runs 44896506918, 44908695033 timed out at 30).
     timeout-minutes: 60
-    # Turbo's remote cache (docs/ci.md, "Caches"), on once the owner sets the TURBO_API variable. Until
+    # Turbo's remote cache (docs/ci.md, "Remote cache"), on once the owner sets the TURBO_API variable. Until
     # then all four are empty, Turbo says "Remote caching disabled", and the job carries .turbo/cache
     # with actions/cache below. The token goes out only with TURBO_API, so it never reaches Turbo's
     # default server, Vercel's.
@@ -85,6 +100,10 @@ jobs:
       # Every template is a devDependency of the API, the player and the cli, whose tests use it (docs/ci.md).
       - name: Template dependencies
         run: sh scripts/check-template-deps.sh
+      # packages/db's import-boundary scan reads every package, which no package graph sees, so it runs
+      # on every change rather than only when db is affected (docs/ci.md). About 2 s.
+      - name: db import boundary
+        run: pnpm --filter @signforge/db exec vitest run --project node
 
       # Which tasks run, whether any of them needs Chromium (the tests of a package that declares a
       # Playwright dependency launch it), and whether any needs the stress media (the cli's golden
@@ -92,23 +111,65 @@ jobs:
       - name: Plan
         id: plan
         run: |
-          # A pull request runs its affected packages' typecheck, tests and lint; the CMS e2e runs on
-          # master, and locally before a pull request is opened (docs/ci.md). A push to master runs everything.
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then affected=--affected; tasks='typecheck test lint'; else affected=; tasks='typecheck test test:e2e lint'; fi
-          pnpm exec turbo run $tasks $affected --dry=json > "$RUNNER_TEMP/plan.json"
+          # A pull request runs its affected packages' typecheck, tests and lint against the base it
+          # merges into; the CMS e2e runs on master, and locally before a pull request is marked ready
+          # (docs/ci.md). A push to master runs every task, the e2e included, of the packages affected
+          # since the newest master commit whose CI passed: each green run vouches for the one before it,
+          # so nothing a red or cancelled run missed goes untested. With no such commit it runs everything,
+          # as the nightly and manual runs do. The nightly run is skipped when master has not moved since
+          # the last nightly that passed.
+          tasks='typecheck test test:e2e lint'
+          base=
+          affected=
+          case $GITHUB_EVENT_NAME in
+            pull_request)
+              tasks='typecheck test lint'
+              base=${{ github.event.pull_request.base.sha }}
+              ;;
+            push)
+              shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=master&status=success&per_page=20" \
+                --jq '.workflow_runs[] | select(.event != "pull_request") | .head_sha') || shas=
+              for sha in $shas; do
+                if git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then base=$sha; break; fi
+              done
+              [ -n "$base" ] || echo "None of the 20 newest green master runs is on a commit HEAD contains: running everything."
+              ;;
+            schedule)
+              last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""') || last=
+              if [ "$last" = "$GITHUB_SHA" ]; then
+                echo "The last nightly run passed on $GITHUB_SHA: nothing new to run."
+                tasks=
+              fi
+              ;;
+          esac
+          # Turbo puts the root package.json (the TypeScript compiler most packages use, tsx, the root
+          # scripts), the lockfile's root importer (those versions, and pnpm's) and the other workflows in
+          # no package, so --affected would plan nothing for a change to them: run everything instead.
+          root_deps() { git show "$1:pnpm-lock.yaml" | awk '/^  \.:$/ { f = 1; next } /^[^ ]|^  [^ ]/ { f = 0 } f'; }
+          if [ -n "$base" ] && { ! git diff --quiet "$base" HEAD -- package.json .github/workflows || [ "$(root_deps "$base")" != "$(root_deps HEAD)" ]; }; then
+            echo "The root package.json, the lockfile's root importer or a workflow changed since $base: running everything."
+            base=
+          fi
           browsers=false
           stress_media=false
-          for dir in $(jq -r '.tasks[] | select(.command != "<NONEXISTENT>" and (.task == "test" or .task == "test:e2e")) | .directory' "$RUNNER_TEMP/plan.json" | sort -u); do
-            grep -q playwright "$dir/package.json" && browsers=true
-            case $dir in packages/cli | packages/tools) stress_media=true ;; esac
-          done
+          if [ -n "$tasks" ]; then
+            [ -z "$base" ] || affected=--affected
+            TURBO_SCM_BASE=$base pnpm exec turbo run $tasks $affected --dry=json > "$RUNNER_TEMP/plan.json"
+            for dir in $(jq -r '.tasks[] | select(.command != "<NONEXISTENT>" and (.task == "test" or .task == "test:e2e")) | .directory' "$RUNNER_TEMP/plan.json" | sort -u); do
+              grep -q playwright "$dir/package.json" && browsers=true
+              case $dir in packages/cli | packages/tools) stress_media=true ;; esac
+            done
+          fi
           {
+            echo "base=$base"
             echo "affected=$affected"
             echo "tasks=$tasks"
             echo "browsers=$browsers"
             echo "stress_media=$stress_media"
             echo "playwright=$(sed -n 's/^  playwright-core@\([^:(]*\):.*/\1/p' pnpm-lock.yaml | sort -u | paste -sd- -)"
           } >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       # Playwright's headless shell, which every browser test launches, cached per Playwright version.
       # System packages are installed only if the runner lacks a library the shell links against.
@@ -158,17 +219,20 @@ jobs:
       # this OS, saved under this sha.
       - name: Restore Turbo cache
         id: turbo-cache
-        if: env.TURBO_API == ''
+        if: steps.plan.outputs.tasks != '' && env.TURBO_API == ''
         uses: actions/cache/restore@v4
         with:
           path: .turbo/cache
           key: turbo-${{ runner.os }}-${{ github.sha }}
           restore-keys: turbo-${{ runner.os }}-
       - name: Typecheck, test, e2e, lint
+        if: steps.plan.outputs.tasks != ''
         run: pnpm exec turbo run ${{ steps.plan.outputs.tasks }} ${{ steps.plan.outputs.affected }} --summarize
+        env:
+          TURBO_SCM_BASE: ${{ steps.plan.outputs.base }} # what --affected compares against
       # Also after a failure, so a rerun replays the tasks that passed.
       - name: Save Turbo cache
-        if: always() && env.TURBO_API == '' && steps.turbo-cache.outputs.cache-hit != 'true'
+        if: always() && steps.plan.outputs.tasks != '' && env.TURBO_API == '' && steps.turbo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .turbo/cache
@@ -188,3 +252,5 @@ jobs:
         run: sh scripts/ci-summary.sh >> "$GITHUB_STEP_SUMMARY"
         env:
           GH_TOKEN: ${{ github.token }}
+          TURBO_SCM_BASE: ${{ steps.plan.outputs.base }}
+          NIGHTLY_SKIPPED: ${{ steps.plan.outcome == 'success' && steps.plan.outputs.tasks == '' }}
