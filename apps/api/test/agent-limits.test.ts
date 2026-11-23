@@ -67,7 +67,7 @@ const read = (c: Caller) => dispatch(registry, 'get_org_settings', {}, c);
 const write = (c: Caller, name = 'Lobby') => dispatch(registry, 'rename_group', { groupId: o.group, name }, c);
 
 describe('the call limit binding', () => {
-  it("allows AGENT_LIMITS' calls a minute, in every environment", () => {
+  it("allows AGENT_LIMITS' calls a minute, in the dev environment's binding", () => {
     const limits: Record<string, { limit: number; period: number }> = JSON.parse(env.RATE_LIMITS);
     expect(limits.AGENT_CALL_LIMIT).toEqual({ limit: AGENT_LIMITS.calls_per_minute, period: 60 });
   });
