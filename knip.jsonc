@@ -34,7 +34,8 @@
       "ignoreDependencies": ["@signforge/template-.*"]
     },
     // templates.test.ts builds every template from templates/ (declared as for apps/api), and the QR fixture.
-    "packages/cli": { "entry": ["test/fixtures/qr/main.ts"], "ignoreDependencies": ["@signforge/template-.*"] },
+    // The golden and video tests read examples/ from disk, declared as for apps/api.
+    "packages/cli": { "entry": ["test/fixtures/qr/main.ts"], "ignoreDependencies": ["@signforge/template-.*", "@signforge/examples"] },
     // The owner deploys the remote cache with `pnpm exec wrangler` by hand (docs/ci.md, "Remote cache").
     "infra/turbo-cache": { "ignoreDependencies": ["wrangler"] },
     // Bundled into a Worker by the upload e2e test.

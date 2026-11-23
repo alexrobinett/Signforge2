@@ -25,7 +25,7 @@ One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready
 
 A few changes mark every package affected:
 - `turbo.json`, the workflow, `tsconfig.base.json`, `biome.jsonc` and `pnpm-workspace.yaml` (`globalDependencies` in `turbo.json`, plus Turbo's own rules);
-- `fonts/` and `examples/`, which tests read but no package owns, and `scripts/stress-media.sh`, which puts the stress media in `examples/` for the cli's and the tools' tests.
+- `fonts/`, which tests read but no package owns, and `scripts/stress-media.sh`, which puts the stress media in `examples/` for the cli's and the tools' tests.
 
 A lockfile change affects only the packages whose dependencies changed.
 
@@ -33,6 +33,7 @@ Turbo puts three things in no package, so `--affected` plans nothing for a chang
 
 Turbo decides what is affected from the package graph alone. It ignores a task's `inputs` that point outside its package. So a test that reads another package's files has to declare that package as a dependency, or a change there will not run the test:
 - The CMS e2e starts the API, so `apps/cms` has `@signforge/api` as a devDependency.
+- The cli's golden and video tests build and read `examples/`, so `examples/` is a package, `@signforge/examples`, and `packages/cli` lists it as a devDependency. A change there (a template's new stress spot, say) runs the cli's tests and those of what depends on the cli: the API, the CMS, the player, the runtime check and the tools, whose publishing test compares against the cli's stress golden. It no longer runs the contract's, db's, feeds' or media's tests. The package has no scripts: Turbo still hashes its files into the tasks that depend on it, so a warm cache never replays a result built from older examples.
 - The cli's and the API's tests build every template with the SDK (the cli's also check that no bundle changed without a new version: [template-spec.md](template-spec.md#rules)), and the player's browser tests and the runtime check's tests (`apps/template-check`) play every template. So `packages/cli`, `apps/api`, `packages/player` and `apps/template-check` list each `templates/*` package and `@signforge/template-sdk` as devDependencies. **A new template goes into all four lists**: the repo-wide step `scripts/check-template-deps.sh` fails until it does. The check's container tests (`pnpm --filter @signforge/template-check test:container`) need Docker and do not run in CI.
 
 knip lists these dependencies as ones it cannot see used.
@@ -45,7 +46,7 @@ One check sees more than the package graph does: packages/db's boundary test (`t
 
 The stress golden (`packages/cli/test/golden/stress.json`) is built from exactly those bytes, and the tools' publishing test compares against that golden. The cli's golden test checks the media against `media.sha256` first. Without the canonical set it fails in CI (`CI` set) and skips elsewhere, saying so on stderr and in the test name.
 
-CI fetches the media when the plan includes the cli's or the tools' tests, with the job's `GITHUB_TOKEN`, and caches it under the hash of `media.sha256`. `media.sha256` is under `examples/`, a global dependency, so a new version reruns every task.
+CI fetches the media when the plan includes the cli's or the tools' tests, with the job's `GITHUB_TOKEN`, and caches it under the hash of `media.sha256`. The media itself is in `.gitignore`, so Turbo does not hash it. A new version changes `media.sha256`, in the `@signforge/examples` package, and the release named in `scripts/stress-media.sh`, a global dependency, so it reruns every task.
 
 A new version (new photos, a re-encoded video) is a new release and a regenerated golden, in one pull request:
 1. `rm -rf examples/stress/media && sh scripts/stress-media.sh --generate` makes a set with curl and ffmpeg, or put the files there by hand. ffmpeg's output differs by machine and version, which is why the set is published rather than generated.
@@ -81,14 +82,14 @@ With it, `master`, pull requests and laptops replay each other's results. The me
 - **Laptops.** Read-only, with the read token. Keep it out of the repository, for example in `~/.config/signforge/turbo.env`, mode 600:
 
   ```sh
-  export TURBO_API=https://signforge-turbo-cache.<subdomain>.workers.dev
+  export TURBO_API=https://signforge-turbo-cache.signforge-spike-m3-platform.workers.dev
   export TURBO_TEAM=signforge
   export TURBO_TOKEN=$(cat ~/.config/signforge/TURBO_READ_TOKEN)
   export TURBO_REMOTE_CACHE_SIGNATURE_KEY=$(cat ~/.config/signforge/TURBO_REMOTE_CACHE_SIGNATURE_KEY)
   ```
 
   `. ~/.config/signforge/turbo.env` before `pnpm typecheck` or `pnpm test`. Turbo reads the cache and keeps writing only its local `.turbo/cache`.
-- **Setting it up** (the owner, with `wrangler login`; from `infra/turbo-cache`):
+- **Setting it up.** Done on 2026-11-23: the Worker is `https://signforge-turbo-cache.signforge-spike-m3-platform.workers.dev`. To build it again, the owner runs these from `infra/turbo-cache`, after `wrangler login`:
   1. `pnpm exec wrangler r2 bucket create signforge-turbo-cache`
   2. `pnpm exec wrangler r2 bucket lifecycle add signforge-turbo-cache expire-30-days --expire-days 30 --force`
   3. Generate each secret into a file only you can read, and never paste it into a chat, an issue or a log: `(umask 077; mkdir -p ~/.config/signforge; for s in TURBO_TOKEN TURBO_READ_TOKEN TURBO_REMOTE_CACHE_SIGNATURE_KEY; do openssl rand -hex 32 > ~/.config/signforge/$s; done)`
@@ -103,11 +104,11 @@ With it, `master`, pull requests and laptops replay each other's results. The me
 
 ## Keeping it fast
 
-- Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it. Otherwise a change there either skips the test on pull requests and on pushes to `master`, until the nightly run, or, with a warm cache, replays a stale result.
+- Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it (better: make it a package, as `examples/` is). Otherwise a change there either skips the test on pull requests and on pushes to `master`, until the nightly run, or, with a warm cache, replays a stale result.
 - Keep the repo-wide checks repo-wide only while they take seconds. Anything slower should become a Turbo task in the package it checks.
 - Keep the workflow's `paths:` filter to files no test reads. A file a test reads that the filter leaves out (as `fonts/README.md` is put back) would change without a run.
 - The player's tests are the longest task: about 14 minutes on GitHub's two-core runner (2026-11-22), down from 18. Any change to the player, the SDK, the CLI, the contract or a template runs them. Vitest runs one fewer file at once than there are cores, which on two cores is one, so `packages/player/vitest.config.ts` asks for at least two: `browser/templates.test.ts` (about 13.5 min) then runs beside the other files (about 7 min together). That one file is now the whole task, so splitting it by template is what would bring those runs down next.
-- Every template change adds a spot to `examples/stress/spots`, and `examples/**` is a global dependency, so the push that merges it reruns every task of every package. Of five `master` runs measured on 2026-11-21 and 22, three replayed nothing from the cache, one replayed 2 of 43 tasks and one 26 of 43.
+- Every template change adds a spot to `examples/stress/spots`. While `examples/**` was a global dependency, the push that merged it reran every task of every package: of five `master` runs measured on 2026-11-21 and 22, three replayed nothing from the cache, one replayed 2 of 43 tasks and one 26 of 43. Now `examples/` is a package ([What "affected" means](#what-affected-means)), so such a push reruns the cli's tests and those of its dependents, not the contract's, db's, feeds' or media's.
 
 ## The API's workerd tests: no module cache on disk
 
@@ -117,6 +118,18 @@ With it, `master`, pull requests and laptops replay each other's results. The me
 - For the API that message was 32.35 MiB: 2,199 modules, measured 2026-11-18. That is over workerd's 32 MiB message limit, so workerd closes the socket (code 1009, "Message is too large") and Vitest reports the worker as exited.
 
 Without the cache on disk, the warm list is empty, and each module is fetched on its own (the largest is 1.5 MiB). packages/tools' warm message was 11 MiB and packages/db's under 0.25 MiB, so they keep the cache. If either one starts to crash the same way, give it the same setting. The bug is in the plugin: drop the setting once the plugin sends warm modules in pieces.
+
+## The CMS e2e's workers
+
+`apps/cms/playwright.config.ts` runs the e2e's specs side by side, but each spec's own tests in order (`fullyParallel: false`). It uses three workers on a laptop and one on CI (`CI` set). Sharding across jobs would cost more minutes, not fewer, since each job repeats the install and the setup. GitHub's `ubuntu-24.04` runner for this private repository has 2 cores (`nproc`). The API (workerd), the CMS (vite) and one Chromium already keep 67% of them busy, and a second worker leaves the player stages too little CPU. The spots' fades then never settle for axe, and tests time out. Against serial runs on the same day's runners, 2 workers took 10–30% less time, but only 1 of 8 runs at 2 or 3 workers passed. Two of those failures were 500s from the API, probably the SQLite lock that `d1()` caused then (it now runs its SQL inside the dev API); the rest were timeouts and fades. Measured 2026-11-22 (#249; runs 45107471407 and 45109633670 on CI, an 18-core Mac locally):
+
+| Workers | Laptop: wall, 3 runs | CI: wall | CI: result |
+| ---: | --- | --- | --- |
+| 1 | 13.7, 13.6, 14.5 min | 22.1, 26.2 min | 70 passed, both runs |
+| 2 | 7.3, 7.2, 7.4 min | 15.4, 17.7, 20.2, 20.6, 20.8 min | 1 of 5 runs all passed. The others had 1–2 failures each, and 3–7 tests did not run. Three of them included command-menu's 60 s timeout, which #250 has since raised |
+| 3 | 5.6, 5.6, 5.7 min | 16.9, 19.0, 20.5 min | 5–8 failures each (timeouts, fades that never settle) |
+
+On CI, where the CPU goes during one serial run (CPU seconds, sampled with `ps`): Chromium's renderers 508 s, its browser process 415 s and its GPU process (software rendering) 358 s; Playwright's runner 321 s; workerd 114 s; vite 106 s. Most of it is Chromium drawing the real player on the stages. A runner with 4 or more cores is what would let workers pay off on CI. On the laptop, 3 workers take the run from 13.7 to 5.6 min.
 
 ## Measured
 
@@ -134,7 +147,7 @@ The week before this workflow (2026-11-15 to 22, from the Actions API): 333 pull
 | Push to `master` | every task: 14–31 min (44944143395 30 m 11 s, 44976726090 31 m 05 s, 45070332774 13 m 43 s, whose e2e failed after 10 min) | the tasks affected since the last green commit. In the week, 62 of the 105 pushes (741 minutes) changed no global dependency, template, contract, SDK, player or CLI |
 | Nightly | none | every task, the Turbo cache replaying what did not change; skipped when the last nightly passed on the same commit |
 
-The slowest tasks with cold caches (44944143395): `player:test` 1,161 s, the CMS e2e about 27 min beside them (being moved to 2–3 Playwright workers), `api:test` 481 s, `tools:test` 248 s, `template-check:test` 157 s, `db:test` 126 s, `cms:lint` 153 s. The API's 28 files spend 103 s in their tests and the rest in each file's module transform (no module cache on disk, above) and setup.
+The slowest tasks with cold caches (44944143395): `player:test` 1,161 s, the CMS e2e about 27 min beside them (one Playwright worker on CI: [The CMS e2e's workers](#the-cms-e2es-workers)), `api:test` 481 s, `tools:test` 248 s, `template-check:test` 157 s, `db:test` 126 s, `cms:lint` 153 s. The API's 28 files spend 103 s in their tests and the rest in each file's module transform (no module cache on disk, above) and setup.
 
 TypeScript is 7.0.2, the native compiler, so there is nothing to gain from `@typescript/native-preview`: `tsc -p apps/api` takes 0.98 s on a laptop against 4.2 s with TypeScript 5.9.3, and every typecheck in the repo takes 7 s. In CI a typecheck takes 1–80 s only because it shares two cores with the tests.
 
