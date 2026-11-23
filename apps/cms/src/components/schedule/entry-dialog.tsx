@@ -204,7 +204,8 @@ export function EntryDialog({
                   : `${playlist.name} and this entry: the playlist has never been published.`}
             </p>
           )}
-          <DialogFooter>
+          {/* Stuck to the dialog's foot (#253): on a phone its fields scroll, and Save would be below them. The negative margins span the dialog's padding. */}
+          <DialogFooter className="sticky -bottom-6 -mx-6 -mb-6 border-t bg-popover px-6 pt-4 pb-6">
             <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>

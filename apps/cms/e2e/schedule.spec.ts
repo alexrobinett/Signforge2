@@ -277,6 +277,9 @@ test('pick one screen by typing part of its name, keyboard only; the picker fill
   await page.keyboard.press('Enter');
   await expect(picker).toBeHidden();
   await expect(plays).toHaveText('Front window');
+  // The dialog is taller than a phone: its actions stay in view as its fields scroll (#253).
+  for (const name of ['Cancel', 'Save draft']) await expect(dialog.getByRole('button', { name })).toBeInViewport({ ratio: 1 });
+  await shots(page, '57-schedule-dialog-phone');
   await page.setViewportSize({ width: 1280, height: 720 });
 
   await dialog.getByRole('button', { name: 'Save draft' }).click();
