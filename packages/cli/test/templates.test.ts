@@ -34,6 +34,15 @@ describe.each(templates)('template %s', (name) => {
     }
   });
 
+  it('carries the OFL, and the copyright of each font its style.css inlines, into its bundle, as the licence asks of every copy', async () => {
+    const { html } = await buildTemplate(join(dir, name));
+    if (!html.includes('data:font/woff2;')) return;
+    expect(html).toContain('SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007');
+    expect(html).toContain('5) The Font Software, modified or unmodified, in part or in whole,');
+    if (readFileSync(join(dir, name, 'style.css'), 'utf8').includes('@fontsource-variable/inter/'))
+      expect(html).toContain('Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)');
+  });
+
   it('reads the time from the SDK, not the device clock', () => {
     const main = readFileSync(join(dir, name, 'main.ts'), 'utf8');
     expect(main).not.toMatch(/new Date\(\s*\)|Date\.now\(\)/);
