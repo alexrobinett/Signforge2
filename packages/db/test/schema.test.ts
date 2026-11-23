@@ -45,6 +45,7 @@ describe('schema', () => {
       'feed_image_deletes',
       'feed_images',
       'idempotency_keys',
+      'org_ai_providers',
       'org_settings',
       'play_counts',
       'playlist_items',

@@ -11,6 +11,7 @@
  */
 import type { RateLimitBucket, ToolServices } from '@signforge/tools';
 import type { Context } from 'hono';
+import { aiProviders } from './agent/provider';
 import type { Auth } from './auth';
 import { betterAuthMembers } from './auth/members';
 import { CALLBACK_PATH, type ConnectorDeps, connectorDeps, connectorsFor, workerFetch } from './connectors';
@@ -60,6 +61,7 @@ export function toolServices<E extends { Bindings: Env }>(c: Context<E>, scope: 
     tables: tableReader(feedGuards(env, workerFetch)),
     templateCheck: templateChecker(env),
     connectors: connectorsFor(env, scope.connectors ?? connectorDeps(env), new URL(CALLBACK_PATH, c.req.url).href),
+    aiProviders: aiProviders(env),
     members: scope.auth && orgId !== null ? betterAuthMembers(scope.auth, c.req.raw.headers, orgId) : undefined,
     rateLimit: async (bucket) => {
       // A template check counts against the org, whose one container it uses. The platform's templates are not checked here.

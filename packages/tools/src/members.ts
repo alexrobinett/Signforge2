@@ -13,7 +13,7 @@ import type { OrgScope } from '@signforge/db';
 import { z } from 'zod';
 import { id } from './fields';
 import { page, pageInput } from './paging';
-import { type Actor, defineTool, notFound, ROLES, type Role, ToolError } from './tool';
+import { type Actor, defineTool, isAgent, notFound, ROLES, type Role, ToolError } from './tool';
 import { outputs } from './outputs';
 
 const roleOf = (role: string | null): Role => z.enum(ROLES).parse(role);
@@ -39,7 +39,8 @@ async function requireMember(org: OrgScope, memberId: string) {
 }
 
 const refuseAgent = (actor: Actor, what: string) => {
-  if (actor.kind === 'agent') throw new ToolError('forbidden', `an agent cannot ${what}: ask an owner to do it in the CMS`);
+  // The in-CMS agent acts as its member, but a member's role and place are a person's choice too (docs/proposals/cms-agent.md).
+  if (isAgent(actor)) throw new ToolError('forbidden', `an agent cannot ${what}: ask an owner to do it in the CMS`);
 };
 
 const role = z.enum(ROLES).describe('One role per member: owner, editor or viewer');
@@ -86,7 +87,7 @@ const inviteMember = defineTool({
   output: outputs.invite_member,
   example: { email: 'sam@example.com', role: 'editor' },
   handler: async ({ actor, input, services: { members } }) => {
-    if (actor.kind === 'agent' && input.role === 'owner') throw new ToolError('forbidden', 'an agent may invite only a viewer or an editor');
+    if (isAgent(actor) && input.role === 'owner') throw new ToolError('forbidden', 'an agent may invite only a viewer or an editor');
     return { invitation: await members.invite(input.email, input.role) };
   },
 });

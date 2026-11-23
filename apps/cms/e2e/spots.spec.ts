@@ -45,8 +45,12 @@ test('choose a template by its thumbnail, by keyboard alone, in two columns on a
   // Two columns at phone width.
   await page.setViewportSize({ width: 390, height: 844 });
   await opener.click();
-  const box = (i: number) => radios.nth(i).evaluate((r) => r.closest('label')!.getBoundingClientRect().toJSON() as { x: number; y: number });
-  const [a, b, c] = [await box(0), await box(1), await box(2)];
+  // Once the dialog's zoom-in has finished, the first three tiles, measured at one moment: measured one by one, mid-animation, two tiles of a row came out half a pixel apart.
+  await dialog.evaluate((d) => Promise.all(d.getAnimations({ subtree: true }).map((a) => a.finished)));
+  const { a, b, c } = await dialog.getByRole('group', { name: 'Template' }).evaluate((g) => {
+    const [a, b, c] = [...g.querySelectorAll('label')].map((l) => ({ x: l.getBoundingClientRect().x, y: l.getBoundingClientRect().y }));
+    return { a: a!, b: b!, c: c! };
+  });
   expect(b.y).toBe(a.y);
   expect(b.x).toBeGreaterThan(a.x);
   expect(c.y).toBeGreaterThan(a.y);
