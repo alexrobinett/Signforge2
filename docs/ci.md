@@ -62,7 +62,7 @@ A remote cache would share Turbo's cache with laptops and across pull requests. 
 - Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it. Otherwise a change there either skips the test on pull requests or, with a warm cache, replays a stale result.
 - Keep the repo-wide checks repo-wide only while they take seconds. Anything slower should become a Turbo task in the package it checks.
 - Don't add `paths:` filters to the workflow. A skipped workflow never reports, so a required check would wait forever; `--affected` already skips what a change does not touch.
-- The player's browser tests are the longest task: 2 m 30 s alone, about 3 min beside the rest of a full run. Any change to the player, the SDK, the CLI, the contract or a template runs them. Making them shorter, or splitting them across runners, is what would bring those pull requests down next.
+- Each template's browser tests are their own task, so a pull request that changes one template runs only that one (above). The slowest is the Info frame's, about 4 m 40 s on a laptop, for its 288 rail × crawl × toggle settings; the rest take 5 s to 1 min. The player's own browser tests are about 2 min on a laptop. A change to the harness, the builder, the SDK or the contract still runs every template's, each in its own task.
 
 ## The API's workerd tests: no module cache on disk
 
@@ -89,6 +89,22 @@ Wall time of each run, from creation to its last update, on GitHub's `ubuntu-24.
 | Player only (#11, 44240138678) | 3 m 31 s | `player:test` (2 m 30 s) and the typechecks it depends on. |
 
 Where the time goes now: setup and the repo-wide checks take about 50 s, then whichever affected test is slowest. That is the player's browser tests (2 m 30 s alone) or the API's workerd tests. Once `master` has run this workflow, a pull request starts from `master`'s Turbo cache, so the typechecks of packages it did not change replay instead of running.
+
+## Per-template tests (#272)
+
+Before, `packages/player/browser/templates.test.ts` played every template inside `player:test`, so any template change ran all of it: 809 s of an 817 s `player:test` on CI's runner (#254, run 45108976002), and 517 s of 519 s on a laptop (2026-11-22). Now each template's tests are its own package's task, on the harness in `packages/template-test`. On the same laptop, at the PR's head:
+
+| Task | Time | Tests |
+| --- | ---: | ---: |
+| `player:test` before (with templates.test.ts) | 519 s | 321 |
+| `player:test` after | 114 s | 183 |
+| All 13 template tasks together, `--force` | 4 m 48 s | 283 |
+| `template-info-frame:test` | 282 s | 27 |
+| `template-photo-promo:test` | 58 s | 37 |
+| `template-countdown:test`, `template-room-status:test` | 43 s each | 18, 11 |
+| `template-clock:test` | 5 s | 20 |
+
+A change to `templates/clock` alone now runs `template-clock:test` (5 s) beside the cli's, the API's, the tools', the runtime check's and the CMS unit tests, and no longer `player:test`. The template tasks have more tests than templates.test.ts had (283, from 138) because the brand-colour checks that played six templates in one test now run per template.
 
 ## Required status check
 
