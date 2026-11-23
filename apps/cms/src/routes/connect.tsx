@@ -138,11 +138,13 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
             )}
 
             {publishing ? (
-              <p role="status" className="flex gap-2.5 rounded-[10px] border border-status-updating bg-status-updating-muted px-3.5 py-3 text-sm leading-snug text-status-updating-foreground">
+              <p
+                role="status"
+                className="flex gap-2.5 rounded-[10px] border border-status-updating bg-status-updating-muted px-3.5 py-3 text-sm leading-snug text-status-updating-foreground"
+              >
                 <TriangleAlertIcon className="mt-0.5 size-4 flex-none" aria-hidden />
                 <span>
-                  {client.name} will be able to change what every screen in {org.name} shows without asking. Each publish is in the audit log and can be
-                  undone.
+                  {client.name} will be able to change what every screen in {org.name} shows without asking. Each publish is in the audit log and can be undone.
                 </span>
               </p>
             ) : (

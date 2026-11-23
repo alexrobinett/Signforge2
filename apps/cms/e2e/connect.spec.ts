@@ -19,7 +19,13 @@ const base64url = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replac
 async function stubClient(name = 'Test agent') {
   const request = await playwrightRequest.newContext({ extraHTTPHeaders: { 'cf-connecting-ip': ADDRESS.stub } });
   const registered = await request.post(`${CMS_URL}/api/auth/oauth2/register`, {
-    data: { client_name: name, redirect_uris: [CALLBACK], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'] },
+    data: {
+      client_name: name,
+      redirect_uris: [CALLBACK],
+      token_endpoint_auth_method: 'none',
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+    },
   });
   expect(registered.status(), await registered.text()).toBe(201);
   const { client_id: clientId } = (await registered.json()) as { client_id: string };
@@ -63,12 +69,12 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   // The person, with two orgs: set up in their own browser first.
   const setup = await browser.newPage();
   await signInAs(setup, email, ADDRESS.person);
-  await createOrg(setup, 'Northside Market');
+  await createOrg(setup, 'Quayside Market');
   await setup.goto('/');
   // Better Auth's own calls need this site's Origin, as a browser sends it.
   const second = await setup.request.post('/api/auth/organization/create', {
     headers: { origin: CMS_URL },
-    data: { name: 'Hearth Café', slug: `hearth-${Date.now()}` },
+    data: { name: 'Harbour Café', slug: `harbour-${Date.now()}` },
   });
   expect(second.status()).toBe(200);
   await setup.close();
@@ -103,9 +109,9 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   await shots(page, '30-connect-agent');
 
   // Publishing on: the warning names the org.
-  await page.getByLabel('Organisation', { exact: true }).selectOption({ label: 'Northside Market' });
+  await page.getByLabel('Organisation', { exact: true }).selectOption({ label: 'Quayside Market' });
   await page.getByRole('checkbox', { name: /Publish to live screens/ }).check();
-  await expect(page.getByRole('status')).toContainText('Test agent will be able to change what every screen in Northside Market shows without asking.');
+  await expect(page.getByRole('status')).toContainText('Test agent will be able to change what every screen in Quayside Market shows without asking.');
   await shots(page, '30-connect-agent-publish');
   await page.setViewportSize({ width: 390, height: 844 });
   await shots(page, '30-connect-agent-phone');
@@ -142,7 +148,10 @@ test('an editor in an org where only owners publish is not offered publishing', 
   await signInAs(owner, ownerEmail, ADDRESS.owner);
   await createOrg(owner, 'Owners Publish');
   await tool(owner, 'update_org_settings', { editorsPublish: false });
-  const invited = await owner.request.post('/api/auth/organization/invite-member', { headers: { origin: CMS_URL }, data: { email: editorEmail, role: 'editor' } });
+  const invited = await owner.request.post('/api/auth/organization/invite-member', {
+    headers: { origin: CMS_URL },
+    data: { email: editorEmail, role: 'editor' },
+  });
   expect(invited.status(), await invited.text()).toBe(200);
   const { id: invitationId } = (await invited.json()) as { id: string };
   await owner.close();
