@@ -12,7 +12,8 @@ export default defineConfig({
   globalSetup: './e2e/global-setup.ts',
   // A spec's tests run in order, in one worker; specs run side by side. Three workers take the
   // run from 13.7 to 5.6 min on a laptop. CI's runner has 2 cores, which the API, the CMS and one
-  // browser already fill: 2 or 3 workers there saved under 10% and timed tests out (#249).
+  // browser already keep 67% busy: 2 or 3 workers there saved 10-30% but failed 7 runs of 8 on
+  // timeouts and fades that never settled (#249, docs/ci.md).
   fullyParallel: false,
   workers: process.env.CI ? 1 : 3,
   timeout: 60_000,
