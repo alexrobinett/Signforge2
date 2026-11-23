@@ -13,6 +13,7 @@ import { connectUi, createUiSlice, type UiSlice } from './ui';
 import { createAssetsSlice, type AssetsSlice } from './assets';
 import { createAuditSlice, type AuditSlice } from './audit';
 import { createBrandKitsSlice, type BrandKitsSlice } from './brand-kits';
+import { createConnectSlice, type ConnectSlice } from './connect';
 import { createGroupsSlice, type GroupsSlice } from './groups';
 import { createIntegrationsSlice, type IntegrationsSlice } from './integrations';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
@@ -42,7 +43,8 @@ export type AppState = UiSlice &
   PublishingSlice &
   ScheduleSlice &
   TargetPickerSlice &
-  GroupsSlice;
+  GroupsSlice &
+  ConnectSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -74,6 +76,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createScheduleSlice(set, get, deps),
     ...createTargetPickerSlice(set, get, deps),
     ...createGroupsSlice(set, get, deps),
+    ...createConnectSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);
