@@ -5,7 +5,7 @@
  * past MAX_CONTAINERS (3 here, test/wrangler-dev.ts) a new org is refused to retry. Run with
  * `pnpm test:container` (Docker); it prints the check's cost per push.
  */
-import { buildTemplate } from '@signforge/cli/template';
+import { buildTemplate } from '@signforge/template-build';
 import { parseTemplateRuntimeReport, type TemplateManifest, type TemplateRuntimeReport } from '@signforge/contract';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
