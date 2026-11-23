@@ -811,7 +811,7 @@ test('an owner saves an Anthropic key, tests it against the stub, chooses models
 
 test('an owner saves an OpenAI-compatible endpoint, its address checked, tests it against the stub and sees what it supports (#262)', async ({ page }) => {
   await signInAs(page, `e2e-settings-endpoint-${Date.now()}@example.com`, '192.0.2.152');
-  await createOrg(page, 'Lantern Lane Grocers');
+  await createOrg(page, 'Lantern Lane Grocers', '192.0.2.152');
   await page.goto('/settings/ai');
   await hydrated(page);
   await page.getByRole('radio', { name: 'OpenAI-compatible endpoint' }).check();
