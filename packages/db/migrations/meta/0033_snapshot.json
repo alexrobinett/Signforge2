@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "85fda9e5-7845-45c0-a5a5-59d70cb67c51",
+  "id": "e07e18e7-4b96-4a8e-afaa-266af24c9719",
   "prevId": "66284f6b-6305-451a-a8c9-874576851dde",
   "tables": {
     "account": {
@@ -112,131 +112,6 @@
           "tableFrom": "account",
           "tableTo": "user",
           "columnsFrom": ["userId"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "agent_grants": {
-      "name": "agent_grants",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "org_id": {
-          "name": "org_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "client_name": {
-          "name": "client_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "scopes_json": {
-          "name": "scopes_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "last_used_at": {
-          "name": "last_used_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "revoked_by": {
-          "name": "revoked_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "row_version": {
-          "name": "row_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        }
-      },
-      "indexes": {
-        "agent_grants_org_id_uq": {
-          "name": "agent_grants_org_id_uq",
-          "columns": ["org_id", "id"],
-          "isUnique": true
-        },
-        "agent_grants_org_user_idx": {
-          "name": "agent_grants_org_user_idx",
-          "columns": ["org_id", "user_id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "agent_grants_org_id_organization_id_fk": {
-          "name": "agent_grants_org_id_organization_id_fk",
-          "tableFrom": "agent_grants",
-          "tableTo": "organization",
-          "columnsFrom": ["org_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "agent_grants_user_id_user_id_fk": {
-          "name": "agent_grants_user_id_user_id_fk",
-          "tableFrom": "agent_grants",
-          "tableTo": "user",
-          "columnsFrom": ["user_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -2038,1001 +1913,114 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "oauthAccessToken": {
-      "name": "oauthAccessToken",
+    "org_ai_providers": {
+      "name": "org_ai_providers",
       "columns": {
-        "id": {
-          "name": "id",
+        "org_id": {
+          "name": "org_id",
           "type": "text",
           "primaryKey": true,
           "notNull": true,
           "autoincrement": false
         },
-        "token": {
-          "name": "token",
+        "provider": {
+          "name": "provider",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "clientId": {
-          "name": "clientId",
+        "key_sealed": {
+          "name": "key_sealed",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "sessionId": {
-          "name": "sessionId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "userId": {
-          "name": "userId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "referenceId": {
-          "name": "referenceId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "authorizationCodeId": {
-          "name": "authorizationCodeId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "resources": {
-          "name": "resources",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "requestedUserInfoClaims": {
-          "name": "requestedUserInfoClaims",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "refreshId": {
-          "name": "refreshId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revoked": {
-          "name": "revoked",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "confirmation": {
-          "name": "confirmation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "scopes": {
-          "name": "scopes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "oauthAccessToken_token_unique": {
-          "name": "oauthAccessToken_token_unique",
-          "columns": ["token"],
-          "isUnique": true
-        },
-        "oauthAccessToken_clientId_idx": {
-          "name": "oauthAccessToken_clientId_idx",
-          "columns": ["clientId"],
-          "isUnique": false
-        },
-        "oauthAccessToken_sessionId_idx": {
-          "name": "oauthAccessToken_sessionId_idx",
-          "columns": ["sessionId"],
-          "isUnique": false
-        },
-        "oauthAccessToken_userId_idx": {
-          "name": "oauthAccessToken_userId_idx",
-          "columns": ["userId"],
-          "isUnique": false
-        },
-        "oauthAccessToken_authorizationCodeId_idx": {
-          "name": "oauthAccessToken_authorizationCodeId_idx",
-          "columns": ["authorizationCodeId"],
-          "isUnique": false
-        },
-        "oauthAccessToken_refreshId_idx": {
-          "name": "oauthAccessToken_refreshId_idx",
-          "columns": ["refreshId"],
-          "isUnique": false
-        },
-        "oauthAccessToken_referenceId_idx": {
-          "name": "oauthAccessToken_referenceId_idx",
-          "columns": ["referenceId"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "oauthAccessToken_clientId_oauthClient_clientId_fk": {
-          "name": "oauthAccessToken_clientId_oauthClient_clientId_fk",
-          "tableFrom": "oauthAccessToken",
-          "tableTo": "oauthClient",
-          "columnsFrom": ["clientId"],
-          "columnsTo": ["clientId"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "oauthAccessToken_sessionId_session_id_fk": {
-          "name": "oauthAccessToken_sessionId_session_id_fk",
-          "tableFrom": "oauthAccessToken",
-          "tableTo": "session",
-          "columnsFrom": ["sessionId"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "oauthAccessToken_userId_user_id_fk": {
-          "name": "oauthAccessToken_userId_user_id_fk",
-          "tableFrom": "oauthAccessToken",
-          "tableTo": "user",
-          "columnsFrom": ["userId"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "oauthAccessToken_refreshId_oauthRefreshToken_id_fk": {
-          "name": "oauthAccessToken_refreshId_oauthRefreshToken_id_fk",
-          "tableFrom": "oauthAccessToken",
-          "tableTo": "oauthRefreshToken",
-          "columnsFrom": ["refreshId"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "oauthClient": {
-      "name": "oauthClient",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "clientId": {
-          "name": "clientId",
+        "key_last4": {
+          "name": "key_last4",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "clientSecret": {
-          "name": "clientSecret",
+        "key_saved_by": {
+          "name": "key_saved_by",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "clientDiscoveryId": {
-          "name": "clientDiscoveryId",
-          "type": "text",
+        "key_saved_at": {
+          "name": "key_saved_at",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "disabled": {
-          "name": "disabled",
+        "verified_at": {
+          "name": "verified_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "skipConsent": {
-          "name": "skipConsent",
+        "fast_model": {
+          "name": "fast_model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "capable_model": {
+          "name": "capable_model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "daily_turn_ceiling": {
+          "name": "daily_turn_ceiling",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "enableEndSession": {
-          "name": "enableEndSession",
+        "row_version": {
+          "name": "row_version",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
         },
-        "subjectType": {
-          "name": "subjectType",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "scopes": {
-          "name": "scopes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "clientCredentialsScopes": {
-          "name": "clientCredentialsScopes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "userId": {
-          "name": "userId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "uri": {
-          "name": "uri",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "icon": {
-          "name": "icon",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "contacts": {
-          "name": "contacts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "tos": {
-          "name": "tos",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "policy": {
-          "name": "policy",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "softwareId": {
-          "name": "softwareId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "softwareVersion": {
-          "name": "softwareVersion",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "softwareStatement": {
-          "name": "softwareStatement",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "redirectUris": {
-          "name": "redirectUris",
-          "type": "text",
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "postLogoutRedirectUris": {
-          "name": "postLogoutRedirectUris",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "backchannelLogoutUri": {
-          "name": "backchannelLogoutUri",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "backchannelLogoutSessionRequired": {
-          "name": "backchannelLogoutSessionRequired",
+        "updated_at": {
+          "name": "updated_at",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "tokenEndpointAuthMethod": {
-          "name": "tokenEndpointAuthMethod",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "applicationType": {
-          "name": "applicationType",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "jwks": {
-          "name": "jwks",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "jwksUri": {
-          "name": "jwksUri",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "grantTypes": {
-          "name": "grantTypes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "responseTypes": {
-          "name": "responseTypes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "requirePKCE": {
-          "name": "requirePKCE",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dpopBoundAccessTokens": {
-          "name": "dpopBoundAccessTokens",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "referenceId": {
-          "name": "referenceId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "oauthClient_clientId_unique": {
-          "name": "oauthClient_clientId_unique",
-          "columns": ["clientId"],
-          "isUnique": true
-        },
-        "oauthClient_userId_idx": {
-          "name": "oauthClient_userId_idx",
-          "columns": ["userId"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "oauthClient_userId_user_id_fk": {
-          "name": "oauthClient_userId_user_id_fk",
-          "tableFrom": "oauthClient",
-          "tableTo": "user",
-          "columnsFrom": ["userId"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "oauthClientAssertion": {
-      "name": "oauthClientAssertion",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "date",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "oauthClientResource": {
-      "name": "oauthClientResource",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "clientId": {
-          "name": "clientId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "resourceId": {
-          "name": "resourceId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "oauthClientResource_clientId_idx": {
-          "name": "oauthClientResource_clientId_idx",
-          "columns": ["clientId"],
-          "isUnique": false
-        },
-        "oauthClientResource_resourceId_idx": {
-          "name": "oauthClientResource_resourceId_idx",
-          "columns": ["resourceId"],
-          "isUnique": false
-        },
-        "oauthClientResource_clientId_resourceId_uidx": {
-          "name": "oauthClientResource_clientId_resourceId_uidx",
-          "columns": ["clientId", "resourceId"],
-          "isUnique": true
-        }
-      },
       "foreignKeys": {
-        "oauthClientResource_clientId_oauthClient_clientId_fk": {
-          "name": "oauthClientResource_clientId_oauthClient_clientId_fk",
-          "tableFrom": "oauthClientResource",
-          "tableTo": "oauthClient",
-          "columnsFrom": ["clientId"],
-          "columnsTo": ["clientId"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "oauthClientResource_resourceId_oauthResource_identifier_fk": {
-          "name": "oauthClientResource_resourceId_oauthResource_identifier_fk",
-          "tableFrom": "oauthClientResource",
-          "tableTo": "oauthResource",
-          "columnsFrom": ["resourceId"],
-          "columnsTo": ["identifier"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "oauthConsent": {
-      "name": "oauthConsent",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "clientId": {
-          "name": "clientId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "userId": {
-          "name": "userId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "referenceId": {
-          "name": "referenceId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "resources": {
-          "name": "resources",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "requestedUserInfoClaims": {
-          "name": "requestedUserInfoClaims",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "scopes": {
-          "name": "scopes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "oauthConsent_clientId_idx": {
-          "name": "oauthConsent_clientId_idx",
-          "columns": ["clientId"],
-          "isUnique": false
-        },
-        "oauthConsent_userId_idx": {
-          "name": "oauthConsent_userId_idx",
-          "columns": ["userId"],
-          "isUnique": false
-        },
-        "oauthConsent_referenceId_idx": {
-          "name": "oauthConsent_referenceId_idx",
-          "columns": ["referenceId"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "oauthConsent_clientId_oauthClient_clientId_fk": {
-          "name": "oauthConsent_clientId_oauthClient_clientId_fk",
-          "tableFrom": "oauthConsent",
-          "tableTo": "oauthClient",
-          "columnsFrom": ["clientId"],
-          "columnsTo": ["clientId"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "oauthConsent_userId_user_id_fk": {
-          "name": "oauthConsent_userId_user_id_fk",
-          "tableFrom": "oauthConsent",
-          "tableTo": "user",
-          "columnsFrom": ["userId"],
+        "org_ai_providers_org_id_organization_id_fk": {
+          "name": "org_ai_providers_org_id_organization_id_fk",
+          "tableFrom": "org_ai_providers",
+          "tableTo": "organization",
+          "columnsFrom": ["org_id"],
           "columnsTo": ["id"],
-          "onDelete": "cascade",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "oauthRefreshToken": {
-      "name": "oauthRefreshToken",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "token": {
-          "name": "token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "clientId": {
-          "name": "clientId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "sessionId": {
-          "name": "sessionId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "userId": {
-          "name": "userId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "referenceId": {
-          "name": "referenceId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "authorizationCodeId": {
-          "name": "authorizationCodeId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "resources": {
-          "name": "resources",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "requestedUserInfoClaims": {
-          "name": "requestedUserInfoClaims",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revoked": {
-          "name": "revoked",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "rotatedAt": {
-          "name": "rotatedAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "rotationReplayResponse": {
-          "name": "rotationReplayResponse",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "rotationReplayExpiresAt": {
-          "name": "rotationReplayExpiresAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "authTime": {
-          "name": "authTime",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "confirmation": {
-          "name": "confirmation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "scopes": {
-          "name": "scopes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "oauthRefreshToken_token_unique": {
-          "name": "oauthRefreshToken_token_unique",
-          "columns": ["token"],
-          "isUnique": true
-        },
-        "oauthRefreshToken_clientId_idx": {
-          "name": "oauthRefreshToken_clientId_idx",
-          "columns": ["clientId"],
-          "isUnique": false
-        },
-        "oauthRefreshToken_sessionId_idx": {
-          "name": "oauthRefreshToken_sessionId_idx",
-          "columns": ["sessionId"],
-          "isUnique": false
-        },
-        "oauthRefreshToken_userId_idx": {
-          "name": "oauthRefreshToken_userId_idx",
-          "columns": ["userId"],
-          "isUnique": false
-        },
-        "oauthRefreshToken_authorizationCodeId_idx": {
-          "name": "oauthRefreshToken_authorizationCodeId_idx",
-          "columns": ["authorizationCodeId"],
-          "isUnique": false
-        },
-        "oauthRefreshToken_referenceId_idx": {
-          "name": "oauthRefreshToken_referenceId_idx",
-          "columns": ["referenceId"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "oauthRefreshToken_clientId_oauthClient_clientId_fk": {
-          "name": "oauthRefreshToken_clientId_oauthClient_clientId_fk",
-          "tableFrom": "oauthRefreshToken",
-          "tableTo": "oauthClient",
-          "columnsFrom": ["clientId"],
-          "columnsTo": ["clientId"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "oauthRefreshToken_sessionId_session_id_fk": {
-          "name": "oauthRefreshToken_sessionId_session_id_fk",
-          "tableFrom": "oauthRefreshToken",
-          "tableTo": "session",
-          "columnsFrom": ["sessionId"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "oauthRefreshToken_userId_user_id_fk": {
-          "name": "oauthRefreshToken_userId_user_id_fk",
-          "tableFrom": "oauthRefreshToken",
-          "tableTo": "user",
-          "columnsFrom": ["userId"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "oauthResource": {
-      "name": "oauthResource",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "identifier": {
-          "name": "identifier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "accessTokenTtl": {
-          "name": "accessTokenTtl",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "refreshTokenTtl": {
-          "name": "refreshTokenTtl",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "signingAlgorithm": {
-          "name": "signingAlgorithm",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "signingKeyId": {
-          "name": "signingKeyId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "allowedScopes": {
-          "name": "allowedScopes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "customClaims": {
-          "name": "customClaims",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "dpopBoundAccessTokensRequired": {
-          "name": "dpopBoundAccessTokensRequired",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "disabled": {
-          "name": "disabled",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "policyVersion": {
-          "name": "policyVersion",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "oauthResource_identifier_unique": {
-          "name": "oauthResource_identifier_unique",
-          "columns": ["identifier"],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

@@ -844,6 +844,34 @@ export const alertChannels = sqliteTable(
 );
 
 /**
+ * The model an org's built-in agent uses with its own key (#261, docs/proposals/cms-agent.md): one
+ * row per org, absent while the org uses SignForge's demo model. The key is sealed by the API
+ * (`ai-key:<org>/<provider>`) and never read back out but to call the provider; `key_last4` is all a
+ * person is shown. Model ids are the exact ones the owner chose from the provider's list.
+ */
+export const orgAiProviders = sqliteTable('org_ai_providers', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => organization.id),
+  provider: text('provider', { enum: ['anthropic'] }).notNull(),
+  keySealed: text('key_sealed').notNull(),
+  keyLast4: text('key_last4').notNull(),
+  /** The user who saved the key, and when. */
+  keySavedBy: text('key_saved_by').notNull(),
+  keySavedAt: integer('key_saved_at').notNull(),
+  /** When a test last reached the provider with this key; null until one does, and again when the key is replaced. */
+  verifiedAt: integer('verified_at'),
+  /** For fills (fast) and the drawer (capable); null until chosen. */
+  fastModel: text('fast_model'),
+  capableModel: text('capable_model'),
+  /** Agent turns a day across the org, then it pauses until midnight in the org's time zone; null for no ceiling. */
+  dailyTurnCeiling: integer('daily_turn_ceiling'),
+  rowVersion: rowVersion(),
+  createdAt: created(),
+  updatedAt: updated(),
+});
+
+/**
  * One alert event on its way to one channel (#88), queued by the alert check or a test send and
  * sent by the delivery run (apps/api src/deliveries.ts), which retries with backoff until
  * `give_up_at`. Kept 7 days, as the delivery log (./retention.ts). `event_json` is the event as a

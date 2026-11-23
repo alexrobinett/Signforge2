@@ -52,4 +52,5 @@ export type OrgSettings = typeof s.orgSettings.$inferSelect;
 export type BrandKitRow = typeof s.brandKits.$inferSelect;
 export type BrandAssignment = typeof s.brandAssignments.$inferSelect;
 export type AlertChannelRow = typeof s.alertChannels.$inferSelect;
+export type AiProviderRow = typeof s.orgAiProviders.$inferSelect;
 export type AlertDeliveryRow = typeof s.alertDeliveries.$inferSelect;

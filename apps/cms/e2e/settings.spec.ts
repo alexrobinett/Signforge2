@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { axe, createOrg, createOrgFromAccountMenu, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool } from './helpers';
-import { API_LOG } from './servers';
+import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, API_LOG } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
 const OWNER_ADDRESS = '192.0.2.31';
@@ -220,6 +220,12 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(invitee.getByRole('combobox')).toHaveCount(0);
   await expect(invitee.getByRole('button', { name: 'Remove' })).toHaveCount(0);
   await expect(invitee.getByLabel('Editors can publish')).toBeDisabled();
+  // AI & agents (#261): read, with no key form, while the org uses the demo model.
+  await invitee.goto('/settings/ai');
+  await expect(invitee.getByRole('heading', { name: 'AI & agents' })).toBeVisible();
+  await expect(invitee.getByText('Only an owner can add a key.')).toBeVisible();
+  await expect(invitee.getByLabel('Anthropic API key')).toHaveCount(0);
+  await invitee.goto('/settings/members');
   await toTop(invitee.getByRole('region', { name: 'Who publishes' }));
   await axe(invitee);
   await shots(invitee, '49-settings-who-publishes-editor');
@@ -720,7 +726,7 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
   const context = await browser.newContext({ javaScriptEnabled: false });
   await context.addCookies(await page.context().cookies());
   const early = await context.newPage();
-  await early.route(/\/settings\/(notifications|members)$/, async (route) => {
+  await early.route(/\/settings\/(notifications|members|ai)$/, async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
     const response = await route.fetch();
     await route.fulfill({ response, body: (await response.text()).replaceAll('<fieldset disabled=""', '<fieldset') });
@@ -728,6 +734,7 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
   const forms = [
     { path: '/settings/notifications', field: 'Webhook URL', button: 'Add webhook', value: 'https://example.com/hooks/tok_SECRET136' },
     { path: '/settings/members', field: 'Emails, separated by commas', button: 'Send invites', value: 'sam-secret136@example.com' },
+    { path: '/settings/ai', field: 'Anthropic API key', button: 'Save key', value: 'sk-ant-SECRET136-0000000000000000' },
   ];
   for (const { path, field, button, value } of forms) {
     await early.goto(path);
@@ -752,4 +759,54 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
     expect(res.headers().location, path).toBe(path);
     expect(await res.text(), path).toBe('');
   }
+});
+
+test('an owner saves an Anthropic key, tests it against the stub, chooses models and a ceiling; the key never comes back (#261)', async ({ page }) => {
+  await signInAs(page, `e2e-settings-ai-${Date.now()}@example.com`, '192.0.2.151');
+  await createOrg(page, 'Quay Street Bakery');
+  await page.goto('/settings/ai');
+  await hydrated(page);
+  await expect(page.getByText('the agent uses SignForge’s demo model', { exact: false })).toBeVisible();
+  await axe(page);
+  await shots(page, '96-settings-ai-demo');
+
+  // A key the provider refuses is saved, and its test says why.
+  const key = page.getByLabel('Anthropic API key');
+  await key.fill('sk-ant-e2e-not-the-stub-key-0000000000-Zz99');
+  await page.getByRole('button', { name: 'Save key' }).click();
+  await expect(page.getByText('••••••••Zz99')).toBeVisible();
+  await expect(page.getByText('Not tested yet')).toBeVisible();
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Anthropic refused the key' })).toBeVisible();
+
+  // The right key: the test lists the models, which become the choices.
+  const replace = page.getByLabel('Replace the Anthropic API key');
+  await replace.fill(ANTHROPIC_STUB_KEY);
+  await page.getByRole('button', { name: 'Replace key' }).click();
+  await expect(page.getByText(`••••••••${ANTHROPIC_STUB_KEY.slice(-4)}`)).toBeVisible();
+  await expect(replace).toHaveValue('');
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByText(/^Connected, checked/)).toBeVisible();
+  await page.getByLabel('Fast model').selectOption(ANTHROPIC_STUB_MODELS[0]!);
+  await page.getByLabel('Capable model').selectOption(ANTHROPIC_STUB_MODELS[1]!);
+  await page.getByLabel('Daily ceiling for the whole organization').fill('300');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+  // Kept, and the key is in no page, read or audit row.
+  await page.reload();
+  await hydrated(page);
+  await expect(page.getByLabel('Fast model')).toHaveValue(ANTHROPIC_STUB_MODELS[0]!);
+  await expect(page.getByLabel('Daily ceiling for the whole organization')).toHaveValue('300');
+  expect(await page.content()).not.toContain(ANTHROPIC_STUB_KEY);
+  expect(JSON.stringify(await tool(page, 'get_ai_provider', {}))).not.toContain(ANTHROPIC_STUB_KEY);
+  expect(JSON.stringify(await tool(page, 'list_audit_log', {}))).not.toContain(ANTHROPIC_STUB_KEY);
+  await axe(page);
+  await shots(page, '97-settings-ai-key');
+
+  // Remove asks first, then the org is back on the demo model.
+  await page.getByRole('button', { name: 'Remove key' }).click();
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(page.getByText('the agent uses SignForge’s demo model', { exact: false })).toBeVisible();
+  expect(await tool(page, 'get_ai_provider', {})).toEqual({ provider: null });
 });

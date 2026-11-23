@@ -119,6 +119,11 @@ function withOwnIds(example: unknown, o: SeededOrg): unknown {
   return walk(example);
 }
 
+const savedKey = async (o: SeededOrg) =>
+  o.scope.commit(
+    (await o.scope.aiProvider.stage.put({ provider: 'anthropic', keySealed: 'sealed:key', keyLast4: 'abcd', keySavedBy: 'u', keySavedAt: 1 })).writes,
+  );
+
 /** Clear what would make a tool's example refuse before it writes. */
 const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   // Its example state, pending for the caller.
@@ -135,6 +140,9 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     await o.scope.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
   },
   renew_asset_upload: (o) => o.scope.assets.update(o.asset, { status: 'pending' }),
+  // A saved key to test, or to remove.
+  test_ai_provider: (o) => savedKey(o),
+  remove_ai_provider: (o) => savedKey(o),
   // Pending, both renditions, and an upload whose bytes do not hash to the claim: finalize rejects it.
   finalize_asset: async (o) => {
     await o.scope.assets.update(o.asset, { status: 'pending' });

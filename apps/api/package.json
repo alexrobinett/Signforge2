@@ -15,6 +15,7 @@
     "dev:screen": "wrangler d1 migrations apply DB --local --env dev >&2 && tsx scripts/dev-screen.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.6.0",
     "@better-auth/oauth-provider": "1.7.25",
     "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",

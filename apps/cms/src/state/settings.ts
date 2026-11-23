@@ -14,7 +14,7 @@ import type { AnyRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { authClient, authErrorMessage } from '~/lib/auth-client';
 import { orgOnScreen } from '~/lib/live';
-import type { AlertChannel, AlertDelivery, AlertKind, AlertRule, Member, OrgSettings } from '~/lib/settings';
+import { AI_TEST_PROBLEMS, type AlertChannel, type AlertDelivery, type AlertKind, type AlertRule, type Member, type OrgSettings } from '~/lib/settings';
 import type { DisplayHours } from '~/lib/screen-types';
 import { callTool, isStale, toolMessage } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
@@ -22,7 +22,7 @@ import type { SliceCreator } from './store';
 import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 /** A page whose actions run one at a time. Account and the invitation page belong to no org. */
-type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'account' | 'invitation';
+type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'ai' | 'account' | 'invitation';
 /** Where an action runs: its page, in the org it was started in (null for Account and the invitation page). */
 export interface SettingsScope {
   page: SettingsPage;
@@ -73,6 +73,17 @@ interface SettingsState {
    * and SignForge keeps it only sealed. Not kept anywhere else.
    */
   signingSecret: { orgId: string; secret: string } | null;
+  /** The models the org's key may use, from its last test: what the model choices offer. Not kept anywhere else. */
+  aiModels: { orgId: string; models: string[] } | null;
+  /** The org whose model key's Remove is waiting for its confirmation. */
+  removingAiKey: string | null;
+}
+
+/** The AI settings' model choices and daily ceiling, as the form sends them: '' for none. */
+interface AiChoices {
+  fastModel: string;
+  capableModel: string;
+  dailyTurnCeiling: string;
 }
 
 export interface SettingsSlice {
@@ -103,6 +114,14 @@ export interface SettingsSlice {
   /** Send a test alert now; email goes to the member asking. */
   testAlertChannel: (orgId: string, channel: AlertDelivery['channel']) => Promise<void>;
   retryAlertDelivery: (orgId: string, deliveryId: string) => Promise<void>;
+  /** Save the org's model key, sealed by the API and never shown again; `ifVersion` when replacing one. True once saved, so the form can clear. */
+  saveAiKey: (orgId: string, apiKey: string, ifVersion?: number) => Promise<boolean>;
+  /** Reach the provider with the saved key: the models it offers become the choices, or the page says why not. */
+  testAiProvider: (orgId: string) => Promise<void>;
+  saveAiChoices: (orgId: string, choices: AiChoices, ifVersion: number) => Promise<void>;
+  /** Opens or closes the key's removal confirmation, as `askToRemoveAlertChannel` does. */
+  askToRemoveAiKey: (orgId: string, open: boolean) => void;
+  removeAiKey: (orgId: string) => Promise<void>;
   /** After a stale save of `at`: reads the settings again, dropping that form's edits and error. */
   reloadSettings: (orgId: string | null, at: string) => Promise<void>;
   /** After a switch: the old org's edits and confirmations go. Its running actions finish, and change nothing here. */
@@ -246,12 +265,23 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
 
   const org = (page: SettingsPage, orgId: string): SettingsScope => ({ page, orgId });
   const notifications = (orgId: string) => org('notifications', orgId);
+  const ai = (orgId: string) => org('ai', orgId);
   const members = (orgId: string) => org('members', orgId);
   const account: SettingsScope = { page: 'account', orgId: null };
   const invitation: SettingsScope = { page: 'invitation', orgId: null };
 
   return {
-    settings: { pending: {}, errors: {}, drafts: {}, roleChange: null, removing: null, removingChannel: null, signingSecret: null },
+    settings: {
+      pending: {},
+      errors: {},
+      drafts: {},
+      roleChange: null,
+      removing: null,
+      removingChannel: null,
+      signingSecret: null,
+      aiModels: null,
+      removingAiKey: null,
+    },
 
     editSettings: (orgId, form, version, change) => drafts.edit(form, { orgId, record: 'settings', version, edit: {} }, (e) => ({ ...e, ...change })),
 
@@ -320,6 +350,53 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         'Sending it again',
       )),
 
+    saveAiKey: (orgId, apiKey, ifVersion) =>
+      run(
+        ai(orgId),
+        'key',
+        () => callTool('save_ai_provider', { provider: 'anthropic', apiKey: apiKey.trim(), ifVersion }),
+        'Key saved. Test it to choose the models.',
+      ),
+    testAiProvider: async (orgId) =>
+      void (await run(
+        ai(orgId),
+        'test',
+        async () => {
+          const result = await callTool('test_ai_provider', {});
+          if (!result.ok) {
+            // A refused key lost its verified mark: the page reads the provider again before it says why.
+            if (onScreen(router, ai(orgId))) await router.invalidate({ sync: true });
+            throw new Error(AI_TEST_PROBLEMS[result.problem ?? 'unreachable']);
+          }
+          patch((s) => ({ ...s, aiModels: { orgId, models: result.models } }));
+        },
+        'Connected',
+      )),
+    saveAiChoices: async (orgId, { fastModel, capableModel, dailyTurnCeiling }, ifVersion) =>
+      void (await run(
+        ai(orgId),
+        'choices',
+        () =>
+          callTool('save_ai_provider', {
+            provider: 'anthropic',
+            fastModel: fastModel || null,
+            capableModel: capableModel || null,
+            dailyTurnCeiling: dailyTurnCeiling.trim() ? Number(dailyTurnCeiling) : null,
+            ifVersion,
+          }),
+        'Saved',
+      )),
+    askToRemoveAiKey: (orgId, open) =>
+      patch((s) => {
+        const running = runningIn(s, ai(orgId));
+        if (open ? running !== undefined : running === 'remove') return s;
+        return { ...s, removingAiKey: open ? orgId : null, errors: withoutKey(s.errors, 'remove') };
+      }),
+    async removeAiKey(orgId) {
+      const removed = await run(ai(orgId), 'remove', () => callTool('remove_ai_provider', {}), 'Key removed. The agent uses the demo model.');
+      if (removed) patch((s) => ({ ...s, removingAiKey: s.removingAiKey === orgId ? null : s.removingAiKey, aiModels: null }));
+    },
+
     async reloadSettings(orgId, at) {
       await router.invalidate({ sync: true });
       // Only the refused form's edits go: another page's are kept, and its own save says if they conflict.
@@ -329,7 +406,7 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
     },
     forgetOrgSettings() {
       drafts.forget();
-      patch((s) => ({ ...s, removing: null, removingChannel: null, signingSecret: null }));
+      patch((s) => ({ ...s, removing: null, removingChannel: null, signingSecret: null, aiModels: null, removingAiKey: null }));
     },
 
     inviteMembers(orgId, emails, role) {

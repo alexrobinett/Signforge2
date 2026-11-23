@@ -389,3 +389,48 @@ describe("the org's name, which the settings' version does not cover (re-check o
     expect(lastCall()).toMatchObject({ name: 'update_org_settings', input: { timezone: 'Europe/London', ifVersion: 2 } });
   });
 });
+
+describe('AI & agents (#261)', () => {
+  const provider = {
+    provider: 'anthropic',
+    keyLast4: '7Q2c',
+    keySavedBy: 'u',
+    keySavedAt: 1,
+    verifiedAt: 2,
+    fastModel: null,
+    capableModel: null,
+    dailyTurnCeiling: null,
+    version: 2,
+  };
+
+  it('a test that reaches the provider makes its models the choices, in that org only', async () => {
+    const store = settingsStore();
+    replies.push({ status: 200, body: { ok: true, models: ['m-fast', 'm-capable'], problem: null, provider } });
+    await store.getState().testAiProvider(A);
+    expect(lastCall()).toEqual({ name: 'test_ai_provider', input: {} });
+    expect(store.getState().settings.aiModels).toEqual({ orgId: A, models: ['m-fast', 'm-capable'] });
+    store.getState().forgetOrgSettings();
+    expect(store.getState().settings.aiModels).toBeNull();
+  });
+
+  it('a test the provider refuses says why in words, and lists nothing', async () => {
+    const store = settingsStore();
+    replies.push({ status: 200, body: { ok: false, models: [], problem: 'refused', provider } });
+    await store.getState().testAiProvider(A);
+    expect(errorOf(store.getState().settings, 'test', A)?.text).toMatch(/^Anthropic refused the key/);
+    expect(store.getState().settings.aiModels).toBeNull();
+    // The key lost its verified mark: the page reads it again, so "Connected" does not stay beside the refusal (re-check of #280).
+    expect(router.invalidate).toHaveBeenCalledWith({ sync: true });
+  });
+
+  it('saves the choices as the tool takes them: empty is none, the ceiling a number, with the version read', async () => {
+    const store = settingsStore();
+    await store.getState().saveAiChoices(A, { fastModel: 'm-fast', capableModel: '', dailyTurnCeiling: ' 300 ' }, 2);
+    expect(lastCall()).toEqual({
+      name: 'save_ai_provider',
+      input: { provider: 'anthropic', fastModel: 'm-fast', capableModel: null, dailyTurnCeiling: 300, ifVersion: 2 },
+    });
+    await store.getState().saveAiChoices(A, { fastModel: '', capableModel: '', dailyTurnCeiling: '' }, 3);
+    expect(lastCall()?.input).toMatchObject({ fastModel: null, dailyTurnCeiling: null });
+  });
+});

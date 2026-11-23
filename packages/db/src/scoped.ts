@@ -45,6 +45,9 @@ type AlertChannelKind = AlertChannel['kind'];
 /** What a channel's owner sets; the rest is the repository's. */
 type AlertChannelValues = Omit<AlertChannel, 'orgId' | 'kind' | 'rowVersion' | 'createdAt' | 'updatedAt'>;
 type AlertDelivery = typeof s.alertDeliveries.$inferSelect;
+type AiProvider = typeof s.orgAiProviders.$inferSelect;
+/** What an owner sets on the org's AI provider; the rest is the repository's. */
+type AiProviderValues = Partial<Omit<AiProvider, 'orgId' | 'rowVersion' | 'createdAt' | 'updatedAt'>>;
 /** An alert to queue: the event as a webhook receives it, the channels it goes to, and when to stop retrying it. */
 export interface QueuedAlert {
   event: { id: string; type: string; json: string };
@@ -487,8 +490,9 @@ export function scoped(d1: D1Database, orgId: string) {
   const sl = s.screenLabels;
   const os = s.orgSettings;
   const ac = s.alertChannels;
+  const ai = s.orgAiProviders;
   /**
-   * Stage setting `values` on a single-row versioned record (the org's settings, an alert channel),
+   * Stage setting `values` on a single-row versioned record (the org's settings, an alert channel, its AI provider),
    * the row its `key` names (the scope's org, and a channel's kind): made from `fresh` if absent,
    * and its version moved on; a record with no row is at version `absent`. The key comes from
    * `key` alone: `values` never sets it, nor any field `strip` guards, so no write moves the row to
@@ -496,7 +500,7 @@ export function scoped(d1: D1Database, orgId: string) {
    * id `id`) unless it is still that version: now, if it is already another, and again by a guard
    * inside the batch.
    */
-  const upsertVersioned = async <T extends typeof os | typeof ac>(
+  const upsertVersioned = async <T extends typeof os | typeof ac | typeof ai>(
     table: T,
     r: {
       id: string;
@@ -1289,6 +1293,47 @@ export function scoped(d1: D1Database, orgId: string) {
         put: (kind: AlertChannelKind, values: AlertChannelValues, ifVersion?: number): Promise<Staged<AlertChannel>> =>
           upsertVersioned(ac, { id: `${kind} channel`, key: { orgId, kind }, absent: 0, fresh: (at) => ({ createdAt: at }) }, values, ifVersion),
         remove: (kind: AlertChannelKind): Staged => staged(undefined, db.delete(ac).where(and(eq(ac.orgId, orgId), eq(ac.kind, kind)))),
+      },
+    },
+
+    /**
+     * The model the org's agent uses with its own key (#261): one row, absent while it uses the
+     * demo model. The key arrives sealed; nothing here opens it.
+     */
+    aiProvider: {
+      get: () => db.select().from(ai).where(eq(ai.orgId, orgId)).get(),
+      stage: {
+        /**
+         * Set the fields given, making the row if absent (a new one needs the provider and its key), and
+         * move its version on; an absent row is at 0. With `ifVersion`, refused (`StaleVersionError`)
+         * unless it is still that version, checked now and again in the batch, as `stage.update` is.
+         * With `ifSealed`, refused the same way unless it still holds that sealed key: a row removed
+         * and saved again starts at version 1 again, so a version alone can name another key.
+         */
+        put: async (values: AiProviderValues, ifVersion?: number, ifSealed?: string): Promise<Staged<AiProvider>> => {
+          const upsert = await upsertVersioned(
+            ai,
+            {
+              id: 'AI provider',
+              key: { orgId },
+              absent: 0,
+              fresh: (at) => ({ verifiedAt: null, fastModel: null, capableModel: null, dailyTurnCeiling: null, createdAt: at }),
+            },
+            values,
+            ifVersion,
+          );
+          if (ifSealed === undefined) return upsert;
+          const holding = async () => {
+            const now = await db.select({ keySealed: ai.keySealed, rowVersion: ai.rowVersion }).from(ai).where(eq(ai.orgId, orgId)).get();
+            return now?.keySealed === ifSealed ? undefined : (now?.rowVersion ?? 0);
+          };
+          const moved = await holding();
+          if (moved !== undefined) throw new StaleVersionError('AI provider', moved);
+          const holds = sql`(SELECT ${ai.keySealed} FROM ${ai} WHERE ${ai.orgId} = ${orgId}) = ${ifSealed}`;
+          return { row: upsert.row, writes: [staleGuard(db, orgId, 'AI provider', upsert.row.rowVersion - 1, holds, holding), ...upsert.writes] };
+        },
+        /** Delete the row, and the sealed key with it. */
+        remove: (): Staged => staged(undefined, db.delete(ai).where(eq(ai.orgId, orgId))),
       },
     },
 
