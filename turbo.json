@@ -1,18 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
   // A change to any of these reruns every task and, on a pull request, marks every package affected
-  // (docs/ci.md). Tests read fonts/ and examples/, which belong to no package, and the stress media
-  // that scripts/stress-media.sh puts in examples/; --affected goes by the package graph, so a file
+  // (docs/ci.md). Tests read fonts/, which belongs to no package, and the stress media that
+  // scripts/stress-media.sh puts in examples/; --affected goes by the package graph, so a file
   // outside every package counts only when it is listed here.
-  "globalDependencies": [
-    "tsconfig.base.json",
-    "biome.jsonc",
-    "pnpm-workspace.yaml",
-    ".github/workflows/ci.yml",
-    "fonts/**",
-    "examples/**",
-    "scripts/stress-media.sh"
-  ],
+  "globalDependencies": ["tsconfig.base.json", "biome.jsonc", "pnpm-workspace.yaml", ".github/workflows/ci.yml", "fonts/**", "scripts/stress-media.sh"],
   "boundaries": {
     "tags": {
       "contract": {
