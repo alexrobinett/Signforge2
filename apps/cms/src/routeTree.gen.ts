@@ -26,6 +26,7 @@ import { Route as AppPlaylistsPlaylistIdRouteImport } from './routes/_app/playli
 import { Route as AppScreensIndexRouteImport } from './routes/_app/screens/index'
 import { Route as AppScreensScreenIdRouteImport } from './routes/_app/screens/$screenId'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppSettingsAiRouteImport } from './routes/_app/settings/ai'
 import { Route as AppSettingsGeneralRouteImport } from './routes/_app/settings/general'
 import { Route as AppSettingsMembersRouteImport } from './routes/_app/settings/members'
 import { Route as AppSettingsNotificationsRouteImport } from './routes/_app/settings/notifications'
@@ -121,6 +122,11 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsAiRoute = AppSettingsAiRouteImport.update({
+  id: '/ai',
+  path: '/ai',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsGeneralRoute = AppSettingsGeneralRouteImport.update({
   id: '/general',
   path: '/general',
@@ -184,6 +190,7 @@ export interface FileRoutesByFullPath {
   '/api/$': typeof ApiSplatRoute
   '/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/settings/ai': typeof AppSettingsAiRoute
   '/settings/general': typeof AppSettingsGeneralRoute
   '/settings/members': typeof AppSettingsMembersRoute
   '/settings/notifications': typeof AppSettingsNotificationsRoute
@@ -210,6 +217,7 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/settings/ai': typeof AppSettingsAiRoute
   '/settings/general': typeof AppSettingsGeneralRoute
   '/settings/members': typeof AppSettingsMembersRoute
   '/settings/notifications': typeof AppSettingsNotificationsRoute
@@ -239,6 +247,7 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
   '/_app/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/_app/settings/ai': typeof AppSettingsAiRoute
   '/_app/settings/general': typeof AppSettingsGeneralRoute
   '/_app/settings/members': typeof AppSettingsMembersRoute
   '/_app/settings/notifications': typeof AppSettingsNotificationsRoute
@@ -268,6 +277,7 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/playlists/$playlistId'
     | '/screens/$screenId'
+    | '/settings/ai'
     | '/settings/general'
     | '/settings/members'
     | '/settings/notifications'
@@ -294,6 +304,7 @@ export interface FileRouteTypes {
     | '/'
     | '/playlists/$playlistId'
     | '/screens/$screenId'
+    | '/settings/ai'
     | '/settings/general'
     | '/settings/members'
     | '/settings/notifications'
@@ -322,6 +333,7 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/playlists/$playlistId'
     | '/_app/screens/$screenId'
+    | '/_app/settings/ai'
     | '/_app/settings/general'
     | '/_app/settings/members'
     | '/_app/settings/notifications'
@@ -465,6 +477,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/ai': {
+      id: '/_app/settings/ai'
+      path: '/ai'
+      fullPath: '/settings/ai'
+      preLoaderRoute: typeof AppSettingsAiRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/settings/general': {
       id: '/_app/settings/general'
       path: '/general'
@@ -532,6 +551,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppSettingsRouteChildren {
+  AppSettingsAiRoute: typeof AppSettingsAiRoute
   AppSettingsGeneralRoute: typeof AppSettingsGeneralRoute
   AppSettingsMembersRoute: typeof AppSettingsMembersRoute
   AppSettingsNotificationsRoute: typeof AppSettingsNotificationsRoute
@@ -541,6 +561,7 @@ interface AppSettingsRouteChildren {
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsAiRoute: AppSettingsAiRoute,
   AppSettingsGeneralRoute: AppSettingsGeneralRoute,
   AppSettingsMembersRoute: AppSettingsMembersRoute,
   AppSettingsNotificationsRoute: AppSettingsNotificationsRoute,
