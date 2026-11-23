@@ -114,7 +114,7 @@ A template that offers the four looks of the template set (#189), Pop, Poster, N
 
 1. Depend on `@signforge/template-looks` (`workspace:*`) and put `@import '@signforge/template-looks/looks.css';` first in `style.css`. `sf build` inlines it and its fonts like the rest of the template's CSS. An `@import` is refused only if one is left in the built bundle, where it would load at run time.
 2. Declare the field: `"look": { "type": "select", "label": "Look", "options": ["pop", "poster", "night", "corporate"], "default": "pop" }` (`LOOKS`).
-3. In `prepare`, first `await applyLook(ctx)` (from `@signforge/template-looks`). It sets `data-look` on the root, the toggles (below), the text colours (below), and waits for the look's fonts, so text measured in `prepare` (a crawl, `fitWords`) is in the look's own type.
+3. In `prepare`, first `await applyLook(ctx)` (from `@signforge/template-looks`). It sets `data-look` on the root, the toggles (below), the text colours (below), and waits for the look's fonts, so text measured in `prepare` (a crawl, `fitWords`) is in the look's own type. If new data arrives while it waits, the SDK restores the document and inits again, and `applyLook` rejects in the old prepare, so nothing after it touches the new document: a template needs no guard of its own.
 
 `packages/template-looks/looks-test` is a template that uses every part of the kit, for the tests and the Pi. It is not in `templates/`, so it is never seeded. `templates/announcement` is the first shipped template on the kit. Two things it does that the next ones will want:
 
