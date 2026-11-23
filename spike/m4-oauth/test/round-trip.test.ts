@@ -308,17 +308,19 @@ describe('the MCP SDK client, end to end', () => {
     expect(back.searchParams.get('error')).toBe('access_denied');
   });
 
-  it('signing out of the CMS: do the agent tokens keep working?', async () => {
+  it('signing out of the CMS revokes the access tokens issued under that session, not the refresh token', async () => {
     const { tokens } = await connectAgain(browser, provider, 'Northside Market', ['content:read']);
     await browser.json('/api/auth/sign-out', {});
     const res = await mcpCall(tokens.access_token, 'whoami');
-    console.log('after the person signs out, the agent call gets', res.status);
+    expect(res.status).toBe(401);
     const refreshed = await worker(`${CMS}/api/auth/oauth2/token`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token!, client_id: provider.client!.client_id, resource: MCP }),
     });
-    console.log('and its refresh gets', refreshed.status, refreshed.status === 200 ? '' : await refreshed.text());
+    expect(refreshed.status).toBe(200);
+    const { access_token } = await refreshed.json<{ access_token: string }>();
+    expect((await mcpCall(access_token, 'whoami')).status).toBe(200);
   });
 });
 
@@ -347,7 +349,36 @@ describe('guards on /mcp', () => {
   });
 });
 
+describe('PKCE', () => {
+  const tryAuthorize = async (change: (url: URL) => void) => {
+    const browser = new Browser();
+    await browser.signIn(OWNER);
+    const provider = new MemoryProvider();
+    await expect(new Client({ name: 't', version: '0' }).connect(transportFor(provider))).rejects.toBeInstanceOf(UnauthorizedError);
+    const url = new URL(provider.authorizationUrl!);
+    change(url);
+    const res = await browser.fetch(url.href);
+    return new URL(res.headers.get('location') ?? 'http://none/', CMS);
+  };
+
+  it('refuses the plain method', async () => {
+    const back = await tryAuthorize((url) => url.searchParams.set('code_challenge_method', 'plain'));
+    console.log('PKCE plain', back.searchParams.get('error'), back.searchParams.get('error_description'));
+    expect(back.searchParams.get('error')).toBe('invalid_request');
+  });
+
+  it('refuses a public client that sends no challenge', async () => {
+    const back = await tryAuthorize((url) => {
+      url.searchParams.delete('code_challenge');
+      url.searchParams.delete('code_challenge_method');
+    });
+    console.log('no PKCE', back.searchParams.get('error'), back.searchParams.get('error_description'));
+    expect(back.searchParams.get('error')).toBe('invalid_request');
+  });
+});
+
 describe('registration', () => {
+  // A limitation M4-04 must close: open registration is meant for public clients only.
   it('lets anyone register a confidential client too, and returns its secret', async () => {
     const res = await worker(`${CMS}/api/auth/oauth2/register`, {
       method: 'POST',
@@ -355,7 +386,9 @@ describe('registration', () => {
       body: JSON.stringify({ client_name: 'SignForge', redirect_uris: ['https://evil.example/cb'], token_endpoint_auth_method: 'client_secret_post' }),
     });
     const body = await res.json<Record<string, unknown>>();
-    console.log('confidential DCR', res.status, JSON.stringify({ ...body, client_secret: body.client_secret ? '[present]' : undefined }));
+    expect(res.status).toBe(201);
+    expect(body).toMatchObject({ token_endpoint_auth_method: 'client_secret_post', client_name: 'SignForge' });
+    expect(typeof body.client_secret).toBe('string');
   });
 });
 
