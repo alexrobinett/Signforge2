@@ -358,7 +358,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
   const picked = entries.find((e) => e.kind === 'tool' && e.tool.name === form);
   const go = entries.filter((e) => e.kind === 'go');
   const org = entries.filter((e) => e.kind === 'org');
-  const actions = entries.filter((e) => e.kind === 'tool');
+  const actions = entries.filter((e) => e.kind === 'tool' || e.kind === 'takeover');
   const icon = (to: string) => SECTIONS.find((s) => s.to === to)?.icon;
 
   const item = (e: CommandEntry) => {
@@ -368,7 +368,7 @@ function MenuBody({ shell, hues }: { shell: Shell; hues: Map<string, number> }) 
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
         {e.kind === 'org' && <Building2Icon className="size-4 text-muted-foreground" aria-hidden />}
         <span className="line-clamp-2 min-w-0 flex-1 sm:truncate">{e.label}</span>
-        {e.kind === 'tool' && <Mono className="hidden sm:inline">{e.tool.name}</Mono>}
+        {(e.kind === 'tool' || e.kind === 'takeover') && <Mono className="hidden sm:inline">{e.tool.name}</Mono>}
       </CommandItem>
     );
   };

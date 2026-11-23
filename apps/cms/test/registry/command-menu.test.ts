@@ -20,7 +20,7 @@ import { SECTIONS } from '../../src/lib/sections';
 
 // What `GET /api/tools` sends: `describeTools` for the member's role, in an org where editors publish (the default).
 const listed = (role: Role) => parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role, editorsPublish: true }) })));
-const toolNames = (role: Role) => commandEntries(listed(role)).flatMap((e) => (e.kind === 'tool' ? [e.tool.name] : []));
+const toolNames = (role: Role) => commandEntries(listed(role)).flatMap((e) => (e.kind === 'tool' || e.kind === 'takeover' ? [e.tool.name] : []));
 
 describe('command menu entries', () => {
   it('lists every tool an owner may use: the whole registry', () => {
@@ -52,6 +52,14 @@ describe('command menu entries', () => {
     expect(byName.get('restart_screen')).toBe("Restart the screen's player now");
     expect(byName.get('revoke_screen_credential')).toBe("Revoke one of a screen's credentials");
     expect(byName.get('list_screens')).toBe('List the screens in the organization with their settings, labels, status and manifests');
+  });
+
+  it('opens the takeover dialog, sent at once, for a member who may publish, as the Schedule page does (#253)', () => {
+    const takeover = commandEntries(listed('owner')).find((e) => e.id === 'tool:start_takeover');
+    expect(takeover).toMatchObject({ kind: 'takeover', label: 'Take over screens now…' });
+    // An editor where only owners publish can only draft one, as the tool says.
+    const drafts = parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role: 'editor', editorsPublish: false }) })));
+    expect(commandEntries(drafts).find((e) => e.id === 'tool:start_takeover')).toMatchObject({ kind: 'tool', label: 'Take over screens with a playlist, as a draft' });
   });
 });
 

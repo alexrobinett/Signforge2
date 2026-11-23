@@ -167,6 +167,17 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
     await expect(page.locator('#main')).toBeFocused();
   }
 
+  // The takeover tool opens the same dialog, which sends it at once: ⌘K never calls a takeover a draft (#253).
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('start_takeover');
+  await expect(selected).toContainText('Take over screens now…');
+  await page.keyboard.press('Enter');
+  const takeover = page.getByRole('dialog', { name: 'Take over screens' });
+  await expect(takeover.getByText(/^Sent now:/)).toBeVisible();
+  await takeover.getByRole('button', { name: 'Cancel' }).click();
+  await expect(takeover).toBeHidden();
+
   // Enter on Back goes back, to what was found, and does not run the selected action; Open goes to the screen's page.
   await page.keyboard.press('ControlOrMeta+k');
   await expect(search).toBeFocused();
