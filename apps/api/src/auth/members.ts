@@ -2,7 +2,10 @@
  * The member tools' `Members` service (#108): Better Auth's organization endpoints, called on the
  * request's own Better Auth instance with its headers, so the caller is the session's member and
  * Better Auth's rules and after hooks run as they do for the CMS's own calls. `membershipAudit`
- * writes each change's audit row. The org is named on every call, the one the service was made for.
+ * writes each change's audit row. Inviting, changing a role and removing name the org the service was
+ * made for. Cancelling cannot: Better Auth acts in the invitation's own org, wherever the person may
+ * manage invitations, so `cancel_invitation`'s check that the invitation is in the caller's org
+ * (packages/tools src/members.ts) is that path's only org guard.
  * Better Auth's refusals become tool refusals: a 400 (already a member, already invited, the last
  * owner) is `conflict`, a 401 or 403 `forbidden`, a 404 `not_found`.
  */

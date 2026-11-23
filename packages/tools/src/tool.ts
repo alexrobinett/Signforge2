@@ -120,18 +120,6 @@ export type AlertDeliverer = (deliveryId: string) => void;
  */
 export type TemplateChecker = (template: { orgId: string; manifest: TemplateManifest; html: string }) => Promise<TemplateRuntimeReport>;
 
-/**
- * What the connection tools need from the API (apps/api/src/connectors): each provider's OAuth
- * and the CONNECTION_KEY that seals credentials. Tokens never leave it: a tool handles only
- * sealed values, the account's name and the scopes granted.
- */
-/**
- * Changes an org's members and invitations through Better Auth's organization endpoints, as the
- * caller, in the org the service was made for: Better Auth keeps its rules (one of our roles each,
- * never without an owner), sends the invitation, and its after hook writes the change's audit row,
- * so the member tools stage nothing. Its refusal is a `ToolError`. A tool checks the row is in its
- * org (`org.members`, `org.invitations`) before it asks.
- */
 /** A pending invitation, as `list_invitations` shows it. */
 export interface Invitation {
   id: string;
@@ -143,6 +131,13 @@ export interface Invitation {
   createdAt: string;
 }
 
+/**
+ * Changes an org's members and invitations through Better Auth's organization endpoints, as the
+ * caller, in the org the service was made for: Better Auth keeps its rules (one of our roles each,
+ * never without an owner), sends the invitation, and its after hook writes the change's audit row,
+ * so the member tools stage nothing. Its refusal is a `ToolError`. A tool checks the row is in its
+ * org (`org.members`, `org.invitations`) before it asks.
+ */
 export interface Members {
   /** Invites the address with the role. Returns the invitation, as Better Auth made it. */
   invite(email: string, role: Role): Promise<Invitation>;
@@ -151,6 +146,11 @@ export interface Members {
   remove(memberId: string): Promise<void>;
 }
 
+/**
+ * What the connection tools need from the API (apps/api/src/connectors): each provider's OAuth
+ * and the CONNECTION_KEY that seals credentials. Tokens never leave it: a tool handles only
+ * sealed values, the account's name and the scopes granted.
+ */
 export interface Connectors {
   /** The providers this deployment can connect. */
   providers: readonly string[];

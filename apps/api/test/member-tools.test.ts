@@ -92,8 +92,8 @@ describe('an editor, through the member tools', () => {
 });
 
 describe('the audit row of a member change', () => {
-  it('is one per change, the same as the CMS’s own call writes', async () => {
-    const { owner, org, ownerId, editorMemberId } = await team();
+  it('is one per change, for each change a tool makes, the same as the CMS’s own call writes', async () => {
+    const { t, owner, org, ownerId, editorMemberId } = await team();
     // The same changes, once through the tools and once through Better Auth's endpoints as the CMS calls them.
     const byTool = email('by-tool');
     const byEndpoint = email('by-endpoint');
@@ -140,6 +140,30 @@ describe('the audit row of a member change', () => {
         targetId: editorMemberId,
         detail: { userId: expect.any(String), role: 'editor' },
       },
+    ]);
+
+    const pending = await scoped(env.DB, org.id).invitations.pending();
+    const toolInvitation = pending.find((i) => i.email === byTool)!.id;
+    const endpointInvitation = pending.find((i) => i.email === byEndpoint)!.id;
+    await owner.tool('cancel_invitation', { invitationId: toolInvitation });
+    await owner.ok('/api/auth/organization/cancel-invitation', { invitationId: endpointInvitation });
+    const by = { actorKind: 'user', actorId: ownerId, clientId: 'cms' };
+    expect(await audits(org.id, 'cancel_invitation')).toEqual([
+      { ...by, targetKind: 'invitation', targetId: toolInvitation, detail: { email: byTool } },
+      { ...by, targetKind: 'invitation', targetId: endpointInvitation, detail: { email: byEndpoint } },
+    ]);
+
+    // A second member to remove through the endpoint, once the editor is removed through the tool.
+    const addr = email('viewer');
+    const invite = await owner.ok<{ id: string }>('/api/auth/organization/invite-member', { email: addr, role: 'viewer' });
+    const viewer = new Client(t);
+    await viewer.signIn(addr);
+    const { member } = await viewer.ok<{ member: { id: string } }>('/api/auth/organization/accept-invitation', { invitationId: invite.id });
+    await owner.tool('remove_member', { memberId: editorMemberId });
+    await owner.ok('/api/auth/organization/remove-member', { memberIdOrEmail: member.id });
+    expect(await audits(org.id, 'remove_member')).toEqual([
+      { ...by, targetKind: 'member', targetId: editorMemberId, detail: { userId: expect.any(String), role: 'editor' } },
+      { ...by, targetKind: 'member', targetId: member.id, detail: { userId: expect.any(String), role: 'viewer' } },
     ]);
   });
 });
