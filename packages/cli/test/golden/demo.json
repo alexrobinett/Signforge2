@@ -125,10 +125,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "86db477d83c1112ac2dbc301a5f073252e0d4f0d8e110b002785e3cd6a3adb59": {
-      "size": 396142,
-      "type": "text/html"
-    },
     "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
       "size": 23664,
       "type": "font/woff2"
@@ -140,10 +136,6 @@
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "9c0d59d32ce322a23c554c82143522c60b574b82b834789b0411cfc3393f0f88": {
-      "size": 398098,
-      "type": "text/html"
     },
     "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d": {
       "size": 24400,
@@ -161,24 +153,32 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "af8ba99270dd87ecfaaab6219d79f3a4d1115b49bcab3a9272948bd7900d270e": {
-      "size": 401771,
-      "type": "text/html"
-    },
-    "c677c828d7360043afae135ed594a8202245f4a74710caec915d6ee406aadd62": {
-      "size": 403207,
-      "type": "text/html"
-    },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
       "size": 24452,
       "type": "font/woff2"
+    },
+    "29c8a47d9b9ec8db5ae8585a0ba1f2f7a682d86bcc0bdadb484117ff49e9604a": {
+      "size": 398189,
+      "type": "text/html"
+    },
+    "d9a25be4ac9420b04f26f1f75dac1344107d92c3c3736b1190982e0cf69865de": {
+      "size": 396208,
+      "type": "text/html"
+    },
+    "626e4abac01ef625e560911367be411be5150978176f743d542a3a2a35d5d2f5": {
+      "size": 403236,
+      "type": "text/html"
+    },
+    "8340e8cb011e77a2019e55f4abcf23c544a174cc36953c4e873943bdc0d8d009": {
+      "size": 401862,
+      "type": "text/html"
     }
   },
   "templates": {
-    "base/announcement@1.0.0": {
+    "base/announcement@1.0.1": {
       "manifest": {
         "id": "announcement",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -300,12 +300,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "9c0d59d32ce322a23c554c82143522c60b574b82b834789b0411cfc3393f0f88"
+      "html": "29c8a47d9b9ec8db5ae8585a0ba1f2f7a682d86bcc0bdadb484117ff49e9604a"
     },
-    "base/countdown@1.0.0": {
+    "base/countdown@1.0.1": {
       "manifest": {
         "id": "countdown",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -428,7 +428,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "86db477d83c1112ac2dbc301a5f073252e0d4f0d8e110b002785e3cd6a3adb59"
+      "html": "d9a25be4ac9420b04f26f1f75dac1344107d92c3c3736b1190982e0cf69865de"
     },
     "base/cstore-promo@1.2.5": {
       "manifest": {
@@ -592,10 +592,10 @@
       },
       "html": "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402"
     },
-    "base/info-frame@1.0.0": {
+    "base/info-frame@1.0.1": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -880,12 +880,12 @@
         },
         "protocol": 2
       },
-      "html": "c677c828d7360043afae135ed594a8202245f4a74710caec915d6ee406aadd62"
+      "html": "626e4abac01ef625e560911367be411be5150978176f743d542a3a2a35d5d2f5"
     },
-    "base/room-status@1.0.0": {
+    "base/room-status@1.0.1": {
       "manifest": {
         "id": "room-status",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1006,7 +1006,7 @@
         },
         "protocol": 2
       },
-      "html": "af8ba99270dd87ecfaaab6219d79f3a4d1115b49bcab3a9272948bd7900d270e"
+      "html": "8340e8cb011e77a2019e55f4abcf23c544a174cc36953c4e873943bdc0d8d009"
     }
   },
   "spots": {
@@ -1014,7 +1014,7 @@
       "id": "announcement",
       "name": "Announcement",
       "kind": "template",
-      "template": "base/announcement@1.0.0",
+      "template": "base/announcement@1.0.1",
       "data": {
         "look": "pop",
         "eyebrow": "Company news",
@@ -1049,7 +1049,7 @@
       "id": "countdown",
       "name": "Days without an accident",
       "kind": "template",
-      "template": "base/countdown@1.0.0",
+      "template": "base/countdown@1.0.1",
       "data": {
         "look": "poster",
         "mode": "up",
@@ -1118,7 +1118,7 @@
       "id": "info-frame",
       "name": "Coffee info frame",
       "kind": "template",
-      "template": "base/info-frame@1.0.0",
+      "template": "base/info-frame@1.0.1",
       "data": {
         "captionTitle": "Large coffee and a pastry",
         "captionLine": "Every weekday until 11 am",
@@ -1181,7 +1181,7 @@
       "id": "room-status",
       "name": "Harbour Room status",
       "kind": "template",
-      "template": "base/room-status@1.0.0",
+      "template": "base/room-status@1.0.1",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -1284,5 +1284,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "604e4046f63617448148c07d6b4f5d22b2fa0896e94461dba8ac2cbb9a5b9e7c"
+  "id": "56469b186165edf12011aeaee902a080f5a3708265c662c008bebbdf08c019fd"
 }
