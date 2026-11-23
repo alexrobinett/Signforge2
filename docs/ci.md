@@ -20,12 +20,13 @@ One job, `check`, in `.github/workflows/ci.yml`, on every pull request and every
 
 A few changes mark every package affected:
 - `turbo.json`, the workflow, `tsconfig.base.json`, `biome.jsonc` and `pnpm-workspace.yaml` (`globalDependencies` in `turbo.json`, plus Turbo's own rules);
-- `fonts/` and `examples/`, which tests read but no package owns.
+- `fonts/`, which tests read but no package owns.
 
 A lockfile change affects only the packages whose dependencies changed.
 
 Turbo decides what is affected from the package graph alone. It ignores a task's `inputs` that point outside its package. So a test that reads another package's files has to declare that package as a dependency, or a change there will not run the test:
 - The CMS e2e starts the API, so `apps/cms` has `@signforge/api` as a devDependency.
+- The cli's golden and video tests build and read `examples/`, so `examples/` is a package, `@signforge/examples`, and `packages/cli` lists it as a devDependency. A change there (a template's new stress spot, say) runs the cli's tests and those of what depends on the cli: the API, the CMS, the player, the runtime check and the tools, whose publishing test compares against the cli's stress golden. It no longer runs the contract's, db's, feeds' or media's tests. The package has no scripts: Turbo still hashes its files into the tasks that depend on it, so a warm cache never replays a result built from older examples.
 - The cli's and the API's tests build every template with the SDK (the cli's also check that no bundle changed without a new version: [template-spec.md](template-spec.md#rules)), and the player's browser tests and the runtime check's tests (`apps/template-check`) play every template. So `packages/cli`, `apps/api`, `packages/player` and `apps/template-check` list each `templates/*` package and `@signforge/template-sdk` as devDependencies. **A new template goes into all four lists**: the repo-wide step `scripts/check-template-deps.sh` fails until it does. The check's container tests (`pnpm --filter @signforge/template-check test:container`) need Docker and do not run in CI.
 
 knip lists these dependencies as ones it cannot see used.
@@ -38,7 +39,7 @@ One check sees more than the package graph does: packages/db's boundary test sca
 
 The stress golden (`packages/cli/test/golden/stress.json`) is built from exactly those bytes, and the tools' publishing test compares against that golden. The cli's golden test checks the media against `media.sha256` first. Without the canonical set it fails in CI (`CI` set) and skips elsewhere, saying so on stderr and in the test name.
 
-CI fetches the media when the plan includes the cli's or the tools' tests, with the job's `GITHUB_TOKEN`, and caches it under the hash of `media.sha256`. `media.sha256` is under `examples/`, a global dependency, so a new version reruns every task.
+CI fetches the media when the plan includes the cli's or the tools' tests, with the job's `GITHUB_TOKEN`, and caches it under the hash of `media.sha256`. `media.sha256` is in the `@signforge/examples` package, so a new version reruns the cli's tests and its dependents'. The media itself is in `.gitignore`, so Turbo does not hash it.
 
 A new version (new photos, a re-encoded video) is a new release and a regenerated golden, in one pull request:
 1. `rm -rf examples/stress/media && sh scripts/stress-media.sh --generate` makes a set with curl and ffmpeg, or put the files there by hand. ffmpeg's output differs by machine and version, which is why the set is published rather than generated.
@@ -58,7 +59,7 @@ A remote cache would share Turbo's cache with laptops and across pull requests. 
 
 ## Keeping it fast
 
-- Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it. Otherwise a change there either skips the test on pull requests or, with a warm cache, replays a stale result.
+- Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it (better: make it a package, as `examples/` is). Otherwise a change there either skips the test on pull requests or, with a warm cache, replays a stale result.
 - Keep the repo-wide checks repo-wide only while they take seconds. Anything slower should become a Turbo task in the package it checks.
 - Don't add `paths:` filters to the workflow. A skipped workflow never reports, so a required check would wait forever; `--affected` already skips what a change does not touch.
 - The player's browser tests are the longest task: 2 m 30 s alone, about 3 min beside the rest of a full run. Any change to the player, the SDK, the CLI, the contract or a template runs them. Making them shorter, or splitting them across runners, is what would bring those pull requests down next.
