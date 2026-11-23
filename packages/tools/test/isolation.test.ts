@@ -4,7 +4,7 @@
 // own rows, so a check on one id cannot hide a missing check on another. A new tool is covered as
 // soon as it is registered; a new kind of id field fails here until it is mapped below.
 import { scoped, startPairing } from '@signforge/db';
-import { seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
+import { seedTeam, seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -39,6 +39,9 @@ const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
   alertDelivery: (o) => o.alertDelivery,
   connection: (o) => o.connection,
   publish: (o) => o.publish,
+  // Better Auth's rows, as seedTeam names them.
+  member: (o) => `${o.orgId}-member`,
+  invitation: (o) => `${o.orgId}-invitation`,
 };
 const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
 
@@ -198,12 +201,15 @@ async function orgAState() {
     scheduleEntries: await a.scheduleEntries.list(),
     alertChannels: await a.alertChannels.list(),
     alertDeliveries: await a.alertDeliveries.list({ take: 100 }),
+    team: await a.members.list(),
+    invitations: await a.invitations.pending(),
   };
 }
 
 beforeAll(async () => {
   s = await seedTwoOrgs(env.DB);
   for (const o of [s.a, s.b]) {
+    await seedTeam(env.DB, o.orgId);
     await env.BLOBS.put(manifestKey(o.orgId, o.screen, files(o).manifest), '{}');
     await env.BLOBS.put(orgBlobKey(o.orgId, files(o).bundle), '<!doctype html>');
     await env.BLOBS.put(orgBlobKey(o.orgId, files(o).sources), '{}');
