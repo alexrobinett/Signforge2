@@ -92,3 +92,4 @@ Where the time goes now: setup and the repo-wide checks take about 50 s, then wh
 ## Required status check
 
 `master` cannot require this check today. Branch protection and rulesets need GitHub Pro (or Team) for a private repository: the API answers 403, "Upgrade to GitHub Pro or make this repository public to enable this feature". On a plan that has them, require the `check` job. It runs on every pull request, even one that affects no package, so it never sits pending.
+
