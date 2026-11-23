@@ -43,43 +43,69 @@ const READS_AS: Record<string, string> = {
   '8': 'b',
 };
 
+/** A letter of a name as it reads, whether a word starts at it, and whether the lookalike map made it. */
+interface Letter {
+  letter: string;
+  starts: boolean;
+  mapped: boolean;
+}
+
 /**
- * A word as it reads: lowercase, `()` as `o`, lookalikes mapped, `(` as `paren` (a `c`, or nothing: it
- * may be either), `rn` as `m`, only a–z kept.
+ * A name as it reads, letter by letter: lowercase, `()` as `o`, `rn` as `m`, lookalikes mapped, `(` as
+ * `paren` (a `c`, or nothing: it may be either), and only a–z kept. A word starts after anything dropped
+ * (a space, `.`, `-`, `_`, `&`, `'`…), at a capital after a small letter (`MySign`), and at a capital
+ * before a small letter after another capital (`GETSign`).
  */
-const skeleton = (word: string, paren: string) =>
-  [...word.toLowerCase().replace(/\(\)/g, 'o')]
-    .map((ch) => (ch === '(' ? paren : (READS_AS[ch] ?? ch)))
-    .join('')
-    .replace(/rn/g, 'm')
-    .replace(/[^a-z]/g, '');
+function lettersOf(name: string, paren: string): Letter[] {
+  const letters: Letter[] = [];
+  let dropped = true;
+  let last = '';
+  for (const match of name.matchAll(/\(\)|rn|[\s\S]/giu)) {
+    const token = match[0];
+    const next = name.charAt(match.index + token.length);
+    const lower = token.toLowerCase();
+    const letter = lower === '()' ? 'o' : lower === 'rn' ? 'm' : lower === '(' ? paren : (READS_AS[lower] ?? lower);
+    const first = token.charAt(0);
+    const capital = /[A-Z]/.test(first);
+    const camel = capital && (/[a-z]/.test(last) || (/[A-Z]/.test(last) && /[a-z]/.test(next)));
+    last = token.charAt(token.length - 1);
+    if (!/^[a-z]$/.test(letter)) {
+      dropped = true;
+      continue;
+    }
+    letters.push({ letter, starts: dropped || camel, mapped: letter !== lower });
+    dropped = false;
+  }
+  return letters;
+}
 
-const RESERVED = ['signforge', 'sfcli'].map((word) => skeleton(word, ''));
+/** The reserved words as they read (`sfcli` as `sfcii`). */
+const RESERVED = ['signforge', 'sfcli'].map((word) =>
+  lettersOf(word, '')
+    .map(({ letter }) => letter)
+    .join(''),
+);
 
 /**
- * Whether a name reads as SignForge's: a reserved word inside one word, or starting where a word starts
- * (so `SF CL1` and `Sign Forge` do), but not one that runs on from inside a word (`Design Forge`, `Docs FC
- * Lite`). A match that starts inside a trailing `(…)` after a name is the user's own label, and is let be.
+ * Whether a name reads as SignForge's: a reserved word inside one word, or starting where a word starts,
+ * or one letter after it when the lookalike map made that letter (`7Sign Forge`); so `SF CL1`, `Sign Forge`,
+ * `Docs-Sign Forge` and `MySign Forge` do, but not one that runs on from inside a word (`Design Forge`,
+ * `Docs FC Lite`). A match that starts inside a trailing `(…)` after a name is the user's own label, and
+ * is let be.
  */
 function readsAsOurs(name: string): boolean {
   const prefix = LABELLED.exec(name)?.[1];
   return ['c', ''].some((paren) => {
-    const words = name
-      .split(' ')
-      .map((w) => skeleton(w, paren))
-      .filter(Boolean);
-    const joined = words.join('');
-    // Where each word lies in `joined`.
-    const spans = words.map((w, i) => {
-      const from = words.slice(0, i).join('').length;
-      return { from, to: from + w.length };
-    });
+    const letters = lettersOf(name, paren);
+    const joined = letters.map(({ letter }) => letter).join('');
     // A label counts only after a name that reads as something (not `- (SignForge CLI)`).
-    const named = prefix === undefined ? 0 : skeleton(prefix, paren).length;
+    const named = prefix === undefined ? 0 : lettersOf(prefix, paren).length;
     const labelAt = named > 0 ? named : joined.length;
     return RESERVED.some((r) => {
       for (let at = joined.indexOf(r); at !== -1 && at < labelAt; at = joined.indexOf(r, at + 1)) {
-        if (spans.some(({ from, to }) => at === from || (at > from && at + r.length <= to))) return true;
+        const inside = letters.slice(at + 1, at + r.length).every(({ starts }) => !starts);
+        const before = letters[at - 1];
+        if (letters[at]?.starts || inside || (before?.starts && before.mapped)) return true;
       }
       return false;
     });

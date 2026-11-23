@@ -396,7 +396,15 @@ describe("the consent page's request", () => {
 
   it("withholds an unverified app's scheme that reads as SignForge's: the page says an app on this device", async () => {
     const { t, owner } = await team();
-    for (const redirect of ['signforge://SignForge-CLI/callback', 'com.signforge.cli:/callback', 'com.example.app://SignForge/callback']) {
+    for (const redirect of [
+      'signforge://SignForge-CLI/callback',
+      'com.signforge.cli:/callback',
+      'com.example.app://SignForge/callback',
+      // Scheme and host as they read together (the provider wants a path after a custom scheme's host).
+      'sign://forge/cb',
+      'sf://cli/cb',
+      'sign://Forge-CLI/cb',
+    ]) {
       const clientId = await register(t, { client_name: 'SignForge CLI', redirect_uris: [redirect] });
       const { oauthQuery } = await consentPage(owner, clientId, ALL_SCOPES, redirect);
       const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
@@ -707,6 +715,23 @@ describe("the consent page's name for a client", () => {
       'SiqnForqe',
       'SignF()rge',
       'SF (LI',
+      // The fifth: a word starting after a dropped sign or at a capital, or after a lookalike letter.
+      'Docs-Sign Forge',
+      'My.Sign Forge',
+      'A&Sign Forge',
+      "It's.Sign Forge",
+      'Get_SF CLI',
+      'Use.SF CLI',
+      'MySign Forge',
+      'OpenSign Forge',
+      'GetSF CLI',
+      'GETSign Forge',
+      '7Sign Forge',
+      '1Sign Forge',
+      'lSign Forge',
+      '5Sign Forge',
+      'qSign Forge',
+      '0SF CLI',
     ];
     expect(await shownAs(names)).toEqual(withheld(names));
   });
@@ -733,7 +758,9 @@ describe("the consent page's name for a client", () => {
       'Goose',
       'Cline',
       'mcp-remote',
+      'VS Code',
       'Design Forge',
+      'DesignForge',
       'Docs FC Lite',
       'Mrs F. Clive',
       "O'Brien's helper",

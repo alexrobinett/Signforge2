@@ -82,7 +82,9 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 function destinationOf(redirectUri: string, verified: boolean): { kind: 'web'; host: string } | { kind: 'app'; target: string | null } {
   const url = new URL(redirectUri);
   if (url.protocol === 'http:' || url.protocol === 'https:') return { kind: 'web', host: url.host };
-  const chosen = [url.protocol.slice(0, -1), url.host].filter(Boolean);
+  const scheme = url.protocol.slice(0, -1);
+  // Each alone, and together, as they read in the heading (`sign://forge`).
+  const chosen = url.host ? [scheme, url.host, `${scheme} ${url.host}`] : [scheme];
   if (!verified && chosen.some((part) => plainName(part) === undefined)) return { kind: 'app', target: null };
   return { kind: 'app', target: url.host ? `${url.protocol}//${url.host}` : url.protocol };
 }
