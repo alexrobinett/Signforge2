@@ -30,13 +30,12 @@ export function SidebarMenuButton({
       {...props}
     />
   );
-  // Always in its tooltip, shown only when folded: the button stays the same element, so it keeps focus as it folds.
+  // Always in its tooltip, so the button stays the same element and keeps focus as it folds; held closed while
+  // unfolded, where the label shows: an open tooltip describes its trigger, and a screen reader would say it twice.
   return (
-    <Tooltip>
+    <Tooltip open={folded ? undefined : false}>
       <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side="right" hidden={!folded}>
-        {tooltip}
-      </TooltipContent>
+      <TooltipContent side="right">{tooltip}</TooltipContent>
     </Tooltip>
   );
 }

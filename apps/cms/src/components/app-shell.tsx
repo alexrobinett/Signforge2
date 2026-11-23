@@ -69,7 +69,7 @@ function Sidebar({ shell, hues, folded = false }: { shell: Shell; hues: Map<stri
             <span>{folded ? 'Unfold the sidebar' : 'Fold the sidebar'}</span>
           </button>
         </SidebarMenuButton>
-        <UserMenu user={shell.user} compact={folded} />
+        <UserMenu user={shell.user} rail={folded} />
       </div>
     </div>
   );
@@ -94,12 +94,7 @@ export function AppShell({ shell, children }: { shell: Shell; children: ReactNod
         <a href="#main" className="sr-only z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3">
           Skip to content
         </a>
-        <aside
-          className="sticky top-0 hidden h-dvh border-r bg-sidebar text-sidebar-foreground lg:block"
-          aria-label="Sidebar"
-          data-state={folded ? 'collapsed' : 'expanded'}
-          data-collapsible={folded ? 'icon' : ''}
-        >
+        <aside className="sticky top-0 hidden h-dvh border-r bg-sidebar text-sidebar-foreground lg:block" aria-label="Sidebar">
           <Sidebar shell={shell} hues={hues} folded={folded} />
         </aside>
         <div className="flex min-w-0 flex-col">

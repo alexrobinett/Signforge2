@@ -16,12 +16,17 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(() => page.context().close());
 
-/** The stage's frame, from the top of the page, as a box. */
+/**
+ * The stage's frame, from the top of the page, as a box, and how far its top sits below the top of
+ * the room it is drawn in (the column under the stage's toggles), which centring would make large.
+ */
 async function stageBox() {
   await page.evaluate(() => window.scrollTo(0, 0));
   const frame = page.getByRole('region', { name: 'Live preview' }).locator('iframe');
   await expect(frame).toBeVisible({ timeout: 30_000 });
-  return (await frame.boundingBox())!;
+  // The frame, its sized box, the box that places it, and the room.
+  const gap = await frame.evaluate((f) => f.getBoundingClientRect().top - f.parentElement!.parentElement!.parentElement!.getBoundingClientRect().top);
+  return { ...(await frame.boundingBox())!, gap };
 }
 
 test('at 1440×900 the stage is in the first viewport, in the spot and playlist editors (#260)', async () => {
@@ -30,6 +35,7 @@ test('at 1440×900 the stage is in the first viewport, in the spot and playlist 
   // Centred in that column, its top was at about 690 px and its bottom past 1,000.
   const spot = await stageBox();
   expect(spot.y + spot.height).toBeLessThanOrEqual(900);
+  expect(spot.gap).toBeLessThanOrEqual(2);
   await shots(page, '90-spot-editor-stage-top');
 
   await page.goto('/playlists');
@@ -42,8 +48,10 @@ test('at 1440×900 the stage is in the first viewport, in the spot and playlist 
   await page.getByRole('button', { name: 'Add spots' }).click();
   await page.getByRole('dialog', { name: 'Add spots' }).getByRole('button', { name: 'Add Harvest Night' }).click();
   await page.keyboard.press('Escape');
+  // A one-spot playlist's column is short, so a centred frame would still fit: its gap is what says it is at the top.
   const playlist = await stageBox();
   expect(playlist.y + playlist.height).toBeLessThanOrEqual(900);
+  expect(playlist.gap).toBeLessThanOrEqual(2);
   await shots(page, '91-playlist-editor-stage-top');
 });
 
@@ -54,6 +62,12 @@ test('the sidebar folds to an icon rail and back, by keyboard, with names and to
   const fold = sidebar.getByRole('button', { name: 'Fold the sidebar' });
   await expect(fold).toHaveAttribute('aria-expanded', 'true');
   const before = (await sidebar.boundingBox())!.width;
+  // Unfolded, the label shows and no tooltip opens, so nothing describes the link a second time (review of #279).
+  const screens = sidebar.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' });
+  await screens.focus();
+  await screens.hover();
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await expect(screens).not.toHaveAttribute('aria-describedby');
 
   await fold.focus();
   await page.keyboard.press('Enter');
@@ -69,6 +83,15 @@ test('the sidebar folds to an icon rail and back, by keyboard, with names and to
   await nav.getByRole('link', { name: 'Screens' }).focus();
   await expect(page.getByRole('tooltip', { name: 'Screens' })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'Search and actions' })).toBeVisible();
+  // The account button has a tooltip like the rest, and its menu opens to the right of the rail.
+  const account = sidebar.getByRole('button', { name: /account and settings$/ });
+  await account.focus();
+  await expect(page.getByRole('tooltip', { name: 'Account and settings' })).toBeVisible();
+  await page.keyboard.press('Enter');
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  expect((await menu.boundingBox())!.x).toBeGreaterThanOrEqual((await sidebar.boundingBox())!.width);
+  await page.keyboard.press('Escape');
   await axe(page);
   await shots(page, '92-sidebar-folded');
 

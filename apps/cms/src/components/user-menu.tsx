@@ -1,6 +1,7 @@
 import { Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { LogOutIcon, MonitorIcon, MoonIcon, PlusIcon, SunIcon, UserIcon } from 'lucide-react';
 import { Button } from '~/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +28,12 @@ const THEMES: { value: Theme; label: string; icon: typeof SunIcon }[] = [
   { value: 'system', label: 'System', icon: MonitorIcon },
 ];
 
-export function UserMenu({ user, compact = false }: { user: Shell['user']; compact?: boolean }) {
+/**
+ * The account menu. `compact` (the phone's top bar) is the avatar alone; `rail` (the folded sidebar) is
+ * the avatar with a tooltip, its menu opening to the right of the rail.
+ */
+export function UserMenu({ user, compact: small = false, rail = false }: { user: Shell['user']; compact?: boolean; rail?: boolean }) {
+  const compact = small || rail;
   const router = useRouter();
   const navigate = useNavigate();
   const theme = useAppStore((s) => s.ui.theme);
@@ -50,24 +56,35 @@ export function UserMenu({ user, compact = false }: { user: Shell['user']; compa
 
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        {compact ? (
-          <Button variant="ghost" size="icon" className="rounded-full">
-            {avatar}
-            <span className="sr-only">, account and settings</span>
-          </Button>
-        ) : (
-          <Button variant="ghost" className="h-auto w-full justify-start gap-3 px-2.5 py-2 text-left">
-            {avatar}
-            <span className="min-w-0 flex-1">
-              {user.name && <span className="block truncate text-sm font-medium">{user.name}</span>}
-              <span className={cn('block truncate text-xs', user.name ? 'text-muted-foreground' : 'text-sm font-medium')}>{user.email}</span>
-            </span>
-            <span className="sr-only">, account and settings</span>
-          </Button>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align={compact ? 'end' : 'start'} side={compact ? 'bottom' : 'top'} className="w-60">
+      <Tooltip open={rail ? undefined : false}>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            {compact ? (
+              <Button variant="ghost" size="icon" className="rounded-full">
+                {avatar}
+                <span className="sr-only">, account and settings</span>
+              </Button>
+            ) : (
+              <Button variant="ghost" className="h-auto w-full justify-start gap-3 px-2.5 py-2 text-left">
+                {avatar}
+                <span className="min-w-0 flex-1">
+                  {user.name && <span className="block truncate text-sm font-medium">{user.name}</span>}
+                  <span className={cn('block truncate text-xs', user.name ? 'text-muted-foreground' : 'text-sm font-medium')}>{user.email}</span>
+                </span>
+                <span className="sr-only">, account and settings</span>
+              </Button>
+            )}
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="right">Account and settings</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent
+        align={compact ? 'end' : 'start'}
+        side={rail ? 'right' : compact ? 'bottom' : 'top'}
+        // Clear of the rail's 16 px margin round the avatar, so the menu starts beside the rail, not over its edge.
+        sideOffset={rail ? 20 : undefined}
+        className="w-60"
+      >
         <DropdownMenuLabel className="truncate font-normal">
           Signed in as <span className="font-medium text-foreground">{user.email}</span>
         </DropdownMenuLabel>
