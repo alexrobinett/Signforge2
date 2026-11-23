@@ -98,15 +98,18 @@ describe('playback loop', () => {
 
   // A paused video that has never played presents no frame, so a frame callback never came: every
   // video prepare waited out a 600 ms timer (about 950 ms in all on the Pi, against a 500 ms budget).
+  // The clock jumps to where `v`'s prepare starts (3 s before `a` ends) and stays paused there: no
+  // timer fires after that, so `v` is ready only if canplaythrough alone makes it so.
   it('has a video spot ready once it can play through, without waiting for a frame callback', async () => {
     const video = readFileSync(join(import.meta.dirname, 'fixtures/clip.webm'));
     const content = h.content([
+      { id: 'a', durationMs: 60_000 },
       { id: 'v', video, durationMs: 1500 },
-      { id: 'a', durationMs: 1500 },
     ]);
-    const p = await h.openPlayer((s) => s.publish(content));
-    const s = await p.until((s) => s.prepares.filter((x) => x.spot === 'v').length >= 2);
+    const p = await h.openPlayer((s) => s.publish(content), {}, { clockAt: new Date('2026-11-23T12:00:00Z') });
+    const playing = await p.until((s) => s.log.length >= 1);
+    await p.page.clock.pauseAt(Date.parse(playing.log[0]!.startedAt) + 57_001);
+    const s = await p.until((s) => s.prepares.some((x) => x.spot === 'v'));
     expect(s.skipped).toBe(0);
-    for (const x of s.prepares.filter((x) => x.spot === 'v')) expect(x.ms).toBeLessThan(500);
   });
 });
