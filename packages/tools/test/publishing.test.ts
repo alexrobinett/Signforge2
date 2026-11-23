@@ -220,6 +220,48 @@ describe('publishOrg', () => {
     expect(after.playlists[x('main')]!.items.map((i) => i.spot)).toEqual([x('deal'), x('still'), x('launch')]);
   });
 
+  it('publishes a spot whose photo is switched off, and still holds one switched on with no photo (#252)', async () => {
+    const { org, lobby } = await seedSmallOrg('pub-photo-off');
+    await org.commit((await publishOrg(org, opts)).writes);
+    const announcement: TemplateManifest = {
+      ...promo,
+      id: 'announcement',
+      name: 'Announcement',
+      fields: { ...promo.fields, showPhoto: { type: 'boolean', label: 'Show the photo', default: true } },
+    };
+    const version = await addTemplate(org, announcement, sha('f'));
+    const spot = (id: string, data: object) =>
+      org.spots.insert({
+        id: x(id),
+        name: id,
+        kind: 'template',
+        durationMs: 8000,
+        templateVersionId: version.id,
+        dataJson: JSON.stringify(data),
+        assetMapJson: '{}',
+      });
+    await spot('photo-off', { showPhoto: false });
+    await spot('photo-on', { showPhoto: true });
+    await org.playlists.setItems(x('main'), [x('deal'), x('photo-off'), x('photo-on')]);
+
+    const result = await publishOrg(org, opts);
+    expect(result.drafts.held).toEqual([
+      { kind: 'playlist', id: x('main'), problems: [`spot ${x('photo-on')} is not published`] },
+      { kind: 'spot', id: x('photo-on'), problems: [`spot ${x('photo-on')}: image field "photo" has no asset`] },
+    ]);
+    expect(result.drafts.promoted).toEqual([{ kind: 'spot', id: x('photo-off') }]);
+    await org.commit(result.writes);
+
+    // With the photo-on spot out of the playlist, the playlist goes out with the photo-off spot in it, and no file for the photo.
+    await org.playlists.setItems(x('main'), [x('deal'), x('photo-off')]);
+    const published = await publishOrg(org, opts);
+    // The photo-on spot is still a draft that cannot publish; nothing else is held.
+    expect(published.drafts.held.map((h) => h.id)).toEqual([x('photo-on')]);
+    const manifest = published.screens.find((s) => s.screenId === lobby.id)!.manifest!;
+    expect(manifest.spots[x('photo-off')]).toMatchObject({ kind: 'template', data: { showPhoto: false }, assets: {} });
+    expect(manifest.playlists[x('main')]!.items.map((i) => i.spot)).toEqual([x('deal'), x('photo-off')]);
+  });
+
   it('keeps the published version of a draft that breaks, and reports it', async () => {
     const { org, lobby } = await seedSmallOrg('pub-keep');
     await org.commit((await publishOrg(org, opts)).writes);
