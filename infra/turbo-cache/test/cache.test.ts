@@ -7,6 +7,10 @@ const BASE = 'https://cache.test/v8/artifacts';
 
 const bytes = async (res: Response) => new TextDecoder().decode(await res.arrayBuffer());
 
+// Tags shaped like turbo's: the base64 of an HMAC-SHA256.
+const TAG = btoa('a'.repeat(32));
+const OTHER_TAG = btoa('b'.repeat(32));
+
 const call = (path: string, init: RequestInit & { auth?: string } = {}) => {
   const { auth = WRITE, ...rest } = init;
   return exports.default.fetch(`${BASE}${path}`, { ...rest, headers: { authorization: auth, ...rest.headers } });
@@ -18,7 +22,7 @@ const upload = (hash: string, body: string, headers: Record<string, string> = {}
     method: 'PUT',
     auth,
     body,
-    headers: { 'content-type': 'application/octet-stream', 'x-artifact-duration': '1234', 'x-artifact-tag': 'tag-for-the-body', ...headers },
+    headers: { 'content-type': 'application/octet-stream', 'x-artifact-duration': '1234', 'x-artifact-tag': TAG, ...headers },
   });
 
 describe('the status', () => {
@@ -62,7 +66,7 @@ describe('artifacts', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/octet-stream');
     expect(res.headers.get('x-artifact-duration')).toBe('1234');
-    expect(res.headers.get('x-artifact-tag')).toBe('tag-for-the-body');
+    expect(res.headers.get('x-artifact-tag')).toBe(TAG);
     expect(await bytes(res)).toBe('tar.zst bytes');
   });
 
@@ -71,7 +75,7 @@ describe('artifacts', () => {
     const res = await call('/bb02?slug=signforge', { method: 'HEAD' });
     expect(res.status).toBe(200);
     expect(res.headers.get('x-artifact-duration')).toBe('1234');
-    expect(res.headers.get('x-artifact-tag')).toBe('tag-for-the-body');
+    expect(res.headers.get('x-artifact-tag')).toBe(TAG);
     expect(await bytes(res)).toBe('');
   });
 
@@ -82,9 +86,9 @@ describe('artifacts', () => {
 
   it('replaces an artifact uploaded again', async () => {
     await upload('bb04', 'first');
-    await upload('bb04', 'second', { 'x-artifact-tag': 'second-tag' });
+    await upload('bb04', 'second', { 'x-artifact-tag': OTHER_TAG });
     const res = await call('/bb04?slug=signforge');
-    expect(res.headers.get('x-artifact-tag')).toBe('second-tag');
+    expect(res.headers.get('x-artifact-tag')).toBe(OTHER_TAG);
     expect(await bytes(res)).toBe('second');
   });
 
@@ -95,6 +99,35 @@ describe('artifacts', () => {
     expect(res.headers.get('x-artifact-tag')).toBeNull();
     expect(res.headers.get('x-artifact-duration')).toBeNull();
     expect(await bytes(res)).toBe('unsigned');
+  });
+});
+
+describe('uploads it refuses, storing nothing', () => {
+  it('refuses an artifact over 64 MiB before reading it, with a 413', async () => {
+    const res = await upload('ee01', 'small', { 'content-length': String(64 * 1024 * 1024 + 1) });
+    expect(res.status).toBe(413);
+    expect((await call('/ee01?slug=signforge', { method: 'HEAD' })).status).toBe(404);
+  });
+
+  it('wants a Content-Length (411), as R2 needs a known length', async () => {
+    const body = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('chunked'));
+        c.close();
+      },
+    });
+    const res = await call('/ee03?slug=signforge', { method: 'PUT', body, headers: { 'x-artifact-tag': TAG } });
+    expect(res.status).toBe(411);
+    expect((await call('/ee03?slug=signforge', { method: 'HEAD' })).status).toBe(404);
+  });
+
+  it.each([
+    ['too long for a signature', btoa('a'.repeat(97))],
+    ['not base64', 'tag-for-the-body'],
+  ])('refuses an x-artifact-tag %s with a 400, not a 500 from R2', async (_, tag) => {
+    const res = await upload('ee04', 'body', { 'x-artifact-tag': tag });
+    expect(res.status).toBe(400);
+    expect((await call('/ee04?slug=signforge', { method: 'HEAD' })).status).toBe(404);
   });
 });
 

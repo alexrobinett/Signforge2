@@ -10,6 +10,11 @@
 const ARTIFACT = /^\/v8\/artifacts\/([0-9a-f]{1,64})$/;
 // `slug` is TURBO_TEAM, `teamId` TURBO_TEAMID: one names the folder each team's artifacts live in.
 const TEAM = /^[\w-]{1,64}$/;
+// CI's artifacts are logs, about 8 KB each (2026-11-22); a cached dist/ would be a few MB. The cap
+// keeps one upload from filling the bucket.
+const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
+// turbo's tag is the base64 of an HMAC-SHA256 (44 characters). R2 holds 2 KB of metadata per object.
+const TAG = /^[A-Za-z0-9+/=]{1,128}$/;
 
 type Access = 'read' | 'write';
 
@@ -65,10 +70,15 @@ export default {
       }
       case 'PUT': {
         if (allowed === 'read') return failure(403, 'forbidden', 'this token only reads the cache');
+        // turbo always sends Content-Length, and R2 needs a body of known length.
+        const length = Number(request.headers.get('content-length') ?? Number.NaN);
+        if (!Number.isSafeInteger(length)) return failure(411, 'length_required', 'an upload needs a Content-Length');
+        if (length > MAX_ARTIFACT_BYTES) return failure(413, 'too_large', `an artifact may be at most ${MAX_ARTIFACT_BYTES} bytes`);
         if (request.body === null) return failure(400, 'bad_request', 'an artifact needs a body');
+        const tag = request.headers.get('x-artifact-tag');
+        if (tag !== null && !TAG.test(tag)) return failure(400, 'bad_request', 'x-artifact-tag is not a signature tag');
         const customMetadata: Record<string, string> = {};
         const duration = request.headers.get('x-artifact-duration');
-        const tag = request.headers.get('x-artifact-tag');
         // turbo fails a hit whose duration is not a whole number of milliseconds.
         if (duration !== null && /^\d{1,15}$/.test(duration)) customMetadata.duration = duration;
         if (tag !== null) customMetadata.tag = tag;
