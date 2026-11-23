@@ -76,7 +76,6 @@ defineTemplate({
   async prepare(ctx) {
     const { data, assets, root } = ctx;
     const look = LOOKS.find((l) => l === data.look)!;
-    const stage = document.querySelector<HTMLElement>('.stage')!;
     // Unpainted until play: a frame that paints the photo, on a layer of its own while it drifts,
     // has it decoded for the screen first, and the SDK's decode before ready then waits behind that
     // one (photo-promo, #168; Announcement, #197). Every look's panel comes in from nothing (Poster's
@@ -106,8 +105,6 @@ defineTemplate({
         showPrice: Boolean(data.price),
       },
     });
-    // A reset while the look's faces loaded has put the next init's document in place: leave it be.
-    if (!stage.isConnected) return;
 
     const drop = (sel: string) => {
       for (const el of document.querySelectorAll(sel)) el.remove();

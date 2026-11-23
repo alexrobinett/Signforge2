@@ -179,8 +179,6 @@ defineTemplate({
         showFacts: on('showFacts', facts.length),
       },
     });
-    // A reset while the look's faces loaded has put the next init's document in place: leave it be.
-    if (!stage.isConnected) return;
     if (done) drop('.number, .rest, .sticker:has(.unit), .unit-row, .tiles, .sub');
     else drop('.done, .done-box');
     if (units === 1) drop('.rest');
