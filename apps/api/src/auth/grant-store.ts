@@ -2,7 +2,7 @@
  * Where agent grants are written and ended (./agent-grants.ts's `GrantDeps`), through packages/db's
  * scoped repository, each change with its audit row in one batch, the person as the actor.
  */
-import { AGENT_GRANT_IDLE_MS, findMembership, scoped } from '@signforge/db';
+import { AGENT_GRANT_IDLE_MS, findMembership, memberships, scoped } from '@signforge/db';
 import { effectiveScopes, grantOf, ROLES, type Role } from '@signforge/tools';
 import type { GrantDeps } from './agent-grants';
 
@@ -59,6 +59,14 @@ export function grantStore(d1: D1Database): GrantDeps {
       const org = scoped(d1, orgId);
       const grants = await org.agentGrants.unrevokedFor(userId);
       if (grants.length) await org.commit(grants.flatMap((g) => revoking(org, g, by, { reason: 'membership_ended', userId })));
+    },
+    offers: async (userId, requested) => {
+      const orgs = await memberships(d1, userId);
+      return Promise.all(
+        orgs.flatMap(({ orgId, name, role }) =>
+          isRole(role) ? [grantOf({ org: scoped(d1, orgId), role, scopes: requested }).then((g) => ({ orgId, name, role, scopes: effectiveScopes(g) }))] : [],
+        ),
+      );
     },
     revokeUnissued: async (orgId, grantId, by) => {
       const org = scoped(d1, orgId);

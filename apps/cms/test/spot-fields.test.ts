@@ -6,8 +6,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { FieldForm } from '../src/components/spots/field-form';
+import { startData } from '@signforge/compiler/draft';
 import { typedFields } from '../src/lib/live-data';
-import { fieldProblems, type SpotDraft, startData } from '../src/lib/spots';
+import { fieldProblems, type SpotDraft } from '../src/lib/spots';
 import { StoreProvider } from '../src/state/provider';
 
 // The image field's picker asks the page's router for the member's role, which a static render has none of.

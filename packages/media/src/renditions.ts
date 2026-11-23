@@ -137,6 +137,39 @@ export async function makeRenditions(file: Blob, options: RenditionOptions = {})
   }
 }
 
+/**
+ * A photo for a model to read (the agent's fill, #263): upright, its longer edge at most `edge`
+ * pixels, as a base64 JPEG on white. The API passes it on without decoding it, so it is made small
+ * here, where the CPU is the person's.
+ */
+export async function scaledPhoto(file: Blob, edge: number, quality = 0.85): Promise<{ mediaType: 'image/jpeg'; data: string }> {
+  const info = readImageInfo(new Uint8Array(await file.arrayBuffer()));
+  if (!info || info.type === 'image/svg+xml') throw new MediaError('the file is not a JPEG, PNG or WebP photo');
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch (e) {
+    throw new MediaError('the file is not an image this browser can read', { cause: e });
+  }
+  try {
+    const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+    const canvas = new OffscreenCanvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new MediaError('this browser cannot draw images off screen');
+    // JPEG has no transparency: a flyer's transparent parts read as paper, not black.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const bytes = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/jpeg', quality })).arrayBuffer());
+    let text = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { mediaType: 'image/jpeg', data: btoa(text) };
+  } finally {
+    bitmap.close();
+  }
+}
+
 /** The rendition with its sample, when it has no transparent pixel. */
 async function withSample(r: Rendition): Promise<Rendition> {
   const bitmap = await createImageBitmap(r.blob, { imageOrientation: 'from-image' });

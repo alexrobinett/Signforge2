@@ -31,6 +31,10 @@ const TEXT_ON: [string, string][] = [
     [`actor-${a}`, 'card'],
     [`actor-${a}`, 'accent'],
   ]),
+  // The agent's fill (#263): its banner's title and pills, and the banner's line, on its muted tint.
+  ['actor-agent', 'actor-agent-muted'],
+  ['foreground', 'actor-agent-muted'],
+  ...(['updating', 'offline'] as const).map((s): [string, string] => [`status-${s}-foreground`, `status-${s}-muted`]),
 ];
 const EDGES_ON: [string, string][] = [
   ['input', 'card'],

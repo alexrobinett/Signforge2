@@ -7,7 +7,9 @@
 import type { DeviceCommand, TableFeed, TemplateManifest, TemplateRuntimeReport } from '@signforge/contract';
 import type { OrgScope, PlatformScope, Staged } from '@signforge/db';
 import type { z } from 'zod';
-import type { AiProviderName, ToolErrorCode } from './outputs';
+import { type AiProviderName, CMS_AGENT_CLIENT_ID, type ToolErrorCode } from './outputs';
+
+export { CMS_AGENT_CLIENT_ID };
 import type { UploadSigner } from './upload';
 
 /** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
@@ -297,9 +299,11 @@ export interface ToolContext<I, D extends DataScope = OrgScope, N extends Servic
  * member and the address). `pairing_claim`: every claim of a pairing code, right or wrong.
  * `place_search`: every `find_places`, each a request to a third party's free service.
  * `table_read`: every `read_table`, each a fetch of a URL the caller typed.
+ * `page_read`: every link the agent's fill reads (#263, #314), a fetch of a URL the caller pasted, which
+ * costs no turn when the page cannot be read.
  * `template_check`: every runtime check of an org's template, keyed by the org, whose container it uses.
  */
-export type RateLimitBucket = 'pairing_claim' | 'place_search' | 'table_read' | 'template_check';
+export type RateLimitBucket = 'pairing_claim' | 'place_search' | 'table_read' | 'page_read' | 'template_check';
 /** Counts one attempt in `bucket`; false once the caller is over its limit. */
 export type RateLimiter = (bucket: RateLimitBucket) => Promise<boolean>;
 
@@ -359,9 +363,6 @@ export class ToolError extends Error {
 }
 
 export const notFound = (what: string, id: string) => new ToolError('not_found', `${what} ${id} not found`);
-
-/** The client id of the agent built into the CMS, which acts as the signed-in member (docs/proposals/cms-agent.md). */
-export const CMS_AGENT_CLIENT_ID = 'cms-agent';
 
 /** An agent is calling: a Milestone 4 grant, or the in-CMS agent acting as its member. A tool only a person may run refuses both. */
 export const isAgent = (actor: Actor) => actor.kind === 'agent' || actor.clientId === CMS_AGENT_CLIENT_ID;

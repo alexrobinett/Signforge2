@@ -58,3 +58,14 @@ export async function orgMembers(d1: D1Database, orgId: string): Promise<{ userI
     .where(eq(member.organizationId, orgId))
     .all();
 }
+
+/** The user's orgs, with the org's name and the user's role there, by name: an agent's consent picks one. */
+export async function memberships(d1: D1Database, userId: string): Promise<{ orgId: string; name: string; role: string }[]> {
+  return drizzle(d1)
+    .select({ orgId: member.organizationId, name: organization.name, role: member.role })
+    .from(member)
+    .innerJoin(organization, eq(organization.id, member.organizationId))
+    .where(eq(member.userId, userId))
+    .orderBy(organization.name, organization.id)
+    .all();
+}

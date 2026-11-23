@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./agent-inline": "./src/agent/inline-shapes.ts",
     "./roles": "./src/auth/roles.ts",
     "./tab-org": "./src/api/tab-org.ts"
   },

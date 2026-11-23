@@ -1,5 +1,5 @@
-// The guard: on `/api`, only Better Auth and the tool route change data, and the tool route
-// changes it only through the dispatcher, which writes the audit log. The test enumerates the
+// The guard: on `/api`, only Better Auth, the tool route and the agent's inline fill change data,
+// and the last two change it only through the dispatcher, which writes the audit log. The test enumerates the
 // Worker's routes, so a new route fails here until it is either read-only or listed below.
 import { seedBaseTemplate, testScope } from '@signforge/db/testing';
 import { registry } from '@signforge/tools';
@@ -10,13 +10,15 @@ import { orgBlobKey } from '../src/r2';
 import { Client, email, testApp } from './client';
 
 /**
- * Every route that is not a GET, and why it may change data. `/api` allows exactly Better Auth
- * and the tool route. Other trees list each route with its reason; a screen reporting about
+ * Every route that is not a GET, and why it may change data. `/api` allows exactly Better Auth,
+ * the tool route and the agent's inline fill. Other trees list each route with its reason; a screen reporting about
  * itself on `/v1/device` (M3-07's sync) goes here too, as a deliberate decision.
  */
 const WRITERS: Record<string, string> = {
-  'POST /api/auth/*': 'Better Auth: sign-in, organizations, members, invitations',
+  'POST /api/auth/*': 'Better Auth: sign-in, organizations, members, invitations, and the OAuth consent for agents (#110)',
   'POST /api/tools/:name': 'the tool registry, through the dispatcher',
+  'POST /api/agent/inline':
+    "the agent's fill from a flyer, photo or link (#263): one create_spot through the dispatcher as the member via cms-agent (its writes and their audit row are checked below)",
   'POST /admin/screens/:screen/missing': 'reads only: POST because the body is a manifest',
   'PUT /admin/screens/:screen/blobs/:sha256': 'sf push: content-addressed bytes in R2, inert until a publish names them',
   'PUT /admin/base/blobs/:sha256': 'sf push: content-addressed bytes in R2, inert until a publish names them',
@@ -72,8 +74,12 @@ describe('the route table', () => {
     expect(unexpected, 'a new route that is not a GET: make it a tool, or list it in WRITERS with a reason').toEqual([]);
   });
 
-  it('allows exactly Better Auth and the tool route to change data on /api', () => {
-    expect(Object.keys(WRITERS).filter((r) => r.split(' ')[1]!.startsWith('/api/'))).toEqual(['POST /api/auth/*', 'POST /api/tools/:name']);
+  it('allows exactly Better Auth, the tool route and the inline fill to change data on /api', () => {
+    expect(Object.keys(WRITERS).filter((r) => r.split(' ')[1]!.startsWith('/api/'))).toEqual([
+      'POST /api/auth/*',
+      'POST /api/tools/:name',
+      'POST /api/agent/inline',
+    ]);
     // Every listed writer still exists, so the list cannot rot.
     for (const r of Object.keys(WRITERS)) expect(routes(), r).toContain(r);
   });
@@ -164,6 +170,31 @@ describe('requests', () => {
     writes.length = 0;
     expect((await owner.tool('rename_screen', { screenId: 'scr_nobody', name: 'x' })).status).toBe(404);
     expect(ours()).not.toContain('audit_log');
+  });
+
+  it('to the inline fill write the one spot with its audit row, through the dispatcher', async () => {
+    const answer = JSON.stringify({ template: 'base/clock@1.0.0', name: 'Bake sale', data_json: JSON.stringify({ title: 'Bake sale' }), unsure: [] });
+    const model: typeof fetch = async () =>
+      Response.json({
+        id: 'msg_1',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-haiku-5-5',
+        content: [{ type: 'text', text: answer }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    const page: typeof fetch = async () => new Response('<p>Bake sale</p>');
+    const filling = testApp({ agent: { reach: { fetch: model, guards: { fetch: page, resolve: async () => ['93.184.215.14'] } } } });
+    const member = new Client(filling, owner.ip, { ...env, DB: recordingD1(env.DB, writes) });
+    for (const [k, v] of owner.jar) member.jar.set(k, v);
+    const saved = await owner.tool('save_ai_provider', { provider: 'anthropic', apiKey: 'sk-ant-api03-GUARDKEYGUARDKEY-0001', fastModel: 'claude-haiku-5-5' });
+    expect(saved.status).toBe(200);
+    writes.length = 0;
+    const res = await member.post('/api/agent/inline', { source: { kind: 'link', url: 'https://bakery.example/' }, idempotencyKey: 'guard-fill-1' });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(ours()).toEqual(['spots', 'idempotency_keys', 'audit_log']);
   });
 });
 

@@ -68,6 +68,8 @@
   --status-needs-you-muted: #fee4e2;
   /* Who did it, in the audit log (canvas board SettingsAudit): agents and screens apart from people. */
   --actor-agent: #5b2a86;
+  /* The agent's pill and banner (#263): what it filled, apart from what a person typed. */
+  --actor-agent-muted: #f3ebfa;
   --actor-device: #2b4c7e;
 
   /* Rollout bars and play counts; every bar carries a text legend. */
@@ -132,6 +134,7 @@
   --status-needs-you-foreground: #fca5a5;
   --status-needs-you-muted: #3f0d0d;
   --actor-agent: #c9a7eb;
+  --actor-agent-muted: #2a1a3a;
   --actor-device: #9db8e8;
 
   --chart-1: #7b93ff;
@@ -195,6 +198,7 @@
   --color-status-needs-you-foreground: var(--status-needs-you-foreground);
   --color-status-needs-you-muted: var(--status-needs-you-muted);
   --color-actor-agent: var(--actor-agent);
+  --color-actor-agent-muted: var(--actor-agent-muted);
   --color-actor-device: var(--actor-device);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);

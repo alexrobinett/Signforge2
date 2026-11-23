@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
+import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAccountRouteImport } from './routes/_app/account'
@@ -39,6 +40,11 @@ import { Route as AppSettingsBrandKitsKitIdRouteImport } from './routes/_app/set
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectRoute = ConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignInRoute = SignInRouteImport.update({
@@ -178,6 +184,7 @@ const AppSettingsBrandKitsKitIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/connect': typeof ConnectRoute
   '/sign-in': typeof SignInRoute
   '/account': typeof AppAccountRoute
   '/assets': typeof AppAssetsRoute
@@ -205,6 +212,7 @@ export interface FileRoutesByFullPath {
   '/settings/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRoutesByTo {
+  '/connect': typeof ConnectRoute
   '/sign-in': typeof SignInRoute
   '/account': typeof AppAccountRoute
   '/assets': typeof AppAssetsRoute
@@ -234,6 +242,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
+  '/connect': typeof ConnectRoute
   '/sign-in': typeof SignInRoute
   '/_app/account': typeof AppAccountRoute
   '/_app/assets': typeof AppAssetsRoute
@@ -265,6 +274,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/connect'
     | '/sign-in'
     | '/account'
     | '/assets'
@@ -292,6 +302,7 @@ export interface FileRouteTypes {
     | '/settings/brand-kits/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/connect'
     | '/sign-in'
     | '/account'
     | '/assets'
@@ -320,6 +331,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_app'
+    | '/connect'
     | '/sign-in'
     | '/_app/account'
     | '/_app/assets'
@@ -350,6 +362,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
+  ConnectRoute: typeof ConnectRoute
   SignInRoute: typeof SignInRoute
   AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
   ApiSplatRoute: typeof ApiSplatRoute
@@ -363,6 +376,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connect': {
+      id: '/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof ConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-in': {
@@ -614,6 +634,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  ConnectRoute: ConnectRoute,
   SignInRoute: SignInRoute,
   AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
   ApiSplatRoute: ApiSplatRoute,

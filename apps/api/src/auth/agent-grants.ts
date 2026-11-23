@@ -14,10 +14,13 @@
  * - **Removal.** A member removed from an org, or leaving it, loses their grants there: revoked,
  *   with the provider's tokens and consents for them, after Better Auth's change.
  */
-import { SCOPES, type Scope } from '@signforge/tools';
+import { FIRST_PARTY_CLIENT_IDS } from '@signforge/db';
+import { type Role, SCOPES, type Scope } from '@signforge/tools';
+import { verifyOAuthQueryParams } from '@better-auth/oauth-provider';
 import type { BetterAuthPlugin } from 'better-auth';
 import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx, sessionMiddleware } from 'better-auth/api';
 import { z } from 'zod';
+import { plainName } from './client-names';
 
 /** What a client may ask for: the tool scopes, and `offline_access` for a refresh token. */
 export const OAUTH_SCOPES = [...SCOPES, 'offline_access'] as const;
@@ -39,6 +42,8 @@ export interface GrantDeps {
   revokeMember(orgId: string, userId: string, by: string): Promise<void>;
   /** Revokes one grant the provider issued no code for, audited as `by`. */
   revokeUnissued(orgId: string, grantId: string, by: string): Promise<void>;
+  /** The user's orgs, each with their role and which of `requested` a grant there may hold now (for the consent page). */
+  offers(userId: string, requested: Scope[]): Promise<{ orgId: string; name: string; role: Role; scopes: Scope[] }[]>;
 }
 
 type ConsentBody = { accept: boolean; oauth_query: string; scope?: string };
@@ -68,10 +73,60 @@ const ENDS_MEMBERSHIP: Record<string, (returned: Record<string, unknown>) => unk
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+/**
+ * Where a client's code goes, as the consent page names it: a web callback's host, or for an app's
+ * own scheme (`com.example.app:/cb`, `cursor://anysphere.cursor-retrieval/...`) the scheme and what follows it up to the path.
+ * An unverified app's scheme and host are a name it chose, so they are shown only when plain (`plainName`):
+ * `signforge://SignForge-CLI/cb` is not (target null: the page says an app on this device).
+ */
+export function destinationOf(redirectUri: string, verified: boolean): { kind: 'web'; host: string } | { kind: 'app'; target: string | null } {
+  const url = new URL(redirectUri);
+  if (url.protocol === 'http:' || url.protocol === 'https:') return { kind: 'web', host: url.host };
+  const scheme = url.protocol.slice(0, -1);
+  // Each alone, and together, as they read in the heading (`sign://forge`).
+  const chosen = url.host ? [scheme, url.host, `${scheme} ${url.host}`] : [scheme];
+  if (!verified && chosen.some((part) => plainName(part) === undefined)) return { kind: 'app', target: null };
+  return { kind: 'app', target: url.host ? `${url.protocol}//${url.host}` : url.protocol };
+}
+
 export function agentGrants(grants: GrantDeps, link: ConsentLink) {
   return {
     id: 'agent-grants',
     endpoints: {
+      /**
+       * What the consent page shows (`/connect` in the CMS): the client, where its code goes, the
+       * person, and each of their orgs with the scopes a grant there may hold (asked for, and capped by
+       * the role as the org has it now). A read: it writes nothing. The signed query is checked here,
+       * as the provider's hook checks it on the consent POST.
+       */
+      agentGrantRequest: createAuthEndpoint(
+        '/agent-grants/request',
+        { method: 'GET', query: z.object({ oauth_query: z.string().min(1) }), requireHeaders: true, use: [sessionMiddleware] },
+        async (ctx) => {
+          if (!(await verifyOAuthQueryParams(ctx.query.oauth_query, ctx.context.secret))) {
+            throw new APIError('BAD_REQUEST', { message: 'this request has expired or is not valid: connect again from the app' });
+          }
+          const query = new URLSearchParams(ctx.query.oauth_query);
+          const clientId = query.get('client_id') ?? '';
+          const client = await ctx.context.adapter.findOne<{ name: string | null }>({ model: 'oauthClient', where: [{ field: 'clientId', value: clientId }] });
+          if (!client) throw new APIError('BAD_REQUEST', { message: 'no such client' });
+          const asked = (query.get('scope') ?? '').split(' ');
+          const requested = SCOPES.filter((s) => asked.includes(s));
+          const { user } = ctx.context.session;
+          const verified = FIRST_PARTY_CLIENT_IDS.some((id) => id === clientId);
+          return ctx.json({
+            client: {
+              id: clientId,
+              // An unverified client's name only when it is plain (`plainName`); otherwise none reaches the page.
+              name: verified ? (client.name ?? clientId) : (plainName(client.name ?? '') ?? null),
+              verified,
+              redirect: destinationOf(query.get('redirect_uri') ?? '', verified),
+            },
+            user: { name: user.name, email: user.email },
+            orgs: await grants.offers(user.id, requested),
+          });
+        },
+      ),
       agentGrantConsent: createAuthEndpoint(
         '/agent-grants/consent',
         { method: 'POST', body: consentBody, requireHeaders: true, use: [sessionMiddleware] },
