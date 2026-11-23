@@ -405,6 +405,35 @@ describe('POST /api/agent/inline', () => {
     }
   });
 
+  it('counts the links read by every member on one address against that address (#316)', async () => {
+    vi.setSystemTime(NOON);
+    try {
+      const s = await setup({ pages: {}, role: 'editor' });
+      // The owner and the editor, both from one address, on one set of rate limits that count on the tests' clock.
+      const limits = clockLimits();
+      const at = (who: Client, ip: string) => {
+        const client = new Client(who.t, ip, limits);
+        for (const [k, v] of who.jar) client.jar.set(k, v);
+        return (source: unknown) => client.post('/api/agent/inline', { source, idempotencyKey: crypto.randomUUID() });
+      };
+      const shared = '10.99.0.1';
+      const owner = at(s.owner, shared);
+      const editor = at(s.member, shared);
+      // Fifteen each: each member is at half its limit, the address at all of its.
+      for (let i = 0; i < 15; i++) {
+        expect((await owner({ kind: 'link', url: LINK })).status, `owner ${i}`).toBe(502);
+        expect((await editor({ kind: 'link', url: LINK })).status, `editor ${i}`).toBe(502);
+      }
+      const fetched = s.web.fetched.length;
+      for (const fill of [owner, editor]) expect(await (await fill({ kind: 'link', url: LINK })).json()).toMatchObject({ error: 'rate_limited' });
+      expect(s.web.fetched).toHaveLength(fetched);
+      // From another address the editor still has half of its own.
+      expect((await at(s.member, '10.99.0.2')({ kind: 'link', url: LINK })).status).toBe(502);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('refuses a fill, unfetched and uncounted, with no model of its own (the demo model is #265), or no fast model chosen', async () => {
     const none = await setup({ save: null });
     const res = await none.fill({ kind: 'link', url: LINK });
