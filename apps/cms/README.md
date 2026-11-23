@@ -96,6 +96,8 @@ src/lib/fleet-status.ts   how the Screens page's poll joins the list it loaded, 
 src/lib/groups.ts         the groups that need attention, and what targets a group (schedule entries as `delete_group` counts them, brand kits)
 src/server/screens.functions.ts  the Screens loaders: tools called as the member, through one helper
 public/sign-in/           spots the player rendered (scripts/spot-shots.ts), for the sign-in wall
+public/template-thumbnails/  the New spot dialog's base template thumbnails, drawn by the player (scripts/template-thumbnails.ts)
+src/lib/template-thumbnails.json  the template versions those thumbnails were drawn from
 src/routes/api/$.ts       `/api/*` handed to the API Worker
 src/routes/v1/device/$.ts `/v1/device/*` handed to the API Worker, for the test screen
 src/server/               server-only: the API binding, the shell's server functions
