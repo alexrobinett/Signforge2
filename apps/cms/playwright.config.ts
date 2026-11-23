@@ -15,7 +15,11 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: CMS_URL, trace: 'retain-on-failure' },
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'] }, testIgnore: /phone/ },
+    { name: 'desktop', use: { ...devices['Desktop Chrome'] }, testIgnore: /phone|table-sources/ },
+    // The real poller (GET /__scheduled) polls every org's due sources and pushes the rest back,
+    // while spot-sources and integrations write their sources' polls by hand: so this spec runs
+    // alone, after every other desktop spec.
+    { name: 'poller', use: { ...devices['Desktop Chrome'] }, testMatch: /table-sources/, dependencies: ['desktop'] },
     { name: 'phone', use: { ...devices['Pixel 7'] }, testMatch: /phone/ },
   ],
 });
