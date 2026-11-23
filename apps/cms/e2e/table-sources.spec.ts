@@ -24,7 +24,7 @@ function writeMenu({ second = 'Dish 2', item = 'Item' } = {}) {
 
 /** Runs the poller now on this spot's source alone: other specs' sources wait, so their states stay theirs. */
 async function pollNow(spotId: string, sourceId: string) {
-  d1(
+  await d1(
     `UPDATE data_sources SET next_poll_at = CASE WHEN org_id = ${orgOf(spotId)} AND id = '${sourceId}' THEN 0 ELSE 9007199254740991 END, etag = NULL, last_modified = NULL`,
   );
   const res = await fetch(`http://127.0.0.1:${API_PORT}/__scheduled?cron=${encodeURIComponent('* * * * *')}`);

@@ -1,5 +1,5 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
-import { buildTemplate } from '@signforge/cli/template';
+import { buildTemplate } from '@signforge/template-build';
 // The fonts entry, not the index: Node loads this config, and the compiler's index uses extensionless imports.
 import { FONTS, fontFilePath } from '@signforge/compiler/fonts';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';

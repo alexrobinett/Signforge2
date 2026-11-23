@@ -43,6 +43,15 @@ jobs:
     runs-on: ubuntu-24.04
     # A master run with cold caches spends about 16 min on typecheck, test and lint and 20 min on the CMS e2e (runs 44896506918, 44908695033 timed out at 30).
     timeout-minutes: 60
+    # Turbo's remote cache (docs/ci.md, "Remote cache"), on once the owner sets the TURBO_API variable. Until
+    # then all four are empty, Turbo says "Remote caching disabled", and the job carries .turbo/cache
+    # with actions/cache below. The token goes out only with TURBO_API, so it never reaches Turbo's
+    # default server, Vercel's.
+    env:
+      TURBO_API: ${{ vars.TURBO_API }}
+      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      TURBO_TOKEN: ${{ vars.TURBO_API != '' && secrets.TURBO_TOKEN || '' }}
+      TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -88,7 +97,7 @@ jobs:
       # A commit that changes packages/contract changes nothing else (AGENTS.md, "The contract leads").
       - name: Contract commits
         run: sh scripts/check-contract-commits.sh ${{ github.event.pull_request.base.sha || github.event.before }}
-      # Every template is a devDependency of the API, the player and the cli, whose tests use it (docs/ci.md).
+      # Every template is a devDependency of the API, the cli and the runtime check, whose tests use it, and has browser tests of its own (docs/ci.md).
       - name: Template dependencies
         run: sh scripts/check-template-deps.sh
       # packages/db's import-boundary scan reads every package, which no package graph sees, so it runs
@@ -97,7 +106,7 @@ jobs:
         run: pnpm --filter @signforge/db exec vitest run --project node
 
       # Which tasks run, whether any of them needs Chromium (the tests of a package that declares a
-      # Playwright dependency launch it), and whether any needs the stress media (the cli's golden
+      # Playwright dependency, or the template harness, launch it), and whether any needs the stress media (the cli's golden
       # test builds examples/stress; the tools' publishing test compares against that golden).
       - name: Plan
         id: plan
@@ -118,12 +127,15 @@ jobs:
               base=${{ github.event.pull_request.base.sha }}
               ;;
             push)
-              shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=master&status=success&per_page=20" \
-                --jq '.workflow_runs[] | select(.event != "pull_request") | .head_sha') || shas=
-              for sha in $shas; do
-                if git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then base=$sha; break; fi
-              done
-              [ -n "$base" ] || echo "None of the 20 newest green master runs is on a commit HEAD contains: running everything."
+              if shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=master&status=success&per_page=20" \
+                --jq '.workflow_runs[] | select(.event != "pull_request") | .head_sha' 2> "$RUNNER_TEMP/runs.err"); then
+                for sha in $shas; do
+                  if git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then base=$sha; break; fi
+                done
+                [ -n "$base" ] || echo "None of the 20 newest green master runs is on a commit HEAD contains: running everything."
+              else
+                echo "Could not list master's green runs: $(cat "$RUNNER_TEMP/runs.err"). Running everything."
+              fi
               ;;
             schedule)
               last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""') || last=
@@ -147,7 +159,7 @@ jobs:
             [ -z "$base" ] || affected=--affected
             TURBO_SCM_BASE=$base pnpm exec turbo run $tasks $affected --dry=json > "$RUNNER_TEMP/plan.json"
             for dir in $(jq -r '.tasks[] | select(.command != "<NONEXISTENT>" and (.task == "test" or .task == "test:e2e")) | .directory' "$RUNNER_TEMP/plan.json" | sort -u); do
-              grep -q playwright "$dir/package.json" && browsers=true
+              grep -qE 'playwright|@signforge/template-test' "$dir/package.json" && browsers=true
               case $dir in packages/cli | packages/tools) stress_media=true ;; esac
             done
           fi
@@ -206,10 +218,11 @@ jobs:
           path: examples/stress/media
           key: ${{ steps.stress-media-cache.outputs.cache-primary-key }}
 
-      # Turbo's local cache, carried between runs: the newest entry for this OS, saved under this sha.
+      # Turbo's local cache, carried between runs while there is no remote cache: the newest entry for
+      # this OS, saved under this sha.
       - name: Restore Turbo cache
         id: turbo-cache
-        if: steps.plan.outputs.tasks != ''
+        if: steps.plan.outputs.tasks != '' && env.TURBO_API == ''
         uses: actions/cache/restore@v4
         with:
           path: .turbo/cache
@@ -217,12 +230,14 @@ jobs:
           restore-keys: turbo-${{ runner.os }}-
       - name: Typecheck, test, e2e, lint
         if: steps.plan.outputs.tasks != ''
-        run: pnpm exec turbo run ${{ steps.plan.outputs.tasks }} ${{ steps.plan.outputs.affected }} --summarize
+        # One task per core: Turbo's default of 10 starts that many Chromiums on the runner's two cores, and
+        # browser tests then miss their waits (#277).
+        run: pnpm exec turbo run ${{ steps.plan.outputs.tasks }} ${{ steps.plan.outputs.affected }} --summarize --concurrency=100%
         env:
           TURBO_SCM_BASE: ${{ steps.plan.outputs.base }} # what --affected compares against
       # Also after a failure, so a rerun replays the tasks that passed.
       - name: Save Turbo cache
-        if: always() && steps.plan.outputs.tasks != '' && steps.turbo-cache.outputs.cache-hit != 'true'
+        if: always() && steps.plan.outputs.tasks != '' && env.TURBO_API == '' && steps.turbo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .turbo/cache
@@ -237,6 +252,7 @@ jobs:
             apps/cms/test-results
             apps/cms/.e2e
           if-no-files-found: ignore
+          include-hidden-files: true # apps/cms/.e2e holds the API's and the CMS's logs
       - name: Timing summary
         if: always()
         run: sh scripts/ci-summary.sh >> "$GITHUB_STEP_SUMMARY"
