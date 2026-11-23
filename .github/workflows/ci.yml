@@ -88,7 +88,7 @@ jobs:
       # A commit that changes packages/contract changes nothing else (AGENTS.md, "The contract leads").
       - name: Contract commits
         run: sh scripts/check-contract-commits.sh ${{ github.event.pull_request.base.sha || github.event.before }}
-      # Every template is a devDependency of the API, the player and the cli, whose tests use it (docs/ci.md).
+      # Every template is a devDependency of the API, the cli and the runtime check, whose tests use it, and has browser tests of its own (docs/ci.md).
       - name: Template dependencies
         run: sh scripts/check-template-deps.sh
       # packages/db's import-boundary scan reads every package, which no package graph sees, so it runs
@@ -97,7 +97,7 @@ jobs:
         run: pnpm --filter @signforge/db exec vitest run --project node
 
       # Which tasks run, whether any of them needs Chromium (the tests of a package that declares a
-      # Playwright dependency launch it), and whether any needs the stress media (the cli's golden
+      # Playwright dependency, or the template harness, launch it), and whether any needs the stress media (the cli's golden
       # test builds examples/stress; the tools' publishing test compares against that golden).
       - name: Plan
         id: plan
@@ -150,7 +150,7 @@ jobs:
             [ -z "$base" ] || affected=--affected
             TURBO_SCM_BASE=$base pnpm exec turbo run $tasks $affected --dry=json > "$RUNNER_TEMP/plan.json"
             for dir in $(jq -r '.tasks[] | select(.command != "<NONEXISTENT>" and (.task == "test" or .task == "test:e2e")) | .directory' "$RUNNER_TEMP/plan.json" | sort -u); do
-              grep -q playwright "$dir/package.json" && browsers=true
+              grep -qE 'playwright|@signforge/template-test' "$dir/package.json" && browsers=true
               case $dir in packages/cli | packages/tools) stress_media=true ;; esac
             done
           fi
@@ -220,7 +220,9 @@ jobs:
           restore-keys: turbo-${{ runner.os }}-
       - name: Typecheck, test, e2e, lint
         if: steps.plan.outputs.tasks != ''
-        run: pnpm exec turbo run ${{ steps.plan.outputs.tasks }} ${{ steps.plan.outputs.affected }} --summarize
+        # One task per core: Turbo's default of 10 starts that many Chromiums on the runner's two cores, and
+        # browser tests then miss their waits (#277).
+        run: pnpm exec turbo run ${{ steps.plan.outputs.tasks }} ${{ steps.plan.outputs.affected }} --summarize --concurrency=100%
         env:
           TURBO_SCM_BASE: ${{ steps.plan.outputs.base }} # what --affected compares against
       # Also after a failure, so a rerun replays the tasks that passed.

@@ -2,7 +2,7 @@
  * The runner's HTTP API, in Node as the container runs it. The network probe points at a local
  * port: closed (nothing listens) for the checks, open (a server answers) for the refusal.
  */
-import { buildTemplate } from '@signforge/cli/template';
+import { buildTemplate } from '@signforge/template-build';
 import { validateTemplateRuntimeReport } from '@signforge/contract';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';

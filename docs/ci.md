@@ -14,7 +14,7 @@ One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready
 
 1. Install, with the pnpm store restored from the cache.
 2. The repo-wide checks, a few seconds each, on every run: Biome lint, the format check on changed files, knip, jscpd, `turbo boundaries`, the contract-commit check, the template-dependency check and packages/db's import-boundary scan.
-3. The plan picks the base `--affected` compares against (a pull request's base; on `master`, the newest commit whose CI passed, found with the Actions API; none on a nightly or manual run), then `turbo run … --dry=json` lists the tasks that will run (no `test:e2e` on a pull request). Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media, tools and template-check).
+3. The plan picks the base `--affected` compares against (a pull request's base; on `master`, the newest commit whose CI passed, found with the Actions API; none on a nightly or manual run), then `turbo run … --dry=json` lists the tasks that will run (no `test:e2e` on a pull request). Chromium is installed only if one of them is the test of a package that declares a Playwright dependency or the template harness (today the player, the CMS, media, tools, template-check, the look kit and every template).
 4. The stress media, only if the cli's or the tools' tests run (see [Stress media](#stress-media)).
 5. `turbo run typecheck test lint --affected --summarize` on a pull request, `turbo run typecheck test test:e2e lint --affected --summarize` on a push to `master`, and the same without `--affected` on a nightly or manual run, with Turbo's cache restored from earlier runs. The job may run 60 minutes: a run that covers everything with cold caches takes about 30 (2026-11-21: the player's tests about 18 minutes, the CMS e2e about 20, side by side).
 6. The timing summary on the run's page: each step's time, then each Turbo task's time and whether it came from the cache (`scripts/ci-summary.sh`).
@@ -33,8 +33,9 @@ Turbo puts three things in no package, so `--affected` plans nothing for a chang
 
 Turbo decides what is affected from the package graph alone. It ignores a task's `inputs` that point outside its package. So a test that reads another package's files has to declare that package as a dependency, or a change there will not run the test:
 - The CMS e2e starts the API, so `apps/cms` has `@signforge/api` as a devDependency.
-- The cli's golden and video tests build and read `examples/`, so `examples/` is a package, `@signforge/examples`, and `packages/cli` lists it as a devDependency. A change there (a template's new stress spot, say) runs the cli's tests and those of what depends on the cli: the API, the CMS, the player, the runtime check and the tools, whose publishing test compares against the cli's stress golden. It no longer runs the contract's, db's, feeds' or media's tests. The package has no scripts: Turbo still hashes its files into the tasks that depend on it, so a warm cache never replays a result built from older examples.
-- The cli's and the API's tests build every template with the SDK (the cli's also check that no bundle changed without a new version: [template-spec.md](template-spec.md#rules)), and the player's browser tests and the runtime check's tests (`apps/template-check`) play every template. So `packages/cli`, `apps/api`, `packages/player` and `apps/template-check` list each `templates/*` package and `@signforge/template-sdk` as devDependencies. **A new template goes into all four lists**: the repo-wide step `scripts/check-template-deps.sh` fails until it does. The check's container tests (`pnpm --filter @signforge/template-check test:container`) need Docker and do not run in CI.
+- The cli's golden and video tests build and read `examples/`, so `examples/` is a package, `@signforge/examples`, and `packages/cli` lists it as a devDependency. A change there (a template's new stress spot, say) runs the cli's tests and those of what depends on the cli: the API, the CMS and the tools, whose publishing test compares against the cli's stress golden. It no longer runs the contract's, db's, feeds' or media's tests. The package has no scripts: Turbo still hashes its files into the tasks that depend on it, so a warm cache never replays a result built from older examples.
+- The cli's and the API's tests build every template with the SDK (the cli's also check that no bundle changed without a new version: [template-spec.md](template-spec.md#rules)), and the runtime check's tests (`apps/template-check`) play every template. So `packages/cli`, `apps/api` and `apps/template-check` list each `templates/*` package and `@signforge/template-sdk` as devDependencies. **A new template goes into all three lists, and gets browser tests of its own** (below): the repo-wide step `scripts/check-template-deps.sh` fails until it does. The check's container tests (`pnpm --filter @signforge/template-check test:container`) need Docker and do not run in CI.
+- Each template's browser tests are its own package's `test` task (`templates/<id>/test`, on the harness in [`packages/template-test`](../packages/template-test/README.md)), and the look kit's are `packages/template-looks`'s. So a change to one template runs only its own browser tests, beside the cli's, the API's and the runtime check's. A change to the harness, the template builder (`packages/template-build`), the SDK, the contract or media runs every template's; one to the look kit runs its own and those of the templates on it. The player keeps its own browser tests (playback, sync, takeovers, files and the rest), which run when the player, player-core, the contract, the SDK or the Alert template change: its takeover test plays the Alert, so the player lists `@signforge/template-alert`.
 
 knip lists these dependencies as ones it cannot see used.
 
@@ -69,7 +70,7 @@ A remote cache would share Turbo's cache with laptops and across pull requests. 
 - Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it (better: make it a package, as `examples/` is). Otherwise a change there either skips the test on pull requests and on pushes to `master`, until the nightly run, or, with a warm cache, replays a stale result.
 - Keep the repo-wide checks repo-wide only while they take seconds. Anything slower should become a Turbo task in the package it checks.
 - Keep the workflow's `paths:` filter to files no test reads. A file a test reads that the filter leaves out (as `fonts/README.md` is put back) would change without a run.
-- The player's tests are the longest task: about 14 minutes on GitHub's two-core runner (2026-11-22), down from 18. Any change to the player, the SDK, the CLI, the contract or a template runs them. Vitest runs one fewer file at once than there are cores, which on two cores is one, so `packages/player/vitest.config.ts` asks for at least two: `browser/templates.test.ts` (about 13.5 min) then runs beside the other files (about 7 min together). That one file is now the whole task, so splitting it by template is what would bring those runs down next.
+- The player's tests were the longest task: about 14 minutes on GitHub's two-core runner (2026-11-22), most of it `browser/templates.test.ts` (about 13.5 min), which played every template, so any template change ran all of it. Each template's browser tests are now their own task (#272, [below](#per-template-tests-272)), so a pull request that changes one template runs only that one. The slowest is the Info frame's, about 4 m 40 s on a laptop, for its 288 rail × crawl × toggle settings; the rest take 5 s to 1 min. The player's own browser tests are about 2 min on a laptop. A change to the harness, the builder, the SDK or the contract still runs every template's, each in its own task.
 - Every template change adds a spot to `examples/stress/spots`. While `examples/**` was a global dependency, the push that merged it reran every task of every package: of five `master` runs measured on 2026-11-21 and 22, three replayed nothing from the cache, one replayed 2 of 43 tasks and one 26 of 43. Now `examples/` is a package ([What "affected" means](#what-affected-means)), so such a push reruns the cli's tests and those of its dependents, not the contract's, db's, feeds' or media's.
 
 ## The API's workerd tests: no module cache on disk
@@ -95,7 +96,7 @@ On CI, where the CPU goes during one serial run (CPU seconds, sampled with `ps`)
 
 ## Measured
 
-On GitHub's `ubuntu-24.04` runner, 2026-11-22. For a private repository it has two cores, so Vitest runs one test file at a time unless a config asks for more. Times are the job's, from its start to its end; Turbo is the `turbo run` step.
+On GitHub's `ubuntu-24.04` runner, 2026-11-22. For a private repository it has two cores, so Vitest runs one test file at a time unless a config asks for more, and the `turbo run` step passes `--concurrency=100%`, one task per core: with Turbo's default of 10, the 13 template test tasks each start a Chromium at once and browser tests miss their waits. Times are the job's, from its start to its end; Turbo is the `turbo run` step.
 
 The week before this workflow (2026-11-15 to 22, from the Actions API): 333 pull request runs, 2,602 minutes (2,760 billed, each job rounded up to a minute), and 105 `master` runs, 1,230 minutes (1,284 billed). Setup and the repo-wide checks take about 45 s of each run (checkout 2–6 s, pnpm 8–11 s, Node 4–7 s, store 6–9 s, install 3–6 s, the checks about 10 s). The rest is Turbo's tasks.
 
@@ -114,6 +115,22 @@ The slowest tasks with cold caches (44944143395): `player:test` 1,161 s, the CMS
 TypeScript is 7.0.2, the native compiler, so there is nothing to gain from `@typescript/native-preview`: `tsc -p apps/api` takes 0.98 s on a laptop against 4.2 s with TypeScript 5.9.3, and every typecheck in the repo takes 7 s. In CI a typecheck takes 1–80 s only because it shares two cores with the tests.
 
 Bun would not help. Install and setup are about 30 s of the run, and the slow tasks run in workerd (the API, tools and db through Cloudflare's Vitest pool), in Chromium (the player, the CMS e2e, template-check) and in Node, whatever installs the packages.
+
+## Per-template tests (#272)
+
+Before, `packages/player/browser/templates.test.ts` played every template inside `player:test`, so any template change ran all of it: 809 s of an 817 s `player:test` on CI's runner (#254, run 45108976002), and 517 s of 519 s on a laptop (2026-11-22). Now each template's tests are its own package's task, on the harness in `packages/template-test`. On the same laptop, at the PR's head:
+
+| Task | Time | Tests |
+| --- | ---: | ---: |
+| `player:test` before (with templates.test.ts) | 519 s | 321 |
+| `player:test` after | 114 s | 183 |
+| All 13 template tasks together, `--force` | 4 m 48 s | 283 |
+| `template-info-frame:test` | 282 s | 27 |
+| `template-photo-promo:test` | 58 s | 37 |
+| `template-countdown:test`, `template-room-status:test` | 43 s each | 18, 11 |
+| `template-clock:test` | 5 s | 20 |
+
+A change to `templates/clock` alone now runs `template-clock:test` (5 s) beside the cli's, the API's, the tools', the runtime check's and the CMS unit tests, and no longer `player:test`. The template tasks have more tests than templates.test.ts had (283, from 138) because the brand-colour checks that played six templates in one test now run per template.
 
 ## Required status check
 

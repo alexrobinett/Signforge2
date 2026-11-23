@@ -239,6 +239,9 @@ importers:
       '@signforge/template-announcement':
         specifier: workspace:*
         version: link:../../templates/announcement
+      '@signforge/template-build':
+        specifier: workspace:*
+        version: link:../../packages/template-build
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -484,9 +487,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20261117.1
         version: 5.20261117.1
-      '@signforge/cli':
-        specifier: workspace:*
-        version: link:../../packages/cli
       '@signforge/template-agenda':
         specifier: workspace:*
         version: link:../../templates/agenda
@@ -496,6 +496,9 @@ importers:
       '@signforge/template-announcement':
         specifier: workspace:*
         version: link:../../templates/announcement
+      '@signforge/template-build':
+        specifier: workspace:*
+        version: link:../../packages/template-build
       '@signforge/template-clock':
         specifier: workspace:*
         version: link:../../templates/clock
@@ -558,9 +561,9 @@ importers:
       '@signforge/media-check':
         specifier: workspace:*
         version: link:../media-check
-      esbuild:
-        specifier: ^0.28.2
-        version: 0.28.2
+      '@signforge/template-build':
+        specifier: workspace:*
+        version: link:../template-build
       sharp:
         specifier: ^0.35.5
         version: 0.35.5(@types/node@26.6.6)
@@ -737,63 +740,21 @@ importers:
         specifier: workspace:*
         version: link:../player-core
     devDependencies:
-      '@signforge/cli':
-        specifier: workspace:*
-        version: link:../cli
-      '@signforge/media':
-        specifier: workspace:*
-        version: link:../media
-      '@signforge/template-agenda':
-        specifier: workspace:*
-        version: link:../../templates/agenda
       '@signforge/template-alert':
         specifier: workspace:*
         version: link:../../templates/alert
-      '@signforge/template-announcement':
+      '@signforge/template-build':
         specifier: workspace:*
-        version: link:../../templates/announcement
-      '@signforge/template-clock':
-        specifier: workspace:*
-        version: link:../../templates/clock
-      '@signforge/template-countdown':
-        specifier: workspace:*
-        version: link:../../templates/countdown
-      '@signforge/template-cstore-promo':
-        specifier: workspace:*
-        version: link:../../templates/cstore-promo
-      '@signforge/template-info-frame':
-        specifier: workspace:*
-        version: link:../../templates/info-frame
-      '@signforge/template-looks':
-        specifier: workspace:*
-        version: link:../template-looks
-      '@signforge/template-menu-board':
-        specifier: workspace:*
-        version: link:../../templates/menu-board
-      '@signforge/template-news':
-        specifier: workspace:*
-        version: link:../../templates/news
-      '@signforge/template-photo-promo':
-        specifier: workspace:*
-        version: link:../../templates/photo-promo
-      '@signforge/template-room-status':
-        specifier: workspace:*
-        version: link:../../templates/room-status
+        version: link:../template-build
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../template-sdk
-      '@signforge/template-weather':
-        specifier: workspace:*
-        version: link:../../templates/weather
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
-      jsqr:
-        specifier: ^1.4.0
-        version: 1.4.0
       playwright:
         specifier: 1.65.1
         version: 1.65.1
@@ -816,6 +777,19 @@ importers:
       vitest:
         specifier: ^5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/template-build:
+    dependencies:
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../contract
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
 
   packages/template-looks:
     dependencies:
@@ -841,9 +815,21 @@ importers:
         specifier: workspace:*
         version: link:../template-sdk
     devDependencies:
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../contract
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../template-test
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
+      playwright:
+        specifier: 1.65.1
+        version: 1.65.1
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/template-sdk:
     dependencies:
@@ -866,6 +852,31 @@ importers:
       vitest:
         specifier: ^5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/template-test:
+    dependencies:
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../contract
+      '@signforge/media':
+        specifier: workspace:*
+        version: link:../media
+      '@signforge/template-build':
+        specifier: workspace:*
+        version: link:../template-build
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      playwright:
+        specifier: 1.65.1
+        version: 1.65.1
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
 
   packages/tools:
     dependencies:
@@ -953,6 +964,15 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.3.0
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/alert:
     dependencies:
@@ -966,6 +986,21 @@ importers:
       '@fontsource-variable/space-grotesk':
         specifier: 5.3.0
         version: 5.3.0
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      playwright:
+        specifier: 1.65.1
+        version: 1.65.1
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/announcement:
     dependencies:
@@ -975,6 +1010,22 @@ importers:
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../../packages/template-sdk
+    devDependencies:
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      jsqr:
+        specifier: ^1.4.0
+        version: 1.4.0
+      playwright:
+        specifier: 1.65.1
+        version: 1.65.1
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/clock:
     dependencies:
@@ -985,6 +1036,15 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.3.0
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/countdown:
     dependencies:
@@ -994,6 +1054,22 @@ importers:
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../../packages/template-sdk
+    devDependencies:
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      playwright:
+        specifier: 1.65.1
+        version: 1.65.1
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/cstore-promo:
     dependencies:
@@ -1004,6 +1080,15 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.3.0
         version: 5.3.0
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/info-frame:
     dependencies:
@@ -1013,6 +1098,22 @@ importers:
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../../packages/template-sdk
+    devDependencies:
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      playwright:
+        specifier: 1.65.1
+        version: 1.65.1
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/menu-board:
     dependencies:
@@ -1023,6 +1124,15 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.3.0
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/news:
     dependencies:
@@ -1033,6 +1143,15 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.3.0
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/photo-promo:
     dependencies:
@@ -1043,6 +1162,18 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.3.0
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/room-status:
     dependencies:
@@ -1052,6 +1183,22 @@ importers:
       '@signforge/template-sdk':
         specifier: workspace:*
         version: link:../../packages/template-sdk
+    devDependencies:
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      playwright:
+        specifier: 1.65.1
+        version: 1.65.1
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   templates/weather:
     dependencies:
@@ -1062,6 +1209,18 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.3.0
+      '@signforge/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@signforge/template-test':
+        specifier: workspace:*
+        version: link:../../packages/template-test
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
 packages:
 

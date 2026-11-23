@@ -25,7 +25,7 @@
       "ignoreDependencies": ["@signforge/player", "@signforge/template-.*"]
     },
     // The fixture template is bundled by the browser tests' global setup; sw.js is served as is.
-    // templates.test.ts plays every template from templates/: declared as for apps/api.
+    // takeover.test.ts plays the Alert template from templates/alert: declared as for apps/api.
     "packages/player": { "entry": ["browser/fixtures/template.ts", "public/sw.js"], "ignoreDependencies": ["@signforge/template-(?!sdk).*"] },
     // The hostile fixture is built by the runner's tests, which check every template in templates/:
     // declared as for apps/api. src/runner/main.ts is the container's entry, bundled by build.ts.
@@ -40,7 +40,7 @@
     "packages/tools": { "entry": ["test/harness-worker.ts"] },
     // Read by url() in each template's style.css; the template build inlines it as a data URL.
     "templates/*": { "ignoreDependencies": ["@fontsource-variable/inter", "@fontsource-variable/space-grotesk"] },
-    // The look kit's test template is built by the player's browser tests and the kit's own, not imported.
+    // The look kit's test template is built by the kit's browser tests and the cli's, not imported.
     "packages/template-looks": { "entry": ["looks-test/main.ts"] }
   }
 }
