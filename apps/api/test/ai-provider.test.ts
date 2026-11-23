@@ -54,6 +54,18 @@ describe('the AI provider service', () => {
     expect(asked.map((a) => a.url)).toEqual(['https://api.anthropic.com/v1/models?limit=100']);
   });
 
+  it("sends the org's own key even with another in ANTHROPIC_CUSTOM_HEADERS in process.env (re-check of #280)", async () => {
+    const { fetch, asked } = anthropic(200);
+    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer sk-ant-someone-elses-key';
+    try {
+      const service = aiProviders(PROD, fetch);
+      await service.test(ORG, await service.seal(ORG, KEY));
+    } finally {
+      delete process.env.ANTHROPIC_CUSTOM_HEADERS;
+    }
+    expect(asked).toEqual([{ url: 'https://api.anthropic.com/v1/models?limit=100', key: `Bearer ${KEY}` }]);
+  });
+
   it('opens a key only for the org and provider it was sealed for', async () => {
     const { fetch, asked } = anthropic(200);
     const service = aiProviders(DEV, fetch);

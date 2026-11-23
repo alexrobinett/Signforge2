@@ -1304,9 +1304,11 @@ export function scoped(d1: D1Database, orgId: string) {
          * Set the fields given, making the row if absent (a new one needs the provider and its key), and
          * move its version on; an absent row is at 0. With `ifVersion`, refused (`StaleVersionError`)
          * unless it is still that version, checked now and again in the batch, as `stage.update` is.
+         * With `ifSealed`, refused the same way unless it still holds that sealed key: a row removed
+         * and saved again starts at version 1 again, so a version alone can name another key.
          */
-        put: (values: AiProviderValues, ifVersion?: number): Promise<Staged<AiProvider>> =>
-          upsertVersioned(
+        put: async (values: AiProviderValues, ifVersion?: number, ifSealed?: string): Promise<Staged<AiProvider>> => {
+          const upsert = await upsertVersioned(
             ai,
             {
               id: 'AI provider',
@@ -1316,7 +1318,17 @@ export function scoped(d1: D1Database, orgId: string) {
             },
             values,
             ifVersion,
-          ),
+          );
+          if (ifSealed === undefined) return upsert;
+          const holding = async () => {
+            const now = await db.select({ keySealed: ai.keySealed, rowVersion: ai.rowVersion }).from(ai).where(eq(ai.orgId, orgId)).get();
+            return now?.keySealed === ifSealed ? undefined : (now?.rowVersion ?? 0);
+          };
+          const moved = await holding();
+          if (moved !== undefined) throw new StaleVersionError('AI provider', moved);
+          const holds = sql`(SELECT ${ai.keySealed} FROM ${ai} WHERE ${ai.orgId} = ${orgId}) = ${ifSealed}`;
+          return { row: upsert.row, writes: [staleGuard(db, orgId, 'AI provider', upsert.row.rowVersion - 1, holds, holding), ...upsert.writes] };
+        },
         /** Delete the row, and the sealed key with it. */
         remove: (): Staged => staged(undefined, db.delete(ai).where(eq(ai.orgId, orgId))),
       },

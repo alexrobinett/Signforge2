@@ -125,11 +125,12 @@ const testAiProvider = defineTool({
     if (!current) throw new ToolError('not_found', 'no model key is saved: save one first');
     const result = await aiProviders.test({ orgId: org.orgId, provider: current.provider }, current.keySealed);
     const answer = result.ok ? { ok: true, models: result.models, problem: null } : { ok: false, models: [], problem: result.problem };
-    // The mark is for the key tested: only while the row is still the version read, so a key replaced while the test ran is not marked.
+    // The mark is for the key tested: only while the row is still the version read and holds that key, so a key
+    // replaced while the test ran, or removed and saved again (whose version starts over), is not marked.
     const verifiedAt = result.ok ? Date.now() : result.problem === 'refused' ? null : current.verifiedAt;
     if (verifiedAt === current.verifiedAt) return { ...answer, provider: viewOf(current) };
     try {
-      return { ...answer, provider: viewOf(write(await org.aiProvider.stage.put({ verifiedAt }, current.rowVersion))) };
+      return { ...answer, provider: viewOf(write(await org.aiProvider.stage.put({ verifiedAt }, current.rowVersion, current.keySealed))) };
     } catch (err) {
       if (!(err instanceof StaleVersionError)) throw err;
       const now = await org.aiProvider.get();

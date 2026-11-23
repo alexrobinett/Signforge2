@@ -29,9 +29,18 @@ const ANTHROPIC_API = 'https://api.anthropic.com';
 
 function anthropicProvider(apiKey: string, options: { baseURL: string; fetch: typeof fetch }): ModelProvider {
   // No retries (the person presses Test again), and no SDK logging: nothing it could log reaches the Worker's logs.
-  // Every setting is passed: the SDK reads what it is not given from process.env (ANTHROPIC_BASE_URL,
-  // ANTHROPIC_CUSTOM_HEADERS), where Workers puts the deployment's vars and secrets.
-  const client = new Anthropic({ apiKey, baseURL: options.baseURL, fetch: options.fetch, maxRetries: 0, timeout: TEST_TIMEOUT_MS, logLevel: 'off' });
+  // The SDK reads what it is not given from process.env, where Workers puts the deployment's vars and secrets: the
+  // address is always given (ANTHROPIC_BASE_URL), and so is the Authorization header, which ANTHROPIC_CUSTOM_HEADERS
+  // could otherwise replace with another key. Other headers that variable names are still added to each request.
+  const client = new Anthropic({
+    apiKey,
+    baseURL: options.baseURL,
+    defaultHeaders: { Authorization: `Bearer ${apiKey}` },
+    fetch: options.fetch,
+    maxRetries: 0,
+    timeout: TEST_TIMEOUT_MS,
+    logLevel: 'off',
+  });
   return {
     listModels: async () => (await client.models.list({ limit: 100 })).data.map((m) => m.id),
   };

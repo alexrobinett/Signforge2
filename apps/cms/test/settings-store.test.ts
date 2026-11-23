@@ -419,6 +419,8 @@ describe('AI & agents (#261)', () => {
     await store.getState().testAiProvider(A);
     expect(errorOf(store.getState().settings, 'test', A)?.text).toMatch(/^Anthropic refused the key/);
     expect(store.getState().settings.aiModels).toBeNull();
+    // The key lost its verified mark: the page reads it again, so "Connected" does not stay beside the refusal (re-check of #280).
+    expect(router.invalidate).toHaveBeenCalledWith({ sync: true });
   });
 
   it('saves the choices as the tool takes them: empty is none, the ceiling a number, with the version read', async () => {

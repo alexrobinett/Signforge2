@@ -113,6 +113,30 @@ describe('the AI provider tools', () => {
     await org.commit((await org.aiProvider.stage.put({ keySealed: before!.keySealed, keyLast4: before!.keyLast4 })).writes);
   });
 
+  it('does not mark a key removed and saved again while the test ran, though its version starts over (re-check of #280)', async () => {
+    const org = scoped(env.DB, o.orgId);
+    const before = await org.aiProvider.get();
+    const fresh = { provider: 'anthropic' as const, keySavedBy: 'u', keySavedAt: 1 };
+    // Key A, at version 1.
+    await org.commit(org.aiProvider.stage.remove().writes);
+    await org.commit((await org.aiProvider.stage.put({ ...fresh, keySealed: 'sealed:A', keyLast4: 'AAAA' })).writes);
+    const racing: AiProviders = {
+      ...aiProviders,
+      test: async () => {
+        // Removed and key B saved in another tab: version 1 again, another key.
+        await org.commit(org.aiProvider.stage.remove().writes);
+        await org.commit((await org.aiProvider.stage.put({ ...fresh, keySealed: 'sealed:B', keyLast4: 'BBBB' })).writes);
+        return { ok: true, models: ['claude-haiku-5-5'] };
+      },
+    };
+    const raced = await call('test_ai_provider', {}, { ...as('owner'), services: { ...fakeServices, aiProviders: racing } });
+    expect(raced).toMatchObject({ ok: true, output: { ok: true, provider: { keyLast4: 'BBBB', verifiedAt: null, version: 1 } } });
+    expect(await org.aiProvider.get()).toMatchObject({ keySealed: 'sealed:B', verifiedAt: null, rowVersion: 1 });
+    // Put the key the other tests expect back.
+    await org.commit(org.aiProvider.stage.remove().writes);
+    await org.commit((await org.aiProvider.stage.put({ ...before!, verifiedAt: null })).writes);
+  });
+
   it('takes away the verified mark when the provider refuses the key, and keeps it while the provider is only busy (review of #280)', async () => {
     const org = scoped(env.DB, o.orgId);
     answer = { ok: true, models: ['claude-haiku-5-5'] };

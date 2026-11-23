@@ -363,7 +363,11 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
         'test',
         async () => {
           const result = await callTool('test_ai_provider', {});
-          if (!result.ok) throw new Error(AI_TEST_PROBLEMS[result.problem ?? 'unreachable']);
+          if (!result.ok) {
+            // A refused key lost its verified mark: the page reads the provider again before it says why.
+            if (onScreen(router, ai(orgId))) await router.invalidate({ sync: true });
+            throw new Error(AI_TEST_PROBLEMS[result.problem ?? 'unreachable']);
+          }
           patch((s) => ({ ...s, aiModels: { orgId, models: result.models } }));
         },
         'Connected',
