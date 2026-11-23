@@ -8,7 +8,7 @@
  */
 import { spotProblems, type CompileInput } from '@signforge/compiler';
 import { compileProbe, DEFAULT_FIT, spotFromDraft, type DraftReads, type Probe, type SpotDraft as SavedDraft } from '@signforge/compiler/draft';
-import { validateSpotData, type FieldDef, type Orientation, type ScalarFieldDef, type ScreenManifest, type Transition } from '@signforge/contract';
+import { toggleOf, validateSpotData, type FieldDef, type Orientation, type ScalarFieldDef, type ScreenManifest, type Transition } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import type { AssetView } from './assets';
 import type { BindingInput } from './live-data';
@@ -63,14 +63,17 @@ export const usableVersions = (templates: TemplateView[]) =>
 
 /**
  * The contract's messages for each field, from `validateSpotData` run on that field alone, so a
- * message sits by the field it is about. An image field with no image yet asks for one.
+ * message sits by the field it is about. An image field with no image yet asks for one, unless its
+ * toggle switched it off (#252): an image is checked with its toggle, as a publish checks it.
  */
 export function fieldProblems(fields: Record<string, FieldDef>, draft: Pick<SpotDraft, 'data' | 'assets'>): Map<string, string[]> {
   const out = new Map<string, string[]>();
   for (const [name, def] of Object.entries(fields)) {
-    const data = name in draft.data ? { [name]: draft.data[name] } : {};
+    const toggle = toggleOf(name);
+    const names = def.type === 'image' && fields[toggle] ? [name, toggle] : [name];
+    const data = Object.fromEntries(names.filter((n) => n in draft.data).map((n) => [n, draft.data[n]]));
     const assets = name in draft.assets ? { [name]: draft.assets[name] } : {};
-    const problems = validateSpotData({ [name]: def }, data, assets);
+    const problems = validateSpotData(Object.fromEntries(names.map((n) => [n, fields[n]])), data, assets).filter((p) => !p.includes(`"${toggle}"`));
     if (problems.length) out.set(name, problems);
   }
   return out;
