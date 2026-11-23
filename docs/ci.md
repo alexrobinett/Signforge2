@@ -89,6 +89,15 @@ Wall time of each run, from creation to its last update, on GitHub's `ubuntu-24.
 
 Where the time goes now: setup and the repo-wide checks take about 50 s, then whichever affected test is slowest. That is the player's browser tests (2 m 30 s alone) or the API's workerd tests. Once `master` has run this workflow, a pull request starts from `master`'s Turbo cache, so the typechecks of packages it did not change replay instead of running.
 
+## Deploying
+
+`.github/workflows/deploy-demo.yml` deploys the `demo` environment to Cloudflare (`https://demo.signforge.alexrobinett.dev`) after `CI` succeeds on `master`, or on manual dispatch. It runs in dependency order: `signforge-template-check` (container image + Worker), D1 migrations on `signforge-demo`, `signforge-api-demo`, the player and CMS builds, `signforge-cms-demo`, and `pnpm seed:templates` when `SF_DEMO_ADMIN_TOKEN` is configured.
+
+Required GitHub Actions repository secrets (environments need GitHub Pro on a private repository):
+- `CLOUDFLARE_API_TOKEN` (Workers Scripts, Containers, D1, R2 and Queues edit permissions)
+- `CLOUDFLARE_ACCOUNT_ID`
+- `SF_DEMO_ADMIN_TOKEN` (optional: seeds base templates after deploy)
+
 ## Required status check
 
 `master` cannot require this check today. Branch protection and rulesets need GitHub Pro (or Team) for a private repository: the API answers 403, "Upgrade to GitHub Pro or make this repository public to enable this feature". On a plan that has them, require the `check` job. It runs on every pull request, even one that affects no package, so it never sits pending.

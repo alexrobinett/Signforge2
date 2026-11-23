@@ -86,7 +86,14 @@
     "demo": {
       "name": "signforge-api-demo",
       "main": "src/index.ts",
-      "vars": { "ENVIRONMENT": "demo", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      "vars": {
+        "ENVIRONMENT": "demo",
+        "BUILD_VERSION": "dev",
+        "EMAIL_FROM": "SignForge <no-reply@alexrobinett.dev>",
+        "CMS_ORIGIN": "https://demo.signforge.alexrobinett.dev",
+        "R2_S3_ENDPOINT": "https://30e327dbb4fcf68bf6605f549d9b6198.r2.cloudflarestorage.com",
+        "R2_BUCKET_NAME": "signforge-demo"
+      },
       // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
       // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
       // Place search (find_places): per member and per address, each a request to Open-Meteo.
