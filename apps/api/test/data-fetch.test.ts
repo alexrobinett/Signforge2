@@ -82,6 +82,22 @@ describe('guardedFetch', () => {
       expect(await refusal(guardedFetch(`https://${host}/a`, {}, stub({}, dns).guards)), host).toBe('private-address');
   });
 
+  it.each(['localhost.', 'printer.local.', 'nas.', 'localhost..'])('refuses the local name %s, written with trailing dots, without a lookup', async (host) => {
+    const asked: string[] = [];
+    const { guards } = stub({});
+    const resolve: FetchGuards['resolve'] = (name, signal) => {
+      asked.push(name);
+      return guards.resolve(name, signal);
+    };
+    expect(await refusal(guardedFetch(`https://${host}/a`, {}, { ...guards, resolve }))).toBe('private-address');
+    expect(asked).toEqual([]);
+  });
+
+  it('fetches a public name written with a trailing dot', async () => {
+    const { guards } = stub({ 'https://feed.test./a': ok('<rss/>') });
+    expect(await guardedFetch('https://feed.test./a', {}, guards)).toMatchObject({ status: 'ok', body: '<rss/>' });
+  });
+
   // Each is read as the 128 bits it names, so no spelling of a private address gets past the check.
   it.each([
     ['::ffff:7f00:1', 'IPv4-mapped 127.0.0.1, in hex'],
@@ -90,6 +106,8 @@ describe('guardedFetch', () => {
     ['::ffff:0:7f00:1', 'IPv4-translated 127.0.0.1'],
     ['::127.0.0.1', 'IPv4-compatible 127.0.0.1'],
     ['::a00:1', 'IPv4-compatible 10.0.0.1, in hex'],
+    ['::8.8.8.8', 'IPv4-compatible, carrying a public IPv4'],
+    ['::808:808', 'IPv4-compatible, carrying a public IPv4, in hex'],
     ['0:0:0:0:0:0:0:1', 'loopback, written out in full'],
     ['0::', 'unspecified, in another spelling'],
     ['2002:7f00:1::', '6to4'],
