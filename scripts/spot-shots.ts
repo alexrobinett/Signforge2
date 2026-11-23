@@ -61,10 +61,21 @@ const port = (server.address() as { port: number }).port;
 
 // ---------------------------------------------------------------- browser
 const profile = mkdtempSync(join(tmpdir(), 'sf-shots-'));
-const chrome = spawn(args.chrome, [
-  '--headless=new', '--use-mock-keychain', '--password-store=basic', '--no-first-run', `--user-data-dir=${profile}`,
-  '--remote-debugging-port=0', '--autoplay-policy=no-user-gesture-required', '--force-device-scale-factor=1', 'about:blank',
-], { stdio: ['ignore', 'ignore', 'pipe'] });
+const chrome = spawn(
+  args.chrome,
+  [
+    '--headless=new',
+    '--use-mock-keychain',
+    '--password-store=basic',
+    '--no-first-run',
+    `--user-data-dir=${profile}`,
+    '--remote-debugging-port=0',
+    '--autoplay-policy=no-user-gesture-required',
+    '--force-device-scale-factor=1',
+    'about:blank',
+  ],
+  { stdio: ['ignore', 'ignore', 'pipe'] },
+);
 const wsUrl = await new Promise<string>((resolveUrl, reject) => {
   let buf = '';
   chrome.stderr.on('data', (d: Buffer) => {
@@ -74,7 +85,10 @@ const wsUrl = await new Promise<string>((resolveUrl, reject) => {
   });
   chrome.on('exit', () => reject(new Error('Chromium exited')));
 });
-const targets = (await (await fetch(wsUrl.replace('ws://', 'http://').replace(/\/devtools\/browser\/.*/, '/json'))).json()) as { type: string; webSocketDebuggerUrl: string }[];
+const targets = (await (await fetch(wsUrl.replace('ws://', 'http://').replace(/\/devtools\/browser\/.*/, '/json'))).json()) as {
+  type: string;
+  webSocketDebuggerUrl: string;
+}[];
 const ws = new WebSocket(targets.find((t) => t.type === 'page')!.webSocketDebuggerUrl);
 await new Promise((r) => ws.addEventListener('open', r, { once: true }));
 let nextId = 0;
@@ -119,7 +133,9 @@ for (const size of args.sizes!.split(',')) {
     const a = await shot('a');
     await sleep(Math.max(0, spot.durationMs * 0.85 - Math.min(2500, spot.durationMs * 0.3)));
     const b = await shot('b');
-    const info = await evaluate<{ error: string; skipped: number; data: Record<string, string> }>('({ error: __sf.lastError, skipped: __sf.skipped, data: __sf.data })');
+    const info = await evaluate<{ error: string; skipped: number; data: Record<string, string> }>(
+      '({ error: __sf.lastError, skipped: __sf.skipped, data: __sf.data })',
+    );
     // `data`: when each live source's snapshot was fetched, as the player held it at the end of the
     // play. A bound source missing here means the spot showed its static fallback.
     index.push({ spot: id, name: spot.name, size, started, frames: [a, b], data: info.data, playerError: info.error || undefined, skipped: info.skipped });

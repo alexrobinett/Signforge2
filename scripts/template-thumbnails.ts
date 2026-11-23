@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * The New spot dialog's template thumbnails: every base template in `templates/`, drawn by the real
- * player with its own defaults, saved as `apps/cms/public/templates/<id>.webp` (480×270), and the
+ * player with its own defaults, saved as `apps/cms/public/template-thumbnails/<id>.webp` (480×270), and the
  * versions they were drawn from in `apps/cms/src/lib/template-thumbnails.json`. A CMS test fails when
  * a template's version moves past its thumbnail's, so a new version is drawn again with it.
  *
@@ -55,7 +55,9 @@ const OVERRIDES: Record<string, Record<string, unknown>> = {
 };
 const templates = readdirSync(join(root, 'templates'), { withFileTypes: true })
   .filter((d) => d.isDirectory())
-  .map((d) => JSON.parse(readFileSync(join(root, 'templates', d.name, 'template.json'), 'utf8')) as { id: string; version: string; fields: Record<string, Field> })
+  .map((d): { id: string; version: string; fields: Record<string, Field> } =>
+    JSON.parse(readFileSync(join(root, 'templates', d.name, 'template.json'), 'utf8')),
+  )
   .sort((a, b) => a.id.localeCompare(b.id));
 
 for (const t of templates) {
@@ -78,9 +80,22 @@ const run = (script: string, argv: string[]) => {
   if (r.status !== 0) throw new Error(`${script} failed`);
 };
 run('packages/cli/src/sf.ts', ['build', project, '--out', join(project, 'out')]);
-run('scripts/spot-shots.ts', ['--content', join(project, 'out'), '--out', join(project, 'shots'), '--chrome', args.chrome, '--sizes', '1920x1080', '--scale', '0.25', '--format', 'webp']);
+run('scripts/spot-shots.ts', [
+  '--content',
+  join(project, 'out'),
+  '--out',
+  join(project, 'shots'),
+  '--chrome',
+  args.chrome,
+  '--sizes',
+  '1920x1080',
+  '--scale',
+  '0.25',
+  '--format',
+  'webp',
+]);
 
-const outDir = join(root, 'apps/cms/public/templates');
+const outDir = join(root, 'apps/cms/public/template-thumbnails');
 mkdirSync(outDir, { recursive: true });
 for (const t of templates) copyFileSync(join(project, 'shots', `${t.id}-1920x1080-a.webp`), join(outDir, `${t.id}.webp`));
 writeFileSync(
