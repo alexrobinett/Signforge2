@@ -154,6 +154,18 @@ describe("the consent page's name", () => {
       '5Sign Forge',
       'qSign Forge',
       '0SF CLI',
+      // The sixth: a capital after a lookalike digit or sign starts a word too.
+      'Go4Sign Forge',
+      'Get1Sign Forge',
+      'My7Sign Forge',
+      'Pro8Sign Forge',
+      'a1Sign Forge',
+      'Go4SignForge',
+      'Use1SF CLI',
+      'x0SF CLI',
+      'A1SF CLI',
+      'Ab4SF CLI',
+      'v7SF CLI',
     ];
     expect(shownAs(names)).toEqual(Object.fromEntries(names.map((name) => [name, undefined])));
   });

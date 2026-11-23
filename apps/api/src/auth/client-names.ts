@@ -53,7 +53,7 @@ interface Letter {
 /**
  * A name as it reads, letter by letter: lowercase, `()` as `o`, `rn` as `m`, lookalikes mapped, `(` as
  * `paren` (a `c`, or nothing: it may be either), and only a–z kept. A word starts after anything dropped
- * (a space, `.`, `-`, `_`, `&`, `'`…), at a capital after a small letter (`MySign`), and at a capital
+ * (a space, `.`, `-`, `_`, `&`, `'`…), at a capital after a small letter or a lookalike sign (`MySign`, `My7Sign`), and at a capital
  * before a small letter after another capital (`GETSign`).
  */
 function lettersOf(name: string, paren: string): Letter[] {
@@ -67,7 +67,7 @@ function lettersOf(name: string, paren: string): Letter[] {
     const letter = lower === '()' ? 'o' : lower === 'rn' ? 'm' : lower === '(' ? paren : (READS_AS[lower] ?? lower);
     const first = token.charAt(0);
     const capital = /[A-Z]/.test(first);
-    const camel = capital && (/[a-z]/.test(last) || (/[A-Z]/.test(last) && /[a-z]/.test(next)));
+    const camel = capital && (/[a-z0-9!|@]/.test(last) || (/[A-Z]/.test(last) && /[a-z]/.test(next)));
     last = token.charAt(token.length - 1);
     if (!/^[a-z]$/.test(letter)) {
       dropped = true;
