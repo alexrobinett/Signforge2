@@ -94,12 +94,14 @@ export function commandEntries(tools: ToolListing[]): CommandEntry[] {
   const publishes = tools.some((t) => t.name === 'publish');
   return [
     ...SECTIONS.map((s): CommandEntry => ({ kind: 'go', id: `go:${s.to}`, label: `Go to ${s.label}`, to: s.to, keywords: [s.label] })),
-    ...tools.filter((t) => t.name !== 'restart_screen').map((tool): CommandEntry => {
-      const entry = { id: `tool:${tool.name}`, tool, keywords: [tool.name, tool.description] };
-      return tool.name === 'start_takeover' && publishes
-        ? { kind: 'takeover', label: 'Take over screens now…', ...entry }
-        : { kind: 'tool', label: labelOf(tool.description), ...entry };
-    }),
+    ...tools
+      .filter((t) => t.name !== 'restart_screen')
+      .map((tool): CommandEntry => {
+        const entry = { id: `tool:${tool.name}`, tool, keywords: [tool.name, tool.description] };
+        return tool.name === 'start_takeover' && publishes
+          ? { kind: 'takeover', label: 'Take over screens now…', ...entry }
+          : { kind: 'tool', label: labelOf(tool.description), ...entry };
+      }),
   ];
 }
 
