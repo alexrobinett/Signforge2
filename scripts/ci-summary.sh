@@ -7,7 +7,8 @@ now=$(date -u +%s)
 jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs")
 started=$(printf '%s' "$jobs" | jq -r --arg job "$GITHUB_JOB" '.jobs[] | select(.name == $job) | .started_at | fromdateiso8601')
 
-if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+# TURBO_SCM_BASE: the plan's base, empty when the run covers every package.
+if [ -n "${TURBO_SCM_BASE:-}" ]; then
   echo "## CI: affected packages only, against ${TURBO_SCM_BASE}"
 else
   echo "## CI: every package"
