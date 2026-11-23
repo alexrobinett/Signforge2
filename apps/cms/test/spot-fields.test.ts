@@ -83,3 +83,18 @@ describe('date and datetime fields in the spot editor', () => {
     expect(at('2027-01-01')).toEqual(new Map([['opens', ['field "opens" must be on or before 2026-12-31']]]));
   });
 });
+
+describe("a new spot's copy (#253)", () => {
+  const fields: Record<string, FieldDef> = {
+    look: { type: 'select', label: 'Look', options: ['pop', 'calm'], default: 'pop' },
+    headline: { type: 'text', label: 'Headline', maxLength: 80, default: 'Pier 9 opens on Monday' },
+    meta: { type: 'text', label: 'Posted by', maxLength: 48, default: 'From the People Team · 20 November' },
+    facts: { type: 'list', label: 'Facts', maxItems: 3, item: { label: { type: 'text', label: 'Label' } }, default: [{ label: 'Pier 9 roof terrace' }] },
+    showMeta: { type: 'boolean', label: 'Show who posted it', default: true },
+    seconds: { type: 'number', label: 'Seconds', default: 10 },
+  };
+
+  it("starts its text and lists empty, not with the template's sample copy, and keeps its settings' defaults", () => {
+    expect(startData(fields)).toEqual({ headline: '', meta: '', facts: [] });
+  });
+});
