@@ -251,7 +251,6 @@ function ToolForm({ entry }: { entry: Extract<CommandEntry, { kind: 'tool' }> })
 /**
  * "Switch organization…": the member's other orgs as buttons, the first focused. The active one is
  * not offered: choosing it would reload for nothing, and the sidebar switcher ignores it too.
- * Not a second cmdk list: cmdk 1.1.1 leaves `aria-activedescendant` on an item a filter removed.
  */
 function OrgList({ shell, hues }: { shell: Shell; hues: Map<string, number> }) {
   const back = useAppStore((s) => s.backToCommands);

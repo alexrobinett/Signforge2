@@ -15,6 +15,7 @@ export { findDeviceScreen, type DeviceScreen } from './device';
 export { claimDueDataSources } from './poller';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
 export { findMembership, memberOrgNames, organizationExists, orgMembers, startingOrg } from './members';
+export { AGENT_GRANT_IDLE_MS, agentGrantForToken, FIRST_PARTY_CLIENT_IDS, pruneUnconsentedClients, UNCONSENTED_CLIENT_MS } from './agent-grants';
 export { findAlertWork, findUnfinishedRollouts, type AlertWork } from './alerts';
 export {
   AUDIT_ROWS_PER_RUN,

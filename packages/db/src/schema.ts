@@ -71,7 +71,7 @@ const incarnation = () => text('incarnation').$defaultFn(() => newId('inc'));
 /*
  * Better Auth's tables (M3-09), as `auth generate` in apps/api writes them for its options:
  * camelCase columns, `date` columns holding ISO strings. Better Auth reads and writes them
- * itself; apps/api/test/auth-schema.test.ts checks it finds nothing missing. Not tenant tables.
+ * itself; apps/api/test/auth-platform.test.ts checks it finds nothing missing. Not tenant tables.
  */
 const date = customType<{ data: string }>({ dataType: () => 'date' });
 const bigint = customType<{ data: number }>({ dataType: () => 'bigint' });
@@ -184,6 +184,186 @@ export const invitation = sqliteTable(
   },
   (t) => [index('invitation_organizationId_idx').on(t.organizationId), index('invitation_email_idx').on(t.email)],
 );
+
+/*
+ * Better Auth's OAuth provider (`@better-auth/oauth-provider`, M4-04): the clients agents register,
+ * the one resource (`/mcp`), consents, and tokens, stored only as SHA-256 hashes. Columns as its CLI
+ * generates them for apps/api's options. `referenceId` on a consent, a token or a refresh token is
+ * the agent grant's id (`agentGrants`); the indexes on it are ours, for revoking a grant's tokens.
+ */
+export const oauthClient = sqliteTable(
+  'oauthClient',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('clientId').notNull().unique(),
+    clientSecret: text('clientSecret'),
+    clientDiscoveryId: text('clientDiscoveryId'),
+    disabled: integer('disabled'),
+    skipConsent: integer('skipConsent'),
+    enableEndSession: integer('enableEndSession'),
+    subjectType: text('subjectType'),
+    scopes: text('scopes'),
+    clientCredentialsScopes: text('clientCredentialsScopes'),
+    userId: text('userId').references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: date('createdAt'),
+    updatedAt: date('updatedAt'),
+    name: text('name'),
+    uri: text('uri'),
+    icon: text('icon'),
+    contacts: text('contacts'),
+    tos: text('tos'),
+    policy: text('policy'),
+    softwareId: text('softwareId'),
+    softwareVersion: text('softwareVersion'),
+    softwareStatement: text('softwareStatement'),
+    redirectUris: text('redirectUris').notNull(),
+    postLogoutRedirectUris: text('postLogoutRedirectUris'),
+    backchannelLogoutUri: text('backchannelLogoutUri'),
+    backchannelLogoutSessionRequired: integer('backchannelLogoutSessionRequired'),
+    tokenEndpointAuthMethod: text('tokenEndpointAuthMethod'),
+    applicationType: text('applicationType'),
+    jwks: text('jwks'),
+    jwksUri: text('jwksUri'),
+    grantTypes: text('grantTypes'),
+    responseTypes: text('responseTypes'),
+    requirePKCE: integer('requirePKCE'),
+    dpopBoundAccessTokens: integer('dpopBoundAccessTokens'),
+    referenceId: text('referenceId'),
+    metadata: text('metadata'),
+  },
+  (t) => [index('oauthClient_userId_idx').on(t.userId)],
+);
+
+export const oauthResource = sqliteTable('oauthResource', {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull().unique(),
+  name: text('name').notNull(),
+  accessTokenTtl: integer('accessTokenTtl'),
+  refreshTokenTtl: integer('refreshTokenTtl'),
+  signingAlgorithm: text('signingAlgorithm'),
+  signingKeyId: text('signingKeyId'),
+  allowedScopes: text('allowedScopes'),
+  customClaims: text('customClaims'),
+  dpopBoundAccessTokensRequired: integer('dpopBoundAccessTokensRequired'),
+  disabled: integer('disabled'),
+  createdAt: date('createdAt'),
+  updatedAt: date('updatedAt'),
+  policyVersion: integer('policyVersion'),
+  metadata: text('metadata'),
+});
+
+export const oauthClientResource = sqliteTable(
+  'oauthClientResource',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('clientId')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    resourceId: text('resourceId')
+      .notNull()
+      .references(() => oauthResource.identifier, { onDelete: 'cascade' }),
+    metadata: text('metadata'),
+    createdAt: date('createdAt'),
+  },
+  (t) => [
+    index('oauthClientResource_clientId_idx').on(t.clientId),
+    index('oauthClientResource_resourceId_idx').on(t.resourceId),
+    uniqueIndex('oauthClientResource_clientId_resourceId_uidx').on(t.clientId, t.resourceId),
+  ],
+);
+
+export const oauthRefreshToken = sqliteTable(
+  'oauthRefreshToken',
+  {
+    id: text('id').primaryKey(),
+    token: text('token').notNull().unique(),
+    clientId: text('clientId')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    sessionId: text('sessionId').references(() => session.id, { onDelete: 'set null' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    referenceId: text('referenceId'),
+    authorizationCodeId: text('authorizationCodeId'),
+    resources: text('resources'),
+    requestedUserInfoClaims: text('requestedUserInfoClaims'),
+    expiresAt: date('expiresAt').notNull(),
+    createdAt: date('createdAt').notNull(),
+    revoked: date('revoked'),
+    rotatedAt: date('rotatedAt'),
+    rotationReplayResponse: text('rotationReplayResponse'),
+    rotationReplayExpiresAt: date('rotationReplayExpiresAt'),
+    authTime: date('authTime'),
+    confirmation: text('confirmation'),
+    scopes: text('scopes').notNull(),
+  },
+  (t) => [
+    index('oauthRefreshToken_clientId_idx').on(t.clientId),
+    index('oauthRefreshToken_sessionId_idx').on(t.sessionId),
+    index('oauthRefreshToken_userId_idx').on(t.userId),
+    index('oauthRefreshToken_authorizationCodeId_idx').on(t.authorizationCodeId),
+    index('oauthRefreshToken_referenceId_idx').on(t.referenceId),
+  ],
+);
+
+export const oauthAccessToken = sqliteTable(
+  'oauthAccessToken',
+  {
+    id: text('id').primaryKey(),
+    token: text('token').notNull().unique(),
+    clientId: text('clientId')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    sessionId: text('sessionId').references(() => session.id, { onDelete: 'set null' }),
+    userId: text('userId').references(() => user.id, { onDelete: 'cascade' }),
+    referenceId: text('referenceId'),
+    authorizationCodeId: text('authorizationCodeId'),
+    resources: text('resources'),
+    requestedUserInfoClaims: text('requestedUserInfoClaims'),
+    refreshId: text('refreshId').references(() => oauthRefreshToken.id, { onDelete: 'cascade' }),
+    expiresAt: date('expiresAt').notNull(),
+    createdAt: date('createdAt').notNull(),
+    revoked: date('revoked'),
+    confirmation: text('confirmation'),
+    scopes: text('scopes').notNull(),
+  },
+  (t) => [
+    index('oauthAccessToken_clientId_idx').on(t.clientId),
+    index('oauthAccessToken_sessionId_idx').on(t.sessionId),
+    index('oauthAccessToken_userId_idx').on(t.userId),
+    index('oauthAccessToken_authorizationCodeId_idx').on(t.authorizationCodeId),
+    index('oauthAccessToken_refreshId_idx').on(t.refreshId),
+    index('oauthAccessToken_referenceId_idx').on(t.referenceId),
+  ],
+);
+
+export const oauthConsent = sqliteTable(
+  'oauthConsent',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('clientId')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    userId: text('userId').references(() => user.id, { onDelete: 'cascade' }),
+    referenceId: text('referenceId'),
+    resources: text('resources'),
+    requestedUserInfoClaims: text('requestedUserInfoClaims'),
+    scopes: text('scopes').notNull(),
+    createdAt: date('createdAt').notNull(),
+    updatedAt: date('updatedAt').notNull(),
+  },
+  (t) => [
+    index('oauthConsent_clientId_idx').on(t.clientId),
+    index('oauthConsent_userId_idx').on(t.userId),
+    index('oauthConsent_referenceId_idx').on(t.referenceId),
+  ],
+);
+
+export const oauthClientAssertion = sqliteTable('oauthClientAssertion', {
+  id: text('id').primaryKey(),
+  expiresAt: date('expiresAt').notNull(),
+});
 
 /** Better Auth's rate-limit counters, per IP and path: in D1 so they survive restarts. */
 export const rateLimit = sqliteTable('rateLimit', {
@@ -1148,4 +1328,37 @@ export const syncEpochs = sqliteTable(
     primaryKey({ columns: [t.orgId, t.screenId, t.epoch] }),
     foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
   ],
+);
+
+// ------------------------------------------------------------------ agent grants
+
+/**
+ * What an agent's OAuth client may do in one org, as one member (M4-04): its id (`agt_…`) is the
+ * dispatcher's agent actor id and the provider's consent reference id, on every token issued under
+ * it. Scopes are those the member chose at consent, capped by their role then; the dispatcher caps
+ * them again on every call. It ends when revoked (by the person, an owner, or the membership
+ * ending, with the provider's tokens) or 90 days after it was last used (`expires_at`).
+ */
+export const agentGrants = sqliteTable(
+  'agent_grants',
+  {
+    id: text('id').primaryKey(),
+    orgId: orgId(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** The OAuth client's id, and its name as it registered (unverified for an open registration). */
+    clientId: text('client_id').notNull(),
+    clientName: text('client_name'),
+    /** A JSON array of the tool scopes granted. */
+    scopesJson: text('scopes_json').notNull(),
+    createdAt: created(),
+    /** Written at most once an hour per grant by `/mcp` (M4-06), with `expires_at`. */
+    lastUsedAt: integer('last_used_at'),
+    expiresAt: integer('expires_at').notNull(),
+    revokedAt: integer('revoked_at'),
+    revokedBy: text('revoked_by'),
+    rowVersion: rowVersion(),
+  },
+  (t) => [uniqueIndex('agent_grants_org_id_uq').on(t.orgId, t.id), index('agent_grants_org_user_idx').on(t.orgId, t.userId)],
 );
