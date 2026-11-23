@@ -170,6 +170,8 @@ describe('announcement (#197)', () => {
     expect(steps).toEqual(['landscape', 'portrait'].flatMap((o) => looks.map((l) => `${l}, ${o}: 1`)));
   });
 
+  // The code is black on white whatever the kit, as its fills show in every kit, so it is read back once per look and
+  // orientation, under no kit: reading it under every kit took 123 s on CI (run 45109076539).
   it('the QR code is at least 30vmin, dark on white with its quiet zone in every look and kit, and reads back at that size as a 100-character address', async () => {
     expect(long.qrUrl).toHaveLength(100);
     for (const orientation of ['landscape', 'portrait'] as const) {
@@ -189,6 +191,7 @@ describe('announcement (#197)', () => {
           });
           expect(vmin, `${look}, ${kit}, ${orientation}`).toBeGreaterThanOrEqual(29.9);
           expect(fills, `${look}, ${kit}`).toEqual(['rgb(255, 255, 255)', 'rgb(0, 0, 0)']);
+          if (kit !== 'no kit') continue;
           const png = (await k.hst.page.screenshot({ clip })).toString('base64');
           const rgba = await k.hst.page.evaluate(async (png) => {
             const img = new Image();

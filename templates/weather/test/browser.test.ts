@@ -130,8 +130,9 @@ describe('weather: the sun and moon follow sunrise, sunset and the screen clock 
           for (const l of low) found.push(`${kit}, ${phase}, code ${code}: ${l}`);
         }
     expect(found).toEqual([]);
-    // 252 screenshots: 17 s on a laptop, 55 s on CI's runner beside the CMS e2e (run 44578336166).
-  }, 120_000);
+    // 252 screenshots, each kit, time of day and condition painting the card differently: 17 s on a laptop, 84 s on
+    // CI's runner (run 45109076539).
+  }, 240_000);
 
   it('without sunrise and sunset, follows isDay as before, whatever the clock says', async () => {
     const scene = await weather();
