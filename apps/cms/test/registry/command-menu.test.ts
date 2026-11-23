@@ -59,7 +59,10 @@ describe('command menu entries', () => {
     expect(takeover).toMatchObject({ kind: 'takeover', label: 'Take over screens now…' });
     // An editor where only owners publish can only draft one, as the tool says.
     const drafts = parseToolList(JSON.parse(JSON.stringify({ tools: describeTools(registry, { role: 'editor', editorsPublish: false }) })));
-    expect(commandEntries(drafts).find((e) => e.id === 'tool:start_takeover')).toMatchObject({ kind: 'tool', label: 'Take over screens with a playlist, as a draft' });
+    expect(commandEntries(drafts).find((e) => e.id === 'tool:start_takeover')).toMatchObject({
+      kind: 'tool',
+      label: 'Take over screens with a playlist, as a draft',
+    });
   });
 });
 

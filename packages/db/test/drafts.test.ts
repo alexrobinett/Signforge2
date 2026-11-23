@@ -320,7 +320,9 @@ describe('publish history', () => {
     const p = await seedOrg(env.DB, 'history-unnamed');
     const org = testScope(env.DB, p.orgId);
     const at = new Date().toISOString();
-    await env.DB.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('user-unnamed', '', 'sam.ortiz@example.com', 1, ?, ?)")
+    await env.DB.prepare(
+      "INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('user-unnamed', '', 'sam.ortiz@example.com', 1, ?, ?)",
+    )
       .bind(at, at)
       .run();
     const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-unnamed', revision: 2 });

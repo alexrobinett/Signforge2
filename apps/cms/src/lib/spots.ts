@@ -110,7 +110,13 @@ export function startValue(d: ScalarFieldDef): unknown {
 export const startData = (fields: Record<string, FieldDef>) =>
   Object.fromEntries(
     Object.entries(fields).flatMap(([name, def]) =>
-      def.type === 'list' ? [[name, []]] : def.type === 'text' ? [[name, '']] : def.type === 'image' || def.default !== undefined ? [] : [[name, startValue(def)]],
+      def.type === 'list'
+        ? [[name, []]]
+        : def.type === 'text'
+          ? [[name, '']]
+          : def.type === 'image' || def.default !== undefined
+            ? []
+            : [[name, startValue(def)]],
     ),
   );
 

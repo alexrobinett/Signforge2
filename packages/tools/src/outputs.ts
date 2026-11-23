@@ -152,7 +152,11 @@ export const publishOutput = z.object({
   revision: z.number().int(),
   restoresId: z.string().nullable().describe('For a roll back: the publish whose screens it put back'),
   restoresRevision: z.number().int().nullable().describe("For a roll back: that publish's revision"),
-  by: z.object({ kind: z.string(), id: z.string(), name: z.string().nullable().describe("A member's name, else their address before the @ (never the whole address); null for an agent or the system") }),
+  by: z.object({
+    kind: z.string(),
+    id: z.string(),
+    name: z.string().nullable().describe("A member's name, else their address before the @ (never the whole address); null for an agent or the system"),
+  }),
   createdAt: z.number(),
   finishedAt: z.number().nullable().describe('When every screen it switched played it, moved on to a later publish, or was revoked'),
   reached: z
