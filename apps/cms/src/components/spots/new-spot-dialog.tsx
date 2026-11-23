@@ -39,7 +39,6 @@ export function NewSpotDialog({ orgId, templates }: { orgId: string; templates: 
     d.name.trim() !== '' && (d.kind === 'template' ? chosen !== undefined : d.kind === 'url' ? safeUrl(d.url.trim()) : image !== undefined) && !d.pending;
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!ready) return;
     if (d.kind === 'template' && chosen && d.templateVersionId !== chosen.version.id) edit({ templateVersionId: chosen.version.id });
     const m = chosen?.version.manifest;
     void create(orgId, d.kind === 'template' && m ? { durationMs: m.duration.defaultMs, data: startData(m.fields) } : undefined);
