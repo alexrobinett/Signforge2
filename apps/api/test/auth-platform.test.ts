@@ -78,7 +78,12 @@ describe("packages/db's migrations", () => {
         audit: async () => {},
         startingOrg: async () => null,
         mcpResource: 'https://cms.test/mcp',
-        grants: { create: async () => ({ ok: false, refused: 'not_a_member' }), revokeMember: async () => {}, revokeUnissued: async () => {} },
+        grants: {
+          create: async () => ({ ok: false, refused: 'not_a_member' }),
+          revokeMember: async () => {},
+          revokeUnissued: async () => {},
+          offers: async () => [],
+        },
         consent: { complete: async () => ({ redirect: false, url: '' }) },
       }),
       database: env.DB,
