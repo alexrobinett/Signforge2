@@ -5,7 +5,7 @@
  * (src/queries/publishes.ts).
  */
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { EmptyState, PageHeader } from '~/components/page';
 import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
 import { Button } from '~/components/ui/button';
@@ -30,11 +30,13 @@ export const Route = createFileRoute('/_app/publishes')({
 
 const when = (ms: number) => new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
-/** One line about a publish: what kind, when, and who. */
-function about(p: PublishView) {
+/** One line about a publish: what kind, when, and who (`me`: "you"). */
+function about(p: PublishView, me: string) {
   const what = p.restoresRevision === null ? 'Published' : `Rolled back to ${versionName({ revision: p.restoresRevision })}`;
-  return `${what} · ${when(p.createdAt)} · by ${byWord(p)}`;
+  return `${what} · ${when(p.createdAt)} · by ${byWord(p, me)}`;
 }
+
+const app = getRouteApi('/_app');
 
 function PublishesPage() {
   const orgId = useOrgId();
@@ -47,6 +49,7 @@ function PublishesPage() {
   const rollBack = useAppStore((s) => s.rollBackTo);
   const now = useNow(current.dataUpdatedAt);
   const section = sectionFor('/publishes');
+  const me = app.useLoaderData().user.id;
 
   if (!publish) {
     return (
@@ -65,7 +68,7 @@ function PublishesPage() {
   return (
     // Room at the foot for the toast, so it never covers the last row's button.
     <div className="mx-auto max-w-4xl space-y-6 pb-36">
-      <PageHeader title={section.label} description={about(publish)} />
+      <PageHeader title={section.label} description={about(publish, me)} />
       <section aria-labelledby="rollout-title" className="flex flex-col gap-4 rounded-[14px] border bg-card p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 id="rollout-title" className="text-lg font-semibold">
@@ -107,7 +110,7 @@ function PublishesPage() {
                 >
                   {versionName(p)}
                 </Link>
-                <span className="min-w-0 flex-[1_1_14rem] text-sm text-muted-foreground">{about(p)}</span>
+                <span className="min-w-0 flex-[1_1_14rem] text-sm text-muted-foreground">{about(p, me)}</span>
                 <span aria-hidden className="h-2 w-32 overflow-hidden rounded-full bg-muted">
                   <span className={cn('block h-full', movedOn ? 'bg-border-strong' : 'bg-chart-1')} style={{ width: `${share}%` }} />
                 </span>

@@ -316,6 +316,18 @@ describe('publish history', () => {
     expect(await testScope(env.DB, 'drafts-org').publishes.history({ limit: 10 })).not.toContainEqual(expect.objectContaining({ id: v2.id }));
   });
 
+  it('names a member with no name by their address before the @, never the whole address (#253)', async () => {
+    const p = await seedOrg(env.DB, 'history-unnamed');
+    const org = testScope(env.DB, p.orgId);
+    const at = new Date().toISOString();
+    await env.DB.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('user-unnamed', '', 'sam.ortiz@example.com', 1, ?, ?)")
+      .bind(at, at)
+      .run();
+    const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-unnamed', revision: 2 });
+    await org.commit(publish.writes);
+    expect(await org.publishes.history({ limit: 1 })).toEqual([expect.objectContaining({ id: publish.row.id, actorName: 'sam.ortiz' })]);
+  });
+
   it("reads a publish's rollout with each screen's state, and what each screen had as of a revision", async () => {
     const p = await seedOrg(env.DB, 'history-rollout');
     const org = testScope(env.DB, p.orgId);
