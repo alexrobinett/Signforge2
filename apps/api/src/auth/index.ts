@@ -5,6 +5,8 @@
 import { scoped, startingOrg } from '@signforge/db';
 import { betterAuth } from 'better-auth';
 import type { EmailSender } from '../email';
+import type { ConsentLink } from './agent-grants';
+import { grantStore } from './grant-store';
 import { authOptions } from './options';
 
 export { ROLES, type Role } from './roles';
@@ -24,12 +26,18 @@ export function createAuth(env: Env, request: Request, email: EmailSender) {
   const secret = authSecret(env);
   const appUrl = env.CMS_ORIGIN ?? origin;
   const github = env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET ? { github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } } : {};
-  return betterAuth({
+  // Called only once a request runs, after `auth` exists.
+  const consent: ConsentLink = { complete: (call) => auth.api.oauth2Consent(call) };
+  const auth = betterAuth({
     ...authOptions({
       email,
       appUrl,
       audit: (orgId, entry) => scoped(env.DB, orgId).auditLog.append(entry),
       startingOrg: (userId) => startingOrg(env.DB, userId),
+      // On the CMS's host, as the issuer is (`<appUrl>/api/auth`): /mcp is routed to this Worker there (M4-06).
+      mcpResource: `${appUrl}/mcp`,
+      grants: grantStore(env.DB),
+      consent,
     }),
     database: env.DB,
     baseURL: origin,
@@ -37,6 +45,7 @@ export function createAuth(env: Env, request: Request, email: EmailSender) {
     trustedOrigins: env.CMS_ORIGIN ? [origin, env.CMS_ORIGIN] : [origin],
     socialProviders: github,
   });
+  return auth;
 }
 
 export type Auth = ReturnType<typeof createAuth>;
