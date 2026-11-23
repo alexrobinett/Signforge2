@@ -11,7 +11,7 @@ import type { ScheduleEntryView } from '../src/lib/schedule';
 import { callTool, Refusal } from '../src/lib/tools';
 import { getPlaylists } from '../src/server/playlists.functions';
 import { getSchedule } from '../src/server/schedule.functions';
-import { getSpots } from '../src/server/spots.functions';
+import { getSpots, getTemplates } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
 
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
@@ -161,5 +161,72 @@ describe('one entry published alone (#181)', () => {
     await store.getState().publishEntry(ORG, 'sch_mine');
     expect(said()).toContainEqual({ title: 'Saved as a draft, not published', description: 'Could not reach SignForge. Check your connection and try again.' });
     expect(vi.mocked(callTool)).not.toHaveBeenCalled();
+  });
+});
+
+describe('a held publish (#253)', () => {
+  const spot = { id: 'spt_6r26', name: 'Breakfast board', templateVersionId: 'tv_promo', published: false, draftChanged: true, version: 2 };
+  const playlist = { id: 'pls_main', name: 'All day', spotIds: ['spt_6r26'], version: 1, isDefault: true, published: false, draftChanged: true };
+  const promo = {
+    key: 'photo-promo',
+    versions: [
+      {
+        id: 'tv_promo',
+        manifest: { fields: { photo: { type: 'image', label: 'Photo' }, showPhoto: { type: 'boolean', label: 'Show the photo', default: true } } },
+      },
+    ],
+  };
+  const held = (problem: string) => ({
+    ...published(2),
+    publish: null,
+    held: [
+      { kind: 'playlist', id: 'pls_main', problems: ['spot spt_6r26 is not published'] },
+      { kind: 'spot', id: 'spt_6r26', problems: [`spot spt_6r26: ${problem}`] },
+    ],
+    screens: [],
+  });
+  /** The publish toast's title, description and action, as sonner holds them. */
+  const heldToast = () => {
+    const t = toast.getToasts().findLast((t) => 'title' in t && t.title === 'Not published');
+    return t && 'title' in t ? { description: t.description, action: t.action } : undefined;
+  };
+
+  function setupHeld(problem: string) {
+    vi.mocked(getSchedule).mockResolvedValue({ entries: [entry('sch_breakfast', false)] } as never);
+    vi.mocked(getPlaylists).mockResolvedValue({ playlists: [playlist] } as never);
+    vi.mocked(getSpots).mockResolvedValue({ spots: [spot] } as never);
+    vi.mocked(getTemplates).mockResolvedValue({ templates: [promo] } as never);
+    vi.mocked(callTool).mockResolvedValueOnce(held(problem) as never);
+    const navigate = vi.fn();
+    const store = createStore<PublishingSlice>()((set, get) =>
+      createPublishingSlice(set as never, get as never, { router: { navigate }, queryClient: new QueryClient() } as never),
+    );
+    return { s: store.getState(), navigate };
+  }
+
+  it('names the spot that holds it back, says how to fix its photo, and links to it', async () => {
+    const { s, navigate } = setupHeld('image field "photo" has no asset');
+    await s.publishSchedule(ORG);
+    const t = heldToast();
+    expect(t?.description).toBe('Breakfast board has no image for Photo: choose one, or untick Show the photo.');
+    expect(t?.action).toMatchObject({ label: 'Open Breakfast board' });
+    const action = t?.action;
+    if (action && typeof action === 'object' && 'onClick' in action) action.onClick({} as never);
+    expect(navigate).toHaveBeenCalledWith({ to: '/spots/$spotId', params: { spotId: 'spt_6r26' } });
+  });
+
+  it("puts any other check in the spot's name, with no id", async () => {
+    const { s } = setupHeld("duration 1000 ms is outside the template's range 4000 to 60000");
+    await s.publishSchedule(ORG);
+    expect(heldToast()?.description).toBe("Breakfast board does not pass its checks: duration 1000 ms is outside the template's range 4000 to 60000.");
+  });
+
+  it('says the problem as written when the names cannot be read, and never calls the publish refused', async () => {
+    vi.mocked(getSpots).mockRejectedValue(new Refusal('network', 'Could not reach SignForge. Check your connection and try again.'));
+    vi.mocked(callTool).mockResolvedValueOnce(held('image field "photo" has no asset') as never);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const store = createStore<PublishingSlice>()((set, get) => createPublishingSlice(set as never, get as never, { router: {}, queryClient } as never));
+    await store.getState().endTakeover(ORG, 'sch_flash');
+    expect(heldToast()?.description).toBe('It does not pass its checks: spot spt_6r26 is not published.');
   });
 });
