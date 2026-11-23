@@ -16,7 +16,7 @@ One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready
 2. The repo-wide checks, a few seconds each, on every run: Biome lint, the format check on changed files, knip, jscpd, `turbo boundaries`, the contract-commit check, the template-dependency check and packages/db's import-boundary scan.
 3. The plan picks the base `--affected` compares against (a pull request's base; on `master`, the newest commit whose CI passed, found with the Actions API; none on a nightly or manual run), then `turbo run … --dry=json` lists the tasks that will run (no `test:e2e` on a pull request). Chromium is installed only if one of them is the test of a package that declares a Playwright dependency or the template harness (today the player, the CMS, media, tools, template-check, the look kit and every template).
 4. The stress media, only if the cli's or the tools' tests run (see [Stress media](#stress-media)).
-5. `turbo run typecheck test lint --affected --summarize` on a pull request, `turbo run typecheck test test:e2e lint --affected --summarize` on a push to `master`, and the same without `--affected` on a nightly or manual run, with Turbo's cache restored from earlier runs. The job may run 60 minutes: a run that covers everything with cold caches takes about 30 (2026-11-21: the player's tests about 18 minutes, the CMS e2e about 20, side by side).
+5. `turbo run typecheck test lint --affected --summarize` on a pull request, `turbo run typecheck test test:e2e lint --affected --summarize` on a push to `master`, and the same without `--affected` on a nightly or manual run, with Turbo's cache restored from earlier runs. The job may run 60 minutes: a run that covers everything with cold caches takes about 30 (2026-11-21: the player's tests about 18 minutes, the CMS e2e about 20, side by side). The CMS e2e alone takes about 6 minutes since #283 ([The CMS e2e's workers](#the-cms-e2es-workers)).
 6. The timing summary on the run's page: each step's time, then each Turbo task's time and whether it came from the cache (`scripts/ci-summary.sh`).
 
 ## What "affected" means
@@ -122,15 +122,26 @@ Without the cache on disk, the warm list is empty, and each module is fetched on
 
 ## The CMS e2e's workers
 
-`apps/cms/playwright.config.ts` runs the e2e's specs side by side, but each spec's own tests in order (`fullyParallel: false`). It uses three workers on a laptop and one on CI (`CI` set). Sharding across jobs would cost more minutes, not fewer, since each job repeats the install and the setup. GitHub's `ubuntu-24.04` runner for this private repository has 2 cores (`nproc`). The API (workerd), the CMS (vite) and one Chromium already keep 67% of them busy, and a second worker leaves the player stages too little CPU. The spots' fades then never settle for axe, and tests time out. Against serial runs on the same day's runners, 2 workers took 10–30% less time, but only 1 of 8 runs at 2 or 3 workers passed. Two of those failures were 500s from the API, probably the SQLite lock that `d1()` caused then (it now runs its SQL inside the dev API); the rest were timeouts and fades. Measured 2026-11-22 (#249; runs 45107471407 and 45109633670 on CI, an 18-core Mac locally):
+`apps/cms/playwright.config.ts` runs the e2e's specs side by side, three at a time, on a laptop and on CI, but each spec's own tests in order (`fullyParallel: false`). It runs against the built CMS: `global-setup.ts` builds it (about 3 s) and serves the built Worker with `vite preview`. Under `vite dev` each module compiled on its first request, which is what the warm-up, the 30 s hydration waits and most of the specs' `test.setTimeout` calls were for (#283).
 
-| Workers | Laptop: wall, 3 runs | CI: wall | CI: result |
-| ---: | --- | --- | --- |
-| 1 | 13.7, 13.6, 14.5 min | 22.1, 26.2 min | 70 passed, both runs |
-| 2 | 7.3, 7.2, 7.4 min | 15.4, 17.7, 20.2, 20.6, 20.8 min | 1 of 5 runs all passed. The others had 1–2 failures each, and 3–7 tests did not run. Three of them included command-menu's 60 s timeout, which #250 has since raised |
-| 3 | 5.6, 5.6, 5.7 min | 16.9, 19.0, 20.5 min | 5–8 failures each (timeouts, fades that never settle) |
+GitHub's `ubuntu-24.04` runner has 4 cores for this repository since it went public (2026-11-23). On it, every run below passed. Each is the CMS e2e alone on its own runner, from the `e2e-measure` workflow #283 used and then removed (Playwright's own time):
 
-On CI, where the CPU goes during one serial run (CPU seconds, sampled with `ps`): Chromium's renderers 508 s, its browser process 415 s and its GPU process (software rendering) 358 s; Playwright's runner 321 s; workerd 114 s; vite 106 s. Most of it is Chromium drawing the real player on the stages. A runner with 4 or more cores is what would let workers pay off on CI. On the laptop, 3 workers take the run from 13.7 to 5.6 min.
+| Setup | 1 worker | 2 workers | 3 workers | 4 workers |
+| --- | --- | --- | --- | --- |
+| `vite dev`, as on `master` before #283 (run 45124512959) | 18.5, 16.3 min | 10.2, 10.2 | 11.8, 8.7 | |
+| Built CMS (run 45125869629) | 15.2, 16.5 | 8.1, 7.8 | 6.6, 7.2 | |
+| Built CMS, cheaper `axe`, orgs through the API (runs 45146239608, 45147142350) | | | 5.9, 6.0, 7.5, 5.9, RUN2 | 5.3, 5.4 |
+
+CI keeps 3 workers: 4 saved under a minute, and leave the API, the CMS and Chromium's GPU process no core of their own. Sharding does not pay: Playwright shards by spec when tests are not fully parallel, so two shards split the run 69 tests to 1 (6.9 min against 0.5), and each shard job repeats the install and the setup. On an 18-core Mac, 3 workers take 3.8–4.6 min (5.6 under `vite dev`).
+
+What #283 changed beside the build, and why:
+- `axe()` reads the CMS's own document once in each theme with the players' frames left out, and the frames alone, in the light theme, inside the fade guard. The guard used to cover the whole page, and on CI that one analysis outlasted a 4 s spot, so a fade began during each of its 5 tries (`playlists.spec.ts`, 2 runs of 7).
+- Specs make their orgs through Better Auth's endpoint (`createOrg` in `e2e/helpers.ts`); only `sign-in-and-orgs.spec.ts` makes one through the page.
+- No test sleeps or asserts on elapsed time: the waits are on requests, the page's state, or the page's clock (`page.clock` in `session-ended.spec.ts`).
+- A failed test keeps its trace. Playwright 1.65 starts a trace chunk on every open context at each test, so the contexts a serial spec makes in `beforeAll` are traced too. CI's e2e artifact has the HTML report (`playwright-report`), with each test's time.
+- The setup refuses an API or CMS port something already holds, found by binding it on 127.0.0.1 and ::1 (`portTaken`): an HTTP probe of 127.0.0.1 missed a CMS on ::1. Teardown kills each server's process group after SIGTERM.
+
+On a 2-core runner (#249, 2026-11-22, runs 45107471407 and 45109633670), 2 or 3 workers failed 7 runs of 8, on timeouts and fades, and 1 worker took 22–26 min: Chromium drawing the real player on the stages used most of the CPU.
 
 ## Measured
 
@@ -148,7 +159,7 @@ The week before this workflow (2026-11-15 to 22, from the Actions API): 333 pull
 | Push to `master` | every task: 14–31 min (44944143395 30 m 11 s, 44976726090 31 m 05 s, 45070332774 13 m 43 s, whose e2e failed after 10 min) | the tasks affected since the last green commit. In the week, 62 of the 105 pushes (741 minutes) changed no global dependency, template, contract, SDK, player or CLI |
 | Nightly | none | every task, the Turbo cache replaying what did not change; skipped when the last nightly passed on the same commit |
 
-The slowest tasks with cold caches (44944143395): `player:test` 1,161 s, the CMS e2e about 27 min beside them (one Playwright worker on CI: [The CMS e2e's workers](#the-cms-e2es-workers)), `api:test` 481 s, `tools:test` 248 s, `template-check:test` 157 s, `db:test` 126 s, `cms:lint` 153 s. The API's 28 files spend 103 s in their tests and the rest in each file's module transform (no module cache on disk, above) and setup.
+The slowest tasks with cold caches (44944143395): `player:test` 1,161 s, the CMS e2e about 27 min beside them (one Playwright worker then; 6–7.5 min with three since #283: [The CMS e2e's workers](#the-cms-e2es-workers)), `api:test` 481 s, `tools:test` 248 s, `template-check:test` 157 s, `db:test` 126 s, `cms:lint` 153 s. The API's 28 files spend 103 s in their tests and the rest in each file's module transform (no module cache on disk, above) and setup.
 
 TypeScript is 7.0.2, the native compiler, so there is nothing to gain from `@typescript/native-preview`: `tsc -p apps/api` takes 0.98 s on a laptop against 4.2 s with TypeScript 5.9.3, and every typecheck in the repo takes 7 s. In CI a typecheck takes 1–80 s only because it shares two cores with the tests.
 
