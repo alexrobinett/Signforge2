@@ -20,6 +20,7 @@ import { verifyOAuthQueryParams } from '@better-auth/oauth-provider';
 import type { BetterAuthPlugin } from 'better-auth';
 import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx, sessionMiddleware } from 'better-auth/api';
 import { z } from 'zod';
+import { plainName } from './client-names';
 
 /** What a client may ask for: the tool scopes, and `offline_access` for a refresh token. */
 export const OAUTH_SCOPES = [...SCOPES, 'offline_access'] as const;
@@ -87,7 +88,7 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
     id: 'agent-grants',
     endpoints: {
       /**
-       * What the consent page shows (`/connect` in the CMS): the client, the host its code goes to, the
+       * What the consent page shows (`/connect` in the CMS): the client, where its code goes, the
        * person, and each of their orgs with the scopes a grant there may hold (asked for, and capped by
        * the role as the org has it now). A read: it writes nothing. The signed query is checked here,
        * as the provider's hook checks it on the consent POST.
@@ -106,11 +107,13 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
           const asked = (query.get('scope') ?? '').split(' ');
           const requested = SCOPES.filter((s) => asked.includes(s));
           const { user } = ctx.context.session;
+          const verified = FIRST_PARTY_CLIENT_IDS.some((id) => id === clientId);
           return ctx.json({
             client: {
               id: clientId,
-              name: client.name ?? clientId,
-              verified: FIRST_PARTY_CLIENT_IDS.some((id) => id === clientId),
+              // An unverified client's name only when it is plain (`plainName`); otherwise none reaches the page.
+              name: verified ? (client.name ?? clientId) : (plainName(client.name ?? '') ?? null),
+              verified,
               redirect: destinationOf(query.get('redirect_uri') ?? ''),
             },
             user: { name: user.name, email: user.email },

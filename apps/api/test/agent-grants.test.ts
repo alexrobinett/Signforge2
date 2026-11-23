@@ -480,70 +480,22 @@ describe('a membership ending', () => {
 describe('client registration', () => {
   /** Each refusal's words, by why the name is refused. */
   const REFUSED = {
-    names: 'client_name must not name SignForge or its apps',
-    mixes: 'client_name must be written in one script (Latin may go with Chinese, Japanese or Korean)',
-    hides: 'client_name must not contain control, format, bidirectional or invisible characters, or spaces other than U+0020',
+    hides: 'client_name must not contain control, format, bidirectional or invisible characters',
     blank: 'client_name must not be blank',
     long: 'client_name must be at most 80 characters',
   };
   /** What registering under `name` is refused for, or its status if it is not refused. */
-  const refusalOf = async (t: ReturnType<typeof testApp>, name: string) => {
+  const refusalOf = async (t: App, name: string) => {
     const res = await registration(t, { client_name: name });
     if (res.status !== 400) return res.status;
     const { error, error_description: why } = (await res.json()) as { error: string; error_description: string };
     expect(error, JSON.stringify(name)).toBe('invalid_client_metadata');
     return Object.entries(REFUSED).find(([, words]) => words === why)?.[0] ?? why;
   };
-  const expectRefusals = async (cases: [string, keyof typeof REFUSED][]) => {
+
+  it('refuses only a blank name, one too long for the heading, and characters that hide or reorder text', async () => {
     const t = testApp();
-    for (const [name, why] of cases) expect(await refusalOf(t, name), JSON.stringify(name)).toBe(why);
-  };
-
-  it("refuses a name that poses as SignForge's own apps, however it is spelled", async () => {
-    await expectRefusals([
-      ['SignForge CLI', 'names'],
-      ['signforge', 'names'],
-      ['My SignForge helper', 'names'],
-      ['Sign Forge', 'names'],
-      ['S-I-G-N-F-O-R-G-E', 'names'],
-      ['SIGNF0RGE', 'names'],
-      ['S1gnF0rge', 'names'],
-      ['5ignForge', 'names'],
-      ['sf-cli', 'names'],
-      ['SF CLI', 'names'],
-      ['sf_cli tools', 'names'],
-      ['SF-CL1', 'names'],
-      // Accents, as NFKD and dropping the marks read them (the re-check of #299).
-      ['SígnForge', 'names'],
-      ['SignForgé', 'names'],
-      ['S̶ignForge', 'names'],
-      ['S⃝ignForge', 'names'],
-      // Full-width, mathematical, superscript and small-capital Latin, and Latin lookalikes in Latin.
-      ['ＳｉｇｎＦｏｒｇｅ', 'names'],
-      ['ＳＦ－ＣＬＩ', 'names'],
-      ['𝐒𝐢𝐠𝐧𝐅𝐨𝐫𝐠𝐞', 'names'],
-      ['𝓈𝒾𝑔𝓃𝒻ℴ𝓇𝑔ℯ', 'names'],
-      ['ˢⁱᵍⁿᶠᵒʳᵍᵉ', 'names'],
-      ['ꜱɪɢɴꜰᴏʀɢᴇ', 'names'],
-      ['ꜱғ-ᴄʟɪ', 'mixes'],
-      ['SıgnForge', 'names'],
-      ['SiɡnForge', 'names'],
-      ['ꜱignforge', 'names'],
-      // Another script's letters among Latin: Greek, Cyrillic, Cherokee.
-      ['SIGΝFORGE', 'mixes'],
-      ['ΣignForge', 'mixes'],
-      ['ѕignforge', 'mixes'],
-      ['Ѕіgnfоrgе', 'mixes'],
-      ['SignFоrge', 'mixes'],
-      ['ᏚignᏀorge', 'mixes'],
-      ['ᏚIGNFORGE', 'mixes'],
-      ['SᎥgnForge', 'mixes'],
-      ['Signհorge', 'mixes'],
-    ]);
-  });
-
-  it('refuses a name with characters that reorder or hide text, and a blank one or one too long for the heading', async () => {
-    await expectRefusals([
+    for (const [name, why] of [
       ['Claude‮edoc', 'hides'],
       ['Claude⁦x⁩', 'hides'],
       ['Clau​de', 'hides'],
@@ -551,22 +503,13 @@ describe('client registration', () => {
       ['Claude\u0000', 'hides'],
       ['Claude­Code', 'hides'],
       ['Claude⁠Code', 'hides'],
-      ['Claude️Code', 'hides'],
       ['Claude\u{E0041}Code', 'hides'],
-      ['Claude', 'hides'],
-      // Hangul fillers are letters, but blank; and the blank Braille pattern.
+      // The Hangul fillers are letters, but blank (the second re-check of #299).
       ['SignㅤForge', 'hides'],
       ['SignᅟForge', 'hides'],
       ['SignᅠForge', 'hides'],
       ['SignﾠForge', 'hides'],
-      ['Sign⠀Forge', 'hides'],
-      // Spaces but U+0020.
-      ['Sign Forge', 'hides'],
-      ['Claude Code', 'hides'],
-      ['Claude　Code', 'hides'],
-      ['Claude\tCode', 'hides'],
       ['', 'blank'],
-      [' ', 'blank'],
       ['   ', 'blank'],
       [' ', 'blank'],
       ['   ', 'blank'],
@@ -574,29 +517,17 @@ describe('client registration', () => {
       ['ㅤ', 'blank'],
       ['​', 'blank'],
       ['A'.repeat(81), 'long'],
-    ]);
-  });
-
-  it('refuses a name mixing Latin with another script, but not one script alone, or Latin with Chinese, Japanese or Korean', async () => {
-    await expectRefusals([
-      ['Café Ελλάδα', 'mixes'],
-      ['Bot Привет', 'mixes'],
-      ['Hello ᏣᎳᎩ', 'mixes'],
-      ['Ελλάδα Привет', 'mixes'],
-    ]);
-    const t = testApp();
-    for (const name of ['Ελληνικός βοηθός', 'Помощник', '東京 Screens', 'ソニー Agent', '서울 Bot', '台北 ㄅㄆ Agent']) {
-      expect(await refusalOf(t, name), name).toBe(201);
+    ] as const) {
+      expect(await refusalOf(t, name), JSON.stringify(name)).toBe(why);
     }
   });
 
-  it('accepts an ordinary name, accents and all, up to 80 characters', async () => {
+  it("registers a name that reads as SignForge's, or any other the page will not show: registration is not the place", async () => {
     const t = testApp();
-    for (const name of ['Claude Code', 'Cursor', 'Café Assistant', 'Zürich 2', "O'Brien's helper", 'Script for screens', 'Signs & forms', 'A'.repeat(80)]) {
+    for (const name of ['SignForge CLI', 'Claude Code (signforge)', '🆂🅸🅶🅽🅵🅾🆁🅶🅴', 'Ελληνικός βοηθός', 'Sign\u2800Forge', 'Bot 🤖']) {
       expect(await refusalOf(t, name), name).toBe(201);
     }
   });
-
   it('refuses a confidential client, or one that names no method', async () => {
     const t = testApp();
     for (const method of ['client_secret_post', 'client_secret_basic', undefined]) {
@@ -648,5 +579,139 @@ describe('client registration', () => {
       statuses.push(res.status);
     }
     expect(statuses).toEqual([201, 201, 201, 201, 201, 429]);
+  });
+});
+
+describe("the consent page's name for a client", () => {
+  /**
+   * The name the consent page gets for a client registered under each of `names`: null where it gets
+   * none, and shows an unverified app.
+   */
+  const shownAs = async (names: readonly string[]) => {
+    const t = testApp();
+    const shown: Record<string, string | null> = {};
+    let person = new Client(t);
+    for (const [i, name] of names.entries()) {
+      // Another person every 20, from another address: authorize is rate-limited per address.
+      if (i % 20 === 0) {
+        person = new Client(t);
+        await person.signIn(email('namer'));
+      }
+      const { oauthQuery } = await consentPage(person, await register(t, { client_name: name }));
+      const body = await (await person.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
+        client: { name: string | null; verified: boolean };
+      }>();
+      expect(body.client.verified, name).toBe(false);
+      shown[name] = body.client.name;
+    }
+    return shown;
+  };
+  const withheld = (names: string[]) => Object.fromEntries(names.map((name) => [name, null]));
+  const kept = (names: string[]) => Object.fromEntries(names.map((name) => [name, name]));
+
+  it('withholds every name from the reviews of #299 that reads as SignForge, so the page shows an unverified app', async () => {
+    const names = [
+      // The first review, and the tests written for it.
+      'SignForge CLI',
+      'signforge',
+      'SIGNFORGE',
+      'My SignForge helper',
+      'TheSignForge',
+      'Sign Forge',
+      'S-I-G-N-F-O-R-G-E',
+      'ＳｉｇｎＦｏｒｇｅ',
+      'S1gnF0rge',
+      'SIGNF0RGE',
+      '5ignForge',
+      'ѕignforge',
+      'Ѕіgnfоrgе',
+      'sf-cli',
+      'SF CLI',
+      'SF-CL1',
+      'sf_cli tools',
+      '(SignForge)',
+      'SignForge CLI (helper)',
+      // The second: accents, small capitals, Greek, Cyrillic and Cherokee letters.
+      'SIGΝFORGE',
+      'SIԌNFORGE',
+      'SIGNϜORGE',
+      'SígnForge',
+      'SignForgé',
+      'ꜱɪɢɴꜰᴏʀɢᴇ',
+      'ᏚᎥᏀΝFᎾᏒᏀᎬ',
+      '𝐒𝐢𝐠𝐧𝐅𝐨𝐫𝐠𝐞',
+      'ˢⁱᵍⁿᶠᵒʳᵍᵉ',
+      'ꜱғ-ᴄʟɪ',
+      'ΣignForge',
+      'ᏚIGNFORGE',
+      'SᎥgnForge',
+      'Signհorge',
+      // The third: enclosed letters and regional indicators, Hangul and Han letters, CJK dashes,
+      // modifier letters, digits and signs, letters with strokes, and spaced and dotted forms.
+      '🆂🅸🅶🅽🅵🅾🆁🅶🅴',
+      '🅢🅘🅖🅝🅕🅞🅡🅖🅔',
+      '🇸🇮🇬🇳🇫🇴🇷🇬🇪',
+      '🆂🅵 🅲🅻🅸',
+      'SㅣGNFORGE',
+      'S丨GNFORGE',
+      'SIGNF口RGE',
+      'SIGNFロRGE',
+      'Sign一Forge',
+      'SignーForge',
+      'SignㅡForge',
+      'SF一CLI',
+      'SignʼForge',
+      'SignˈForge',
+      'SignˌForge',
+      'SignˍForge',
+      'S!gnForge',
+      'SI6NFOR6E',
+      'SignForg€',
+      'Sign Forg£',
+      'SF CL!',
+      'SignFørge',
+      'SIGNFØRGE',
+      'SigƞForge',
+      'SiǥnForǥe',
+      'SignForɠe',
+      'S.i.g.n Forge',
+      'Sign-Forge',
+      'Sign_Forge',
+      'S·F CLI',
+      'Sign\u2800Forge',
+    ];
+    expect(await shownAs(names)).toEqual(withheld(names));
+  });
+
+  it('withholds a name that is not plain ASCII, international ones and a non-plain label included', async () => {
+    const names = ['Café Assistant', 'Ελληνικός βοηθός', '東京 Screens', 'Bot 🤖', 'Claude Code (сервер)', 'Agent #1', 'Agent: two'];
+    expect(await shownAs(names)).toEqual(withheld(names));
+  });
+
+  it("shows the major clients' names, a label after them, and names that only run into a reserved word", async () => {
+    const names = [
+      'Claude Code (signforge)',
+      'Claude Code (SignForge)',
+      'Claude Code (screens)',
+      'Cursor',
+      'Visual Studio Code',
+      'Visual Studio Code - Insiders',
+      'ChatGPT',
+      'Windsurf',
+      'Codex',
+      'MCP Inspector',
+      'Gemini CLI MCP Client',
+      'Zed',
+      'Goose',
+      'Cline',
+      'mcp-remote',
+      'Design Forge',
+      'Docs FC Lite',
+      'Mrs F. Clive',
+      "O'Brien's helper",
+      'Signs & forms',
+      'W'.repeat(80),
+    ];
+    expect(await shownAs(names)).toEqual(kept(names));
   });
 });

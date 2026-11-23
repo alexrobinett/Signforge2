@@ -59,16 +59,20 @@ function ConnectPage() {
   );
 }
 
+/** A long name with no break wraps anywhere rather than widen the page. */
+const NAME_WRAP = '[overflow-wrap:anywhere]';
+
 /**
- * The client's name as it registered it, kept apart from the text around it (`<bdi>`), and in quotes
- * unless the client is SignForge's own: the name is only the app's claim.
+ * The client in a sentence: SignForge's own by its name; another by its name in quotes, as only its
+ * claim; and one whose name the API withholds as "this app" (the heading says where its code goes).
+ * `<bdi>` keeps a name from reordering the text around it.
  */
 function ClientName({ client }: { client: ConnectRequest['client'] }) {
-  return client.verified ? (
-    <bdi>{client.name}</bdi>
-  ) : (
+  if (client.verified) return <bdi className={NAME_WRAP}>{client.name}</bdi>;
+  if (client.name === null) return <>this app</>;
+  return (
     <>
-      “<bdi>{client.name}</bdi>”
+      “<bdi className={NAME_WRAP}>{client.name}</bdi>”
     </>
   );
 }
@@ -92,6 +96,7 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
   const publishing = chosen.includes('content:publish');
   const busy = pending !== null;
   const cancel = () => void cancelConnection(oauthQuery);
+  const where = client.redirect.kind === 'web' ? client.redirect.host : client.redirect.target;
 
   return (
     <>
@@ -103,7 +108,14 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
           <div className="flex flex-col gap-0.5">
             {/* The badge is part of the heading, so moving by heading reads it. */}
             <h1 className="text-[22px] font-semibold tracking-tight">
-              <ClientName client={client} /> wants to work in SignForge
+              {client.name === null ? (
+                <>
+                  An unverified app at <span className="font-mono [overflow-wrap:anywhere]">{where}</span>
+                </>
+              ) : (
+                <ClientName client={client} />
+              )}{' '}
+              wants to work in SignForge
               {client.verified ? null : (
                 <>
                   {' '}
@@ -185,7 +197,7 @@ function Consent({ request, oauthQuery }: { request: ConnectRequest; oauthQuery:
                 <p className="flex gap-2.5 rounded-[10px] border border-status-updating bg-status-updating-muted px-3.5 py-3 text-sm leading-snug text-status-updating-foreground">
                   <TriangleAlertIcon className="mt-0.5 size-4 flex-none" aria-hidden />
                   <span>
-                    <ClientName client={client} /> will be able to change what every screen in <bdi>{org.name}</bdi> shows without asking. Each publish is in
+                    Publishing lets <ClientName client={client} /> change what every screen in <bdi>{org.name}</bdi> shows without asking. Each publish is in
                     the audit log and can be undone.
                   </span>
                 </p>

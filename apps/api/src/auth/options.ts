@@ -147,7 +147,7 @@ const refusePublicOnly = {
               error_description: 'only public clients may register: token_endpoint_auth_method must be none',
             });
           }
-          // The consent page puts the name in its heading: no posing as SignForge, no reordered text.
+          // Only what no page can show; whether the consent page shows the name is decided there (`plainName`).
           const refused = typeof body.client_name === 'string' ? clientNameRefusal(body.client_name) : undefined;
           if (refused) throw new APIError('BAD_REQUEST', { error: 'invalid_client_metadata', error_description: refused });
         }),
