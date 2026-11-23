@@ -21,9 +21,8 @@ import { useAppStore } from '~/state/provider';
 const NO_REQUEST = 'This page opens when an app asks to connect to SignForge.';
 
 export const Route = createFileRoute('/connect')({
-  // The provider's signed query, carried whole as `q` once the page has read it (`getSignedQuery`). A URL
-  // with `sig` is the provider's own, read again even when a client sent a `q` of its own. The search keeps
-  // only keys the URL already has: a new one would be written into the URL, and the signature break.
+  // The signed query, carried as `q` once read (`getSignedQuery`). A URL with `sig` is the provider's,
+  // read again even if a client sent its own `q`. No new keys: the router would write them into the URL.
   validateSearch: (search: Record<string, unknown>): { q?: string; sig?: string } => ({
     ...(typeof search.q === 'string' ? { q: search.q } : {}),
     ...(typeof search.sig === 'string' ? { sig: search.sig } : {}),
