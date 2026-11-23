@@ -4,7 +4,7 @@ One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready
 
 - **A pull request** runs typecheck, test and lint for the packages its diff affects. It does not run the CMS end-to-end run (`test:e2e`): run that locally before marking the pull request ready or pushing to it, on your own ports (`E2E_API_PORT=... E2E_CMS_PORT=... pnpm --filter @signforge/cms test:e2e`), and say in the pull request that it passed.
 - **A draft pull request** runs nothing: the job is skipped. Marking it ready (`gh pr ready <n>`) starts the run.
-- **A push to `master`** runs every task, the CMS end-to-end run included, of the packages affected since the newest `master` commit whose CI passed. Each green run vouches for the one before it, so what a red or cancelled run did not get through runs again on the next push. When none of the 20 newest green non-PR runs is on a commit HEAD contains, it runs everything, and so it does when the root `package.json`, the lockfile's root importer or a workflow changed since that commit (see [What "affected" means](#what-affected-means)). A red `master` run is fixed first, before more merges.
+- **A push to `master`** runs every task, the CMS end-to-end run included, of the packages affected since the newest `master` commit whose CI passed. Each green run vouches for the one before it, so what a red or cancelled run did not get through runs again on the next push. When none of the 20 newest green non-PR runs is on a commit HEAD contains, or the Actions API cannot be read (the log says why), it runs everything, and so it does when the root `package.json`, the lockfile's root importer or a workflow changed since that commit (see [What "affected" means](#what-affected-means)). A red `master` run is fixed first, before more merges.
 - **The nightly run** (07:30 UTC) and **a manual run** (Actions, CI, "Run workflow", or `gh workflow run ci.yml`) run every task, so nothing an affected run leaves out goes untested for long. Tasks whose inputs did not change replay from the Turbo cache; the e2e always runs. The nightly run does nothing when the last nightly run passed on the same commit.
 - **A change to docs and Markdown only** (`docs/**`, `**/*.md`, but not `fonts/README.md`, which the compiler's fonts test checks) starts no run, on a pull request or on `master`. `gh pr checks` then says "no checks reported", which on such a pull request is a pass.
 
@@ -25,7 +25,7 @@ One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready
 
 A few changes mark every package affected:
 - `turbo.json`, the workflow, `tsconfig.base.json`, `biome.jsonc` and `pnpm-workspace.yaml` (`globalDependencies` in `turbo.json`, plus Turbo's own rules);
-- `fonts/` and `examples/`, which tests read but no package owns.
+- `fonts/` and `examples/`, which tests read but no package owns, and `scripts/stress-media.sh`, which puts the stress media in `examples/` for the cli's and the tools' tests.
 
 A lockfile change affects only the packages whose dependencies changed.
 

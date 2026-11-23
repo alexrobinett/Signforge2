@@ -127,12 +127,15 @@ jobs:
               base=${{ github.event.pull_request.base.sha }}
               ;;
             push)
-              shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=master&status=success&per_page=20" \
-                --jq '.workflow_runs[] | select(.event != "pull_request") | .head_sha') || shas=
-              for sha in $shas; do
-                if git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then base=$sha; break; fi
-              done
-              [ -n "$base" ] || echo "None of the 20 newest green master runs is on a commit HEAD contains: running everything."
+              if shas=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=master&status=success&per_page=20" \
+                --jq '.workflow_runs[] | select(.event != "pull_request") | .head_sha' 2> "$RUNNER_TEMP/runs.err"); then
+                for sha in $shas; do
+                  if git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then base=$sha; break; fi
+                done
+                [ -n "$base" ] || echo "None of the 20 newest green master runs is on a commit HEAD contains: running everything."
+              else
+                echo "Could not list master's green runs: $(cat "$RUNNER_TEMP/runs.err"). Running everything."
+              fi
               ;;
             schedule)
               last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""') || last=
