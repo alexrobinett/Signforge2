@@ -77,6 +77,9 @@ describe("packages/db's migrations", () => {
         appUrl: 'https://cms.test',
         audit: async () => {},
         startingOrg: async () => null,
+        mcpResource: 'https://cms.test/mcp',
+        grants: { create: async () => undefined, revokeMember: async () => {} },
+        consent: {},
       }),
       database: env.DB,
     });

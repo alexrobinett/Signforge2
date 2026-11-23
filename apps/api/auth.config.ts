@@ -12,6 +12,9 @@ export const auth = betterAuth({
     appUrl: 'http://localhost',
     audit: async () => {},
     startingOrg: async () => null,
+    mcpResource: 'http://localhost/mcp',
+    grants: { create: async () => undefined, revokeMember: async () => {} },
+    consent: {},
   }),
   database: new DatabaseSync(':memory:'),
 });
