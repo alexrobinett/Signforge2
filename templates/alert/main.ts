@@ -43,7 +43,11 @@ defineTemplate({
     // Measured in the template's own faces: lay out, so they load, then wait for them.
     const body = document.querySelector<HTMLElement>('.body')!;
     body.getBoundingClientRect();
+    const page = document.body;
     await document.fonts.ready;
+    // New data while the faces loaded: the SDK put a fresh copy of the loaded body in place and
+    // inits again. Rejecting stops this prepare there, and the SDK drops a superseded prepare's error.
+    if (document.body !== page) throw new Error('new data replaced this prepare');
     for (const fit of FITS) {
       root.style.setProperty('--fit', String(fit));
       if (body.scrollHeight <= body.clientHeight) break;

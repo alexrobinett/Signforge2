@@ -21,7 +21,11 @@ defineTemplate({
     // first, and the SDK's decode before ready then waits behind that one (on the Pi, 80 ms more).
     const img = document.querySelector<HTMLImageElement>('.photo img')!;
     img.style.visibility = 'hidden';
+    const page = document.body;
     const { pixels, lightest } = await backdrop(ctx, eyebrow, img, bg);
+    // New data while the backdrop was measured: the SDK put a fresh copy of the loaded body in place
+    // and inits again. Rejecting stops this prepare there, and the SDK drops a superseded prepare's error.
+    if (document.body !== page) throw new Error('new data replaced this prepare');
     img.style.visibility = '';
     const over = readableOver(pixels, accent, { large: true, lightest });
     if (!over) eyebrow.classList.add('scrim');

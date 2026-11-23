@@ -52,8 +52,8 @@
       "size": 78257,
       "type": "text/html"
     },
-    "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402": {
-      "size": 122679,
+    "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29": {
+      "size": 122770,
       "type": "text/html"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
@@ -77,8 +77,8 @@
       "type": "image/jpeg",
       "sample": "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd"
     },
-    "09d65f3b5fea83adc02fd8a5413ec747703f1e629fd21db20c05541678df4f9a": {
-      "size": 80991,
+    "592027ce8ebad984cc42759c5748858dc0a5c69c893693890d9d13721cd49ae2": {
+      "size": 81079,
       "type": "text/html"
     },
     "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd": {
@@ -116,10 +116,10 @@
     }
   },
   "templates": {
-    "base/alert@1.0.0": {
+    "base/alert@1.0.1": {
       "manifest": {
         "id": "alert",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Alert",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
         "fields": {
@@ -199,7 +199,7 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402"
+      "html": "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29"
     },
     "base/announcement@1.0.1": {
       "manifest": {
@@ -1144,10 +1144,10 @@
       },
       "html": "cf62c825efab14860fe3c1afde8fb891e85b3d5498a9b0cfd0e4a9493b9b5045"
     },
-    "base/photo-promo@1.4.1": {
+    "base/photo-promo@1.4.2": {
       "manifest": {
         "id": "photo-promo",
-        "version": "1.4.1",
+        "version": "1.4.2",
         "name": "Photo Promo",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
         "fields": {
@@ -1193,7 +1193,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "09d65f3b5fea83adc02fd8a5413ec747703f1e629fd21db20c05541678df4f9a"
+      "html": "592027ce8ebad984cc42759c5748858dc0a5c69c893693890d9d13721cd49ae2"
     },
     "base/room-status@1.0.1": {
       "manifest": {
@@ -1440,7 +1440,7 @@
       "id": "alert",
       "name": "Evacuation alert",
       "kind": "template",
-      "template": "base/alert@1.0.0",
+      "template": "base/alert@1.0.1",
       "data": {
         "severity": "emergency",
         "headline": "Evacuate the building now",
@@ -1841,7 +1841,7 @@
       "id": "photo-berries",
       "name": "Photo promo, 1080p photo",
       "kind": "template",
-      "template": "base/photo-promo@1.4.1",
+      "template": "base/photo-promo@1.4.2",
       "data": {
         "eyebrow": "This week",
         "headline": "Fresh picked",
@@ -1857,7 +1857,7 @@
       "id": "photo-kitchen",
       "name": "Photo promo, 4K photo 2",
       "kind": "template",
-      "template": "base/photo-promo@1.4.1",
+      "template": "base/photo-promo@1.4.2",
       "data": {
         "eyebrow": "Made here",
         "headline": "Hot and ready",
@@ -1873,7 +1873,7 @@
       "id": "photo-river",
       "name": "Photo promo, 4K photo",
       "kind": "template",
-      "template": "base/photo-promo@1.4.1",
+      "template": "base/photo-promo@1.4.2",
       "data": {
         "eyebrow": "Weekend escape",
         "headline": "Go further",
@@ -2154,5 +2154,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "eac06e250a251753b9d85b427928c3f56fb047d492e6f65f15fad4f66a350e2c"
+  "id": "ae2891f11051fe363080ef6e70cd272fe04f81e32b52902c2e70eb0ca13bef99"
 }

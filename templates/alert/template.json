@@ -1,6 +1,6 @@
 {
   "id": "alert",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Alert",
   "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
   "fields": {

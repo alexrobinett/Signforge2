@@ -181,4 +181,57 @@ describe('alert (#200)', () => {
       expect(still, severity).toEqual({ animations: 0, moved: [] });
     }
   });
+
+  // The SDK restores the document and inits again on new data, while the old prepare may still be
+  // waiting for the faces. Here the first prepare is held there until the new data has played its
+  // own prepare: resuming must not step the new copy's type (#308). The new copy is long, so its own
+  // step is not the first, which the old prepare, measuring its detached copy, would set.
+  it('a prepare that new data replaced, resuming after the faces load, leaves the new document as a fresh load', async () => {
+    const hst = await host('landscape', true);
+    const a = spotData(t().manifest, { severity: 'notice' });
+    const b = spotData(t().manifest, { severity: 'emergency', qrUrl, ...longCopy() });
+    await hst.open('fresh', t().html);
+    await hst.init('fresh', b, {}, NOW);
+    await hst.waitFor('fresh', 'ready', 1);
+    const fresh = await hst.dom('fresh');
+    expect(fresh).toContain('--fit: 0.88;');
+    for (const [name, index] of [
+      ['reset', 1],
+      ['again', 2],
+    ] as const) {
+      await hst.open(name, t().html);
+      const f = hst.page.mainFrame().childFrames()[index]!;
+      // The first read of `document.fonts.ready` is the first prepare's: it waits there until the
+      // test lets it go, and says when it has got there.
+      await f.evaluate(() => {
+        const w = window as unknown as { held: Promise<void>; release: () => void };
+        const ready = Object.getOwnPropertyDescriptor(FontFaceSet.prototype, 'ready')!.get!;
+        const gate = new Promise<void>((r) => (w.release = r));
+        let arrived: () => void = () => {};
+        w.held = new Promise((r) => (arrived = r));
+        let reads = 0;
+        Object.defineProperty(document.fonts, 'ready', {
+          get(this: FontFaceSet) {
+            if (reads++) return ready.call(this);
+            arrived();
+            return gate.then(() => ready.call(this));
+          },
+        });
+      });
+      await hst.init(name, a, {}, NOW);
+      await f.evaluate(() => (window as unknown as { held: Promise<void> }).held);
+      if (name === 'reset') {
+        await hst.post(name, 'reset');
+        await hst.waitFor(name, 'loaded', 2);
+      }
+      await hst.init(name, b, {}, NOW);
+      await hst.waitFor(name, 'ready', 1);
+      // Let the first prepare go, then wait a task: what it does next runs in microtasks before it.
+      await f.evaluate(async () => {
+        (window as unknown as { release: () => void }).release();
+        await new Promise((r) => setTimeout(r));
+      });
+      expect(await hst.dom(name), name).toBe(fresh);
+    }
+  });
 });

@@ -1,5 +1,6 @@
-import { IMAGE_SAMPLE_CELL, type Orientation } from '@signforge/contract';
-import { brandColourTests, host, spotData, useTemplate, type BrandSpot } from '@signforge/template-test';
+import { IMAGE_SAMPLE_CELL, type FrameTheme, type Orientation } from '@signforge/contract';
+import { describe, expect, it } from 'vitest';
+import { brandColourTests, DEMO_KIT, host, spotData, useTemplate, type BrandSpot } from '@signforge/template-test';
 
 const t = useTemplate(new URL('..', import.meta.url), {
   a: { body: 'Picked this morning' },
@@ -74,4 +75,71 @@ brandColourTests(t, {
   onFill: [['.tag', '.tag', 4.5]],
   onBackdrop: ['.eyebrow'],
   sameWithSample: '.eyebrow',
+});
+
+// The SDK restores the document and inits again on new data, while the old prepare may still be
+// measuring the eyebrow's backdrop. Here the first prepare is held at its first wait until the new
+// data has played its own prepare: resuming must not set the eyebrow's colour on the new document
+// (#308). The old data's kit has a green accent and the new data's none, so the old prepare's
+// eyebrow colour (green, black or white) is never the new one's (the default accent).
+describe('photo-promo (#308)', () => {
+  it('a prepare that new data replaced, resuming while it measures, leaves the new document as a fresh load', async () => {
+    const hst = await host('landscape', true);
+    const a = spotData(t().manifest, { body: 'Picked this morning' });
+    const b = spotData(t().manifest, { headline: 'Two for one' });
+    const green: FrameTheme = { colors: { ...DEMO_KIT, accent: '#22c55e' }, shape: 'soft', fonts: {} };
+    await hst.open('fresh', t().html);
+    await hst.init('fresh', b, { photo: '#000000' }, undefined, undefined, true);
+    await hst.waitFor('fresh', 'ready', 1);
+    const fresh = await hst.dom('fresh');
+    for (const [name, index] of [
+      ['reset', 1],
+      ['again', 2],
+    ] as const) {
+      await hst.open(name, t().html);
+      const f = hst.page.mainFrame().childFrames()[index]!;
+      // The first read of `document.fonts.ready` is the first prepare's: it waits there until the
+      // test lets it go, and says when it has got there. The backdrop's last step is a canvas read.
+      await f.evaluate(() => {
+        const w = window as unknown as { held: Promise<void>; release: () => void; read: () => Promise<void> };
+        const ready = Object.getOwnPropertyDescriptor(FontFaceSet.prototype, 'ready')!.get!;
+        const gate = new Promise<void>((r) => (w.release = r));
+        let arrived: () => void = () => {};
+        w.held = new Promise((r) => (arrived = r));
+        let reads = 0;
+        Object.defineProperty(document.fonts, 'ready', {
+          get(this: FontFaceSet) {
+            if (reads++) return ready.call(this);
+            arrived();
+            return gate.then(() => ready.call(this));
+          },
+        });
+        const getImageData = OffscreenCanvasRenderingContext2D.prototype.getImageData;
+        let onRead: () => void = () => {};
+        w.read = () => new Promise((r) => (onRead = r));
+        OffscreenCanvasRenderingContext2D.prototype.getImageData = function (this: OffscreenCanvasRenderingContext2D, ...args) {
+          onRead();
+          return getImageData.apply(this, args);
+        };
+      });
+      await hst.init(name, a, { photo: '#ffffff' }, undefined, green, true);
+      await f.evaluate(() => (window as unknown as { held: Promise<void> }).held);
+      if (name === 'reset') {
+        await hst.post(name, 'reset');
+        await hst.waitFor(name, 'loaded', 2);
+      }
+      await hst.init(name, b, { photo: '#000000' }, undefined, undefined, true);
+      await hst.waitFor(name, 'ready', 1);
+      // Let the first prepare go until its backdrop's canvas read, then wait a task: what it does
+      // next runs in microtasks before it.
+      await f.evaluate(async () => {
+        const w = window as unknown as { release: () => void; read: () => Promise<void> };
+        const read = w.read();
+        w.release();
+        await read;
+        await new Promise((r) => setTimeout(r));
+      });
+      expect(await hst.dom(name), name).toBe(fresh);
+    }
+  });
 });
