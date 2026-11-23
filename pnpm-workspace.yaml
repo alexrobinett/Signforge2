@@ -3,6 +3,7 @@ packages:
   - packages/*
   - templates/*
   - examples
+  - infra/*
   - spike/m3-platform
 allowBuilds:
   esbuild: true

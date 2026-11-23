@@ -544,6 +544,21 @@ importers:
 
   examples: {}
 
+  infra/turbo-cache:
+    devDependencies:
+      '@cloudflare/vitest-plugin':
+        specifier: ^1.8.4
+        version: 1.8.4(@cloudflare/workers-types@5.20261117.1)(@types/node@26.6.6)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
+      '@cloudflare/workers-types':
+        specifier: ^5.20261117.1
+        version: 5.20261117.1
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      wrangler:
+        specifier: ^4.164.0
+        version: 4.164.0(@cloudflare/workers-types@5.20261117.1)(@types/node@26.6.6)
+
   packages/cli:
     dependencies:
       '@signforge/compiler':
