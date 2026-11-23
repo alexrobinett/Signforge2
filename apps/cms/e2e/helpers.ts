@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { createHash, randomUUID } from 'node:crypto';
-import { expect, request as playwrightRequest, type Page, type Route } from '@playwright/test';
+import { expect, request as playwrightRequest, type Frame, type Page, type Route } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
 import { slugify } from '../src/lib/paths';
@@ -177,7 +177,9 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
  * (which starts at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70).
  * The next play restarts them. The player's own slots fade between spots, and an analysis during
  * that fade reads a spot half shown: each analysis waits for the slots to settle and is repeated if
- * a fade began during it (#95).
+ * a fade began during it (#95). A player starts its next spot from a timer, so its timers are held
+ * while its frames are checked: else a busy machine, slower than a spot, never got a still stage
+ * (#310). A step already under way may start one spot more: then the next analysis is still.
  */
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
@@ -192,16 +194,20 @@ export async function axe(page: Page) {
     // fade that began during one may have shown it a spot mid-intro or half faded: settle, hold,
     // analyse again.
     if ((await page.locator('iframe').count()) > 0) {
+      const release = await holdPlayers(page);
       let found: string[] = [];
       let held = false;
-      for (let tries = 0; tries < 5 && !held; tries++) {
-        // Often: between 4 s spots with a long fade, the stage is still for about a second.
-        await expect.poll(() => slotFades(page), { message: 'a player slot is still fading', intervals: [50], timeout: 15_000 }).not.toBeUndefined();
-        const fades = await slotFades(page);
-        if (fades === undefined) continue;
-        await holdTemplates(page);
-        found = report('light', (await new AxeBuilder({ page }).withTags(WCAG).include('iframe').analyze()).violations);
-        held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
+      try {
+        for (let tries = 0; tries < 5 && !held; tries++) {
+          await expect.poll(() => slotFades(page), { message: 'a player slot is still fading', intervals: [50], timeout: 15_000 }).not.toBeUndefined();
+          const fades = await slotFades(page);
+          if (fades === undefined) continue;
+          await holdTemplates(page);
+          found = report('light', (await new AxeBuilder({ page }).withTags(WCAG).include('iframe').analyze()).violations);
+          held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
+        }
+      } finally {
+        await release();
       }
       expect(held, 'a template frame started a play, or a player slot a fade, during each of 5 analyses').toBe(true);
       expect(found, page.url()).toEqual([]);
@@ -213,6 +219,56 @@ export async function axe(page: Page) {
     await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
     await still.evaluate((el) => el.parentNode?.removeChild(el));
   }
+}
+
+/**
+ * Holds the timers each player (a document with `.slot`s) sets from now until the returned release:
+ * one that comes due meanwhile runs then, and one cleared meanwhile never. Timers set before the
+ * hold run as set.
+ * A frame the player removed in the meantime is skipped.
+ */
+async function holdPlayers(page: Page): Promise<() => Promise<void>> {
+  const players: Frame[] = [];
+  for (const frame of page.frames()) {
+    const player = await frame
+      .evaluate(() => {
+        if (!document.querySelector('.slot')) return false;
+        const w: Window & { sfAxeRelease?: () => void } = window;
+        const { setTimeout: set, clearTimeout: clear } = window;
+        const due = new Map<number, () => void>();
+        let held = true;
+        // The player's own scripts, by their place in the call stack: axe runs in this document too, on its timers.
+        const player = new URL('.', location.href).href;
+        w.setTimeout = (fn: TimerHandler, ms?: number, ...args: unknown[]) => {
+          if (typeof fn === 'string' || !new Error().stack?.includes(player)) return set(fn, ms, ...args);
+          const run = () => fn(...args);
+          const id = set(() => (held ? due.set(id, run) : run()), ms);
+          return id;
+        };
+        w.clearTimeout = (id?: number) => {
+          if (id !== undefined) due.delete(id);
+          clear(id);
+        };
+        w.sfAxeRelease = () => {
+          held = false;
+          w.setTimeout = set;
+          w.clearTimeout = clear;
+          for (const run of due.values()) set(run);
+        };
+        return true;
+      })
+      .catch(() => false);
+    if (player) players.push(frame);
+  }
+  return async () => {
+    for (const frame of players)
+      await frame
+        .evaluate(() => {
+          const w: Window & { sfAxeRelease?: () => void } = window;
+          w.sfAxeRelease?.();
+        })
+        .catch(() => {});
+  };
 }
 
 /**
