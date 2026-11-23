@@ -233,9 +233,11 @@ test('connected accounts: reconnect and disconnect, a failing read, and what the
   await expect(confirm.getByRole('alert')).toHaveText('The provider did not answer. Try again.');
   await expect(owner.getByText('The provider did not answer. Try again.')).toHaveCount(1);
   await owner.unroute('**/api/tools/disconnect');
+  // Done when the API says so. Not when the card leaves: while the confirm is open the page behind it
+  // is aria-hidden, so `accounts` counted 0 at once, before the disconnect landed.
+  const disconnected = owner.waitForResponse((r) => r.url().endsWith('/api/tools/disconnect'));
   await confirm.getByRole('button', { name: 'Disconnect' }).click();
-  // The confirm stays open until the disconnect is done, and while it is open the page behind it is
-  // aria-hidden: `accounts` would count 0 at once, before the disconnect landed.
+  expect((await disconnected).status()).toBe(200);
   await expect(confirm).toBeHidden();
   // Its last account gone and no provider to connect here, the card goes.
   await expect(accounts).toHaveCount(0);
