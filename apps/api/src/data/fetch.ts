@@ -17,7 +17,16 @@ import { FEED_URL_PROBLEMS, feedUrlProblem, LIMITS, type FeedUrlProblem } from '
 export const FETCH_TIMEOUT_MS = 5000;
 const MAX_REDIRECTS = 3;
 
-export type FetchErrorCode = FeedUrlProblem | 'dns' | 'blocked-address' | 'too-many-redirects' | 'timeout' | 'http-status' | 'too-large' | 'network';
+export type FetchErrorCode =
+  | FeedUrlProblem
+  | 'dns'
+  | 'blocked-address'
+  | 'too-many-redirects'
+  | 'redirect-elsewhere'
+  | 'timeout'
+  | 'http-status'
+  | 'too-large'
+  | 'network';
 
 export class FetchError extends Error {
   readonly code: FetchErrorCode;
@@ -65,16 +74,41 @@ export function guardedImageFetch(url: string, last: Validators, guards: FetchGu
   });
 }
 
-/** A GET of `url` through the guards, every hop checked, its 2xx body read by `read` within the deadline. */
+/**
+ * GET JSON from an org's model endpoint with its key (#262): the guards on every hop, and a redirect
+ * followed only within the endpoint's own origin, since the request carries the key. The body is
+ * parsed, not trusted: the caller reads what it needs from it.
+ */
+export async function guardedKeyedJson(url: string, apiKey: string, guards: FetchGuards): Promise<unknown> {
+  const result = await guardedGet(
+    url,
+    {},
+    guards,
+    'application/json',
+    async (res) => JSON.parse(new TextDecoder().decode(await capped(res, LIMITS.maxBytes))),
+    {
+      headers: { authorization: `Bearer ${apiKey}`, 'user-agent': 'SignForge agent' },
+      sameOrigin: true,
+    },
+  );
+  if (result.status !== 'ok') throw new FetchError('it answered 304 to a request with no validators', { code: 'http-status', status: 304 });
+  return result.body;
+}
+
+/**
+ * A GET of `url` through the guards, every hop checked, its 2xx body read by `read` within the deadline.
+ * `headers` are added to each hop's; with `sameOrigin`, a redirect to another origin is refused.
+ */
 async function guardedGet<Body>(
   url: string,
   last: Validators,
   guards: FetchGuards,
   accept: string,
   read: (res: Response) => Promise<Body>,
+  options: { headers?: Record<string, string>; sameOrigin?: boolean } = {},
 ): Promise<FetchResult<Body>> {
   const signal = AbortSignal.timeout(guards.timeoutMs ?? FETCH_TIMEOUT_MS);
-  const headers = new Headers({ accept, 'user-agent': 'SignForge feed poller' });
+  const headers = new Headers({ accept, 'user-agent': 'SignForge feed poller', ...options.headers });
   if (last.etag) headers.set('if-none-match', last.etag);
   if (last.lastModified) headers.set('if-modified-since', last.lastModified);
   try {
@@ -86,7 +120,10 @@ async function guardedGet<Body>(
         const location = res.headers.get('location');
         if (!location) throw new FetchError(`redirect ${res.status} without a location`, { code: 'http-status', status: res.status });
         if (hop === MAX_REDIRECTS) throw new FetchError(`more than ${MAX_REDIRECTS} redirects`, { code: 'too-many-redirects' });
-        next = await checkedUrl(new URL(location, next).href, guards, signal);
+        const to = new URL(location, next);
+        if (options.sameOrigin && to.origin !== new URL(next).origin)
+          throw new FetchError(`it redirected to another origin (${to.origin})`, { code: 'redirect-elsewhere', status: res.status });
+        next = await checkedUrl(to.href, guards, signal);
         continue;
       }
       if (res.status === 304) return { status: 'not-modified' };
