@@ -132,7 +132,7 @@ GitHub's `ubuntu-24.04` runner has 4 cores for this repository since it went pub
 | Built CMS (run 45125869629) | 15.2, 16.5 | 8.1, 7.8 | 6.6, 7.2 | |
 | Built CMS, cheaper `axe`, orgs through the API (runs 45146239608, 45147142350) | | | 5.9, 6.0, 7.5, 5.9, 6.0, 5.9, 7.4, 7.7 | 5.3, 5.4, 6.1, 5.3 |
 
-CI keeps 3 workers: 8 runs of 8 passed at 3. Four saved under a minute, and leave the API, the CMS and Chromium's GPU process no core of their own. Sharding does not pay: Playwright shards by spec when tests are not fully parallel, so two shards split the run 69 tests to 1 (6.9 min against 0.5), and each shard job repeats the install and the setup. On an 18-core Mac, 3 workers take 3.8–4.6 min (5.6 under `vite dev`).
+In a full run of every task with the remote cache warm (45147984299, on this branch), the e2e took 6.2 min beside the others and the job 11 m 51 s. CI keeps 3 workers: 8 runs of 8 passed at 3. Four saved under a minute, and leave the API, the CMS and Chromium's GPU process no core of their own. Sharding does not pay: Playwright shards by spec when tests are not fully parallel, so two shards split the run 69 tests to 1 (6.9 min against 0.5), and each shard job repeats the install and the setup. On an 18-core Mac, 3 workers take 3.8–4.6 min (5.6 under `vite dev`).
 
 What #283 changed beside the build, and why:
 - `axe()` reads the CMS's own document once in each theme with the players' frames left out, and the frames alone, in the light theme, inside the fade guard. The guard used to cover the whole page, and on CI that one analysis outlasted a 4 s spot, so a fade began during each of its 5 tries (`playlists.spec.ts`, 2 runs of 7).
