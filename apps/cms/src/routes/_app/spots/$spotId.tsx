@@ -117,7 +117,7 @@ function SpotEditor() {
         <FillBanner
           marks={filled.marks}
           from={filled.photo ? 'photo' : 'link'}
-          onUndo={() => undoFill(orgId, spotId, startData(version.manifest.fields))}
+          onUndo={() => undoFill(orgId, spotId, { name: version.manifest.name, data: startData(version.manifest.fields) })}
           onAnother={() => void fillWithAnother(spotId)}
           onDone={() => finishFill(spotId)}
         />

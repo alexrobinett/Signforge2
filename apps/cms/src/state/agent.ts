@@ -54,8 +54,8 @@ export interface AgentSlice {
   clearFillMark: (spotId: string, field: string) => void;
   /** Done: the marks go. */
   finishFill: (spotId: string) => void;
-  /** Undo the fill: the spot's data back to what a new spot starts with, no photo, and the marks gone. */
-  undoFill: (orgId: string, spotId: string, start: Record<string, unknown>) => void;
+  /** Undo the fill: the spot named after its template, its data back to what a new spot starts with, no photo, and the marks gone. */
+  undoFill: (orgId: string, spotId: string, start: { name: string; data: Record<string, unknown> }) => void;
   /** Try another template: the New spot dialog again, with the same material and a template to pick. */
   fillWithAnother: (spotId: string) => Promise<void>;
   /** Uploads the flyer's photo, as any image is, and puts it in the image field. */
@@ -99,7 +99,8 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
           const scaled = await scaledPhoto(photo, FILL_IMAGE_EDGE).catch((err: unknown) => {
             throw err instanceof MediaError ? new Refusal('invalid_input', `Could not read the photo: ${err.message}.`, undefined, { cause: err }) : err;
           });
-          if ((scaled.data.length / 4) * 3 > FILL_IMAGE_MAX_BYTES) throw new Refusal('invalid_input', 'The photo has too much detail to send. Try a closer or plainer one.');
+          if ((scaled.data.length / 4) * 3 > FILL_IMAGE_MAX_BYTES)
+            throw new Refusal('invalid_input', 'The photo has too much detail to send. Try a closer or plainer one.');
           source = { kind: 'image', ...scaled };
         } else source = { kind: 'link', url: link.trim() };
         const request: InlineRequest = { source, idempotencyKey: key, ...(templateVersionId && { templateVersionId }) };
@@ -110,7 +111,12 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
         const made = await answer<InlineAnswer>(res, `Something went wrong (${res.status}).`);
         queryClient.setQueryData(spotKeys.one(orgId, made.spot.id), made.spot);
         void queryClient.invalidateQueries({ queryKey: spotKeys.all(orgId), exact: true });
-        agent((a) => ({ fill: newFill(), filled: { ...a.filled, [made.spot.id]: { marks: made.marks, photo, link, uploading: false, uploadError: null } } }));
+        // A retry of a fill that had made its spot gets it back with no marks (they were in the lost answer): nothing to mark.
+        const marked = Object.keys(made.marks).length > 0;
+        agent((a) => ({
+          fill: newFill(),
+          filled: marked ? { ...a.filled, [made.spot.id]: { marks: made.marks, photo, link, uploading: false, uploadError: null } } : a.filled,
+        }));
         get().openNewSpot(false);
         await router.navigate({ to: '/spots/$spotId', params: { spotId: made.spot.id } });
       } catch (err) {
@@ -128,7 +134,8 @@ export const createAgentSlice: SliceCreator<AgentSlice> = (set, get, { router, q
     finishFill: (spotId) => filled(spotId, () => undefined),
 
     undoFill(orgId, spotId, start) {
-      get().editSpot(orgId, spotId, (d) => ({ ...d, data: start, assets: {} }));
+      // The name is the model's too: the template's is what the spot is before anyone names it.
+      get().editSpot(orgId, spotId, (d) => ({ ...d, name: start.name, data: start.data, assets: {} }));
       filled(spotId, () => undefined);
     },
 

@@ -18,8 +18,9 @@
  * time zone against the ceiling its owner set. With no model of the org's own there is no fill yet:
  * the demo model and its quota are #265.
  *
- * Budget per call, inside the Free plan's 50 of each (test/agent-inline.test.ts): at most 14 D1
- * statements (12 for an owner; an editor's role check reads the org's settings), and at most 2 model
+ * Budget per call, inside the Free plan's 50 of each (test/agent-inline.test.ts): at most 15 D1
+ * statements (13 for an owner; an editor's role check reads the org's settings), 2 calls to the
+ * org's Durable Object (a turn left, a turn taken), and at most 2 model
  * requests (one retry) plus, for a link, the page: up to 4 hops of 2 DNS lookups and a request, 12
  * fetches. 14 fetches in all with Anthropic; an endpoint's requests go through the guards too, each
  * up to 12 with its same-origin redirects, 36 in all. The photo is passed on without being decoded.
@@ -53,7 +54,8 @@ const inlineRequest = z.object({
       data: z
         .string()
         .max(Math.ceil(FILL_IMAGE_MAX_BYTES / 3) * 4, `the photo is over ${FILL_IMAGE_MAX_BYTES / 1e6} MB`)
-        .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'the photo is not base64'),
+        // Whole groups of four, as a browser writes it: so its first bytes decode (`signed`).
+        .regex(/^(?:[A-Za-z0-9+/]{4})+$|^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)$/, 'the photo is not base64'),
     }),
     z.object({ kind: z.literal('link'), url: z.string().trim().max(2048) }),
   ]),
@@ -141,7 +143,7 @@ const SYSTEM = [
 ].join('\n\n');
 
 /** Untrusted text inside a fence: its closing tag cannot be written from inside. */
-const fenced = (tag: string, text: string) => `<${tag}>\n${text.replace(new RegExp(`</?${tag}`, 'gi'), (m) => m.replace('<', '&lt;'))}\n</${tag}>`;
+const fenced = (tag: string, text: string) => `<${tag}>\n${text.replace(new RegExp(`<\\s*/?\\s*${tag}`, 'gi'), (m) => m.replace('<', '&lt;'))}\n</${tag}>`;
 
 /** The page's words, without its markup, scripts or styles. Linear in the page: no pattern here backtracks across it. */
 function pageText(html: string): string {
@@ -334,16 +336,28 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
     const offers = [...newest.values()];
     if (!offers.length) return refuse(c, 'cannot_fill', templateVersionId ? 'That template is not approved for use.' : 'No template is approved for use yet.');
 
-    const reach = deps.reach ?? { fetch: workerFetch, guards: feedGuards(c.env, workerFetch) };
-    const page = source.kind === 'link' ? await readPage(source.url, reach.guards) : undefined;
-    if (page && 'problem' in page) return refuse(c, page.problem, page.message);
+    // A retry of a fill that made its spot (its answer lost on the way) gets that spot, with no turn, fetch or model
+    // call spent. Its marks were in the lost answer: the spot opens unmarked.
+    const prior = await org.idempotency.get(idempotencyKey);
+    if (prior) {
+      if (prior.action !== 'create_spot') return refuse(c, 'invalid_input', 'That idempotency key was used for something else: use a new one.');
+      return c.json({ spot: outputs.create_spot.parse(JSON.parse(prior.outputJson)).spot, marks: {} } satisfies InlineAnswer);
+    }
 
     const now = (deps.now ?? Date.now)();
     // An org that set no time zone counts its days in UTC.
     const timeZone = (await org.settings.get())?.timezone ?? 'UTC';
+    const day = dayIn(timeZone, now);
     const turns = c.env.ORGS.get(c.env.ORGS.idFromName(org.orgId));
-    if (!(await turns.takeTurn(dayIn(timeZone, now), provider.dailyTurnCeiling)))
-      return refuse(c, 'out_of_turns', `The organization has used its ${provider.dailyTurnCeiling} agent turns for today. They come back at midnight.`);
+    const spent = `The organization has used its ${provider.dailyTurnCeiling} agent turns for today. They come back at midnight.`;
+    // Asked before the link is fetched, so an org with none left makes no request to a third party; taken after, so a
+    // link that cannot be read costs none.
+    if (!(await turns.hasTurn(day, provider.dailyTurnCeiling))) return refuse(c, 'out_of_turns', spent);
+
+    const reach = deps.reach ?? { fetch: workerFetch, guards: feedGuards(c.env, workerFetch) };
+    const page = source.kind === 'link' ? await readPage(source.url, reach.guards) : undefined;
+    if (page && 'problem' in page) return refuse(c, page.problem, page.message);
+    if (!(await turns.takeTurn(day, provider.dailyTurnCeiling))) return refuse(c, 'out_of_turns', spent);
 
     const listing = offers.map((o) => ({
       key: o.key,
@@ -351,8 +365,8 @@ export function mountInline(api: Hono<ApiEnv>, connectors: ConnectorDeps | undef
       ...(o.manifest.description && { description: o.manifest.description }),
       fields: Object.fromEntries(Object.entries(o.fields).map(([k, d]) => [k, described(d)])),
     }));
-    const material = page ? fenced('material', page.text) : fenced('material', 'The image above.');
-    const text = [`Today is ${dayIn(timeZone, now)}.`, fenced('templates', JSON.stringify(listing)), material].join('\n\n');
+    const material = page ? fenced('material', page.text) : fenced('material', 'The image sent with this message.');
+    const text = [`Today is ${day}.`, fenced('templates', JSON.stringify(listing)), material].join('\n\n');
     const image = source.kind === 'image' ? { mediaType: source.mediaType, data: source.data } : undefined;
     const key = { orgId: org.orgId, provider: provider.provider, baseUrl: provider.baseUrl };
     const model = provider.fastModel;

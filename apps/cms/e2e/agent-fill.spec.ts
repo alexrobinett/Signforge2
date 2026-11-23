@@ -71,6 +71,7 @@ test('a member fills a new spot from a link and from a photo, checks the marked 
   // Undo the fill: the draft is back to a new spot's start.
   await page.getByRole('button', { name: 'Undo the fill' }).click();
   await expect(page.getByLabel('Headline')).toHaveValue('');
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Photo Promo');
 
   // The log names the member, and that it was the agent.
   await page.goto('/audit');

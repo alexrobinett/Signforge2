@@ -59,6 +59,12 @@ export class OrgObject extends DurableObject<Env> {
    * fewer than `ceiling` were taken that day, or with no ceiling; false, counting nothing, once
    * `ceiling` were. A new day starts from none.
    */
+  /** Whether a turn is left today, counting nothing: asked before a fill fetches anything (#263). */
+  async hasTurn(day: string, ceiling: number | null): Promise<boolean> {
+    const now = await this.ctx.storage.get<Turns>('turns');
+    return ceiling === null || (now?.day === day ? now.count : 0) < ceiling;
+  }
+
   async takeTurn(day: string, ceiling: number | null): Promise<boolean> {
     // Read and written with no other await between: the input gate lets no other call in.
     const now = await this.ctx.storage.get<Turns>('turns');

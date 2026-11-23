@@ -19,10 +19,9 @@ export const ADMIN_TOKEN = 'e2e-admin-token';
 /** The one key the run's Anthropic stub accepts (global-setup.ts), and the models it lists for it. */
 export const ANTHROPIC_STUB_KEY = 'sk-ant-e2e-stub-key-0000000000000000-Ab12';
 export const ANTHROPIC_STUB_MODELS = ['claude-haiku-5-5', 'claude-sonnet-5-5'];
-/** The one key the run's OpenAI-compatible stub accepts at any host's /v1/models (the feed server, global-setup.ts), and its models (#262). */
 /** What the Anthropic stub's model fills from any flyer (#263): Photo Promo's fields, and the spot's name. */
 export const STUB_FILL = { name: 'Harbour bake sale', eyebrow: 'Saturday', headline: 'Harbour bake sale', body: 'Scones, tea and a raffle', price: '$2.50' };
-
+/** The one key the run's OpenAI-compatible stub accepts at any host's /v1/models (the feed server, global-setup.ts), and its models (#262). */
 export const ENDPOINT_STUB_KEY = 'sk-e2e-endpoint-stub-key-000000000000-Cd34';
 export const ENDPOINT_STUB_MODELS = ['gemini-stub-flash', 'gemini-stub-pro'];
 
