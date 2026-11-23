@@ -264,7 +264,8 @@ export function authOptions({ email, appUrl, audit, startingOrg, mcpResource, gr
       membershipAudit(audit),
       // Agents' OAuth (M4-04; spike/m4-oauth/RESULTS.md). The issuer is `<appUrl>/api/auth`, the one resource `/mcp`.
       oauthProvider({
-        loginPage: '/sign-in',
+        // One CMS page for both: signed out, it sends the person through sign-in and back to itself.
+        loginPage: '/connect',
         consentPage: '/connect',
         scopes: [...OAUTH_SCOPES],
         // Opaque tokens, stored as SHA-256 hashes and looked up with their grant on every call, so a

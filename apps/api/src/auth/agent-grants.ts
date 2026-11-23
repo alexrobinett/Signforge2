@@ -14,7 +14,9 @@
  * - **Removal.** A member removed from an org, or leaving it, loses their grants there: revoked,
  *   with the provider's tokens and consents for them, after Better Auth's change.
  */
-import { SCOPES, type Scope } from '@signforge/tools';
+import { FIRST_PARTY_CLIENT_IDS } from '@signforge/db';
+import { type Role, SCOPES, type Scope } from '@signforge/tools';
+import { verifyOAuthQueryParams } from '@better-auth/oauth-provider';
 import type { BetterAuthPlugin } from 'better-auth';
 import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx, sessionMiddleware } from 'better-auth/api';
 import { z } from 'zod';
@@ -39,6 +41,8 @@ export interface GrantDeps {
   revokeMember(orgId: string, userId: string, by: string): Promise<void>;
   /** Revokes one grant the provider issued no code for, audited as `by`. */
   revokeUnissued(orgId: string, grantId: string, by: string): Promise<void>;
+  /** The user's orgs, each with their role and which of `requested` a grant there may hold now (for the consent page). */
+  offers(userId: string, requested: Scope[]): Promise<{ orgId: string; name: string; role: Role; scopes: Scope[] }[]>;
 }
 
 type ConsentBody = { accept: boolean; oauth_query: string; scope?: string };
@@ -72,6 +76,38 @@ export function agentGrants(grants: GrantDeps, link: ConsentLink) {
   return {
     id: 'agent-grants',
     endpoints: {
+      /**
+       * What the consent page shows (`/connect` in the CMS): the client, the host its code goes to, the
+       * person, and each of their orgs with the scopes a grant there may hold (asked for, and capped by
+       * the role as the org has it now). A read: it writes nothing. The signed query is checked here,
+       * as the provider's hook checks it on the consent POST.
+       */
+      agentGrantRequest: createAuthEndpoint(
+        '/agent-grants/request',
+        { method: 'GET', query: z.object({ oauth_query: z.string().min(1) }), requireHeaders: true, use: [sessionMiddleware] },
+        async (ctx) => {
+          if (!(await verifyOAuthQueryParams(ctx.query.oauth_query, ctx.context.secret))) {
+            throw new APIError('BAD_REQUEST', { message: 'this request has expired or is not valid: connect again from the app' });
+          }
+          const query = new URLSearchParams(ctx.query.oauth_query);
+          const clientId = query.get('client_id') ?? '';
+          const client = await ctx.context.adapter.findOne<{ name: string | null }>({ model: 'oauthClient', where: [{ field: 'clientId', value: clientId }] });
+          if (!client) throw new APIError('BAD_REQUEST', { message: 'no such client' });
+          const asked = (query.get('scope') ?? '').split(' ');
+          const requested = SCOPES.filter((s) => asked.includes(s));
+          const { user } = ctx.context.session;
+          return ctx.json({
+            client: {
+              id: clientId,
+              name: client.name ?? clientId,
+              verified: FIRST_PARTY_CLIENT_IDS.some((id) => id === clientId),
+              redirectHost: new URL(query.get('redirect_uri') ?? '').host,
+            },
+            user: { name: user.name, email: user.email },
+            orgs: await grants.offers(user.id, requested),
+          });
+        },
+      ),
       agentGrantConsent: createAuthEndpoint(
         '/agent-grants/consent',
         { method: 'POST', body: consentBody, requireHeaders: true, use: [sessionMiddleware] },

@@ -313,7 +313,8 @@ describe('a consent the provider gives no code for', () => {
     });
     const res = await owner.get(`/api/auth/oauth2/authorize?${params}`, { accept: 'text/html' });
     const signIn = new URL(res.headers.get('location') ?? (await res.json<{ url: string }>()).url, ORIGIN);
-    expect(signIn.pathname).toBe('/sign-in');
+    // The provider's login page is the consent page, which sends a signed-out person through sign-in.
+    expect(signIn.pathname).toBe('/connect');
     // The page is skipped and the signed query consented to with the old session.
     const decided = await owner.post('/api/auth/agent-grants/consent', {
       oauth_query: signIn.search.slice(1),
@@ -351,6 +352,47 @@ describe('consent from another site', () => {
       expect(res.status, String(origin)).toBe(403);
     }
     expect(await scoped(env.DB, org.id).agentGrants.list()).toEqual([]);
+  });
+});
+
+describe("the consent page's request", () => {
+  it("names the client, the host its code goes to, and each of the person's orgs with the scopes it may offer there", async () => {
+    const { t, owner, editor, org } = await team();
+    expect((await owner.tool('update_org_settings', { editorsPublish: false })).status).toBe(200);
+    const own = await editor.createOrg('Editor Owns This');
+    const clientId = await register(t);
+    const { oauthQuery } = await consentPage(editor, clientId);
+    const res = await editor.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`);
+    expect(res.status).toBe(200);
+    const body = await res.json<{ client: unknown; user: { email: string }; orgs: { orgId: string; name: string; role: string; scopes: string[] }[] }>();
+    expect(body.client).toEqual({ id: clientId, name: 'Test agent', verified: false, redirectHost: '127.0.0.1:33418' });
+    // By name. An editor while editors may not publish: no content:publish, and no org:manage.
+    expect(body.orgs).toEqual([
+      { orgId: own.id, name: 'Editor Owns This', role: 'owner', scopes: ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage'] },
+      { orgId: org.id, name: 'Grants Co', role: 'editor', scopes: ['content:read', 'content:draft', 'screens:manage'] },
+    ]);
+  });
+
+  it('offers only what the client asked for', async () => {
+    const { t, owner, org } = await team();
+    const clientId = await register(t);
+    const { oauthQuery } = await consentPage(owner, clientId, 'content:read offline_access');
+    const body = await (await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).json<{
+      orgs: { orgId: string; scopes: string[] }[];
+    }>();
+    expect(body.orgs).toEqual([expect.objectContaining({ orgId: org.id, scopes: ['content:read'] })]);
+  });
+
+  it('is refused for a query that is not signed, or signed for other parameters, and for no session', async () => {
+    const { t, owner } = await team();
+    const clientId = await register(t);
+    const { oauthQuery } = await consentPage(owner, clientId);
+    const forged = new URLSearchParams(oauthQuery);
+    forged.set('redirect_uri', 'https://evil.test/cb');
+    for (const q of [forged.toString(), `client_id=${clientId}&scope=content%3Aread`]) {
+      expect((await owner.get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: q })}`)).status, q).toBe(400);
+    }
+    expect((await new Client(t).get(`/api/auth/agent-grants/request?${new URLSearchParams({ oauth_query: oauthQuery })}`)).status).toBe(401);
   });
 });
 
