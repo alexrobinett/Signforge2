@@ -119,14 +119,22 @@ const saveAiProvider = defineTool({
     const current = await org.aiProvider.get();
     const endpoint = input.provider === 'openai-compatible';
     if (!endpoint && (input.baseUrl !== undefined || input.acceptsImages !== undefined || input.jsonSchemaOutput !== undefined))
-      throw new ToolError('invalid_input', "Anthropic's address and features are fixed: baseUrl, acceptsImages and jsonSchemaOutput are for an OpenAI-compatible endpoint");
+      throw new ToolError(
+        'invalid_input',
+        "Anthropic's address and features are fixed: baseUrl, acceptsImages and jsonSchemaOutput are for an OpenAI-compatible endpoint",
+      );
     const switching = current?.provider !== input.provider;
     // The key goes only to the address it was saved for: one at a new address is given again.
     const address = endpoint ? (input.baseUrl ?? (switching ? null : (current?.baseUrl ?? null))) : null;
     if (endpoint && !address) throw new ToolError('invalid_input', 'an OpenAI-compatible endpoint needs its baseUrl');
     const moved = !switching && address !== (current?.baseUrl ?? null);
     if (!input.apiKey && (switching || moved))
-      throw new ToolError('invalid_input', switching ? `saving ${input.provider} the first time needs its apiKey` : 'a new baseUrl needs the apiKey again: a key is sent only to the address it was saved for');
+      throw new ToolError(
+        'invalid_input',
+        switching
+          ? `saving ${input.provider} the first time needs its apiKey`
+          : 'a new baseUrl needs the apiKey again: a key is sent only to the address it was saved for',
+      );
     const key = input.apiKey && {
       keySealed: await aiProviders.seal({ orgId: org.orgId, provider: input.provider, baseUrl: address }, input.apiKey),
       keyLast4: input.apiKey.slice(-4),

@@ -484,7 +484,9 @@ export const aiProviderView = z.object({
   baseUrl: z.string().nullable().describe("An OpenAI-compatible endpoint's base address; null for Anthropic"),
   supports: z
     .object({ images: z.boolean(), jsonSchema: z.boolean() })
-    .describe('Whether the provider takes images and returns output to a JSON schema, both of which Fill from a flyer needs: Anthropic does both; an endpoint, as its owner said'),
+    .describe(
+      'Whether the provider takes images and returns output to a JSON schema, both of which Fill from a flyer needs: Anthropic does both; an endpoint, as its owner said',
+    ),
   keyLast4: z.string().describe("The key's last four characters; the key itself is sealed and never shown"),
   keySavedBy: z.string().describe('The user who saved the key'),
   keySavedAt: z.number(),
@@ -776,7 +778,9 @@ export const outputs = {
     problem: z
       .enum(['refused', 'busy', 'unreachable', 'blocked'])
       .nullable()
-      .describe("Why not: the provider refused the key, was busy, did not answer, or is at an address SignForge may not reach (not public https, or a redirect elsewhere)"),
+      .describe(
+        'Why not: the provider refused the key, was busy, did not answer, or is at an address SignForge may not reach (not public https, or a redirect elsewhere)',
+      ),
     provider: aiProviderView,
   }),
   remove_ai_provider: z.object({
