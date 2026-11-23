@@ -7,7 +7,7 @@
 import { applyD1Migrations, type D1Migration } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
 import { Client, StreamableHTTPClientTransport, UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/client';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 declare global {
   namespace Cloudflare {
@@ -377,6 +377,126 @@ describe('PKCE', () => {
   });
 });
 
+describe('authorization codes', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A new client's code, consented to Northside Market, before the token exchange. */
+  async function authorizedCode() {
+    const browser = new Browser();
+    await browser.signIn(OWNER);
+    const provider = new MemoryProvider();
+    const page = await authorizePage(browser, provider);
+    const back = await consent(browser, page.page, page.url, 'Northside Market', ['content:read']);
+    return { provider, code: back.searchParams.get('code')! };
+  }
+  /** The token request a client makes with its code; each test changes what it is checking. */
+  const exchange = (provider: MemoryProvider, code: string, change: Record<string, string | undefined> = {}) => {
+    const form = {
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: provider.verifier,
+      redirect_uri: REDIRECT,
+      client_id: provider.client!.client_id,
+      resource: MCP,
+      ...change,
+    };
+    return worker(`${CMS}/api/auth/oauth2/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(Object.entries(form).filter((e): e is [string, string] => e[1] !== undefined)),
+    });
+  };
+  const refusal = async (res: Response) => ({ status: res.status, ...(await res.json<{ error: string }>()) });
+
+  it('is used once: a replay is refused and revokes the tokens the code gave', async () => {
+    const { provider, code } = await authorizedCode();
+    const first = await exchange(provider, code);
+    expect(first.status).toBe(200);
+    const { access_token, refresh_token } = await first.json<{ access_token: string; refresh_token: string }>();
+    expect((await mcpCall(access_token, 'whoami')).status).toBe(200);
+    expect(await refusal(await exchange(provider, code))).toMatchObject({ status: 400, error: 'invalid_grant' });
+    expect((await mcpCall(access_token, 'whoami')).status).toBe(401);
+    const refreshed = await worker(`${CMS}/api/auth/oauth2/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token, client_id: provider.client!.client_id, resource: MCP }),
+    });
+    expect(refreshed.status).toBe(400);
+  });
+
+  it('needs the verifier of its challenge; a wrong or missing one is refused and leaves the code for the right one', async () => {
+    const { provider, code } = await authorizedCode();
+    expect(await refusal(await exchange(provider, code, { code_verifier: 'x'.repeat(64) }))).toMatchObject({ status: 400, error: 'invalid_grant' });
+    expect(await refusal(await exchange(provider, code, { code_verifier: undefined }))).toMatchObject({ status: 400, error: 'invalid_request' });
+    expect((await exchange(provider, code)).status).toBe(200);
+  });
+
+  it('is bound to its client, its redirect URI and its resource', async () => {
+    const { provider, code } = await authorizedCode();
+    const other = await authorizedCode();
+    // Another registered client, with this code's own verifier: only the client binding refuses it.
+    expect(await refusal(await exchange(provider, code, { client_id: other.provider.client!.client_id }))).toMatchObject({
+      status: 400,
+      error: 'invalid_grant',
+    });
+    expect(await refusal(await exchange(provider, code, { redirect_uri: 'http://127.0.0.1:33418/other' }))).toMatchObject({
+      status: 400,
+      error: 'invalid_grant',
+    });
+    expect(await refusal(await exchange(provider, code, { redirect_uri: undefined }))).toMatchObject({ status: 400, error: 'invalid_request' });
+    expect(await refusal(await exchange(provider, code, { resource: 'https://other.example/mcp' }))).toMatchObject({ status: 400, error: 'invalid_target' });
+    expect((await exchange(provider, code)).status).toBe(200);
+  });
+
+  it('expires 10 minutes after it is issued', async () => {
+    // Only Date is faked: the code's expiry is read from the clock, on the worker in this isolate.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.UTC(2026, 10, 23, 12) });
+    const late = await authorizedCode();
+    const onTime = await authorizedCode();
+    vi.setSystemTime(Date.UTC(2026, 10, 23, 12, 9, 59));
+    expect((await exchange(onTime.provider, onTime.code)).status).toBe(200);
+    vi.setSystemTime(Date.UTC(2026, 10, 23, 12, 10, 1));
+    expect(await refusal(await exchange(late.provider, late.code))).toMatchObject({ status: 400, error: 'invalid_grant' });
+  });
+});
+
+describe('redirect URIs at authorize', () => {
+  /** Where the authorize endpoint sends the signed-in person when the client asks for `redirectUri`. */
+  async function redirectFor(redirectUri: string) {
+    const browser = new Browser();
+    await browser.signIn(OWNER);
+    const provider = new MemoryProvider();
+    await expect(new Client({ name: 't', version: '0' }).connect(transportFor(provider))).rejects.toBeInstanceOf(UnauthorizedError);
+    const url = new URL(provider.authorizationUrl!);
+    url.searchParams.set('redirect_uri', redirectUri);
+    const res = await browser.fetch(url.href);
+    return new URL(res.headers.get('location') ?? (await res.json<{ url: string }>()).url, CMS);
+  }
+
+  // The open-redirect check: an error for a URI that is not registered goes to the server's own error page, never to the URI.
+  it.each([
+    ['an unregistered host', 'https://evil.example/callback'],
+    ['a longer path', `${REDIRECT}/more`],
+    ['an added query', `${REDIRECT}?next=https://evil.example`],
+    ['another loopback host name', 'http://localhost:33418/callback'],
+  ])('refuses %s without redirecting to it', async (_, redirectUri) => {
+    const to = await redirectFor(redirectUri);
+    expect(to.href.startsWith(redirectUri)).toBe(false);
+    expect(to.origin).toBe(CMS);
+    expect(to.searchParams.get('error')).toBeTruthy();
+    expect(to.searchParams.has('code')).toBe(false);
+  });
+
+  // RFC 8252 §7.3: a native client's loopback callback may come back on another port. The plugin
+  // allows it for a registered loopback URI; M4-04 keeps it (Claude Code picks a free port each run).
+  it('accepts the registered loopback URI on another port, to the consent page', async () => {
+    const to = await redirectFor('http://127.0.0.1:40000/callback');
+    expect(to.origin + to.pathname).toBe(`${CMS}/consent`);
+  });
+});
+
 describe('registration', () => {
   // A limitation M4-04 must close: open registration is meant for public clients only.
   it('lets anyone register a confidential client too, and returns its secret', async () => {
@@ -425,6 +545,11 @@ async function connectAgain(browser: Browser, provider: MemoryProvider, orgName:
   const back = await consent(browser, page.page, page.url, orgName, scopes);
   const transport = transportFor(provider);
   await transport.finishAuth(back.searchParams.get('code')!, back.searchParams.get('iss')!);
-  const grant = await env.DB.prepare('SELECT id FROM spike_grants ORDER BY created_at DESC LIMIT 1').first<{ id: string }>();
-  return { tokens: provider.saved!, grantId: grant!.id };
+  // The grant is the token's consent reference, read from the token's row by its hash.
+  const hash = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(provider.saved!.access_token)))))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  const row = await env.DB.prepare('SELECT referenceId FROM oauthAccessToken WHERE token = ?').bind(hash).first<{ referenceId: string }>();
+  return { tokens: provider.saved!, grantId: row!.referenceId };
 }
