@@ -25,8 +25,9 @@ on:
     - cron: "30 7 * * *" # nightly, after the evening's merges (UTC)
   workflow_dispatch:
 
+# By event as well as ref, so a push to master never cancels the nightly or a manual full run.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -90,6 +91,10 @@ jobs:
       # Every template is a devDependency of the API, the player and the cli, whose tests use it (docs/ci.md).
       - name: Template dependencies
         run: sh scripts/check-template-deps.sh
+      # packages/db's import-boundary scan reads every package, which no package graph sees, so it runs
+      # on every change rather than only when db is affected (docs/ci.md). About 2 s.
+      - name: db import boundary
+        run: pnpm --filter @signforge/db exec vitest run --project node
 
       # Which tasks run, whether any of them needs Chromium (the tests of a package that declares a
       # Playwright dependency launch it), and whether any needs the stress media (the cli's golden
@@ -118,7 +123,7 @@ jobs:
               for sha in $shas; do
                 if git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then base=$sha; break; fi
               done
-              [ -n "$base" ] || echo "No green master commit in the last 20 runs: running everything."
+              [ -n "$base" ] || echo "None of the 20 newest green master runs is on a commit HEAD contains: running everything."
               ;;
             schedule)
               last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""') || last=
@@ -128,6 +133,14 @@ jobs:
               fi
               ;;
           esac
+          # Turbo puts the root package.json (the TypeScript compiler most packages use, tsx, the root
+          # scripts), the lockfile's root importer (those versions, and pnpm's) and the other workflows in
+          # no package, so --affected would plan nothing for a change to them: run everything instead.
+          root_deps() { git show "$1:pnpm-lock.yaml" | awk '/^  \.:$/ { f = 1; next } /^[^ ]|^  [^ ]/ { f = 0 } f'; }
+          if [ -n "$base" ] && { ! git diff --quiet "$base" HEAD -- package.json .github/workflows || [ "$(root_deps "$base")" != "$(root_deps HEAD)" ]; }; then
+            echo "The root package.json, the lockfile's root importer or a workflow changed since $base: running everything."
+            base=
+          fi
           browsers=false
           stress_media=false
           if [ -n "$tasks" ]; then
@@ -230,3 +243,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TURBO_SCM_BASE: ${{ steps.plan.outputs.base }}
+          NIGHTLY_SKIPPED: ${{ steps.plan.outcome == 'success' && steps.plan.outputs.tasks == '' }}

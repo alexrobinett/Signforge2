@@ -4,16 +4,16 @@ One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready
 
 - **A pull request** runs typecheck, test and lint for the packages its diff affects. It does not run the CMS end-to-end run (`test:e2e`): run that locally before marking the pull request ready or pushing to it, on your own ports (`E2E_API_PORT=... E2E_CMS_PORT=... pnpm --filter @signforge/cms test:e2e`), and say in the pull request that it passed.
 - **A draft pull request** runs nothing: the job is skipped. Marking it ready (`gh pr ready <n>`) starts the run.
-- **A push to `master`** runs every task, the CMS end-to-end run included, of the packages affected since the newest `master` commit whose CI passed. Each green run vouches for the one before it, so what a red or cancelled run did not get through runs again on the next push. With no green commit among the last 20 runs, it runs everything. A red `master` run is fixed first, before more merges.
+- **A push to `master`** runs every task, the CMS end-to-end run included, of the packages affected since the newest `master` commit whose CI passed. Each green run vouches for the one before it, so what a red or cancelled run did not get through runs again on the next push. When none of the 20 newest green non-PR runs is on a commit HEAD contains, it runs everything, and so it does when the root `package.json`, the lockfile's root importer or a workflow changed since that commit (see [What "affected" means](#what-affected-means)). A red `master` run is fixed first, before more merges.
 - **The nightly run** (07:30 UTC) and **a manual run** (Actions, CI, "Run workflow", or `gh workflow run ci.yml`) run every task, so nothing an affected run leaves out goes untested for long. Tasks whose inputs did not change replay from the Turbo cache; the e2e always runs. The nightly run does nothing when the last nightly run passed on the same commit.
 - **A change to docs and Markdown only** (`docs/**`, `**/*.md`, but not `fonts/README.md`, which the compiler's fonts test checks) starts no run, on a pull request or on `master`. `gh pr checks` then says "no checks reported", which on such a pull request is a pass.
 
-**Agents** open pull requests as drafts (`gh pr create --draft`), run their local checks (`pnpm lint`, `pnpm typecheck`, the tests of what they touched and the CMS e2e), push their fixes, and only then mark the pull request ready. Every push to a ready pull request runs CI, and a new push cancels the run in progress, so push to a ready pull request only what it needs.
+**Agents** open pull requests as drafts (`gh pr create --draft`), run their local checks (`pnpm lint`, `pnpm typecheck`, the tests of what they touched and the CMS e2e), push their fixes, and only then mark the pull request ready. Every push to a ready pull request runs CI, and a new push cancels the run in progress, so push to a ready pull request only what it needs. Runs are grouped by event and ref, so a push to `master` cancels an older push's run but never the nightly or a manual run.
 
 ## What runs
 
 1. Install, with the pnpm store restored from the cache.
-2. The repo-wide checks, a few seconds each, on every run: Biome lint, the format check on changed files, knip, jscpd, `turbo boundaries`, the contract-commit check and the template-dependency check.
+2. The repo-wide checks, a few seconds each, on every run: Biome lint, the format check on changed files, knip, jscpd, `turbo boundaries`, the contract-commit check, the template-dependency check and packages/db's import-boundary scan.
 3. The plan picks the base `--affected` compares against (a pull request's base; on `master`, the newest commit whose CI passed, found with the Actions API; none on a nightly or manual run), then `turbo run … --dry=json` lists the tasks that will run (no `test:e2e` on a pull request). Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media, tools and template-check).
 4. The stress media, only if the cli's or the tools' tests run (see [Stress media](#stress-media)).
 5. `turbo run typecheck test lint --affected --summarize` on a pull request, `turbo run typecheck test test:e2e lint --affected --summarize` on a push to `master`, and the same without `--affected` on a nightly or manual run, with Turbo's cache restored from earlier runs. The job may run 60 minutes: a run that covers everything with cold caches takes about 30 (2026-11-21: the player's tests about 18 minutes, the CMS e2e about 20, side by side).
@@ -29,13 +29,15 @@ A few changes mark every package affected:
 
 A lockfile change affects only the packages whose dependencies changed.
 
+Turbo puts three things in no package, so `--affected` plans nothing for a change to them: the root `package.json` (the TypeScript compiler that every package but the CMS typechecks with, `tsx`, which runs `pnpm seed:templates` for the CMS e2e, and the root scripts), the lockfile's root importer (those versions, and pnpm's own), and the workflows other than `ci.yml`. When any of them changed since the base, the plan drops `--affected` and runs everything, on a pull request and on `master`. A lockfile change below the root importer only (a root devDependency's own dependencies, with its version unchanged) is still invisible to the graph: the nightly run covers it.
+
 Turbo decides what is affected from the package graph alone. It ignores a task's `inputs` that point outside its package. So a test that reads another package's files has to declare that package as a dependency, or a change there will not run the test:
 - The CMS e2e starts the API, so `apps/cms` has `@signforge/api` as a devDependency.
 - The cli's and the API's tests build every template with the SDK (the cli's also check that no bundle changed without a new version: [template-spec.md](template-spec.md#rules)), and the player's browser tests and the runtime check's tests (`apps/template-check`) play every template. So `packages/cli`, `apps/api`, `packages/player` and `apps/template-check` list each `templates/*` package and `@signforge/template-sdk` as devDependencies. **A new template goes into all four lists**: the repo-wide step `scripts/check-template-deps.sh` fails until it does. The check's container tests (`pnpm --filter @signforge/template-check test:container`) need Docker and do not run in CI.
 
 knip lists these dependencies as ones it cannot see used.
 
-One check sees more than the package graph does: packages/db's boundary test scans the whole repo for imports that reach past `@signforge/db`. A pull request runs it only when db is affected. On other pull requests, db's `exports` and `turbo boundaries` refuse those imports, and `master` runs the scan.
+One check sees more than the package graph does: packages/db's boundary test (`test/node/boundary.test.ts`) scans the whole repo for imports that reach past `@signforge/db`, above all production code that imports `@signforge/db/testing`, a public export that neither `exports` nor `turbo boundaries` refuses. So it runs on every run as a repo-wide step (`pnpm --filter @signforge/db exec vitest run --project node`, about 2 s), whatever is affected, and again inside `db#test` when db is.
 
 ## Stress media
 
@@ -63,7 +65,7 @@ A remote cache would share Turbo's cache with laptops and across pull requests. 
 
 ## Keeping it fast
 
-- Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it. Otherwise a change there either skips the test on pull requests or, with a warm cache, replays a stale result.
+- Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it. Otherwise a change there either skips the test on pull requests and on pushes to `master`, until the nightly run, or, with a warm cache, replays a stale result.
 - Keep the repo-wide checks repo-wide only while they take seconds. Anything slower should become a Turbo task in the package it checks.
 - Keep the workflow's `paths:` filter to files no test reads. A file a test reads that the filter leaves out (as `fonts/README.md` is put back) would change without a run.
 - The player's tests are the longest task: about 14 minutes on GitHub's two-core runner (2026-11-22), down from 18. Any change to the player, the SDK, the CLI, the contract or a template runs them. Vitest runs one fewer file at once than there are cores, which on two cores is one, so `packages/player/vitest.config.ts` asks for at least two: `browser/templates.test.ts` (about 13.5 min) then runs beside the other files (about 7 min together). That one file is now the whole task, so splitting it by template is what would bring those runs down next.
