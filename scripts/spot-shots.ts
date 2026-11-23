@@ -3,6 +3,7 @@
  * Screenshot every spot of a built project through the real player, for visual review.
  *
  *   tsx scripts/spot-shots.ts --content <sf build output> --out <dir> [--chrome <path>] [--sizes 1920x1080,1080x1920] [--spots a,b]
+ *     [--scale 0.25 --format webp]
  *
  * Serves `dist/player` (run `pnpm build:player` first) with the content under it, launches
  * Chromium headless, plays each spot on its own at each size, and saves two frames per spot:
@@ -26,6 +27,9 @@ const { values: args } = parseArgs({
     chrome: { type: 'string', default: process.env.CHROME },
     sizes: { type: 'string', default: '1920x1080,1080x1920' },
     spots: { type: 'string' },
+    // A frame drawn at full size and saved smaller, as scripts/template-thumbnails.ts saves them.
+    scale: { type: 'string', default: '1' },
+    format: { type: 'string', default: 'png' },
   },
 });
 if (!args.content || !args.out || !args.chrome) {
@@ -105,8 +109,9 @@ for (const size of args.sizes!.split(',')) {
       started = (await evaluate<number>('window.__sf ? __sf.played : 0').catch(() => 0)) >= 1;
     }
     const shot = async (suffix: string) => {
-      const { data } = (await call('Page.captureScreenshot', { format: 'png' })) as { data: string };
-      const file = `${id}-${width}x${height}-${suffix}.png`;
+      const clip = { x: 0, y: 0, width, height, scale: Number(args.scale) };
+      const { data } = (await call('Page.captureScreenshot', { format: args.format, quality: 82, clip })) as { data: string };
+      const file = `${id}-${width}x${height}-${suffix}.${args.format}`;
       writeFileSync(join(outDir, file), Buffer.from(data, 'base64'));
       return file;
     };
