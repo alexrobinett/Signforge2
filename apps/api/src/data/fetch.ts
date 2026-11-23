@@ -1,5 +1,6 @@
 /**
- * Fetching a feed URL a user typed (docs/backend-plan.md, Data sources, Fetch safety). Every hop
+ * Fetching a URL a user typed: a feed, a story's photo, an alert channel, an org's model endpoint
+ * (docs/backend-plan.md, Data sources, Fetch safety). Every hop
  * is checked before it is requested: https on the default port, a hostname rather than an IP
  * address, and a name that does not resolve to a private or reserved address. Redirects are
  * followed by hand, at most 3, each checked again. The whole fetch has 5 seconds, under one
@@ -30,7 +31,7 @@ export type FetchErrorCode =
 
 export class FetchError extends Error {
   readonly code: FetchErrorCode;
-  /** The feed's HTTP status, for `http-status` and `blocked-address`. */
+  /** The HTTP status that refused it, for `http-status`, `blocked-address` and `redirect-elsewhere`. */
   readonly status?: number;
   constructor(message: string, options: ErrorOptions & { code: FetchErrorCode; status?: number }) {
     super(message, options);
@@ -75,9 +76,9 @@ export function guardedImageFetch(url: string, last: Validators, guards: FetchGu
 }
 
 /**
- * GET JSON from an org's model endpoint with its key (#262): the guards on every hop, and a redirect
- * followed only within the endpoint's own origin, since the request carries the key. The body is
- * parsed, not trusted: the caller reads what it needs from it.
+ * GET JSON from an org's model endpoint with its key (#262): the guards on every hop, a redirect
+ * followed only within the endpoint's own origin, and no hop with a user name or password in its URL,
+ * since the request carries the key. The body is parsed, not trusted: the caller reads what it needs.
  */
 export async function guardedKeyedJson(url: string, apiKey: string, guards: FetchGuards): Promise<unknown> {
   const result = await guardedGet(
@@ -97,7 +98,8 @@ export async function guardedKeyedJson(url: string, apiKey: string, guards: Fetc
 
 /**
  * A GET of `url` through the guards, every hop checked, its 2xx body read by `read` within the deadline.
- * `headers` are added to each hop's; with `sameOrigin`, a redirect to another origin is refused.
+ * `headers` are added to each hop's. With `sameOrigin`, for a request that carries a key, a redirect to
+ * another origin is refused, and so is a URL, the first or a redirect's, with a user name or password.
  */
 async function guardedGet<Body>(
   url: string,
@@ -112,7 +114,14 @@ async function guardedGet<Body>(
   if (last.etag) headers.set('if-none-match', last.etag);
   if (last.lastModified) headers.set('if-modified-since', last.lastModified);
   try {
-    let next = await checkedUrl(url, guards, signal);
+    // A URL that is not one is left for `checkedUrl` to refuse, as for any request.
+    const keyed = (href: string) => {
+      if (!options.sameOrigin || !URL.canParse(href)) return href;
+      const { username, password } = new URL(href);
+      if (username || password) throw new FetchError('a request with a key goes to no URL with a user name or password', { code: 'bad-url' });
+      return href;
+    };
+    let next = await checkedUrl(keyed(url), guards, signal);
     for (let hop = 0; ; hop++) {
       const res = await guards.fetch(next, { headers, redirect: 'manual', signal });
       if (res.status >= 300 && res.status < 400 && res.status !== 304) {
@@ -123,7 +132,7 @@ async function guardedGet<Body>(
         const to = new URL(location, next);
         if (options.sameOrigin && to.origin !== new URL(next).origin)
           throw new FetchError(`it redirected to another origin (${to.origin})`, { code: 'redirect-elsewhere', status: res.status });
-        next = await checkedUrl(to.href, guards, signal);
+        next = await checkedUrl(keyed(to.href), guards, signal);
         continue;
       }
       if (res.status === 304) return { status: 'not-modified' };

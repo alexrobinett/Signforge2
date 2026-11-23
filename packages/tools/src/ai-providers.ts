@@ -61,7 +61,7 @@ const URL_PROBLEMS: Record<FeedUrlProblem, string> = {
   'private-address': 'the host is a local name',
 };
 
-/** An endpoint's base address: the fetch-safety rules of feed URLs, no query or fragment, kept without a trailing slash. */
+/** An endpoint's base address: the fetch-safety rules of feed URLs, no user name or password, no query or fragment, kept without a trailing slash. */
 const baseUrl = z
   .string()
   .trim()
@@ -69,6 +69,9 @@ const baseUrl = z
   .superRefine((url, ctx) => {
     const problem = feedUrlProblem(url);
     if (problem) ctx.addIssue({ code: 'custom', message: URL_PROBLEMS[problem] });
+    // A user name makes `https://api.openai.com@evil.example/v1` read as one host and go to another, and a
+    // password would be kept in clear, shown to every member and in the audit log.
+    else if (new URL(url).username || new URL(url).password) ctx.addIssue({ code: 'custom', message: "the endpoint's address has no user name or password" });
     else if (/[?#]/.test(url)) ctx.addIssue({ code: 'custom', message: 'the endpoint is a base address, with no query or fragment' });
   })
   .transform((url) => url.replace(/\/+$/, ''))

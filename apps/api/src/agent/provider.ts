@@ -77,11 +77,7 @@ const BLOCKED: readonly FetchErrorCode[] = [
 
 /** An endpoint's failure in a word, as `problemOf` says Anthropic's. */
 function endpointProblemOf(err: unknown): Problem {
-  if (!(err instanceof FetchError)) {
-    // A body that is not JSON: an endpoint that answered, but not as one.
-    if (err instanceof SyntaxError) return 'unreachable';
-    throw err;
-  }
+  if (!(err instanceof FetchError)) throw err;
   if (BLOCKED.includes(err.code)) return 'blocked';
   if (err.code === 'http-status' && (err.status === 401 || err.status === 403)) return 'refused';
   if (err.code === 'http-status' && err.status !== undefined && (err.status === 429 || err.status >= 500)) return 'busy';

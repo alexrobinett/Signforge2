@@ -91,6 +91,19 @@ describe('an OpenAI-compatible endpoint', () => {
     }
   });
 
+  it("sends the key to no URL with a user name or password, the first or a redirect's, whatever the tool let through (review of #302)", async () => {
+    for (const baseUrl of ['https://api.openai.com@evil.example.net/v1', 'https://user:pw@models.example.com/v1']) {
+      const { service, asked, resolved } = endpoint(() => Response.json(MODELS));
+      expect(await test(service, { ...ORG, baseUrl }), baseUrl).toEqual({ ok: false, problem: 'blocked' });
+      expect(asked, baseUrl).toEqual([]);
+      expect(resolved, baseUrl).toEqual([]);
+    }
+    const to = 'https://x:y@models.example.com/v2/models';
+    const { service, asked } = endpoint((url) => (url === `${BASE}/models` ? redirect(to) : Response.json(MODELS)));
+    expect(await test(service)).toEqual({ ok: false, problem: 'blocked' });
+    expect(asked.map((a) => a.url)).toEqual([`${BASE}/models`]);
+  });
+
   it('never follows a redirect to another origin, so the key stays with its address (review lesson of #280)', async () => {
     for (const to of ['https://elsewhere.example.net/v1/models', 'https://models.example.com.evil.test/models', 'http://models.example.com/v1/models']) {
       const { service, asked } = endpoint((url) => (url === `${BASE}/models` ? redirect(to) : Response.json(MODELS)));
