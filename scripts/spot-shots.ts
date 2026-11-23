@@ -3,6 +3,7 @@
  * Screenshot every spot of a built project through the real player, for visual review.
  *
  *   tsx scripts/spot-shots.ts --content <sf build output> --out <dir> [--chrome <path>] [--sizes 1920x1080,1080x1920] [--spots a,b]
+ *     [--scale 0.25 --format webp]
  *
  * Serves `dist/player` (run `pnpm build:player` first) with the content under it, launches
  * Chromium headless, plays each spot on its own at each size, and saves two frames per spot:
@@ -26,6 +27,9 @@ const { values: args } = parseArgs({
     chrome: { type: 'string', default: process.env.CHROME },
     sizes: { type: 'string', default: '1920x1080,1080x1920' },
     spots: { type: 'string' },
+    // A frame drawn at full size and saved smaller, as scripts/template-thumbnails.ts saves them.
+    scale: { type: 'string', default: '1' },
+    format: { type: 'string', default: 'png' },
   },
 });
 if (!args.content || !args.out || !args.chrome) {
@@ -57,10 +61,21 @@ const port = (server.address() as { port: number }).port;
 
 // ---------------------------------------------------------------- browser
 const profile = mkdtempSync(join(tmpdir(), 'sf-shots-'));
-const chrome = spawn(args.chrome, [
-  '--headless=new', '--use-mock-keychain', '--password-store=basic', '--no-first-run', `--user-data-dir=${profile}`,
-  '--remote-debugging-port=0', '--autoplay-policy=no-user-gesture-required', '--force-device-scale-factor=1', 'about:blank',
-], { stdio: ['ignore', 'ignore', 'pipe'] });
+const chrome = spawn(
+  args.chrome,
+  [
+    '--headless=new',
+    '--use-mock-keychain',
+    '--password-store=basic',
+    '--no-first-run',
+    `--user-data-dir=${profile}`,
+    '--remote-debugging-port=0',
+    '--autoplay-policy=no-user-gesture-required',
+    '--force-device-scale-factor=1',
+    'about:blank',
+  ],
+  { stdio: ['ignore', 'ignore', 'pipe'] },
+);
 const wsUrl = await new Promise<string>((resolveUrl, reject) => {
   let buf = '';
   chrome.stderr.on('data', (d: Buffer) => {
@@ -70,7 +85,10 @@ const wsUrl = await new Promise<string>((resolveUrl, reject) => {
   });
   chrome.on('exit', () => reject(new Error('Chromium exited')));
 });
-const targets = (await (await fetch(wsUrl.replace('ws://', 'http://').replace(/\/devtools\/browser\/.*/, '/json'))).json()) as { type: string; webSocketDebuggerUrl: string }[];
+const targets = (await (await fetch(wsUrl.replace('ws://', 'http://').replace(/\/devtools\/browser\/.*/, '/json'))).json()) as {
+  type: string;
+  webSocketDebuggerUrl: string;
+}[];
 const ws = new WebSocket(targets.find((t) => t.type === 'page')!.webSocketDebuggerUrl);
 await new Promise((r) => ws.addEventListener('open', r, { once: true }));
 let nextId = 0;
@@ -105,8 +123,9 @@ for (const size of args.sizes!.split(',')) {
       started = (await evaluate<number>('window.__sf ? __sf.played : 0').catch(() => 0)) >= 1;
     }
     const shot = async (suffix: string) => {
-      const { data } = (await call('Page.captureScreenshot', { format: 'png' })) as { data: string };
-      const file = `${id}-${width}x${height}-${suffix}.png`;
+      const clip = { x: 0, y: 0, width, height, scale: Number(args.scale) };
+      const { data } = (await call('Page.captureScreenshot', { format: args.format, quality: 82, clip })) as { data: string };
+      const file = `${id}-${width}x${height}-${suffix}.${args.format}`;
       writeFileSync(join(outDir, file), Buffer.from(data, 'base64'));
       return file;
     };
@@ -114,7 +133,9 @@ for (const size of args.sizes!.split(',')) {
     const a = await shot('a');
     await sleep(Math.max(0, spot.durationMs * 0.85 - Math.min(2500, spot.durationMs * 0.3)));
     const b = await shot('b');
-    const info = await evaluate<{ error: string; skipped: number; data: Record<string, string> }>('({ error: __sf.lastError, skipped: __sf.skipped, data: __sf.data })');
+    const info = await evaluate<{ error: string; skipped: number; data: Record<string, string> }>(
+      '({ error: __sf.lastError, skipped: __sf.skipped, data: __sf.data })',
+    );
     // `data`: when each live source's snapshot was fetched, as the player held it at the end of the
     // play. A bound source missing here means the spot showed its static fallback.
     index.push({ spot: id, name: spot.name, size, started, frames: [a, b], data: info.data, playerError: info.error || undefined, skipped: info.skipped });

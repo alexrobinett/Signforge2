@@ -5,7 +5,7 @@
 // its own. The dispatcher commits only after the handler returns, so a batch run while the handler
 // runs is the tool's own, whatever it ends with.
 import { scoped, startPairing } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { seedOrg, seedTeam, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -92,6 +92,9 @@ const OWN_IDS: Record<string, (o: SeededOrg) => string> = {
   alertDelivery: (o) => o.alertDelivery,
   connection: (o) => o.connection,
   publish: (o) => o.publish,
+  // Better Auth's rows, as seedTeam names them (PREPARE seeds them).
+  member: (o) => `${o.orgId}-member`,
+  invitation: (o) => `${o.orgId}-invitation`,
   // An R2 multipart upload's id, not a row.
   upload: () => 'upload-id',
   // Catalogue ids, the same for every org.
@@ -116,6 +119,11 @@ function withOwnIds(example: unknown, o: SeededOrg): unknown {
   return walk(example);
 }
 
+const savedKey = async (o: SeededOrg) =>
+  o.scope.commit(
+    (await o.scope.aiProvider.stage.put({ provider: 'anthropic', keySealed: 'sealed:key', keyLast4: 'abcd', keySavedBy: 'u', keySavedAt: 1 })).writes,
+  );
+
 /** Clear what would make a tool's example refuse before it writes. */
 const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
   // Its example state, pending for the caller.
@@ -132,6 +140,9 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     await o.scope.brandKits.update(o.brandKit, { logoOnDarkAssetId: null });
   },
   renew_asset_upload: (o) => o.scope.assets.update(o.asset, { status: 'pending' }),
+  // A saved key to test, or to remove.
+  test_ai_provider: (o) => savedKey(o),
+  remove_ai_provider: (o) => savedKey(o),
   // Pending, both renditions, and an upload whose bytes do not hash to the claim: finalize rejects it.
   finalize_asset: async (o) => {
     await o.scope.assets.update(o.asset, { status: 'pending' });
@@ -146,6 +157,10 @@ const PREPARE: Record<string, (o: SeededOrg) => Promise<unknown>> = {
     });
     await env.BLOBS.put(uploadKey(o.orgId, o.asset, 'b'.repeat(64)), 'not the claimed bytes');
   },
+  // The member tools' rows. Their changes are Better Auth's, faked here: they write nothing of their own.
+  cancel_invitation: (o) => seedTeam(env.DB, o.orgId),
+  update_member_role: (o) => seedTeam(env.DB, o.orgId),
+  remove_member: (o) => seedTeam(env.DB, o.orgId),
   // A pending video whose uploaded bytes are no MP4: finalize rejects it.
   finalize_video_upload: async (o) => {
     const asset = await o.scope.assets.update(o.asset, { kind: 'video', status: 'pending', type: 'video/mp4', size: 11 });

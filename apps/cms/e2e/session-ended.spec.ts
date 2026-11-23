@@ -39,7 +39,7 @@ test('a session that ends on Spots or in the spot editor goes to sign-in at once
   await spotsLink.click();
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
-  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: 'Clock' });
+  await page.getByRole('radio', { name: 'Clock', exact: true }).check();
   await page.getByLabel('Name').fill('Window clock');
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page).toHaveURL(/\/spots\/[^/?]+$/);

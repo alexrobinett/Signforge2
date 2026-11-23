@@ -16,6 +16,10 @@ export const CMS_URL = `http://localhost:${CMS_PORT}`;
 /** The dev API's deploy secret for this run, which turns on `/admin` (how `sf push` publishes, and seeding templates). */
 export const ADMIN_TOKEN = 'e2e-admin-token';
 
+/** The one key the run's Anthropic stub accepts (global-setup.ts), and the models it lists for it. */
+export const ANTHROPIC_STUB_KEY = 'sk-ant-e2e-stub-key-0000000000000000-Ab12';
+export const ANTHROPIC_STUB_MODELS = ['claude-haiku-5-5', 'claude-sonnet-5-5'];
+
 /** Scratch space for one run: the API's log, local D1 state and the dev registry. */
 export const RUN_DIR = fileURLToPath(new URL('../.e2e/', import.meta.url));
 export const API_LOG = `${RUN_DIR}api.log`;

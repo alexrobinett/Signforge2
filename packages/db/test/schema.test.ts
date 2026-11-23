@@ -4,14 +4,30 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 
 /** Tables whose rows exist before or outside any org: pairing codes, the platform audit log and Better Auth's own. */
-const AUTH_TABLES = ['account', 'invitation', 'member', 'organization', 'rateLimit', 'session', 'user', 'verification'];
+const AUTH_TABLES = [
+  'account',
+  'invitation',
+  'member',
+  'oauthAccessToken',
+  'oauthClient',
+  'oauthClientAssertion',
+  'oauthClientResource',
+  'oauthConsent',
+  'oauthRefreshToken',
+  'oauthResource',
+  'organization',
+  'rateLimit',
+  'session',
+  'user',
+  'verification',
+];
 const NOT_TENANT = new Set(['pairing_codes', 'platform_audit_log', ...AUTH_TABLES]);
 /** Tables where a null org means a base row shared by every org. */
 const NULLABLE_ORG = new Set(['templates', 'template_versions']);
 /** Indexes that deliberately do not lead with org_id. The due deliveries are found across orgs, from pending rows only. */
 const INDEX_EXCEPTIONS = new Set(['templates_base_key_uq', 'template_versions_base_version_uq', 'alert_deliveries_due_idx']);
-/** Foreign keys that deliberately do not include org_id. */
-const FK_EXCEPTIONS = new Set(['spots.template_version_id']);
+/** Foreign keys that deliberately do not include org_id. A grant's user belongs to no org; its membership is checked on every call. */
+const FK_EXCEPTIONS = new Set(['spots.template_version_id', 'agent_grants.user_id']);
 
 const all = async <T>(sql: string) => (await env.DB.prepare(sql).all<T>()).results;
 
@@ -30,6 +46,7 @@ describe('schema', () => {
 
   it('has the tables in the plan', async () => {
     expect(await tables()).toEqual([
+      'agent_grants',
       'alert_channels',
       'alert_deliveries',
       'asset_renditions',
@@ -45,6 +62,7 @@ describe('schema', () => {
       'feed_image_deletes',
       'feed_images',
       'idempotency_keys',
+      'org_ai_providers',
       'org_settings',
       'play_counts',
       'playlist_items',

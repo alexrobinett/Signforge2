@@ -42,7 +42,7 @@ One native adapter, Anthropic, plus an OpenAI-compatible endpoint, which also co
 
 Model IDs come from configuration (the API's environment for the demo model, the org's settings for its own key), never from code. Each configured value is an exact, versioned model ID, never an alias that moves, so the model measured is the model that runs. The adapter is where they are used, so switching a model is a setting, not a release.
 
-The OpenAI-compatible address is the org's choice, so every request to it is a server-side fetch to an untrusted URL. It goes through the feed fetch guards (`apps/api/src/data/fetch.ts`): https only, no private, loopback, link-local or metadata address, every redirect checked again. It waits for #236, which closes the IPv6 forms the guards miss today.
+The OpenAI-compatible address is the org's choice, so every request to it is a server-side fetch to an untrusted URL. It goes through the feed fetch guards (`apps/api/src/data/fetch.ts`): https only, no private, loopback, link-local or metadata address, every redirect checked again. Since #236 they also refuse every spelling of a private IPv6 address.
 
 Why not three native adapters: each is code to keep current with its API, and OpenAI-compatible reaches the others with one guarded adapter (#244's review, point 6).
 

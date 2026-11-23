@@ -17,11 +17,70 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(() => page.context().close());
 
+test('choose a template by its thumbnail, by keyboard alone, in two columns on a phone (#259)', async () => {
+  await page.goto('/spots');
+  await hydrated(page);
+  const opener = page.getByRole('button', { name: 'New spot' });
+  const dialog = page.getByRole('dialog', { name: 'New spot' });
+  const radios = dialog.getByRole('group', { name: 'Template' }).getByRole('radio');
+
+  // Every base template shows the thumbnail the player drew, from the CMS's own assets.
+  await opener.click();
+  await expect(radios.first()).toBeChecked();
+  const images = await dialog.locator('img').evaluateAll((imgs) =>
+    imgs.map((i) => ({
+      src: new URL((i as HTMLImageElement).src).pathname,
+      ok: (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0,
+    })),
+  );
+  expect(images.length).toBeGreaterThanOrEqual(7);
+  for (const i of images) expect(i, i.src).toEqual({ src: expect.stringMatching(/^\/template-thumbnails\/[a-z-]+\.webp$/), ok: true });
+  await axe(page);
+  await shots(page, '29-new-spot-thumbnails');
+  // Escape closes it, and focus goes back to what opened it.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+
+  // Two columns at phone width.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await opener.click();
+  // Once the dialog's zoom-in has finished, the first three tiles, measured at one moment: measured one by one, mid-animation, two tiles of a row came out half a pixel apart.
+  await dialog.evaluate((d) => Promise.all(d.getAnimations({ subtree: true }).map((a) => a.finished)));
+  const { a, b, c } = await dialog.getByRole('group', { name: 'Template' }).evaluate((g) => {
+    const [a, b, c] = [...g.querySelectorAll('label')].map((l) => ({ x: l.getBoundingClientRect().x, y: l.getBoundingClientRect().y }));
+    return { a: a!, b: b!, c: c! };
+  });
+  expect(b.y).toBe(a.y);
+  expect(b.x).toBeGreaterThan(a.x);
+  expect(c.y).toBeGreaterThan(a.y);
+  expect(c.x).toBe(a.x);
+  await axe(page);
+  await shots(page, '29-new-spot-thumbnails-phone');
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  // Keyboard only: Enter on a template with no name goes to the name; then back, an arrow moves the choice, Enter creates.
+  await opener.focus();
+  await page.keyboard.press('Enter');
+  await radios.first().focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByLabel('Name')).toBeFocused();
+  await page.keyboard.type('Picked by keyboard');
+  await page.keyboard.press('Shift+Tab');
+  await expect(radios.first()).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(radios.nth(1)).toBeChecked();
+  await expect(radios.nth(1)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Picked by keyboard', level: 1 })).toBeVisible();
+});
+
 test('make a spot from a template, see it on the real player as you type, and keep it as a draft', async () => {
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' }).click();
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
-  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: 'Clock' });
+  await page.getByRole('radio', { name: 'Clock', exact: true }).check();
   await page.getByLabel('Name').fill('Lobby clock');
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page).toHaveURL(/\/spots\/[^/?]+$/);
@@ -167,7 +226,7 @@ test('every base template can be configured and previewed', async () => {
     await page.goto('/spots');
     await hydrated(page);
     await page.getByRole('button', { name: 'New spot' }).click();
-    await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: t.name });
+    await page.getByRole('radio', { name: t.name, exact: true }).check();
     await page.getByLabel('Name').fill(`${t.name} spot`);
     await page.getByRole('button', { name: 'Create spot' }).click();
     await expect(page.getByRole('heading', { name: `${t.name} spot`, level: 1 })).toBeVisible();
@@ -207,7 +266,7 @@ test('make an Announcement in a look, with a QR code, and see both on the real p
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Spots' }).click();
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
-  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: 'Announcement' });
+  await page.getByRole('radio', { name: 'Announcement', exact: true }).check();
   await page.getByLabel('Name').fill('Pier 9 opening');
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name: 'Pier 9 opening', level: 1 })).toBeVisible();

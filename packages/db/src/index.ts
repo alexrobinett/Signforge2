@@ -15,6 +15,7 @@ export { findDeviceScreen, type DeviceScreen } from './device';
 export { claimDueDataSources } from './poller';
 export { collectPairing, startPairing, PAIRING_TTL_MS, type PairingCollected } from './pairing';
 export { findMembership, memberOrgNames, organizationExists, orgMembers, startingOrg } from './members';
+export { AGENT_GRANT_IDLE_MS, agentGrantForToken, FIRST_PARTY_CLIENT_IDS, pruneUnconsentedClients, UNCONSENTED_CLIENT_MS } from './agent-grants';
 export { findAlertWork, findUnfinishedRollouts, type AlertWork } from './alerts';
 export {
   AUDIT_ROWS_PER_RUN,
@@ -51,4 +52,5 @@ export type OrgSettings = typeof s.orgSettings.$inferSelect;
 export type BrandKitRow = typeof s.brandKits.$inferSelect;
 export type BrandAssignment = typeof s.brandAssignments.$inferSelect;
 export type AlertChannelRow = typeof s.alertChannels.$inferSelect;
+export type AiProviderRow = typeof s.orgAiProviders.$inferSelect;
 export type AlertDeliveryRow = typeof s.alertDeliveries.$inferSelect;

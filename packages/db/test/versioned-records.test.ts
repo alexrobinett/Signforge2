@@ -1,4 +1,4 @@
-// Single-row versioned records (the org's settings, an alert channel): one upsert and one batch
+// Single-row versioned records (the org's settings, an alert channel, its AI provider): one upsert and one batch
 // guard serve both, so each is checked on both sides of a version conflict.
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
@@ -39,10 +39,24 @@ const records: VersionedRecord[] = [
       return r && { rowVersion: r.rowVersion, value: r.host };
     },
   },
+  {
+    name: "the org's AI provider",
+    id: 'AI provider',
+    absent: 0,
+    put: (org, value, ifVersion) =>
+      org.aiProvider.stage.put(
+        { provider: 'anthropic', keySealed: 'sealed:key', keyLast4: 'abcd', keySavedBy: 'u', keySavedAt: 1, fastModel: value },
+        ifVersion,
+      ),
+    read: async (org) => {
+      const r = await org.aiProvider.get();
+      return r && { rowVersion: r.rowVersion, value: r.fastModel };
+    },
+  },
 ];
 
 describe.each(records)('$name', (record) => {
-  const fresh = async (tag: string) => scoped(env.DB, (await seedOrg(env.DB, `vrec-${record.absent}-${tag}`)).orgId);
+  const fresh = async (tag: string) => scoped(env.DB, (await seedOrg(env.DB, `vrec-${record.id.replace(/\W/g, '')}-${tag}`)).orgId);
 
   it('is at its absent version with no row, and the first change made from it makes the row one above', async () => {
     const org = await fresh('first');

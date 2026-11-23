@@ -35,6 +35,7 @@ import { assertId, newId } from './ids';
 import * as s from './schema';
 import { contentJson } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
+import { AGENT_GRANT_IDLE_MS } from './agent-grants';
 import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS, unreferencedFeedImage } from './retention';
 import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
 
@@ -44,6 +45,9 @@ type AlertChannelKind = AlertChannel['kind'];
 /** What a channel's owner sets; the rest is the repository's. */
 type AlertChannelValues = Omit<AlertChannel, 'orgId' | 'kind' | 'rowVersion' | 'createdAt' | 'updatedAt'>;
 type AlertDelivery = typeof s.alertDeliveries.$inferSelect;
+type AiProvider = typeof s.orgAiProviders.$inferSelect;
+/** What an owner sets on the org's AI provider; the rest is the repository's. */
+type AiProviderValues = Partial<Omit<AiProvider, 'orgId' | 'rowVersion' | 'createdAt' | 'updatedAt'>>;
 /** An alert to queue: the event as a webhook receives it, the channels it goes to, and when to stop retrying it. */
 export interface QueuedAlert {
   event: { id: string; type: string; json: string };
@@ -435,6 +439,8 @@ export function scoped(d1: D1Database, orgId: string) {
   const dataSources = entity(db, orgId, s.dataSources, 'src', 'content');
   const connectionRows = entity(db, orgId, s.connections, 'con');
   const authorizations = entity(db, orgId, s.connectionAuthorizations, 'oas');
+  const grants = entity(db, orgId, s.agentGrants, 'agt');
+  const ag = s.agentGrants;
   const audit = entity(db, orgId, s.auditLog, 'aud');
   const brandKitRows = entity(db, orgId, s.brandKits, 'bk');
 
@@ -484,8 +490,9 @@ export function scoped(d1: D1Database, orgId: string) {
   const sl = s.screenLabels;
   const os = s.orgSettings;
   const ac = s.alertChannels;
+  const ai = s.orgAiProviders;
   /**
-   * Stage setting `values` on a single-row versioned record (the org's settings, an alert channel),
+   * Stage setting `values` on a single-row versioned record (the org's settings, an alert channel, its AI provider),
    * the row its `key` names (the scope's org, and a channel's kind): made from `fresh` if absent,
    * and its version moved on; a record with no row is at version `absent`. The key comes from
    * `key` alone: `values` never sets it, nor any field `strip` guards, so no write moves the row to
@@ -493,7 +500,7 @@ export function scoped(d1: D1Database, orgId: string) {
    * id `id`) unless it is still that version: now, if it is already another, and again by a guard
    * inside the batch.
    */
-  const upsertVersioned = async <T extends typeof os | typeof ac>(
+  const upsertVersioned = async <T extends typeof os | typeof ac | typeof ai>(
     table: T,
     r: {
       id: string;
@@ -639,6 +646,13 @@ export function scoped(d1: D1Database, orgId: string) {
   };
   const pc = s.playCounts;
   const pcodes = s.pairingCodes;
+  /** The org's member rows with their user's name and address, narrowed by `where`. */
+  const memberRows = (where?: SQL) =>
+    db
+      .select({ id: s.member.id, userId: s.member.userId, name: s.user.name, email: s.user.email, role: s.member.role, createdAt: s.member.createdAt })
+      .from(s.member)
+      .innerJoin(s.user, eq(s.user.id, s.member.userId))
+      .where(and(eq(s.member.organizationId, orgId), where));
 
   return {
     orgId,
@@ -1279,6 +1293,47 @@ export function scoped(d1: D1Database, orgId: string) {
         put: (kind: AlertChannelKind, values: AlertChannelValues, ifVersion?: number): Promise<Staged<AlertChannel>> =>
           upsertVersioned(ac, { id: `${kind} channel`, key: { orgId, kind }, absent: 0, fresh: (at) => ({ createdAt: at }) }, values, ifVersion),
         remove: (kind: AlertChannelKind): Staged => staged(undefined, db.delete(ac).where(and(eq(ac.orgId, orgId), eq(ac.kind, kind)))),
+      },
+    },
+
+    /**
+     * The model the org's agent uses with its own key (#261): one row, absent while it uses the
+     * demo model. The key arrives sealed; nothing here opens it.
+     */
+    aiProvider: {
+      get: () => db.select().from(ai).where(eq(ai.orgId, orgId)).get(),
+      stage: {
+        /**
+         * Set the fields given, making the row if absent (a new one needs the provider and its key), and
+         * move its version on; an absent row is at 0. With `ifVersion`, refused (`StaleVersionError`)
+         * unless it is still that version, checked now and again in the batch, as `stage.update` is.
+         * With `ifSealed`, refused the same way unless it still holds that sealed key: a row removed
+         * and saved again starts at version 1 again, so a version alone can name another key.
+         */
+        put: async (values: AiProviderValues, ifVersion?: number, ifSealed?: string): Promise<Staged<AiProvider>> => {
+          const upsert = await upsertVersioned(
+            ai,
+            {
+              id: 'AI provider',
+              key: { orgId },
+              absent: 0,
+              fresh: (at) => ({ verifiedAt: null, fastModel: null, capableModel: null, dailyTurnCeiling: null, createdAt: at }),
+            },
+            values,
+            ifVersion,
+          );
+          if (ifSealed === undefined) return upsert;
+          const holding = async () => {
+            const now = await db.select({ keySealed: ai.keySealed, rowVersion: ai.rowVersion }).from(ai).where(eq(ai.orgId, orgId)).get();
+            return now?.keySealed === ifSealed ? undefined : (now?.rowVersion ?? 0);
+          };
+          const moved = await holding();
+          if (moved !== undefined) throw new StaleVersionError('AI provider', moved);
+          const holds = sql`(SELECT ${ai.keySealed} FROM ${ai} WHERE ${ai.orgId} = ${orgId}) = ${ifSealed}`;
+          return { row: upsert.row, writes: [staleGuard(db, orgId, 'AI provider', upsert.row.rowVersion - 1, holds, holding), ...upsert.writes] };
+        },
+        /** Delete the row, and the sealed key with it. */
+        remove: (): Staged => staged(undefined, db.delete(ai).where(eq(ai.orgId, orgId))),
       },
     },
 
@@ -2014,6 +2069,85 @@ export function scoped(d1: D1Database, orgId: string) {
           deleteExpired: (now: number): Staged => staged(undefined, db.delete(cna).where(and(eq(cna.orgId, orgId), lte(cna.expiresAt, now)))),
         },
       },
+    },
+
+    /**
+     * The org's agent grants (M4-04): what an agent's OAuth client may do here, as one member. The
+     * provider's tokens carry a grant's id as their reference id (`agentGrantForToken`).
+     */
+    agentGrants: {
+      ...grants,
+      /** The user's grants here not yet revoked, expired ones included: their tokens are still stored. */
+      unrevokedFor: (userId: string) =>
+        db
+          .select()
+          .from(ag)
+          .where(and(eq(ag.orgId, orgId), eq(ag.userId, userId), isNull(ag.revokedAt)))
+          .orderBy(asc(ag.id))
+          .all(),
+      /** Used now: its 90 days unused start again. Bookkeeping, not audited; a revoked grant stays revoked. */
+      touch: (grantId: string, now: number) =>
+        db
+          .update(ag)
+          .set({ lastUsedAt: now, expiresAt: now + AGENT_GRANT_IDLE_MS })
+          .where(and(eq(ag.orgId, orgId), eq(ag.id, grantId), isNull(ag.revokedAt)))
+          .run(),
+      stage: {
+        ...grants.stage,
+        /**
+         * Revoked by `by` at `now`, and in the same batch the provider's access and refresh tokens,
+         * consents and unexchanged authorization codes for it deleted, so its client's next refresh is refused too (M4-01's RESULTS,
+         * limitation 3). Only this org's grant's: the deletes find it here first. Already revoked: nothing.
+         */
+        revoke: (grant: typeof ag.$inferSelect, by: string, now: number): Staged<typeof ag.$inferSelect> => {
+          if (grant.revokedAt !== null) return { row: grant, writes: [] };
+          const revoked = grants.stage.update(grant, { revokedAt: now, revokedBy: by });
+          const ours = db
+            .select({ id: ag.id })
+            .from(ag)
+            .where(and(eq(ag.orgId, orgId), eq(ag.id, grant.id)));
+          const tokens = staged(
+            undefined,
+            db.delete(s.oauthAccessToken).where(inArray(s.oauthAccessToken.referenceId, ours)),
+            db.delete(s.oauthRefreshToken).where(inArray(s.oauthRefreshToken.referenceId, ours)),
+            db.delete(s.oauthConsent).where(inArray(s.oauthConsent.referenceId, ours)),
+            // Its authorization codes not yet exchanged: verification rows whose JSON value names it
+            // (the provider's `{ type: 'authorization_code', referenceId, ... }`). Other rows (sign-in
+            // codes) hold no JSON, so the value is read only where it is valid.
+            db
+              .delete(s.verification)
+              .where(inArray(sql`CASE WHEN json_valid(${s.verification.value}) THEN json_extract(${s.verification.value}, '$.referenceId') END`, ours)),
+          );
+          return { row: revoked.row, writes: [...revoked.writes, ...tokens.writes] };
+        },
+      },
+    },
+
+    /**
+     * The org's members (Better Auth's `member` rows), with each one's name and address. Read only:
+     * members change through Better Auth's organization endpoints, which keep its rules (one of our
+     * roles each, never without an owner) and write the audit row (`membershipAudit` in apps/api).
+     */
+    members: {
+      list: () => memberRows().orderBy(s.member.createdAt, s.member.id).all(),
+      get: (memberId: string) => memberRows(eq(s.member.id, memberId)).get(),
+    },
+    /** The org's invitations (Better Auth's `invitation` rows), read only, as `members` is. */
+    invitations: {
+      /** Those still pending, oldest first. One whose `expiresAt` has passed can no longer be accepted. */
+      pending: () =>
+        db
+          .select()
+          .from(s.invitation)
+          .where(and(eq(s.invitation.organizationId, orgId), eq(s.invitation.status, 'pending')))
+          .orderBy(s.invitation.createdAt, s.invitation.id)
+          .all(),
+      get: (invitationId: string) =>
+        db
+          .select()
+          .from(s.invitation)
+          .where(and(eq(s.invitation.organizationId, orgId), eq(s.invitation.id, invitationId)))
+          .get(),
     },
 
     auditLog: {

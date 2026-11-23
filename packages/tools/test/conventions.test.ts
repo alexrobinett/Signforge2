@@ -1,5 +1,5 @@
 // The conventions every tool keeps: it declares what it returns, and a list pages.
-import { testScope } from '@signforge/db/testing';
+import { seedTeam, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -22,8 +22,10 @@ import { seededMembers } from './member';
 const { o, as } = seededMembers('conv-org');
 let owner: Caller;
 
-beforeAll(() => {
+beforeAll(async () => {
   owner = as('owner');
+  // Better Auth's rows for the member tools to list.
+  await seedTeam(env.DB, o.orgId);
 });
 
 const shapeOf = (schema: z.ZodType) => (schema instanceof z.ZodObject ? schema.shape : undefined);
@@ -57,7 +59,9 @@ describe('every registered tool', () => {
   it('accepts ifVersion if it updates a row, and returns the version to pass', () => {
     // An update tool is named for the change (update_*, rename_*) or replaces a list (set_*_members).
     // update_screen_labels merges, as add_group_members does, so it drops nothing it did not read and needs no version.
-    const updates = all.filter((t) => /^(update|rename)_|^set_\w+_members$/.test(t.name) && t.name !== 'update_screen_labels');
+    // update_member_role sets one field of Better Auth's row, which has no version, and Better Auth guards the last owner.
+    const unversioned = new Set(['update_screen_labels', 'update_member_role']);
+    const updates = all.filter((t) => /^(update|rename)_|^set_\w+_members$/.test(t.name) && !unversioned.has(t.name));
     expect(updates.map((t) => t.name)).toEqual(expect.arrayContaining(['rename_screen', 'update_screen_settings', 'set_group_members']));
     for (const t of updates) {
       expect(t.mutates, t.name).toBe(true);

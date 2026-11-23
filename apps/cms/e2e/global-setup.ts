@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, FEEDS_DIR, PLACES, portTaken, RUN_DIR } from './servers';
+import { ADMIN_TOKEN, ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, API_LOG, API_PORT, CMS_PORT, CMS_URL, FEEDS_DIR, PLACES, portTaken, RUN_DIR } from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
 const cmsDir = fileURLToPath(new URL('../', import.meta.url));
@@ -41,6 +41,31 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
   const address = server.address();
   if (typeof address !== 'object' || !address) throw new Error('the geocoding stub is not listening');
   return { url: `http://127.0.0.1:${address.port}/v1/search`, close: () => server.close() };
+}
+
+/**
+ * Anthropic's Models API as the agent's adapter asks it (`ANTHROPIC_BASE_URL`, apps/api src/agent):
+ * the stub key gets `ANTHROPIC_STUB_MODELS`, any other key Anthropic's 401. On a free port, so the
+ * run never reaches the internet or spends a token.
+ */
+async function anthropicStub(): Promise<{ url: string; close: () => void }> {
+  const server = createServer((req, res) => {
+    const known = req.headers.authorization === `Bearer ${ANTHROPIC_STUB_KEY}` || req.headers['x-api-key'] === ANTHROPIC_STUB_KEY;
+    if (new URL(req.url ?? '/', 'http://stub').pathname !== '/v1/models') return void res.writeHead(404).end();
+    res.writeHead(known ? 200 : 401, { 'content-type': 'application/json' });
+    const models = ANTHROPIC_STUB_MODELS.map((id) => ({ type: 'model', id, display_name: id, created_at: '2026-10-01T00:00:00Z' }));
+    res.end(
+      JSON.stringify(
+        known
+          ? { data: models, has_more: false, first_id: models[0]!.id, last_id: models.at(-1)!.id }
+          : { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } },
+      ),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (typeof address !== 'object' || !address) throw new Error('the Anthropic stub is not listening');
+  return { url: `http://127.0.0.1:${address.port}`, close: () => server.close() };
 }
 
 /**
@@ -88,6 +113,7 @@ export default async function globalSetup() {
 
   const geocoding = await geocodingStub();
   const feeds = await feedServer();
+  const anthropic = await anthropicStub();
   const log = openSync(API_LOG, 'a');
   const cmsLog = openSync(`${RUN_DIR}cms.log`, 'a');
   const children: ChildProcess[] = [
@@ -113,6 +139,8 @@ export default async function globalSetup() {
         `GEOCODING_URL:${geocoding.url}`,
         '--var',
         `FEED_STUB_URL:${feeds.url}`,
+        '--var',
+        `ANTHROPIC_BASE_URL:${anthropic.url}`,
         // GET /__scheduled runs the Cron Triggers' jobs: how a test makes the poller run now.
         '--test-scheduled',
       ],
@@ -157,6 +185,7 @@ export default async function globalSetup() {
   return async () => {
     geocoding.close();
     feeds.close();
+    anthropic.close();
     // Each server is its own process group (pnpm, wrangler or vite, workerd): asked to stop, then
     // killed, so no workerd is left holding a port for the next run.
     await Promise.all(

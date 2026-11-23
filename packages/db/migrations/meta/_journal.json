@@ -232,6 +232,20 @@
       "when": 1795317358951,
       "tag": "0032_feed_images",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1795408764284,
+      "tag": "0033_org_ai_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1795427335115,
+      "tag": "0034_agent_grants_and_oauth",
+      "breakpoints": true
     }
   ]
 }

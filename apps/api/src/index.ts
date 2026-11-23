@@ -7,7 +7,7 @@
  * the photos of news feeds' stories that the poller queues (src/data/images.ts).
  * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
  * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
- * keys, audit rows and alert deliveries (packages/db retention.ts). The poller's 01:00 UTC run
+ * keys, audit rows and alert deliveries (packages/db retention.ts), and prunes OAuth clients nobody consented to. The poller's 01:00 UTC run
  * forgets unneeded feed photos (src/data/images.ts).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
@@ -18,7 +18,7 @@ import { MANIFEST_SCHEMA } from '@signforge/contract';
 import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
-import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
+import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys, pruneUnconsentedClients } from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
 import { type FeedImageJob, forgetFeedImages, storeFeedImages } from './data/images';
@@ -54,9 +54,9 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // The offline alert check and the finished rollouts (src/alerts.ts), every 5 minutes: screens sync that
   // often, so a shorter period finds nothing new. Then the alert deliveries to Slack and webhooks (src/deliveries.ts), the new ones and the retries due,
   // started once the check has queued its alerts and whether or not it failed, so neither holds up the other.
-  // The midnight run spends up to 21 D1 calls on retention, 14 on deliveries, and 4 on finding
-  // alerts and rollouts. One write per check leaves room for their context reads and fallback writes
-  // (up to 5 calls each, 49 total). The remaining work is due again at 00:05.
+  // The midnight run spends up to 21 D1 calls on retention, 1 on pruning OAuth clients nobody consented to
+  // (M4-04), 14 on deliveries, and 4 on finding alerts and rollouts. One write per check leaves room for their
+  // context reads and fallback writes (up to 5 calls each, 50 total). The remaining work is due again at 00:05.
   // Settled, not raced: a failed retention delete must not end the run before an alert's email goes.
   '*/5 * * * *': async (env, now) => {
     const daily = now % DAY_MS < FIVE_MIN_MS;
@@ -68,7 +68,9 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
       // Claimed at the time it claims: the checks may have taken minutes, and a lease counted from the
       // schedule could run out before the sends do, letting the next run send them again.
       Promise.allSettled(checks).then(() => deliverAlerts(env, email, { now: Date.now() })),
-      ...(daily ? [expireAuditRows(env.DB, now), expireIdempotencyKeys(env.DB, now), expireAlertDeliveries(env.DB, now)] : []),
+      ...(daily
+        ? [expireAuditRows(env.DB, now), expireIdempotencyKeys(env.DB, now), expireAlertDeliveries(env.DB, now), pruneUnconsentedClients(env.DB, now)]
+        : []),
     ]);
     const audit = results[checks.length + 1];
     if (audit?.status === 'fulfilled' && audit.value === AUDIT_ROWS_PER_RUN)
