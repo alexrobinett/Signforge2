@@ -86,13 +86,15 @@ const labelOf = (description: string) =>
 /**
  * Navigation first, in sidebar order, then the tools in registry order. A takeover is sent at once
  * wherever the CMS offers it, so `start_takeover`, which only drafts one, opens the takeover dialog
- * for a member who may publish; one who may not can only draft it, as its own words say.
+ * for a member who may publish; one who may not can only draft it, as its own words say. Restart is
+ * left out: a found screen offers it only once it is in touch (`targetActions`), and the tool would
+ * say Sent to one that is not (#253).
  */
 export function commandEntries(tools: ToolListing[]): CommandEntry[] {
   const publishes = tools.some((t) => t.name === 'publish');
   return [
     ...SECTIONS.map((s): CommandEntry => ({ kind: 'go', id: `go:${s.to}`, label: `Go to ${s.label}`, to: s.to, keywords: [s.label] })),
-    ...tools.map((tool): CommandEntry => {
+    ...tools.filter((t) => t.name !== 'restart_screen').map((tool): CommandEntry => {
       const entry = { id: `tool:${tool.name}`, tool, keywords: [tool.name, tool.description] };
       return tool.name === 'start_takeover' && publishes
         ? { kind: 'takeover', label: 'Take over screens now…', ...entry }

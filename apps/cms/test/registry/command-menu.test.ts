@@ -23,12 +23,22 @@ const listed = (role: Role) => parseToolList(JSON.parse(JSON.stringify({ tools: 
 const toolNames = (role: Role) => commandEntries(listed(role)).flatMap((e) => (e.kind === 'tool' || e.kind === 'takeover' ? [e.tool.name] : []));
 
 describe('command menu entries', () => {
-  it('lists every tool an owner may use: the whole registry', () => {
-    expect(toolNames('owner').sort()).toEqual(TOOLS.map((t) => t.name).sort());
+  // Restart goes only to a screen in touch: it is each found screen's action, with that check, never a plain tool (#253 review).
+  const PER_SCREEN = ['restart_screen'];
+
+  it('lists every tool an owner may use: the whole registry, but for Restart', () => {
+    expect(toolNames('owner').sort()).toEqual(TOOLS.map((t) => t.name).filter((n) => !PER_SCREEN.includes(n)).sort());
+  });
+
+  it('offers Restart only on a found screen, where it is checked: never as a tool whose form takes any screen id', () => {
+    for (const role of ['owner', 'editor'] as const) {
+      expect(listed(role).map((t) => t.name)).toContain('restart_screen');
+      expect(toolNames(role)).not.toContain('restart_screen');
+    }
   });
 
   it('lists every tool an editor may use, and none of the owner-only ones', () => {
-    const editorTools = TOOLS.filter((t) => t.minRole !== 'owner').map((t) => t.name);
+    const editorTools = TOOLS.filter((t) => t.minRole !== 'owner' && !PER_SCREEN.includes(t.name)).map((t) => t.name);
     expect(toolNames('editor').sort()).toEqual(editorTools.sort());
     expect(toolNames('editor')).not.toContain('revoke_screen_credential');
   });
@@ -49,7 +59,6 @@ describe('command menu entries', () => {
     const byName = new Map(commandEntries(listed('owner')).flatMap((e) => (e.kind === 'tool' ? [[e.tool.name, e.label]] : [])));
     expect(byName.get('rename_screen')).toBe('Rename a screen');
     expect(byName.get('claim_screen')).toBe('Pair a screen');
-    expect(byName.get('restart_screen')).toBe("Restart the screen's player now");
     expect(byName.get('revoke_screen_credential')).toBe("Revoke one of a screen's credentials");
     expect(byName.get('list_screens')).toBe('List the screens in the organization with their settings, labels, status and manifests');
   });
