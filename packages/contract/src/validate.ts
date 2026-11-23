@@ -430,27 +430,27 @@ export function validateSpotData(fields: unknown, data: unknown, assets: unknown
     if (table !== undefined && def && !fieldDefProblems(name, def).length)
       errors.push(...tableBindingProblems(name, def as FieldDef, own(binding, 'path'), table));
   }
-  for (const [name, raw] of Object.entries(fields)) {
-    if (fieldDefProblems(name, raw).length) {
-      errors.push(`field "${name}" has no valid definition`);
-      continue;
-    }
-    const def = raw as FieldDef;
-    if (def.type === 'image') {
-      if (!isText(own(a, name)) && !switchedOff(fields, d, b, name)) errors.push(`image field "${name}" has no asset`);
-      continue;
-    }
-    const v = own(d, name) ?? ('default' in def ? def.default : undefined);
-    // A bound field still needs a static value: it is what shows before the first snapshot arrives.
-    if (v === undefined) errors.push(`field "${name}" is missing${own(b, name) ? ' (a bound field needs a fallback value)' : ''}`);
-    else if (def.type === 'list') errors.push(...listProblems(name, def, v));
-    else {
-      const e = scalarProblem(name, def, v);
-      if (e) errors.push(e);
-    }
-  }
+  for (const name of Object.keys(fields)) errors.push(...validateSpotField(fields, d, a, b, name));
   for (const name of Object.keys(d)) if (!own(fields, name)) errors.push(`unknown field "${name}"`);
   return errors;
+}
+
+/**
+ * The problems `validateSpotData` finds with one field's value, checked against all of the spot's
+ * fields, data, assets and bindings (an image with its toggle), so an editor can show each by its
+ * field and agree with the publish. The bindings' own problems are not in it.
+ */
+export function validateSpotField(fields: Obj, data: Obj, assets: Obj, bindings: Obj, name: string): string[] {
+  const raw = own(fields, name);
+  if (fieldDefProblems(name, raw).length) return [`field "${name}" has no valid definition`];
+  const def = raw as FieldDef;
+  if (def.type === 'image') return isText(own(assets, name)) || switchedOff(fields, data, bindings, name) ? [] : [`image field "${name}" has no asset`];
+  const v = own(data, name) ?? ('default' in def ? def.default : undefined);
+  // A bound field still needs a static value: it is what shows before the first snapshot arrives.
+  if (v === undefined) return [`field "${name}" is missing${own(bindings, name) ? ' (a bound field needs a fallback value)' : ''}`];
+  if (def.type === 'list') return listProblems(name, def, v);
+  const e = scalarProblem(name, def, v);
+  return e ? [e] : [];
 }
 
 // ------------------------------------------------------------------ bound values

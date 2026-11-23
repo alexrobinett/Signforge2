@@ -8,7 +8,7 @@
  */
 import { spotProblems, type CompileInput } from '@signforge/compiler';
 import { compileProbe, DEFAULT_FIT, spotFromDraft, type DraftReads, type Probe, type SpotDraft as SavedDraft } from '@signforge/compiler/draft';
-import { toggleOf, validateSpotData, type FieldDef, type Orientation, type ScalarFieldDef, type ScreenManifest, type Transition } from '@signforge/contract';
+import { validateSpotField, type FieldDef, type Orientation, type ScalarFieldDef, type ScreenManifest, type Transition } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import type { AssetView } from './assets';
 import type { BindingInput } from './live-data';
@@ -62,18 +62,14 @@ export const usableVersions = (templates: TemplateView[]) =>
   });
 
 /**
- * The contract's messages for each field, from `validateSpotData` run on that field alone, so a
- * message sits by the field it is about. An image field with no image yet asks for one, unless its
- * toggle switched it off (#252): an image is checked with its toggle, as a publish checks it.
+ * The contract's messages for each field, from the check a publish runs on it (`validateSpotField`),
+ * so a message sits by the field it is about and the editor agrees with the publish: an image is
+ * checked with its toggle (#252), and a bound toggle never counts as off (#285).
  */
-export function fieldProblems(fields: Record<string, FieldDef>, draft: Pick<SpotDraft, 'data' | 'assets'>): Map<string, string[]> {
+export function fieldProblems(fields: Record<string, FieldDef>, draft: Pick<SpotDraft, 'data' | 'assets' | 'bindings'>): Map<string, string[]> {
   const out = new Map<string, string[]>();
-  for (const [name, def] of Object.entries(fields)) {
-    const toggle = toggleOf(name);
-    const names = def.type === 'image' && fields[toggle] ? [name, toggle] : [name];
-    const data = Object.fromEntries(names.filter((n) => n in draft.data).map((n) => [n, draft.data[n]]));
-    const assets = name in draft.assets ? { [name]: draft.assets[name] } : {};
-    const problems = validateSpotData(Object.fromEntries(names.map((n) => [n, fields[n]])), data, assets).filter((p) => !p.includes(`"${toggle}"`));
+  for (const name of Object.keys(fields)) {
+    const problems = validateSpotField(fields, draft.data, draft.assets, draft.bindings, name);
     if (problems.length) out.set(name, problems);
   }
   return out;
