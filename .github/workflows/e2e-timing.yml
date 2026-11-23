@@ -1,0 +1,64 @@
+# TEMPORARY (#249): times the CMS e2e at 1, 2 and 3 workers on GitHub's runner. Removed before review.
+name: e2e timing
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { workers: 1, run: 1 }
+          - { workers: 2, run: 1 }
+          - { workers: 2, run: 2 }
+          - { workers: 2, run: 3 }
+          - { workers: 3, run: 1 }
+          - { workers: 3, run: 2 }
+          - { workers: 3, run: 3 }
+    name: workers ${{ matrix.workers }} run ${{ matrix.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - name: Playwright version
+        id: pw
+        run: echo "v=$(sed -n 's/^  playwright-core@\([^:(]*\):.*/\1/p' pnpm-lock.yaml | sort -u | paste -sd- -)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.v }}
+      - run: pnpm --filter @signforge/player exec playwright install --only-shell chromium
+      - name: Runner
+        run: echo "nproc=$(nproc)"; free -m
+      - name: CMS e2e
+        run: |
+          start=$(date +%s)
+          pnpm --filter @signforge/cms exec playwright test --workers=${{ matrix.workers }}
+          echo "e2e wall: $(( $(date +%s) - start )) s at workers ${{ matrix.workers }}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload e2e results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cms-e2e-w${{ matrix.workers }}-r${{ matrix.run }}
+          path: |
+            apps/cms/test-results
+            apps/cms/.e2e
+          if-no-files-found: ignore
