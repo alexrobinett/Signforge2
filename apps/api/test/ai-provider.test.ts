@@ -11,10 +11,11 @@ const PROD = { ENVIRONMENT: 'prod', CONNECTION_KEY: 'k'.repeat(64), ANTHROPIC_BA
 
 /** Anthropic's Models API, answering `status` (and its list for a 200), recording what it was asked. */
 function anthropic(status: number) {
-  const asked: { url: string; key: string | null }[] = [];
+  const asked: { url: string; key: string | null; apiKey?: string }[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
-    asked.push({ url: request.url, key: request.headers.get('authorization') });
+    const apiKey = request.headers.get('x-api-key');
+    asked.push({ url: request.url, key: request.headers.get('authorization'), ...(apiKey === null ? {} : { apiKey }) });
     if (status !== 200) return Response.json({ type: 'error', error: { type: 'some_error', message: `refused ${KEY}` } }, { status });
     return Response.json({
       data: [
@@ -56,7 +57,7 @@ describe('the AI provider service', () => {
 
   it("sends the org's own key even with another in ANTHROPIC_CUSTOM_HEADERS in process.env (re-check of #280)", async () => {
     const { fetch, asked } = anthropic(200);
-    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer sk-ant-someone-elses-key';
+    process.env.ANTHROPIC_CUSTOM_HEADERS = 'Authorization: Bearer sk-ant-someone-elses-key\nX-Api-Key: sk-ant-someone-elses-key';
     try {
       const service = aiProviders(PROD, fetch);
       await service.test(ORG, await service.seal(ORG, KEY));
