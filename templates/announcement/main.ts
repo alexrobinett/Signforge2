@@ -24,8 +24,8 @@ defineTemplate({
     const img = document.querySelector<HTMLImageElement>('.photo img');
     if (img) img.style.visibility = 'hidden';
     // An element with nothing to show is off, as if switched off, so the layout closes up around it:
-    // no QR address, no logo in the kit, no facts, an empty line. (A photo is always chosen: the
-    // contract asks every image field for one.)
+    // no QR address, no logo in the kit, no facts, an empty line. (A photo is chosen unless showPhoto
+    // is off: the contract asks for one only while it is shown, #252.)
     const on = (show: string, has: unknown) => data[show] === true && Boolean(has);
     await applyLook({
       ...ctx,
