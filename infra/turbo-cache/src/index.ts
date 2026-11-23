@@ -1,5 +1,5 @@
 // Turborepo's remote cache over one R2 bucket: the calls turbo 2.11 makes when it runs tasks
-// (docs/ci.md, "Caches"). Artifacts are signed by the clients (`remoteCache.signature` in
+// (docs/ci.md, "Remote cache"). Artifacts are signed by the clients (`remoteCache.signature` in
 // turbo.json), so this Worker stores the tag and never needs the key. Two bearer tokens: TURBO_TOKEN
 // reads and writes (CI), TURBO_READ_TOKEN only reads (laptops). Old entries expire by the bucket's
 // lifecycle rule, not here.
