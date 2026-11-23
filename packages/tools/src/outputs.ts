@@ -479,12 +479,18 @@ export const channelView = z.object({
 
 // ------------------------------------------------------------------ AI providers
 
-/** The model providers an org can bring its own key for (#261; OpenAI-compatible is #262). */
-export const AI_PROVIDERS = ['anthropic'] as const;
+/** The model providers an org can bring its own key for: Anthropic (#261), and any OpenAI-compatible endpoint (#262). */
+export const AI_PROVIDERS = ['anthropic', 'openai-compatible'] as const;
 export type AiProviderName = (typeof AI_PROVIDERS)[number];
 
 export const aiProviderView = z.object({
   provider: z.enum(AI_PROVIDERS),
+  baseUrl: z.string().nullable().describe("An OpenAI-compatible endpoint's base address; null for Anthropic"),
+  supports: z
+    .object({ images: z.boolean(), jsonSchema: z.boolean() })
+    .describe(
+      'Whether the provider takes images and returns output to a JSON schema, both of which Fill from a flyer needs: Anthropic does both; an endpoint, as its owner said',
+    ),
   keyLast4: z.string().describe("The key's last four characters; the key itself is sealed and never shown"),
   keySavedBy: z.string().describe('The user who saved the key'),
   keySavedAt: z.number(),
@@ -773,7 +779,12 @@ export const outputs = {
   test_ai_provider: z.object({
     ok: z.boolean(),
     models: z.array(z.string()).describe('The exact model ids the provider offers this key, to choose from; empty when it could not be reached'),
-    problem: z.enum(['refused', 'busy', 'unreachable']).nullable().describe('Why not: the provider refused the key, was busy, or did not answer'),
+    problem: z
+      .enum(['refused', 'busy', 'unreachable', 'blocked'])
+      .nullable()
+      .describe(
+        'Why not: the provider refused the key, was busy, did not answer, or is at an address SignForge may not reach (not public https, or a redirect elsewhere)',
+      ),
     provider: aiProviderView,
   }),
   remove_ai_provider: z.object({

@@ -42,7 +42,13 @@ One native adapter, Anthropic, plus an OpenAI-compatible endpoint, which also co
 
 Model IDs come from configuration (the API's environment for the demo model, the org's settings for its own key), never from code. Each configured value is an exact, versioned model ID, never an alias that moves, so the model measured is the model that runs. The adapter is where they are used, so switching a model is a setting, not a release.
 
-The OpenAI-compatible address is the org's choice, so every request to it is a server-side fetch to an untrusted URL. It goes through the feed fetch guards (`apps/api/src/data/fetch.ts`): https only, no private, loopback, link-local or metadata address, every redirect checked again. Since #236 they also refuse every spelling of a private IPv6 address.
+The OpenAI-compatible address is the org's choice, so every request to it is a server-side fetch to an untrusted URL. It goes through the feed fetch guards (`apps/api/src/data/fetch.ts`): https only, no private, loopback, link-local or metadata address, every redirect checked again. Since #236 they also refuse every spelling of a private IPv6 address. Built in #262:
+
+- The address is checked where it enters, as a feed URL is: https, the default port, a public host name, no query or fragment.
+- Every request to it goes through the guards, each redirect's too, and a redirect to another origin is refused, since the request carries the key.
+- The key is sealed for the address as well as the org (`ai-key:<org>/openai-compatible/<address>`), so it opens for no other address, and a new address needs the key again.
+- The adapter is plain `fetch` through the guards, with no SDK, so nothing in `process.env` changes where a request goes or what it carries: the base URL, custom headers and a second key header that #280's reviews found in the Anthropic SDK do not arise.
+- An endpoint says whether it takes images and returns JSON-schema output as its owner states them; Fill from a flyer needs both, and the settings page says when it cannot run. Gemini's compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai`, checked 2026-11-23) documents image input (`image_url` with a base64 data URL), `GET /models` and a Bearer key; its structured output is shown only through the OpenAI SDKs' parse helpers, which send `response_format` `json_schema`, without naming it, so an owner ticks it on their own check.
 
 Why not three native adapters: each is code to keep current with its API, and OpenAI-compatible reaches the others with one guarded adapter (#244's review, point 6).
 
