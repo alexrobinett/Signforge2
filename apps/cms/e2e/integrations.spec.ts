@@ -51,7 +51,7 @@ let blog: string;
 
 test.beforeAll(async ({ browser }) => {
   owner = await memberPage(browser, `e2e-integrations-${Date.now()}@example.com`, OWNER_ADDRESS);
-  orgId = await newOrg(owner, 'Northside Market');
+  orgId = await newOrg(owner, 'Northside Hotel');
 });
 
 test.afterAll(() => owner.context().close());

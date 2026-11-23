@@ -38,9 +38,9 @@ test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext({ viewport: { width: 1920, height: 1200 } })).newPage();
   await signInAs(page, `e2e-sources-${Date.now()}@example.com`, ADDRESS);
   await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
+  await fillUntilEnabled(page, 'Organization name', 'Northside Garden', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Northside Market', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Northside Garden', level: 1 })).toBeVisible();
 });
 
 test.afterAll(() => page.context().close());

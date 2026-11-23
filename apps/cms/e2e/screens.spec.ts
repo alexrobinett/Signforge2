@@ -57,9 +57,9 @@ test('pair a screen from the empty Screens page, watch it come online, wake, ide
   await shots(page, '10-sign-in');
   await signInAs(page, `e2e-screens-${Date.now()}@example.com`, ADDRESS);
   await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
+  await fillUntilEnabled(page, 'Organization name', 'Northside Arcade', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Northside Market', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Northside Arcade', level: 1 })).toBeVisible();
 
   // Empty: one path, pairing, with the code input on the page.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
@@ -356,7 +356,7 @@ test('the Screens page says when its poll fails, until a good one, and an expire
 test("a screen's actions are disabled in the server's HTML, until the page has hydrated (#136)", async ({ page, request }) => {
   // The page hydrates after the app (body[data-hydrated]): a click in between went nowhere.
   await signInAs(page, `e2e-screen-server-${Date.now()}@example.com`, '192.0.2.17');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Arcade');
   const { code } = await startPairing(request);
   const { screen } = await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
   const path = `/screens/${screen.id}`;
@@ -375,7 +375,7 @@ test("the Screens page's pairing form, and its search and filters, are disabled 
   // The page hydrates after the app (body[data-hydrated]): a field changed in between was set back
   // by React, and a filter chosen in between went nowhere.
   await signInAs(page, `e2e-screens-server-${Date.now()}@example.com`, '192.0.2.18');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Arcade');
   // No screens yet: the pairing form is on the page.
   const pairing = [...Array.from({ length: 6 }, (_, i) => `Character ${i + 1} of 6`), 'Name it', 'Time zone', 'Orientation', 'Pair'];
   expect(await disabledOnServer(page, '/screens', pairing)).toEqual(Object.fromEntries(pairing.map((n) => [n, [true]])));
