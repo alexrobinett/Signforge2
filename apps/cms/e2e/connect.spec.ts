@@ -1,14 +1,23 @@
 // Connecting an agent (M4-05, #110): an MCP client stub registers and opens the authorize URL; the
 // person signs in, picks an org and scopes on /connect, and Allow sends the stub a code it exchanges
 // for tokens; Cancel sends `access_denied`. An editor while editors may not publish is not offered it.
-// The first-party CLI shows as verified, and the pages are never framed.
+// The first-party CLI shows as verified, and the pages are never framed. An unverified name the page
+// may not show (not plain, or reading as SignForge's) is withheld: the page says an unverified app, at its host.
 import { createHash, randomBytes } from 'node:crypto';
 import { expect, request as playwrightRequest, test, type Page } from '@playwright/test';
 import { axe, createOrg, disabledOnServer, fromAddress, hydrated, shots, signIn, signInAs, tool } from './helpers';
 import { CMS_URL } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
-const ADDRESS = { owner: '192.0.2.161', person: '192.0.2.162', editor: '192.0.2.163', stub: '192.0.2.164', cli: '192.0.2.165' };
+const ADDRESS = {
+  owner: '192.0.2.161',
+  person: '192.0.2.162',
+  editor: '192.0.2.163',
+  stub: '192.0.2.164',
+  cli: '192.0.2.165',
+  namer: '192.0.2.166',
+  names: '192.0.2.167',
+};
 /** The stub's loopback callback, as a native MCP client registers one. */
 const CALLBACK = 'http://127.0.0.1:33418/callback';
 const RESOURCE = `${CMS_URL}/mcp`;
@@ -18,8 +27,8 @@ const base64url = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replac
 const challengeOf = (verifier: string) => base64url(createHash('sha256').update(verifier).digest());
 
 /** An MCP client stub: registers by open registration, and builds an authorize URL with S256 PKCE. */
-async function stubClient(name = 'Test agent') {
-  const request = await playwrightRequest.newContext({ extraHTTPHeaders: { 'cf-connecting-ip': ADDRESS.stub } });
+async function stubClient(name = 'Test agent', address = ADDRESS.stub) {
+  const request = await playwrightRequest.newContext({ extraHTTPHeaders: { 'cf-connecting-ip': address } });
   const registered = await request.post(`${CMS_URL}/api/auth/oauth2/register`, {
     data: {
       client_name: name,
@@ -117,7 +126,7 @@ test('an agent connects: sign in and back, pick an org and scopes, Allow gives t
   // Publishing on: the warning names the org.
   await page.getByLabel('Organisation', { exact: true }).selectOption({ label: 'Quayside Market' });
   await page.getByRole('checkbox', { name: /Publish to live screens/ }).check();
-  await expect(page.getByRole('status')).toContainText('“Test agent” will be able to change what every screen in Quayside Market shows without asking.');
+  await expect(page.getByRole('status')).toContainText('Publishing lets “Test agent” change what every screen in Quayside Market shows without asking.');
   await shots(page, '30-connect-agent-publish');
   await page.setViewportSize({ width: 390, height: 844 });
   await shots(page, '30-connect-agent-phone');
@@ -203,4 +212,36 @@ test('the SignForge CLI shows as verified, a client’s own `q` does not get in 
   await expect(page.getByRole('heading', { level: 1 })).toHaveAccessibleName('SignForge CLI wants to work in SignForge');
   await expect(page.getByText('A SignForge app. It sends you back to 127.0.0.1:40123.')).toBeVisible();
   await expect(page.getByText('Unverified', { exact: true })).toHaveCount(0);
+});
+
+test('an unverified name that reads as SignForge is not on the page; a plain one is quoted; a long one wraps', async ({ page }) => {
+  await signInAs(page, `e2e-connect-names-${Date.now()}@example.com`, ADDRESS.namer);
+  await createOrg(page, 'Lantern Quay', ADDRESS.namer);
+  /** The heading for a client the stub registers as `name` (five at most: registration's limit per address). */
+  const headingFor = async (name: string) => {
+    const stub = await stubClient(name, ADDRESS.names);
+    await page.goto(stub.authorizeUrl);
+    await stub.dispose();
+    return page.getByRole('heading', { level: 1 });
+  };
+
+  // Names from the reviews of #299: digits read as letters, and boxed letters spelling SIGNFORGE.
+  await expect(await headingFor('SI6NFOR6E')).toHaveAccessibleName('An unverified app at 127.0.0.1:33418 wants to work in SignForge Unverified');
+  expect(await page.content()).not.toContain('SI6NFOR6E');
+  await expect(await headingFor('🆂🅸🅶🅽🅵🅾🆁🅶🅴')).toHaveAccessibleName('An unverified app at 127.0.0.1:33418 wants to work in SignForge Unverified');
+  await hydrated(page);
+  await expect(page.getByRole('status')).toContainText('Without publishing, changes by this app stay drafts');
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 1150 });
+  await shots(page, '30-connect-agent-unnamed');
+
+  // Claude Code with a server named after SignForge, and a name that only runs into "signforge", are shown.
+  await expect(await headingFor('Claude Code (signforge)')).toHaveAccessibleName('“Claude Code (signforge)” wants to work in SignForge Unverified');
+  await expect(await headingFor('Design Forge')).toHaveAccessibleName('“Design Forge” wants to work in SignForge Unverified');
+
+  // A long name with no break wraps in the card rather than widen the page.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const long = 'W'.repeat(80);
+  await expect(await headingFor(long)).toHaveAccessibleName(`“${long}” wants to work in SignForge Unverified`);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
