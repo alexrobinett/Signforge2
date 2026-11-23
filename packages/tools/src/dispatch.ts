@@ -337,6 +337,8 @@ async function overLimit(name: string, write: boolean, caller: Caller<DataScope>
   if (allowance.audit) {
     if (!('appendOnce' in org.auditLog)) throw new Error('an agent acts only in an org');
     const { window, start } = allowance.audit;
+    // Still a refusal, not an error, if either step fails: the window keeps asking for its row, and its next refused call writes it.
+    let recorded = false;
     try {
       // One row per grant and window, however many refused calls race to write it.
       await org.auditLog.appendOnce(`rate_limited_${actor.id}_${window}_${start}`, {
@@ -349,10 +351,15 @@ async function overLimit(name: string, write: boolean, caller: Caller<DataScope>
         // The name as the agent sent it, which may name no tool.
         detailJson: JSON.stringify({ tool: redact(name), refused: { error: 'rate_limited', message, details } }),
       });
+      recorded = true;
       await agentLimiter.audited(actor.id, allowance.audit);
     } catch (err) {
-      // Still a refusal, not an error: the window keeps asking for its row, and its next refused call writes it.
-      console.warn(`[tools] could not record that agent grant ${actor.id} was refused`, err);
+      console.warn(
+        recorded
+          ? `[tools] recorded that agent grant ${actor.id} was refused, but could not tell its limiter: the window's next refusal tries again and writes nothing`
+          : `[tools] could not record that agent grant ${actor.id} was refused`,
+        err,
+      );
     }
   }
   return fail('rate_limited', message, details);
