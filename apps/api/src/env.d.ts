@@ -35,13 +35,18 @@ interface DataSourceSettings {
 /** Connected accounts (src/connectors). */
 interface ConnectorSettings {
   /**
-   * Encrypts connections' credentials (OAuth grants, API keys) and pending PKCE verifiers at rest
+   * Encrypts connections' credentials (OAuth grants, API keys), pending PKCE verifiers and orgs' model keys at rest
    * (src/connectors/vault.ts), 32+ random bytes, separate from DATA_SOURCE_KEY. Required outside dev;
    * changing it loses every connection's credentials (each then needs reconnecting).
    */
   CONNECTION_KEY?: string;
 }
-interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings {}
+/** The built-in agent's model providers (src/agent). */
+interface AgentSettings {
+  /** Dev only: where the Anthropic adapter sends its requests instead of Anthropic's API (src/agent/provider.ts). The CMS e2e points it at a stub. */
+  ANTHROPIC_BASE_URL?: string;
+}
+interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings, AgentSettings {}
 declare namespace Cloudflare {
-  interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings {}
+  interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings, AgentSettings {}
 }
