@@ -19,7 +19,8 @@ permissions:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # Only a push to master deploys: the nightly and manual CI runs (#254) re-test the same commit, and should not redeploy it.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     # No `environment:`: environments in a private repository need GitHub Pro (see "Required status check"); the secrets are repository secrets.
