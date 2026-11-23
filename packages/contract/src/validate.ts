@@ -389,6 +389,23 @@ function tableBindingProblems(name: string, def: FieldDef, path: unknown, t: unk
 }
 
 /**
+ * The look kit's toggle for a field (docs/template-spec.md, Toggles): `photo` is switched by `showPhoto`.
+ */
+export const toggleOf = (name: string) => `show${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+
+/**
+ * Whether the spot switched the field off with its toggle, a boolean field set (or defaulting) to
+ * false (#252): then the template removes the element, and an image there needs no asset. A bound
+ * toggle may turn on with the next snapshot, so it never counts as off.
+ */
+function switchedOff(fields: Obj, data: Obj, bindings: Obj, name: string): boolean {
+  const toggle = toggleOf(name);
+  const def = own(fields, toggle);
+  if (own(def, 'type') !== 'boolean' || own(bindings, toggle) !== undefined) return false;
+  return (own(data, toggle) ?? own(def, 'default')) === false;
+}
+
+/**
  * Check a spot's data against the template's fields. Returns problems; empty means valid. Total
  * over any input; a malformed field definition is reported rather than trusted.
  */
@@ -420,7 +437,7 @@ export function validateSpotData(fields: unknown, data: unknown, assets: unknown
     }
     const def = raw as FieldDef;
     if (def.type === 'image') {
-      if (!isText(own(a, name))) errors.push(`image field "${name}" has no asset`);
+      if (!isText(own(a, name)) && !switchedOff(fields, d, b, name)) errors.push(`image field "${name}" has no asset`);
       continue;
     }
     const v = own(d, name) ?? ('default' in def ? def.default : undefined);
