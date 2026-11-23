@@ -10,7 +10,7 @@ import { type Invitation, type Members, ROLES, type Role, ToolError } from '@sig
 import { APIError } from 'better-auth/api';
 import type { Auth } from './index';
 
-const isRole = (r: string | null | undefined): r is Role => (ROLES as readonly (string | null | undefined)[]).includes(r);
+const isRole = (r: string | null | undefined): r is Role => ROLES.some((role) => role === r);
 
 const REFUSALS: Record<number, ToolError['code']> = { 400: 'conflict', 401: 'forbidden', 403: 'forbidden', 404: 'not_found' };
 
@@ -20,7 +20,8 @@ async function refusing<T>(run: () => Promise<T>): Promise<T> {
   } catch (err) {
     const code = err instanceof APIError ? REFUSALS[err.statusCode] : undefined;
     if (!code || !(err instanceof APIError)) throw err;
-    throw new ToolError(code, err.body?.message ?? err.message);
+    // biome-ignore lint/style/useErrorCause: the cause is passed, in the options argument.
+    throw new ToolError(code, err.body?.message ?? err.message, undefined, false, { cause: err });
   }
 }
 

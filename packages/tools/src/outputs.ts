@@ -14,7 +14,6 @@ import type { CompileInput } from '@signforge/compiler';
 import { z } from 'zod';
 import { displayHours, draftOutput, orientation, version } from './fields';
 import { NEEDS_YOU_REASONS, STATE_KINDS } from './screen-state';
-import { ROLES } from './tool';
 
 /** Why a tool refused: the `error` of its answer, next to `message` and, for some, `details`. */
 export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable';
@@ -600,18 +599,23 @@ const auditEntryOutput = z.object({
 
 // ------------------------------------------------------------------ every tool's output
 
+/**
+ * A member's role: `ROLES` in ./tool.ts, written out because this file reaches no module that
+ * imports `@signforge/db` (the CMS types its calls by it). test/members.test.ts holds the two equal.
+ */
+const roleOutput = z.enum(['viewer', 'editor', 'owner']);
 const memberOutput = z.object({
   id: z.string().describe("The membership's id: pass it as memberId"),
   userId: z.string(),
   name: z.string(),
   email: z.string(),
-  role: z.enum(ROLES),
+  role: roleOutput,
   createdAt: z.string().describe('ISO 8601'),
 });
 const invitationOutput = z.object({
   id: z.string(),
   email: z.string(),
-  role: z.enum(ROLES),
+  role: roleOutput,
   status: z.literal('pending'),
   expiresAt: z.string().describe('ISO 8601; after it the invitation can no longer be accepted'),
   inviterId: z.string().describe("The inviting member's user id"),

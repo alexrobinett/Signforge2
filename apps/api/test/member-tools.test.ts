@@ -20,7 +20,7 @@ async function team() {
   return { t, owner, ownerId: user.id, org, editor, editorMemberId: member.id, ownerMemberId: ownerMember.id };
 }
 
-const body = async (res: Response) => ({ status: res.status, ...((await res.json()) as Record<string, unknown>) });
+const body = async (res: Response): Promise<Record<string, unknown>> => ({ status: res.status, ...(await res.json<Record<string, unknown>>()) });
 /** The org's audit rows for one action, oldest first, with their detail parsed. */
 const audits = async (orgId: string, action: string) =>
   (await scoped(env.DB, orgId).auditLog.list({ limit: 200 }))
@@ -46,7 +46,8 @@ describe('an owner, through the member tools', () => {
     expect(invited).toMatchObject({ status: 200, invitation: { email: addr, role: 'viewer', status: 'pending' } });
     // Better Auth sends the invitation, as for the CMS's own call.
     expect(t.outbox.last(addr)?.subject).toBe('Join Team Tools on SignForge');
-    const { id: invitationId } = invited.invitation as { id: string };
+    const invitationId = (await scoped(env.DB, org.id).invitations.pending()).find((i) => i.email === addr)!.id;
+    expect(invited.invitation).toMatchObject({ id: invitationId });
     expect(await body(await owner.tool('list_invitations'))).toMatchObject({ invitations: [{ id: invitationId, email: addr }] });
     expect(await body(await owner.tool('cancel_invitation', { invitationId }))).toMatchObject({ status: 200, canceled: invitationId });
     expect(await body(await owner.tool('list_invitations'))).toMatchObject({ invitations: [] });

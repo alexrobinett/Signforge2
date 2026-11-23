@@ -40,8 +40,7 @@ async function requireMember(org: OrgScope, memberId: string) {
 
 async function requirePending(org: OrgScope, invitationId: string) {
   const row = await org.invitations.get(invitationId);
-  if (!row || row.status !== 'pending') throw notFound('pending invitation', invitationId);
-  return row;
+  if (row?.status !== 'pending') throw notFound('pending invitation', invitationId);
 }
 
 const refuseAgent = (actor: Actor, what: string) => {

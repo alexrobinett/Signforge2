@@ -5,7 +5,8 @@ import { scoped } from '@signforge/db';
 import { seedOrg, seedTeam, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { dispatch, registry, type AgentLimiter, type Caller, type Members, type Role, type Scope } from '../src';
+import { dispatch, registry, ROLES, type AgentLimiter, type Caller, type Members, type Role, type Scope } from '../src';
+import { outputs } from '../src/outputs';
 import { fakeServices } from './services';
 
 let o: SeededOrg;
@@ -44,6 +45,13 @@ const as = (role: Role, members: Members, agent?: { scopes: Scope[] }): Caller =
 
 const member = () => `${o.orgId}-member`;
 const invitation = () => `${o.orgId}-invitation`;
+
+describe('the outputs', () => {
+  it('name the roles ROLES has', () => {
+    expect(outputs.list_members.shape.members.element.shape.role.options).toEqual([...ROLES]);
+    expect(outputs.list_invitations.shape.invitations.element.shape.role.options).toEqual([...ROLES]);
+  });
+});
 
 describe('an owner', () => {
   it('lists the members and pending invitations, and changes them through Better Auth', async () => {
