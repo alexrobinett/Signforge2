@@ -242,6 +242,7 @@ jobs:
             apps/cms/test-results
             apps/cms/.e2e
           if-no-files-found: ignore
+          include-hidden-files: true # apps/cms/.e2e holds the API's and the CMS's logs
       - name: Timing summary
         if: always()
         run: sh scripts/ci-summary.sh >> "$GITHUB_STEP_SUMMARY"

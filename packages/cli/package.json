@@ -25,6 +25,7 @@
     "sharp": "^0.35.5"
   },
   "devDependencies": {
+    "@signforge/examples": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
     "@signforge/template-alert": "workspace:*",
     "@signforge/template-announcement": "workspace:*",
