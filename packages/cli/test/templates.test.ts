@@ -53,7 +53,9 @@ it('changes no template bundle without a new version', async () => {
       "bytes. Bump the template's version (template.json and package.json) and record the new key and hash in place of the old. " +
       "If the template's own files did not change, something else reached its bundle (docs/template-spec.md, Rules).",
   ).toEqual(recorded);
-});
+  // It builds every template while CI runs up to 13 template test tasks on two cores, and it went past the
+  // default 5 s there (#277, run 45117900937).
+}, 30_000);
 
 it('checks what a stylesheet that style.css imports brings into the bundle: network URLs and colour literals', async () => {
   // Under this directory, so main.ts resolves the SDK as a template's own does.
