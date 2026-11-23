@@ -1,22 +1,27 @@
 # CI
 
-One job, `check`, in `.github/workflows/ci.yml`, on every pull request and every push to `master`. It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks.
+One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready for review, on pushes to `master`, nightly and by hand. It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks.
 
-- **A pull request** runs typecheck, test and lint for the packages its diff affects. It does not run the CMS end-to-end run (`test:e2e`): run that locally before opening or updating the pull request, on your own ports (`E2E_API_PORT=... E2E_CMS_PORT=... pnpm --filter @signforge/cms test:e2e`), and say in the pull request that it passed.
-- **A push to `master`** runs every task, the CMS end-to-end run included, so nothing a pull request skipped goes unchecked and the caches that pull requests read stay warm. A red `master` run is fixed first, before more merges.
+- **A pull request** runs typecheck, test and lint for the packages its diff affects. It does not run the CMS end-to-end run (`test:e2e`): run that locally before marking the pull request ready or pushing to it, on your own ports (`E2E_API_PORT=... E2E_CMS_PORT=... pnpm --filter @signforge/cms test:e2e`), and say in the pull request that it passed.
+- **A draft pull request** runs nothing: the job is skipped. Marking it ready (`gh pr ready <n>`) starts the run.
+- **A push to `master`** runs every task, the CMS end-to-end run included, of the packages affected since the newest `master` commit whose CI passed. Each green run vouches for the one before it, so what a red or cancelled run did not get through runs again on the next push. With no green commit among the last 20 runs, it runs everything. A red `master` run is fixed first, before more merges.
+- **The nightly run** (07:30 UTC) and **a manual run** (Actions, CI, "Run workflow", or `gh workflow run ci.yml`) run every task, so nothing an affected run leaves out goes untested for long. Tasks whose inputs did not change replay from the Turbo cache; the e2e always runs. The nightly run does nothing when the last nightly run passed on the same commit.
+- **A change to docs and Markdown only** (`docs/**`, `**/*.md`, but not `fonts/README.md`, which the compiler's fonts test checks) starts no run, on a pull request or on `master`. `gh pr checks` then says "no checks reported", which on such a pull request is a pass.
+
+**Agents** open pull requests as drafts (`gh pr create --draft`), run their local checks (`pnpm lint`, `pnpm typecheck`, the tests of what they touched and the CMS e2e), push their fixes, and only then mark the pull request ready. Every push to a ready pull request runs CI, and a new push cancels the run in progress, so push to a ready pull request only what it needs.
 
 ## What runs
 
 1. Install, with the pnpm store restored from the cache.
 2. The repo-wide checks, a few seconds each, on every run: Biome lint, the format check on changed files, knip, jscpd, `turbo boundaries`, the contract-commit check and the template-dependency check.
-3. The plan: `turbo run … --dry=json` lists the tasks that will run (`--affected` and no `test:e2e` on a pull request). Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media, tools and template-check).
+3. The plan picks the base `--affected` compares against (a pull request's base; on `master`, the newest commit whose CI passed, found with the Actions API; none on a nightly or manual run), then `turbo run … --dry=json` lists the tasks that will run (no `test:e2e` on a pull request). Chromium is installed only if one of them is the test of a package that declares a Playwright dependency (today the player, the CMS, media, tools and template-check).
 4. The stress media, only if the cli's or the tools' tests run (see [Stress media](#stress-media)).
-5. `turbo run typecheck test lint --affected --summarize` on a pull request, or `turbo run typecheck test test:e2e lint --summarize` on `master`, with Turbo's cache restored from earlier runs. The job may run 60 minutes: on `master` with cold caches (a contract change rebuilds nearly everything) the tests take about 16 minutes and the CMS e2e about 20 (2026-11-21).
+5. `turbo run typecheck test lint --affected --summarize` on a pull request, `turbo run typecheck test test:e2e lint --affected --summarize` on a push to `master`, and the same without `--affected` on a nightly or manual run, with Turbo's cache restored from earlier runs. The job may run 60 minutes: a run that covers everything with cold caches takes about 30 (2026-11-21: the player's tests about 18 minutes, the CMS e2e about 20, side by side).
 6. The timing summary on the run's page: each step's time, then each Turbo task's time and whether it came from the cache (`scripts/ci-summary.sh`).
 
 ## What "affected" means
 
-`--affected` compares the pull request with the base it merges into (`TURBO_SCM_BASE`, the base's sha). It counts a package as affected when a file in it changed or a package it depends on is affected. So a docs-only change runs nothing, a player change runs the player's tests, and a contract change runs nearly everything.
+`--affected` compares the commit with a base (`TURBO_SCM_BASE`): on a pull request the base it merges into, on `master` the newest commit whose CI passed. It counts a package as affected when a file in it changed or a package it depends on is affected. So a docs-only change runs nothing, a player change runs the player's tests, and a contract change runs nearly everything.
 
 A few changes mark every package affected:
 - `turbo.json`, the workflow, `tsconfig.base.json`, `biome.jsonc` and `pnpm-workspace.yaml` (`globalDependencies` in `turbo.json`, plus Turbo's own rules);
@@ -52,16 +57,17 @@ A new version (new photos, a re-encoded video) is a new release and a regenerate
 - **pnpm store**: restored on every run, keyed by the lockfile, falling back to the newest store. It is saved only from `master`: an upload took up to a minute, and a pull request would pay that again on each new lockfile.
 - **Playwright**: the headless shell (`playwright install --only-shell chromium`, which every browser test uses), keyed by the Playwright version in the lockfile. System packages are installed only when the shell links a library the runner lacks. On GitHub's Ubuntu 24.04 image none is missing, which saves the 15 s apt run.
 - **Stress media**: `examples/stress/media`, keyed by the hash of `examples/stress/media.sha256`.
-- **Turbo**: `.turbo/cache`, saved under the commit's sha and restored from the newest entry, even after a failure, so a rerun replays the tasks that passed. Turbo caches every task but the e2e run (`cache: false`). A pull request can read its own earlier runs and `master`'s, but not other pull requests'.
+- **Turbo**: `.turbo/cache`, saved under the commit's sha and restored from the newest entry, even after a failure, so a rerun replays the tasks that passed. Turbo caches every task but the e2e run (`cache: false`). A pull request can read its own earlier runs and `master`'s, but not other pull requests', and `master` cannot read a pull request's: the push that merges a pull request runs again what the pull request ran.
 
-A remote cache would share Turbo's cache with laptops and across pull requests. The README says how to move to one.
+A remote cache would share Turbo's cache with laptops and across pull requests. The README says how to move to one, and #257 has the numbers and the plan for one in R2.
 
 ## Keeping it fast
 
 - Declare what a test reads. A test that reads files outside its package needs that package as a dependency, or the directory in `globalDependencies` if no package owns it. Otherwise a change there either skips the test on pull requests or, with a warm cache, replays a stale result.
 - Keep the repo-wide checks repo-wide only while they take seconds. Anything slower should become a Turbo task in the package it checks.
-- Don't add `paths:` filters to the workflow. A skipped workflow never reports, so a required check would wait forever; `--affected` already skips what a change does not touch.
-- The player's browser tests are the longest task: 2 m 30 s alone, about 3 min beside the rest of a full run. Any change to the player, the SDK, the CLI, the contract or a template runs them. Making them shorter, or splitting them across runners, is what would bring those pull requests down next.
+- Keep the workflow's `paths:` filter to files no test reads. A file a test reads that the filter leaves out (as `fonts/README.md` is put back) would change without a run.
+- The player's tests are the longest task: about 14 minutes on GitHub's two-core runner (2026-11-22), down from 18. Any change to the player, the SDK, the CLI, the contract or a template runs them. Vitest runs one fewer file at once than there are cores, which on two cores is one, so `packages/player/vitest.config.ts` asks for at least two: `browser/templates.test.ts` (about 13.5 min) then runs beside the other files (about 7 min together). That one file is now the whole task, so splitting it by template is what would bring those runs down next.
+- Every template change adds a spot to `examples/stress/spots`, and `examples/**` is a global dependency, so the push that merges it reruns every task of every package. Of five `master` runs measured on 2026-11-21 and 22, three replayed nothing from the cache, one replayed 2 of 43 tasks and one 26 of 43.
 
 ## The API's workerd tests: no module cache on disk
 
@@ -74,21 +80,28 @@ Without the cache on disk, the warm list is empty, and each module is fetched on
 
 ## Measured
 
-Wall time of each run, from creation to its last update, on GitHub's `ubuntu-24.04` runners, 2026-11-18. The baseline is the workflow before this change, which ran everything on every run. The docs, feeds and player rows are throwaway pull requests on top of this change (#9, #10, #11), each touching one place. They started with cold caches: a pull request reads only its own caches and `master`'s, and `master` had not run this workflow yet.
+On GitHub's `ubuntu-24.04` runner, 2026-11-22. For a private repository it has two cores, so Vitest runs one test file at a time unless a config asks for more. Times are the job's, from its start to its end; Turbo is the `turbo run` step.
 
-| Change | Wall time | What ran |
-| --- | ---: | --- |
-| Baseline, any change (runs 44237204249, 44237196981) | 4 m 57 s, 6 m 18 s | Everything. Tests took 3 m 06 s–3 m 31 s; the slower run also spent 65 s uploading the pnpm store. |
-| This change, cold caches (44239478412) | 4 m 55 s | Everything: the change touches the workflow, a global dependency. 14 test and lint tasks, 20 typechecks, the e2e run. |
-| This change again (44240106272) | 4 m 11 s | Everything again: the commit changed the workflow, so no Turbo cache entry matched. |
-| This change merged with its base (44244442985) | 4 m 40 s | Everything; the merge brought new code into most packages. |
-| The same commit rerun, warm Turbo cache (44244442985, attempt 2) | 1 m 41 s | All 34 cacheable tasks replayed from the cache; only the e2e run (45 s, never cached) ran. |
-| Docs only (#9, 44240132884) | 52 s | No Turbo task, no browser: install and the repo-wide checks. |
-| `packages/feeds` only (#10, 44240134887) | 4 m 27 s | feeds and what depends on it: cli, player, tools, api, and the CMS through the API (8 test and lint tasks, 19 typechecks, the e2e run). |
-| Player only (#11, 44240138678) | 3 m 31 s | `player:test` (2 m 30 s) and the typechecks it depends on. |
+The week before this workflow (2026-11-15 to 22, from the Actions API): 333 pull request runs, 2,602 minutes (2,760 billed, each job rounded up to a minute), and 105 `master` runs, 1,230 minutes (1,284 billed). Setup and the repo-wide checks take about 45 s of each run (checkout 2–6 s, pnpm 8–11 s, Node 4–7 s, store 6–9 s, install 3–6 s, the checks about 10 s). The rest is Turbo's tasks.
 
-Where the time goes now: setup and the repo-wide checks take about 50 s, then whichever affected test is slowest. That is the player's browser tests (2 m 30 s alone) or the API's workerd tests. Once `master` has run this workflow, a pull request starts from `master`'s Turbo cache, so the typechecks of packages it did not change replay instead of running.
+| Run | Before | After |
+| --- | ---: | ---: |
+| Draft pull request | the affected tasks on every push | job skipped, 0 minutes (45108818670) |
+| Docs-only pull request or push | about a minute on a pull request, every task on `master`: 10 such runs, 43 minutes in the week | no run (#255) |
+| Pull request, every task with a cold cache (no e2e) | 21 m 01 s, Turbo 19 m 58 s (#201, 44979171863) | 15 m 07 s, Turbo 14 m 06 s (#254, 45108976002) |
+| `player:test` in that run | 1,168 s, one file at a time | 817 s, two files at a time (`templates.test.ts` 809 s beside the other 22) |
+| Pull request, typical | about 4 min (#195 4 m 24 s, #246 3 m 55 s: 45069709571, 45104405919) | the same: what it affects |
+| Push to `master` | every task: 14–31 min (44944143395 30 m 11 s, 44976726090 31 m 05 s, 45070332774 13 m 43 s, whose e2e failed after 10 min) | the tasks affected since the last green commit. In the week, 62 of the 105 pushes (741 minutes) changed no global dependency, template, contract, SDK, player or CLI |
+| Nightly | none | every task, the Turbo cache replaying what did not change; skipped when the last nightly passed on the same commit |
+
+The slowest tasks with cold caches (44944143395): `player:test` 1,161 s, the CMS e2e about 27 min beside them (being moved to 2–3 Playwright workers), `api:test` 481 s, `tools:test` 248 s, `template-check:test` 157 s, `db:test` 126 s, `cms:lint` 153 s. The API's 28 files spend 103 s in their tests and the rest in each file's module transform (no module cache on disk, above) and setup.
+
+TypeScript is 7.0.2, the native compiler, so there is nothing to gain from `@typescript/native-preview`: `tsc -p apps/api` takes 0.98 s on a laptop against 4.2 s with TypeScript 5.9.3, and every typecheck in the repo takes 7 s. In CI a typecheck takes 1–80 s only because it shares two cores with the tests.
+
+Bun would not help. Install and setup are about 30 s of the run, and the slow tasks run in workerd (the API, tools and db through Cloudflare's Vitest pool), in Chromium (the player, the CMS e2e, template-check) and in Node, whatever installs the packages.
 
 ## Required status check
 
-`master` cannot require this check today. Branch protection and rulesets need GitHub Pro (or Team) for a private repository: the API answers 403, "Upgrade to GitHub Pro or make this repository public to enable this feature". On a plan that has them, require the `check` job. It runs on every pull request, even one that affects no package, so it never sits pending.
+`master` cannot require this check today. Branch protection and rulesets need GitHub Pro (or Team) for a private repository: the API answers 403, "Upgrade to GitHub Pro or make this repository public to enable this feature". So nothing waits on `check`: a docs-only pull request, which starts no run, merges as any other.
+
+On a plan that has them, requiring `check` needs one change first. A draft's skipped job counts as passed, but a docs-only pull request starts no run at all, so a required `check` would sit pending on it forever. Either drop the workflow's `paths:` filter (the run then only installs and runs the repo-wide checks, about 50 s, billed as a minute) or add a second workflow with the same job name that runs on exactly those paths and passes.
