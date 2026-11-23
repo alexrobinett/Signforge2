@@ -28,6 +28,15 @@ jobs:
     runs-on: ubuntu-24.04
     # A master run with cold caches spends about 16 min on typecheck, test and lint and 20 min on the CMS e2e (runs 44896506918, 44908695033 timed out at 30).
     timeout-minutes: 60
+    # Turbo's remote cache (docs/ci.md, "Caches"), on once the owner sets the TURBO_API variable. Until
+    # then all four are empty, Turbo says "Remote caching disabled", and the job carries .turbo/cache
+    # with actions/cache below. The token goes out only with TURBO_API, so it never reaches Turbo's
+    # default server, Vercel's.
+    env:
+      TURBO_API: ${{ vars.TURBO_API }}
+      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      TURBO_TOKEN: ${{ vars.TURBO_API != '' && secrets.TURBO_TOKEN || '' }}
+      TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -145,9 +154,11 @@ jobs:
           path: examples/stress/media
           key: ${{ steps.stress-media-cache.outputs.cache-primary-key }}
 
-      # Turbo's local cache, carried between runs: the newest entry for this OS, saved under this sha.
+      # Turbo's local cache, carried between runs while there is no remote cache: the newest entry for
+      # this OS, saved under this sha.
       - name: Restore Turbo cache
         id: turbo-cache
+        if: env.TURBO_API == ''
         uses: actions/cache/restore@v4
         with:
           path: .turbo/cache
@@ -157,7 +168,7 @@ jobs:
         run: pnpm exec turbo run ${{ steps.plan.outputs.tasks }} ${{ steps.plan.outputs.affected }} --summarize
       # Also after a failure, so a rerun replays the tasks that passed.
       - name: Save Turbo cache
-        if: always() && steps.turbo-cache.outputs.cache-hit != 'true'
+        if: always() && env.TURBO_API == '' && steps.turbo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .turbo/cache

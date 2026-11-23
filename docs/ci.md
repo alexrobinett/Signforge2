@@ -52,9 +52,39 @@ A new version (new photos, a re-encoded video) is a new release and a regenerate
 - **pnpm store**: restored on every run, keyed by the lockfile, falling back to the newest store. It is saved only from `master`: an upload took up to a minute, and a pull request would pay that again on each new lockfile.
 - **Playwright**: the headless shell (`playwright install --only-shell chromium`, which every browser test uses), keyed by the Playwright version in the lockfile. System packages are installed only when the shell links a library the runner lacks. On GitHub's Ubuntu 24.04 image none is missing, which saves the 15 s apt run.
 - **Stress media**: `examples/stress/media`, keyed by the hash of `examples/stress/media.sha256`.
-- **Turbo**: `.turbo/cache`, saved under the commit's sha and restored from the newest entry, even after a failure, so a rerun replays the tasks that passed. Turbo caches every task but the e2e run (`cache: false`). A pull request can read its own earlier runs and `master`'s, but not other pull requests'.
+- **Turbo**: the remote cache below, once it is set up. Until then, `.turbo/cache`, saved under the commit's sha and restored from the newest entry, even after a failure, so a rerun replays the tasks that passed. A pull request can read its own earlier runs and `master`'s, but not other pull requests', so the push that merges a pull request runs again what the pull request just ran. Turbo caches every task but the e2e run (`cache: false`).
 
-A remote cache would share Turbo's cache with laptops and across pull requests. The README says how to move to one.
+### Remote cache
+
+`infra/turbo-cache` is a Worker in front of an R2 bucket that speaks Turbo's remote cache API: `GET`, `HEAD` and `PUT /v8/artifacts/:hash` and `GET /v8/artifacts/status`, the calls turbo 2.11 makes when it runs tasks. It leaves out two calls, which turbo copes with:
+- `POST /v8/artifacts`, the batch lookup that only `--dry` uses: on a 404, turbo sends a `HEAD` per hash instead.
+- `POST /v8/artifacts/events`, Vercel's usage analytics: turbo ignores the failure.
+
+With it, `master`, pull requests and laptops replay each other's results. The merge push replays every task whose inputs match the pull request's.
+
+- **Tokens.** `TURBO_TOKEN` reads and writes. CI uses it, on pull requests too: in this single-owner repository the pull requests are the owner's and the owner's agents, and their writes are what the merge push replays. `TURBO_READ_TOKEN` only reads. The Worker's status call tells turbo so, and turbo then skips uploads without a warning. If outside contributors ever push branches, give pull requests the read token, or `TURBO_CACHE=local:rw,remote:r`, and let only `master` write.
+- **Signatures.** `remoteCache.signature` in `turbo.json` makes turbo sign each artifact with `TURBO_REMOTE_CACHE_SIGNATURE_KEY` and check the signature on every hit. An entry changed on the server fails the check, and the task runs instead. The Worker stores the tag and never sees the key. Use at least 32 bytes (`openssl rand -hex 32`); turbo warns below that.
+- **Expiry.** The bucket's lifecycle rule deletes entries 30 days after they are written. A miss just runs the task. The cache holds logs and small outputs, about 1.4 MB per full run (2026-11-22).
+- **CI.** The `check` job passes the repository variables `TURBO_API` and `TURBO_TEAM` and the secrets `TURBO_TOKEN` and `TURBO_REMOTE_CACHE_SIGNATURE_KEY` to Turbo. The token is passed only when `TURBO_API` is set, so it never reaches Turbo's default server, which is Vercel's. While `TURBO_API` is unset, Turbo says "Remote caching disabled", and the job carries `.turbo/cache` with `actions/cache` as before. Once the remote cache has run green on `master`, drop those two steps and `TURBO_CACHE_DIR`.
+- **Laptops.** Read-only, with the read token. Keep it out of the repository, for example in `~/.config/signforge/turbo.env`, mode 600:
+
+  ```sh
+  export TURBO_API=https://signforge-turbo-cache.<subdomain>.workers.dev
+  export TURBO_TEAM=signforge
+  export TURBO_TOKEN=<the read token>
+  export TURBO_REMOTE_CACHE_SIGNATURE_KEY=<the signature key>
+  ```
+
+  `. ~/.config/signforge/turbo.env` before `pnpm typecheck` or `pnpm test`. Turbo reads the cache and keeps writing only its local `.turbo/cache`.
+- **Setting it up or rotating a secret** (the owner, with `wrangler login`; from `infra/turbo-cache`):
+  1. `pnpm exec wrangler r2 bucket create signforge-turbo-cache`
+  2. `pnpm exec wrangler r2 bucket lifecycle add signforge-turbo-cache expire-30-days --expire-days 30 --force`
+  3. Generate each secret into a file only you can read, and never paste it into a chat, an issue or a log: `umask 077; mkdir -p ~/.config/signforge; for s in TURBO_TOKEN TURBO_READ_TOKEN TURBO_REMOTE_CACHE_SIGNATURE_KEY; do openssl rand -hex 32 > ~/.config/signforge/$s; done`
+  4. `pnpm exec wrangler secret put TURBO_TOKEN < ~/.config/signforge/TURBO_TOKEN`, and the same for `TURBO_READ_TOKEN`. The Worker never sees the signature key.
+  5. `pnpm exec wrangler deploy`. It prints the Worker's URL.
+  6. GitHub: `gh secret set TURBO_TOKEN < ~/.config/signforge/TURBO_TOKEN`, `gh secret set TURBO_REMOTE_CACHE_SIGNATURE_KEY < ~/.config/signforge/TURBO_REMOTE_CACHE_SIGNATURE_KEY`, `gh variable set TURBO_TEAM --body signforge`, and last `gh variable set TURBO_API --body <the URL>`, which turns it on.
+
+  Rotating a secret: repeat steps 3, 4 and 6 for that secret. A new signature key turns every entry into a miss until CI has written them again.
 
 ## Keeping it fast
 
