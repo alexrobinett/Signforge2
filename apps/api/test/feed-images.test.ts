@@ -1290,7 +1290,8 @@ describe('budgets, resilience and cleanup', () => {
     expect(counter.counts().statements).toBeLessThan(20);
   });
 
-  it('keeps a full mixed-source poll within the D1 budget when provider refreshes fail', async () => {
+  // Twelve orgs seeded and polled: 8.2 s on CI (run 45070332774), against 0.4 s on a laptop.
+  it('keeps a full mixed-source poll within the D1 budget when provider refreshes fail', { timeout: 30_000 }, async () => {
     const fake = fakeProvider();
     const refresh = vi.fn(async () => {
       throw new ProviderError('invalid_grant', 'The provider refused the grant');
@@ -1343,7 +1344,8 @@ describe('budgets, resilience and cleanup', () => {
     expect(take()).toHaveLength(4);
   });
 
-  it('keeps the full midnight cron and the separate feed cleanup within the D1 budget under load', async () => {
+  // Twelve orgs and 18,000 old rows, then two crons: 9.1 s on CI (run 45070332774), against 0.5 s on a laptop.
+  it('keeps the full midnight cron and the separate feed cleanup within the D1 budget under load', { timeout: 30_000 }, async () => {
     const midnight = Math.ceil(NOW / DAY_MS) * DAY_MS;
     vi.spyOn(Date, 'now').mockReturnValue(midnight);
     const orgs = [];
