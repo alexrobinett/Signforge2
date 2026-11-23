@@ -41,7 +41,7 @@ These are SignForge's, so no registry has them:
 - **`ScreenTile` / `ScreenRow`**: thumbnail, name, location, status badge, version, last heartbeat. Used by Screens A/B/C and the screen detail page.
 - **`RolloutBar`**: one publish's screens by state (applied, downloading, asleep, offline), with a legend that names counts.
 - **`PlayerStage`**: the real player in an iframe (M3-36 preview channel), scaled to fit at true resolution, with landscape/portrait and fit/100% toggles. The heart of the editor.
-- **`FieldForm`**: a form generated from a template's `fields` (text, number, boolean, color, select, url, date, datetime, image, list), with the contract's validators giving each field's errors (`validateSpotField`, the per-field part of the publish's `validateSpotData`). Built on shadcn `form` patterns.
+- **`FieldForm`**: a form generated from a template's `fields` (text, number, boolean, color, select, url, date, datetime, image, list), with the contract's validators giving each field's errors (`validateSpotField`, the per-field part of the publish's `validateSpotData`). It draws only the fields a person types, but checks each against all of the template's fields, as a publish does, so an image whose toggle is a live field is checked with it. Built on shadcn `form` patterns.
 - **`BrandColorField`**: "Brand accent" or a custom colour, with the contrast check beside it.
 - **`AssetPicker`**: the media library in a `dialog` (built with the library page in M3-14). The focal point for portrait crops comes with the spot editor (M3-16).
 - **`DataBindingField`**: bind a field to a data source and path, showing the live value and the fallback.

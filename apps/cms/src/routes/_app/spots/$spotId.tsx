@@ -159,7 +159,8 @@ function SpotEditor() {
               (version ? (
                 <EditorSection title="Content">
                   <FieldForm
-                    fields={typedFields(version.manifest, draft.bindings)}
+                    fields={version.manifest.fields}
+                    shown={typedFields(version.manifest, draft.bindings)}
                     draft={draft}
                     assets={assets}
                     marks={filled?.marks}

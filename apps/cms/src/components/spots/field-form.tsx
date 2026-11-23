@@ -305,8 +305,10 @@ function ListField({
   );
 }
 
+/** Draws the `shown` fields, each checked against all of the template's `fields`, as a publish checks it (#304). */
 export function FieldForm({
   fields,
+  shown,
   draft,
   assets,
   marks = {},
@@ -315,6 +317,7 @@ export function FieldForm({
   onEdited,
 }: {
   fields: Record<string, FieldDef>;
+  shown: Record<string, FieldDef>;
   draft: SpotDraft;
   assets: AssetView[];
   /** The agent's marks, by field, on a spot it just filled. */
@@ -324,10 +327,10 @@ export function FieldForm({
   /** Told which field changed, to take its mark away. */
   onEdited?: (name: string) => void;
 }) {
-  const problems = fieldProblems(fields, draft);
+  const problems = fieldProblems(fields, draft, Object.keys(shown));
   return (
     <div className="flex flex-col gap-5">
-      {Object.entries(fields).map(([name, def]) => {
+      {Object.entries(shown).map(([name, def]) => {
         const p = problems.get(name);
         const mark = marks[name];
         const edit: Edit = (change) => {

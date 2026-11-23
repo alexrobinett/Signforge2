@@ -44,10 +44,6 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "86db477d83c1112ac2dbc301a5f073252e0d4f0d8e110b002785e3cd6a3adb59": {
-      "size": 396142,
-      "type": "text/html"
-    },
     "8e2718f87b448dbedf268356aaabe3ba109b4efcdfc0f4266f4ce0b52e32c169": {
       "size": 9600472,
       "type": "video/mp4"
@@ -56,17 +52,13 @@
       "size": 78257,
       "type": "text/html"
     },
-    "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402": {
-      "size": 122679,
+    "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29": {
+      "size": 122770,
       "type": "text/html"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
-    },
-    "9c0d59d32ce322a23c554c82143522c60b574b82b834789b0411cfc3393f0f88": {
-      "size": 398098,
-      "type": "text/html"
     },
     "7f232d4d4a6b7bc054558782207350c3bcde287e02c14437578d974ab4e7c215": {
       "size": 79453,
@@ -80,21 +72,13 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "af8ba99270dd87ecfaaab6219d79f3a4d1115b49bcab3a9272948bd7900d270e": {
-      "size": 401771,
-      "type": "text/html"
-    },
-    "c677c828d7360043afae135ed594a8202245f4a74710caec915d6ee406aadd62": {
-      "size": 403207,
-      "type": "text/html"
-    },
     "ccb7f55cbea7ce67423de4c695b4a936eddb4be60f923ebd42bdad82628286e8": {
       "size": 182996,
       "type": "image/jpeg",
       "sample": "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd"
     },
-    "09d65f3b5fea83adc02fd8a5413ec747703f1e629fd21db20c05541678df4f9a": {
-      "size": 80991,
+    "592027ce8ebad984cc42759c5748858dc0a5c69c893693890d9d13721cd49ae2": {
+      "size": 81079,
       "type": "text/html"
     },
     "d5bee43e7459a02755c2dd2ea307dec9637ebdef53269d473b84108da91e3ebd": {
@@ -113,13 +97,29 @@
       "size": 421529,
       "type": "image/jpeg",
       "sample": "72a7e93fdfee4006c751a14960c506a5a33650cf13b947b86d8b672de5dbf30f"
+    },
+    "29c8a47d9b9ec8db5ae8585a0ba1f2f7a682d86bcc0bdadb484117ff49e9604a": {
+      "size": 398189,
+      "type": "text/html"
+    },
+    "d9a25be4ac9420b04f26f1f75dac1344107d92c3c3736b1190982e0cf69865de": {
+      "size": 396208,
+      "type": "text/html"
+    },
+    "626e4abac01ef625e560911367be411be5150978176f743d542a3a2a35d5d2f5": {
+      "size": 403236,
+      "type": "text/html"
+    },
+    "8340e8cb011e77a2019e55f4abcf23c544a174cc36953c4e873943bdc0d8d009": {
+      "size": 401862,
+      "type": "text/html"
     }
   },
   "templates": {
-    "base/alert@1.0.0": {
+    "base/alert@1.0.1": {
       "manifest": {
         "id": "alert",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Alert",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
         "fields": {
@@ -199,12 +199,12 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402"
+      "html": "c00468f97bcf956eacbeaa986090c42a2fcf25f50ae1d320199dd5dc53909a29"
     },
-    "base/announcement@1.0.0": {
+    "base/announcement@1.0.1": {
       "manifest": {
         "id": "announcement",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -326,7 +326,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "9c0d59d32ce322a23c554c82143522c60b574b82b834789b0411cfc3393f0f88"
+      "html": "29c8a47d9b9ec8db5ae8585a0ba1f2f7a682d86bcc0bdadb484117ff49e9604a"
     },
     "base/clock@1.2.4": {
       "manifest": {
@@ -378,10 +378,10 @@
       },
       "html": "ca36d504017fe4aa0a5a2bef2c662c07a100e225e4d97543f2d2f5acc60dd12a"
     },
-    "base/countdown@1.0.0": {
+    "base/countdown@1.0.1": {
       "manifest": {
         "id": "countdown",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -504,7 +504,7 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "86db477d83c1112ac2dbc301a5f073252e0d4f0d8e110b002785e3cd6a3adb59"
+      "html": "d9a25be4ac9420b04f26f1f75dac1344107d92c3c3736b1190982e0cf69865de"
     },
     "base/cstore-promo@1.2.5": {
       "manifest": {
@@ -674,10 +674,10 @@
       },
       "html": "2a90c69fb6be20c6768b8a60e16fda017732bff59f13c6297be9a4b8f59cf357"
     },
-    "base/info-frame@1.0.0": {
+    "base/info-frame@1.0.1": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -962,7 +962,7 @@
         },
         "protocol": 2
       },
-      "html": "c677c828d7360043afae135ed594a8202245f4a74710caec915d6ee406aadd62"
+      "html": "626e4abac01ef625e560911367be411be5150978176f743d542a3a2a35d5d2f5"
     },
     "base/menu-board@1.3.1": {
       "manifest": {
@@ -1144,10 +1144,10 @@
       },
       "html": "cf62c825efab14860fe3c1afde8fb891e85b3d5498a9b0cfd0e4a9493b9b5045"
     },
-    "base/photo-promo@1.4.1": {
+    "base/photo-promo@1.4.2": {
       "manifest": {
         "id": "photo-promo",
-        "version": "1.4.1",
+        "version": "1.4.2",
         "name": "Photo Promo",
         "description": "Full-screen photograph with a slow push-in, a headline and a price tag.",
         "fields": {
@@ -1193,12 +1193,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "09d65f3b5fea83adc02fd8a5413ec747703f1e629fd21db20c05541678df4f9a"
+      "html": "592027ce8ebad984cc42759c5748858dc0a5c69c893693890d9d13721cd49ae2"
     },
-    "base/room-status@1.0.0": {
+    "base/room-status@1.0.1": {
       "manifest": {
         "id": "room-status",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -1319,7 +1319,7 @@
         },
         "protocol": 2
       },
-      "html": "af8ba99270dd87ecfaaab6219d79f3a4d1115b49bcab3a9272948bd7900d270e"
+      "html": "8340e8cb011e77a2019e55f4abcf23c544a174cc36953c4e873943bdc0d8d009"
     },
     "base/weather@1.5.1": {
       "manifest": {
@@ -1440,7 +1440,7 @@
       "id": "alert",
       "name": "Evacuation alert",
       "kind": "template",
-      "template": "base/alert@1.0.0",
+      "template": "base/alert@1.0.1",
       "data": {
         "severity": "emergency",
         "headline": "Evacuate the building now",
@@ -1460,7 +1460,7 @@
       "id": "announcement",
       "name": "Announcement, 4K photo and QR code",
       "kind": "template",
-      "template": "base/announcement@1.0.0",
+      "template": "base/announcement@1.0.1",
       "data": {
         "look": "night",
         "eyebrow": "Company news",
@@ -1502,7 +1502,7 @@
       "id": "countdown",
       "name": "Countdown (minutes ticking)",
       "kind": "template",
-      "template": "base/countdown@1.0.0",
+      "template": "base/countdown@1.0.1",
       "data": {
         "look": "night",
         "mode": "up",
@@ -1573,7 +1573,7 @@
       "id": "info-frame",
       "name": "Info frame, 4K photo, live weather and news",
       "kind": "template",
-      "template": "base/info-frame@1.0.0",
+      "template": "base/info-frame@1.0.1",
       "data": {
         "captionTitle": "Fresh from the kitchen",
         "captionLine": "Hot meals until 9 pm",
@@ -1841,7 +1841,7 @@
       "id": "photo-berries",
       "name": "Photo promo, 1080p photo",
       "kind": "template",
-      "template": "base/photo-promo@1.4.1",
+      "template": "base/photo-promo@1.4.2",
       "data": {
         "eyebrow": "This week",
         "headline": "Fresh picked",
@@ -1857,7 +1857,7 @@
       "id": "photo-kitchen",
       "name": "Photo promo, 4K photo 2",
       "kind": "template",
-      "template": "base/photo-promo@1.4.1",
+      "template": "base/photo-promo@1.4.2",
       "data": {
         "eyebrow": "Made here",
         "headline": "Hot and ready",
@@ -1873,7 +1873,7 @@
       "id": "photo-river",
       "name": "Photo promo, 4K photo",
       "kind": "template",
-      "template": "base/photo-promo@1.4.1",
+      "template": "base/photo-promo@1.4.2",
       "data": {
         "eyebrow": "Weekend escape",
         "headline": "Go further",
@@ -1889,7 +1889,7 @@
       "id": "room-status",
       "name": "Room status (live calendar)",
       "kind": "template",
-      "template": "base/room-status@1.0.0",
+      "template": "base/room-status@1.0.1",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -2154,5 +2154,5 @@
   },
   "schedule": [],
   "defaultPlaylist": "stress",
-  "id": "3470c473fbaefa4880b986277b1d4dac282750e00e63cf5ab34c8b3300eca586"
+  "id": "ae2891f11051fe363080ef6e70cd272fe04f81e32b52902c2e70eb0ca13bef99"
 }

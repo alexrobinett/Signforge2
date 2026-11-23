@@ -27,6 +27,9 @@ const INKS = [
  *   layout reflows around what is left and a hidden photo is never decoded;
  * - each ink and on-colour through `readableOn`, on the page or on its fill;
  * - the look's faces loaded, before anything is measured.
+ *
+ * It rejects when new data replaced the document while the faces loaded, so the rest of that
+ * prepare never touches the new one.
  */
 export async function applyLook(ctx: TemplateContext): Promise<void> {
   const { root, data } = ctx;
@@ -46,7 +49,11 @@ export async function applyLook(ctx: TemplateContext): Promise<void> {
   // out, then wait, so text measured in prepare (a crawl, `fitWords`) is in the look's own type.
   // Only the faces the text uses load (Night's bold mono, say, only where a template uses it).
   root.getBoundingClientRect();
+  const body = document.body;
   await document.fonts.ready;
+  // New data while the faces loaded: the SDK put a fresh copy of the loaded body in place and
+  // inits again. Rejecting stops this prepare there, and the SDK drops a superseded prepare's error.
+  if (document.body !== body) throw new Error('new data replaced this prepare');
 }
 
 /**
