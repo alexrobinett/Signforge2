@@ -27,14 +27,12 @@ test('choose a template by its thumbnail, by keyboard alone, in two columns on a
   // Every base template shows the thumbnail the player drew, from the CMS's own assets.
   await opener.click();
   await expect(radios.first()).toBeChecked();
-  const images = await dialog
-    .locator('img')
-    .evaluateAll((imgs) =>
-      imgs.map((i) => ({
-        src: new URL((i as HTMLImageElement).src).pathname,
-        ok: (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0,
-      })),
-    );
+  const images = await dialog.locator('img').evaluateAll((imgs) =>
+    imgs.map((i) => ({
+      src: new URL((i as HTMLImageElement).src).pathname,
+      ok: (i as HTMLImageElement).complete && (i as HTMLImageElement).naturalWidth > 0,
+    })),
+  );
   expect(images.length).toBeGreaterThanOrEqual(7);
   for (const i of images) expect(i, i.src).toEqual({ src: expect.stringMatching(/^\/template-thumbnails\/[a-z-]+\.webp$/), ok: true });
   await axe(page);
